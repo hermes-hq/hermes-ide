@@ -26,14 +26,7 @@ const LANG_COLORS: Record<string, string> = {
 };
 
 function realmShortPath(path: string): string {
-  const home = path.indexOf("/Users/");
-  if (home >= 0) {
-    const afterUsers = path.indexOf("/", home + 7);
-    if (afterUsers >= 0) {
-      return "~" + path.slice(afterUsers + path.slice(afterUsers + 1).indexOf("/") + afterUsers + 1);
-    }
-  }
-  return path;
+  return path.replace(/^\/Users\/[^/]+/, "~");
 }
 
 const SCAN_STATUS_LABELS: Record<string, string> = {
@@ -63,7 +56,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
       // First scan for projects (legacy), which also populates the projects table
       await invoke("scan_directory", { path: scanPath.trim(), maxDepth: 3 });
       // Then create a realm for the scanned path itself
-      await invoke("create_realm", { path: scanPath.trim(), name: null }).catch(() => {});
+      await invoke("create_realm", { path: scanPath.trim(), name: null }).catch((err) => console.warn("[WorkspacePanel] Failed to create realm:", err));
       // Reload realms
       loadRealms();
       setScanPath("");
@@ -78,13 +71,8 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
     try {
       await invoke("scan_directory", { path: "~", maxDepth: 2 });
       loadRealms();
-    } catch {
-      try {
-        await invoke("scan_directory", { path: `/Users/${await getUsername()}`, maxDepth: 2 });
-        loadRealms();
-      } catch (err) {
-        console.warn("[WorkspacePanel] Home scan failed:", err);
-      }
+    } catch (err) {
+      console.warn("[WorkspacePanel] Home scan failed:", err);
     }
     setScanning(false);
   }, [loadRealms]);
@@ -196,11 +184,3 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
   );
 }
 
-async function getUsername(): Promise<string> {
-  try {
-    await invoke("scan_directory", { path: "/Users", maxDepth: 0 });
-    return "user";
-  } catch {
-    return "user";
-  }
-}

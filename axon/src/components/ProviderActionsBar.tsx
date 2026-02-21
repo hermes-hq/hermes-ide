@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ActionTemplate, ActionEvent } from "../state/SessionContext";
+import { utf8ToBase64 } from "../utils/encoding";
 
 // Default actions per AI provider — shown immediately before agent detection
 const DEFAULT_ACTIONS: Record<string, ActionTemplate[]> = {
@@ -47,7 +48,7 @@ interface ProviderActionsBarProps {
 }
 
 function sendCommand(sessionId: string, command: string) {
-  const data = btoa(command + "\r");
+  const data = utf8ToBase64(command + "\r");
   invoke("write_to_session", { sessionId, data }).catch(console.error);
 }
 

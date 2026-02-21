@@ -486,13 +486,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                       sessionId: session.id,
                       realmId: realm.id,
                       role: "primary",
-                    }).catch(() => {});
+                    }).catch((err) => console.warn("[SessionContext] Failed to attach realm:", err));
                   }
-                }).catch(() => {});
+                }).catch((err) => console.warn("[SessionContext] Failed to check attached realms:", err));
                 break;
               }
             }
-          }).catch(() => {});
+          }).catch((err) => console.warn("[SessionContext] Failed to load realms for auto-attach:", err));
         }
 
         // Auto-cleanup destroyed sessions (PTY exited on its own)
@@ -537,6 +537,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       const u2 = await listen<string>("session-removed", (event) => {
         destroyTerminal(event.payload);
+        // Clean up nudge timer if one exists for this session
+        const existingTimer = nudgeTimers.current.get(event.payload);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+          nudgeTimers.current.delete(event.payload);
+        }
         dispatch({ type: "SESSION_REMOVED", id: event.payload });
       });
       unlisteners.push(u2);
@@ -548,7 +554,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (existing) clearTimeout(existing);
         const timer = setTimeout(() => {
           nudgeTimers.current.delete(sessionId);
-          invoke("nudge_realm_context", { sessionId }).catch(() => {});
+          invoke("nudge_realm_context", { sessionId }).catch((err) => console.warn("[SessionContext] Failed to nudge realm context:", err));
         }, 1500);
         nudgeTimers.current.set(sessionId, timer);
       });
@@ -557,7 +563,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     setup();
 
-    // Load settings first, then sessions (so terminals use correct settings)
+    // Load settings first, THEN sessions (so terminals use correct settings)
     invoke("get_settings")
       .then((settings) => {
         const s = settings as Record<string, string>;
@@ -573,10 +579,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             cancelDelayMs: s.auto_cancel_delay_ms ? parseInt(s.auto_cancel_delay_ms, 10) || 3000 : 3000,
           },
         });
-      })
-      .catch(console.error);
 
-    invoke("get_sessions")
+        // Now load sessions after settings are applied
+        return invoke("get_sessions");
+      })
       .then((sessions) => {
         const arr = sessions as SessionData[];
         arr.forEach((s) => {

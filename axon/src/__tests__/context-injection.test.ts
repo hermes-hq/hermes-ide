@@ -41,6 +41,7 @@ import {
 import {
   sessionReducer,
   initialState,
+  type SessionData,
 } from "../state/SessionContext";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -61,54 +62,113 @@ function makeBaseContext(overrides?: Partial<ContextState>): ContextState {
   };
 }
 
+function makeSession(overrides?: Partial<SessionData>): SessionData {
+  return {
+    id: "sess-1",
+    label: "Session 1",
+    color: "#ff0000",
+    group: null,
+    phase: "idle",
+    working_directory: "/home/user/project",
+    shell: "bash",
+    created_at: "2025-01-01T00:00:00Z",
+    last_activity_at: "2025-01-01T00:00:00Z",
+    workspace_paths: [],
+    detected_agent: null,
+    metrics: {
+      output_lines: 0,
+      error_count: 0,
+      stuck_score: 0,
+      token_usage: {},
+      tool_calls: [],
+      tool_call_summary: {},
+      files_touched: [],
+      recent_errors: [],
+      recent_actions: [],
+      available_actions: [],
+      memory_facts: [],
+      latency_p50_ms: null,
+      latency_p95_ms: null,
+      latency_samples: [],
+      token_history: [],
+    },
+    ai_provider: null,
+    context_injected: false,
+    ...overrides,
+  };
+}
+
 // =====================================================================
-// Suite 1: Version State Transitions
+// Suite 1: Version State Transitions (via sessionReducer)
 // =====================================================================
 
 describe("Suite 1: Version State Transitions", () => {
-  it("CLEAN: lifecycle is 'clean' when currentVersion === injectedVersion", () => {
-    const currentVersion = 3;
-    const injectedVersion = 3;
-    const state: string = currentVersion === injectedVersion ? "clean" : "dirty";
-    expect(state).toBe("clean");
+  it("SESSION_UPDATED adds a new session to state", () => {
+    const session = makeSession({ id: "s1", phase: "idle" });
+    const state = sessionReducer(initialState, { type: "SESSION_UPDATED", session });
+    expect(state.sessions["s1"]).toBeDefined();
+    expect(state.sessions["s1"].phase).toBe("idle");
   });
 
-  it("DIRTY: lifecycle becomes 'dirty' when context changes after apply", () => {
-    const currentVersion = 4;
-    const injectedVersion = 3;
-    const state: string = currentVersion > injectedVersion ? "dirty" : "clean";
-    expect(state).toBe("dirty");
+  it("SESSION_UPDATED updates phase from idle to busy", () => {
+    const session = makeSession({ id: "s1", phase: "idle" });
+    const s1 = sessionReducer(initialState, { type: "SESSION_UPDATED", session });
+
+    const updated = makeSession({ id: "s1", phase: "busy" });
+    const s2 = sessionReducer(s1, { type: "SESSION_UPDATED", session: updated });
+    expect(s2.sessions["s1"].phase).toBe("busy");
   });
 
-  it("APPLYING: lifecycle is 'applying' while apply_context is in flight", () => {
-    const state: string = "applying";
-    expect(state).toBe("applying");
+  it("SESSION_UPDATED updates phase from busy back to idle", () => {
+    const s1 = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "busy" }),
+    });
+    const s2 = sessionReducer(s1, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "idle" }),
+    });
+    expect(s2.sessions["s1"].phase).toBe("idle");
   });
 
-  it("APPLIED: lifecycle returns to 'clean' after successful apply", () => {
-    let injectedVersion = 3;
-    let currentVersion = 5;
-    let state: string = "applying";
+  it("SESSION_REMOVED removes the session from state", () => {
+    const s1 = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1" }),
+    });
+    expect(s1.sessions["s1"]).toBeDefined();
 
-    // Simulate successful result from backend
-    const backendVersion = 6;
-    injectedVersion = backendVersion;
-    currentVersion = backendVersion;
-    state = "clean";
-
-    expect(state).toBe("clean");
-    expect(currentVersion).toBe(injectedVersion);
+    const s2 = sessionReducer(s1, { type: "SESSION_REMOVED", id: "s1" });
+    expect(s2.sessions["s1"]).toBeUndefined();
   });
 
-  it("APPLY_FAILED: lifecycle is 'apply_failed' when apply_context rejects", () => {
-    const state: string = "apply_failed";
-    expect(state).toBe("apply_failed");
+  it("SESSION_REMOVED clears activeSessionId when the active session is removed", () => {
+    let state = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1" }),
+    });
+    state = sessionReducer(state, { type: "SET_ACTIVE", id: "s1" });
+    expect(state.activeSessionId).toBe("s1");
+
+    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
+    expect(state.activeSessionId).not.toBe("s1");
   });
 
-  it("APPLY_FAILED retains dirty detection after error", () => {
-    const state: string = "apply_failed";
-    const canApply = state !== "clean" && state !== "applying";
-    expect(canApply).toBe(true);
+  it("SESSION_UPDATED preserves other sessions when updating one", () => {
+    let state = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", label: "First" }),
+    });
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s2", label: "Second" }),
+    });
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", label: "First Updated" }),
+    });
+    expect(state.sessions["s1"].label).toBe("First Updated");
+    expect(state.sessions["s2"].label).toBe("Second");
   });
 });
 
@@ -169,135 +229,136 @@ describe("Suite 2: Dirty Detection", () => {
 });
 
 // =====================================================================
-// Suite 3: Apply Behavior
+// Suite 3: Apply Behavior (via sessionReducer)
 // =====================================================================
 
 describe("Suite 3: Apply Behavior", () => {
-  it("Successful apply syncs injectedVersion from result", () => {
-    let injectedVersion = 0;
-    const result = { version: 5 };
-    injectedVersion = result.version;
-    expect(injectedVersion).toBe(5);
+  it("SET_EXECUTION_MODE sets mode for a specific session", () => {
+    const state = sessionReducer(initialState, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "autonomous",
+    });
+    expect(state.executionModes["s1"]).toBe("autonomous");
   });
 
-  it("Successful apply syncs currentVersion to result version", () => {
-    let currentVersion = 3;
-    const result = { version: 5 };
-    currentVersion = result.version;
-    expect(currentVersion).toBe(result.version);
+  it("SET_EXECUTION_MODE can change mode from autonomous to manual", () => {
+    let state = sessionReducer(initialState, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "autonomous",
+    });
+    state = sessionReducer(state, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "manual",
+    });
+    expect(state.executionModes["s1"]).toBe("manual");
   });
 
-  it("Successful apply sets lifecycle to clean", () => {
-    let state: string = "applying";
-    state = "clean";
-    expect(state).toBe("clean");
+  it("SET_EXECUTION_MODE for one session does not affect another", () => {
+    let state = sessionReducer(initialState, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "autonomous",
+    });
+    state = sessionReducer(state, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s2",
+      mode: "assisted",
+    });
+    expect(state.executionModes["s1"]).toBe("autonomous");
+    expect(state.executionModes["s2"]).toBe("assisted");
   });
 
-  it("Failed apply sets lifecycle to apply_failed", () => {
-    let state: string = "applying";
-    state = "apply_failed";
-    expect(state).toBe("apply_failed");
+  it("SET_DEFAULT_MODE changes the default execution mode", () => {
+    const state = sessionReducer(initialState, {
+      type: "SET_DEFAULT_MODE",
+      mode: "autonomous",
+    });
+    expect(state.defaultMode).toBe("autonomous");
   });
 
-  it("applyContext is no-op when lifecycle is applying (double-apply prevention)", () => {
-    const state: string = "applying";
-    const shouldApply = state !== "applying";
-    expect(shouldApply).toBe(false);
+  it("SET_DEFAULT_MODE does not affect per-session overrides", () => {
+    let state = sessionReducer(initialState, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "assisted",
+    });
+    state = sessionReducer(state, { type: "SET_DEFAULT_MODE", mode: "autonomous" });
+    expect(state.defaultMode).toBe("autonomous");
+    expect(state.executionModes["s1"]).toBe("assisted");
   });
 
-  it("Stale apply: context changes during apply keeps dirty state", () => {
-    const currentVersion = 6;
-    const resultVersion = 5;
-    const state: string = currentVersion > resultVersion ? "dirty" : "clean";
-    expect(state).toBe("dirty");
+  it("SET_AUTONOMOUS_SETTINGS updates autonomous thresholds", () => {
+    const state = sessionReducer(initialState, {
+      type: "SET_AUTONOMOUS_SETTINGS",
+      settings: { errorMinOccurrences: 10, cancelDelayMs: 5000 },
+    });
+    expect(state.autonomousSettings.errorMinOccurrences).toBe(10);
+    expect(state.autonomousSettings.cancelDelayMs).toBe(5000);
+    // Unmodified setting is preserved
+    expect(state.autonomousSettings.commandMinFrequency).toBe(
+      initialState.autonomousSettings.commandMinFrequency
+    );
   });
 });
 
 // =====================================================================
-// Suite 4: Auto-Apply Behavior
+// Suite 4: Auto-Apply Behavior (via sessionReducer)
 // =====================================================================
 
 describe("Suite 4: Auto-Apply Behavior", () => {
-  it("Auto-apply triggers on busy transition when dirty and enabled", () => {
-    const prevPhase: string = "idle";
-    const currentPhase: string = "busy";
-    const autoApplyEnabled = true;
-    const state: string = "dirty";
-
-    const shouldAutoApply =
-      currentPhase === "busy" &&
-      prevPhase !== "busy" &&
-      autoApplyEnabled &&
-      state === "dirty";
-
-    expect(shouldAutoApply).toBe(true);
-  });
-
-  it("Auto-apply does NOT trigger when clean", () => {
-    const prevPhase: string = "idle";
-    const currentPhase: string = "busy";
-    const autoApplyEnabled = true;
-    const state: string = "clean";
-
-    const shouldAutoApply =
-      currentPhase === "busy" &&
-      prevPhase !== "busy" &&
-      autoApplyEnabled &&
-      state === "dirty";
-
-    expect(shouldAutoApply).toBe(false);
-  });
-
-  it("Auto-apply does NOT trigger when disabled", () => {
-    const prevPhase: string = "idle";
-    const currentPhase: string = "busy";
-    const autoApplyEnabled = false;
-    const state: string = "dirty";
-
-    const shouldAutoApply =
-      currentPhase === "busy" &&
-      prevPhase !== "busy" &&
-      autoApplyEnabled &&
-      state === "dirty";
-
-    expect(shouldAutoApply).toBe(false);
-  });
-
-  it("Auto-apply does NOT trigger when already applying", () => {
-    const prevPhase: string = "idle";
-    const currentPhase: string = "busy";
-    const autoApplyEnabled = true;
-    const state: string = "applying";
-
-    const shouldAutoApply =
-      currentPhase === "busy" &&
-      prevPhase !== "busy" &&
-      autoApplyEnabled &&
-      state === "dirty";
-
-    expect(shouldAutoApply).toBe(false);
-  });
-
-  it("Auto-apply does NOT trigger on non-busy transitions", () => {
-    const prevPhase: string = "busy";
-    const currentPhase: string = "idle";
-    const autoApplyEnabled = true;
-    const state: string = "dirty";
-
-    const shouldAutoApply =
-      currentPhase === "busy" &&
-      prevPhase !== "busy" &&
-      autoApplyEnabled &&
-      state === "dirty";
-
-    expect(shouldAutoApply).toBe(false);
-  });
-
   it("TOGGLE_AUTO_APPLY action toggles autoApplyEnabled", () => {
     const state1 = sessionReducer(initialState, { type: "TOGGLE_AUTO_APPLY" });
     expect(state1.autoApplyEnabled).toBe(!initialState.autoApplyEnabled);
     const state2 = sessionReducer(state1, { type: "TOGGLE_AUTO_APPLY" });
     expect(state2.autoApplyEnabled).toBe(initialState.autoApplyEnabled);
+  });
+
+  it("autoApplyEnabled defaults to true", () => {
+    expect(initialState.autoApplyEnabled).toBe(true);
+  });
+
+  it("TOGGLE_AUTO_APPLY does not affect other state fields", () => {
+    const session = makeSession({ id: "s1" });
+    let state = sessionReducer(initialState, { type: "SESSION_UPDATED", session });
+    state = sessionReducer(state, { type: "SET_ACTIVE", id: "s1" });
+    const before = { ...state, autoApplyEnabled: undefined };
+
+    const toggled = sessionReducer(state, { type: "TOGGLE_AUTO_APPLY" });
+    const after = { ...toggled, autoApplyEnabled: undefined };
+
+    expect(before.activeSessionId).toBe(after.activeSessionId);
+    expect(before.defaultMode).toBe(after.defaultMode);
+    expect(Object.keys(before.sessions)).toEqual(Object.keys(after.sessions));
+  });
+
+  it("Phase transition idle->busy is tracked in session state", () => {
+    let state = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "idle" }),
+    });
+    expect(state.sessions["s1"].phase).toBe("idle");
+
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "busy" }),
+    });
+    expect(state.sessions["s1"].phase).toBe("busy");
+    expect(state.autoApplyEnabled).toBe(true);
+  });
+
+  it("Phase transition does not auto-apply when autoApplyEnabled is toggled off", () => {
+    let state = sessionReducer(initialState, { type: "TOGGLE_AUTO_APPLY" });
+    expect(state.autoApplyEnabled).toBe(false);
+
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "busy" }),
+    });
+    // autoApplyEnabled remains false after session update
+    expect(state.autoApplyEnabled).toBe(false);
   });
 });
 
@@ -391,45 +452,52 @@ describe("Suite 5: Injection Formatting", () => {
 // =====================================================================
 
 describe("Suite 6: Idempotency", () => {
-  it("Calling applyContext twice rapidly: second call is no-op (lifecycle guard)", () => {
-    let applyCount = 0;
-    let state: string = "dirty";
-
-    const tryApply = () => {
-      if (state === "applying") return;
-      state = "applying";
-      applyCount++;
-    };
-
-    tryApply();
-    tryApply();
-
-    expect(applyCount).toBe(1);
+  it("Dispatching the same SESSION_UPDATED twice produces identical state", () => {
+    const session = makeSession({ id: "s1", phase: "idle" });
+    const s1 = sessionReducer(initialState, { type: "SESSION_UPDATED", session });
+    const s2 = sessionReducer(s1, { type: "SESSION_UPDATED", session });
+    expect(s2.sessions["s1"]).toEqual(s1.sessions["s1"]);
   });
 
-  it("Version doesn't increment if context hasn't changed (JSON comparison)", () => {
-    let version = 0;
-    let prevJson = "";
+  it("TOGGLE_AUTO_APPLY twice returns to original value", () => {
+    const s1 = sessionReducer(initialState, { type: "TOGGLE_AUTO_APPLY" });
+    const s2 = sessionReducer(s1, { type: "TOGGLE_AUTO_APPLY" });
+    expect(s2.autoApplyEnabled).toBe(initialState.autoApplyEnabled);
+  });
 
-    const maybeIncrement = (ctx: ContextState) => {
-      const json = JSON.stringify(ctx);
-      if (json !== prevJson) {
-        prevJson = json;
-        version++;
-      }
-    };
+  it("TOGGLE_CONTEXT twice returns to original value", () => {
+    const s1 = sessionReducer(initialState, { type: "TOGGLE_CONTEXT" });
+    const s2 = sessionReducer(s1, { type: "TOGGLE_CONTEXT" });
+    expect(s2.ui.contextPanelOpen).toBe(initialState.ui.contextPanelOpen);
+  });
 
+  it("formatContextMarkdown produces identical output for identical input", () => {
     const ctx = makeBaseContext();
-    maybeIncrement(ctx);
-    expect(version).toBe(1);
+    const output1 = formatContextMarkdown(ctx, 1, "manual");
+    const output2 = formatContextMarkdown(ctx, 1, "manual");
+    expect(output1).toBe(output2);
+  });
 
-    // Same context again — no increment
-    maybeIncrement(ctx);
-    expect(version).toBe(1);
+  it("formatContextMarkdown produces different output when context changes", () => {
+    const ctx1 = makeBaseContext({ agent: "anthropic" });
+    const ctx2 = makeBaseContext({ agent: "openai" });
+    const output1 = formatContextMarkdown(ctx1, 1, "manual");
+    const output2 = formatContextMarkdown(ctx2, 1, "manual");
+    expect(output1).not.toBe(output2);
+  });
 
-    // Different context — increment
-    maybeIncrement(makeBaseContext({ agent: "different" }));
-    expect(version).toBe(2);
+  it("SET_EXECUTION_MODE to same mode is idempotent", () => {
+    const s1 = sessionReducer(initialState, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "autonomous",
+    });
+    const s2 = sessionReducer(s1, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "autonomous",
+    });
+    expect(s2.executionModes["s1"]).toBe(s1.executionModes["s1"]);
   });
 });
 
@@ -438,28 +506,69 @@ describe("Suite 6: Idempotency", () => {
 // =====================================================================
 
 describe("Suite 7: Multi-Session Isolation", () => {
-  it("Version counters are independent per simulation", () => {
-    let versionA = 0;
-    let versionB = 0;
-
-    versionA++;
-    versionA++;
-    versionB++;
-
-    expect(versionA).toBe(2);
-    expect(versionB).toBe(1);
+  it("Execution modes are independent per session", () => {
+    let state = sessionReducer(initialState, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s1",
+      mode: "autonomous",
+    });
+    state = sessionReducer(state, {
+      type: "SET_EXECUTION_MODE",
+      sessionId: "s2",
+      mode: "manual",
+    });
+    expect(state.executionModes["s1"]).toBe("autonomous");
+    expect(state.executionModes["s2"]).toBe("manual");
   });
 
-  it("Context changes in one session don't affect another", () => {
-    const ctxA = makeBaseContext({ workingDirectory: "/project-a" });
-    const ctxB = makeBaseContext({ workingDirectory: "/project-b" });
+  it("Removing one session does not affect another session's data", () => {
+    let state = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", label: "Session A" }),
+    });
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s2", label: "Session B" }),
+    });
+    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
 
-    const jsonA = JSON.stringify(ctxA);
-    const jsonB = JSON.stringify(ctxB);
+    expect(state.sessions["s1"]).toBeUndefined();
+    expect(state.sessions["s2"]).toBeDefined();
+    expect(state.sessions["s2"].label).toBe("Session B");
+  });
 
-    expect(jsonA).not.toBe(jsonB);
-    expect(ctxA.workingDirectory).toBe("/project-a");
-    expect(ctxB.workingDirectory).toBe("/project-b");
+  it("Session updates to one session do not overwrite another", () => {
+    let state = sessionReducer(initialState, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "idle" }),
+    });
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s2", phase: "idle" }),
+    });
+    state = sessionReducer(state, {
+      type: "SESSION_UPDATED",
+      session: makeSession({ id: "s1", phase: "busy" }),
+    });
+
+    expect(state.sessions["s1"].phase).toBe("busy");
+    expect(state.sessions["s2"].phase).toBe("idle");
+  });
+
+  it("formatContextMarkdown produces isolated output per context", () => {
+    const ctxA = makeBaseContext({ workingDirectory: "/project-a", agent: "anthropic" });
+    const ctxB = makeBaseContext({ workingDirectory: "/project-b", agent: "openai" });
+
+    const outputA = formatContextMarkdown(ctxA, 1, "manual");
+    const outputB = formatContextMarkdown(ctxB, 1, "manual");
+
+    expect(outputA).toContain("Dir: /project-a");
+    expect(outputA).toContain("Provider: anthropic");
+    expect(outputA).not.toContain("/project-b");
+
+    expect(outputB).toContain("Dir: /project-b");
+    expect(outputB).toContain("Provider: openai");
+    expect(outputB).not.toContain("/project-a");
   });
 });
 

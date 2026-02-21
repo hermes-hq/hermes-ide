@@ -206,7 +206,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
       try {
         const pins = await invoke("get_context_pins", { sessionId: session.id, projectId: null }) as ContextPin[];
         initial.pinnedItems = pins;
-      } catch { /* */ }
+      } catch (err) { console.warn("[useContextState] Failed to load pins:", err); }
 
       // Fetch error resolutions
       try {
@@ -216,7 +216,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
         initial.errorResolutions = patterns
           .filter((p) => p.resolution)
           .map((p) => ({ fingerprint: p.fingerprint, resolution: p.resolution!, occurrence_count: p.occurrence_count }));
-      } catch { /* */ }
+      } catch (err) { console.warn("[useContextState] Failed to load error resolutions:", err); }
 
       // Fetch realm context
       try {
@@ -224,7 +224,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
           realms: RealmContextInfo[];
         };
         initial.realms = ctx.realms;
-      } catch { /* */ }
+      } catch (err) { console.warn("[useContextState] Failed to assemble session context:", err); }
 
       // Fetch persisted memory
       try {
@@ -232,7 +232,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
           key: string; value: string; source: string;
         }[];
         initial.persistedMemory = entries;
-      } catch { /* */ }
+      } catch (err) { console.warn("[useContextState] Failed to load persisted memory:", err); }
 
       setContext(initial);
       // Reset versions on session change
@@ -281,7 +281,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
           const context = ctx as { realms: RealmContextInfo[] };
           setContext((prev) => ({ ...prev, realms: context.realms }));
         })
-        .catch(() => {});
+        .catch((err) => console.warn("[useContextState] Failed to refresh realms:", err));
     }).then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, [session?.id]);
@@ -295,7 +295,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
         .then((pins) => {
           setContext((prev) => ({ ...prev, pinnedItems: pins as ContextPin[] }));
         })
-        .catch(() => {});
+        .catch((err) => console.warn("[useContextState] Failed to refresh pins:", err));
     }).then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, [session?.id]);

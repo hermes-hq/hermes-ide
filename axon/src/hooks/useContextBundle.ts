@@ -43,7 +43,7 @@ export function useContextBundle(session: SessionData | null) {
     if (!session) return;
     invoke("get_context_pins", { sessionId: session.id, projectId: null })
       .then((entries) => setPins(entries as ContextPin[]))
-      .catch(() => {});
+      .catch((err) => console.warn("[useContextBundle] Failed to load pins:", err));
     invoke("get_error_resolutions", { projectId: session.working_directory, limit: 10 })
       .then((entries) => {
         const patterns = entries as { fingerprint: string; resolution: string | null; occurrence_count: number }[];
@@ -53,7 +53,7 @@ export function useContextBundle(session: SessionData | null) {
             .map((p) => ({ fingerprint: p.fingerprint, resolution: p.resolution!, occurrence_count: p.occurrence_count }))
         );
       })
-      .catch(() => {});
+      .catch((err) => console.warn("[useContextBundle] Failed to load error resolutions:", err));
     // Fetch realm context via attunement
     invoke("assemble_session_context", { sessionId: session.id, tokenBudget: 4000 })
       .then((ctx) => {

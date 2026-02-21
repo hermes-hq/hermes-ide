@@ -32,7 +32,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   useEffect(() => {
     invoke("get_realms")
       .then((r) => setAllRealms(r as Realm[]))
-      .catch(() => {});
+      .catch((err) => console.warn("[SessionCreator] Failed to load realms:", err));
   }, []);
 
   useEffect(() => {

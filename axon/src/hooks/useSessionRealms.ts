@@ -35,21 +35,28 @@ export function useSessionRealms(sessionId: string | null) {
       .catch(() => setRealms([]));
 
     // Listen for updates to this session's realms
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
+    let unlistenGlobal: (() => void) | null = null;
+
     listen<Realm[]>(`session-realms-updated-${sessionId}`, (event) => {
       setRealms(event.payload);
-    }).then((u) => { unlisten = u; });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
 
     // Listen for global realm updates (scan completions)
-    let unlistenGlobal: (() => void) | null = null;
     listen<Realm>("realm-updated", () => {
       // Refetch to get updated data
       invoke("get_session_realms", { sessionId })
         .then((r) => setRealms(r as Realm[]))
-        .catch(() => {});
-    }).then((u) => { unlistenGlobal = u; });
+        .catch((err) => console.warn("[useSessionRealms] Failed to refresh realms:", err));
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlistenGlobal = u; }
+    });
 
     return () => {
+      cancelled = true;
       unlisten?.();
       unlistenGlobal?.();
     };

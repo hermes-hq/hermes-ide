@@ -34,10 +34,14 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
   const [days, setDays] = useState(7);
   const [dailyCosts, setDailyCosts] = useState<CostDailyEntry[]>([]);
   const [projectCosts, setProjectCosts] = useState<ProjectCostEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    invoke("get_cost_history", { days }).then((entries) => setDailyCosts(entries as CostDailyEntry[])).catch(() => {});
-    invoke("get_cost_by_project", { days }).then((entries) => setProjectCosts(entries as ProjectCostEntry[])).catch(() => {});
+    setLoading(true);
+    Promise.all([
+      invoke("get_cost_history", { days }).then((entries) => setDailyCosts(entries as CostDailyEntry[])).catch((err) => console.warn("[CostDashboard] Failed to load cost history:", err)),
+      invoke("get_cost_by_project", { days }).then((entries) => setProjectCosts(entries as ProjectCostEntry[])).catch((err) => console.warn("[CostDashboard] Failed to load project costs:", err)),
+    ]).finally(() => setLoading(false));
   }, [days]);
 
   const { dailyTotals, maxDailyCost, totalCost } = useMemo(() => {
@@ -92,7 +96,11 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
           <button className="cost-dashboard-close" onClick={onClose}>&times;</button>
         </div>
 
-        {isEmpty ? (
+        {loading ? (
+          <div className="cost-dashboard-empty">
+            Loading cost data...
+          </div>
+        ) : isEmpty ? (
           <div className="cost-dashboard-empty">
             Cost data appears when AI providers report token usage.
           </div>

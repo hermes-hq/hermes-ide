@@ -96,6 +96,7 @@ export function StatusBar() {
             <span className="status-bar-divider" />
           </>
         )}
+        {active && <span className="status-bar-item"><kbd className="status-kbd">⌘J</kbd></span>}
         <span className="status-bar-item"><kbd className="status-kbd">⌘K</kbd></span>
       </div>
     </div>

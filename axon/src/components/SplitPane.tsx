@@ -59,8 +59,12 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
   const handleMouseDown = useCallback(() => {
     if (!isFocused) {
       dispatch({ type: "FOCUS_PANE", paneId });
+    } else {
+      // Pane already focused in React state, but xterm may have lost DOM focus
+      // (e.g. after a system dialog stole focus). Re-focus it.
+      focusTerminal(sessionId);
     }
-  }, [isFocused, paneId, dispatch]);
+  }, [isFocused, paneId, sessionId, dispatch]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();

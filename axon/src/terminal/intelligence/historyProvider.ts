@@ -8,6 +8,7 @@ export interface HistoryMatch {
 
 export interface HistoryProvider {
   loaded: boolean;
+  markLoaded(): void;
   match(prefix: string): HistoryMatch[];
   addCommand(command: string): void;
 }
@@ -16,7 +17,8 @@ const MAX_HISTORY = 500;
 
 export function createHistoryProvider(): HistoryProvider {
   const frequencyMap = new Map<string, number>();
-  const recencyList: string[] = []; // index 0 = most recent
+  const recencyList: string[] = []; // index 0 = most recent, no duplicates
+  const recencySet = new Set<string>(); // O(1) existence checks, mirrors recencyList
   let loaded = false;
 
   function addToMaps(command: string): void {
@@ -26,22 +28,26 @@ export function createHistoryProvider(): HistoryProvider {
     frequencyMap.set(trimmed, (frequencyMap.get(trimmed) ?? 0) + 1);
 
     // Update recency — move to front if exists, or prepend
-    const idx = recencyList.indexOf(trimmed);
-    if (idx !== -1) recencyList.splice(idx, 1);
+    if (recencySet.has(trimmed)) {
+      // Already in list — splice out old position (list stays same length or shrinks by 1)
+      const idx = recencyList.indexOf(trimmed);
+      if (idx !== -1) recencyList.splice(idx, 1);
+    }
     recencyList.unshift(trimmed);
+    recencySet.add(trimmed);
 
-    // Cap at MAX_HISTORY
+    // Cap at MAX_HISTORY — pop oldest entry
     if (recencyList.length > MAX_HISTORY) {
       const removed = recencyList.pop()!;
-      // Only remove from frequency map if not elsewhere in list
-      if (!recencyList.includes(removed)) {
-        frequencyMap.delete(removed);
-      }
+      // Since recencyList has no duplicates, this entry is now gone
+      recencySet.delete(removed);
+      frequencyMap.delete(removed);
     }
   }
 
   return {
     get loaded() { return loaded; },
+    markLoaded() { loaded = true; },
 
     match(prefix: string): HistoryMatch[] {
       if (!prefix.trim()) return [];
@@ -103,4 +109,6 @@ export async function loadHistory(
   } catch {
     // Session history not available — not critical
   }
+
+  provider.markLoaded();
 }

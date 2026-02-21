@@ -55,14 +55,18 @@ export function BootSequence({ onComplete }: BootSequenceProps) {
   // Phase 4: Idle + fade out (3-3.5s)
   useEffect(() => {
     if (phase !== "idle") return;
+    let innerTimer: ReturnType<typeof setTimeout>;
     const timer = setTimeout(() => {
       setFadeOut(true);
-      setTimeout(() => {
+      innerTimer = setTimeout(() => {
         setPhase("done");
         onComplete();
       }, 500);
     }, 500);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(innerTimer);
+    };
   }, [phase, onComplete]);
 
   if (phase === "done") return null;

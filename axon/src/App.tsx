@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
@@ -19,9 +19,11 @@ import { BootSequence } from "./components/BootSequence";
 import { HermesDaemon } from "./components/HermesDaemon";
 import { RealmPicker } from "./components/RealmPicker";
 import { SessionCreator } from "./components/SessionCreator";
+import { PromptComposer } from "./components/PromptComposer";
 import { SplitLayout } from "./components/SplitLayout";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { decodeSessionDrag } from "./components/SplitPane";
+import { focusTerminal } from "./terminal/TerminalPool";
 
 function AppContent() {
   const { state, dispatch, createSession, closeSession, setActive } = useSession();
@@ -34,6 +36,7 @@ function AppContent() {
   const [costDashboardOpen, setCostDashboardOpen] = useState(false);
   const [realmPickerOpen, setRealmPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpen] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const { copyToClipboard } = useContextBundle(activeSession);
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
 
@@ -99,6 +102,7 @@ function AppContent() {
         case "e": e.preventDefault(); dispatch({ type: "TOGGLE_CONTEXT" }); break;
         case "k": e.preventDefault(); dispatch({ type: "TOGGLE_PALETTE" }); break;
         case "b": e.preventDefault(); dispatch({ type: "TOGGLE_SIDEBAR" }); break;
+        case "j": e.preventDefault(); setComposerOpen((v) => !v); break;
         case "t": e.preventDefault(); dispatch({ type: "TOGGLE_TIMELINE" }); break;
         case ",": e.preventDefault(); setSettingsOpen((v) => !v); break;
         case "$": e.preventDefault(); setCostDashboardOpen((v) => !v); break;
@@ -130,6 +134,34 @@ function AppContent() {
   }, [ui.autoToast, dispatch]);
 
   const stuckSession = ui.stuckOverlaySessionId ? state.sessions[ui.stuckOverlaySessionId] : null;
+
+  // Re-focus the active terminal when the app window regains focus
+  // (e.g. after a system dialog, Cmd+Tab, or notification steals focus).
+  // Uses Tauri's onFocusChanged (reliable in WKWebView) + browser fallbacks.
+  useEffect(() => {
+    if (!activeSession) return;
+    const sessionId = activeSession.id;
+
+    // Tauri window focus event — most reliable in WKWebView
+    let unlistenTauri: (() => void) | null = null;
+    getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (focused) focusTerminal(sessionId);
+    }).then((u) => { unlistenTauri = u; });
+
+    // Browser fallbacks for edge cases
+    const onFocus = () => focusTerminal(sessionId);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") focusTerminal(sessionId);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      unlistenTauri?.();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [activeSession]);
 
   // Global capture-phase window drag listener — bypasses React synthetic events,
   // WKWebView focus quirks, and Tauri's automatic injection.
@@ -260,6 +292,7 @@ function AppContent() {
           onOpenCostDashboard={() => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
           onAttachRealm={() => setRealmPickerOpen(true)}
+          onOpenComposer={() => setComposerOpen(true)}
           onScanCwd={() => {
             if (activeSession?.working_directory) {
               invoke("create_realm", { path: activeSession.working_directory, name: null }).catch(console.error);
@@ -311,6 +344,13 @@ function AppContent() {
         />
       )}
 
+      {composerOpen && activeSession && (
+        <PromptComposer
+          sessionId={activeSession.id}
+          onClose={() => setComposerOpen(false)}
+        />
+      )}
+
       {stuckSession && (
         <StuckOverlay
           session={stuckSession}
@@ -337,17 +377,70 @@ function AppContent() {
   );
 }
 
+// ─── Error Boundary ─────────────────────────────────────────────────
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[ErrorBoundary] Uncaught error:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: "40px", color: "#c8d6e5", background: "#0B0F14",
+          height: "100vh", fontFamily: "monospace", display: "flex",
+          flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: "16px",
+        }}>
+          <div style={{ fontSize: "18px", color: "#ff4444" }}>Something went wrong</div>
+          <pre style={{
+            fontSize: "12px", color: "#7f8c9b", maxWidth: "600px",
+            overflow: "auto", whiteSpace: "pre-wrap",
+          }}>
+            {this.state.error?.message}
+          </pre>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            style={{
+              padding: "8px 20px", background: "#33ff99", color: "#0B0F14",
+              border: "none", borderRadius: "4px", cursor: "pointer",
+              fontWeight: 600, fontFamily: "monospace",
+            }}
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─── App Root ───────────────────────────────────────────────────────
+
 function App() {
   const [booted, setBooted] = useState(false);
 
   return (
-    <>
+    <ErrorBoundary>
       {!booted && <BootSequence onComplete={() => setBooted(true)} />}
       <SessionProvider>
         <AppContent />
         {booted && <HermesDaemon mode="watermark" />}
       </SessionProvider>
-    </>
+    </ErrorBoundary>
   );
 }
 

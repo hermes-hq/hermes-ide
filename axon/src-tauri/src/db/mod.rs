@@ -1181,13 +1181,26 @@ impl Database {
     }
 
     pub fn delete_realm(&self, id: &str) -> Result<(), String> {
-        self.conn.execute("DELETE FROM session_realms WHERE realm_id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        self.conn.execute("DELETE FROM realm_conventions WHERE realm_id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        self.conn.execute("DELETE FROM realms WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        self.conn.execute_batch("BEGIN IMMEDIATE").map_err(|e| e.to_string())?;
+        let result = (|| -> Result<(), String> {
+            self.conn.execute("DELETE FROM session_realms WHERE realm_id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+            self.conn.execute("DELETE FROM realm_conventions WHERE realm_id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+            self.conn.execute("DELETE FROM realms WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
     }
 
     pub fn attach_session_realm(&self, session_id: &str, realm_id: &str, role: &str) -> Result<(), String> {

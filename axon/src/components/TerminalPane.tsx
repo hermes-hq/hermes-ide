@@ -108,7 +108,7 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     detectShellEnvironment(sessionId).then((env) => {
       const provider = getHistoryProvider(sessionId);
       if (provider) {
-        loadHistory(provider, sessionId, env.shellType).catch(() => {});
+        loadHistory(provider, sessionId, env.shellType).catch((err) => console.warn("[TerminalPane] Failed to load shell history:", err));
       }
     });
   }, [sessionId]);
@@ -120,40 +120,23 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       const newCwd = event.payload;
       setSessionCwd(sessionId, newCwd);
       invalidateContext(newCwd);
-      invoke("detect_project", { path: newCwd }).catch(() => {});
-      detectProjectContext(newCwd).catch(() => {});
+      invoke("detect_project", { path: newCwd }).catch((err) => console.warn("[TerminalPane] Failed to detect project:", err));
+      detectProjectContext(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project context:", err));
     }).then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, [sessionId]);
 
-  // Listen for command predictions → show ghost text (only in assisted mode)
+  // Listen for command predictions — ghost text in assisted mode, auto-execute in autonomous mode
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen<CommandPredictionEvent>(`command-prediction-${sessionId}`, (event) => {
-      if (mode !== "assisted") return;
       const predictions = event.payload.predictions;
-      if (predictions.length > 0 && phase === "idle") {
+      if (predictions.length === 0 || phase !== "idle") return;
+
+      if (mode === "assisted") {
         showGhostText(sessionId, predictions[0].next_command);
-      }
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
-  }, [sessionId, mode, phase]);
-
-  // Clear ghost text when phase changes to busy
-  useEffect(() => {
-    if (phase === "busy") {
-      clearGhostText(sessionId);
-    }
-  }, [phase, sessionId]);
-
-  // Autonomous mode: auto-execute predictions
-  useEffect(() => {
-    if (mode !== "autonomous") return;
-    let unlisten: (() => void) | null = null;
-    listen<CommandPredictionEvent>(`command-prediction-${sessionId}`, (event) => {
-      if (mode !== "autonomous" || phase !== "idle") return;
-      const predictions = event.payload.predictions;
-      if (predictions.length > 0 && predictions[0].frequency >= autoSettings.commandMinFrequency) {
+      } else if (mode === "autonomous" && predictions[0].frequency >= autoSettings.commandMinFrequency) {
         dispatch({
           type: "SHOW_AUTO_TOAST",
           command: predictions[0].next_command,
@@ -161,9 +144,21 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
           sessionId,
         });
       }
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [sessionId, mode, phase, dispatch, autoSettings.commandMinFrequency]);
+
+  // Clear ghost text when phase changes to busy
+  useEffect(() => {
+    if (phase === "busy") {
+      clearGhostText(sessionId);
+    }
+  }, [phase, sessionId]);
 
   // Autonomous mode: auto-execute error resolutions
   useEffect(() => {

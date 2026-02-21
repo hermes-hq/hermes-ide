@@ -34,7 +34,7 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
   useEffect(() => {
     invoke("get_realms")
       .then((r) => setAllRealms(r as Realm[]))
-      .catch(() => {});
+      .catch((err) => console.warn("[RealmPicker] Failed to load realms:", err));
     inputRef.current?.focus();
   }, []);
 
@@ -63,7 +63,7 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
     // Refresh all realms in case of updates
     invoke("get_realms")
       .then((r) => setAllRealms(r as Realm[]))
-      .catch(() => {});
+      .catch((err) => console.warn("[RealmPicker] Failed to refresh realms:", err));
   };
 
   const scanNewPath = async (path: string) => {

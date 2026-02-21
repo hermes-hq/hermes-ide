@@ -14,6 +14,7 @@ interface CommandPaletteProps {
   onToggleFlowMode?: () => void;
   onAttachRealm?: () => void;
   onScanCwd?: () => void;
+  onOpenComposer?: () => void;
 }
 
 interface Command {
@@ -25,7 +26,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachRealm, onScanCwd,
+  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachRealm, onScanCwd, onOpenComposer,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -41,6 +42,7 @@ export function CommandPalette({
     ...(onToggleFlowMode ? [{ id: "flow-mode", label: "Toggle Flow Mode", category: "View", shortcut: "⌘⇧F", action: () => { onToggleFlowMode(); onClose(); } }] : []),
     ...(onAttachRealm ? [{ id: "attach-realm", label: "Add Project...", category: "Projects", action: () => { onAttachRealm(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: "Scan Current Directory", category: "Projects", action: () => { onScanCwd(); onClose(); } }] : []),
+    ...(onOpenComposer ? [{ id: "composer", label: "Prompt Composer", category: "Tools", shortcut: "⌘J", action: () => { onOpenComposer(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,
       label: s.label,
@@ -48,7 +50,7 @@ export function CommandPalette({
       shortcut: i < 9 ? `⌘${i + 1}` : undefined,
       action: () => { onSelectSession(s.id); onClose(); },
     })),
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachRealm, onScanCwd]);
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachRealm, onScanCwd, onOpenComposer]);
 
   const filtered = useMemo(() => query
     ? commands.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()) || c.category.toLowerCase().includes(query.toLowerCase()))

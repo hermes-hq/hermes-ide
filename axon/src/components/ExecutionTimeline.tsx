@@ -69,30 +69,29 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
     return () => { unlisten?.(); };
   }, [sessionId]);
 
-  // Load more on scroll to bottom
-  const loadMore = useCallback(() => {
-    invoke("get_execution_nodes", { sessionId, limit: 50, offset: offsetRef.current })
-      .then((result) => {
-        const fetched = result as ExecutionNode[];
-        if (fetched.length > 0) {
-          setNodes((prev) => {
-            const existingIds = new Set(prev.map((n) => n.id));
-            const newNodes = fetched.filter((n) => !existingIds.has(n.id));
-            return [...prev, ...newNodes];
-          });
-          offsetRef.current += fetched.length;
-        }
-      })
-      .catch(console.error);
-  }, [sessionId]);
-
+  // Load more on scroll to bottom (throttled — one request at a time)
+  const loadingMoreRef = useRef(false);
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || loadingMoreRef.current) return;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) {
-      loadMore();
+      loadingMoreRef.current = true;
+      invoke("get_execution_nodes", { sessionId, limit: 50, offset: offsetRef.current })
+        .then((result) => {
+          const fetched = result as ExecutionNode[];
+          if (fetched.length > 0) {
+            setNodes((prev) => {
+              const existingIds = new Set(prev.map((n) => n.id));
+              const newNodes = fetched.filter((n) => !existingIds.has(n.id));
+              return [...prev, ...newNodes];
+            });
+            offsetRef.current += fetched.length;
+          }
+        })
+        .catch(console.error)
+        .finally(() => { loadingMoreRef.current = false; });
     }
-  }, [loadMore]);
+  }, [sessionId]);
 
   return (
     <div className="execution-timeline" ref={containerRef} onScroll={handleScroll}>

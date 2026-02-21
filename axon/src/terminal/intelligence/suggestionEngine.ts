@@ -106,20 +106,18 @@ export function suggest(
 function addCandidate(map: Map<string, Suggestion>, candidate: Suggestion): void {
   const existing = map.get(candidate.text);
   if (existing) {
-    // Dedup: keep highest score + 50 bonus for multi-source
-    if (candidate.score > existing.score) {
-      candidate.score += 50;
-      // Preserve description/badge from the richer source
-      if (!candidate.description && existing.description) {
-        candidate.description = existing.description;
-      }
-      if (!candidate.badge && existing.badge) {
-        candidate.badge = existing.badge;
-      }
-      map.set(candidate.text, candidate);
-    } else {
-      existing.score += 50;
+    // Dedup: keep the higher-scoring entry + 50 multi-source bonus
+    const kept = candidate.score > existing.score ? candidate : existing;
+    const other = candidate.score > existing.score ? existing : candidate;
+    kept.score += 50;
+    // Preserve description/badge from the richer source
+    if (!kept.description && other.description) {
+      kept.description = other.description;
     }
+    if (!kept.badge && other.badge) {
+      kept.badge = other.badge;
+    }
+    map.set(candidate.text, kept);
   } else {
     map.set(candidate.text, candidate);
   }

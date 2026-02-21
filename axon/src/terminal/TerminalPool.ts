@@ -15,6 +15,15 @@ import {
   shouldConsumeTab,
 } from "./intelligence/shellEnvironment";
 
+// ─── Helpers ────────────────────────────────────────────────────────
+
+/** UTF-8-safe base64 encoding (handles characters outside Latin-1 range) */
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+  return btoa(binary);
+}
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 interface PoolEntry {
@@ -243,7 +252,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
     const ghostContent = entry.ghostText;
     clearGhostText(sessionId);
     dismissSuggestions(sessionId);
-    invoke("write_to_session", { sessionId, data: btoa(ghostContent + "\r") }).catch((err) => {
+    invoke("write_to_session", { sessionId, data: utf8ToBase64(ghostContent + "\r") }).catch((err) => {
       console.warn(`[TerminalPool] write_to_session (ghost accept) failed for ${sessionId}:`, err);
     });
     return;
@@ -260,7 +269,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
   }
 
   // ── Always pass data to PTY ──
-  invoke("write_to_session", { sessionId, data: btoa(data) }).catch((err) => {
+  invoke("write_to_session", { sessionId, data: utf8ToBase64(data) }).catch((err) => {
     console.warn(`[TerminalPool] write_to_session failed for ${sessionId}:`, err);
   });
 
@@ -388,7 +397,7 @@ function acceptSuggestion(sessionId: string): void {
   // Send backspaces to erase current input, then write the suggestion
   const eraseSequence = "\x7f".repeat(currentInput.length);
   const fullData = eraseSequence + selected.text;
-  invoke("write_to_session", { sessionId, data: btoa(fullData) }).catch((err) => {
+  invoke("write_to_session", { sessionId, data: utf8ToBase64(fullData) }).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (accept) failed for ${sessionId}:`, err);
   });
 }
@@ -412,7 +421,7 @@ function executeSuggestion(sessionId: string): void {
 
   const eraseSequence = "\x7f".repeat(currentInput.length);
   const fullData = eraseSequence + selected.text + "\r";
-  invoke("write_to_session", { sessionId, data: btoa(fullData) }).catch((err) => {
+  invoke("write_to_session", { sessionId, data: utf8ToBase64(fullData) }).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (execute) failed for ${sessionId}:`, err);
   });
 }
@@ -426,7 +435,7 @@ function acceptGhostInline(sessionId: string): void {
   dismissSuggestions(sessionId);
 
   entry.inputBuffer += ghostContent;
-  invoke("write_to_session", { sessionId, data: btoa(ghostContent) }).catch((err) => {
+  invoke("write_to_session", { sessionId, data: utf8ToBase64(ghostContent) }).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (ghost inline) failed for ${sessionId}:`, err);
   });
 }
@@ -552,6 +561,16 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
     entry.terminal.open(entry.container);
     entry.opened = true;
 
+    // Ensure clicks on the terminal always restore keyboard focus.
+    // WKWebView can lose focus after native dialogs and not recover on click.
+    entry.container.addEventListener("mousedown", () => {
+      requestAnimationFrame(() => {
+        entry.terminal.focus();
+        const textarea = entry.container.querySelector("textarea.xterm-helper-textarea") as HTMLTextAreaElement | null;
+        if (textarea) textarea.focus({ preventScroll: true });
+      });
+    });
+
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => webgl.dispose());
@@ -575,7 +594,7 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
       sessionId,
       rows: entry.terminal.rows,
       cols: entry.terminal.cols,
-    }).catch(() => {});
+    }).catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
   });
 }
 
@@ -583,6 +602,12 @@ export function focusTerminal(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (!entry || !entry.attached || !entry.opened) return;
   entry.terminal.focus();
+  // WKWebView workaround: xterm.focus() may silently fail after a native dialog
+  // steals focus. Directly find and focus the hidden textarea as a fallback.
+  const textarea = entry.container.querySelector("textarea.xterm-helper-textarea") as HTMLTextAreaElement | null;
+  if (textarea && document.activeElement !== textarea) {
+    textarea.focus({ preventScroll: true });
+  }
 }
 
 export function detach(sessionId: string): void {

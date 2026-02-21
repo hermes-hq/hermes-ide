@@ -8,6 +8,7 @@ import { useContextBundle } from "../hooks/useContextBundle";
 import { useContextState } from "../hooks/useContextState";
 import { ContextStatusBar } from "./ContextStatusBar";
 import { ContextPreview } from "./ContextPreview";
+import { utf8ToBase64 } from "../utils/encoding";
 
 interface PersistedMemory {
   id: number;
@@ -93,7 +94,7 @@ function ToolBar({ tool, count, maxCount }: { tool: string; count: number; maxCo
 }
 
 function sendCommand(sessionId: string, command: string) {
-  const data = btoa(command + "\r");
+  const data = utf8ToBase64(command + "\r");
   invoke("write_to_session", { sessionId, data }).catch((err) => {
     console.warn(`[ContextPanel] Failed to send command "${command}":`, err);
   });
@@ -172,29 +173,40 @@ function DomainSection({ sessionId }: { sessionId: string }) {
     conventions: { rule: string; source: string; confidence: number }[];
   }[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    invoke("get_session_realms", { sessionId })
-      .then((r) => setRealms(r as typeof realms))
-      .catch(() => {});
+    let mounted = true;
+    const fetchRealms = () => {
+      invoke("get_session_realms", { sessionId })
+        .then((r) => { if (mounted) { setRealms(r as typeof realms); setLoading(false); } })
+        .catch((err) => { console.warn("[ContextPanel] Failed to load realms:", err); if (mounted) setLoading(false); });
+    };
+
+    setLoading(true);
+    fetchRealms();
 
     let unlisten: (() => void) | null = null;
-    listen(`session-realms-updated-${sessionId}`, () => {
-      invoke("get_session_realms", { sessionId })
-        .then((r) => setRealms(r as typeof realms))
-        .catch(() => {});
-    }).then((u) => { unlisten = u; });
-
     let unlistenGlobal: (() => void) | null = null;
-    listen("realm-updated", () => {
-      invoke("get_session_realms", { sessionId })
-        .then((r) => setRealms(r as typeof realms))
-        .catch(() => {});
-    }).then((u) => { unlistenGlobal = u; });
 
-    return () => { unlisten?.(); unlistenGlobal?.(); };
+    listen(`session-realms-updated-${sessionId}`, fetchRealms)
+      .then((u) => { if (mounted) unlisten = u; else u(); });
+    listen("realm-updated", fetchRealms)
+      .then((u) => { if (mounted) unlistenGlobal = u; else u(); });
+
+    return () => {
+      mounted = false;
+      unlisten?.();
+      unlistenGlobal?.();
+    };
   }, [sessionId]);
 
+  if (loading) return (
+    <div className="ctx-section">
+      <div className="ctx-section-title">Projects</div>
+      <div className="text-muted">Loading...</div>
+    </div>
+  );
   if (realms.length === 0) return null;
 
   return (
@@ -279,7 +291,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
   useEffect(() => {
     invoke("get_all_memory", { scope: "global", scopeId: "global" })
       .then((entries) => setPersistedMemory(entries as PersistedMemory[]))
-      .catch(() => {});
+      .catch((err) => console.warn("[ContextPanel] Failed to load persisted memory:", err));
   }, [session.id]);
 
   // Listen for error-matched events
@@ -307,7 +319,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
         if (corrs.length > 0) {
           setCorrelations((prev) => ({ ...prev, [event.payload.fingerprint]: corrs }));
         }
-      }).catch(() => {});
+      }).catch((err) => console.warn("[ContextPanel] Failed to load error correlations:", err));
     }).then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, [session.id, session.working_directory]);

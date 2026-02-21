@@ -14,6 +14,11 @@ export function AutoToast({ command, reason, delayMs, onCancel, onExecute }: Aut
   const executedRef = useRef(false);
 
   useEffect(() => {
+    // Reset timer state when effect re-runs (delayMs or command changed)
+    startRef.current = Date.now();
+    executedRef.current = false;
+    setProgress(100);
+
     const interval = setInterval(() => {
       const elapsed = Date.now() - startRef.current;
       const remaining = Math.max(0, 100 - (elapsed / delayMs) * 100);

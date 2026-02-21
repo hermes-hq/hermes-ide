@@ -156,8 +156,22 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
     </div>
   );
 
-  // Global index counter for keyboard shortcuts
-  let globalIdx = 0;
+  // Pre-compute session index map for keyboard shortcuts (concurrent-mode safe)
+  const sessionIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let idx = 0;
+    for (const session of (grouped.get(null) || [])) {
+      map.set(session.id, idx++);
+    }
+    for (const group of allGroups) {
+      if (!collapsedGroups.has(group)) {
+        for (const session of (grouped.get(group) || [])) {
+          map.set(session.id, idx++);
+        }
+      }
+    }
+    return map;
+  }, [grouped, allGroups, collapsedGroups]);
 
   return (
     <div className="session-list">
@@ -168,8 +182,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
 
         {/* Ungrouped sessions first */}
         {(grouped.get(null) || []).map((session) => {
-          const idx = globalIdx++;
-          return renderSession(session, idx);
+          return renderSession(session, sessionIndexMap.get(session.id) ?? 0);
         })}
 
         {/* Grouped sessions */}
@@ -192,8 +205,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
                 )}
               </div>
               {!isCollapsed && groupSessions.map((session) => {
-                const idx = globalIdx++;
-                return renderSession(session, idx);
+                return renderSession(session, sessionIndexMap.get(session.id) ?? 0);
               })}
             </div>
           );
