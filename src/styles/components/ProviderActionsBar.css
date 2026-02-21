@@ -2,19 +2,14 @@
 
 .provider-actions-bar {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   padding: 4px 12px;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
   flex-shrink: 0;
   background: var(--bg-1);
   align-items: center;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
-  mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
 }
-
-.provider-actions-bar::-webkit-scrollbar { height: 3px; }
-.provider-actions-bar::-webkit-scrollbar-thumb { background: var(--bg-3); }
 
 .provider-actions-label {
   font-size: var(--text-sm);

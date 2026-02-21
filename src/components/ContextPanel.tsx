@@ -104,8 +104,11 @@ function FileTreeView({ nodes, onPin }: { nodes: FileTreeNode[]; onPin: (path: s
         <div key={node.path}>
           <div
             className="ctx-file-tree-dir"
+            role="button"
+            tabIndex={0}
             style={{ paddingLeft: depth * 12 }}
             onClick={() => toggle(node.path)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(node.path); } }}
           >
             {isOpen ? "▾" : "▸"} {node.name}/
           </div>
@@ -131,7 +134,7 @@ function ToolTimeline({ toolCalls }: { toolCalls: { tool: string; args: string; 
     <div className="ctx-tool-timeline">
       {last20.map((tc, i) => (
         <div
-          key={i}
+          key={`${tc.timestamp}-${tc.tool}-${i}`}
           className="ctx-tool-dot"
           style={{ background: toolColors[tc.tool] || "var(--text-3)" }}
           title={`${tc.tool}(${tc.args}) - ${tc.timestamp}`}
@@ -192,7 +195,10 @@ function DomainSection({ sessionId }: { sessionId: string }) {
         <div key={realm.id} className="ctx-domain-realm">
           <div
             className="ctx-domain-realm-header"
+            role="button"
+            tabIndex={0}
             onClick={() => setExpanded(expanded === realm.id ? null : realm.id)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === realm.id ? null : realm.id); } }}
           >
             <span className="ctx-domain-realm-name">{realm.name}</span>
             <span className="realm-scan-badge" data-status={realm.scan_status}>
@@ -221,8 +227,8 @@ function DomainSection({ sessionId }: { sessionId: string }) {
               )}
               {realm.conventions.length > 0 && (
                 <div className="ctx-domain-conventions">
-                  {realm.conventions.slice(0, 8).map((conv, i) => (
-                    <div key={i} className="ctx-domain-conv">{conv.rule}</div>
+                  {realm.conventions.slice(0, 8).map((conv) => (
+                    <div key={conv.rule} className="ctx-domain-conv">{conv.rule}</div>
                   ))}
                 </div>
               )}
@@ -244,7 +250,7 @@ function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, 
   return (
     <div className="ctx-section">
       <div className="ctx-section-title">Workspace</div>
-      <div className="ctx-workspace-compact" onClick={() => setExpanded(!expanded)} title={cwd}>
+      <div className="ctx-workspace-compact" role="button" tabIndex={0} onClick={() => setExpanded(!expanded)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(!expanded); } }} title={cwd}>
         <span className="mono">{basename}</span>
         {extraPaths.length > 0 && (
           <span className="ctx-workspace-expand-badge">+{extraPaths.length}</span>
@@ -294,7 +300,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const [memoryScopeInput, setMemoryScopeInput] = useState<"project" | "global">("project");
   const [correlations, setCorrelations] = useState<Record<string, ErrorCorrelation[]>>({});
   const [copyDone, setCopyDone] = useState(false);
-  const [expandedErrors, setExpandedErrors] = useState<Set<number>>(new Set());
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 
   // Derive primary realm id for project-scoped operations
   const primaryRealmId = contextManager.context.realms.length > 0
@@ -768,7 +774,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
             <div className="ctx-section-title">Recent Actions</div>
             <div className="ctx-action-history">
               {metrics.recent_actions.slice(-5).map((a, i) => (
-                <div key={i} className="ctx-action-entry mono">
+                <div key={`${a.command}-${i}`} className="ctx-action-entry mono">
                   {a.command} <span className="text-muted">{a.is_suggestion ? "suggested" : "executed"}</span>
                 </div>
               ))}
@@ -828,7 +834,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
                   const last3 = metrics.recent_actions.slice(-3).map((a) => a.command).join("\n");
                   const errText = metrics.recent_errors.slice(-3).join("\n");
                   const text = `CWD: ${session.working_directory}\n\nRecent commands:\n${last3}\n\nErrors:\n${errText}`;
-                  navigator.clipboard.writeText(text).catch(console.error);
+                  navigator.clipboard.writeText(text).catch(console.warn);
                 }}
                 title="Copy errors with context"
               >
@@ -876,7 +882,10 @@ export function ContextPanel({ session }: ContextPanelProps) {
                     Also in:{" "}
                     <span
                       className="ctx-error-correlation-link"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setActive(corr.session_id)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActive(corr.session_id); } }}
                     >
                       {corr.session_label}
                     </span>
@@ -886,18 +895,34 @@ export function ContextPanel({ session }: ContextPanelProps) {
               </div>
             ))}
             <div className="ctx-error-list">
-              {metrics.recent_errors.slice(-5).map((err, i) => (
-                <div
-                  key={i}
-                  className={`ctx-error-entry mono ${expandedErrors.has(i) ? "ctx-error-entry-expanded" : ""}`}
-                  onClick={() => setExpandedErrors((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(i)) next.delete(i);
-                    else next.add(i);
-                    return next;
-                  })}
-                >{err}</div>
-              ))}
+              {metrics.recent_errors.slice(-5).map((err, i) => {
+                const errKey = `${i}-${err.slice(0, 80)}`;
+                return (
+                  <div
+                    key={errKey}
+                    className={`ctx-error-entry mono ${expandedErrors.has(errKey) ? "ctx-error-entry-expanded" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setExpandedErrors((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(errKey)) next.delete(errKey);
+                      else next.add(errKey);
+                      return next;
+                    })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setExpandedErrors((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(errKey)) next.delete(errKey);
+                          else next.add(errKey);
+                          return next;
+                        });
+                      }
+                    }}
+                  >{err}</div>
+                );
+              })}
             </div>
           </div>
         )}

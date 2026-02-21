@@ -432,6 +432,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       const u2 = await listen<string>("session-removed", (event) => {
         destroyTerminal(event.payload);
+        // Clean up refs that track per-session state (prevent memory leaks)
+        busyTimestamps.current.delete(event.payload);
+        stuckNotified.current.delete(event.payload);
+        closingSessionIds.current.delete(event.payload);
         // Clean up nudge timer if one exists for this session
         const existingTimer = nudgeTimers.current.get(event.payload);
         if (existingTimer) {

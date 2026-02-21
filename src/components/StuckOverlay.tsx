@@ -34,7 +34,7 @@ export function StuckOverlay({ session, onDismiss, onSendCtrlC }: StuckOverlayPr
         <div className="stuck-overlay-actions">
           <button className="stuck-btn stuck-btn-danger" onClick={onSendCtrlC}>Send Ctrl+C</button>
           <button className="stuck-btn" onClick={() => {
-            navigator.clipboard.writeText(session.metrics.recent_errors.join("\n"));
+            navigator.clipboard.writeText(session.metrics.recent_errors.join("\n")).catch(console.warn);
           }}>Copy Errors</button>
           <button className="stuck-btn" onClick={onDismiss}>Dismiss</button>
         </div>

@@ -144,7 +144,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
             <span className="session-agent-tag">{session.detected_agent.name}</span>
           )}
           <span className="session-phase-tag" data-phase={session.phase}>
-            {session.phase}
+            {session.phase === "busy" ? "working" : session.phase === "shell_ready" ? "ready" : session.phase === "creating" ? "starting" : session.phase}
           </span>
           <span className="session-age">{timeAgo(session.last_activity_at)}</span>
         </div>
@@ -196,7 +196,10 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
             <div key={group}>
               <div
                 className="session-group-header"
+                role="button"
+                tabIndex={0}
                 onClick={() => toggleGroup(group)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(group); } }}
               >
                 <span>
                   {isCollapsed ? "▸" : "▾"} {group} ({groupSessions.length})
