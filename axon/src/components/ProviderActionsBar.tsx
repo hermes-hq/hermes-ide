@@ -1,3 +1,4 @@
+import "../styles/components/ProviderActionsBar.css";
 import { useMemo } from "react";
 import { ActionTemplate, ActionEvent } from "../state/SessionContext";
 import { utf8ToBase64 } from "../utils/encoding";

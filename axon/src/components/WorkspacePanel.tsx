@@ -1,3 +1,4 @@
+import "../styles/components/WorkspacePanel.css";
 import { useState, useEffect, useCallback } from "react";
 import { Realm } from "../hooks/useSessionRealms";
 import { getRealms, createRealm, deleteRealm as apiDeleteRealm, scanRealm, scanDirectory as apiScanDirectory } from "../api/realms";

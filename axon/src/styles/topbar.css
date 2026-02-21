@@ -1,0 +1,117 @@
+/* ─── Top Bar (Drag-Safe Architecture) ────────────────────── */
+
+.topbar {
+  position: relative;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  -webkit-user-select: none;
+  user-select: none;
+  flex-shrink: 0;
+  z-index: 999999;
+  padding: 0 12px;
+  gap: var(--space-2);
+  cursor: default;
+}
+
+/* macOS traffic lights occupy ~70px */
+.topbar-traffic-spacer {
+  width: 68px;
+  height: 100%;
+  flex-shrink: 0;
+}
+
+/* Interactive button groups */
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* Center — all elements receive events so capture-phase drag listener fires */
+.topbar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
+  cursor: default;
+}
+
+.topbar-center span,
+.topbar-title,
+.topbar-session-name,
+.topbar-phase,
+.topbar-dot {
+  cursor: default;
+}
+
+.topbar-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 3px 10px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-ui);
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.topbar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+  border-color: var(--border);
+}
+
+.topbar-btn-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.topbar-btn-new {
+  font-size: 16px;
+  font-weight: 300;
+  padding: 2px 8px;
+}
+
+.topbar-badge {
+  font-size: var(--text-sm);
+  background: var(--bg-3);
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  color: var(--text-1);
+}
+
+.topbar-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 1px;
+}
+
+.topbar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.topbar-session-name {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--text-0);
+}
+
+.topbar-phase {
+  font-size: var(--text-base);
+  color: var(--text-3);
+}

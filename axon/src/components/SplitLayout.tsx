@@ -1,3 +1,4 @@
+import "../styles/components/SplitPane.css";
 import { LayoutNode } from "../state/layoutTypes";
 import { SplitPane } from "./SplitPane";
 import { SplitDivider } from "./SplitDivider";

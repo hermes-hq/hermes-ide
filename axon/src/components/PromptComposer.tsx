@@ -1,3 +1,4 @@
+import "../styles/components/PromptComposer.css";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { getSetting, setSetting } from "../api/settings";
 import { writeToSession } from "../api/sessions";

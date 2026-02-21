@@ -1,3 +1,4 @@
+import "../styles/components/ExecutionTimeline.css";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ExecutionNode } from "../state/SessionContext";

@@ -1,3 +1,4 @@
+import "../styles/components/SplitPane.css";
 import { useCallback, useRef } from "react";
 import { SplitDirection } from "../state/layoutTypes";
 import { useSession } from "../state/SessionContext";

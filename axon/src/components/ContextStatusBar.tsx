@@ -1,3 +1,4 @@
+import "../styles/components/ContextStatusBar.css";
 import { type ContextManager } from "../hooks/useContextState";
 
 interface ContextStatusBarProps {

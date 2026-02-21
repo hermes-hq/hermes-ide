@@ -1,3 +1,4 @@
+import "../styles/components/Settings.css";
 import { useState, useEffect, useCallback } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { updateSettings as applyTerminalSettings } from "../terminal/TerminalPool";

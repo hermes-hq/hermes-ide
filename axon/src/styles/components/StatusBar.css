@@ -1,0 +1,102 @@
+/* ─── Status Bar ──────────────────────────────────────────── */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--statusbar-h);
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  padding: 0 12px;
+  font-size: var(--text-base);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.status-bar-left, .status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.status-bar-right { max-width: 50%; }
+
+.status-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.status-bar-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.status-dot-on {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.status-kbd { font-size: var(--text-sm); padding: 0 4px; }
+
+.status-bar-model { font-size: var(--text-sm); color: var(--text-3); }
+
+.status-bar-busy {
+  font-size: var(--text-sm);
+  color: var(--green);
+  margin-left: 2px;
+}
+
+.status-bar-stuck {
+  color: var(--red);
+  font-weight: 600;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+.status-bar-tokens {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+}
+
+.status-bar-cost {
+  color: var(--yellow);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+}
+
+/* ─── Mode Selector ───────────────────────────── */
+
+.status-mode-btn {
+  border: 1px solid var(--border);
+  font-size: var(--text-base);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-1);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 0.15s;
+}
+.status-mode-btn:hover { background: var(--bg-hover); }
+.status-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-mode-manual .status-mode-dot { background: var(--text-3); }
+.status-mode-assisted .status-mode-dot { background: var(--green); }
+.status-mode-autonomous .status-mode-dot { background: var(--accent); }

@@ -1,3 +1,4 @@
+import "../styles/components/AutoToast.css";
 import { useState, useEffect, useRef } from "react";
 
 interface AutoToastProps {

@@ -1,0 +1,44 @@
+/* ─── Flow Mode ──────────────────────────────── */
+
+.flow-mode .topbar {
+  height: 20px;
+  opacity: 0.5;
+  transition: opacity 0.2s, height 0.2s;
+}
+.flow-mode .topbar:hover { opacity: 1; }
+.flow-mode .topbar-controls { display: none; }
+.flow-mode .status-bar {
+  height: 20px;
+  font-size: var(--text-sm);
+  opacity: 0.5;
+  transition: opacity 0.2s, height 0.2s;
+}
+.flow-mode .status-bar:hover { opacity: 1; }
+
+/* Flow Toast */
+.flow-toast-container {
+  position: fixed;
+  top: 28px;
+  right: 12px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.flow-toast {
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: var(--text-md);
+  color: var(--red);
+  animation: flowToastIn 0.2s ease-out, flowToastOut 0.3s ease-in 2.7s forwards;
+}
+@keyframes flowToastIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes flowToastOut {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateY(-10px); }
+}

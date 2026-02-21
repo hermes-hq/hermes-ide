@@ -1,3 +1,4 @@
+import "../styles/components/SplitPane.css";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";

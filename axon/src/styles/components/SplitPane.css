@@ -1,0 +1,111 @@
+/* ─── Split-Pane Tiling System ─────────────────────────────────── */
+
+.split-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-pane-focused {
+  border-color: var(--accent);
+}
+
+.split-pane-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.split-pane-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: var(--text-base);
+  color: var(--text-2);
+}
+
+.split-pane-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.split-pane-phase {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+.split-pane-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.split-pane:hover .split-pane-close,
+.split-pane-focused .split-pane-close {
+  opacity: 1;
+}
+.split-pane-close:hover {
+  color: var(--text-0);
+}
+
+.split-pane-terminal {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  min-height: 0;
+}
+
+/* Dividers */
+.split-divider {
+  flex-shrink: 0;
+  background: var(--border);
+  transition: background 0.15s;
+  z-index: 1;
+}
+.split-divider:hover {
+  background: var(--accent);
+}
+.split-divider-horizontal {
+  width: 3px;
+  cursor: col-resize;
+}
+.split-divider-vertical {
+  height: 3px;
+  cursor: row-resize;
+}
+
+/* Scope bar & provider actions bar adjustments inside pane header */
+.split-pane-header .scope-bar {
+  border-bottom: none;
+}
+.split-pane-header .provider-actions-bar {
+  border-bottom: none;
+}

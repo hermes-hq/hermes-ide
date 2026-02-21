@@ -1,3 +1,4 @@
+import "../styles/components/FlowToast.css";
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 

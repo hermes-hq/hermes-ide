@@ -1,0 +1,100 @@
+/* ─── Execution Timeline ─────────────────────────────── */
+
+.execution-timeline {
+  height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+
+.timeline-node {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: var(--text-md);
+  color: var(--text-1);
+  transition: background 0.1s;
+}
+.timeline-node:hover { background: var(--bg-2); }
+
+.timeline-kind {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  min-width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.timeline-input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.timeline-exit-badge {
+  font-size: var(--text-sm);
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.timeline-exit-ok { background: var(--green-dim); color: var(--green); }
+.timeline-exit-err { background: var(--red-dim); color: var(--red); }
+.timeline-exit-badge:not(.timeline-exit-ok):not(.timeline-exit-err) {
+  background: var(--bg-3);
+  color: var(--text-3);
+}
+
+.timeline-duration {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  min-width: 48px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.timeline-time {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  min-width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.timeline-output {
+  padding: 8px 12px 8px 36px;
+  font-size: var(--text-md);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  background: var(--bg-0);
+  max-height: 200px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.timeline-output-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.timeline-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--text-md);
+}

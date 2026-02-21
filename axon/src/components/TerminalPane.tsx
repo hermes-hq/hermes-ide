@@ -1,3 +1,4 @@
+import "../styles/components/TerminalPane.css";
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { detectProject } from "../api/realms";

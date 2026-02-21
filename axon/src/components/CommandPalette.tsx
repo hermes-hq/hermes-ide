@@ -1,3 +1,4 @@
+import "../styles/components/CommandPalette.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { SessionData } from "../state/SessionContext";
 

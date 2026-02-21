@@ -1,3 +1,4 @@
+import "../styles/components/SessionList.css";
 import { useState, useMemo, useCallback } from "react";
 import { SessionData } from "../state/SessionContext";
 import { updateSessionGroup, updateSessionLabel } from "../api/sessions";

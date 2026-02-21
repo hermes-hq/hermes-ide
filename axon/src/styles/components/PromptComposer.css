@@ -1,0 +1,267 @@
+/* ─── Prompt Composer ──────────────────────────────────────── */
+
+.prompt-composer {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  width: 720px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  align-self: flex-start;
+  animation: paletteIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes paletteIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.prompt-composer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.prompt-composer-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-0);
+  letter-spacing: 0.02em;
+}
+
+.prompt-composer-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prompt-composer-close {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 2px 6px;
+  line-height: 1;
+}
+.prompt-composer-close:hover {
+  color: var(--text-0);
+}
+
+.prompt-composer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.prompt-composer-fields {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prompt-composer-field label {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.prompt-composer-field textarea {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  font-size: var(--text-lg);
+  font-family: var(--font-ui);
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+  line-height: 1.5;
+}
+.prompt-composer-field textarea:focus {
+  border-color: var(--accent);
+}
+.prompt-composer-field textarea::placeholder {
+  color: var(--text-3);
+}
+
+.prompt-composer-preview {
+  width: 280px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.prompt-composer-preview-label {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 12px 14px 8px;
+}
+
+.prompt-composer-preview-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 14px 14px;
+  font-size: var(--text-md);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.prompt-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  gap: var(--space-2);
+}
+
+.prompt-composer-actions-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prompt-composer-actions-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prompt-composer-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  font-size: var(--text-md);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.prompt-composer-btn:hover:not(:disabled) {
+  background: var(--bg-active);
+}
+.prompt-composer-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.prompt-composer-btn-sm {
+  padding: 4px 8px;
+  font-size: var(--text-base);
+}
+
+.prompt-composer-btn-send {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.prompt-composer-btn-send:hover:not(:disabled) {
+  filter: brightness(1.1);
+  background: var(--accent);
+}
+.prompt-composer-btn-send kbd {
+  font-size: var(--text-sm);
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.prompt-composer-template-select {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: var(--text-md);
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+}
+.prompt-composer-template-select:focus {
+  border-color: var(--accent);
+}
+
+.prompt-composer-template-delete {
+  font-size: var(--text-base);
+}
+
+.prompt-composer-save-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prompt-composer-save-input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  font-size: var(--text-md);
+  padding: 5px 8px;
+  outline: none;
+  width: 160px;
+}
+.prompt-composer-save-input:focus {
+  border-color: var(--accent);
+}
+
+.prompt-composer-field-label {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 2px;
+  letter-spacing: 0.04em;
+}
+
+/* ─── Prompt Composer: Advanced Toggle ───────────────── */
+
+.prompt-composer-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: var(--text-md);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.prompt-composer-advanced-toggle:hover {
+  color: var(--text-1);
+}
+
+.prompt-composer-advanced-chevron {
+  font-family: monospace;
+  font-size: var(--text-sm);
+}
+
+.prompt-composer-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}

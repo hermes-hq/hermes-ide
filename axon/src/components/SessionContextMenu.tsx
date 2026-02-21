@@ -1,3 +1,4 @@
+import "../styles/components/SessionList.css";
 import { useState, useEffect, useCallback, useRef } from "react";
 
 interface SessionContextMenuProps {

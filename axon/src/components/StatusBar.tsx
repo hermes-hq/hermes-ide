@@ -1,3 +1,4 @@
+import "../styles/components/StatusBar.css";
 import { setSetting } from "../api/settings";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
 

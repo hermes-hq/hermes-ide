@@ -1,0 +1,59 @@
+/* ─── Design Tokens ─────────────────────────────────────────
+ * Backgrounds:  --bg-0 (darkest) → --bg-active (lightest)
+ * Text:         --text-0 (brightest) → --text-3 (dimmest)
+ * Semantic:     --accent, --green, --red, --yellow, --violet, --error
+ * Radius:       --radius (3px), --radius-sm (3px), --radius-lg (6px), --radius-pill (10px)
+ * Spacing:      --space-1 (4px) → --space-6 (32px)
+ * Font sizes:   --text-xs (9px) → --text-xl (15px)
+ * Fonts:        --font-mono, --font-ui
+ * Layout:       --topbar-h, --statusbar-h, --sidebar-w, --context-w
+ * ──────────────────────────────────────────────────────────── */
+
+:root {
+  --bg-0: #0B0F14;
+  --bg-1: #111820;
+  --bg-2: #1a222d;
+  --bg-3: #1f2937;
+  --bg-hover: #1f2937;
+  --bg-active: #2a3444;
+  --text-0: #e2e8f0;
+  --text-1: #c8d6e5;
+  --text-2: #7f8c9b;
+  --text-3: #4a5568;
+  --accent: #7b93db;
+  --accent-dim: #7b93db26;
+  --green: #34d399;
+  --green-dim: #34d39926;
+  --red: #ff4444;
+  --red-dim: #ff444426;
+  --yellow: #ffb000;
+  --yellow-dim: #ffb00026;
+  --error: #ee5555;
+  --violet: #a78bfa;
+  --violet-dim: #a78bfa26;
+  --border: #1a2332;
+  --border-light: #243040;
+  --radius: 3px;
+  --radius-sm: 3px;
+  --radius-lg: 6px;
+  --radius-pill: 10px;
+  --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", Menlo, monospace;
+  --font-ui: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  --font-sans: var(--font-ui);
+  --topbar-h: 40px;
+  --statusbar-h: 28px;
+  --sidebar-w: 240px;
+  --context-w: 300px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --text-xs: 9px;
+  --text-sm: 10px;
+  --text-base: 11px;
+  --text-md: 12px;
+  --text-lg: 13px;
+  --text-xl: 15px;
+}

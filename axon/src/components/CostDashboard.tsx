@@ -1,3 +1,4 @@
+import "../styles/components/CostDashboard.css";
 import { useState, useEffect, useMemo } from "react";
 import type { CostDailyEntry, ProjectCostEntry } from "../types";
 import { getCostHistory, getCostByProject } from "../api/costs";

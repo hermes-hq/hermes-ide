@@ -1,3 +1,4 @@
+import "../styles/components/RealmPicker.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Realm, useSessionRealms } from "../hooks/useSessionRealms";

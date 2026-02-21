@@ -1,3 +1,4 @@
+import "../styles/components/RoleSelector.css";
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { RoleDefinition } from "../lib/roles";
 import { validateCustomRole } from "../lib/roles";

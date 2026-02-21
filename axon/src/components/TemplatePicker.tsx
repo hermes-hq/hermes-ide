@@ -1,3 +1,4 @@
+import "../styles/components/TemplatePicker.css";
 import { useState, useRef, useEffect } from "react";
 import { TEMPLATE_CATEGORIES, type PromptTemplate, type TemplateCategory } from "../lib/templates";
 

@@ -1,3 +1,4 @@
+import "../styles/components/StyleSelector.css";
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { StyleDefinition, SelectedStyle } from "../lib/styles";
 import { validateCustomStyle } from "../lib/styles";

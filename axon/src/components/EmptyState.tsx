@@ -1,3 +1,4 @@
+import "../styles/components/EmptyState.css";
 import { SessionHistoryEntry } from "../state/SessionContext";
 
 interface EmptyStateProps {

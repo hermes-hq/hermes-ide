@@ -1,3 +1,4 @@
+import "../styles/components/StuckOverlay.css";
 import { SessionData } from "../state/SessionContext";
 
 interface StuckOverlayProps {

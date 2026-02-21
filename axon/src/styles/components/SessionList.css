@@ -1,0 +1,180 @@
+/* ─── Session List ──────────────────────────────────────────── */
+
+.session-list {
+  width: var(--sidebar-w);
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  user-select: none;
+  animation: slideInLeft 0.15s ease-out;
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.session-list-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.session-list-empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: var(--text-md);
+  color: var(--text-3);
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.1s;
+  position: relative;
+}
+
+.session-item:hover { background: var(--bg-hover); }
+.session-item-active { background: var(--bg-active); }
+.session-item-active:hover { background: var(--bg-active); }
+
+.session-item-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.session-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.session-number {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.session-item-info { flex: 1; min-width: 0; }
+
+.session-item-name {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-item-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.session-agent-tag {
+  font-size: var(--text-sm);
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.session-phase-tag { font-size: var(--text-sm); color: var(--text-3); }
+.session-phase-tag[data-phase="busy"] { color: var(--green); }
+.session-phase-tag[data-phase="error"] { color: var(--red); }
+.session-phase-tag[data-phase="idle"] { color: var(--text-2); }
+
+.session-age { font-size: var(--text-sm); color: var(--text-3); }
+
+.session-item-destroyed { opacity: 0.5; }
+.session-phase-tag[data-phase="destroyed"] { color: var(--text-3); }
+
+.session-item-close {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.session-item:hover .session-item-close { opacity: 1; }
+.session-item-close:hover { background: var(--red-dim); color: var(--red); }
+
+/* ─── Session Groups ─────────────────────────────────── */
+
+.session-group-header {
+  padding: 6px 12px;
+  font-size: var(--text-base);
+  color: var(--text-2);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  transition: background 0.1s;
+}
+.session-group-header:hover { background: var(--bg-2); }
+.session-group-cost { color: var(--text-3); font-size: var(--text-sm); }
+
+.session-context-menu {
+  position: fixed;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 0;
+  min-width: 160px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: paletteIn 0.1s ease-out;
+}
+
+.session-context-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: var(--text-md);
+  color: var(--text-1);
+  transition: background 0.1s;
+}
+.session-context-menu-item:hover { background: var(--bg-3); }
+
+.session-context-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.session-context-menu-input-row {
+  display: flex;
+  gap: var(--space-1);
+  padding: 4px 8px;
+}
+
+.session-context-menu-input {
+  flex: 1;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: var(--text-md);
+  padding: 4px 8px;
+  outline: none;
+  font-family: var(--font-ui);
+}
+.session-context-menu-input:focus { border-color: var(--accent); }

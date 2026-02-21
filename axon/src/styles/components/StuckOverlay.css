@@ -1,0 +1,80 @@
+/* ─── Stuck Overlay ──────────────────────────────────────────── */
+
+.stuck-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(2px);
+}
+
+.stuck-overlay {
+  background: var(--bg-1);
+  border: 1px solid var(--red-dim);
+  border-radius: var(--radius-lg);
+  width: 440px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: overlayIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes overlayIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.stuck-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.stuck-overlay-icon {
+  width: 28px;
+  height: 28px;
+  background: var(--red-dim);
+  color: var(--red);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+.stuck-overlay-title { font-size: var(--text-xl); font-weight: 600; color: var(--text-0); }
+
+.stuck-overlay-error {
+  background: var(--red-dim);
+  color: var(--red);
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: var(--text-base);
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stuck-overlay-info { font-size: var(--text-md); color: var(--text-2); margin-bottom: var(--space-4); }
+
+.stuck-overlay-actions { display: flex; gap: var(--space-2); }
+
+.stuck-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  font-family: var(--font-ui);
+  transition: background 0.1s, border-color 0.1s;
+}
+.stuck-btn:hover { background: var(--bg-hover); border-color: var(--text-3); }
+.stuck-btn-danger { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+.stuck-btn-danger:hover { background: var(--red); color: white; }

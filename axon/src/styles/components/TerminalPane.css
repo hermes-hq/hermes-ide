@@ -1,0 +1,147 @@
+/* ─── Terminal ──────────────────────────────────────────────── */
+
+.terminal-pane-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+.terminal-viewport {
+  width: 100%;
+  height: 100%;
+  padding: 4px 0 0 4px;
+  overflow: hidden;
+}
+
+.terminal-color-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  opacity: 0.7;
+}
+
+.terminal-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 5;
+  background: var(--bg-0);
+}
+
+.terminal-loading-text { font-size: var(--text-lg); color: var(--text-3); }
+
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Ghost Text ─────────────────────────────────── */
+
+.ghost-text-overlay {
+  color: var(--text-3);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ─── Suggestion Overlay (Terminal Command Intelligence) ─── */
+
+.suggestion-overlay {
+  position: absolute;
+  z-index: 10;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 280px;
+  max-width: 480px;
+  padding: 4px;
+  opacity: 0;
+  animation: suggestionFadeIn 100ms ease-out forwards;
+  font-family: var(--font-mono);
+}
+
+@keyframes suggestionFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.suggestion-item {
+  padding: 5px 8px;
+  cursor: default;
+}
+
+.suggestion-item-selected {
+  background: var(--bg-hover);
+}
+
+.suggestion-item-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.suggestion-command {
+  flex: 1;
+  color: var(--text-0);
+  font-size: var(--text-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-description {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-badge {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  color: var(--text-2);
+  background: var(--bg-3);
+}
+
+.suggestion-badge-git { color: #f78166; background: rgba(247, 129, 102, 0.12); }
+.suggestion-badge-npm { color: #cb3837; background: rgba(203, 56, 55, 0.12); }
+.suggestion-badge-yarn { color: #2c8ebb; background: rgba(44, 142, 187, 0.12); }
+.suggestion-badge-pnpm { color: #f9ad00; background: rgba(249, 173, 0, 0.12); }
+.suggestion-badge-bun { color: #fbf0df; background: rgba(251, 240, 223, 0.10); }
+.suggestion-badge-docker { color: #2496ed; background: rgba(36, 150, 237, 0.12); }
+.suggestion-badge-cargo { color: #dea584; background: rgba(222, 165, 132, 0.12); }
+.suggestion-badge-python { color: #3776ab; background: rgba(55, 118, 171, 0.12); }
+.suggestion-badge-go { color: #00add8; background: rgba(0, 173, 216, 0.12); }
+.suggestion-badge-system { color: var(--text-2); background: var(--bg-3); }
+.suggestion-badge-k8s { color: #326ce5; background: rgba(50, 108, 229, 0.12); }
+.suggestion-badge-brew { color: #fbb040; background: rgba(251, 176, 64, 0.12); }
+.suggestion-badge-gh { color: var(--text-1); background: var(--bg-3); }
+.suggestion-badge-next { color: #ffffff; background: rgba(255, 255, 255, 0.08); }
+.suggestion-badge-vite { color: #646cff; background: rgba(100, 108, 255, 0.12); }
+.suggestion-badge-tauri { color: #ffc131; background: rgba(255, 193, 49, 0.12); }
+.suggestion-badge-terraform { color: #7b42bc; background: rgba(123, 66, 188, 0.12); }
+.suggestion-badge-make { color: var(--text-2); background: var(--bg-3); }
+.suggestion-badge-typescript { color: #3178c6; background: rgba(49, 120, 198, 0.12); }
+.suggestion-badge-test { color: #33ff99; background: rgba(51, 255, 153, 0.10); }
+.suggestion-badge-lint { color: #a78bfa; background: rgba(167, 139, 250, 0.12); }
+.suggestion-badge-prisma { color: #2d3748; background: rgba(45, 55, 72, 0.20); }

@@ -1,0 +1,96 @@
+/* ─── Empty State ──────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.empty-state-logo {
+  font-size: 36px;
+  font-weight: 200;
+  color: var(--text-1);
+  letter-spacing: 8px;
+}
+
+.empty-state-subtitle {
+  font-size: var(--text-lg);
+  color: var(--text-3);
+  margin-bottom: var(--space-4);
+}
+
+.empty-state-hint {
+  font-size: var(--text-md);
+  color: var(--text-3);
+  margin-bottom: var(--space-4);
+}
+
+.empty-state-actions { margin-bottom: 20px; }
+
+.btn-primary {
+  background: var(--accent);
+  border: none;
+  color: var(--bg-0);
+  padding: 10px 24px;
+  border-radius: var(--radius);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.btn-primary:hover { filter: brightness(1.1); }
+
+.empty-state-shortcuts {
+  display: flex;
+  gap: 20px;
+  font-size: var(--text-md);
+  color: var(--text-3);
+  margin-bottom: 32px;
+}
+.empty-state-shortcuts span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.empty-state-recent { width: 360px; }
+
+.empty-state-recent-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: var(--space-2);
+  padding: 0 8px;
+}
+
+.empty-state-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  text-align: left;
+  transition: background 0.1s, border-color 0.1s;
+}
+.empty-state-recent-item:hover {
+  background: var(--bg-2);
+  border-color: var(--border);
+}
+
+.recent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.recent-label { font-weight: 500; color: var(--text-0); }
+.recent-path { flex: 1; font-size: var(--text-base); color: var(--text-3); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-time { font-size: var(--text-sm); color: var(--text-3); flex-shrink: 0; }

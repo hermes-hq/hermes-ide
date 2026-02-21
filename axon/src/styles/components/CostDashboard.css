@@ -1,0 +1,84 @@
+/* ─── Cost Dashboard ──────────────────────────── */
+
+.cost-dashboard {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+.cost-dashboard-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.cost-dashboard-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text-0);
+  flex: 1;
+}
+.cost-dashboard-tabs { display: flex; gap: var(--space-1); }
+.cost-tab {
+  font-size: var(--text-base);
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.cost-tab-active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+.cost-tab:hover { background: var(--bg-hover); }
+.cost-dashboard-close {
+  font-size: 18px;
+}
+.cost-dashboard-close:hover { color: var(--text-1); }
+.cost-dashboard-body { padding: 12px 16px; }
+.cost-dashboard-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--text-lg);
+}
+.cost-summary {
+  font-size: var(--text-lg);
+  color: var(--text-1);
+  margin-bottom: var(--space-4);
+}
+.cost-summary-amount { font-weight: 600; color: var(--text-0); font-size: 18px; }
+.cost-summary-period { color: var(--text-3); }
+.cost-section { margin-bottom: var(--space-4); }
+.cost-section-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.cost-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 0;
+}
+.cost-bar-label {
+  width: 60px;
+  font-size: var(--text-base);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.cost-bar-value {
+  width: 50px;
+  text-align: right;
+  font-size: var(--text-base);
+  color: var(--text-1);
+  flex-shrink: 0;
+}
+.cost-bar-provider { background: var(--accent) !important; }
+.cost-bar-project { background: var(--green) !important; }

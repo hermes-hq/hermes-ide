@@ -1,0 +1,52 @@
+/* ─── Boot Sequence ─────────────────────────────────────── */
+
+.boot-sequence {
+  position: fixed; inset: 0; background: var(--bg-0);
+  z-index: 10000; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+}
+.boot-text { font-size: var(--text-lg); color: var(--green); max-width: 500px; width: 100%; }
+.boot-line { line-height: 1.6; }
+.boot-cursor { animation: blink-cursor 0.5s step-end infinite; }
+@keyframes blink-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+.boot-fade-out { animation: boot-fade 0.5s ease-out forwards; }
+@keyframes boot-fade { to { opacity: 0; } }
+
+/* ─── Hermes Daemon Sprite ──────────────────────────────── */
+
+.hermes-daemon { position: relative; }
+.hermes-float { animation: daemon-float 3s ease-in-out infinite; }
+@keyframes daemon-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+
+.hermes-blink { animation: daemon-blink 4s step-end infinite; }
+@keyframes daemon-blink { 0%, 96% { opacity: 1; } 96.1%, 100% { opacity: 0; } }
+
+.hermes-spark {
+  position: absolute; top: -3px; left: 50%;
+  width: 2px; height: 2px; background: var(--yellow);
+  border-radius: 50%; opacity: 0;
+  animation: spark-pulse 6s ease-in-out infinite 2s;
+}
+@keyframes spark-pulse { 0%, 85% { opacity: 0; } 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+
+.hermes-watermark {
+  position: fixed; bottom: 30px; right: 8px;
+  width: 16px; height: 16px; opacity: 0.12;
+  z-index: 1; pointer-events: none;
+}
+
+/* ─── Boot Sequence: Skip ────────────────────────────────── */
+
+.boot-skip-hint {
+  position: absolute;
+  bottom: 24px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  opacity: 0.5;
+}
+
+.boot-daemon-wrap {
+  margin-top: var(--space-5);
+}

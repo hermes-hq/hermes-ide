@@ -1,3 +1,4 @@
+import "../styles/components/ContextPanel.css";
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";

@@ -1,0 +1,193 @@
+/* ─── Session Creator Modal ─────────────────────────────────────── */
+
+.session-creator {
+  width: 480px;
+  max-height: 70vh;
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-creator-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: var(--space-2);
+}
+
+.session-creator-title {
+  font-weight: 600;
+  font-size: var(--text-lg);
+  color: var(--text-0);
+}
+
+.session-creator-step {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.session-creator-steps {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  justify-content: center;
+}
+
+.session-creator-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  transition: background 0.15s;
+}
+
+.session-creator-step-dot.active {
+  background: var(--accent);
+}
+
+.session-creator-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.session-creator-section-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.session-creator-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.session-creator-list::-webkit-scrollbar { width: 4px; }
+.session-creator-list::-webkit-scrollbar-thumb { background: var(--bg-3); }
+
+.session-creator-provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.session-creator-provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  text-align: left;
+}
+
+.session-creator-provider-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+
+.session-creator-provider-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.session-creator-provider-card.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.session-creator-provider-name {
+  font-weight: 600;
+  font-size: var(--text-lg);
+  color: var(--text-0);
+}
+
+.session-creator-provider-desc {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.session-creator-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.session-creator-summary-row {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+}
+
+.session-creator-summary-label {
+  color: var(--text-3);
+  min-width: 80px;
+}
+
+.session-creator-summary-value {
+  color: var(--text-0);
+}
+
+.session-creator-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.session-creator-btn-primary {
+  padding: 6px 14px;
+  background: var(--accent);
+  color: var(--bg-0);
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.session-creator-btn-primary:hover { opacity: 0.85; }
+.session-creator-btn-primary:disabled { opacity: 0.5; cursor: default; }
+
+.session-creator-btn-secondary {
+  padding: 6px 14px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.session-creator-btn-secondary:hover { background: var(--bg-hover); }

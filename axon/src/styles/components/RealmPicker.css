@@ -1,0 +1,199 @@
+/* ─── Realm Picker ───────────────────────────────────────── */
+
+.realm-picker {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  width: 560px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  align-self: flex-start;
+  margin-top: 16vh;
+  animation: paletteIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes paletteIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.realm-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.realm-picker-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-0);
+  flex: 1;
+}
+
+.realm-picker-count {
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+
+.realm-picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.realm-picker-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.realm-picker-item:hover { background: var(--bg-hover); }
+.realm-picker-item-attached { background: var(--accent-dim); }
+.realm-picker-item-attached:hover { background: var(--accent-dim); }
+
+.realm-picker-check {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  color: var(--text-2);
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.realm-picker-info { flex: 1; min-width: 0; }
+
+.realm-picker-name {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--text-0);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.realm-picker-scan-badge {
+  font-size: var(--text-xs);
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  background: var(--bg-3);
+  color: var(--text-3);
+}
+.realm-picker-scan-badge[data-status="deep"],
+.realm-picker-scan-badge[data-status="full"] {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.realm-picker-path {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.realm-picker-tags {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.realm-picker-delete {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  opacity: 0;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.realm-picker-item:hover .realm-picker-delete { opacity: 1; }
+.realm-picker-delete:hover {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+.realm-picker-footer {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ─── Realm Scan Badge (WorkspacePanel) ──────────────────── */
+
+.realm-scan-badge {
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  background: var(--bg-3);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.realm-scan-badge[data-status="deep"],
+.realm-scan-badge[data-status="full"] {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.realm-scan-badge[data-status="pending"] {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+}
+
+.realm-arch-info {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  margin-top: 4px;
+}
+
+.realm-arch-pattern {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.realm-arch-layers {
+  color: var(--text-3);
+}
+
+.realm-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: 6px;
+}
+
+.realm-action-btn {
+  font-size: var(--text-sm);
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.realm-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+}
+.realm-action-delete:hover {
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: var(--red);
+}

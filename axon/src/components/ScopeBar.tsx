@@ -1,3 +1,4 @@
+import "../styles/components/ScopeBar.css";
 import { useState } from "react";
 import { useSessionRealms, Realm } from "../hooks/useSessionRealms";
 import { useSession } from "../state/SessionContext";

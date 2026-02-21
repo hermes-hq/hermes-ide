@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from "react";
+import "./styles/layout.css";
+import "./styles/topbar.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeToSession } from "./api/sessions";
 import { createRealm } from "./api/realms";

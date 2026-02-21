@@ -1,3 +1,4 @@
+import "../styles/components/BootSequence.css";
 import { useState, useEffect } from "react";
 
 interface HermesDaemonProps {
