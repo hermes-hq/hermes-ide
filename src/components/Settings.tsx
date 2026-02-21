@@ -182,7 +182,7 @@ export function Settings({ onClose }: SettingsProps) {
             {activeTab === "providers" && (
               <div className="settings-section">
                 <p className="settings-hint">
-                  API keys are stored locally and never sent to HERMES-IDEA servers.
+                  API keys are stored locally and never sent to HERMES-IDE servers.
                 </p>
                 {PROVIDERS.map((provider) => (
                   <div key={provider.id} className="settings-provider">

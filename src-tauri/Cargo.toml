@@ -1,16 +1,16 @@
 [package]
-name = "hermes-idea"
+name = "hermes-ide"
 version = "0.1.0"
 description = "AI-native terminal for macOS"
 authors = ["Gabriel Anhaia"]
 edition = "2021"
 
 [lib]
-name = "hermes_idea_lib"
+name = "hermes_ide_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
-name = "hermes-idea"
+name = "hermes-ide"
 path = "src/main.rs"
 
 [build-dependencies]

@@ -1684,7 +1684,7 @@ pub fn create_session(
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    cmd.env("TERM_PROGRAM", "HERMES-IDEA");
+    cmd.env("TERM_PROGRAM", "HERMES-IDE");
 
     // Set context file env vars so AI agents can read project info from disk
     if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id) {

@@ -111,5 +111,5 @@ pub fn run() {
             realm::attunement::apply_context,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running HERMES-IDEA");
+        .expect("error while running HERMES-IDE");
 }

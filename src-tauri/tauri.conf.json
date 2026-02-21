@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "HERMES-IDEA",
+  "productName": "HERMES-IDE",
   "version": "0.1.0",
-  "identifier": "com.hermes-idea.terminal",
+  "identifier": "com.hermes-ide.terminal",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "HERMES-IDEA",
+        "title": "HERMES-IDE",
         "width": 1200,
         "height": 800,
         "minWidth": 600,

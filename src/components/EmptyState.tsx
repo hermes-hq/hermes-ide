@@ -27,7 +27,7 @@ function projectName(path: string): string {
 export function EmptyState({ recentSessions, onNew, onRestore }: EmptyStateProps) {
   return (
     <div className="empty-state">
-      <div className="empty-state-logo">HERMES-IDEA</div>
+      <div className="empty-state-logo">HERMES-IDE</div>
       <p className="empty-state-subtitle">AI-native terminal for macOS</p>
       <p className="empty-state-hint">Drop a session here or press <kbd>⌘N</kbd> to start</p>
 
