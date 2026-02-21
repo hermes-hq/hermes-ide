@@ -6,7 +6,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { writeToSession, resizeSession } from "../api/sessions";
 import { suggest } from "./intelligence/suggestionEngine";
 import { resolveIntent, getIntentSuggestions } from "./intentCommands";
-import { type ProjectContext, getCachedContext } from "./intelligence/contextAnalyzer";
+import { type ProjectContext, getCachedContext, invalidateContext } from "./intelligence/contextAnalyzer";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
 import { type SuggestionState } from "./intelligence/SuggestionOverlay";
 import {
@@ -14,6 +14,7 @@ import {
   shouldShowGhostText,
   shouldShowOverlay,
   shouldConsumeTab,
+  clearShellEnvironment,
 } from "./intelligence/shellEnvironment";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -574,6 +575,10 @@ export function setSessionPhase(sessionId: string, phase: string): void {
 export function setSessionCwd(sessionId: string, cwd: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
+  // Invalidate stale project context cache for the old CWD
+  if (entry.cwd && entry.cwd !== cwd) {
+    invalidateContext(entry.cwd);
+  }
   entry.cwd = cwd;
 }
 
@@ -667,6 +672,9 @@ export function destroy(sessionId: string): void {
   entry.container.remove();
   pool.delete(sessionId);
   suggestionSubscribers.delete(sessionId);
+  // Clean up per-session shell environment and context cache
+  clearShellEnvironment(sessionId);
+  if (entry.cwd) invalidateContext(entry.cwd);
 }
 
 export function refitActive(): void {

@@ -95,12 +95,19 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       // Clean dismissed set
       const newDismissed = new Set(state.ui.dismissedStuckSessions);
       newDismissed.delete(action.id);
+      // Clean per-session execution mode
+      const { [action.id]: _mode, ...restModes } = state.executionModes;
+      // Clear autoToast if it references the removed session
+      const newAutoToast = state.ui.autoToast?.sessionId === action.id
+        ? null
+        : state.ui.autoToast;
       return {
         ...state,
         sessions: rest,
         activeSessionId: newActive,
+        executionModes: restModes,
         layout: { root: newRoot, focusedPaneId: newFocused },
-        ui: { ...state.ui, dismissedStuckSessions: newDismissed },
+        ui: { ...state.ui, dismissedStuckSessions: newDismissed, autoToast: newAutoToast },
       };
     }
     case "SET_ACTIVE": {
@@ -387,15 +394,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         // Auto-show stuck overlay + notify (only if not dismissed for this session)
         if (session.metrics.stuck_score > 0.7) {
-          dispatch({ type: "SHOW_STUCK_OVERLAY", sessionId: session.id });
           if (!stuckNotified.current.has(session.id)) {
             stuckNotified.current.add(session.id);
+            dispatch({ type: "SHOW_STUCK_OVERLAY", sessionId: session.id });
             if (document.hidden) {
               notifyStuck(session.label);
             }
           }
         } else {
-          stuckNotified.current.delete(session.id);
+          // Auto-dismiss stuck overlay when stuck_score drops below threshold
+          if (stuckNotified.current.has(session.id)) {
+            stuckNotified.current.delete(session.id);
+            dispatch({ type: "DISMISS_STUCK_OVERLAY" });
+          }
         }
       });
       unlisteners.push(u1);

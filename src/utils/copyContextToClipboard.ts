@@ -10,7 +10,11 @@ import { getAllMemory } from "../api/memory";
  * Standalone utility for copying the full context bundle to clipboard.
  * Used by App.tsx for the Cmd+Shift+C keyboard shortcut — no React hooks needed.
  */
-export async function copyContextToClipboard(session: SessionData | null): Promise<void> {
+export async function copyContextToClipboard(
+  session: SessionData | null,
+  version: number = 0,
+  executionMode: string = "manual",
+): Promise<void> {
   if (!session) return;
 
   const [pinsResult, errorsResult, realmsResult, memoryResult] = await Promise.allSettled([
@@ -42,7 +46,7 @@ export async function copyContextToClipboard(session: SessionData | null): Promi
     recentErrors: session.metrics.recent_errors,
   };
 
-  const text = formatContextMarkdown(ctx, 0, "manual");
+  const text = formatContextMarkdown(ctx, version, executionMode);
   if (text) {
     await navigator.clipboard.writeText(text);
   }

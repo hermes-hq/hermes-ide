@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { SessionData } from "../state/SessionContext";
 import { getContextPins, getErrorResolutions, applyContext as apiApplyContext } from "../api/context";
@@ -68,10 +68,11 @@ export function formatContextMarkdown(ctx: ContextState, version: number, execut
     lines.push("");
   }
 
-  // Memory
+  // Memory — persistedMemory (user-saved, authoritative) takes precedence over
+  // memoryFacts (ephemeral session-level facts) when the same key exists in both.
   const allMemory = [
-    ...ctx.memoryFacts.map((f) => ({ key: f.key, value: f.value })),
     ...ctx.persistedMemory.map((m) => ({ key: m.key, value: m.value })),
+    ...ctx.memoryFacts.map((f) => ({ key: f.key, value: f.value })),
   ];
   if (allMemory.length > 0) {
     lines.push("## Memory");
@@ -185,6 +186,22 @@ export function useContextState(session: SessionData | null, executionMode?: str
   }, [session?.id]);
 
   // ── Keep context in sync with live session data (reactive updates) ──
+  // Serialize relevant session fields to a stable string so the effect only fires
+  // when the actual values change, not on every SESSION_UPDATED event (which
+  // creates new array/object references even when values are identical).
+  const sessionSyncKey = useMemo(() => {
+    if (!session) return "";
+    return JSON.stringify({
+      wd: session.working_directory,
+      wp: session.workspace_paths,
+      agent: session.detected_agent?.name ?? null,
+      model: session.detected_agent?.model ?? null,
+      mf: session.metrics.memory_facts,
+      ft: session.metrics.files_touched,
+      re: session.metrics.recent_errors,
+    });
+  }, [session]);
+
   useEffect(() => {
     if (!session) return;
     setContext((prev) => ({
@@ -197,41 +214,42 @@ export function useContextState(session: SessionData | null, executionMode?: str
       filesTouched: session.metrics.files_touched,
       recentErrors: session.metrics.recent_errors,
     }));
-  }, [
-    session?.working_directory,
-    session?.workspace_paths,
-    session?.detected_agent,
-    session?.metrics.memory_facts,
-    session?.metrics.files_touched,
-    session?.metrics.recent_errors,
-  ]);
+  }, [sessionSyncKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Listen for realm changes ──
   useEffect(() => {
     if (!session) return;
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen(`session-realms-updated-${session.id}`, () => {
+      if (cancelled) return;
       assembleSessionContext(session.id, 4000)
         .then((ctx) => {
-          setContext((prev) => ({ ...prev, realms: ctx.realms }));
+          if (!cancelled) setContext((prev) => ({ ...prev, realms: ctx.realms }));
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh realms:", err));
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, [session?.id]);
 
   // ── Listen for pin changes (backend now emits this event) ──
   useEffect(() => {
     if (!session) return;
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen(`context-pins-changed-${session.id}`, () => {
+      if (cancelled) return;
       getContextPins(session.id, null)
         .then((pins) => {
-          setContext((prev) => ({ ...prev, pinnedItems: pins }));
+          if (!cancelled) setContext((prev) => ({ ...prev, pinnedItems: pins }));
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh pins:", err));
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, [session?.id]);
 
   // ── Auto-increment version when context changes → mark dirty ──
