@@ -64,7 +64,7 @@ export function ContextStatusBar({ manager, autoApplyEnabled, onToggleAutoApply 
         <div className="ctx-status-right">
           <button
             className="ctx-apply-btn"
-            onClick={() => void applyContext()}
+            onClick={() => { applyContext().catch(console.error); }}
             disabled={lifecycle === 'clean' || lifecycle === 'applying'}
           >
             {isApplying ? "Applying..." : "Apply Context"}

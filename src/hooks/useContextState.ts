@@ -15,6 +15,9 @@ import type {
   ContextState, ContextLifecycleState, ContextManager,
 } from "../types/context";
 
+/** Default token budget used when no project config overrides it */
+export const DEFAULT_TOKEN_BUDGET = 4000;
+
 function emptyContext(): ContextState {
   return {
     pinnedItems: [],
@@ -122,7 +125,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
   const [lifecycle, setLifecycle] = useState<ContextLifecycleState>('clean');
   const [lastError, setLastError] = useState<string | null>(null);
   const [injectedContent, setInjectedContent] = useState<string | null>(null);
-  const [tokenBudget, setTokenBudget] = useState(4000);
+  const [tokenBudget, setTokenBudget] = useState(DEFAULT_TOKEN_BUDGET);
   const [estimatedTokens, setEstimatedTokens] = useState(0);
 
   const prevContextJson = useRef<string>("");
@@ -163,7 +166,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
 
       // Fetch realm context (includes token budget and estimated tokens)
       try {
-        const ctx = await assembleSessionContext(session.id, 4000);
+        const ctx = await assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET);
         initial.realms = ctx.realms;
         if (ctx.token_budget) setTokenBudget(ctx.token_budget);
         if (ctx.estimated_tokens) setEstimatedTokens(ctx.estimated_tokens);
@@ -228,7 +231,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
     let unlisten: (() => void) | null = null;
     listen(`session-realms-updated-${session.id}`, () => {
       if (cancelled) return;
-      assembleSessionContext(session.id, 4000)
+      assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET)
         .then((ctx) => {
           if (!cancelled) {
             setContext((prev) => ({ ...prev, realms: ctx.realms }));

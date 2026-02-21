@@ -271,6 +271,11 @@ function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, 
   );
 }
 
+// ─── Constants ──────────────────────────────────────────────────────
+const COPY_FEEDBACK_MS = 2000;
+const MAX_ERROR_CORRELATIONS = 3;
+const MAX_VISIBLE_ERRORS = 10;
+
 export function ContextPanel({ session }: ContextPanelProps) {
   const { metrics, detected_agent } = session;
   const mode = useExecutionMode(session.id);
@@ -300,11 +305,18 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const pins = contextManager.context.pinnedItems;
 
   const fileTree = useFileTree(metrics.files_touched);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup copy-done timer on unmount
+  useEffect(() => {
+    return () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); };
+  }, []);
 
   const handleCopyContext = useCallback(async () => {
     await contextManager.copyToClipboard();
     setCopyDone(true);
-    setTimeout(() => setCopyDone(false), 2000);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopyDone(false), COPY_FEEDBACK_MS);
   }, [contextManager.copyToClipboard]);
 
   // Load persisted memory on mount and when session/realm changes
@@ -327,8 +339,10 @@ export function ContextPanel({ session }: ContextPanelProps) {
 
   // Listen for error-matched events
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen<ErrorMatchEvent>(`error-matched-${session.id}`, (event) => {
+      if (cancelled) return;
       setErrorMatches((prev) => {
         const existing = prev.findIndex((e) => e.fingerprint === event.payload.fingerprint);
         if (existing >= 0) {
@@ -344,14 +358,16 @@ export function ContextPanel({ session }: ContextPanelProps) {
         fingerprint: event.payload.fingerprint,
         projectId: session.working_directory,
         excludeSession: session.id,
-        limit: 3,
+        limit: MAX_ERROR_CORRELATIONS,
       }).then((corrs) => {
-        if (corrs.length > 0) {
+        if (!cancelled && corrs.length > 0) {
           setCorrelations((prev) => ({ ...prev, [event.payload.fingerprint]: corrs }));
         }
       }).catch((err) => console.warn("[ContextPanel] Failed to load error correlations:", err));
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, [session.id, session.working_directory]);
 
   const addPin = useCallback(async () => {
@@ -427,7 +443,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
     } catch (err) {
       console.warn("[ContextPanel] Failed to pin memory:", err);
     }
-  }, [session.id]);
+  }, [session.id, primaryRealmId]);
 
   const addMemoryFact = useCallback(async () => {
     if (!memoryKeyInput.trim() || !memoryValueInput.trim()) return;
@@ -498,6 +514,13 @@ export function ContextPanel({ session }: ContextPanelProps) {
     return { toolEntries: entries, maxToolCount: max, totalToolCalls: total };
   }, [metrics.tool_call_summary]);
 
+  // Memoize memory dedup: persisted memory excluding keys already present in live facts
+  const { persistedOnly, memoryTotalCount } = useMemo(() => {
+    const liveKeys = new Set(metrics.memory_facts.map((f) => f.key));
+    const filtered = persistedMemory.filter((m) => !liveKeys.has(m.key));
+    return { persistedOnly: filtered, memoryTotalCount: metrics.memory_facts.length + filtered.length };
+  }, [metrics.memory_facts, persistedMemory]);
+
   const sparkData = useMemo(
     () => metrics.token_history?.map(([i, o]) => i + o) || [],
     [metrics.token_history]
@@ -531,9 +554,9 @@ export function ContextPanel({ session }: ContextPanelProps) {
       sessionState.autoApplyEnabled &&
       contextManager.lifecycle === 'dirty'
     ) {
-      void contextManager.applyContext();
+      contextManager.applyContext().catch(console.error);
     }
-  }, [session.phase, sessionState.autoApplyEnabled, contextManager.lifecycle]);
+  }, [session.phase, sessionState.autoApplyEnabled, contextManager.lifecycle, contextManager.applyContext]);
 
   return (
     <div className={`context-panel ${contextManager.lifecycle === 'dirty' || contextManager.lifecycle === 'apply_failed' ? "context-panel-outofsync" : ""}`}>
@@ -756,17 +779,10 @@ export function ContextPanel({ session }: ContextPanelProps) {
         )}
 
         {/* Memory (merged: live-detected + persisted) — hidden when empty */}
-        {(() => {
-          const liveKeys = new Set(metrics.memory_facts.map((f) => f.key));
-          const persistedOnly = persistedMemory.filter((m) => !liveKeys.has(m.key));
-          const totalCount = metrics.memory_facts.length + persistedOnly.length;
-
-          if (totalCount === 0 && !showMemoryAdd) return null;
-
-          return (
+        {(memoryTotalCount > 0 || showMemoryAdd) && (
             <div className="ctx-section">
               <div className="ctx-section-title">
-                Memory <span className="ctx-cost">{totalCount} facts</span>
+                Memory <span className="ctx-cost">{memoryTotalCount} facts</span>
               </div>
               {metrics.memory_facts.map((fact) => (
                 <div key={fact.key} className="ctx-memory-row">
@@ -801,8 +817,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
                 </div>
               )}
             </div>
-          );
-        })()}
+        )}
 
         {/* Recent Errors + Error Intelligence + Correlations (F6) — Tiered Display */}
         {(metrics.recent_errors.length > 0 || errorMatches.length > 0) && (

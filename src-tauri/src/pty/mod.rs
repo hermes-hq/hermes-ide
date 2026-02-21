@@ -2056,9 +2056,9 @@ pub fn nudge_realm_context(
     };
 
     // Only nudge if an AI agent has been detected in this session
-    let has_agent = pty.session.lock().ok()
-        .map(|s| s.detected_agent.is_some())
-        .unwrap_or(false);
+    let has_agent = pty.session.lock()
+        .map_err(|e| format!("Session lock failed: {}", e))?
+        .detected_agent.is_some();
 
     if !has_agent {
         return Ok(false);

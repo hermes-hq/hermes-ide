@@ -5,6 +5,9 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::AppState;
 
+/// Default token budget when no project config overrides it
+const DEFAULT_TOKEN_BUDGET: usize = 4000;
+
 // ─── .hermes/context.json Schema ─────────────────────────────────────
 
 /// .hermes/context.json schema for project-level defaults
@@ -19,7 +22,7 @@ pub struct HermesProjectConfig {
     /// Human-authored conventions that override auto-detected
     #[serde(default)]
     pub conventions: Vec<String>,
-    /// Token budget override (default 4000)
+    /// Token budget override (default: DEFAULT_TOKEN_BUDGET)
     #[serde(default)]
     pub token_budget: Option<usize>,
 }
@@ -457,7 +460,7 @@ pub fn write_session_context_file(
     db: &crate::db::Database,
     session_id: &str,
 ) -> Result<PathBuf, String> {
-    let context = assemble_context(db, session_id, 4000)?;
+    let context = assemble_context(db, session_id, DEFAULT_TOKEN_BUDGET)?;
     let path = session_context_path(app, session_id)?;
 
     let has_content = !context.realms.is_empty()
@@ -502,7 +505,7 @@ pub fn assemble_session_context(
     token_budget: Option<usize>,
 ) -> Result<SessionContext, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    assemble_context(&db, &session_id, token_budget.unwrap_or(4000))
+    assemble_context(&db, &session_id, token_budget.unwrap_or(DEFAULT_TOKEN_BUDGET))
 }
 
 #[tauri::command]
@@ -514,7 +517,7 @@ pub fn apply_context(
 ) -> Result<ApplyContextResult, String> {
     // 1. Assemble context from DB
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut context = assemble_context(&db, &session_id, 4000)?;
+    let mut context = assemble_context(&db, &session_id, DEFAULT_TOKEN_BUDGET)?;
 
     // 2. Increment version: max existing + 1
     let snapshots = db.get_context_snapshots(&session_id).unwrap_or_default();
