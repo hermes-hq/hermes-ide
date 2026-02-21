@@ -1,0 +1,29 @@
+# Dependencies
+axon/node_modules/
+
+# Build outputs
+axon/dist/
+axon/src-tauri/target/
+
+# Generated
+axon/src-tauri/gen/
+
+# OS files
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*

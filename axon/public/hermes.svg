@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- R1: Wing tips -->
+  <rect x="3" y="1" width="1" height="1" fill="#a78bfa"/>
+  <rect x="20" y="1" width="1" height="1" fill="#a78bfa"/>
+  <!-- R2: Wings + crown top (6px) -->
+  <rect x="3" y="2" width="2" height="1" fill="#a78bfa"/>
+  <rect x="9" y="2" width="6" height="1" fill="#33ff99"/>
+  <rect x="19" y="2" width="2" height="1" fill="#a78bfa"/>
+  <!-- R3: Wings + crown (8px) -->
+  <rect x="4" y="3" width="2" height="1" fill="#a78bfa"/>
+  <rect x="8" y="3" width="8" height="1" fill="#33ff99"/>
+  <rect x="18" y="3" width="2" height="1" fill="#a78bfa"/>
+  <!-- R4: Wings + brim (12px) -->
+  <rect x="4" y="4" width="2" height="1" fill="#a78bfa"/>
+  <rect x="6" y="4" width="12" height="1" fill="#33ff99"/>
+  <rect x="18" y="4" width="2" height="1" fill="#a78bfa"/>
+  <!-- R5: Brim bottom (14px) -->
+  <rect x="5" y="5" width="14" height="1" fill="#33ff99"/>
+  <!-- R6: Hair line -->
+  <rect x="6" y="6" width="12" height="1" fill="#4a5568"/>
+  <!-- R7: Hair sides + forehead -->
+  <rect x="6" y="7" width="2" height="1" fill="#4a5568"/>
+  <rect x="8" y="7" width="8" height="1" fill="#8896a0"/>
+  <rect x="16" y="7" width="2" height="1" fill="#4a5568"/>
+  <!-- R8: Face -->
+  <rect x="7" y="8" width="10" height="1" fill="#8896a0"/>
+  <!-- R9: Eyes -->
+  <rect x="7" y="9" width="2" height="1" fill="#8896a0"/>
+  <rect x="9" y="9" width="1" height="1" fill="#ffb000"/>
+  <rect x="10" y="9" width="4" height="1" fill="#8896a0"/>
+  <rect x="14" y="9" width="1" height="1" fill="#ffb000"/>
+  <rect x="15" y="9" width="2" height="1" fill="#8896a0"/>
+  <!-- R10-11: Face -->
+  <rect x="7" y="10" width="10" height="2" fill="#8896a0"/>
+  <!-- R12: Chin -->
+  <rect x="8" y="12" width="8" height="1" fill="#8896a0"/>
+  <!-- R13: Jaw -->
+  <rect x="9" y="13" width="6" height="1" fill="#8896a0"/>
+  <!-- R14: Neck -->
+  <rect x="10" y="14" width="4" height="1" fill="#8896a0"/>
+</svg>

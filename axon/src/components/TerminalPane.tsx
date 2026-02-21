@@ -1,0 +1,207 @@
+import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  attach, detach, has, showGhostText, clearGhostText,
+  subscribeSuggestions, setSessionPhase, setSessionCwd,
+  getHistoryProvider,
+} from "../terminal/TerminalPool";
+import { useExecutionMode, useAutonomousSettings, useSession } from "../state/SessionContext";
+import { SuggestionOverlay, type SuggestionState } from "../terminal/intelligence/SuggestionOverlay";
+import { detectProjectContext, invalidateContext } from "../terminal/intelligence/contextAnalyzer";
+import { loadHistory } from "../terminal/intelligence/historyProvider";
+import { detectShellEnvironment } from "../terminal/intelligence/shellEnvironment";
+import "@xterm/xterm/css/xterm.css";
+
+interface TerminalPaneProps {
+  sessionId: string;
+  phase: string;
+  color: string;
+}
+
+interface CommandPredictionEvent {
+  predictions: { next_command: string; frequency: number }[];
+}
+
+interface ErrorMatchEvent {
+  fingerprint: string;
+  occurrence_count: number;
+  resolution: string | null;
+  raw_sample: string | null;
+}
+
+export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+  const mode = useExecutionMode(sessionId);
+  const autoSettings = useAutonomousSettings();
+  const { dispatch } = useSession();
+  const [suggestionState, setSuggestionState] = useState<SuggestionState | null>(null);
+
+  // Attach/detach terminal from pool
+  useEffect(() => {
+    if (!viewportRef.current) return;
+
+    // Wait for terminal to be in pool (it's created async in SessionContext)
+    const tryAttach = () => {
+      if (has(sessionId) && viewportRef.current) {
+        attach(sessionId, viewportRef.current);
+        setReady(true);
+        return true;
+      }
+      return false;
+    };
+
+    if (!tryAttach()) {
+      // Poll briefly if terminal hasn't been created yet
+      const interval = setInterval(() => {
+        if (tryAttach()) clearInterval(interval);
+      }, 50);
+      const timeout = setTimeout(() => {
+        clearInterval(interval);
+        setReady(true); // Show anyway after timeout
+      }, 3000);
+      return () => {
+        clearInterval(interval);
+        clearTimeout(timeout);
+        detach(sessionId);
+      };
+    }
+
+    return () => { detach(sessionId); };
+  }, [sessionId]);
+
+  // Handle resize when container size changes (debounced)
+  useEffect(() => {
+    if (!viewportRef.current) return;
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (has(sessionId) && viewportRef.current) {
+          attach(sessionId, viewportRef.current);
+        }
+      }, 100);
+    });
+    observer.observe(viewportRef.current);
+    return () => {
+      clearTimeout(resizeTimer);
+      observer.disconnect();
+    };
+  }, [sessionId]);
+
+  // Sync phase to TerminalPool for intelligence gating
+  useEffect(() => {
+    setSessionPhase(sessionId, phase);
+  }, [sessionId, phase]);
+
+  // Subscribe to suggestion state from TerminalPool
+  useEffect(() => {
+    const unsub = subscribeSuggestions(sessionId, (state) => {
+      setSuggestionState(state);
+    });
+    return unsub;
+  }, [sessionId]);
+
+  // Initialize shell environment detection and history loading
+  useEffect(() => {
+    detectShellEnvironment(sessionId).then((env) => {
+      const provider = getHistoryProvider(sessionId);
+      if (provider) {
+        loadHistory(provider, sessionId, env.shellType).catch(() => {});
+      }
+    });
+  }, [sessionId]);
+
+  // Listen for CWD changes and auto-detect project
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<string>(`cwd-changed-${sessionId}`, (event) => {
+      const newCwd = event.payload;
+      setSessionCwd(sessionId, newCwd);
+      invalidateContext(newCwd);
+      invoke("detect_project", { path: newCwd }).catch(() => {});
+      detectProjectContext(newCwd).catch(() => {});
+    }).then((u) => { unlisten = u; });
+    return () => { unlisten?.(); };
+  }, [sessionId]);
+
+  // Listen for command predictions → show ghost text (only in assisted mode)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<CommandPredictionEvent>(`command-prediction-${sessionId}`, (event) => {
+      if (mode !== "assisted") return;
+      const predictions = event.payload.predictions;
+      if (predictions.length > 0 && phase === "idle") {
+        showGhostText(sessionId, predictions[0].next_command);
+      }
+    }).then((u) => { unlisten = u; });
+    return () => { unlisten?.(); };
+  }, [sessionId, mode, phase]);
+
+  // Clear ghost text when phase changes to busy
+  useEffect(() => {
+    if (phase === "busy") {
+      clearGhostText(sessionId);
+    }
+  }, [phase, sessionId]);
+
+  // Autonomous mode: auto-execute predictions
+  useEffect(() => {
+    if (mode !== "autonomous") return;
+    let unlisten: (() => void) | null = null;
+    listen<CommandPredictionEvent>(`command-prediction-${sessionId}`, (event) => {
+      if (mode !== "autonomous" || phase !== "idle") return;
+      const predictions = event.payload.predictions;
+      if (predictions.length > 0 && predictions[0].frequency >= autoSettings.commandMinFrequency) {
+        dispatch({
+          type: "SHOW_AUTO_TOAST",
+          command: predictions[0].next_command,
+          reason: "prediction",
+          sessionId,
+        });
+      }
+    }).then((u) => { unlisten = u; });
+    return () => { unlisten?.(); };
+  }, [sessionId, mode, phase, dispatch, autoSettings.commandMinFrequency]);
+
+  // Autonomous mode: auto-execute error resolutions
+  useEffect(() => {
+    if (mode !== "autonomous") return;
+    let unlisten: (() => void) | null = null;
+    listen<ErrorMatchEvent>(`error-matched-${sessionId}`, (event) => {
+      if (mode !== "autonomous") return;
+      const match = event.payload;
+      if (match.resolution && match.occurrence_count >= autoSettings.errorMinOccurrences) {
+        dispatch({
+          type: "SHOW_AUTO_TOAST",
+          command: match.resolution,
+          reason: "error_fix",
+          sessionId,
+        });
+      }
+    }).then((u) => { unlisten = u; });
+    return () => { unlisten?.(); };
+  }, [sessionId, mode, dispatch, autoSettings.errorMinOccurrences]);
+
+  const showLoading = !ready && (phase === "creating" || phase === "initializing");
+  const phaseLabel = phase === "creating" ? "Spawning shell..." :
+                     phase === "initializing" ? "Starting shell..." :
+                     phase === "error" ? "Session error" : "";
+
+  return (
+    <div className="terminal-pane-wrapper">
+      {showLoading && (
+        <div className="terminal-loading">
+          <div className="loading-spinner" style={{ borderTopColor: color }} />
+          <span className="terminal-loading-text">{phaseLabel || "Connecting..."}</span>
+        </div>
+      )}
+      <div className="terminal-viewport" ref={viewportRef} />
+      {suggestionState && (
+        <SuggestionOverlay state={suggestionState} />
+      )}
+      <div className="terminal-color-accent" style={{ background: color }} />
+    </div>
+  );
+}
