@@ -1,12 +1,12 @@
 # Dependencies
-axon/node_modules/
+node_modules/
 
 # Build outputs
-axon/dist/
-axon/src-tauri/target/
+dist/
+src-tauri/target/
 
 # Generated
-axon/src-tauri/gen/
+src-tauri/gen/
 
 # OS files
 .DS_Store
