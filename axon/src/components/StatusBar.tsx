@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { setSetting } from "../api/settings";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
 
 function formatTokens(n: number): string {
@@ -21,7 +21,7 @@ export function StatusBar() {
     const next: ExecutionMode = mode === "manual" ? "assisted" : mode === "assisted" ? "autonomous" : "manual";
     dispatch({ type: "SET_EXECUTION_MODE", sessionId: active.id, mode: next });
     dispatch({ type: "SET_DEFAULT_MODE", mode: next });
-    invoke("set_setting", { key: "execution_mode", value: next }).catch(console.error);
+    setSetting("execution_mode", next).catch(console.error);
   };
 
   return (

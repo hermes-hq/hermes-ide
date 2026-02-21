@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { SessionData } from "../state/SessionContext";
+import { updateSessionGroup, updateSessionLabel } from "../api/sessions";
 import { SessionContextMenu } from "./SessionContextMenu";
 import { encodeSessionDrag } from "./SplitPane";
 
@@ -82,12 +82,12 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
 
   const handleSetGroup = useCallback((group: string | null) => {
     if (!contextMenu) return;
-    invoke("update_session_group", { sessionId: contextMenu.sessionId, group }).catch(console.error);
+    updateSessionGroup(contextMenu.sessionId, group).catch(console.error);
   }, [contextMenu]);
 
   const handleRename = useCallback((newLabel: string) => {
     if (!contextMenu) return;
-    invoke("update_session_label", { sessionId: contextMenu.sessionId, label: newLabel }).catch(console.error);
+    updateSessionLabel(contextMenu.sessionId, newLabel).catch(console.error);
   }, [contextMenu]);
 
   const contextSession = contextMenu ? sessions.find((s) => s.id === contextMenu.sessionId) : null;

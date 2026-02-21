@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { getSetting, setSetting } from "../api/settings";
+import { writeToSession } from "../api/sessions";
 import {
   ComposerFields,
   EMPTY_FIELDS,
@@ -81,7 +82,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
 
   // Load user templates on mount
   useEffect(() => {
-    invoke("get_setting", { key: "prompt_templates" })
+    getSetting("prompt_templates")
       .then((val) => {
         if (typeof val === "string" && val) {
           try {
@@ -95,7 +96,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
 
   // Load custom roles on mount
   useEffect(() => {
-    invoke("get_setting", { key: "custom_roles" })
+    getSetting("custom_roles")
       .then((val) => {
         if (typeof val === "string" && val) {
           try { setCustomRoles(JSON.parse(val)); } catch { /* ignore malformed JSON */ }
@@ -106,7 +107,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
 
   // Load custom styles on mount
   useEffect(() => {
-    invoke("get_setting", { key: "custom_styles" })
+    getSetting("custom_styles")
       .then((val) => {
         if (typeof val === "string" && val) {
           try { setCustomStyles(JSON.parse(val)); } catch { /* ignore malformed JSON */ }
@@ -161,7 +162,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     const bytes = new TextEncoder().encode(payload);
     const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
     const data = btoa(binary);
-    invoke("write_to_session", { sessionId, data }).catch(console.error);
+    writeToSession(sessionId, data).catch(console.error);
     onClose();
   }, [compiled, sessionId, onClose]);
 
@@ -185,7 +186,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     };
     const updated = [...userTemplates.filter((t) => t.name !== name), newTemplate];
     setUserTemplates(updated);
-    invoke("set_setting", { key: "prompt_templates", value: JSON.stringify(updated) }).catch(console.error);
+    setSetting("prompt_templates", JSON.stringify(updated)).catch(console.error);
     setSaveTemplateName("");
     setShowSaveInput(false);
   }, [saveTemplateName, fields, userTemplates]);
@@ -193,7 +194,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
   const deleteTemplate = useCallback((id: string) => {
     const updated = userTemplates.filter((t) => t.id !== id);
     setUserTemplates(updated);
-    invoke("set_setting", { key: "prompt_templates", value: JSON.stringify(updated) }).catch(console.error);
+    setSetting("prompt_templates", JSON.stringify(updated)).catch(console.error);
   }, [userTemplates]);
 
   const createCustomRole = useCallback((role: Omit<RoleDefinition, "id" | "builtIn">) => {
@@ -204,14 +205,14 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     };
     const updated = [...customRoles, newRole];
     setCustomRoles(updated);
-    invoke("set_setting", { key: "custom_roles", value: JSON.stringify(updated) }).catch(console.error);
+    setSetting("custom_roles", JSON.stringify(updated)).catch(console.error);
     setFields((prev) => ({ ...prev, roleIds: [...prev.roleIds, newRole.id] }));
   }, [customRoles]);
 
   const deleteCustomRole = useCallback((id: string) => {
     const updated = customRoles.filter((r) => r.id !== id);
     setCustomRoles(updated);
-    invoke("set_setting", { key: "custom_roles", value: JSON.stringify(updated) }).catch(console.error);
+    setSetting("custom_roles", JSON.stringify(updated)).catch(console.error);
     setFields((prev) => ({ ...prev, roleIds: prev.roleIds.filter((rid) => rid !== id) }));
   }, [customRoles]);
 
@@ -223,7 +224,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     };
     const updated = [...customStyles, newStyle];
     setCustomStyles(updated);
-    invoke("set_setting", { key: "custom_styles", value: JSON.stringify(updated) }).catch(console.error);
+    setSetting("custom_styles", JSON.stringify(updated)).catch(console.error);
     setFields((prev) => ({
       ...prev,
       styleSelections: [...prev.styleSelections, { id: newStyle.id, level: 3 }],
@@ -233,7 +234,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
   const deleteCustomStyle = useCallback((id: string) => {
     const updated = customStyles.filter((s) => s.id !== id);
     setCustomStyles(updated);
-    invoke("set_setting", { key: "custom_styles", value: JSON.stringify(updated) }).catch(console.error);
+    setSetting("custom_styles", JSON.stringify(updated)).catch(console.error);
     setFields((prev) => ({
       ...prev,
       styleSelections: prev.styleSelections.filter((s) => s.id !== id),

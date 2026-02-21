@@ -28,6 +28,7 @@ export function EmptyState({ recentSessions, onNew, onRestore }: EmptyStateProps
     <div className="empty-state">
       <div className="empty-state-logo">HERMES-IDEA</div>
       <p className="empty-state-subtitle">AI-native terminal for macOS</p>
+      <p className="empty-state-hint">Drop a session here or press <kbd>⌘N</kbd> to start</p>
 
       <div className="empty-state-actions">
         <button className="btn-primary" onClick={onNew}>New Session</button>

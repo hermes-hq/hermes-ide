@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { readShellHistory, getSessionCommands } from "../../api/intelligence";
 
 export interface HistoryMatch {
   command: string;
@@ -84,10 +84,7 @@ export async function loadHistory(
 ): Promise<void> {
   try {
     // Load shell history file (most recent 500)
-    const shellHistory = await invoke<string[]>("read_shell_history", {
-      shell,
-      limit: MAX_HISTORY,
-    });
+    const shellHistory = await readShellHistory(shell, MAX_HISTORY);
     // Add oldest first so most recent ends up at front
     for (let i = shellHistory.length - 1; i >= 0; i--) {
       provider.addCommand(shellHistory[i]);
@@ -98,10 +95,7 @@ export async function loadHistory(
 
   try {
     // Load session commands from execution_log DB
-    const sessionCommands = await invoke<string[]>("get_session_commands", {
-      sessionId,
-      limit: MAX_HISTORY,
-    });
+    const sessionCommands = await getSessionCommands(sessionId, MAX_HISTORY);
     // Session commands are more recent, add last
     for (let i = sessionCommands.length - 1; i >= 0; i--) {
       provider.addCommand(sessionCommands[i]);

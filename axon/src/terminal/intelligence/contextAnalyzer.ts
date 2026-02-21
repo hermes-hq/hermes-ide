@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getProjectContext } from "../../api/intelligence";
 
 export interface ProjectContext {
   hasGit: boolean;
@@ -15,7 +15,7 @@ export async function detectProjectContext(cwd: string): Promise<ProjectContext>
   if (cached) return cached;
 
   try {
-    const ctx = await invoke<ProjectContext>("get_project_context", { path: cwd });
+    const ctx = await getProjectContext(cwd);
     contextCache.set(cwd, ctx);
     return ctx;
   } catch {

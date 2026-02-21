@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Realm } from "../hooks/useSessionRealms";
 import { CreateSessionOpts } from "../state/SessionContext";
+import { getRealms, createRealm } from "../api/realms";
 
 const AI_PROVIDERS = [
   { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
@@ -30,8 +30,8 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    invoke("get_realms")
-      .then((r) => setAllRealms(r as Realm[]))
+    getRealms()
+      .then((r) => setAllRealms(r))
       .catch((err) => console.warn("[SessionCreator] Failed to load realms:", err));
   }, []);
 
@@ -66,10 +66,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
     if (!path.trim()) return;
     setScanning(true);
     try {
-      const realm = (await invoke("create_realm", {
-        path: path.trim(),
-        name: null,
-      })) as Realm;
+      const realm = await createRealm(path.trim(), null);
       setAllRealms((prev) => [realm, ...prev.filter((r) => r.id !== realm.id)]);
       setSelectedRealmIds((prev) =>
         prev.includes(realm.id) ? prev : [...prev, realm.id]
@@ -126,7 +123,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
         <div className="session-creator-header">
           <span className="session-creator-title">New Session</span>
           <span className="session-creator-step">Step {step} of 3</span>
-          <button className="settings-close" onClick={onClose}>x</button>
+          <button className="close-btn settings-close" onClick={onClose}>x</button>
         </div>
 
         {/* Step indicator */}

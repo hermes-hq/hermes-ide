@@ -1,126 +1,30 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  createSession as apiCreateSession, closeSession as apiCloseSession,
+  getSessions, getRecentSessions, getSessionSnapshot,
+} from "../api/sessions";
+import { getRealms, getSessionRealms, attachSessionRealm, nudgeRealmContext } from "../api/realms";
+import { getSettings } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, updateSettings, writeScrollback } from "../terminal/TerminalPool";
 import { initNotifications, notifyStuck, notifyLongRunningDone } from "../utils/notifications";
 import {
-  LayoutNode, PaneLeaf, SplitDirection,
+  LayoutNode, PaneLeaf,
   nextPaneId, nextSplitId,
   replaceNode, removePane, collectPanes, updateSplitRatio,
   setPaneSession, removePanesBySession,
 } from "./layoutTypes";
 
-// ─── Types (mirror Rust structs) ────────────────────────────────────
+// ─── Re-export shared types for backward compatibility ──────────────
+export type {
+  AgentInfo, ToolCall, ProviderTokens, ActionEvent, ActionTemplate,
+  MemoryFact, SessionMetrics, SessionData, SessionHistoryEntry,
+  ExecutionNode, ExecutionMode, CreateSessionOpts, SessionAction,
+} from "../types/session";
 
-export interface AgentInfo {
-  name: string;
-  provider: string;
-  model: string | null;
-  detected_at: string;
-  confidence: number;
-}
-
-export interface ToolCall {
-  tool: string;
-  args: string;
-  timestamp: string;
-}
-
-export interface ProviderTokens {
-  input_tokens: number;
-  output_tokens: number;
-  estimated_cost_usd: number;
-  model: string;
-  last_updated: string;
-  update_count: number;
-}
-
-export interface ActionEvent {
-  command: string;
-  label: string;
-  provider: string;
-  is_suggestion: boolean;
-  timestamp: string;
-}
-
-export interface ActionTemplate {
-  command: string;
-  label: string;
-  description: string;
-  category: string;
-}
-
-export interface MemoryFact {
-  key: string;
-  value: string;
-  source: string;
-  confidence: number;
-}
-
-export interface SessionMetrics {
-  output_lines: number;
-  error_count: number;
-  stuck_score: number;
-  token_usage: Record<string, ProviderTokens>;
-  tool_calls: ToolCall[];
-  tool_call_summary: Record<string, number>;
-  files_touched: string[];
-  recent_errors: string[];
-  recent_actions: ActionEvent[];
-  available_actions: ActionTemplate[];
-  memory_facts: MemoryFact[];
-  latency_p50_ms: number | null;
-  latency_p95_ms: number | null;
-  latency_samples: number[];
-  token_history: [number, number][];
-}
-
-export interface SessionData {
-  id: string;
-  label: string;
-  color: string;
-  group: string | null;
-  phase: string;
-  working_directory: string;
-  shell: string;
-  created_at: string;
-  last_activity_at: string;
-  workspace_paths: string[];
-  detected_agent: AgentInfo | null;
-  metrics: SessionMetrics;
-  ai_provider: string | null;
-  context_injected: boolean;
-}
-
-export interface SessionHistoryEntry {
-  id: string;
-  label: string;
-  color: string;
-  working_directory: string;
-  shell: string;
-  created_at: string;
-  closed_at: string | null;
-  scrollback_preview: string | null;
-}
-
-// ─── Execution Nodes (mirror Rust struct) ────────────────────────────
-
-export interface ExecutionNode {
-  id: number;
-  session_id: string;
-  timestamp: number;
-  kind: string;
-  input: string | null;
-  output_summary: string | null;
-  exit_code: number | null;
-  working_dir: string;
-  duration_ms: number;
-  metadata: string | null;
-}
-
-// ─── Execution Mode ──────────────────────────────────────────────────
-
-export type ExecutionMode = "manual" | "assisted" | "autonomous";
+import type {
+  SessionData, SessionHistoryEntry, ExecutionMode, CreateSessionOpts, SessionAction,
+} from "../types/session";
 
 // ─── State ──────────────────────────────────────────────────────────
 
@@ -151,32 +55,6 @@ interface SessionState {
     autoToast: { command: string; reason: string; sessionId: string } | null;
   };
 }
-
-export type SessionAction =
-  | { type: "SESSION_UPDATED"; session: SessionData }
-  | { type: "SESSION_REMOVED"; id: string }
-  | { type: "SET_ACTIVE"; id: string | null }
-  | { type: "SET_RECENT"; entries: SessionHistoryEntry[] }
-  | { type: "TOGGLE_CONTEXT" }
-  | { type: "TOGGLE_SIDEBAR" }
-  | { type: "TOGGLE_PALETTE" }
-  | { type: "SHOW_STUCK_OVERLAY"; sessionId: string }
-  | { type: "DISMISS_STUCK_OVERLAY" }
-  | { type: "SET_EXECUTION_MODE"; sessionId: string; mode: ExecutionMode }
-  | { type: "SET_DEFAULT_MODE"; mode: ExecutionMode }
-  | { type: "TOGGLE_FLOW_MODE" }
-  | { type: "TOGGLE_TIMELINE" }
-  | { type: "SHOW_AUTO_TOAST"; command: string; reason: string; sessionId: string }
-  | { type: "DISMISS_AUTO_TOAST" }
-  | { type: "TOGGLE_AUTO_APPLY" }
-  | { type: "SET_AUTONOMOUS_SETTINGS"; settings: Partial<SessionState["autonomousSettings"]> }
-  // Layout actions
-  | { type: "INIT_PANE"; sessionId: string }
-  | { type: "SPLIT_PANE"; paneId: string; direction: SplitDirection; newSessionId: string; insertBefore?: boolean }
-  | { type: "CLOSE_PANE"; paneId: string }
-  | { type: "FOCUS_PANE"; paneId: string }
-  | { type: "RESIZE_SPLIT"; splitId: string; ratio: number }
-  | { type: "SET_PANE_SESSION"; paneId: string; sessionId: string };
 
 /** @internal — exported for testing */
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
@@ -433,14 +311,6 @@ export const initialState: SessionState = {
 
 // ─── Context ────────────────────────────────────────────────────────
 
-export interface CreateSessionOpts {
-  label?: string;
-  workingDirectory?: string;
-  restoreFromId?: string;
-  aiProvider?: string;
-  realmIds?: string[];
-}
-
 interface SessionContextValue {
   state: SessionState;
   dispatch: React.Dispatch<SessionAction>;
@@ -474,19 +344,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         // Auto-attach realm on working_directory change
         if (session.working_directory) {
-          invoke("get_realms").then((realmsArr) => {
-            const realms = realmsArr as { id: string; path: string }[];
+          getRealms().then((realms) => {
             for (const realm of realms) {
               if (session.working_directory.startsWith(realm.path)) {
                 // Check if already attached
-                invoke("get_session_realms", { sessionId: session.id }).then((attached) => {
-                  const attachedRealms = attached as { id: string }[];
+                getSessionRealms(session.id).then((attachedRealms) => {
                   if (!attachedRealms.some((r) => r.id === realm.id)) {
-                    invoke("attach_session_realm", {
-                      sessionId: session.id,
-                      realmId: realm.id,
-                      role: "primary",
-                    }).catch((err) => console.warn("[SessionContext] Failed to attach realm:", err));
+                    attachSessionRealm(session.id, realm.id, "primary")
+                      .catch((err) => console.warn("[SessionContext] Failed to attach realm:", err));
                   }
                 }).catch((err) => console.warn("[SessionContext] Failed to check attached realms:", err));
                 break;
@@ -498,7 +363,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // Auto-cleanup destroyed sessions (PTY exited on its own)
         if (session.phase === "destroyed" && !closingSessionIds.current.has(session.id)) {
           closingSessionIds.current.add(session.id);
-          invoke("close_session", { sessionId: session.id }).catch(() => {
+          apiCloseSession(session.id).catch(() => {
             closingSessionIds.current.delete(session.id);
           });
           return;
@@ -554,7 +419,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (existing) clearTimeout(existing);
         const timer = setTimeout(() => {
           nudgeTimers.current.delete(sessionId);
-          invoke("nudge_realm_context", { sessionId }).catch((err) => console.warn("[SessionContext] Failed to nudge realm context:", err));
+          nudgeRealmContext(sessionId).catch((err) => console.warn("[SessionContext] Failed to nudge realm context:", err));
         }, 1500);
         nudgeTimers.current.set(sessionId, timer);
       });
@@ -564,9 +429,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setup();
 
     // Load settings first, THEN sessions (so terminals use correct settings)
-    invoke("get_settings")
-      .then((settings) => {
-        const s = settings as Record<string, string>;
+    getSettings()
+      .then((s) => {
         updateSettings(s);
         if (s.execution_mode === "assisted" || s.execution_mode === "autonomous") {
           dispatch({ type: "SET_DEFAULT_MODE", mode: s.execution_mode as ExecutionMode });
@@ -581,10 +445,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         });
 
         // Now load sessions after settings are applied
-        return invoke("get_sessions");
+        return getSessions();
       })
-      .then((sessions) => {
-        const arr = sessions as SessionData[];
+      .then((arr) => {
         arr.forEach((s) => {
           dispatch({ type: "SESSION_UPDATED", session: s });
           createTerminal(s.id, s.color);
@@ -597,8 +460,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       })
       .catch(console.error);
 
-    invoke("get_recent_sessions", { limit: 10 })
-      .then((entries) => dispatch({ type: "SET_RECENT", entries: entries as SessionHistoryEntry[] }))
+    getRecentSessions(10)
+      .then((entries) => dispatch({ type: "SET_RECENT", entries }))
       .catch(console.error);
 
     return () => { unlisteners.forEach((u) => u()); };
@@ -615,20 +478,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const createSession = useCallback(async (opts?: CreateSessionOpts) => {
     try {
-      const session = await invoke("create_session", {
+      const session = await apiCreateSession({
         label: opts?.label || null,
         workingDirectory: opts?.workingDirectory || null,
         color: null,
         workspacePaths: null,
         aiProvider: opts?.aiProvider || null,
         realmIds: opts?.realmIds || null,
-      }) as SessionData;
+      });
       await createTerminal(session.id, session.color);
 
       // Restore scrollback from previous session if available
       if (opts?.restoreFromId) {
         try {
-          const snapshot = await invoke("get_session_snapshot", { sessionId: opts.restoreFromId }) as string | null;
+          const snapshot = await getSessionSnapshot(opts.restoreFromId);
           if (snapshot) {
             writeScrollback(session.id, snapshot);
           }
@@ -648,7 +511,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const closeSession = useCallback(async (id: string) => {
     try {
-      await invoke("close_session", { sessionId: id });
+      await apiCloseSession(id);
     } catch (err) {
       console.error("Failed to close session:", err);
     }

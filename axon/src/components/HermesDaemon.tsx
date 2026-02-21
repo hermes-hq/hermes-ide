@@ -112,7 +112,7 @@ const FRAMES = {
 };
 
 const COLORS: Record<string, string> = {
-  "1": "#33ff99", // hat — phosphor green
+  "1": "#34d399", // hat — phosphor green
   "2": "#a78bfa", // wings — soft violet
   "3": "#ffb000", // eyes — amber glow
   "4": "#8896a0", // skin — cool grey

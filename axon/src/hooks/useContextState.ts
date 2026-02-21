@@ -1,66 +1,19 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { SessionData, MemoryFact } from "../state/SessionContext";
+import { SessionData } from "../state/SessionContext";
+import { getContextPins, getErrorResolutions, applyContext as apiApplyContext } from "../api/context";
+import { assembleSessionContext } from "../api/realms";
+import { getAllMemory } from "../api/memory";
 
-// ─── Context State (the versioned execution contract) ────────────────
+// ─── Re-export shared types for backward compatibility ──────────────
+export type {
+  ContextPin, RealmContextInfo, ErrorResolution,
+  ContextState, ContextLifecycleState, ContextManager, ApplyContextResult,
+} from "../types/context";
 
-export interface ContextPin {
-  id: number;
-  session_id: string | null;
-  project_id: string | null;
-  kind: string;
-  target: string;
-  label: string | null;
-  priority: number;
-  created_at: number;
-}
-
-export interface RealmContextInfo {
-  realm_id: string;
-  realm_name: string;
-  path: string;
-  languages: string[];
-  frameworks: string[];
-  architecture_pattern: string | null;
-  architecture_layers: string[];
-  conventions: string[];
-  scan_status: string;
-}
-
-export interface ErrorResolution {
-  fingerprint: string;
-  resolution: string;
-  occurrence_count: number;
-}
-
-export interface ContextState {
-  pinnedItems: ContextPin[];
-  memoryFacts: MemoryFact[];
-  persistedMemory: { key: string; value: string; source: string }[];
-  realms: RealmContextInfo[];
-  workspacePaths: string[];
-  workingDirectory: string;
-  agent: string | null;
-  model: string | null;
-  errorResolutions: ErrorResolution[];
-  filesTouched: string[];
-  recentErrors: string[];
-}
-
-export type ContextLifecycleState = 'clean' | 'dirty' | 'applying' | 'apply_failed';
-
-export interface ContextManager {
-  context: ContextState;
-  currentVersion: number;
-  injectedVersion: number;
-  lastInjectedAt: number | null;
-  lifecycle: ContextLifecycleState;
-  lastError: string | null;
-  injectedContent: string | null;
-  applyContext: () => Promise<void>;
-  formatContext: () => string;
-}
+import type {
+  ContextState, ContextLifecycleState, ContextManager,
+} from "../types/context";
 
 function emptyContext(): ContextState {
   return {
@@ -157,17 +110,6 @@ export function formatContextMarkdown(ctx: ContextState, version: number, execut
 // Backward-compat alias — existing tests import `formatContext`
 export const formatContext = formatContextMarkdown;
 
-// ─── Backend apply result type ───────────────────────────────────────
-
-interface ApplyContextResult {
-  version: number;
-  content: string;
-  file_path: string;
-  nudge_sent: boolean;
-  nudge_error: string | null;
-  estimated_tokens: number;
-}
-
 // ─── Hook ────────────────────────────────────────────────────────────
 
 export function useContextState(session: SessionData | null, executionMode?: string): ContextManager {
@@ -204,15 +146,12 @@ export function useContextState(session: SessionData | null, executionMode?: str
 
       // Fetch pins
       try {
-        const pins = await invoke("get_context_pins", { sessionId: session.id, projectId: null }) as ContextPin[];
-        initial.pinnedItems = pins;
+        initial.pinnedItems = await getContextPins(session.id, null);
       } catch (err) { console.warn("[useContextState] Failed to load pins:", err); }
 
       // Fetch error resolutions
       try {
-        const patterns = await invoke("get_error_resolutions", { projectId: session.working_directory, limit: 10 }) as {
-          fingerprint: string; resolution: string | null; occurrence_count: number;
-        }[];
+        const patterns = await getErrorResolutions(session.working_directory, 10);
         initial.errorResolutions = patterns
           .filter((p) => p.resolution)
           .map((p) => ({ fingerprint: p.fingerprint, resolution: p.resolution!, occurrence_count: p.occurrence_count }));
@@ -220,17 +159,13 @@ export function useContextState(session: SessionData | null, executionMode?: str
 
       // Fetch realm context
       try {
-        const ctx = await invoke("assemble_session_context", { sessionId: session.id, tokenBudget: 4000 }) as {
-          realms: RealmContextInfo[];
-        };
+        const ctx = await assembleSessionContext(session.id, 4000);
         initial.realms = ctx.realms;
       } catch (err) { console.warn("[useContextState] Failed to assemble session context:", err); }
 
       // Fetch persisted memory
       try {
-        const entries = await invoke("get_all_memory", { scope: "global", scopeId: "global" }) as {
-          key: string; value: string; source: string;
-        }[];
+        const entries = await getAllMemory("global", "global");
         initial.persistedMemory = entries;
       } catch (err) { console.warn("[useContextState] Failed to load persisted memory:", err); }
 
@@ -276,10 +211,9 @@ export function useContextState(session: SessionData | null, executionMode?: str
     if (!session) return;
     let unlisten: (() => void) | null = null;
     listen(`session-realms-updated-${session.id}`, () => {
-      invoke("assemble_session_context", { sessionId: session.id, tokenBudget: 4000 })
+      assembleSessionContext(session.id, 4000)
         .then((ctx) => {
-          const context = ctx as { realms: RealmContextInfo[] };
-          setContext((prev) => ({ ...prev, realms: context.realms }));
+          setContext((prev) => ({ ...prev, realms: ctx.realms }));
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh realms:", err));
     }).then((u) => { unlisten = u; });
@@ -291,9 +225,9 @@ export function useContextState(session: SessionData | null, executionMode?: str
     if (!session) return;
     let unlisten: (() => void) | null = null;
     listen(`context-pins-changed-${session.id}`, () => {
-      invoke("get_context_pins", { sessionId: session.id, projectId: null })
+      getContextPins(session.id, null)
         .then((pins) => {
-          setContext((prev) => ({ ...prev, pinnedItems: pins as ContextPin[] }));
+          setContext((prev) => ({ ...prev, pinnedItems: pins }));
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh pins:", err));
     }).then((u) => { unlisten = u; });
@@ -331,10 +265,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
     setLastError(null);
 
     try {
-      const result = await invoke("apply_context", {
-        sessionId: sess.id,
-        executionMode: liveMode,
-      }) as ApplyContextResult;
+      const result = await apiApplyContext(sess.id, liveMode);
 
       setInjectedVersion(result.version);
       setInjectedContent(result.content);
@@ -361,6 +292,12 @@ export function useContextState(session: SessionData | null, executionMode?: str
     return formatContextMarkdown(context, currentVersion, liveMode);
   }, [context, currentVersion, liveMode]);
 
+  // ── Copy context to clipboard ──
+  const copyToClipboard = useCallback(async () => {
+    const text = formatContextPreview();
+    if (text) await navigator.clipboard.writeText(text);
+  }, [formatContextPreview]);
+
   return {
     context,
     currentVersion,
@@ -371,5 +308,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
     injectedContent,
     applyContext,
     formatContext: formatContextPreview,
+    copyToClipboard,
   };
 }

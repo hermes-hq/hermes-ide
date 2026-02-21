@@ -21,6 +21,13 @@ export function BootSequence({ onComplete }: BootSequenceProps) {
   const [fadeOut, setFadeOut] = useState(false);
   const lineIndex = useRef(0);
 
+  // Skip boot if user previously clicked to skip
+  useEffect(() => {
+    if (localStorage.getItem("hermes-skip-boot")) {
+      onComplete();
+    }
+  }, [onComplete]);
+
   // Phase 1: Typewriter text (0-1.5s)
   useEffect(() => {
     if (phase !== "text") return;
@@ -70,9 +77,18 @@ export function BootSequence({ onComplete }: BootSequenceProps) {
   }, [phase, onComplete]);
 
   if (phase === "done") return null;
+  if (localStorage.getItem("hermes-skip-boot")) return null;
+
+  const handleSkip = () => {
+    localStorage.setItem("hermes-skip-boot", "1");
+    onComplete();
+  };
 
   return (
-    <div className={`boot-sequence ${fadeOut ? "boot-fade-out" : ""}`}>
+    <div
+      className={`boot-sequence ${fadeOut ? "boot-fade-out" : ""}`}
+      onClick={handleSkip}
+    >
       <div className="boot-text">
         {visibleLines.map((line, i) => (
           <div key={i} className="boot-line">{line}</div>
@@ -81,10 +97,12 @@ export function BootSequence({ onComplete }: BootSequenceProps) {
       </div>
 
       {(phase === "assemble" || phase === "spark" || phase === "idle") && (
-        <div style={{ marginTop: 24 }}>
+        <div className="boot-daemon-wrap">
           <HermesDaemon mode="full" assembling={phase === "assemble"} />
         </div>
       )}
+
+      <div className="boot-skip-hint">click to skip</div>
     </div>
   );
 }

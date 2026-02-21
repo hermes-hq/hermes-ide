@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Realm } from "../hooks/useSessionRealms";
+import { getRealms, createRealm, deleteRealm as apiDeleteRealm, scanRealm, scanDirectory as apiScanDirectory } from "../api/realms";
 
 interface WorkspacePanelProps {
   onClose: () => void;
@@ -42,8 +42,8 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
   const [scanning, setScanning] = useState(false);
 
   const loadRealms = useCallback(() => {
-    invoke("get_realms")
-      .then((r) => setRealms(r as Realm[]))
+    getRealms()
+      .then((r) => setRealms(r))
       .catch(console.error);
   }, []);
 
@@ -54,9 +54,9 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
     setScanning(true);
     try {
       // First scan for projects (legacy), which also populates the projects table
-      await invoke("scan_directory", { path: scanPath.trim(), maxDepth: 3 });
+      await apiScanDirectory(scanPath.trim(), 3);
       // Then create a realm for the scanned path itself
-      await invoke("create_realm", { path: scanPath.trim(), name: null }).catch((err) => console.warn("[WorkspacePanel] Failed to create realm:", err));
+      await createRealm(scanPath.trim(), null).catch((err) => console.warn("[WorkspacePanel] Failed to create realm:", err));
       // Reload realms
       loadRealms();
       setScanPath("");
@@ -69,7 +69,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
   const scanHome = useCallback(async () => {
     setScanning(true);
     try {
-      await invoke("scan_directory", { path: "~", maxDepth: 2 });
+      await apiScanDirectory("~", 2);
       loadRealms();
     } catch (err) {
       console.warn("[WorkspacePanel] Home scan failed:", err);
@@ -78,13 +78,13 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
   }, [loadRealms]);
 
   const triggerScan = useCallback(async (realmId: string) => {
-    await invoke("scan_realm", { id: realmId, depth: "deep" }).catch(console.error);
+    await scanRealm(realmId, "deep").catch(console.error);
     // Will be updated via realm-updated event, but also refetch
     setTimeout(loadRealms, 3000);
   }, [loadRealms]);
 
-  const deleteRealm = useCallback(async (realmId: string) => {
-    await invoke("delete_realm", { id: realmId }).catch(console.error);
+  const deleteRealmById = useCallback(async (realmId: string) => {
+    await apiDeleteRealm(realmId).catch(console.error);
     loadRealms();
   }, [loadRealms]);
 
@@ -169,7 +169,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
                   </button>
                   <button
                     className="realm-action-btn realm-action-delete"
-                    onClick={() => deleteRealm(realm.id)}
+                    onClick={() => deleteRealmById(realm.id)}
                     title="Delete realm"
                   >
                     Delete

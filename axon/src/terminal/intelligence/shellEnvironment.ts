@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { detectShellEnvironment as apiDetectShellEnvironment } from "../../api/intelligence";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ let globalConfig: IntelligenceConfig = { ...DEFAULT_CONFIG };
 
 export async function detectShellEnvironment(sessionId: string): Promise<ShellEnvironment> {
   try {
-    const env = await invoke<ShellEnvironment>("detect_shell_environment", { sessionId });
+    const env = await apiDetectShellEnvironment(sessionId);
     sessionShellEnv.set(sessionId, env);
 
     // Auto-adjust defaults for fish

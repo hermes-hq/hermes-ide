@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Realm, useSessionRealms } from "../hooks/useSessionRealms";
+import { getRealms, createRealm, deleteRealm } from "../api/realms";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",
@@ -32,8 +32,8 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    invoke("get_realms")
-      .then((r) => setAllRealms(r as Realm[]))
+    getRealms()
+      .then((r) => setAllRealms(r))
       .catch((err) => console.warn("[RealmPicker] Failed to load realms:", err));
     inputRef.current?.focus();
   }, []);
@@ -61,8 +61,8 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
       await attach(realm.id);
     }
     // Refresh all realms in case of updates
-    invoke("get_realms")
-      .then((r) => setAllRealms(r as Realm[]))
+    getRealms()
+      .then((r) => setAllRealms(r))
       .catch((err) => console.warn("[RealmPicker] Failed to refresh realms:", err));
   };
 
@@ -70,10 +70,7 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
     if (!path.trim()) return;
     setScanning(true);
     try {
-      const realm = await invoke("create_realm", {
-        path: path.trim(),
-        name: null,
-      }) as Realm;
+      const realm = await createRealm(path.trim(), null);
       setAllRealms((prev) => [realm, ...prev.filter((r) => r.id !== realm.id)]);
       await attach(realm.id);
       setScanPath("");
@@ -119,7 +116,7 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
           <span className="realm-picker-count">
             {attachedRealms.length} attached
           </span>
-          <button className="settings-close" onClick={onClose}>
+          <button className="close-btn settings-close" onClick={onClose}>
             x
           </button>
         </div>
@@ -183,7 +180,7 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
                 className="realm-picker-delete"
                 onClick={(e) => {
                   e.stopPropagation();
-                  invoke("delete_realm", { id: realm.id }).then(() => {
+                  deleteRealm(realm.id).then(() => {
                     setAllRealms((prev) => prev.filter((r) => r.id !== realm.id));
                   }).catch(console.error);
                 }}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { detectProject } from "../api/realms";
 import {
   attach, detach, has, showGhostText, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,
@@ -19,16 +19,7 @@ interface TerminalPaneProps {
   color: string;
 }
 
-interface CommandPredictionEvent {
-  predictions: { next_command: string; frequency: number }[];
-}
-
-interface ErrorMatchEvent {
-  fingerprint: string;
-  occurrence_count: number;
-  resolution: string | null;
-  raw_sample: string | null;
-}
+import type { CommandPredictionEvent, ErrorMatchEvent } from "../types";
 
 export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -120,7 +111,7 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       const newCwd = event.payload;
       setSessionCwd(sessionId, newCwd);
       invalidateContext(newCwd);
-      invoke("detect_project", { path: newCwd }).catch((err) => console.warn("[TerminalPane] Failed to detect project:", err));
+      detectProject(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project:", err));
       detectProjectContext(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project context:", err));
     }).then((u) => { unlisten = u; });
     return () => { unlisten?.(); };

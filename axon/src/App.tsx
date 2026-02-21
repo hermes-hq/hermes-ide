@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { writeToSession } from "./api/sessions";
+import { createRealm } from "./api/realms";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
@@ -14,7 +15,7 @@ import { CostDashboard } from "./components/CostDashboard";
 import { FlowToast } from "./components/FlowToast";
 import { ExecutionTimeline } from "./components/ExecutionTimeline";
 import { AutoToast } from "./components/AutoToast";
-import { useContextBundle } from "./hooks/useContextBundle";
+import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { BootSequence } from "./components/BootSequence";
 import { HermesDaemon } from "./components/HermesDaemon";
 import { RealmPicker } from "./components/RealmPicker";
@@ -37,7 +38,6 @@ function AppContent() {
   const [realmPickerOpen, setRealmPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
-  const { copyToClipboard } = useContextBundle(activeSession);
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
 
   // Keyboard shortcuts
@@ -77,7 +77,7 @@ function AppContent() {
             }
             return;
           case "F": case "f": e.preventDefault(); dispatch({ type: "TOGGLE_FLOW_MODE" }); return;
-          case "C": case "c": e.preventDefault(); copyToClipboard(); return;
+          case "C": case "c": e.preventDefault(); copyContextToClipboard(activeSession); return;
         }
       }
       switch (e.key) {
@@ -116,12 +116,12 @@ function AppContent() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.activeSessionId, state.layout, sessions, createSession, closeSession, dispatch, setActive, copyToClipboard]);
+  }, [state.activeSessionId, state.layout, sessions, activeSession, createSession, closeSession, dispatch, setActive]);
 
   const sendCtrlC = useCallback(() => {
     const id = ui.stuckOverlaySessionId;
     if (!id) return;
-    invoke("write_to_session", { sessionId: id, data: btoa("\x03") }).catch(console.error);
+    writeToSession(id, btoa("\x03")).catch(console.error);
     dispatch({ type: "DISMISS_STUCK_OVERLAY" });
   }, [ui.stuckOverlaySessionId, dispatch]);
 
@@ -129,7 +129,7 @@ function AppContent() {
     if (!ui.autoToast) return;
     const { command, sessionId } = ui.autoToast;
     const data = btoa(command + "\r");
-    invoke("write_to_session", { sessionId, data }).catch(console.error);
+    writeToSession(sessionId, data).catch(console.error);
     dispatch({ type: "DISMISS_AUTO_TOAST" });
   }, [ui.autoToast, dispatch]);
 
@@ -295,7 +295,7 @@ function AppContent() {
           onOpenComposer={() => setComposerOpen(true)}
           onScanCwd={() => {
             if (activeSession?.working_directory) {
-              invoke("create_realm", { path: activeSession.working_directory, name: null }).catch(console.error);
+              createRealm(activeSession.working_directory, null).catch(console.error);
             }
           }}
         />
@@ -398,26 +398,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{
-          padding: "40px", color: "#c8d6e5", background: "#0B0F14",
-          height: "100vh", fontFamily: "monospace", display: "flex",
-          flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: "16px",
-        }}>
-          <div style={{ fontSize: "18px", color: "#ff4444" }}>Something went wrong</div>
-          <pre style={{
-            fontSize: "12px", color: "#7f8c9b", maxWidth: "600px",
-            overflow: "auto", whiteSpace: "pre-wrap",
-          }}>
+        <div className="error-boundary">
+          <div className="error-boundary-title">Something went wrong</div>
+          <pre className="error-boundary-stack">
             {this.state.error?.message}
           </pre>
           <button
+            className="error-boundary-retry"
             onClick={() => this.setState({ hasError: false, error: null })}
-            style={{
-              padding: "8px 20px", background: "#33ff99", color: "#0B0F14",
-              border: "none", borderRadius: "4px", cursor: "pointer",
-              fontWeight: 600, fontFamily: "monospace",
-            }}
           >
             Try Again
           </button>

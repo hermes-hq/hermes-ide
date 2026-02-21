@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { updateSettings as applyTerminalSettings } from "../terminal/TerminalPool";
 import { useSession } from "../state/SessionContext";
+import {
+  getSettings, setSetting, exportSettings, importSettings,
+  type SettingsMap,
+} from "../api/settings";
 
 interface SettingsProps {
   onClose: () => void;
 }
-
-type SettingsMap = Record<string, string>;
 
 const PROVIDERS = [
   { id: "anthropic", name: "Anthropic (Claude)", keyName: "api_key_anthropic", models: ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-5-20251001"] },
@@ -26,8 +27,8 @@ export function Settings({ onClose }: SettingsProps) {
   const [activeTab, setActiveTab] = useState("general");
   const { dispatch } = useSession();
   useEffect(() => {
-    invoke("get_settings")
-      .then((s) => setSettings(s as SettingsMap))
+    getSettings()
+      .then((s) => setSettings(s))
       .catch(console.error);
   }, []);
 
@@ -45,7 +46,7 @@ export function Settings({ onClose }: SettingsProps) {
       }
       return next;
     });
-    invoke("set_setting", { key, value }).catch(console.error);
+    setSetting(key, value).catch(console.error);
     // Sync autonomous settings to live state
     if (key in AUTONOMOUS_KEYS) {
       dispatch({
@@ -73,7 +74,7 @@ export function Settings({ onClose }: SettingsProps) {
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span className="settings-title">Settings</span>
-          <button className="settings-close" onClick={onClose}>&times;</button>
+          <button className="close-btn settings-close" onClick={onClose}>&times;</button>
         </div>
 
         <div className="settings-body">
@@ -283,7 +284,7 @@ export function Settings({ onClose }: SettingsProps) {
                 filters: [{ name: "JSON", extensions: ["json"] }],
               });
               if (path) {
-                invoke("export_settings", { path }).catch(console.error);
+                exportSettings(path).catch(console.error);
               }
             }}
           >
@@ -298,7 +299,7 @@ export function Settings({ onClose }: SettingsProps) {
               });
               if (path) {
                 try {
-                  const newSettings = await invoke<SettingsMap>("import_settings", { path });
+                  const newSettings = await importSettings(path);
                   setSettings(newSettings);
                   applyTerminalSettings(newSettings);
                 } catch (e) {

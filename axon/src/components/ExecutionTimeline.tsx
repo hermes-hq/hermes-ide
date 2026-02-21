@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ExecutionNode } from "../state/SessionContext";
+import { getExecutionNodes } from "../api/execution";
 
 interface ExecutionTimelineProps {
   sessionId: string;
@@ -44,9 +44,8 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
     setLoading(true);
     setNodes([]);
     offsetRef.current = 0;
-    invoke("get_execution_nodes", { sessionId, limit: 50, offset: 0 })
-      .then((result) => {
-        const fetched = result as ExecutionNode[];
+    getExecutionNodes(sessionId, 50, 0)
+      .then((fetched) => {
         setNodes(fetched);
         offsetRef.current = fetched.length;
         setLoading(false);
@@ -76,9 +75,8 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
     if (!el || loadingMoreRef.current) return;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) {
       loadingMoreRef.current = true;
-      invoke("get_execution_nodes", { sessionId, limit: 50, offset: offsetRef.current })
-        .then((result) => {
-          const fetched = result as ExecutionNode[];
+      getExecutionNodes(sessionId, 50, offsetRef.current)
+        .then((fetched) => {
           if (fetched.length > 0) {
             setNodes((prev) => {
               const existingIds = new Set(prev.map((n) => n.id));

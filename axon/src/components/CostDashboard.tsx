@@ -1,24 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
-
-interface CostDailyEntry {
-  date: string;
-  provider: string;
-  model: string;
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_cost_usd: number;
-  session_count: number;
-}
-
-interface ProjectCostEntry {
-  working_directory: string;
-  provider: string;
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_cost_usd: number;
-  session_count: number;
-}
+import type { CostDailyEntry, ProjectCostEntry } from "../types";
+import { getCostHistory, getCostByProject } from "../api/costs";
 
 interface CostDashboardProps {
   onClose: () => void;
@@ -39,8 +21,8 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      invoke("get_cost_history", { days }).then((entries) => setDailyCosts(entries as CostDailyEntry[])).catch((err) => console.warn("[CostDashboard] Failed to load cost history:", err)),
-      invoke("get_cost_by_project", { days }).then((entries) => setProjectCosts(entries as ProjectCostEntry[])).catch((err) => console.warn("[CostDashboard] Failed to load project costs:", err)),
+      getCostHistory(days).then((entries) => setDailyCosts(entries)).catch((err) => console.warn("[CostDashboard] Failed to load cost history:", err)),
+      getCostByProject(days).then((entries) => setProjectCosts(entries)).catch((err) => console.warn("[CostDashboard] Failed to load project costs:", err)),
     ]).finally(() => setLoading(false));
   }, [days]);
 
@@ -93,7 +75,7 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
               </button>
             ))}
           </div>
-          <button className="cost-dashboard-close" onClick={onClose}>&times;</button>
+          <button className="close-btn cost-dashboard-close" onClick={onClose}>&times;</button>
         </div>
 
         {loading ? (

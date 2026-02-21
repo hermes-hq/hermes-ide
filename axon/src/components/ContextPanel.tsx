@@ -1,42 +1,17 @@
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SessionData, useExecutionMode, useSession } from "../state/SessionContext";
+import { writeToSession, addWorkspacePath as apiAddWorkspacePath } from "../api/sessions";
+import { getSessionRealms } from "../api/realms";
+import { addContextPin, removeContextPin, findErrorCorrelations } from "../api/context";
+import { getAllMemory, saveMemory, deleteMemory } from "../api/memory";
 import { useFileTree, FileTreeNode } from "../hooks/useFileTree";
-import { useContextBundle } from "../hooks/useContextBundle";
 import { useContextState } from "../hooks/useContextState";
 import { ContextStatusBar } from "./ContextStatusBar";
 import { ContextPreview } from "./ContextPreview";
 import { utf8ToBase64 } from "../utils/encoding";
-
-interface PersistedMemory {
-  id: number;
-  scope: string;
-  scope_id: string;
-  category: string;
-  key: string;
-  value: string;
-  source: string;
-  confidence: number;
-  access_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ErrorMatchEvent {
-  fingerprint: string;
-  occurrence_count: number;
-  resolution: string | null;
-  raw_sample: string | null;
-}
-
-interface ErrorCorrelation {
-  session_id: string;
-  session_label: string;
-  last_seen: number;
-  occurrence_count: number;
-}
+import type { PersistedMemory, ErrorMatchEvent, ErrorCorrelation } from "../types";
 
 interface ContextPanelProps {
   session: SessionData;
@@ -95,7 +70,7 @@ function ToolBar({ tool, count, maxCount }: { tool: string; count: number; maxCo
 
 function sendCommand(sessionId: string, command: string) {
   const data = utf8ToBase64(command + "\r");
-  invoke("write_to_session", { sessionId, data }).catch((err) => {
+  writeToSession(sessionId, data).catch((err) => {
     console.warn(`[ContextPanel] Failed to send command "${command}":`, err);
   });
 }
@@ -178,7 +153,7 @@ function DomainSection({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     let mounted = true;
     const fetchRealms = () => {
-      invoke("get_session_realms", { sessionId })
+      getSessionRealms(sessionId)
         .then((r) => { if (mounted) { setRealms(r as typeof realms); setLoading(false); } })
         .catch((err) => { console.warn("[ContextPanel] Failed to load realms:", err); if (mounted) setLoading(false); });
     };
@@ -274,23 +249,23 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const [pinTarget, setPinTarget] = useState("");
   const [correlations, setCorrelations] = useState<Record<string, ErrorCorrelation[]>>({});
   const [copyDone, setCopyDone] = useState(false);
+  const [expandedErrors, setExpandedErrors] = useState<Set<number>>(new Set());
 
   // Pins come from contextManager (single source of truth via backend events)
   const pins = contextManager.context.pinnedItems;
 
   const fileTree = useFileTree(metrics.files_touched);
-  const { copyToClipboard } = useContextBundle(session);
 
   const handleCopyContext = useCallback(async () => {
-    await copyToClipboard();
+    await contextManager.copyToClipboard();
     setCopyDone(true);
     setTimeout(() => setCopyDone(false), 2000);
-  }, [copyToClipboard]);
+  }, [contextManager.copyToClipboard]);
 
   // Load persisted memory on mount and when session changes
   useEffect(() => {
-    invoke("get_all_memory", { scope: "global", scopeId: "global" })
-      .then((entries) => setPersistedMemory(entries as PersistedMemory[]))
+    getAllMemory("global", "global")
+      .then((entries) => setPersistedMemory(entries))
       .catch((err) => console.warn("[ContextPanel] Failed to load persisted memory:", err));
   }, [session.id]);
 
@@ -309,13 +284,12 @@ export function ContextPanel({ session }: ContextPanelProps) {
       });
 
       // Fetch correlations for this error (F6)
-      invoke("find_error_correlations", {
+      findErrorCorrelations({
         fingerprint: event.payload.fingerprint,
         projectId: session.working_directory,
         excludeSession: session.id,
         limit: 3,
-      }).then((result) => {
-        const corrs = result as ErrorCorrelation[];
+      }).then((corrs) => {
         if (corrs.length > 0) {
           setCorrelations((prev) => ({ ...prev, [event.payload.fingerprint]: corrs }));
         }
@@ -327,7 +301,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const addPin = useCallback(async () => {
     if (!pinTarget.trim()) return;
     try {
-      await invoke("add_context_pin", {
+      await addContextPin({
         sessionId: session.id, projectId: null,
         kind: pinKind, target: pinTarget.trim(), label: null, priority: null,
       });
@@ -346,7 +320,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
         defaultPath: session.working_directory,
       });
       if (selected) {
-        await invoke("add_context_pin", {
+        await addContextPin({
           sessionId: session.id, projectId: null,
           kind: "file", target: selected, label: null, priority: null,
         });
@@ -359,7 +333,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
 
   const removePin = useCallback(async (id: number) => {
     try {
-      await invoke("remove_context_pin", { id });
+      await removeContextPin(id);
       // State update handled by context-pins-changed event → useContextState
     } catch (err) {
       console.warn("[ContextPanel] Failed to remove pin:", err);
@@ -368,7 +342,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
 
   const pinFile = useCallback(async (filePath: string) => {
     try {
-      await invoke("add_context_pin", {
+      await addContextPin({
         sessionId: session.id, projectId: null,
         kind: "file", target: filePath, label: null, priority: null,
       });
@@ -380,7 +354,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
 
   const pinMemory = useCallback(async (key: string, value: string) => {
     try {
-      await invoke("add_context_pin", {
+      await addContextPin({
         sessionId: session.id, projectId: null,
         kind: "memory", target: `${key}=${value}`, label: key, priority: null,
       });
@@ -393,7 +367,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const addMemoryFact = useCallback(async () => {
     if (!memoryKeyInput.trim() || !memoryValueInput.trim()) return;
     try {
-      await invoke("save_memory", {
+      await saveMemory({
         scope: "global",
         scopeId: "global",
         key: memoryKeyInput.trim(),
@@ -405,8 +379,8 @@ export function ContextPanel({ session }: ContextPanelProps) {
       setMemoryKeyInput("");
       setMemoryValueInput("");
       setShowMemoryAdd(false);
-      const entries = await invoke("get_all_memory", { scope: "global", scopeId: "global" });
-      setPersistedMemory(entries as PersistedMemory[]);
+      const entries = await getAllMemory("global", "global");
+      setPersistedMemory(entries);
     } catch (err) {
       console.warn("[ContextPanel] Failed to save memory:", err);
     }
@@ -414,7 +388,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
 
   const deleteMemoryFact = useCallback(async (key: string) => {
     try {
-      await invoke("delete_memory", { scope: "global", scopeId: "global", key });
+      await deleteMemory("global", "global", key);
       setPersistedMemory((prev) => prev.filter((m) => m.key !== key));
     } catch (err) {
       console.warn("[ContextPanel] Failed to delete memory:", err);
@@ -424,7 +398,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const addWorkspacePath = useCallback(async () => {
     if (!workspaceInput.trim()) return;
     try {
-      await invoke("add_workspace_path", { sessionId: session.id, path: workspaceInput.trim() });
+      await apiAddWorkspacePath(session.id, workspaceInput.trim());
       setWorkspaceInput("");
     } catch (err) {
       console.warn("[ContextPanel] Failed to add workspace path:", err);
@@ -788,7 +762,16 @@ export function ContextPanel({ session }: ContextPanelProps) {
             ))}
             <div className="ctx-error-list">
               {metrics.recent_errors.slice(-5).map((err, i) => (
-                <div key={i} className="ctx-error-entry mono">{err}</div>
+                <div
+                  key={i}
+                  className={`ctx-error-entry mono ${expandedErrors.has(i) ? "ctx-error-entry-expanded" : ""}`}
+                  onClick={() => setExpandedErrors((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(i)) next.delete(i);
+                    else next.add(i);
+                    return next;
+                  })}
+                >{err}</div>
               ))}
             </div>
           </div>

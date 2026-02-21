@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { writeToSession, resizeSession } from "../api/sessions";
 import { suggest } from "./intelligence/suggestionEngine";
 import { type ProjectContext, getCachedContext } from "./intelligence/contextAnalyzer";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
@@ -155,7 +155,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     handleTerminalInput(sessionId, data);
   });
   terminal.onBinary((data) => {
-    invoke("write_to_session", { sessionId, data: btoa(data) }).catch((err) => {
+    writeToSession(sessionId, btoa(data)).catch((err) => {
       console.warn(`[TerminalPool] write_to_session (binary) failed for ${sessionId}:`, err);
     });
   });
@@ -252,7 +252,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
     const ghostContent = entry.ghostText;
     clearGhostText(sessionId);
     dismissSuggestions(sessionId);
-    invoke("write_to_session", { sessionId, data: utf8ToBase64(ghostContent + "\r") }).catch((err) => {
+    writeToSession(sessionId, utf8ToBase64(ghostContent + "\r")).catch((err) => {
       console.warn(`[TerminalPool] write_to_session (ghost accept) failed for ${sessionId}:`, err);
     });
     return;
@@ -269,7 +269,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
   }
 
   // ── Always pass data to PTY ──
-  invoke("write_to_session", { sessionId, data: utf8ToBase64(data) }).catch((err) => {
+  writeToSession(sessionId, utf8ToBase64(data)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session failed for ${sessionId}:`, err);
   });
 
@@ -397,7 +397,7 @@ function acceptSuggestion(sessionId: string): void {
   // Send backspaces to erase current input, then write the suggestion
   const eraseSequence = "\x7f".repeat(currentInput.length);
   const fullData = eraseSequence + selected.text;
-  invoke("write_to_session", { sessionId, data: utf8ToBase64(fullData) }).catch((err) => {
+  writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (accept) failed for ${sessionId}:`, err);
   });
 }
@@ -421,7 +421,7 @@ function executeSuggestion(sessionId: string): void {
 
   const eraseSequence = "\x7f".repeat(currentInput.length);
   const fullData = eraseSequence + selected.text + "\r";
-  invoke("write_to_session", { sessionId, data: utf8ToBase64(fullData) }).catch((err) => {
+  writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (execute) failed for ${sessionId}:`, err);
   });
 }
@@ -435,7 +435,7 @@ function acceptGhostInline(sessionId: string): void {
   dismissSuggestions(sessionId);
 
   entry.inputBuffer += ghostContent;
-  invoke("write_to_session", { sessionId, data: utf8ToBase64(ghostContent) }).catch((err) => {
+  writeToSession(sessionId, utf8ToBase64(ghostContent)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (ghost inline) failed for ${sessionId}:`, err);
   });
 }
@@ -590,11 +590,7 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
       entry.fitAddon.fit();
     } catch { /* terminal may not be ready */ }
     if (autoFocus) entry.terminal.focus();
-    invoke("resize_session", {
-      sessionId,
-      rows: entry.terminal.rows,
-      cols: entry.terminal.cols,
-    }).catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
+    resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols).catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
   });
 }
 
