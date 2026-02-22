@@ -225,13 +225,12 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   terminal.loadAddon(new WebLinksAddon());
 
   // Wire input → PTY (with intelligence interception)
+  // NOTE: onBinary was intentionally removed — it caused duplicate keystrokes
+  // for printable characters (e.g. apostrophes) when xterm fired both onData
+  // and onBinary for the same keystroke on macOS with smart quotes / dead keys.
+  // All input (including binary escape sequences) flows through onData.
   terminal.onData((data) => {
     handleTerminalInput(sessionId, data);
-  });
-  terminal.onBinary((data) => {
-    writeToSession(sessionId, btoa(data)).catch((err) => {
-      console.warn(`[TerminalPool] write_to_session (binary) failed for ${sessionId}:`, err);
-    });
   });
 
   // Wire PTY output → terminal

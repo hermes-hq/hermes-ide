@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { SessionData } from "../state/SessionContext";
 import { getContextPins, getErrorResolutions, applyContext as apiApplyContext } from "../api/context";
@@ -195,12 +195,15 @@ export function useContextState(session: SessionData | null, executionMode?: str
   }, [session?.id]);
 
   // ── Keep context in sync with live session data (reactive updates) ──
-  // Serialize relevant session fields to a stable string so the effect only fires
-  // when the actual values change, not on every SESSION_UPDATED event (which
-  // creates new array/object references even when values are identical).
-  const sessionSyncKey = useMemo(() => {
-    if (!session) return "";
-    return JSON.stringify({
+  // We use a ref to track the previous serialized key so the effect only
+  // triggers setContext when session fields actually change — not on every
+  // SESSION_UPDATED event (which creates new object references even when
+  // values are identical).
+  const prevSyncKeyRef = useRef("");
+
+  useEffect(() => {
+    if (!session) return;
+    const key = JSON.stringify({
       wd: session.working_directory,
       wp: session.workspace_paths,
       agent: session.detected_agent?.name ?? null,
@@ -209,10 +212,8 @@ export function useContextState(session: SessionData | null, executionMode?: str
       ft: session.metrics.files_touched,
       re: session.metrics.recent_errors,
     });
-  }, [session]);
-
-  useEffect(() => {
-    if (!session) return;
+    if (key === prevSyncKeyRef.current) return; // no real change — skip
+    prevSyncKeyRef.current = key;
     setContext((prev) => ({
       ...prev,
       workingDirectory: session.working_directory,
@@ -223,7 +224,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
       filesTouched: session.metrics.files_touched,
       recentErrors: session.metrics.recent_errors,
     }));
-  }, [sessionSyncKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Listen for realm changes ──
   useEffect(() => {
@@ -235,7 +236,10 @@ export function useContextState(session: SessionData | null, executionMode?: str
       assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET)
         .then((ctx) => {
           if (!cancelled) {
-            setContext((prev) => ({ ...prev, realms: ctx.realms }));
+            setContext((prev) => {
+              if (structuralEqual(prev.realms, ctx.realms)) return prev; // no-op if unchanged
+              return { ...prev, realms: ctx.realms };
+            });
             if (ctx.token_budget) setTokenBudget(ctx.token_budget);
             if (ctx.estimated_tokens) setEstimatedTokens(ctx.estimated_tokens);
           }
