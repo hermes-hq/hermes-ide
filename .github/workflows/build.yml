@@ -70,23 +70,35 @@ jobs:
         run: npx tauri build --target aarch64-apple-darwin
 
       - name: Notarize DMG
-        timeout-minutes: 45
+        timeout-minutes: 30
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           DMG_PATH=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          NOTARIZED=false
           for attempt in 1 2 3; do
-            echo "Notarization attempt $attempt..."
-            xcrun notarytool submit "$DMG_PATH" \
+            echo "Notarization attempt $attempt of 3..."
+            if xcrun notarytool submit "$DMG_PATH" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_ID_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
-              --wait --timeout 30m && break
-            echo "Attempt $attempt failed, retrying in 30s..."
-            sleep 30
+              --wait --timeout 8m; then
+              NOTARIZED=true
+              break
+            fi
+            echo "Attempt $attempt failed."
+            if [ "$attempt" -lt 3 ]; then
+              echo "Retrying in 15s..."
+              sleep 15
+            fi
           done
+          if [ "$NOTARIZED" != "true" ]; then
+            echo "::error::All 3 notarization attempts failed"
+            exit 1
+          fi
           xcrun stapler staple "$DMG_PATH"
 
       - name: Upload DMG
