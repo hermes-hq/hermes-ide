@@ -75,21 +75,10 @@ function simulateSessionSyncWithGuard(sessions: MockSessionData[]): number {
   return setContextCallCount;
 }
 
-interface MockRealmContext {
-  realms: Array<{
-    realm_id: string;
-    realm_name: string;
-    languages: string[];
-    frameworks: string[];
-    conventions: string[];
-  }>;
-}
-
 // ─── Tests: Session sync key stability ───────────────────────────────
 
 describe("Context dirty regression: sessionSyncKey guard", () => {
   it("identical session updates do NOT trigger setContext", () => {
-    const session = makeSession();
     // Simulate 10 SESSION_UPDATED events with identical data but new object refs
     const sessions = Array.from({ length: 10 }, () => makeSession());
 
