@@ -42,17 +42,18 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "dmg": {
+        "background": "icons/dmg-background.png",
         "windowSize": {
           "width": 720,
           "height": 480
         },
         "appPosition": {
           "x": 200,
-          "y": 240
+          "y": 220
         },
         "applicationFolderPosition": {
           "x": 520,
-          "y": 240
+          "y": 220
         }
       }
     }
