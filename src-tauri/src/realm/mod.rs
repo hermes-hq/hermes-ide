@@ -38,14 +38,6 @@ pub struct Realm {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionRealm {
-    pub session_id: String,
-    pub realm_id: String,
-    pub attached_at: String,
-    pub role: String,
-}
-
 // ─── IPC Commands ────────────────────────────────────────────────────
 
 #[tauri::command]

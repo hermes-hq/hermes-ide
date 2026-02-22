@@ -9,6 +9,9 @@ export default defineConfig(async () => ({
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
+  build: {
+    chunkSizeWarningLimit: 1000,
+  },
   clearScreen: false,
   server: {
     port: 1420,
