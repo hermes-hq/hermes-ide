@@ -1,0 +1,86 @@
+/* ─── Close Session Dialog ──────────────────────────────────── */
+
+.close-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(2px);
+}
+
+.close-dialog {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 400px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: overlayIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.close-dialog-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 8px;
+}
+
+.close-dialog-body {
+  font-size: var(--text-lg);
+  color: var(--text-2);
+  margin-bottom: 16px;
+}
+
+.close-dialog-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-base);
+  color: var(--text-2);
+  margin-bottom: 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.close-dialog-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+.close-dialog-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.close-dialog-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  font-family: var(--font-ui);
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.close-dialog-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-3);
+}
+
+.close-dialog-btn-confirm {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.close-dialog-btn-confirm:hover {
+  background: var(--red);
+  color: white;
+}

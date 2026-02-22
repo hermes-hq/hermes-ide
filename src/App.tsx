@@ -13,6 +13,7 @@ import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { EmptyState } from "./components/EmptyState";
 import { StuckOverlay } from "./components/StuckOverlay";
+import { CloseSessionDialog } from "./components/CloseSessionDialog";
 import { Settings } from "./components/Settings";
 import { ShortcutsPanel } from "./components/ShortcutsPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
@@ -25,12 +26,13 @@ import { RealmPicker } from "./components/RealmPicker";
 import { SessionCreator } from "./components/SessionCreator";
 import { PromptComposer } from "./components/PromptComposer";
 import { SplitLayout } from "./components/SplitLayout";
+import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { decodeSessionDrag } from "./components/SplitPane";
 import { focusTerminal } from "./terminal/TerminalPool";
 
 function AppContent() {
-  const { state, dispatch, createSession, closeSession, setActive } = useSession();
+  const { state, dispatch, createSession, closeSession, requestCloseSession, setActive } = useSession();
   const activeSession = useActiveSession();
   const sessions = useSessionList();
   const { ui } = state;
@@ -100,7 +102,7 @@ function AppContent() {
             // Close just the pane, keep the session alive
             dispatch({ type: "CLOSE_PANE", paneId: state.layout.focusedPaneId });
           } else if (state.activeSessionId) {
-            closeSession(state.activeSessionId);
+            requestCloseSession(state.activeSessionId);
           }
           break;
         case "e": e.preventDefault(); dispatch({ type: "TOGGLE_CONTEXT" }); break;
@@ -121,7 +123,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.activeSessionId, state.layout, sessions, activeSession, createSession, closeSession, dispatch, setActive]);
+  }, [state.activeSessionId, state.layout, sessions, activeSession, createSession, closeSession, requestCloseSession, dispatch, setActive]);
 
   const sendCtrlC = useCallback(() => {
     const id = ui.stuckOverlaySessionId;
@@ -221,7 +223,7 @@ function AppContent() {
             sessions={sessions}
             activeSessionId={state.activeSessionId}
             onSelect={setActive}
-            onClose={closeSession}
+            onClose={requestCloseSession}
           />
         )}
         <div className="main-area">
@@ -378,6 +380,21 @@ function AppContent() {
           delayMs={autoSettings.cancelDelayMs}
           onCancel={() => dispatch({ type: "DISMISS_AUTO_TOAST" })}
           onExecute={handleAutoExecute}
+        />
+      )}
+
+      {state.pendingCloseSessionId && (
+        <CloseSessionDialog
+          sessionId={state.pendingCloseSessionId}
+          onConfirm={(id) => {
+            dispatch({ type: "CANCEL_CLOSE_SESSION" });
+            closeSession(id);
+          }}
+          onCancel={() => dispatch({ type: "CANCEL_CLOSE_SESSION" })}
+          onDontAskAgain={() => {
+            dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip: true });
+            setSetting("skip_close_confirm", "true").catch(console.warn);
+          }}
         />
       )}
     </div>

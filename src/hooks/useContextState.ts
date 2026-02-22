@@ -130,6 +130,8 @@ export function useContextState(session: SessionData | null, executionMode?: str
   const [estimatedTokens, setEstimatedTokens] = useState(0);
 
   const prevContextRef = useRef<ContextState | null>(null);
+  const contextRef = useRef(context);
+  contextRef.current = context;
   const versionRef = useRef(0);
   const lifecycleRef = useRef<ContextLifecycleState>('clean');
 
@@ -260,7 +262,10 @@ export function useContextState(session: SessionData | null, executionMode?: str
       if (cancelled) return;
       getContextPins(session.id, null)
         .then((pins) => {
-          if (!cancelled) setContext((prev) => ({ ...prev, pinnedItems: pins }));
+          if (!cancelled) setContext((prev) => {
+            if (structuralEqual(prev.pinnedItems, pins)) return prev;
+            return { ...prev, pinnedItems: pins };
+          });
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh pins:", err));
     }).then((u) => {
@@ -317,6 +322,11 @@ export function useContextState(session: SessionData | null, executionMode?: str
       setCurrentVersion(result.version);
 
       setLifecycle('clean');
+
+      // Absorb any context drift that occurred during the async apply window.
+      // Without this, metrics changes triggered by the AI's response to the nudge
+      // would be detected as new changes and re-mark the context dirty.
+      prevContextRef.current = structuralClone(contextRef.current);
 
       // If nudge had a warning but file was written, show non-fatal info
       if (result.nudge_error && !result.nudge_sent) {

@@ -151,4 +151,8 @@ export type SessionAction =
   | { type: "CLOSE_PANE"; paneId: string }
   | { type: "FOCUS_PANE"; paneId: string }
   | { type: "RESIZE_SPLIT"; splitId: string; ratio: number }
-  | { type: "SET_PANE_SESSION"; paneId: string; sessionId: string };
+  | { type: "SET_PANE_SESSION"; paneId: string; sessionId: string }
+  // Close confirmation actions
+  | { type: "REQUEST_CLOSE_SESSION"; id: string }
+  | { type: "CANCEL_CLOSE_SESSION" }
+  | { type: "SET_SKIP_CLOSE_CONFIRM"; skip: boolean };

@@ -5,7 +5,7 @@ import {
   getSessions, getRecentSessions, getSessionSnapshot,
 } from "../api/sessions";
 import { getRealms, getSessionRealms, attachSessionRealm, nudgeRealmContext } from "../api/realms";
-import { getSettings } from "../api/settings";
+import { getSettings, getSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback } from "../terminal/TerminalPool";
 import { applyTheme } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
@@ -47,6 +47,8 @@ interface SessionState {
     root: LayoutNode | null;
     focusedPaneId: string | null;
   };
+  pendingCloseSessionId: string | null;
+  skipCloseConfirm: boolean;
   ui: {
     contextPanelOpen: boolean;
     sessionListCollapsed: boolean;
@@ -297,6 +299,14 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
 
+    // ─── Close confirmation actions ───────────────────────────────────
+    case "REQUEST_CLOSE_SESSION":
+      return { ...state, pendingCloseSessionId: action.id };
+    case "CANCEL_CLOSE_SESSION":
+      return { ...state, pendingCloseSessionId: null };
+    case "SET_SKIP_CLOSE_CONFIRM":
+      return { ...state, skipCloseConfirm: action.skip };
+
     default:
       return state;
   }
@@ -316,6 +326,8 @@ export const initialState: SessionState = {
   },
   autoApplyEnabled: true,
   injectionLocks: {},
+  pendingCloseSessionId: null,
+  skipCloseConfirm: false,
   layout: {
     root: null,
     focusedPaneId: null,
@@ -339,6 +351,7 @@ interface SessionContextValue {
   dispatch: React.Dispatch<SessionAction>;
   createSession: (opts?: CreateSessionOpts) => Promise<SessionData | null>;
   closeSession: (id: string) => Promise<void>;
+  requestCloseSession: (id: string) => void;
   setActive: (id: string | null) => void;
 }
 
@@ -554,12 +567,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const requestCloseSession = useCallback((id: string) => {
+    if (state.skipCloseConfirm) {
+      closeSession(id);
+    } else {
+      dispatch({ type: "REQUEST_CLOSE_SESSION", id });
+    }
+  }, [state.skipCloseConfirm, closeSession]);
+
   const setActive = useCallback((id: string | null) => {
     dispatch({ type: "SET_ACTIVE", id });
   }, []);
 
+  // Load skip_close_confirm preference on mount
+  useEffect(() => {
+    getSetting("skip_close_confirm")
+      .then((val) => {
+        if (val === "true") {
+          dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip: true });
+        }
+      })
+      .catch(() => { /* Setting not found — use default (false) */ });
+  }, []);
+
   return (
-    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, setActive }}>
+    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive }}>
       {children}
     </SessionContext.Provider>
   );
