@@ -1,0 +1,300 @@
+/* ─── Process Panel ──────────────────────────────────────────── */
+
+.process-panel {
+  width: 240px;
+  min-width: 200px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* ─── Toolbar ──────────────────────────────────────────────── */
+
+.process-toolbar {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.process-search {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.process-search:focus {
+  border-color: var(--accent);
+}
+
+.process-toolbar-toggles {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.process-toggle {
+  padding: 2px 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.process-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.process-toggle-active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.process-toggle-danger.process-toggle-active {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ─── Summary Bar ──────────────────────────────────────────── */
+
+.process-summary {
+  padding: 4px var(--space-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--space-2);
+  font-size: 10px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+
+.process-error {
+  padding: 4px var(--space-2);
+  background: var(--red-dim);
+  color: var(--red);
+  font-size: 10px;
+}
+
+/* ─── Table Header ─────────────────────────────────────────── */
+
+.process-table-header {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+
+.process-col-header {
+  padding: 4px 2px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.process-col-header:hover {
+  color: var(--text-0);
+}
+
+.process-col-sorted {
+  color: var(--accent);
+}
+
+.process-sort-arrow {
+  font-size: 8px;
+}
+
+/* ─── Column widths ────────────────────────────────────────── */
+
+.process-col-pid,
+.process-col-header.process-col-pid { width: 48px; min-width: 48px; }
+.process-col-name,
+.process-col-header.process-col-name { flex: 1; min-width: 60px; }
+.process-col-cpu,
+.process-col-header.process-col-cpu { width: 44px; min-width: 44px; text-align: right; }
+.process-col-mem,
+.process-col-header.process-col-mem { width: 52px; min-width: 52px; text-align: right; }
+.process-col-mempct,
+.process-col-header.process-col-mempct { width: 40px; min-width: 40px; text-align: right; }
+.process-col-threads,
+.process-col-header.process-col-threads { width: 28px; min-width: 28px; text-align: right; }
+.process-col-ppid,
+.process-col-header.process-col-ppid { width: 44px; min-width: 44px; }
+.process-col-uptime,
+.process-col-header.process-col-uptime,
+.process-col-header.process-col-start_time { width: 44px; min-width: 44px; }
+.process-col-user,
+.process-col-header.process-col-user { width: 52px; min-width: 52px; }
+.process-col-status,
+.process-col-header.process-col-status { width: 52px; min-width: 52px; }
+
+/* ─── Table Scroll ─────────────────────────────────────────── */
+
+.process-table-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ─── Process Row ──────────────────────────────────────────── */
+
+.process-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.process-row:hover {
+  background: var(--bg-hover);
+}
+
+.process-row-main {
+  display: flex;
+  align-items: center;
+  height: 32px;
+}
+
+.process-col {
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.process-col-name {
+  font-weight: 500;
+}
+
+.process-lock {
+  font-size: 9px;
+  margin-right: 2px;
+}
+
+/* ─── Row Variants ─────────────────────────────────────────── */
+
+.process-row-hermes {
+  border-left: 2px solid var(--accent);
+}
+
+.process-row-zombie {
+  background: var(--red-dim);
+}
+
+.process-row-new {
+  animation: processRowFadeIn 0.3s ease-out;
+}
+
+@keyframes processRowFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Status Colors ────────────────────────────────────────── */
+
+.process-status-running { color: var(--green); }
+.process-status-sleeping { color: var(--text-3); }
+.process-status-zombie { color: var(--red); }
+.process-status-stopped { color: var(--yellow); }
+.process-status-dead { color: var(--red); }
+.process-status-unknown { color: var(--text-3); }
+
+/* ─── Expanded Row Detail ──────────────────────────────────── */
+
+.process-row-expanded {
+  background: var(--bg-0);
+}
+
+.process-row-detail {
+  padding: 4px var(--space-2) 8px;
+  font-size: 10px;
+  color: var(--text-2);
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.process-detail-info div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.process-detail-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.process-action-btn {
+  padding: 2px 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-size: 9px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.process-action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-3);
+}
+
+.process-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.process-action-danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.process-action-danger:hover:not(:disabled) {
+  background: var(--red-dim);
+}
+
+/* ─── Kill Warning ─────────────────────────────────────────── */
+
+.process-kill-warning {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  color: var(--red);
+  font-size: var(--text-base);
+}

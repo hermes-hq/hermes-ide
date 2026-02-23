@@ -8,7 +8,8 @@ import { createRealm } from "./api/realms";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
-import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, ProcessesIcon } from "./components/ActivityBar";
+import { ProcessPanel } from "./components/ProcessPanel";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { EmptyState } from "./components/EmptyState";
@@ -109,6 +110,7 @@ function AppContent() {
         case "k": e.preventDefault(); dispatch({ type: "TOGGLE_PALETTE" }); break;
         case "b": e.preventDefault(); dispatch({ type: "TOGGLE_SIDEBAR" }); break;
         case "j": e.preventDefault(); setComposerOpen((v) => !v); break;
+        case "p": e.preventDefault(); dispatch({ type: "TOGGLE_PROCESS_PANEL" }); break;
         case "t": e.preventDefault(); dispatch({ type: "TOGGLE_TIMELINE" }); break;
         case ",": e.preventDefault(); setSettingsOpen((v) => v ? null : "general"); break;
         case "/": e.preventDefault(); setShortcutsOpen((v) => !v); break;
@@ -212,19 +214,26 @@ function AppContent() {
             side="left"
             tabs={[
               { id: "sessions", label: "Sessions (⌘B)", icon: SessionsIcon, badge: sessions.length || undefined },
+              { id: "processes", label: "Processes (⌘P)", icon: ProcessesIcon },
             ]}
-            activeTabId={ui.sessionListCollapsed ? null : "sessions"}
-            onTabClick={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+            activeTabId={
+              ui.processPanelOpen ? "processes" :
+              ui.sessionListCollapsed ? null : "sessions"
+            }
+            onTabClick={(tabId) => dispatch({ type: "SET_LEFT_TAB", tab: tabId as "sessions" | "processes" })}
             topAction={{ icon: PlusIcon, label: "New Session (⌘N)", onClick: () => setSessionCreatorOpen(true) }}
           />
         )}
-        {!ui.sessionListCollapsed && !ui.flowMode && (
+        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && (
           <SessionList
             sessions={sessions}
             activeSessionId={state.activeSessionId}
             onSelect={setActive}
             onClose={requestCloseSession}
           />
+        )}
+        {ui.processPanelOpen && !ui.flowMode && (
+          <ProcessPanel visible={ui.processPanelOpen} />
         )}
         <div className="main-area">
           <div className="terminal-and-timeline">

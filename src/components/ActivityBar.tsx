@@ -64,6 +64,15 @@ export const ContextIcon = (
   </svg>
 );
 
+export const ProcessesIcon = (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="2" width="6" height="6" rx="1" />
+    <rect x="10" y="2" width="6" height="6" rx="1" />
+    <rect x="2" y="10" width="6" height="6" rx="1" />
+    <rect x="10" y="10" width="6" height="6" rx="1" />
+  </svg>
+);
+
 export const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
     <line x1="8" y1="3" x2="8" y2="13" />

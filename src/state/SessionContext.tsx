@@ -58,6 +58,8 @@ interface SessionState {
     flowMode: boolean;
     timelineOpen: boolean;
     autoToast: { command: string; reason: string; sessionId: string } | null;
+    processPanelOpen: boolean;
+    activeLeftTab: "sessions" | "processes";
   };
 }
 
@@ -156,7 +158,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "TOGGLE_CONTEXT":
       return { ...state, ui: { ...state.ui, contextPanelOpen: !state.ui.contextPanelOpen } };
     case "TOGGLE_SIDEBAR":
-      return { ...state, ui: { ...state.ui, sessionListCollapsed: !state.ui.sessionListCollapsed } };
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          sessionListCollapsed: !state.ui.sessionListCollapsed,
+          activeLeftTab: "sessions" as const,
+          processPanelOpen: !state.ui.sessionListCollapsed ? state.ui.processPanelOpen : false,
+        },
+      };
     case "TOGGLE_PALETTE":
       return { ...state, ui: { ...state.ui, commandPaletteOpen: !state.ui.commandPaletteOpen } };
     case "SHOW_STUCK_OVERLAY":
@@ -299,6 +309,32 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
 
+    // ─── Process panel actions ──────────────────────────────────────────
+    case "TOGGLE_PROCESS_PANEL": {
+      const opening = !state.ui.processPanelOpen;
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          processPanelOpen: opening,
+          activeLeftTab: opening ? "processes" : "sessions",
+          sessionListCollapsed: opening ? true : state.ui.sessionListCollapsed,
+        },
+      };
+    }
+    case "SET_LEFT_TAB": {
+      const tab = action.tab;
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          activeLeftTab: tab,
+          processPanelOpen: tab === "processes",
+          sessionListCollapsed: tab === "processes" ? true : false,
+        },
+      };
+    }
+
     // ─── Close confirmation actions ───────────────────────────────────
     case "REQUEST_CLOSE_SESSION":
       return { ...state, pendingCloseSessionId: action.id };
@@ -341,6 +377,8 @@ export const initialState: SessionState = {
     flowMode: false,
     timelineOpen: false,
     autoToast: null,
+    processPanelOpen: false,
+    activeLeftTab: "sessions" as const,
   },
 };
 

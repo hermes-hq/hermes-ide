@@ -34,3 +34,4 @@ walkdir = "2"
 base64 = "0.22"
 regex = "1"
 lazy_static = "1"
+sysinfo = { version = "0.33", default-features = false, features = ["apple-app-store", "system", "user"] }

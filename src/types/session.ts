@@ -155,4 +155,7 @@ export type SessionAction =
   // Close confirmation actions
   | { type: "REQUEST_CLOSE_SESSION"; id: string }
   | { type: "CANCEL_CLOSE_SESSION" }
-  | { type: "SET_SKIP_CLOSE_CONFIRM"; skip: boolean };
+  | { type: "SET_SKIP_CLOSE_CONFIRM"; skip: boolean }
+  // Process panel actions
+  | { type: "TOGGLE_PROCESS_PANEL" }
+  | { type: "SET_LEFT_TAB"; tab: "sessions" | "processes" };

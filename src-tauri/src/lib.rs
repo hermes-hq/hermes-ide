@@ -1,4 +1,5 @@
 mod db;
+mod process;
 mod pty;
 mod realm;
 mod workspace;
@@ -9,6 +10,7 @@ use tauri::Manager;
 pub struct AppState {
     pub db: Mutex<db::Database>,
     pub pty_manager: Mutex<pty::PtyManager>,
+    pub sys: Mutex<sysinfo::System>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -35,6 +37,7 @@ pub fn run() {
             let state = AppState {
                 db: Mutex::new(database),
                 pty_manager: Mutex::new(pty::PtyManager::new()),
+                sys: Mutex::new(sysinfo::System::new()),
             };
 
             app.manage(state);
@@ -111,6 +114,12 @@ pub fn run() {
             realm::attunement::apply_context,
             realm::attunement::fork_session_context,
             realm::attunement::load_hermes_project_config,
+            // Process management
+            process::list_processes,
+            process::kill_process,
+            process::kill_process_tree,
+            process::get_process_detail,
+            process::reveal_process_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running HERMES-IDE");
