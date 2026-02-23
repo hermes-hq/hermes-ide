@@ -34,10 +34,13 @@ pub fn run() {
             }
             let database = db::Database::new(&db_path).expect("Failed to initialize database");
 
+            let mut sys = sysinfo::System::new();
+            sys.refresh_all(); // baseline for CPU delta computation
+
             let state = AppState {
                 db: Mutex::new(database),
                 pty_manager: Mutex::new(pty::PtyManager::new()),
-                sys: Mutex::new(sysinfo::System::new()),
+                sys: Mutex::new(sys),
             };
 
             app.manage(state);

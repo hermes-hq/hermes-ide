@@ -1,9 +1,9 @@
 /* ─── Process Panel ──────────────────────────────────────────── */
 
 .process-panel {
-  width: 240px;
-  min-width: 200px;
-  max-width: 320px;
+  position: relative;
+  min-width: 240px;
+  max-width: 600px;
   display: flex;
   flex-direction: column;
   background: var(--bg-1);
@@ -11,6 +11,23 @@
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
+}
+
+/* ─── Resize Handle ───────────────────────────────────────────── */
+
+.process-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 3px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.process-panel-resize-handle:hover {
+  background: var(--accent);
 }
 
 /* ─── Toolbar ──────────────────────────────────────────────── */
@@ -93,6 +110,16 @@
   font-size: 10px;
 }
 
+/* ─── Horizontal Scroll Wrapper ───────────────────────────────── */
+
+.process-table-hscroll {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-x: auto;
+  min-height: 0;
+}
+
 /* ─── Table Header ─────────────────────────────────────────── */
 
 .process-table-header {
@@ -100,6 +127,7 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
   flex-shrink: 0;
+  min-width: 500px;
 }
 
 .process-col-header {
@@ -180,6 +208,7 @@
   display: flex;
   align-items: center;
   height: 32px;
+  min-width: 500px;
 }
 
 .process-col {
@@ -284,6 +313,50 @@
 }
 
 .process-action-danger:hover:not(:disabled) {
+  background: var(--red-dim);
+}
+
+/* ─── Context Menu ─────────────────────────────────────────── */
+
+.process-context-menu {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+  min-width: 140px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.process-context-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.process-context-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.process-context-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.process-context-item-danger {
+  color: var(--red);
+}
+
+.process-context-item-danger:hover:not(:disabled) {
   background: var(--red-dim);
 }
 

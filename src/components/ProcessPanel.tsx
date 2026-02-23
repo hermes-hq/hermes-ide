@@ -1,8 +1,14 @@
-import { useState, useMemo, useCallback, useRef, memo } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, memo } from "react";
 import "../styles/components/ProcessPanel.css";
 import { useProcesses } from "../hooks/useProcesses";
 import { killProcess, killProcessTree, getProcessDetail, revealProcessInFinder } from "../api/processes";
 import type { ProcessInfo, ProcessSortField, SortDirection, ProcessFilter } from "../types/process";
+
+// ─── Constants ──────────────────────────────────────────────────────
+
+const PANEL_MIN_WIDTH = 240;
+const PANEL_MAX_WIDTH = 600;
+const PANEL_DEFAULT_WIDTH = 320;
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -90,6 +96,84 @@ function memColor(pct: number): string {
   return cpuColor(pct);
 }
 
+// ─── ContextMenu ────────────────────────────────────────────────────
+
+interface ContextMenuProps {
+  x: number;
+  y: number;
+  process: ProcessInfo;
+  advancedMode: boolean;
+  onKill: (pid: number, signal: string, name: string) => void;
+  onKillTree: (pid: number, signal: string, name: string) => void;
+  onReveal: (path: string) => void;
+  onClose: () => void;
+}
+
+function ProcessContextMenu({ x, y, process, advancedMode, onKill, onKillTree, onReveal, onClose }: ContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [onClose]);
+
+  // Adjust position so menu stays within viewport
+  const style: React.CSSProperties = {
+    position: "fixed",
+    top: y,
+    left: x,
+    zIndex: 9999,
+  };
+
+  return (
+    <div className="process-context-menu" ref={menuRef} style={style}>
+      <button className="process-context-item" onClick={() => { navigator.clipboard.writeText(String(process.pid)); onClose(); }}>
+        Copy PID
+      </button>
+      <button
+        className="process-context-item"
+        disabled={process.is_protected}
+        onClick={() => { onKill(process.pid, "SIGTERM", process.name); onClose(); }}
+      >
+        Send SIGTERM
+      </button>
+      {advancedMode && (
+        <>
+          <button
+            className="process-context-item process-context-item-danger"
+            disabled={process.is_protected}
+            onClick={() => { onKill(process.pid, "SIGKILL", process.name); onClose(); }}
+          >
+            Send SIGKILL
+          </button>
+          <button
+            className="process-context-item process-context-item-danger"
+            disabled={process.is_protected}
+            onClick={() => { onKillTree(process.pid, "SIGTERM", process.name); onClose(); }}
+          >
+            Kill Tree
+          </button>
+        </>
+      )}
+      {process.exe_path && (
+        <button className="process-context-item" onClick={() => { onReveal(process.exe_path); onClose(); }}>
+          Reveal in Finder
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── ProcessRow ─────────────────────────────────────────────────────
 
 interface ProcessRowProps {
@@ -103,11 +187,12 @@ interface ProcessRowProps {
   onKill: (pid: number, signal: string, name: string) => void;
   onKillTree: (pid: number, signal: string, name: string) => void;
   onReveal: (path: string) => void;
+  onContextMenu: (e: React.MouseEvent, process: ProcessInfo) => void;
 }
 
 const ProcessRow = memo(function ProcessRow({
   process, isExpanded, isNew, top, height, advancedMode,
-  onToggleExpand, onKill, onKillTree, onReveal,
+  onToggleExpand, onKill, onKillTree, onReveal, onContextMenu,
 }: ProcessRowProps) {
   const [detail, setDetail] = useState<ProcessInfo | null>(null);
 
@@ -123,6 +208,7 @@ const ProcessRow = memo(function ProcessRow({
       className={`process-row${isExpanded ? " process-row-expanded" : ""}${process.is_hermes_session ? " process-row-hermes" : ""}${process.is_zombie ? " process-row-zombie" : ""}${isNew ? " process-row-new" : ""}`}
       style={{ position: "absolute", top, height, width: "100%" }}
       onClick={handleExpand}
+      onContextMenu={(e) => onContextMenu(e, process)}
     >
       <div className="process-row-main">
         <span className="process-col process-col-pid">{process.pid}</span>
@@ -287,6 +373,13 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
   const [skipKillConfirm, setSkipKillConfirm] = useState(false);
   const [pendingKill, setPendingKill] = useState<{ pid: number; signal: string; name: string; isTree: boolean } | null>(null);
 
+  // Resize state
+  const [panelWidth, setPanelWidth] = useState(PANEL_DEFAULT_WIDTH);
+  const resizeRafRef = useRef<number | null>(null);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; process: ProcessInfo } | null>(null);
+
   // Virtualization
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -377,10 +470,50 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
     setAdvancedMode((v) => !v);
   }, [advancedMode, advancedWarningShown]);
 
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = panelWidth;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (resizeRafRef.current !== null) return;
+      resizeRafRef.current = requestAnimationFrame(() => {
+        resizeRafRef.current = null;
+        const delta = ev.clientX - startX;
+        const newWidth = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, startWidth + delta));
+        setPanelWidth(newWidth);
+      });
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      if (resizeRafRef.current !== null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [panelWidth]);
+
+  const handleRowContextMenu = useCallback((e: React.MouseEvent, process: ProcessInfo) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, process });
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
   if (!visible) return null;
 
   return (
-    <div className="process-panel">
+    <div className="process-panel" style={{ width: panelWidth }}>
       {/* Toolbar */}
       <div className="process-toolbar">
         <input
@@ -436,61 +569,82 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
 
       {error && <div className="process-error">{error}</div>}
 
-      {/* Table Header */}
-      <div className="process-table-header">
-        {([
-          ["pid", "PID"],
-          ["name", "Name"],
-          ["cpu_percent", "CPU%"],
-          ["memory_bytes", "Mem"],
-          ["memory_percent", "Mem%"],
-          ["threads", "Thr"],
-          ["ppid", "PPID"],
-          ["start_time", "Uptime"],
-          ["user", "User"],
-          ["status", "Status"],
-        ] as [ProcessSortField, string][]).map(([field, label]) => (
-          <button
-            key={field}
-            className={`process-col-header process-col-${field === "memory_bytes" ? "mem" : field === "memory_percent" ? "mempct" : field}${sortField === field ? " process-col-sorted" : ""}`}
-            onClick={() => handleSort(field)}
-          >
-            {label}
-            {sortField === field && (
-              <span className="process-sort-arrow">{sortDirection === "asc" ? " \u25B2" : " \u25BC"}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      {/* Horizontally scrollable table area */}
+      <div className="process-table-hscroll">
+        {/* Table Header */}
+        <div className="process-table-header">
+          {([
+            ["pid", "PID"],
+            ["name", "Name"],
+            ["cpu_percent", "CPU%"],
+            ["memory_bytes", "Mem"],
+            ["memory_percent", "Mem%"],
+            ["threads", "Thr"],
+            ["ppid", "PPID"],
+            ["start_time", "Uptime"],
+            ["user", "User"],
+            ["status", "Status"],
+          ] as [ProcessSortField, string][]).map(([field, label]) => (
+            <button
+              key={field}
+              className={`process-col-header process-col-${field === "memory_bytes" ? "mem" : field === "memory_percent" ? "mempct" : field}${sortField === field ? " process-col-sorted" : ""}`}
+              onClick={() => handleSort(field)}
+            >
+              {label}
+              {sortField === field && (
+                <span className="process-sort-arrow">{sortDirection === "asc" ? " \u25B2" : " \u25BC"}</span>
+              )}
+            </button>
+          ))}
+        </div>
 
-      {/* Virtualized Table */}
-      <div
-        className="process-table-scroll"
-        ref={scrollRef}
-        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-      >
-        <div style={{ height: totalHeight, position: "relative" }}>
-          {filteredProcesses.slice(visibleRange.startIdx, visibleRange.endIdx + 1).map((proc, i) => {
-            const idx = visibleRange.startIdx + i;
-            const pos = rowPositions[idx];
-            return (
-              <ProcessRow
-                key={proc.pid}
-                process={proc}
-                isExpanded={expandedPids.has(proc.pid)}
-                isNew={newPids.has(proc.pid)}
-                top={pos.top}
-                height={pos.height}
-                advancedMode={advancedMode}
-                onToggleExpand={toggleExpand}
-                onKill={(pid, signal, name) => handleKillRequest(pid, signal, name, false)}
-                onKillTree={(pid, signal, name) => handleKillRequest(pid, signal, name, true)}
-                onReveal={revealProcessInFinder}
-              />
-            );
-          })}
+        {/* Virtualized Table */}
+        <div
+          className="process-table-scroll"
+          ref={scrollRef}
+          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        >
+          <div style={{ height: totalHeight, position: "relative" }}>
+            {filteredProcesses.slice(visibleRange.startIdx, visibleRange.endIdx + 1).map((proc, i) => {
+              const idx = visibleRange.startIdx + i;
+              const pos = rowPositions[idx];
+              return (
+                <ProcessRow
+                  key={proc.pid}
+                  process={proc}
+                  isExpanded={expandedPids.has(proc.pid)}
+                  isNew={newPids.has(proc.pid)}
+                  top={pos.top}
+                  height={pos.height}
+                  advancedMode={advancedMode}
+                  onToggleExpand={toggleExpand}
+                  onKill={(pid, signal, name) => handleKillRequest(pid, signal, name, false)}
+                  onKillTree={(pid, signal, name) => handleKillRequest(pid, signal, name, true)}
+                  onReveal={revealProcessInFinder}
+                  onContextMenu={handleRowContextMenu}
+                />
+              );
+            })}
+          </div>
         </div>
       </div>
+
+      {/* Resize handle */}
+      <div className="process-panel-resize-handle" onMouseDown={handleResizeMouseDown} />
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ProcessContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          process={contextMenu.process}
+          advancedMode={advancedMode}
+          onKill={(pid, signal, name) => handleKillRequest(pid, signal, name, false)}
+          onKillTree={(pid, signal, name) => handleKillRequest(pid, signal, name, true)}
+          onReveal={revealProcessInFinder}
+          onClose={closeContextMenu}
+        />
+      )}
 
       {/* Kill Confirm Dialog */}
       {pendingKill && (
