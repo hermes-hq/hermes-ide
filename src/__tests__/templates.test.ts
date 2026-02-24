@@ -5,8 +5,8 @@ import { BUILT_IN_STYLES } from "../lib/styles";
 import { compilePrompt, EMPTY_FIELDS } from "../lib/compilePrompt";
 
 describe("Template registry", () => {
-  it("has 37 built-in templates with required fields", () => {
-    expect(BUILT_IN_TEMPLATES.length).toBe(37);
+  it("has 49 built-in templates with required fields", () => {
+    expect(BUILT_IN_TEMPLATES.length).toBe(49);
     for (const tpl of BUILT_IN_TEMPLATES) {
       expect(tpl.id).toBeTruthy();
       expect(tpl.name).toBeTruthy();

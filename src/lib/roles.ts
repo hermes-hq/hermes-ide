@@ -133,6 +133,34 @@ export const BUILT_IN_ROLES: RoleDefinition[] = [
     systemInstruction: "You are an ML engineer with expertise in machine learning, data pipelines, and model evaluation.",
     builtIn: true,
   },
+  {
+    id: "product-manager",
+    label: "Product Manager",
+    description: "Product strategy, user stories, prioritization, roadmaps",
+    systemInstruction: "You are a product manager with expertise in product strategy, user story writing, feature prioritization, and roadmap planning.",
+    builtIn: true,
+  },
+  {
+    id: "ux-designer",
+    label: "UX Designer",
+    description: "User experience, interaction design, usability heuristics",
+    systemInstruction: "You are a UX designer with expertise in user experience research, interaction design, usability heuristics, and design systems.",
+    builtIn: true,
+  },
+  {
+    id: "project-manager",
+    label: "Project Manager",
+    description: "Sprint planning, release coordination, risk management",
+    systemInstruction: "You are a project manager with expertise in agile methodologies, sprint planning, release coordination, and risk management.",
+    builtIn: true,
+  },
+  {
+    id: "data-analyst",
+    label: "Data Analyst",
+    description: "Metrics, analytics, data-driven decisions",
+    systemInstruction: "You are a data analyst with expertise in defining metrics, analyzing user behavior, and driving data-informed product decisions.",
+    builtIn: true,
+  },
 ];
 
 /**

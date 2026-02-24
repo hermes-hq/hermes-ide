@@ -8,7 +8,10 @@ export type TemplateCategory =
   | "testing"
   | "architecture"
   | "documentation"
-  | "git-review";
+  | "git-review"
+  | "product"
+  | "planning"
+  | "design";
 
 export interface PromptTemplate {
   id: string;
@@ -29,6 +32,9 @@ export const TEMPLATE_CATEGORIES: Record<TemplateCategory, { label: string; icon
   architecture:  { label: "Architecture",      icon: "^" },
   documentation: { label: "Documentation",     icon: "=" },
   "git-review":  { label: "Git & Code Review", icon: "@" },
+  product:       { label: "Product Management", icon: "%" },
+  planning:      { label: "Planning & Strategy", icon: "&" },
+  design:        { label: "UX & Design",        icon: "+" },
 };
 
 export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
@@ -465,6 +471,156 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
     fields: {
       constraints: "Guide through bisecting to find the commit that introduced the issue.",
       style: "Step-by-step git commands. Show how to write a test script for automated bisect.",
+    },
+  },
+
+  // ── Product Management (4) ──
+  {
+    id: "product-prd",
+    name: "PRD Writing",
+    category: "product",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "detailed", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Include problem statement, goals, user personas, requirements, success metrics, and out-of-scope items.",
+      style: "Use structured sections with clear headings. Include acceptance criteria for each requirement.",
+    },
+  },
+  {
+    id: "product-user-stories",
+    name: "User Story Generation",
+    category: "product",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 2 }],
+    builtIn: true,
+    fields: {
+      constraints: "Follow the 'As a [user], I want [goal], so that [benefit]' format. Include acceptance criteria and edge cases.",
+      style: "Group stories by epic or theme. Include story points estimation guidance and dependencies.",
+    },
+  },
+  {
+    id: "product-prioritization",
+    name: "Feature Prioritization",
+    category: "product",
+    recommendedRoles: ["product-manager", "data-analyst"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "balanced", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Use a prioritization framework (RICE, ICE, or MoSCoW). Consider impact, effort, confidence, and reach.",
+      style: "Present as a scored table. Justify each score. Show the final ranked priority list.",
+    },
+  },
+  {
+    id: "product-competitive",
+    name: "Competitive Analysis",
+    category: "product",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "detailed", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Compare features, pricing, strengths, and weaknesses across competitors. Identify gaps and opportunities.",
+      style: "Use comparison tables. Highlight differentiators. Conclude with strategic recommendations.",
+    },
+  },
+
+  // ── Planning & Strategy (4) ──
+  {
+    id: "planning-sprint",
+    name: "Sprint Planning",
+    category: "planning",
+    recommendedRoles: ["project-manager", "product-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define sprint goal, capacity, selected backlog items, and task breakdown. Flag risks and dependencies.",
+      style: "Structure as sprint goal, then itemized task list with estimates and assignees. Include a capacity check.",
+    },
+  },
+  {
+    id: "planning-roadmap",
+    name: "Roadmap Planning",
+    category: "planning",
+    recommendedRoles: ["product-manager", "architect"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "opinionated", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Organize by time horizons (now, next, later). Align features to strategic goals. Identify dependencies.",
+      style: "Use a timeline or swimlane format. Show milestones and key deliverables. Mark dependencies clearly.",
+    },
+  },
+  {
+    id: "planning-spike",
+    name: "Technical Spike",
+    category: "planning",
+    recommendedRoles: ["architect", "project-manager"],
+    recommendedStyles: [{ id: "balanced", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define the question to answer, time-box the investigation, and list evaluation criteria for each option.",
+      style: "Present options with pros/cons. Include a recommendation with rationale. Define follow-up actions.",
+    },
+  },
+  {
+    id: "planning-release",
+    name: "Release Planning",
+    category: "planning",
+    recommendedRoles: ["project-manager", "product-manager"],
+    recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Include release scope, timeline, go/no-go criteria, rollback plan, and communication plan.",
+      style: "Structure as a checklist. Show the release timeline with key dates and responsible parties.",
+    },
+  },
+
+  // ── UX & Design (4) ──
+  {
+    id: "design-ux-review",
+    name: "UX Heuristic Review",
+    category: "design",
+    recommendedRoles: ["ux-designer"],
+    recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Evaluate against Nielsen's 10 usability heuristics. Consider accessibility, learnability, and error prevention.",
+      style: "Score each heuristic. Show specific violations with severity ratings and suggested fixes.",
+    },
+  },
+  {
+    id: "design-system",
+    name: "Design System Audit",
+    category: "design",
+    recommendedRoles: ["ux-designer", "frontend-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "detailed", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Review component consistency, token usage, naming conventions, and pattern reuse.",
+      style: "Catalog inconsistencies by category (color, spacing, typography, components). Propose unified tokens.",
+    },
+  },
+  {
+    id: "design-user-flow",
+    name: "User Flow Mapping",
+    category: "design",
+    recommendedRoles: ["ux-designer", "product-manager"],
+    recommendedStyles: [{ id: "visual", level: 5 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Map the complete user journey including entry points, decision points, error states, and exit points.",
+      style: "Use flowchart-style descriptions. Identify friction points and drop-off risks at each step.",
+    },
+  },
+  {
+    id: "design-wireframe",
+    name: "Wireframe Description",
+    category: "design",
+    recommendedRoles: ["ux-designer"],
+    recommendedStyles: [{ id: "visual", level: 5 }, { id: "detailed", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Describe layout, hierarchy, interactive elements, and responsive behavior. No visual polish — focus on structure.",
+      style: "Use ASCII or structured descriptions for each screen. Annotate key interactions and state changes.",
     },
   },
 
