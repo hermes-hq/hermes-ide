@@ -91,9 +91,14 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
     expect(SRC).toContain("terminal.attachCustomKeyEventHandler(");
   });
 
-  it("suppresses keydown for single printable characters (event.key.length === 1)", () => {
-    // The handler must check event.key.length to identify printable chars
-    expect(SRC).toContain('event.key.length !== 1');
+  it("suppresses keydown for non-passthrough keys (KEYDOWN_PASSTHROUGH allowlist)", () => {
+    // The main suppression logic must use an allowlist to decide what goes through keydown
+    expect(SRC).toContain("KEYDOWN_PASSTHROUGH.has(event.key)");
+    // The shouldSuppress variable must NOT use key-length as the primary check
+    const suppressBlock = SRC.match(/const shouldSuppress\s*=[\s\S]*?;/);
+    expect(suppressBlock).not.toBeNull();
+    expect(suppressBlock![0]).not.toContain("event.key.length");
+    expect(suppressBlock![0]).toContain("KEYDOWN_PASSTHROUGH");
   });
 
   it("allows modifier combos through (Ctrl, Meta, Alt)", () => {
@@ -113,11 +118,8 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
   it("returns false for printable keydown (suppress) — the key architectural decision", () => {
     // The handler must return false to suppress printable keydown
     // This means only textarea input events fire onData for printable chars
-    const handlerBlock = SRC.match(
-      /attachCustomKeyEventHandler\(\(event[\s\S]*?return false;\s*\}\)/
-    );
-    expect(handlerBlock).not.toBeNull();
-    expect(handlerBlock![0]).toContain("return false");
+    // The handler block ends with `if (shouldSuppress) return false;`
+    expect(SRC).toContain("if (shouldSuppress) return false;");
   });
 
   it("NO timing-based dedup exists (removed architectural hack)", () => {
@@ -128,13 +130,15 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
     expect(SRC).not.toMatch(/< 10/); // No 10ms window
   });
 
-  it("NO heuristic-based dedup exists", () => {
-    // No timing heuristics in onData
+  it("NO heuristic-based dedup exists (composition dedup is allowed)", () => {
+    // No TIMING heuristics in onData
     const onDataBlock = SRC.match(/terminal\.onData\(\(data\)\s*=>\s*\{[\s\S]*?\}\);/);
     expect(onDataBlock).not.toBeNull();
-    // The onData handler must be clean — just debugLog + handleTerminalInput
+    // Must not have timing-based dedup
     expect(onDataBlock![0]).not.toContain("performance.now()");
-    expect(onDataBlock![0]).not.toContain("duplicate");
+    // Composition-based dedup (lastComposedChar) is allowed — it uses
+    // compositionend events, not timing heuristics
+    expect(onDataBlock![0]).toContain("lastComposedChar");
   });
 });
 
@@ -142,7 +146,7 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
 // INVARIANT 3: Shortcut uses terminal.paste() — no control codes for text
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("Invariant 3: Shortcut command uses terminal.paste(), no display-breaking codes", () => {
+describe("Invariant 3: Shortcut command uses paste() with display clear, no breaking codes", () => {
   // Extract the sendShortcutCommand function body
   function getShortcutFnBody(): string {
     const match = SRC.match(
@@ -156,9 +160,18 @@ describe("Invariant 3: Shortcut command uses terminal.paste(), no display-breaki
     expect(SRC).toMatch(/export function sendShortcutCommand\(/);
   });
 
-  it("uses terminal.paste() to inject command text", () => {
+  it("uses terminal.paste() for command injection (single input path through onData)", () => {
     const body = getShortcutFnBody();
     expect(body).toContain(".paste(");
+    // paste() goes through onData → handleTerminalInput → writeToSession
+    // This is the SINGLE authoritative input path — no direct writeToSession bypass
+    expect(body).not.toMatch(/writeToSession\(/); // no direct PTY write in shortcut fn
+  });
+
+  it("clears display before paste (erase to end of screen)", () => {
+    const body = getShortcutFnBody();
+    // \r\x1b[J = carriage return + erase from cursor to end of screen (handles wrapped lines)
+    expect(body).toContain('\\r\\x1b[J');
   });
 
   it("does NOT contain \\x0b (Vertical Tab — causes cursor-down in display)", () => {
@@ -166,10 +179,11 @@ describe("Invariant 3: Shortcut command uses terminal.paste(), no display-breaki
     expect(body).not.toContain("\\x0b");
   });
 
-  it("does NOT contain \\x0a / \\n (Line Feed)", () => {
+  it("validates command has no line breaks (invariant enforcement)", () => {
     const body = getShortcutFnBody();
-    expect(body).not.toContain("\\x0a");
-    expect(body).not.toContain("\\n");
+    // Source should check for \n and \r in command
+    expect(body).toContain('command.includes("\\n")');
+    expect(body).toContain('command.includes("\\r")');
   });
 
   it("clears inputBuffer and dismisses suggestions", () => {
@@ -178,15 +192,11 @@ describe("Invariant 3: Shortcut command uses terminal.paste(), no display-breaki
     expect(body).toContain("dismissSuggestions");
   });
 
-  it("uses display-only line clear (\\r\\x1b[K) before paste", () => {
-    const body = getShortcutFnBody();
-    // \r\x1b[K is carriage return + erase-to-end-of-line (display only)
-    expect(body).toContain('\\r\\x1b[K');
-  });
-
-  it("sends Ctrl-U to PTY for readline buffer clear", () => {
+  it("sends Ctrl-U + command + Enter as single paste payload", () => {
     const body = getShortcutFnBody();
     expect(body).toContain("\\x15");
+    expect(body).toContain("\\r");
+    expect(body).toContain('"\\x15" + command + "\\r"');
   });
 });
 
@@ -218,13 +228,33 @@ describe("Invariant 4: All UI shortcut callers use sendShortcutCommand", () => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Invariant 5: updateInputBuffer handles paste/IME (multi-char data)", () => {
-  /** Mirror of updateInputBuffer logic for unit testing */
+  /** Mirror of updateInputBuffer logic for unit testing.
+   *  Must match the actual implementation in TerminalPool.ts exactly. */
   function updateInputBuffer(inputBuffer: string, data: string): string {
-    if (data === "\x7f") return inputBuffer.slice(0, -1);
-    if (data === "\x03" || data === "\r" || data === "\x15") return "";
+    // Single-char fast path
+    if (data.length === 1) {
+      const code = data.charCodeAt(0);
+      if (code === 0x7f) return inputBuffer.slice(0, -1);
+      if (code === 0x03 || code === 0x15) return "";
+      if (code === 0x0d) return ""; // Enter clears
+      if (code === 0x1b) return inputBuffer; // Bare Escape
+      if (code >= 32) return inputBuffer + data;
+      return inputBuffer;
+    }
+    // Escape sequences
     if (data.startsWith("\x1b")) return inputBuffer;
+    // Multi-char: process every character (paste, IME, shortcut payload)
     for (let i = 0; i < data.length; i++) {
-      if (data.charCodeAt(i) >= 32) inputBuffer += data[i];
+      const code = data.charCodeAt(i);
+      if (code === 0x7f) {
+        inputBuffer = inputBuffer.slice(0, -1);
+      } else if (code === 0x03 || code === 0x15 || code === 0x0d) {
+        inputBuffer = "";
+      } else if (code === 0x1b) {
+        break; // escape sequence — stop processing
+      } else if (code >= 32) {
+        inputBuffer += data[i];
+      }
     }
     return inputBuffer;
   }
@@ -264,6 +294,21 @@ describe("Invariant 5: updateInputBuffer handles paste/IME (multi-char data)", (
 
   it("backspace removes exactly one char", () => {
     expect(updateInputBuffer("abc", "\x7f")).toBe("ab");
+  });
+
+  it("Enter within paste clears buffer (shortcut payload correctness)", () => {
+    // Simulates: paste("\x15/config\r") → Ctrl-U clears, then /config typed, then Enter clears
+    expect(updateInputBuffer("stale", "\x15/config\r")).toBe("");
+  });
+
+  it("Ctrl-U within paste clears buffer before remaining chars", () => {
+    expect(updateInputBuffer("old", "\x15new")).toBe("new");
+  });
+
+  it("shortcut paste payload leaves buffer empty", () => {
+    // This is the EXACT payload from sendShortcutCommand: "\x15" + command + "\r"
+    const payload = "\x15/compact\r";
+    expect(updateInputBuffer("whatever", payload)).toBe("");
   });
 
   it("source does NOT use single-char guard (old bug pattern)", () => {
@@ -325,5 +370,79 @@ describe("Invariant 8: No accidental display-breaking codes sent to PTY", () => 
     const shortcutFn = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
     expect(shortcutFn).not.toBeNull();
     expect(shortcutFn![0]).not.toContain("\\x0b");
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT 9: Context lifecycle guards prevent double injection
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const CONTEXT_HOOK: string = readFileSync(
+  new URL("../hooks/useContextState.ts", import.meta.url),
+  "utf-8",
+);
+
+describe("Invariant 9: Context injection race prevention", () => {
+  it("applyContext updates lifecycleRef SYNCHRONOUSLY before async work", () => {
+    // The ref must be set to 'applying' BEFORE setLifecycle (which is async React state)
+    const applyBlock = CONTEXT_HOOK.match(/const applyContext = useCallback[\s\S]*?}, \[/);
+    expect(applyBlock).not.toBeNull();
+    const body = applyBlock![0];
+    // lifecycleRef.current = 'applying' must appear BEFORE setLifecycle('applying')
+    const refSetIdx = body.indexOf("lifecycleRef.current = 'applying'");
+    const stateSetIdx = body.indexOf("setLifecycle('applying')");
+    expect(refSetIdx).toBeGreaterThan(-1);
+    expect(stateSetIdx).toBeGreaterThan(-1);
+    expect(refSetIdx).toBeLessThan(stateSetIdx);
+  });
+
+  it("realm listener is gated by initialLoadDone", () => {
+    expect(CONTEXT_HOOK).toMatch(/session-realms-updated[\s\S]*?initialLoadDone\.current/);
+  });
+
+  it("pin listener is gated by initialLoadDone", () => {
+    expect(CONTEXT_HOOK).toMatch(/context-pins-changed[\s\S]*?initialLoadDone\.current/);
+  });
+
+  it("session sync effect is gated by initialLoadDone", () => {
+    expect(CONTEXT_HOOK).toMatch(/session\.working_directory[\s\S]*?initialLoadDone\.current/);
+  });
+
+  it("prevContextRef initialized to emptyContext (not null)", () => {
+    expect(CONTEXT_HOOK).toMatch(/prevContextRef = useRef<ContextState>\(emptyContext\(\)\)/);
+  });
+
+  it("initial load sets prevContextRef BEFORE setContext", () => {
+    // Find the load function and verify ordering
+    const loadBlock = CONTEXT_HOOK.match(/const load = async \(\)[\s\S]*?load\(\)/);
+    expect(loadBlock).not.toBeNull();
+    const body = loadBlock![0];
+    const refSetIdx = body.indexOf("prevContextRef.current = structuralClone(initial)");
+    const setContextIdx = body.indexOf("setContext(initial)");
+    expect(refSetIdx).toBeGreaterThan(-1);
+    expect(setContextIdx).toBeGreaterThan(-1);
+    expect(refSetIdx).toBeLessThan(setContextIdx);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT 10: sendShortcutCommand hard-stops on invariant violation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+describe("Invariant 10: sendShortcutCommand refuses linebreak commands", () => {
+  it("returns after detecting linebreak (not just logs)", () => {
+    const fnBody = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
+    expect(fnBody).not.toBeNull();
+    const body = fnBody![0];
+    // After the invariant check, there must be a return statement
+    const checkIdx = body.indexOf('command.includes("\\n")');
+    expect(checkIdx).toBeGreaterThan(-1);
+    // Find the next 'return' after the check
+    const afterCheck = body.slice(checkIdx);
+    const returnIdx = afterCheck.indexOf("return;");
+    expect(returnIdx).toBeGreaterThan(-1);
+    // The return must be before the paste call
+    const pasteIdx = afterCheck.indexOf(".paste(");
+    expect(returnIdx).toBeLessThan(pasteIdx);
   });
 });

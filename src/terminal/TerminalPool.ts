@@ -20,12 +20,13 @@ import {
 
 // ─── Debug ──────────────────────────────────────────────────────────
 
-/** Set to true to enable forensic input pipeline logging in the console. */
-const DEBUG_INPUT = false;
-
-function debugLog(tag: string, ...args: unknown[]): void {
-  if (DEBUG_INPUT) console.log(`[INPUT:${tag}]`, ...args);
-}
+import {
+  HERMES_RAW_MODE,
+  recordTerminal,
+  recordPty,
+  recordMount,
+  recordShortcut,
+} from "../debug/eventRecorder";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -202,10 +203,29 @@ export function updateSettings(settings: Record<string, string>): void {
   }
 }
 
+// ─── Keydown Passthrough Allowlist ────────────────────────────────────
+// Keys that MUST go through the keydown → onData path. Everything NOT in
+// this set is suppressed at keydown (textarea input is the sole source).
+// This handles dead keys ("Dead", length > 1) which the old
+// key-length-based check failed to suppress.
+const KEYDOWN_PASSTHROUGH = new Set([
+  "Enter", "Backspace", "Tab", "Escape", "Delete",
+  "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+  "Home", "End", "PageUp", "PageDown",
+  "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+  "Insert", "Clear", "Pause", "ScrollLock", "PrintScreen",
+  "CapsLock", "NumLock",
+]);
+
 // ─── Terminal Lifecycle ──────────────────────────────────────────────
 
 export async function createTerminal(sessionId: string, color: string): Promise<void> {
-  if (pool.has(sessionId)) return;
+  if (pool.has(sessionId)) {
+    recordMount("DUPLICATE_CREATE", sessionId, { color, poolSize: pool.size });
+    console.error(`[HERMES_DEBUG:DUPLICATE_CREATE] session=${sessionId} — pool already has entry!`);
+    return;
+  }
+  recordMount("TERMINAL_CREATE", sessionId, { color, poolSizeBefore: pool.size });
 
   const themeName = currentSettings.theme || "dark";
   const theme = THEMES[themeName] || THEMES.dark;
@@ -238,42 +258,177 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   }));
 
   // Wire input → PTY (with intelligence interception)
-  // NOTE: onBinary was intentionally removed — it caused duplicate keystrokes
-  // for printable characters (e.g. apostrophes) when xterm fired both onData
-  // and onBinary for the same keystroke on macOS with smart quotes / dead keys.
-  // All input (including binary escape sequences) flows through onData.
   //
-  // ARCHITECTURE: WKWebView (Tauri macOS) fires onData TWICE for single
-  // printable keystrokes — once from xterm's keydown handler and once from the
-  // hidden textarea's input event.  Instead of a timing-based dedup hack, we
-  // suppress the keydown path for printable characters using
-  // attachCustomKeyEventHandler.  The textarea input event is the single
-  // authoritative source for printable characters.  Control keys, modifiers,
-  // and special keys (arrows, etc.) still go through the keydown path.
+  // ARCHITECTURE: WKWebView (Tauri macOS) fires BOTH keydown AND textarea
+  // input events for the same keystroke. xterm.js processes both independently,
+  // which would cause onData to fire TWICE per printable character.
+  //
+  // attachCustomKeyEventHandler returning false for printable keydown suppresses
+  // xterm's keydown→onData path. The textarea input event is the SINGLE
+  // authoritative source for printable characters. Control keys, modifiers,
+  // and special keys still go through keydown.
+  //
+  // DEAD KEY FIX: macOS dead keys (e.g. apostrophe on Brazilian Portuguese
+  // keyboard) fire event.key === "Dead" (length 4), which the old
+  // key-length-based check didn't suppress. The resolved character
+  // then also fires via textarea → duplicate. Using an allowlist of keys
+  // that MUST go through keydown ensures dead keys are suppressed.
+  //
+  // onBinary was removed — it was a redundant duplicate path.
+  // ── Composition state for dead key handling ──
+  // WKWebView dead key flow:
+  //   1. compositionend fires with composed char (e.g. "'")
+  //   2. xterm fires onData("'") — legitimate, first occurrence
+  //   3. keydown fires for the RESOLVING key (e.g. "t") — normally suppressed
+  //   4. Composition's textarea input fires — xterm fires onData("'") AGAIN (duplicate)
+  //   5. The textarea input for "t" fires but produces NO onData (xterm already consumed it)
+  //
+  // Fixes needed:
+  //   A. Suppress the duplicate onData for the composed char (step 4)
+  //   B. Allow the resolving keydown through (step 3) since textarea path is broken (step 5)
+  //   C. Dedup the resolving char in case the textarea path does fire for it
+  let lastComposedChar: string | null = null;
+  let composedDataFired = false;
+  let postCompPassOne = false;     // Allow ONE keydown through after composition
+  let postCompChar: string | null = null; // The resolving character to dedup
+  let postCompCharFired = false;
+
+  container.addEventListener("compositionend", (e: CompositionEvent) => {
+    lastComposedChar = e.data || null;
+    composedDataFired = false;
+    postCompPassOne = true;
+    postCompChar = null;
+    postCompCharFired = false;
+    // Safety timeout: clear all composition state
+    setTimeout(() => {
+      lastComposedChar = null;
+      composedDataFired = false;
+      postCompPassOne = false;
+      postCompChar = null;
+      postCompCharFired = false;
+    }, 200);
+  }, true); // capture phase — fires BEFORE xterm's bubbling-phase handler
+
   terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
     // Only intercept keydown — keyup is harmless
     if (event.type !== "keydown") return true;
+
+    // After compositionend, the resolving character (e.g. "t" after dead key
+    // apostrophe) is LOST because:
+    // - xterm ignores keydown during/after composition
+    // - The textarea path is broken (composition's deferred input consumed it)
+    //
+    // CRITICAL: On WKWebView, event.key for the resolving keydown is the
+    // composed char + resolving char CONCATENATED (e.g. "'t" not "t").
+    // We must extract the resolving character from after the composed prefix.
+    //
+    // Cases:
+    //   Non-combining: ' + t → composedChar="'", event.key="'t" → resolve "t" ✓
+    //   Combining:     ' + a → composedChar="á", event.key="á"  → no resolve  ✓
+    //   Space resolve: ' + space → composedChar="'", event.key="' " → skip    ✓
+    if (postCompPassOne && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      postCompPassOne = false;
+
+      // Extract resolving character: only for non-combining dead key results
+      // where event.key starts with the composed char and has additional chars.
+      let resolving: string | null = null;
+      if (lastComposedChar &&
+          event.key.startsWith(lastComposedChar) &&
+          event.key.length > lastComposedChar.length) {
+        resolving = event.key.slice(lastComposedChar.length);
+        // Don't inject space — it's a transparent dead key resolver
+        if (!resolving.trim()) resolving = null;
+      } else if (event.key.length === 1) {
+        // Fallback: single-char key (normal behavior)
+        resolving = event.key;
+      }
+
+      if (resolving) {
+        postCompChar = resolving;
+        postCompCharFired = true; // Mark as already fired — prevents textarea duplicate
+
+        recordTerminal("KEYDOWN_HANDLER", sessionId, {
+          key: event.key, code: event.code, type: event.type,
+          isComposing: event.isComposing, ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey,
+          repeat: event.repeat, decision: "INJECT_POST_COMP", resolving,
+          rawMode: HERMES_RAW_MODE,
+        });
+
+        // Inject directly — bypass xterm's composition state
+        handleTerminalInput(sessionId, resolving);
+        return false; // SUPPRESS xterm's keydown
+      }
+      // Combining case or space resolver — fall through to normal handling
+    }
+
+    const shouldSuppress =
+      !HERMES_RAW_MODE &&  // RAW MODE: never suppress — let xterm fire both paths
+      !event.isComposing &&
+      !event.ctrlKey && !event.metaKey && !event.altKey &&
+      !KEYDOWN_PASSTHROUGH.has(event.key);
+
+    // DIAGNOSTIC: Log EVERY keydown decision
+    recordTerminal("KEYDOWN_HANDLER", sessionId, {
+      key: event.key, code: event.code, type: event.type,
+      isComposing: event.isComposing, ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey,
+      repeat: event.repeat, decision: shouldSuppress ? "SUPPRESS" : "ALLOW",
+      rawMode: HERMES_RAW_MODE,
+    });
+
+    if (shouldSuppress) return false;
+
     // Allow composing (IME) — textarea handles the final composed char
     if (event.isComposing) return true;
     // Allow modifier combos (Ctrl-C, Cmd-V, Alt-anything)
     if (event.ctrlKey || event.metaKey || event.altKey) return true;
-    // Allow non-printable keys: arrows, Enter, Tab, Escape, Backspace, etc.
-    // event.key is a single char for printable keys; multi-char for specials
-    if (event.key.length !== 1) return true;
-    // Single printable character from keydown: SUPPRESS.
-    // The textarea input event will fire onData with the correct character.
-    debugLog("customKeyHandler:SUPPRESS", { key: event.key, code: event.code });
-    return false;
+    // Allow non-printable keys
+    return true;
   });
 
+  recordMount("REGISTER_ON_DATA", sessionId, { note: "exactly one onData listener" });
   terminal.onData((data) => {
-    debugLog("onData", {
-      data,
+    // ── Composition dedup: suppress duplicate composed char from textarea input ──
+    // IMPORTANT: Do NOT clear lastComposedChar on non-matching data!
+    // The resolving key's onData (e.g. "t") fires BETWEEN the first and duplicate
+    // "'" events. Clearing state on "t" would let the duplicate "'" pass through.
+    // The compositionend listener's 200ms timeout handles cleanup.
+    if (lastComposedChar !== null && data === lastComposedChar) {
+      if (composedDataFired) {
+        recordTerminal("ON_DATA_COMPOSE_DEDUP", sessionId, data, {
+          note: "suppressed duplicate composed character",
+        });
+        return;
+      }
+      composedDataFired = true;
+    }
+
+    // ── Post-composition dedup: suppress duplicate resolving char ──
+    // The resolving key (e.g. "t") was allowed through keydown. If the textarea
+    // path also fires for it, suppress the duplicate.
+    // Same rule: do NOT clear on non-matching data — timeout handles cleanup.
+    if (postCompChar !== null && data === postCompChar) {
+      if (postCompCharFired) {
+        recordTerminal("ON_DATA_POSTCOMP_DEDUP", sessionId, data, {
+          note: "suppressed duplicate post-composition character",
+        });
+        return;
+      }
+      postCompCharFired = true;
+    }
+
+    recordTerminal("ON_DATA", sessionId, data, {
       hex: [...data].map(c => c.charCodeAt(0).toString(16)).join(" "),
       len: data.length,
+      inputBufferBefore: pool.get(sessionId)?.inputBuffer ?? "N/A",
     });
 
     handleTerminalInput(sessionId, data);
+
+    recordTerminal("ON_DATA_AFTER", sessionId, data, {
+      inputBufferAfter: pool.get(sessionId)?.inputBuffer ?? "N/A",
+    });
   });
 
   // Track user scroll position to avoid jumping during streaming
@@ -286,6 +441,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   });
 
   // Wire PTY output → terminal
+  recordMount("REGISTER_PTY_LISTEN", sessionId, { event: `pty-output-${sessionId}` });
   const unlistenOutput = await listen<string>(`pty-output-${sessionId}`, (event) => {
     const entry = pool.get(sessionId);
     const scrolledUp = entry?.userScrolledUp ?? false;
@@ -294,10 +450,15 @@ export async function createTerminal(sessionId: string, color: string): Promise<
       const binary = atob(event.payload);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      debugLog("pty-output", { len: bytes.length, first20hex: [...bytes.slice(0, 20)].map(b => b.toString(16).padStart(2, "0")).join(" ") });
+      // Decode to string for diagnostic display (first 40 chars)
+      const decoded = new TextDecoder().decode(bytes.slice(0, 40));
+      recordPty("PTY_OUTPUT", sessionId, decoded, {
+        len: bytes.length,
+        first20hex: [...bytes.slice(0, 20)].map(b => b.toString(16).padStart(2, "0")).join(" "),
+      });
       terminal.write(bytes);
     } catch {
-      debugLog("pty-output:fallback", { len: event.payload.length });
+      recordPty("PTY_OUTPUT_FALLBACK", sessionId, event.payload.slice(0, 40), { len: event.payload.length });
       terminal.write(event.payload);
     }
     if (scrolledUp && viewportY >= 0) {
@@ -420,10 +581,10 @@ function handleTerminalInput(sessionId: string, data: string): void {
   }
 
   // ── Always pass data to PTY ──
-  debugLog("writeToSession", {
-    data,
+  recordPty("PTY_WRITE", sessionId, data, {
     hex: [...data].map(c => c.charCodeAt(0).toString(16)).join(" "),
     inputBuffer: entry.inputBuffer,
+    source: "handleTerminalInput",
   });
   writeToSession(sessionId, utf8ToBase64(data)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session failed for ${sessionId}:`, err);
@@ -442,37 +603,65 @@ function handleTerminalInput(sessionId: string, data: string): void {
 }
 
 function updateInputBuffer(entry: PoolEntry, data: string): void {
-  if (data === "\x7f") {
-    // Backspace — pop last char
-    entry.inputBuffer = entry.inputBuffer.slice(0, -1);
-  } else if (data === "\x03") {
-    // Ctrl-C — clear
-    entry.inputBuffer = "";
-    dismissSuggestionsForEntry(entry);
-  } else if (data === "\r") {
-    // Enter — log to history and clear
-    if (entry.inputBuffer.trim()) {
-      entry.historyProvider.addCommand(entry.inputBuffer.trim());
-    }
-    entry.inputBuffer = "";
-    dismissSuggestionsForEntry(entry);
-  } else if (data === "\x15") {
-    // Ctrl-U — clear line
-    entry.inputBuffer = "";
-    dismissSuggestionsForEntry(entry);
-  } else if (data.startsWith("\x1b")) {
-    // Escape sequences (arrows, etc.) — don't modify buffer
-    // But dismiss suggestions on Escape alone
-    if (data === "\x1b") {
+  // Single-char fast paths (keyboard input — one char per onData call)
+  if (data.length === 1) {
+    const code = data.charCodeAt(0);
+    if (code === 0x7f) {
+      // Backspace
+      entry.inputBuffer = entry.inputBuffer.slice(0, -1);
+    } else if (code === 0x03 || code === 0x15) {
+      // Ctrl-C or Ctrl-U — clear
+      entry.inputBuffer = "";
       dismissSuggestionsForEntry(entry);
-    }
-  } else {
-    // Printable characters — iterate to handle multi-char data (paste, IME)
-    for (let i = 0; i < data.length; i++) {
-      if (data.charCodeAt(i) >= 32) {
-        entry.inputBuffer += data[i];
+    } else if (code === 0x0d) {
+      // Enter — log to history and clear
+      if (entry.inputBuffer.trim()) {
+        entry.historyProvider.addCommand(entry.inputBuffer.trim());
       }
+      entry.inputBuffer = "";
+      dismissSuggestionsForEntry(entry);
+    } else if (code === 0x1b) {
+      // Bare Escape — dismiss suggestions
+      dismissSuggestionsForEntry(entry);
+    } else if (code >= 32) {
+      // Single printable character
+      entry.inputBuffer += data;
     }
+    return;
+  }
+
+  // Escape sequences (arrows, etc.) — don't modify buffer
+  if (data.startsWith("\x1b")) return;
+
+  // Multi-char data (paste, IME, shortcut paste payload).
+  // Process EVERY character — control chars have their normal effect.
+  // This is critical: paste data like "\x15/config\r" must clear the buffer
+  // on \x15, add "/config", then clear again on \r.
+  for (let i = 0; i < data.length; i++) {
+    const code = data.charCodeAt(i);
+    if (code === 0x7f) {
+      // Backspace within paste
+      entry.inputBuffer = entry.inputBuffer.slice(0, -1);
+    } else if (code === 0x03 || code === 0x15) {
+      // Ctrl-C or Ctrl-U within paste — clear buffer
+      entry.inputBuffer = "";
+      dismissSuggestionsForEntry(entry);
+    } else if (code === 0x0d) {
+      // Enter within paste — log to history and clear
+      if (entry.inputBuffer.trim()) {
+        entry.historyProvider.addCommand(entry.inputBuffer.trim());
+      }
+      entry.inputBuffer = "";
+      dismissSuggestionsForEntry(entry);
+    } else if (code === 0x1b) {
+      // Start of escape sequence embedded in paste — skip remaining chars
+      // (escape sequences are variable-length, safest to stop processing)
+      break;
+    } else if (code >= 32) {
+      // Printable character
+      entry.inputBuffer += data[i];
+    }
+    // All other control chars (code < 32) are silently skipped
   }
 }
 
@@ -807,6 +996,7 @@ export function detach(sessionId: string): void {
 export function destroy(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
+  recordMount("TERMINAL_DESTROY", sessionId, { poolSizeBefore: pool.size });
   entry.unlistenOutput?.();
   entry.unlistenExit?.();
   if (entry.suggestionTimer) clearTimeout(entry.suggestionTimer);
@@ -911,40 +1101,63 @@ export function clearGhostText(sessionId: string): void {
   }
 }
 
-/** Send a shortcut command, clearing the current display line first.
+/** Insert a shortcut command text on the current prompt line.
  *
- *  Strategy:
- *  1. Clear the display line with \r\x1b[K (carriage return + erase-to-EOL)
- *     written directly to the terminal display — this is a visual operation,
- *     NOT sent to PTY.
- *  2. Send Ctrl-U (\x15) to PTY to clear readline's internal buffer so the
- *     shell doesn't execute stale partial input.
- *  3. Use terminal.paste(command + "\r") to inject the command text through
- *     xterm's standard input path (fires onData → handleTerminalInput →
- *     writeToSession).
+ *  Replaces any existing input with the command text. Does NOT press Enter —
+ *  the user can review/edit the command and press Enter manually.
  *
- *  IMPORTANT: Do NOT use \x0b (Vertical Tab) — it moves the cursor down in
- *  the display layer, producing a visible newline artifact. */
+ *  Uses xterm's internal triggerDataEvent with isPaste=false so the data is
+ *  treated as normal keyboard input (no bracketed paste markers).
+ *
+ *  Invariants enforced:
+ *  - command NEVER contains \n or \r (caller must ensure)
+ */
 export function sendShortcutCommand(sessionId: string, command: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
 
+  // Invariant: command must not contain line breaks
+  if (command.includes("\n") || command.includes("\r")) {
+    console.error(`[FORENSIC:SHORTCUT_INVARIANT_VIOLATION] command contains line break!`, {
+      command,
+      hex: [...command].map(c => c.charCodeAt(0).toString(16)).join(" "),
+    });
+    return;
+  }
+
+  // Save input buffer length BEFORE clearing — we need it for backspaces
+  const eraseLen = entry.inputBuffer.length;
   entry.inputBuffer = "";
   dismissSuggestions(sessionId);
   clearGhostText(sessionId);
 
-  debugLog("sendShortcutCommand", { command });
-
-  // Step 1: Clear readline's internal buffer via PTY
-  writeToSession(sessionId, utf8ToBase64("\x15")).catch((err) => {
-    console.warn(`[TerminalPool] sendShortcutCommand Ctrl-U failed for ${sessionId}:`, err);
+  recordShortcut("SHORTCUT_BEFORE", sessionId, command, {
+    hex: [...command].map(c => c.charCodeAt(0).toString(16)).join(" "),
+    eraseLen,
+    suggestionsVisible: entry.suggestionState?.visible ?? false,
   });
 
-  // Step 2: Clear the display line (visual only, not sent to PTY)
-  entry.terminal.write("\r\x1b[K");
+  // Send backspaces (to clear existing text) + command text.
+  // NO \r — the command is inserted on the prompt, not executed.
+  // The user reviews and presses Enter manually.
+  const backspaces = eraseLen > 0 ? "\x7f".repeat(eraseLen) : "";
+  const fullData = backspaces + command;
+  const core = (entry.terminal as any)._core;
+  if (core?.coreService?.triggerDataEvent) {
+    core.coreService.triggerDataEvent(fullData, false);
+  } else {
+    writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
+      console.warn(`[TerminalPool] write_to_session (shortcut) failed for ${sessionId}:`, err);
+    });
+  }
 
-  // Step 3: Inject command + Enter through xterm's paste path → onData → PTY
-  entry.terminal.paste(command + "\r");
+  // Refocus terminal — clicking the shortcut button steals focus from xterm.
+  focusTerminal(sessionId);
+
+  recordShortcut("SHORTCUT_AFTER", sessionId, command, {
+    inputBufferAfter: entry.inputBuffer,
+    suggestionsVisible: entry.suggestionState?.visible ?? false,
+  });
 }
 
 export function getTerminal(sessionId: string): Terminal | null {

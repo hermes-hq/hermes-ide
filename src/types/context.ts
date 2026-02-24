@@ -67,6 +67,7 @@ export interface ContextManager {
   tokenBudget: number;
   estimatedTokens: number;
   applyContext: () => Promise<void>;
+  acknowledgeInjection: () => void;
   formatContext: () => string;
   copyToClipboard: () => Promise<void>;
 }

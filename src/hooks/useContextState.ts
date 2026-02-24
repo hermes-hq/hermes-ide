@@ -5,6 +5,20 @@ import { getContextPins, applyContext as apiApplyContext } from "../api/context"
 import { assembleSessionContext } from "../api/realms";
 import { getAllMemory } from "../api/memory";
 import { structuralEqual, structuralClone } from "../utils/structuralEqual";
+import { HERMES_DEBUG, HERMES_RAW_MODE, recordContext } from "../debug/eventRecorder";
+
+// ─── Forensic instrumentation (centralized) ──────────────────────────
+// All context lifecycle events route through the centralized event recorder.
+// When HERMES_DEBUG is active, every event appears in the DebugPanel and
+// can be exported as structured JSON.
+function ctxForensic(tag: string, detail: Record<string, unknown>): void {
+  const sessionId = (detail.sessionId as string) ?? "*";
+  recordContext(tag, sessionId, detail);
+  // Stack traces for critical events (only when debug active)
+  if (HERMES_DEBUG && (tag === "INJECTION_TRIGGER" || tag === "VERSION_BUMP" || tag === "LIFECYCLE_CHANGE")) {
+    console.trace(`  ↳ call stack for [CONTEXT:${tag}]`);
+  }
+}
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
@@ -113,28 +127,38 @@ export function useContextState(session: SessionData | null, executionMode?: str
   const [tokenBudget, setTokenBudget] = useState(DEFAULT_TOKEN_BUDGET);
   const [estimatedTokens, setEstimatedTokens] = useState(0);
 
-  const prevContextRef = useRef<ContextState | null>(null);
+  const prevContextRef = useRef<ContextState>(emptyContext());
   const contextRef = useRef(context);
   contextRef.current = context;
   const versionRef = useRef(0);
   const lifecycleRef = useRef<ContextLifecycleState>('clean');
 
-  // Keep lifecycle ref in sync
+  // Keep lifecycle ref in sync — this is a SECONDARY sync.
+  // The PRIMARY sync happens synchronously in applyContext() to prevent race conditions.
+  // This effect ensures the ref stays correct for reads outside of applyContext.
   useEffect(() => {
     lifecycleRef.current = lifecycle;
   }, [lifecycle]);
 
   // ── Load initial state from backend ──
+  // Track whether initial load has completed for this session
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
     if (!session) return;
+    initialLoadDone.current = false;
+    ctxForensic("INITIAL_LOAD_START", { sessionId: session.id });
 
     const load = async () => {
       const initial = emptyContext();
-      initial.workingDirectory = session.working_directory;
-      initial.workspacePaths = session.workspace_paths;
-      initial.agent = session.detected_agent?.name ?? null;
-      initial.model = session.detected_agent?.model ?? null;
-      initial.memoryFacts = session.metrics.memory_facts;
+      // Use sessionRef for fresh data — the closed-over `session` may be stale
+      // if SESSION_UPDATED events fired during the async fetches above.
+      const latestInit = sessionRef.current ?? session;
+      initial.workingDirectory = latestInit.working_directory;
+      initial.workspacePaths = latestInit.workspace_paths;
+      initial.agent = latestInit.detected_agent?.name ?? null;
+      initial.model = latestInit.detected_agent?.model ?? null;
+      initial.memoryFacts = latestInit.metrics.memory_facts;
 
       // Fetch pins (session + project-scoped)
       try {
@@ -155,8 +179,12 @@ export function useContextState(session: SessionData | null, executionMode?: str
         initial.persistedMemory = entries;
       } catch (err) { console.warn("[useContextState] Failed to load persisted memory:", err); }
 
+      // Set prevContextRef BEFORE setContext so the version-tracking effect
+      // sees structuralEqual(initial, initial) → true → no version bump.
+      // This prevents the initial load from marking the context dirty.
+      prevContextRef.current = structuralClone(initial);
       setContext(initial);
-      // Reset versions on session change
+      // Reset versions on session change — initial load is NOT a user change
       versionRef.current = 0;
       setCurrentVersion(0);
       setInjectedVersion(0);
@@ -164,11 +192,29 @@ export function useContextState(session: SessionData | null, executionMode?: str
       setLifecycle('clean');
       setLastError(null);
       setInjectedContent(null);
-      prevContextRef.current = structuralClone(initial);
+      initialLoadDone.current = true;
+      // Also reset the sync key so the session sync effect doesn't re-apply
+      // the same data that was just loaded
+      // Use sessionRef for fresh data — prevents sync key mismatch when
+      // SESSION_UPDATED events updated the session during async load.
+      const latest = sessionRef.current ?? session;
+      prevSyncKeyRef.current = JSON.stringify({
+        wd: latest.working_directory,
+        wp: latest.workspace_paths,
+        agent: latest.detected_agent?.name ?? null,
+        model: latest.detected_agent?.model ?? null,
+        mf: latest.metrics.memory_facts,
+      });
+      ctxForensic("INITIAL_LOAD_DONE", {
+        sessionId: session.id,
+        version: 0,
+        lifecycle: "clean",
+        prevSyncKeySet: true,
+      });
     };
 
     load();
-  }, [session?.id]);
+  }, [session?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Keep context in sync with live session data (reactive updates) ──
   // We use a ref to track the previous serialized key so the effect only
@@ -179,6 +225,17 @@ export function useContextState(session: SessionData | null, executionMode?: str
 
   useEffect(() => {
     if (!session) return;
+    // GUARD: Do NOT sync before initial load completes — the initial load
+    // sets prevSyncKeyRef and prevContextRef atomically. If the sync effect
+    // fires before that, it creates a context change from emptyContext() →
+    // session data, which triggers a phantom version bump → dirty → injection.
+    if (!HERMES_RAW_MODE && !initialLoadDone.current) {
+      ctxForensic("SESSION_SYNC_SKIP", {
+        sessionId: session.id,
+        reason: "initial load not done",
+      });
+      return;
+    }
     const key = JSON.stringify({
       wd: session.working_directory,
       wp: session.workspace_paths,
@@ -186,7 +243,18 @@ export function useContextState(session: SessionData | null, executionMode?: str
       model: session.detected_agent?.model ?? null,
       mf: session.metrics.memory_facts,
     });
-    if (key === prevSyncKeyRef.current) return; // no real change — skip
+    if (!HERMES_RAW_MODE && key === prevSyncKeyRef.current) {
+      ctxForensic("SESSION_SYNC_SKIP", {
+        sessionId: session.id,
+        reason: "key unchanged",
+      });
+      return; // no real change — skip
+    }
+    ctxForensic("SESSION_SYNC_APPLY", {
+      sessionId: session.id,
+      prevKey: prevSyncKeyRef.current.slice(0, 80),
+      newKey: key.slice(0, 80),
+    });
     prevSyncKeyRef.current = key;
     setContext((prev) => ({
       ...prev,
@@ -205,11 +273,18 @@ export function useContextState(session: SessionData | null, executionMode?: str
     let unlisten: (() => void) | null = null;
     listen(`session-realms-updated-${session.id}`, () => {
       if (cancelled) return;
+      // GUARD: Ignore realm events before initial load completes — the initial
+      // load fetches realm data. If a realm event fires first, it creates a
+      // context change from emptyContext → realm data → phantom version bump → dirty.
+      if (!HERMES_RAW_MODE && !initialLoadDone.current) {
+        ctxForensic("REALM_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
+        return;
+      }
       assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET)
         .then((ctx) => {
           if (!cancelled) {
             setContext((prev) => {
-              if (structuralEqual(prev.realms, ctx.realms)) return prev; // no-op if unchanged
+              if (!HERMES_RAW_MODE && structuralEqual(prev.realms, ctx.realms)) return prev; // no-op if unchanged
               return { ...prev, realms: ctx.realms };
             });
             if (ctx.token_budget) setTokenBudget(ctx.token_budget);
@@ -230,10 +305,15 @@ export function useContextState(session: SessionData | null, executionMode?: str
     let unlisten: (() => void) | null = null;
     listen(`context-pins-changed-${session.id}`, () => {
       if (cancelled) return;
+      // GUARD: Ignore pin events before initial load — same reason as realm guard.
+      if (!HERMES_RAW_MODE && !initialLoadDone.current) {
+        ctxForensic("PIN_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
+        return;
+      }
       getContextPins(session.id, null)
         .then((pins) => {
           if (!cancelled) setContext((prev) => {
-            if (structuralEqual(prev.pinnedItems, pins)) return prev;
+            if (!HERMES_RAW_MODE && structuralEqual(prev.pinnedItems, pins)) return prev;
             return { ...prev, pinnedItems: pins };
           });
         })
@@ -246,15 +326,39 @@ export function useContextState(session: SessionData | null, executionMode?: str
 
   // ── Auto-increment version when context changes → mark dirty ──
   useEffect(() => {
-    if (structuralEqual(context, prevContextRef.current)) return;
+    const isEqual = structuralEqual(context, prevContextRef.current);
+    if (!HERMES_RAW_MODE && isEqual) {
+      ctxForensic("VERSION_CHECK_EQUAL", {
+        sessionId: session?.id,
+        currentVersion: versionRef.current,
+        note: "no bump — context structurally unchanged",
+      });
+      return;
+    }
     prevContextRef.current = structuralClone(context);
     versionRef.current += 1;
     setCurrentVersion(versionRef.current);
+    ctxForensic("VERSION_BUMP", {
+      sessionId: session?.id,
+      newVersion: versionRef.current,
+      initialLoadDone: initialLoadDone.current,
+    });
     // Mark dirty if we've already had at least one state load
     if (versionRef.current > 0) {
-      setLifecycle((prev) => prev === 'applying' ? prev : 'dirty');
+      setLifecycle((prev) => {
+        const next = prev === 'applying' ? prev : 'dirty';
+        if (prev !== next) {
+          ctxForensic("LIFECYCLE_CHANGE", {
+            sessionId: session?.id,
+            from: prev,
+            to: next,
+            version: versionRef.current,
+          });
+        }
+        return next;
+      });
     }
-  }, [context]);
+  }, [context]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Apply: inject current context to AI agent (async, backend-authoritative) ──
   const sessionRef = useRef(session);
@@ -267,8 +371,28 @@ export function useContextState(session: SessionData | null, executionMode?: str
     if (!sess) return;
 
     // Guard: prevent double-apply
-    if (lifecycleRef.current === 'applying') return;
+    if (!HERMES_RAW_MODE && lifecycleRef.current === 'applying') {
+      ctxForensic("INJECTION_BLOCKED", {
+        sessionId: sess.id,
+        reason: "already applying",
+        lifecycle: lifecycleRef.current,
+      });
+      return;
+    }
 
+    const injectionId = `inj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    ctxForensic("INJECTION_TRIGGER", {
+      sessionId: sess.id,
+      injectionId,
+      currentVersion: versionRef.current,
+      lifecycle: lifecycleRef.current,
+    });
+
+    // CRITICAL: Update ref SYNCHRONOUSLY before any async work.
+    // The useEffect-based sync (lifecycle → lifecycleRef) only runs after the
+    // NEXT render, creating a race window where concurrent callers both read
+    // 'clean' and both proceed. This synchronous write closes that window.
+    lifecycleRef.current = 'applying';
     setLifecycle('applying');
     setLastError(null);
 
@@ -291,6 +415,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
       versionRef.current = result.version;
       setCurrentVersion(result.version);
 
+      lifecycleRef.current = 'clean';
       setLifecycle('clean');
 
       // Absorb any context drift that occurred during the async apply window.
@@ -298,15 +423,52 @@ export function useContextState(session: SessionData | null, executionMode?: str
       // would be detected as new changes and re-mark the context dirty.
       prevContextRef.current = structuralClone(contextRef.current);
 
+      ctxForensic("INJECTION_SUCCESS", {
+        sessionId: sess.id,
+        injectionId,
+        lifecycleRef: lifecycleRef.current,
+        version: result.version,
+        triggerSource: "applyContext",
+        tokenBudget: result.token_budget,
+        estimatedTokens: result.estimated_tokens,
+        nudgeSent: result.nudge_sent,
+      });
+
       // If nudge had a warning but file was written, show non-fatal info
       if (result.nudge_error && !result.nudge_sent) {
         setLastError(`Context file updated but agent not notified: ${result.nudge_error}`);
       }
     } catch (err) {
+      lifecycleRef.current = 'apply_failed';
       setLifecycle('apply_failed');
       setLastError(err instanceof Error ? err.message : String(err));
+      ctxForensic("INJECTION_FAILED", {
+        sessionId: sess.id,
+        injectionId,
+        lifecycleRef: lifecycleRef.current,
+        error: err instanceof Error ? err.message : String(err),
+        triggerSource: "applyContext",
+      });
     }
   }, [liveMode]);
+
+  // ── Acknowledge injection (startup command already handled context) ──
+  const acknowledgeInjection = useCallback(() => {
+    // Mark context as clean WITHOUT calling the backend API.
+    // The backend startup command already includes $HERMES_CONTEXT, so the
+    // first auto-apply trigger is redundant. This updates version tracking
+    // to prevent the redundant nudge.
+    const ver = versionRef.current;
+    ctxForensic("ACKNOWLEDGE_INJECTION", {
+      sessionId: session?.id,
+      version: ver,
+      lifecycle: lifecycleRef.current,
+    });
+    setInjectedVersion(ver);
+    lifecycleRef.current = 'clean';
+    setLifecycle('clean');
+    prevContextRef.current = structuralClone(contextRef.current);
+  }, [session?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Format context for preview ──
   const formatContextPreview = useCallback(() => {
@@ -330,6 +492,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
     tokenBudget,
     estimatedTokens,
     applyContext,
+    acknowledgeInjection,
     formatContext: formatContextPreview,
     copyToClipboard,
   };

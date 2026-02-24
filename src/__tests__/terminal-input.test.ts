@@ -53,12 +53,17 @@ describe("Terminal input: onBinary handler removed (double apostrophe fix)", () 
   });
 
   it("comment explains why onBinary was removed", () => {
-    expect(source).toContain("onBinary was intentionally removed");
+    expect(source).toContain("onBinary was removed");
   });
 
-  it("attachCustomKeyEventHandler suppresses printable keydown", () => {
+  it("attachCustomKeyEventHandler suppresses non-passthrough keydown via allowlist", () => {
     expect(source).toContain("attachCustomKeyEventHandler");
-    expect(source).toContain("event.key.length !== 1");
+    expect(source).toContain("KEYDOWN_PASSTHROUGH.has(event.key)");
+    // The shouldSuppress variable must NOT use key-length as the primary check
+    const suppressBlock = source.match(/const shouldSuppress\s*=[\s\S]*?;/);
+    expect(suppressBlock).not.toBeNull();
+    expect(suppressBlock![0]).not.toContain("event.key.length");
+    expect(suppressBlock![0]).toContain("KEYDOWN_PASSTHROUGH");
   });
 
   it("no timing-based dedup hack remains", () => {
@@ -142,5 +147,34 @@ describe("Terminal input: duplicate keystroke prevention", () => {
     mockWriteToSession(); // onBinary path (BUG - now removed)
 
     expect(writeCount).toBe(2); // This was the bug - double write
+  });
+});
+
+// ─── Shortcut command: paste()-based single input path ────────────────
+
+describe("Terminal input: sendShortcutCommand architecture", () => {
+  it("sendShortcutCommand uses terminal.paste() (single input path through onData)", () => {
+    const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
+    expect(fnMatch).not.toBeNull();
+    const fnBody = fnMatch![0];
+
+    // Must use paste() — goes through onData → handleTerminalInput → writeToSession
+    expect(fnBody).toContain(".paste(");
+    // Must NOT call writeToSession directly (no bypass of input pipeline)
+    expect(fnBody).not.toMatch(/writeToSession\(/);
+  });
+
+  it("sendShortcutCommand clears display before paste (erase to end of screen)", () => {
+    const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
+    expect(fnMatch).not.toBeNull();
+    const fnBody = fnMatch![0];
+
+    // Display clear: \r\x1b[J (carriage return + erase from cursor to end of screen)
+    expect(fnBody).toContain('\\r\\x1b[J');
+  });
+
+  it("sendShortcutCommand paste payload contains Ctrl-U + command + Enter", () => {
+    // The payload should be: \x15 + command + \r in a single paste
+    expect(source).toContain('"\\x15" + command + "\\r"');
   });
 });

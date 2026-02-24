@@ -557,25 +557,82 @@ export function ContextPanel({ session }: ContextPanelProps) {
     }
   }, [session.id, sessionState.injectionLocks, dispatch, contextManager]);
 
-  // Auto-apply on execution: when session becomes busy and context is dirty
+  // Auto-apply on execution: fires ONCE per busy period when EITHER:
+  // 1. Session phase transitions non-busy → busy while context is dirty
+  // 2. Context lifecycle transitions to dirty while session is already busy
+  // The autoAppliedRef guard prevents a loop: apply → clean → metrics change →
+  // dirty → apply → clean → ... by limiting to one auto-apply per busy period.
   const prevPhase = useRef(session.phase);
-  const autoApplyTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const prevLifecycle = useRef(contextManager.lifecycle);
+  const autoAppliedRef = useRef(false);
   useEffect(() => {
     const wasBusy = prevPhase.current === "busy";
+    const wasDirty = prevLifecycle.current === "dirty";
     prevPhase.current = session.phase;
-    if (
+    prevLifecycle.current = contextManager.lifecycle;
+
+    // Reset guard when session leaves busy state
+    if (session.phase !== "busy" && wasBusy) {
+      autoAppliedRef.current = false;
+    }
+
+    // Trigger 1: Phase transition non-busy → busy while context is dirty
+    const phaseTrigger =
       session.phase === "busy" &&
       !wasBusy &&
+      contextManager.lifecycle === 'dirty' &&
+      contextManager.currentVersion > contextManager.injectedVersion;
+
+    // Trigger 2: Lifecycle transition to dirty while session is already busy
+    const lifecycleTrigger =
+      session.phase === "busy" &&
+      contextManager.lifecycle === 'dirty' &&
+      !wasDirty &&
+      contextManager.currentVersion > contextManager.injectedVersion;
+
+    const shouldApply =
       sessionState.autoApplyEnabled &&
-      contextManager.lifecycle === 'dirty'
-    ) {
-      clearTimeout(autoApplyTimeout.current);
-      autoApplyTimeout.current = setTimeout(() => {
-        lockedApplyContext().catch(console.error);
-      }, 100); // 100ms debounce prevents multi-pane race
+      !autoAppliedRef.current &&
+      (phaseTrigger || lifecycleTrigger);
+
+    // FORENSIC: log every auto-apply decision
+    if ((session.phase === "busy" && !wasBusy) || (contextManager.lifecycle === 'dirty' && !wasDirty)) {
+      console.log(`[CTX_FORENSIC][AUTO_APPLY_CHECK]`, {
+        sessionId: session.id,
+        phase: session.phase,
+        wasBusy,
+        lifecycle: contextManager.lifecycle,
+        wasDirty,
+        autoApplyEnabled: sessionState.autoApplyEnabled,
+        autoAppliedAlready: autoAppliedRef.current,
+        currentVersion: contextManager.currentVersion,
+        injectedVersion: contextManager.injectedVersion,
+        trigger: phaseTrigger ? "phase" : lifecycleTrigger ? "lifecycle" : "none",
+        decision: shouldApply ? "WILL_APPLY" : "SKIP",
+      });
     }
-    return () => clearTimeout(autoApplyTimeout.current);
-  }, [session.phase, sessionState.autoApplyEnabled, contextManager.lifecycle, lockedApplyContext]);
+
+    if (shouldApply) {
+      autoAppliedRef.current = true;
+      if (contextManager.injectedVersion === 0) {
+        // The backend startup command already includes $HERMES_CONTEXT —
+        // the agent has already read the context file. Acknowledge the
+        // injection without sending a redundant nudge.
+        console.log(`[CTX_FORENSIC][AUTO_APPLY_ACKNOWLEDGE]`, {
+          sessionId: session.id,
+          trigger: phaseTrigger ? "phase_transition" : "lifecycle_transition",
+          reason: "startup command already handled initial context",
+        });
+        contextManager.acknowledgeInjection();
+      } else {
+        console.log(`[CTX_FORENSIC][AUTO_APPLY_FIRE]`, {
+          sessionId: session.id,
+          trigger: phaseTrigger ? "phase_transition" : "lifecycle_transition",
+        });
+        lockedApplyContext().catch(console.error);
+      }
+    }
+  }, [session.phase, sessionState.autoApplyEnabled, contextManager.lifecycle, contextManager.currentVersion, contextManager.injectedVersion, lockedApplyContext, contextManager.acknowledgeInjection]);
 
   return (
     <div className={`context-panel ${contextManager.lifecycle === 'dirty' || contextManager.lifecycle === 'apply_failed' ? "context-panel-outofsync" : ""}`}>

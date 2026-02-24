@@ -120,8 +120,8 @@ export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
             <span className="status-bar-divider" />
           </>
         )}
-        <span className="status-bar-version" title="HERMES-IDE v0.1.0 (dev build 2026-02-23)">
-          v0.1.0-dev
+        <span className="status-bar-version" title={`HERMES-IDE v${__APP_VERSION__}`}>
+          v{__APP_VERSION__}
         </span>
         {onOpenShortcuts && (
           <button

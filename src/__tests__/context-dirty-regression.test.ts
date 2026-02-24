@@ -241,6 +241,82 @@ describe("Context dirty regression: array order sensitivity", () => {
   });
 });
 
+// ─── Tests: Initial load does not mark dirty ─────────────────────────
+
+describe("Context dirty regression: initial load lifecycle", () => {
+  it("prevContextRef initialized to emptyContext prevents phantom dirty on initial load", () => {
+    // Simulate the fix: prevContextRef starts as emptyContext() instead of null
+    const emptyCtx = {
+      pinnedItems: [],
+      memoryFacts: [],
+      persistedMemory: [],
+      realms: [],
+      workspacePaths: [],
+      workingDirectory: "",
+      agent: null,
+      model: null,
+    };
+    const prevContextRef = { current: structuralClone(emptyCtx) };
+
+    // Before initial load completes, version-tracking effect runs
+    // with context = emptyContext() and prevContextRef = emptyContext()
+    const shouldBumpVersion = !structuralEqual(emptyCtx, prevContextRef.current);
+    expect(shouldBumpVersion).toBe(false); // No version bump → no dirty mark
+  });
+
+  it("setting prevContextRef BEFORE setContext prevents version bump on load", () => {
+    const emptyCtx = {
+      pinnedItems: [],
+      memoryFacts: [],
+      persistedMemory: [],
+      realms: [],
+      workspacePaths: [],
+      workingDirectory: "",
+      agent: null,
+      model: null,
+    };
+
+    // Simulate async load completing:
+    const initial = {
+      ...emptyCtx,
+      workingDirectory: "/home/user/project",
+      realms: [{ realm_id: "r1", realm_name: "my-project", languages: ["TypeScript"] }],
+    };
+
+    // FIX: set prevContextRef BEFORE setContext
+    const prevContextRef = { current: structuralClone(initial) };
+
+    // When React's version-tracking effect fires after setContext(initial),
+    // it compares context (initial) with prevContextRef.current (also initial)
+    const shouldBumpVersion = !structuralEqual(initial, prevContextRef.current);
+    expect(shouldBumpVersion).toBe(false); // No version bump → stays clean
+  });
+
+  it("actual user change AFTER initial load DOES bump version", () => {
+    const initial = {
+      pinnedItems: [],
+      memoryFacts: [],
+      persistedMemory: [],
+      realms: [{ realm_id: "r1", realm_name: "proj", languages: ["TypeScript"] }],
+      workspacePaths: [],
+      workingDirectory: "/home/user/project",
+      agent: null,
+      model: null,
+    };
+
+    const prevContextRef = { current: structuralClone(initial) };
+
+    // User adds a pin — this is a real change
+    const updated = {
+      ...initial,
+      pinnedItems: [{ id: 1, kind: "file", target: "/src/main.ts", label: null, session_id: "s1" }],
+    };
+
+    const shouldBumpVersion = !structuralEqual(updated, prevContextRef.current);
+    expect(shouldBumpVersion).toBe(true); // Version SHOULD bump → mark dirty
+  });
+});
+
 // ─── Tests: Version increment logic ──────────────────────────────────
 
 describe("Context dirty regression: version increment rules", () => {
