@@ -32,7 +32,6 @@ import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { decodeSessionDrag } from "./components/SplitPane";
 import { focusTerminal } from "./terminal/TerminalPool";
-import { DebugPanel } from "./debug/DebugPanel";
 
 function AppContent() {
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive } = useSession();
@@ -408,8 +407,6 @@ function AppContent() {
         />
       )}
 
-      {/* Diagnostic debug panel — only renders when HERMES_DEBUG is active */}
-      <DebugPanel />
     </div>
   );
 }

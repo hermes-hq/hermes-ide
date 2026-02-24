@@ -5,20 +5,6 @@ import { getContextPins, applyContext as apiApplyContext } from "../api/context"
 import { assembleSessionContext } from "../api/projects";
 import { getAllMemory } from "../api/memory";
 import { structuralEqual, structuralClone } from "../utils/structuralEqual";
-import { HERMES_DEBUG, HERMES_RAW_MODE, recordContext } from "../debug/eventRecorder";
-
-// ─── Forensic instrumentation (centralized) ──────────────────────────
-// All context lifecycle events route through the centralized event recorder.
-// When HERMES_DEBUG is active, every event appears in the DebugPanel and
-// can be exported as structured JSON.
-function ctxForensic(tag: string, detail: Record<string, unknown>): void {
-  const sessionId = (detail.sessionId as string) ?? "*";
-  recordContext(tag, sessionId, detail);
-  // Stack traces for critical events (only when debug active)
-  if (HERMES_DEBUG && (tag === "INJECTION_TRIGGER" || tag === "VERSION_BUMP" || tag === "LIFECYCLE_CHANGE")) {
-    console.trace(`  ↳ call stack for [CONTEXT:${tag}]`);
-  }
-}
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
@@ -147,8 +133,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
   useEffect(() => {
     if (!session) return;
     initialLoadDone.current = false;
-    ctxForensic("INITIAL_LOAD_START", { sessionId: session.id });
-
     const load = async () => {
       const initial = emptyContext();
       // Use sessionRef for fresh data — the closed-over `session` may be stale
@@ -205,12 +189,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
         model: latest.detected_agent?.model ?? null,
         mf: latest.metrics.memory_facts,
       });
-      ctxForensic("INITIAL_LOAD_DONE", {
-        sessionId: session.id,
-        version: 0,
-        lifecycle: "clean",
-        prevSyncKeySet: true,
-      });
     };
 
     load();
@@ -229,11 +207,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
     // sets prevSyncKeyRef and prevContextRef atomically. If the sync effect
     // fires before that, it creates a context change from emptyContext() →
     // session data, which triggers a phantom version bump → dirty → injection.
-    if (!HERMES_RAW_MODE && !initialLoadDone.current) {
-      ctxForensic("SESSION_SYNC_SKIP", {
-        sessionId: session.id,
-        reason: "initial load not done",
-      });
+    if (!initialLoadDone.current) {
       return;
     }
     const key = JSON.stringify({
@@ -243,18 +217,9 @@ export function useContextState(session: SessionData | null, executionMode?: str
       model: session.detected_agent?.model ?? null,
       mf: session.metrics.memory_facts,
     });
-    if (!HERMES_RAW_MODE && key === prevSyncKeyRef.current) {
-      ctxForensic("SESSION_SYNC_SKIP", {
-        sessionId: session.id,
-        reason: "key unchanged",
-      });
+    if (key === prevSyncKeyRef.current) {
       return; // no real change — skip
     }
-    ctxForensic("SESSION_SYNC_APPLY", {
-      sessionId: session.id,
-      prevKey: prevSyncKeyRef.current.slice(0, 80),
-      newKey: key.slice(0, 80),
-    });
     prevSyncKeyRef.current = key;
     setContext((prev) => ({
       ...prev,
@@ -276,15 +241,14 @@ export function useContextState(session: SessionData | null, executionMode?: str
       // GUARD: Ignore project events before initial load completes — the initial
       // load fetches project data. If an event fires first, it creates a
       // context change from emptyContext → project data → phantom version bump → dirty.
-      if (!HERMES_RAW_MODE && !initialLoadDone.current) {
-        ctxForensic("PROJECT_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
+      if (!initialLoadDone.current) {
         return;
       }
       assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET)
         .then((ctx) => {
           if (!cancelled) {
             setContext((prev) => {
-              if (!HERMES_RAW_MODE && structuralEqual(prev.realms, ctx.realms)) return prev; // no-op if unchanged
+              if (structuralEqual(prev.realms, ctx.realms)) return prev; // no-op if unchanged
               return { ...prev, realms: ctx.realms };
             });
             if (ctx.token_budget) setTokenBudget(ctx.token_budget);
@@ -306,14 +270,13 @@ export function useContextState(session: SessionData | null, executionMode?: str
     listen(`context-pins-changed-${session.id}`, () => {
       if (cancelled) return;
       // GUARD: Ignore pin events before initial load — same reason as project guard.
-      if (!HERMES_RAW_MODE && !initialLoadDone.current) {
-        ctxForensic("PIN_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
+      if (!initialLoadDone.current) {
         return;
       }
       getContextPins(session.id, null)
         .then((pins) => {
           if (!cancelled) setContext((prev) => {
-            if (!HERMES_RAW_MODE && structuralEqual(prev.pinnedItems, pins)) return prev;
+            if (structuralEqual(prev.pinnedItems, pins)) return prev;
             return { ...prev, pinnedItems: pins };
           });
         })
@@ -327,34 +290,16 @@ export function useContextState(session: SessionData | null, executionMode?: str
   // ── Auto-increment version when context changes → mark dirty ──
   useEffect(() => {
     const isEqual = structuralEqual(context, prevContextRef.current);
-    if (!HERMES_RAW_MODE && isEqual) {
-      ctxForensic("VERSION_CHECK_EQUAL", {
-        sessionId: session?.id,
-        currentVersion: versionRef.current,
-        note: "no bump — context structurally unchanged",
-      });
+    if (isEqual) {
       return;
     }
     prevContextRef.current = structuralClone(context);
     versionRef.current += 1;
     setCurrentVersion(versionRef.current);
-    ctxForensic("VERSION_BUMP", {
-      sessionId: session?.id,
-      newVersion: versionRef.current,
-      initialLoadDone: initialLoadDone.current,
-    });
     // Mark dirty if we've already had at least one state load
     if (versionRef.current > 0) {
       setLifecycle((prev) => {
         const next = prev === 'applying' ? prev : 'dirty';
-        if (prev !== next) {
-          ctxForensic("LIFECYCLE_CHANGE", {
-            sessionId: session?.id,
-            from: prev,
-            to: next,
-            version: versionRef.current,
-          });
-        }
         return next;
       });
     }
@@ -371,22 +316,9 @@ export function useContextState(session: SessionData | null, executionMode?: str
     if (!sess) return;
 
     // Guard: prevent double-apply
-    if (!HERMES_RAW_MODE && lifecycleRef.current === 'applying') {
-      ctxForensic("INJECTION_BLOCKED", {
-        sessionId: sess.id,
-        reason: "already applying",
-        lifecycle: lifecycleRef.current,
-      });
+    if (lifecycleRef.current === 'applying') {
       return;
     }
-
-    const injectionId = `inj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    ctxForensic("INJECTION_TRIGGER", {
-      sessionId: sess.id,
-      injectionId,
-      currentVersion: versionRef.current,
-      lifecycle: lifecycleRef.current,
-    });
 
     // CRITICAL: Update ref SYNCHRONOUSLY before any async work.
     // The useEffect-based sync (lifecycle → lifecycleRef) only runs after the
@@ -423,17 +355,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
       // would be detected as new changes and re-mark the context dirty.
       prevContextRef.current = structuralClone(contextRef.current);
 
-      ctxForensic("INJECTION_SUCCESS", {
-        sessionId: sess.id,
-        injectionId,
-        lifecycleRef: lifecycleRef.current,
-        version: result.version,
-        triggerSource: "applyContext",
-        tokenBudget: result.token_budget,
-        estimatedTokens: result.estimated_tokens,
-        nudgeSent: result.nudge_sent,
-      });
-
       // If nudge had a warning but file was written, show non-fatal info
       if (result.nudge_error && !result.nudge_sent) {
         setLastError(`Context file updated but agent not notified: ${result.nudge_error}`);
@@ -442,13 +363,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
       lifecycleRef.current = 'apply_failed';
       setLifecycle('apply_failed');
       setLastError(err instanceof Error ? err.message : String(err));
-      ctxForensic("INJECTION_FAILED", {
-        sessionId: sess.id,
-        injectionId,
-        lifecycleRef: lifecycleRef.current,
-        error: err instanceof Error ? err.message : String(err),
-        triggerSource: "applyContext",
-      });
     }
   }, [liveMode]);
 
@@ -459,11 +373,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
     // first auto-apply trigger is redundant. This updates version tracking
     // to prevent the redundant nudge.
     const ver = versionRef.current;
-    ctxForensic("ACKNOWLEDGE_INJECTION", {
-      sessionId: session?.id,
-      version: ver,
-      lifecycle: lifecycleRef.current,
-    });
     setInjectedVersion(ver);
     lifecycleRef.current = 'clean';
     setLifecycle('clean');

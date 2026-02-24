@@ -18,15 +18,6 @@ import {
   clearShellEnvironment,
 } from "./intelligence/shellEnvironment";
 
-// ─── Debug ──────────────────────────────────────────────────────────
-
-import {
-  HERMES_RAW_MODE,
-  recordTerminal,
-  recordPty,
-  recordMount,
-} from "../debug/eventRecorder";
-
 // ─── Helpers ────────────────────────────────────────────────────────
 
 /** UTF-8-safe base64 encoding (handles characters outside Latin-1 range) */
@@ -220,11 +211,9 @@ const KEYDOWN_PASSTHROUGH = new Set([
 
 export async function createTerminal(sessionId: string, color: string): Promise<void> {
   if (pool.has(sessionId)) {
-    recordMount("DUPLICATE_CREATE", sessionId, { color, poolSize: pool.size });
-    console.error(`[HERMES_DEBUG:DUPLICATE_CREATE] session=${sessionId} — pool already has entry!`);
+    console.warn(`[TerminalPool] duplicate create for session=${sessionId}`);
     return;
   }
-  recordMount("TERMINAL_CREATE", sessionId, { color, poolSizeBefore: pool.size });
 
   const themeName = currentSettings.theme || "dark";
   const theme = THEMES[themeName] || THEMES.dark;
@@ -346,14 +335,6 @@ export async function createTerminal(sessionId: string, color: string): Promise<
         postCompChar = resolving;
         postCompCharFired = true; // Mark as already fired — prevents textarea duplicate
 
-        recordTerminal("KEYDOWN_HANDLER", sessionId, {
-          key: event.key, code: event.code, type: event.type,
-          isComposing: event.isComposing, ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey,
-          repeat: event.repeat, decision: "INJECT_POST_COMP", resolving,
-          rawMode: HERMES_RAW_MODE,
-        });
-
         // Inject directly — bypass xterm's composition state
         handleTerminalInput(sessionId, resolving);
         return false; // SUPPRESS xterm's keydown
@@ -362,19 +343,9 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     }
 
     const shouldSuppress =
-      !HERMES_RAW_MODE &&  // RAW MODE: never suppress — let xterm fire both paths
       !event.isComposing &&
       !event.ctrlKey && !event.metaKey && !event.altKey &&
       !KEYDOWN_PASSTHROUGH.has(event.key);
-
-    // DIAGNOSTIC: Log EVERY keydown decision
-    recordTerminal("KEYDOWN_HANDLER", sessionId, {
-      key: event.key, code: event.code, type: event.type,
-      isComposing: event.isComposing, ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey,
-      repeat: event.repeat, decision: shouldSuppress ? "SUPPRESS" : "ALLOW",
-      rawMode: HERMES_RAW_MODE,
-    });
 
     if (shouldSuppress) return false;
 
@@ -386,7 +357,6 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     return true;
   });
 
-  recordMount("REGISTER_ON_DATA", sessionId, { note: "exactly one onData listener" });
   terminal.onData((data) => {
     // ── Composition dedup: suppress duplicate composed char from textarea input ──
     // IMPORTANT: Do NOT clear lastComposedChar on non-matching data!
@@ -395,9 +365,6 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     // The compositionend listener's 200ms timeout handles cleanup.
     if (lastComposedChar !== null && data === lastComposedChar) {
       if (composedDataFired) {
-        recordTerminal("ON_DATA_COMPOSE_DEDUP", sessionId, data, {
-          note: "suppressed duplicate composed character",
-        });
         return;
       }
       composedDataFired = true;
@@ -409,25 +376,12 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     // Same rule: do NOT clear on non-matching data — timeout handles cleanup.
     if (postCompChar !== null && data === postCompChar) {
       if (postCompCharFired) {
-        recordTerminal("ON_DATA_POSTCOMP_DEDUP", sessionId, data, {
-          note: "suppressed duplicate post-composition character",
-        });
         return;
       }
       postCompCharFired = true;
     }
 
-    recordTerminal("ON_DATA", sessionId, data, {
-      hex: [...data].map(c => c.charCodeAt(0).toString(16)).join(" "),
-      len: data.length,
-      inputBufferBefore: pool.get(sessionId)?.inputBuffer ?? "N/A",
-    });
-
     handleTerminalInput(sessionId, data);
-
-    recordTerminal("ON_DATA_AFTER", sessionId, data, {
-      inputBufferAfter: pool.get(sessionId)?.inputBuffer ?? "N/A",
-    });
   });
 
   // Track user scroll position to avoid jumping during streaming
@@ -440,7 +394,6 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   });
 
   // Wire PTY output → terminal
-  recordMount("REGISTER_PTY_LISTEN", sessionId, { event: `pty-output-${sessionId}` });
   const unlistenOutput = await listen<string>(`pty-output-${sessionId}`, (event) => {
     const entry = pool.get(sessionId);
     const scrolledUp = entry?.userScrolledUp ?? false;
@@ -449,15 +402,8 @@ export async function createTerminal(sessionId: string, color: string): Promise<
       const binary = atob(event.payload);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      // Decode to string for diagnostic display (first 40 chars)
-      const decoded = new TextDecoder().decode(bytes.slice(0, 40));
-      recordPty("PTY_OUTPUT", sessionId, decoded, {
-        len: bytes.length,
-        first20hex: [...bytes.slice(0, 20)].map(b => b.toString(16).padStart(2, "0")).join(" "),
-      });
       terminal.write(bytes);
     } catch {
-      recordPty("PTY_OUTPUT_FALLBACK", sessionId, event.payload.slice(0, 40), { len: event.payload.length });
       terminal.write(event.payload);
     }
     if (scrolledUp && viewportY >= 0) {
@@ -580,11 +526,6 @@ function handleTerminalInput(sessionId: string, data: string): void {
   }
 
   // ── Always pass data to PTY ──
-  recordPty("PTY_WRITE", sessionId, data, {
-    hex: [...data].map(c => c.charCodeAt(0).toString(16)).join(" "),
-    inputBuffer: entry.inputBuffer,
-    source: "handleTerminalInput",
-  });
   writeToSession(sessionId, utf8ToBase64(data)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session failed for ${sessionId}:`, err);
   });
@@ -995,7 +936,6 @@ export function detach(sessionId: string): void {
 export function destroy(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
-  recordMount("TERMINAL_DESTROY", sessionId, { poolSizeBefore: pool.size });
   entry.unlistenOutput?.();
   entry.unlistenExit?.();
   if (entry.suggestionTimer) clearTimeout(entry.suggestionTimer);
