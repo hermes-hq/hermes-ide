@@ -25,7 +25,6 @@ import {
   recordTerminal,
   recordPty,
   recordMount,
-  recordShortcut,
 } from "../debug/eventRecorder";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -1118,10 +1117,6 @@ export function sendShortcutCommand(sessionId: string, command: string): void {
 
   // Invariant: command must not contain line breaks
   if (command.includes("\n") || command.includes("\r")) {
-    console.error(`[FORENSIC:SHORTCUT_INVARIANT_VIOLATION] command contains line break!`, {
-      command,
-      hex: [...command].map(c => c.charCodeAt(0).toString(16)).join(" "),
-    });
     return;
   }
 
@@ -1130,12 +1125,6 @@ export function sendShortcutCommand(sessionId: string, command: string): void {
   entry.inputBuffer = "";
   dismissSuggestions(sessionId);
   clearGhostText(sessionId);
-
-  recordShortcut("SHORTCUT_BEFORE", sessionId, command, {
-    hex: [...command].map(c => c.charCodeAt(0).toString(16)).join(" "),
-    eraseLen,
-    suggestionsVisible: entry.suggestionState?.visible ?? false,
-  });
 
   // Send backspaces (to clear existing text) + command text.
   // NO \r — the command is inserted on the prompt, not executed.
@@ -1153,11 +1142,6 @@ export function sendShortcutCommand(sessionId: string, command: string): void {
 
   // Refocus terminal — clicking the shortcut button steals focus from xterm.
   focusTerminal(sessionId);
-
-  recordShortcut("SHORTCUT_AFTER", sessionId, command, {
-    inputBufferAfter: entry.inputBuffer,
-    suggestionsVisible: entry.suggestionState?.visible ?? false,
-  });
 }
 
 export function getTerminal(sessionId: string): Terminal | null {

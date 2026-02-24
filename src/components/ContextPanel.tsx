@@ -595,40 +595,14 @@ export function ContextPanel({ session }: ContextPanelProps) {
       !autoAppliedRef.current &&
       (phaseTrigger || lifecycleTrigger);
 
-    // FORENSIC: log every auto-apply decision
-    if ((session.phase === "busy" && !wasBusy) || (contextManager.lifecycle === 'dirty' && !wasDirty)) {
-      console.log(`[CTX_FORENSIC][AUTO_APPLY_CHECK]`, {
-        sessionId: session.id,
-        phase: session.phase,
-        wasBusy,
-        lifecycle: contextManager.lifecycle,
-        wasDirty,
-        autoApplyEnabled: sessionState.autoApplyEnabled,
-        autoAppliedAlready: autoAppliedRef.current,
-        currentVersion: contextManager.currentVersion,
-        injectedVersion: contextManager.injectedVersion,
-        trigger: phaseTrigger ? "phase" : lifecycleTrigger ? "lifecycle" : "none",
-        decision: shouldApply ? "WILL_APPLY" : "SKIP",
-      });
-    }
-
     if (shouldApply) {
       autoAppliedRef.current = true;
       if (contextManager.injectedVersion === 0) {
         // The backend startup command already includes $HERMES_CONTEXT —
         // the agent has already read the context file. Acknowledge the
         // injection without sending a redundant nudge.
-        console.log(`[CTX_FORENSIC][AUTO_APPLY_ACKNOWLEDGE]`, {
-          sessionId: session.id,
-          trigger: phaseTrigger ? "phase_transition" : "lifecycle_transition",
-          reason: "startup command already handled initial context",
-        });
         contextManager.acknowledgeInjection();
       } else {
-        console.log(`[CTX_FORENSIC][AUTO_APPLY_FIRE]`, {
-          sessionId: session.id,
-          trigger: phaseTrigger ? "phase_transition" : "lifecycle_transition",
-        });
         lockedApplyContext().catch(console.error);
       }
     }

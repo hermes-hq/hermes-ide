@@ -324,6 +324,21 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
     case "SET_LEFT_TAB": {
       const tab = action.tab;
+      const alreadyActive =
+        (tab === "processes" && state.ui.processPanelOpen) ||
+        (tab === "sessions" && !state.ui.sessionListCollapsed && !state.ui.processPanelOpen);
+      if (alreadyActive) {
+        // Clicking the active tab collapses it
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            processPanelOpen: false,
+            sessionListCollapsed: true,
+            activeLeftTab: tab,
+          },
+        };
+      }
       return {
         ...state,
         ui: {
