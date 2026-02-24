@@ -158,4 +158,6 @@ export type SessionAction =
   | { type: "SET_SKIP_CLOSE_CONFIRM"; skip: boolean }
   // Process panel actions
   | { type: "TOGGLE_PROCESS_PANEL" }
-  | { type: "SET_LEFT_TAB"; tab: "sessions" | "processes" };
+  | { type: "SET_LEFT_TAB"; tab: "sessions" | "processes" | "git" }
+  // Git panel actions
+  | { type: "TOGGLE_GIT_PANEL" };

@@ -1,4 +1,5 @@
 mod db;
+mod git;
 mod process;
 mod pty;
 mod realm;
@@ -123,6 +124,15 @@ pub fn run() {
             process::kill_process_tree,
             process::get_process_detail,
             process::reveal_process_in_finder,
+            // Git integration
+            git::git_status,
+            git::git_stage,
+            git::git_unstage,
+            git::git_commit,
+            git::git_push,
+            git::git_pull,
+            git::git_diff,
+            git::git_open_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running HERMES-IDE");

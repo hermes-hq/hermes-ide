@@ -59,7 +59,8 @@ interface SessionState {
     timelineOpen: boolean;
     autoToast: { command: string; reason: string; sessionId: string } | null;
     processPanelOpen: boolean;
-    activeLeftTab: "sessions" | "processes";
+    gitPanelOpen: boolean;
+    activeLeftTab: "sessions" | "processes" | "git";
   };
 }
 
@@ -165,6 +166,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           sessionListCollapsed: !state.ui.sessionListCollapsed,
           activeLeftTab: "sessions" as const,
           processPanelOpen: !state.ui.sessionListCollapsed ? state.ui.processPanelOpen : false,
+          gitPanelOpen: !state.ui.sessionListCollapsed ? state.ui.gitPanelOpen : false,
         },
       };
     case "TOGGLE_PALETTE":
@@ -317,6 +319,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ui: {
           ...state.ui,
           processPanelOpen: opening,
+          gitPanelOpen: opening ? false : state.ui.gitPanelOpen,
           activeLeftTab: opening ? "processes" : "sessions",
           sessionListCollapsed: opening ? true : state.ui.sessionListCollapsed,
         },
@@ -326,7 +329,8 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const tab = action.tab;
       const alreadyActive =
         (tab === "processes" && state.ui.processPanelOpen) ||
-        (tab === "sessions" && !state.ui.sessionListCollapsed && !state.ui.processPanelOpen);
+        (tab === "git" && state.ui.gitPanelOpen) ||
+        (tab === "sessions" && !state.ui.sessionListCollapsed && !state.ui.processPanelOpen && !state.ui.gitPanelOpen);
       if (alreadyActive) {
         // Clicking the active tab collapses it
         return {
@@ -334,6 +338,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ui: {
             ...state.ui,
             processPanelOpen: false,
+            gitPanelOpen: false,
             sessionListCollapsed: true,
             activeLeftTab: tab,
           },
@@ -345,7 +350,23 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ...state.ui,
           activeLeftTab: tab,
           processPanelOpen: tab === "processes",
-          sessionListCollapsed: tab === "processes" ? true : false,
+          gitPanelOpen: tab === "git",
+          sessionListCollapsed: tab !== "sessions",
+        },
+      };
+    }
+
+    // ─── Git panel actions ──────────────────────────────────────────────
+    case "TOGGLE_GIT_PANEL": {
+      const opening = !state.ui.gitPanelOpen;
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          gitPanelOpen: opening,
+          processPanelOpen: opening ? false : state.ui.processPanelOpen,
+          activeLeftTab: opening ? "git" : "sessions",
+          sessionListCollapsed: opening ? true : state.ui.sessionListCollapsed,
         },
       };
     }
@@ -393,6 +414,7 @@ export const initialState: SessionState = {
     timelineOpen: false,
     autoToast: null,
     processPanelOpen: false,
+    gitPanelOpen: false,
     activeLeftTab: "sessions" as const,
   },
 };

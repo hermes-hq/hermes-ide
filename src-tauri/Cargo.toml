@@ -35,3 +35,4 @@ base64 = "0.22"
 regex = "1"
 lazy_static = "1"
 sysinfo = { version = "0.33", features = ["system", "user"] }
+git2 = "0.19"

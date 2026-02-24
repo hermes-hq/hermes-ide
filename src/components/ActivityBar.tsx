@@ -73,6 +73,18 @@ export const ProcessesIcon = (
   </svg>
 );
 
+export const GitIcon = (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="5" cy="5" r="2" />
+    <circle cx="13" cy="5" r="2" />
+    <circle cx="9" cy="14" r="2" />
+    <line x1="5" y1="7" x2="5" y2="10" />
+    <line x1="13" y1="7" x2="13" y2="10" />
+    <path d="M5 10 C5 12 9 12 9 12" />
+    <path d="M13 10 C13 12 9 12 9 12" />
+  </svg>
+);
+
 export const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
     <line x1="8" y1="3" x2="8" y2="13" />

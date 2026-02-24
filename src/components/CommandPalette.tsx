@@ -17,6 +17,7 @@ interface CommandPaletteProps {
   onScanCwd?: () => void;
   onOpenComposer?: () => void;
   onOpenShortcuts?: () => void;
+  onToggleGit?: () => void;
 }
 
 interface Command {
@@ -29,7 +30,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts,
+  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -52,6 +53,7 @@ export function CommandPalette({
     ...(onScanCwd ? [{ id: "scan-cwd", label: "Scan Current Directory", category: "Projects", action: () => { onScanCwd(); onClose(); } }] : []),
     ...(onOpenComposer ? [{ id: "composer", label: "Prompt Composer", category: "Tools", shortcut: "⌘J", action: () => { onOpenComposer(); onClose(); } }] : []),
     ...(onOpenShortcuts ? [{ id: "shortcuts", label: "Keyboard Shortcuts", category: "Help", shortcut: "⌘/", action: () => { onOpenShortcuts(); onClose(); } }] : []),
+    ...(onToggleGit ? [{ id: "git", label: "Toggle Git Panel", category: "View", shortcut: "⌘G", action: () => { onToggleGit(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,
       label: s.label,
@@ -59,7 +61,7 @@ export function CommandPalette({
       shortcut: i < 9 ? `⌘${i + 1}` : undefined,
       action: () => { onSelectSession(s.id); onClose(); },
     })),
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts]);
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

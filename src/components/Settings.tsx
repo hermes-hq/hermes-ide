@@ -136,6 +136,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
   const tabs = [
     { id: "general", label: "General" },
     { id: "appearance", label: "Appearance" },
+    { id: "git", label: "Git" },
     { id: "autonomous", label: "Autonomous" },
     { id: "shortcuts", label: "Shortcuts" },
   ];
@@ -317,6 +318,67 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                     ))}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {activeTab === "git" && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">Auto-refresh Interval</label>
+                  <select
+                    className="settings-select"
+                    value={settings.git_poll_interval || "3000"}
+                    onChange={(e) => updateSetting("git_poll_interval", e.target.value)}
+                  >
+                    <option value="1000">1 second</option>
+                    <option value="3000">3 seconds</option>
+                    <option value="5000">5 seconds</option>
+                    <option value="10000">10 seconds</option>
+                    <option value="0">Off</option>
+                  </select>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Author Name Override</label>
+                  <input
+                    className="settings-input"
+                    placeholder="Use git config (default)"
+                    value={settings.git_author_name || ""}
+                    onChange={(e) => updateSetting("git_author_name", e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Author Email Override</label>
+                  <input
+                    className="settings-input"
+                    placeholder="Use git config (default)"
+                    value={settings.git_author_email || ""}
+                    onChange={(e) => updateSetting("git_author_email", e.target.value)}
+                  />
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label settings-label-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.git_auto_stage === "true"}
+                      onChange={(e) => updateSetting("git_auto_stage", e.target.checked ? "true" : "false")}
+                    />
+                    Auto-stage all changes on commit
+                  </label>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label settings-label-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.git_show_untracked !== "false"}
+                      onChange={(e) => updateSetting("git_show_untracked", e.target.checked ? "true" : "false")}
+                    />
+                    Show untracked files
+                  </label>
+                </div>
               </div>
             )}
 
