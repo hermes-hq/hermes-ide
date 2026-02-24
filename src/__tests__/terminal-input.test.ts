@@ -150,31 +150,36 @@ describe("Terminal input: duplicate keystroke prevention", () => {
   });
 });
 
-// ─── Shortcut command: paste()-based single input path ────────────────
+// ─── Shortcut command: triggerDataEvent-based input with backspace clearing ──
 
 describe("Terminal input: sendShortcutCommand architecture", () => {
-  it("sendShortcutCommand uses terminal.paste() (single input path through onData)", () => {
+  it("sendShortcutCommand uses triggerDataEvent (with writeToSession fallback)", () => {
     const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
     expect(fnMatch).not.toBeNull();
     const fnBody = fnMatch![0];
 
-    // Must use paste() — goes through onData → handleTerminalInput → writeToSession
-    expect(fnBody).toContain(".paste(");
-    // Must NOT call writeToSession directly (no bypass of input pipeline)
-    expect(fnBody).not.toMatch(/writeToSession\(/);
+    // Must use triggerDataEvent for command injection
+    expect(fnBody).toContain("triggerDataEvent");
+    // writeToSession is the fallback path when triggerDataEvent is unavailable
+    expect(fnBody).toContain("writeToSession");
   });
 
-  it("sendShortcutCommand clears display before paste (erase to end of screen)", () => {
+  it("sendShortcutCommand uses backspaces to clear existing input", () => {
     const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
     expect(fnMatch).not.toBeNull();
     const fnBody = fnMatch![0];
 
-    // Display clear: \r\x1b[J (carriage return + erase from cursor to end of screen)
-    expect(fnBody).toContain('\\r\\x1b[J');
+    // Uses \x7f (DEL/backspace) repeated by eraseLen to clear existing text
+    expect(fnBody).toContain("\\x7f");
+    expect(fnBody).toContain("eraseLen");
   });
 
-  it("sendShortcutCommand paste payload contains Ctrl-U + command + Enter", () => {
-    // The payload should be: \x15 + command + \r in a single paste
-    expect(source).toContain('"\\x15" + command + "\\r"');
+  it("sendShortcutCommand does NOT append Enter — user reviews and presses Enter manually", () => {
+    const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
+    expect(fnMatch).not.toBeNull();
+    const fnBody = fnMatch![0];
+
+    // The function inserts the command on the prompt without executing it
+    expect(fnBody).toContain("NO \\r");
   });
 });

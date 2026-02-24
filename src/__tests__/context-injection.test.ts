@@ -392,7 +392,7 @@ describe("Suite 5: Injection Formatting", () => {
     expect(output).toContain("db_host = localhost");
   });
 
-  it("formatContextMarkdown includes realms", () => {
+  it("formatContextMarkdown includes projects", () => {
     const ctx = makeBaseContext({
       realms: [{
         realm_id: "r1", realm_name: "my-project", path: "/home/user/my-project",

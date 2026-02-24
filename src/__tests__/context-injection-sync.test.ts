@@ -8,7 +8,7 @@
  * FIX:
  *   1. Added contextRef that always holds latest context value.
  *   2. After apply succeeds, reset prevContextRef to current context (absorb drift).
- *   3. Added structuralEqual guard to pin listener (was missing unlike realm listener).
+ *   3. Added structuralEqual guard to pin listener (was missing unlike project listener).
  */
 import { describe, it, expect } from "vitest";
 import { structuralEqual, structuralClone } from "../utils/structuralEqual";

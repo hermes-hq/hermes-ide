@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { SessionData, useExecutionMode, useSession } from "../state/SessionContext";
 import { addWorkspacePath as apiAddWorkspacePath } from "../api/sessions";
 import { sendShortcutCommand } from "../terminal/TerminalPool";
-import { getSessionRealms } from "../api/realms";
+import { getSessionProjects } from "../api/projects";
 import { addContextPin, removeContextPin, findErrorCorrelations } from "../api/context";
 import { getAllMemory, saveMemory, deleteMemory } from "../api/memory";
 import { useFileTree, FileTreeNode } from "../hooks/useFileTree";
@@ -141,9 +141,9 @@ function ToolTimeline({ toolCalls }: { toolCalls: { tool: string; args: string; 
   );
 }
 
-// ─── Domain Section (Attached Realms) ────────────────────────────────
+// ─── Domain Section (Attached Projects) ──────────────────────────────
 function DomainSection({ sessionId }: { sessionId: string }) {
-  const [realms, setRealms] = useState<{
+  const [projects, setProjects] = useState<{
     id: string; name: string; path: string; languages: string[];
     scan_status: string; architecture: { pattern: string; layers: string[] } | null;
     conventions: { rule: string; source: string; confidence: number }[];
@@ -153,21 +153,21 @@ function DomainSection({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     let mounted = true;
-    const fetchRealms = () => {
-      getSessionRealms(sessionId)
-        .then((r) => { if (mounted) { setRealms(r as typeof realms); setLoading(false); } })
-        .catch((err) => { console.warn("[ContextPanel] Failed to load realms:", err); if (mounted) setLoading(false); });
+    const fetchProjects = () => {
+      getSessionProjects(sessionId)
+        .then((r) => { if (mounted) { setProjects(r as typeof projects); setLoading(false); } })
+        .catch((err) => { console.warn("[ContextPanel] Failed to load projects:", err); if (mounted) setLoading(false); });
     };
 
     setLoading(true);
-    fetchRealms();
+    fetchProjects();
 
     let unlisten: (() => void) | null = null;
     let unlistenGlobal: (() => void) | null = null;
 
-    listen(`session-realms-updated-${sessionId}`, fetchRealms)
+    listen(`session-realms-updated-${sessionId}`, fetchProjects)
       .then((u) => { if (mounted) unlisten = u; else u(); });
-    listen("realm-updated", fetchRealms)
+    listen("realm-updated", fetchProjects)
       .then((u) => { if (mounted) unlistenGlobal = u; else u(); });
 
     return () => {
@@ -183,48 +183,48 @@ function DomainSection({ sessionId }: { sessionId: string }) {
       <div className="text-muted">Loading...</div>
     </div>
   );
-  if (realms.length === 0) return null;
+  if (projects.length === 0) return null;
 
   return (
     <div className="ctx-section">
       <div className="ctx-section-title">Projects</div>
-      {realms.map((realm) => (
-        <div key={realm.id} className="ctx-domain-realm">
+      {projects.map((project) => (
+        <div key={project.id} className="ctx-domain-project">
           <div
-            className="ctx-domain-realm-header"
+            className="ctx-domain-project-header"
             role="button"
             tabIndex={0}
-            onClick={() => setExpanded(expanded === realm.id ? null : realm.id)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === realm.id ? null : realm.id); } }}
+            onClick={() => setExpanded(expanded === project.id ? null : project.id)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(expanded === project.id ? null : project.id); } }}
           >
-            <span className="ctx-domain-realm-name">{realm.name}</span>
-            <span className="realm-scan-badge" data-status={realm.scan_status}>
-              {realm.scan_status}
+            <span className="ctx-domain-project-name">{project.name}</span>
+            <span className="project-scan-badge" data-status={project.scan_status}>
+              {project.scan_status}
             </span>
           </div>
-          {expanded === realm.id && (
-            <div className="ctx-domain-realm-detail">
-              {realm.architecture && (
+          {expanded === project.id && (
+            <div className="ctx-domain-project-detail">
+              {project.architecture && (
                 <div className="ctx-kv">
                   <span>Architecture</span>
-                  <span className="mono">{realm.architecture.pattern}</span>
+                  <span className="mono">{project.architecture.pattern}</span>
                 </div>
               )}
-              {realm.architecture && realm.architecture.layers.length > 0 && (
+              {project.architecture && project.architecture.layers.length > 0 && (
                 <div className="ctx-kv">
                   <span>Layers</span>
-                  <span className="mono">{realm.architecture.layers.join(", ")}</span>
+                  <span className="mono">{project.architecture.layers.join(", ")}</span>
                 </div>
               )}
-              {realm.languages.length > 0 && (
+              {project.languages.length > 0 && (
                 <div className="ctx-kv">
                   <span>Languages</span>
-                  <span className="mono">{realm.languages.join(", ")}</span>
+                  <span className="mono">{project.languages.join(", ")}</span>
                 </div>
               )}
-              {realm.conventions.length > 0 && (
+              {project.conventions.length > 0 && (
                 <div className="ctx-domain-conventions">
-                  {realm.conventions.slice(0, 8).map((conv) => (
+                  {project.conventions.slice(0, 8).map((conv) => (
                     <div key={conv.rule} className="ctx-domain-conv">{conv.rule}</div>
                   ))}
                 </div>
@@ -299,8 +299,8 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const [copyDone, setCopyDone] = useState(false);
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
 
-  // Derive primary realm id for project-scoped operations
-  const primaryRealmId = contextManager.context.realms.length > 0
+  // Derive primary project id for project-scoped operations
+  const primaryProjectId = contextManager.context.realms.length > 0
     ? contextManager.context.realms[0].realm_id
     : null;
 
@@ -322,13 +322,13 @@ export function ContextPanel({ session }: ContextPanelProps) {
     copyTimerRef.current = setTimeout(() => setCopyDone(false), COPY_FEEDBACK_MS);
   }, [contextManager.copyToClipboard]);
 
-  // Load persisted memory on mount and when session/realm changes
+  // Load persisted memory on mount and when session/project changes
   useEffect(() => {
     const loadMemory = async () => {
       try {
         const globalEntries = await getAllMemory("global", "global");
-        if (primaryRealmId) {
-          const projectEntries = await getAllMemory("project", primaryRealmId);
+        if (primaryProjectId) {
+          const projectEntries = await getAllMemory("project", primaryProjectId);
           setPersistedMemory([...projectEntries, ...globalEntries]);
         } else {
           setPersistedMemory(globalEntries);
@@ -338,7 +338,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
       }
     };
     loadMemory();
-  }, [session.id, primaryRealmId]);
+  }, [session.id, primaryProjectId]);
 
   // Listen for error-matched events
   useEffect(() => {
@@ -376,10 +376,10 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const addPin = useCallback(async () => {
     if (!pinTarget.trim()) return;
     try {
-      const isProject = pinScope === "project" && primaryRealmId;
+      const isProject = pinScope === "project" && primaryProjectId;
       await addContextPin({
         sessionId: isProject ? null : session.id,
-        projectId: isProject ? primaryRealmId : null,
+        projectId: isProject ? primaryProjectId : null,
         kind: pinKind, target: pinTarget.trim(), label: null, priority: null,
       });
       setPinTarget("");
@@ -387,7 +387,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
     } catch (err) {
       console.warn("[ContextPanel] Failed to add pin:", err);
     }
-  }, [session.id, pinKind, pinTarget, pinScope, primaryRealmId]);
+  }, [session.id, pinKind, pinTarget, pinScope, primaryProjectId]);
 
   const browseAndPinFile = useCallback(async () => {
     try {
@@ -397,10 +397,10 @@ export function ContextPanel({ session }: ContextPanelProps) {
         defaultPath: session.working_directory,
       });
       if (selected) {
-        const isProject = pinScope === "project" && primaryRealmId;
+        const isProject = pinScope === "project" && primaryProjectId;
         await addContextPin({
           sessionId: isProject ? null : session.id,
-          projectId: isProject ? primaryRealmId : null,
+          projectId: isProject ? primaryProjectId : null,
           kind: "file", target: selected, label: null, priority: null,
         });
         setShowPinAdd(false);
@@ -408,7 +408,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
     } catch (err) {
       console.warn("[ContextPanel] Failed to browse/pin file:", err);
     }
-  }, [session.id, session.working_directory, pinScope, primaryRealmId]);
+  }, [session.id, session.working_directory, pinScope, primaryProjectId]);
 
   const removePin = useCallback(async (id: number) => {
     try {
@@ -422,39 +422,39 @@ export function ContextPanel({ session }: ContextPanelProps) {
   const pinFile = useCallback(async (filePath: string) => {
     try {
       // Files pinned from the file tree default to project scope
-      const isProject = primaryRealmId != null;
+      const isProject = primaryProjectId != null;
       await addContextPin({
         sessionId: isProject ? null : session.id,
-        projectId: isProject ? primaryRealmId : null,
+        projectId: isProject ? primaryProjectId : null,
         kind: "file", target: filePath, label: null, priority: null,
       });
       // State update handled by context-pins-changed event → useContextState
     } catch (err) {
       console.warn("[ContextPanel] Failed to pin file:", err);
     }
-  }, [session.id, primaryRealmId]);
+  }, [session.id, primaryProjectId]);
 
   const pinMemory = useCallback(async (key: string, value: string) => {
     try {
-      const isProject = primaryRealmId != null;
+      const isProject = primaryProjectId != null;
       await addContextPin({
         sessionId: isProject ? null : session.id,
-        projectId: isProject ? primaryRealmId : null,
+        projectId: isProject ? primaryProjectId : null,
         kind: "memory", target: `${key}=${value}`, label: key, priority: null,
       });
       // State update handled by context-pins-changed event → useContextState
     } catch (err) {
       console.warn("[ContextPanel] Failed to pin memory:", err);
     }
-  }, [session.id, primaryRealmId]);
+  }, [session.id, primaryProjectId]);
 
   const addMemoryFact = useCallback(async () => {
     if (!memoryKeyInput.trim() || !memoryValueInput.trim()) return;
     try {
-      const isProject = memoryScopeInput === "project" && primaryRealmId;
+      const isProject = memoryScopeInput === "project" && primaryProjectId;
       await saveMemory({
         scope: isProject ? "project" : "global",
-        scopeId: isProject ? primaryRealmId! : "global",
+        scopeId: isProject ? primaryProjectId! : "global",
         key: memoryKeyInput.trim(),
         value: memoryValueInput.trim(),
         source: "user",
@@ -466,8 +466,8 @@ export function ContextPanel({ session }: ContextPanelProps) {
       setShowMemoryAdd(false);
       // Reload both project and global memory
       const globalEntries = await getAllMemory("global", "global");
-      if (primaryRealmId) {
-        const projectEntries = await getAllMemory("project", primaryRealmId);
+      if (primaryProjectId) {
+        const projectEntries = await getAllMemory("project", primaryProjectId);
         setPersistedMemory([...projectEntries, ...globalEntries]);
       } else {
         setPersistedMemory(globalEntries);
@@ -475,7 +475,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
     } catch (err) {
       console.warn("[ContextPanel] Failed to save memory:", err);
     }
-  }, [memoryKeyInput, memoryValueInput, memoryScopeInput, primaryRealmId]);
+  }, [memoryKeyInput, memoryValueInput, memoryScopeInput, primaryProjectId]);
 
   const deleteMemoryFact = useCallback(async (key: string) => {
     try {

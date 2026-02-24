@@ -11,7 +11,7 @@ export interface ContextPin {
   created_at: number;
 }
 
-export interface RealmContextInfo {
+export interface ProjectContextInfo {
   realm_id: string;
   realm_name: string;
   path: string;
@@ -47,7 +47,7 @@ export interface ContextState {
   pinnedItems: ContextPin[];
   memoryFacts: Pick<PersistedMemory, 'key' | 'value' | 'source' | 'confidence'>[];
   persistedMemory: Pick<PersistedMemory, 'key' | 'value' | 'source'>[];
-  realms: RealmContextInfo[];
+  realms: ProjectContextInfo[];
   workspacePaths: string[];
   workingDirectory: string;
   agent: string | null;

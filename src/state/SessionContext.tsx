@@ -4,7 +4,7 @@ import {
   createSession as apiCreateSession, closeSession as apiCloseSession,
   getSessions, getRecentSessions, getSessionSnapshot,
 } from "../api/sessions";
-import { getRealms, getSessionRealms, attachSessionRealm, nudgeRealmContext } from "../api/realms";
+import { getProjects, getSessionProjects, attachSessionProject, nudgeProjectContext } from "../api/projects";
 import { getSettings, getSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback } from "../terminal/TerminalPool";
 import { applyTheme } from "../utils/themeManager";
@@ -416,27 +416,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const session = event.payload;
         dispatch({ type: "SESSION_UPDATED", session });
 
-        // Auto-attach realm on working_directory change
+        // Auto-attach project on working_directory change
         // Uses exact path match with trailing separator to prevent
         // /home/user/app matching /home/user/app-legacy
         if (session.working_directory) {
-          getRealms().then((realms) => {
-            for (const realm of realms) {
+          getProjects().then((projects) => {
+            for (const project of projects) {
               const wd = session.working_directory;
-              const rp = realm.path;
+              const rp = project.path;
               const isExactOrSubdir = wd === rp || wd.startsWith(rp + "/");
               if (isExactOrSubdir) {
                 // Check if already attached
-                getSessionRealms(session.id).then((attachedRealms) => {
-                  if (!attachedRealms.some((r) => r.id === realm.id)) {
-                    attachSessionRealm(session.id, realm.id, "primary")
-                      .catch((err) => console.warn("[SessionContext] Failed to attach realm:", err));
+                getSessionProjects(session.id).then((attachedProjects) => {
+                  if (!attachedProjects.some((r) => r.id === project.id)) {
+                    attachSessionProject(session.id, project.id, "primary")
+                      .catch((err) => console.warn("[SessionContext] Failed to attach project:", err));
                   }
-                }).catch((err) => console.warn("[SessionContext] Failed to check attached realms:", err));
+                }).catch((err) => console.warn("[SessionContext] Failed to check attached projects:", err));
                 break;
               }
             }
-          }).catch((err) => console.warn("[SessionContext] Failed to load realms for auto-attach:", err));
+          }).catch((err) => console.warn("[SessionContext] Failed to load projects for auto-attach:", err));
         }
 
         // Auto-cleanup destroyed sessions (PTY exited on its own)
@@ -499,14 +499,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
       unlisteners.push(u2);
 
-      // Debounced nudge when realms change mid-session (e.g. user adds/removes projects)
+      // Debounced nudge when projects change mid-session (e.g. user adds/removes projects)
       const u3 = await listen<string>("session-realms-changed", (event) => {
         const sessionId = event.payload;
         const existing = nudgeTimers.current.get(sessionId);
         if (existing) clearTimeout(existing);
         const timer = setTimeout(() => {
           nudgeTimers.current.delete(sessionId);
-          nudgeRealmContext(sessionId).catch((err) => console.warn("[SessionContext] Failed to nudge realm context:", err));
+          nudgeProjectContext(sessionId).catch((err) => console.warn("[SessionContext] Failed to nudge project context:", err));
         }, 1500);
         nudgeTimers.current.set(sessionId, timer);
       });
@@ -572,7 +572,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         color: null,
         workspacePaths: null,
         aiProvider: opts?.aiProvider || null,
-        realmIds: opts?.realmIds || null,
+        realmIds: opts?.projectIds || null,
       });
       await createTerminal(session.id, session.color);
 

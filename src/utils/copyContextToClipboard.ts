@@ -2,7 +2,7 @@ import type { SessionData } from "../types/session";
 import type { ContextState } from "../types/context";
 import { formatContextMarkdown } from "../hooks/useContextState";
 import { getContextPins } from "../api/context";
-import { assembleSessionContext } from "../api/realms";
+import { assembleSessionContext } from "../api/projects";
 import { getAllMemory } from "../api/memory";
 
 /**
@@ -23,14 +23,14 @@ export async function copyContextToClipboard(
   ]);
 
   const pins = pinsResult.status === "fulfilled" ? pinsResult.value : [];
-  const realmCtx = realmsResult.status === "fulfilled" ? realmsResult.value : { realms: [] };
+  const projectCtx = realmsResult.status === "fulfilled" ? realmsResult.value : { realms: [] };
   const persistedMemory = memoryResult.status === "fulfilled" ? memoryResult.value : [];
 
   const ctx: ContextState = {
     pinnedItems: pins,
     memoryFacts: session.metrics.memory_facts,
     persistedMemory,
-    realms: realmCtx.realms,
+    realms: projectCtx.realms,
     workspacePaths: session.workspace_paths,
     workingDirectory: session.working_directory,
     agent: session.detected_agent?.name ?? null,

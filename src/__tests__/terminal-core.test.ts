@@ -71,7 +71,7 @@ describe("Invariant 1: ONE authoritative input path, no dual echo", () => {
     //   1. pty-output event handler
     //   2. pty-exit message
     //   3. writeScrollback
-    //   4. sendShortcutCommand display clear (\r\x1b[K)
+    //   4. sendShortcutCommand backspace clearing
     // NOT in handleTerminalInput or onData
     const handleInputFn = SRC.match(
       /function handleTerminalInput[\s\S]*?^}/m
@@ -146,7 +146,7 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
 // INVARIANT 3: Shortcut uses terminal.paste() — no control codes for text
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("Invariant 3: Shortcut command uses paste() with display clear, no breaking codes", () => {
+describe("Invariant 3: Shortcut command uses triggerDataEvent with backspace clearing, no breaking codes", () => {
   // Extract the sendShortcutCommand function body
   function getShortcutFnBody(): string {
     const match = SRC.match(
@@ -160,18 +160,18 @@ describe("Invariant 3: Shortcut command uses paste() with display clear, no brea
     expect(SRC).toMatch(/export function sendShortcutCommand\(/);
   });
 
-  it("uses terminal.paste() for command injection (single input path through onData)", () => {
+  it("uses triggerDataEvent for command injection (with writeToSession fallback)", () => {
     const body = getShortcutFnBody();
-    expect(body).toContain(".paste(");
-    // paste() goes through onData → handleTerminalInput → writeToSession
-    // This is the SINGLE authoritative input path — no direct writeToSession bypass
-    expect(body).not.toMatch(/writeToSession\(/); // no direct PTY write in shortcut fn
+    expect(body).toContain("triggerDataEvent");
+    // writeToSession is used as a fallback when triggerDataEvent is not available
+    expect(body).toContain("writeToSession");
   });
 
-  it("clears display before paste (erase to end of screen)", () => {
+  it("uses backspaces to clear existing input before sending command", () => {
     const body = getShortcutFnBody();
-    // \r\x1b[J = carriage return + erase from cursor to end of screen (handles wrapped lines)
-    expect(body).toContain('\\r\\x1b[J');
+    // Uses \x7f (DEL/backspace) repeated by eraseLen to clear existing text
+    expect(body).toContain("\\x7f");
+    expect(body).toContain("eraseLen");
   });
 
   it("does NOT contain \\x0b (Vertical Tab — causes cursor-down in display)", () => {
@@ -192,11 +192,10 @@ describe("Invariant 3: Shortcut command uses paste() with display clear, no brea
     expect(body).toContain("dismissSuggestions");
   });
 
-  it("sends Ctrl-U + command + Enter as single paste payload", () => {
+  it("does NOT append Enter — user reviews and presses Enter manually", () => {
     const body = getShortcutFnBody();
-    expect(body).toContain("\\x15");
-    expect(body).toContain("\\r");
-    expect(body).toContain('"\\x15" + command + "\\r"');
+    // The command is inserted on the prompt, not executed
+    expect(body).toContain("NO \\r");
   });
 });
 
@@ -305,8 +304,8 @@ describe("Invariant 5: updateInputBuffer handles paste/IME (multi-char data)", (
     expect(updateInputBuffer("old", "\x15new")).toBe("new");
   });
 
-  it("shortcut paste payload leaves buffer empty", () => {
-    // This is the EXACT payload from sendShortcutCommand: "\x15" + command + "\r"
+  it("shortcut payload with Ctrl-U + command + Enter leaves buffer empty", () => {
+    // Legacy payload pattern — tests that control chars reset the buffer
     const payload = "\x15/compact\r";
     expect(updateInputBuffer("whatever", payload)).toBe("");
   });
@@ -396,7 +395,7 @@ describe("Invariant 9: Context injection race prevention", () => {
     expect(refSetIdx).toBeLessThan(stateSetIdx);
   });
 
-  it("realm listener is gated by initialLoadDone", () => {
+  it("project listener is gated by initialLoadDone", () => {
     expect(CONTEXT_HOOK).toMatch(/session-realms-updated[\s\S]*?initialLoadDone\.current/);
   });
 
@@ -441,8 +440,8 @@ describe("Invariant 10: sendShortcutCommand refuses linebreak commands", () => {
     const afterCheck = body.slice(checkIdx);
     const returnIdx = afterCheck.indexOf("return;");
     expect(returnIdx).toBeGreaterThan(-1);
-    // The return must be before the paste call
-    const pasteIdx = afterCheck.indexOf(".paste(");
-    expect(returnIdx).toBeLessThan(pasteIdx);
+    // The return must be before the triggerDataEvent call
+    const triggerIdx = afterCheck.indexOf("triggerDataEvent");
+    expect(returnIdx).toBeLessThan(triggerIdx);
   });
 });

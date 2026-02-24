@@ -1,6 +1,6 @@
-// ─── Realm Types ─────────────────────────────────────────────────────
+// ─── Project Types ───────────────────────────────────────────────────
 
-export interface Realm {
+export interface Project {
   id: string;
   path: string;
   name: string;

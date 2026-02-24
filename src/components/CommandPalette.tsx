@@ -13,7 +13,7 @@ interface CommandPaletteProps {
   onOpenWorkspace: () => void;
   onOpenCostDashboard?: () => void;
   onToggleFlowMode?: () => void;
-  onAttachRealm?: () => void;
+  onAttachProject?: () => void;
   onScanCwd?: () => void;
   onOpenComposer?: () => void;
   onOpenShortcuts?: () => void;
@@ -29,7 +29,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachRealm, onScanCwd, onOpenComposer, onOpenShortcuts,
+  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -48,7 +48,7 @@ export function CommandPalette({
     { id: "workspace", label: "Projects", category: "App", action: () => { onOpenWorkspace(); onClose(); } },
     ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: "Cost Dashboard", category: "App", shortcut: "⌘⇧D", action: () => { onOpenCostDashboard(); onClose(); } }] : []),
     ...(onToggleFlowMode ? [{ id: "flow-mode", label: "Toggle Flow Mode", category: "View", shortcut: "⌘⇧F", action: () => { onToggleFlowMode(); onClose(); } }] : []),
-    ...(onAttachRealm ? [{ id: "attach-realm", label: "Add Project...", category: "Projects", action: () => { onAttachRealm(); onClose(); } }] : []),
+    ...(onAttachProject ? [{ id: "attach-project", label: "Add Project...", category: "Projects", action: () => { onAttachProject(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: "Scan Current Directory", category: "Projects", action: () => { onScanCwd(); onClose(); } }] : []),
     ...(onOpenComposer ? [{ id: "composer", label: "Prompt Composer", category: "Tools", shortcut: "⌘J", action: () => { onOpenComposer(); onClose(); } }] : []),
     ...(onOpenShortcuts ? [{ id: "shortcuts", label: "Keyboard Shortcuts", category: "Help", shortcut: "⌘/", action: () => { onOpenShortcuts(); onClose(); } }] : []),
@@ -59,7 +59,7 @@ export function CommandPalette({
       shortcut: i < 9 ? `⌘${i + 1}` : undefined,
       action: () => { onSelectSession(s.id); onClose(); },
     })),
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachRealm, onScanCwd, onOpenComposer, onOpenShortcuts]);
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

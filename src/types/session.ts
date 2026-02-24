@@ -117,7 +117,7 @@ export interface CreateSessionOpts {
   workingDirectory?: string;
   restoreFromId?: string;
   aiProvider?: string;
-  realmIds?: string[];
+  projectIds?: string[];
 }
 
 // ─── Session Action (reducer) ────────────────────────────────────────

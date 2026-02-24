@@ -24,16 +24,6 @@ const SRC: string = readFileSync(
   "utf-8",
 );
 
-/** Filter source to only non-comment code lines */
-function getActiveCode(src: string): string {
-  return src.split("\n").filter((line) => {
-    const t = line.trim();
-    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return false;
-    return true;
-  }).join("\n");
-}
-
-const ACTIVE_CODE = getActiveCode(SRC);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Bug 2: KEYDOWN_PASSTHROUGH allowlist verification
@@ -188,22 +178,23 @@ describe("Bug 2 fix: headless xterm single-char input", () => {
 // Bug 3: Display corruption — \x1b[J clears wrapped lines
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("Bug 3 fix: sendShortcutCommand uses \\x1b[J (source verification)", () => {
-  it("sendShortcutCommand uses \\x1b[J (Erase in Display), NOT \\x1b[K (Erase in Line)", () => {
+describe("Bug 3 fix: sendShortcutCommand uses backspaces to clear input (source verification)", () => {
+  it("sendShortcutCommand uses backspaces (\\x7f) to clear existing input", () => {
     const fnBody = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
     expect(fnBody).not.toBeNull();
     const body = fnBody![0];
-    // Must use \x1b[J for clearing wrapped lines
-    expect(body).toContain("\\x1b[J");
-    // Must NOT use \x1b[K (only clears current line)
-    expect(body).not.toContain("\\x1b[K");
+    // Uses DEL/backspace chars repeated by eraseLen
+    expect(body).toContain("\\x7f");
+    expect(body).toContain("eraseLen");
   });
 
-  it("uses \\r\\x1b[J sequence (carriage return + erase to end of screen)", () => {
+  it("does NOT use escape sequences for display clearing (backspaces handle it)", () => {
     const fnBody = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
     expect(fnBody).not.toBeNull();
     const body = fnBody![0];
-    expect(body).toContain('\\r\\x1b[J');
+    // No \x1b[K or \x1b[J — backspaces are used instead
+    expect(body).not.toContain("\\x1b[K");
+    expect(body).not.toContain("\\x1b[J");
   });
 });
 

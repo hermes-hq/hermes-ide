@@ -813,29 +813,29 @@
 
 /* ─── Domain Section ──────────────────────── */
 
-.ctx-domain-realm {
+.ctx-domain-project {
   margin-bottom: 6px;
 }
 
-.ctx-domain-realm-header {
+.ctx-domain-project-header {
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   padding: 3px 0;
 }
-.ctx-domain-realm-header:hover .ctx-domain-realm-name {
+.ctx-domain-project-header:hover .ctx-domain-project-name {
   color: var(--text-0);
 }
 
-.ctx-domain-realm-name {
+.ctx-domain-project-name {
   font-size: var(--text-md);
   font-weight: 500;
   color: var(--text-1);
   flex: 1;
 }
 
-.ctx-domain-realm-detail {
+.ctx-domain-project-detail {
   padding: 4px 0 4px 8px;
   border-left: 2px solid var(--border);
   margin-left: 4px;

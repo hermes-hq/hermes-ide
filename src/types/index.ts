@@ -16,7 +16,7 @@ export type {
 
 export type {
   ContextPin,
-  RealmContextInfo,
+  ProjectContextInfo,
   ErrorResolution,
   PersistedMemory,
   ContextState,
@@ -32,6 +32,6 @@ export type {
   ErrorCorrelation,
 } from "./events";
 
-export type { Realm } from "./realm";
+export type { Project } from "./project";
 
 export type { CostDailyEntry, ProjectCostEntry } from "./costs";

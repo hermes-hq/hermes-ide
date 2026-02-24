@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { SessionData } from "../state/SessionContext";
 import { getContextPins, applyContext as apiApplyContext } from "../api/context";
-import { assembleSessionContext } from "../api/realms";
+import { assembleSessionContext } from "../api/projects";
 import { getAllMemory } from "../api/memory";
 import { structuralEqual, structuralClone } from "../utils/structuralEqual";
 import { HERMES_DEBUG, HERMES_RAW_MODE, recordContext } from "../debug/eventRecorder";
@@ -22,7 +22,7 @@ function ctxForensic(tag: string, detail: Record<string, unknown>): void {
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
-  ContextPin, RealmContextInfo,
+  ContextPin, ProjectContextInfo,
   ContextState, ContextLifecycleState, ContextManager, ApplyContextResult,
 } from "../types/context";
 
@@ -64,12 +64,12 @@ export function formatContextMarkdown(ctx: ContextState, version: number, execut
   // Projects
   if (ctx.realms.length > 0) {
     lines.push("## Projects");
-    for (const realm of ctx.realms) {
-      lines.push(`### ${realm.realm_name} (${realm.path})`);
-      if (realm.languages.length > 0) lines.push(`- Languages: ${realm.languages.join(", ")}`);
-      if (realm.frameworks.length > 0) lines.push(`- Frameworks: ${realm.frameworks.join(", ")}`);
-      if (realm.architecture_pattern) lines.push(`- Architecture: ${realm.architecture_pattern}`);
-      if (realm.conventions.length > 0) lines.push(`- Conventions: ${realm.conventions.join("; ")}`);
+    for (const project of ctx.realms) {
+      lines.push(`### ${project.realm_name} (${project.path})`);
+      if (project.languages.length > 0) lines.push(`- Languages: ${project.languages.join(", ")}`);
+      if (project.frameworks.length > 0) lines.push(`- Frameworks: ${project.frameworks.join(", ")}`);
+      if (project.architecture_pattern) lines.push(`- Architecture: ${project.architecture_pattern}`);
+      if (project.conventions.length > 0) lines.push(`- Conventions: ${project.conventions.join("; ")}`);
     }
     lines.push("");
   }
@@ -165,7 +165,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
         initial.pinnedItems = await getContextPins(session.id, null);
       } catch (err) { console.warn("[useContextState] Failed to load pins:", err); }
 
-      // Fetch realm context (includes token budget and estimated tokens)
+      // Fetch project context (includes token budget and estimated tokens)
       try {
         const ctx = await assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET);
         initial.realms = ctx.realms;
@@ -266,18 +266,18 @@ export function useContextState(session: SessionData | null, executionMode?: str
     }));
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Listen for realm changes ──
+  // ── Listen for project changes ──
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen(`session-realms-updated-${session.id}`, () => {
       if (cancelled) return;
-      // GUARD: Ignore realm events before initial load completes — the initial
-      // load fetches realm data. If a realm event fires first, it creates a
-      // context change from emptyContext → realm data → phantom version bump → dirty.
+      // GUARD: Ignore project events before initial load completes — the initial
+      // load fetches project data. If an event fires first, it creates a
+      // context change from emptyContext → project data → phantom version bump → dirty.
       if (!HERMES_RAW_MODE && !initialLoadDone.current) {
-        ctxForensic("REALM_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
+        ctxForensic("PROJECT_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
         return;
       }
       assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET)
@@ -291,7 +291,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
             if (ctx.estimated_tokens) setEstimatedTokens(ctx.estimated_tokens);
           }
         })
-        .catch((err) => console.warn("[useContextState] Failed to refresh realms:", err));
+        .catch((err) => console.warn("[useContextState] Failed to refresh projects:", err));
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });
@@ -305,7 +305,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
     let unlisten: (() => void) | null = null;
     listen(`context-pins-changed-${session.id}`, () => {
       if (cancelled) return;
-      // GUARD: Ignore pin events before initial load — same reason as realm guard.
+      // GUARD: Ignore pin events before initial load — same reason as project guard.
       if (!HERMES_RAW_MODE && !initialLoadDone.current) {
         ctxForensic("PIN_LISTENER_SKIP", { sessionId: session.id, reason: "initial load not done" });
         return;

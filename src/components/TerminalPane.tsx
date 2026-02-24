@@ -1,7 +1,7 @@
 import "../styles/components/TerminalPane.css";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { detectProject } from "../api/realms";
+import { detectProject } from "../api/projects";
 import {
   attach, detach, has, showGhostText, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,

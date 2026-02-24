@@ -1,8 +1,8 @@
-import "../styles/components/RealmPicker.css";
+import "../styles/components/ProjectPicker.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Realm, useSessionRealms } from "../hooks/useSessionRealms";
-import { getRealms, createRealm, deleteRealm } from "../api/realms";
+import { Project, useSessionProjects } from "../hooks/useSessionProjects";
+import { getProjects, createProject, deleteProject } from "../api/projects";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",
@@ -19,66 +19,83 @@ const LANGUAGE_COLORS: Record<string, string> = {
   "C#": "#178600",
 };
 
-interface RealmPickerProps {
+interface ProjectPickerProps {
   sessionId: string;
   onClose: () => void;
 }
 
-export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
-  const { realms: attachedRealms, attach, detach } = useSessionRealms(sessionId);
-  const [allRealms, setAllRealms] = useState<Realm[]>([]);
+export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
+  const { projects: attachedProjects, attach, detach } = useSessionProjects(sessionId);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getRealms()
-      .then((r) => setAllRealms(r))
-      .catch((err) => console.warn("[RealmPicker] Failed to load realms:", err));
+    getProjects()
+      .then((r) => setAllProjects(r))
+      .catch((err) => console.warn("[ProjectPicker] Failed to load projects:", err));
     inputRef.current?.focus();
   }, []);
 
   const attachedIds = useMemo(
-    () => new Set(attachedRealms.map((r) => r.id)),
-    [attachedRealms]
+    () => new Set(attachedProjects.map((r) => r.id)),
+    [attachedProjects]
   );
 
   const filtered = useMemo(() => {
-    if (!query) return allRealms;
+    if (!query) return allProjects;
     const q = query.toLowerCase();
-    return allRealms.filter(
+    return allProjects.filter(
       (r) =>
         r.name.toLowerCase().includes(q) ||
         r.path.toLowerCase().includes(q) ||
         r.languages.some((l) => l.toLowerCase().includes(q))
     );
-  }, [query, allRealms]);
+  }, [query, allProjects]);
 
-  const toggleRealm = async (realm: Realm) => {
-    if (attachedIds.has(realm.id)) {
-      await detach(realm.id);
+  const toggleProject = async (project: Project) => {
+    if (attachedIds.has(project.id)) {
+      await detach(project.id);
     } else {
-      await attach(realm.id);
+      await attach(project.id);
     }
-    // Refresh all realms in case of updates
-    getRealms()
-      .then((r) => setAllRealms(r))
-      .catch((err) => console.warn("[RealmPicker] Failed to refresh realms:", err));
+    // Refresh all projects in case of updates
+    getProjects()
+      .then((r) => {
+        setAllProjects(r);
+        inputRef.current?.focus();
+      })
+      .catch((err) => console.warn("[ProjectPicker] Failed to refresh projects:", err));
   };
 
   const scanNewPath = async (path: string) => {
-    if (!path.trim()) return;
+    const normalized = path.trim().replace(/\/+$/, "");
+    if (!normalized) return;
     setScanning(true);
     try {
-      const realm = await createRealm(path.trim(), null);
-      setAllRealms((prev) => [realm, ...prev.filter((r) => r.id !== realm.id)]);
-      await attach(realm.id);
+      // Check if a project with this path already exists
+      const existing = allProjects.find(
+        (r) => r.path.replace(/\/+$/, "") === normalized
+      );
+      if (existing) {
+        // Move to top and auto-attach instead of creating a duplicate
+        setAllProjects((prev) => [existing, ...prev.filter((r) => r.id !== existing.id)]);
+        if (!attachedIds.has(existing.id)) {
+          await attach(existing.id);
+        }
+      } else {
+        const project = await createProject(normalized, null);
+        setAllProjects((prev) => [project, ...prev.filter((r) => r.id !== project.id)]);
+        await attach(project.id);
+      }
       setScanPath("");
     } catch (err) {
-      console.error("Failed to create realm:", err);
+      console.error("Failed to create project:", err);
     } finally {
       setScanning(false);
+      inputRef.current?.focus();
     }
   };
 
@@ -109,13 +126,13 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
   return (
     <div className="command-palette-overlay" onClick={onClose}>
       <div
-        className="realm-picker"
+        className="project-picker"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="realm-picker-header">
-          <span className="realm-picker-title">Projects</span>
-          <span className="realm-picker-count">
-            {attachedRealms.length} attached
+        <div className="project-picker-header">
+          <span className="project-picker-title">Projects</span>
+          <span className="project-picker-count">
+            {attachedProjects.length} attached
           </span>
           <button className="close-btn settings-close" onClick={onClose}>
             x
@@ -128,10 +145,10 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
           placeholder="Filter projects..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+          onKeyDown={(e) => { if (e.key === "Escape") onClose(); else e.stopPropagation(); }}
         />
 
-        <div className="realm-picker-body">
+        <div className="project-picker-body">
           {filtered.length === 0 && !query && (
             <div className="workspace-empty">
               No projects found. Scan a directory below to add one.
@@ -142,25 +159,25 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
               No projects matching "{query}"
             </div>
           )}
-          {filtered.map((realm) => (
+          {filtered.map((project) => (
             <div
-              key={realm.id}
-              className={`realm-picker-item ${attachedIds.has(realm.id) ? "realm-picker-item-attached" : ""}`}
-              onClick={() => toggleRealm(realm)}
+              key={project.id}
+              className={`project-picker-item ${attachedIds.has(project.id) ? "project-picker-item-attached" : ""}`}
+              onClick={() => toggleProject(project)}
             >
-              <span className="realm-picker-check">
-                {attachedIds.has(realm.id) ? "[x]" : "[ ]"}
+              <span className="project-picker-check">
+                {attachedIds.has(project.id) ? "[x]" : "[ ]"}
               </span>
-              <div className="realm-picker-info">
-                <div className="realm-picker-name">
-                  {realm.name}
-                  <span className="realm-picker-scan-badge" data-status={realm.scan_status}>
-                    {scanStatusLabel(realm.scan_status)}
+              <div className="project-picker-info">
+                <div className="project-picker-name">
+                  {project.name}
+                  <span className="project-picker-scan-badge" data-status={project.scan_status}>
+                    {scanStatusLabel(project.scan_status)}
                   </span>
                 </div>
-                <div className="realm-picker-path">{shortPath(realm.path)}</div>
-                <div className="realm-picker-tags">
-                  {realm.languages.map((lang) => (
+                <div className="project-picker-path">{shortPath(project.path)}</div>
+                <div className="project-picker-tags">
+                  {project.languages.map((lang) => (
                     <span
                       key={lang}
                       className="workspace-lang-tag"
@@ -172,17 +189,17 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
                       {lang}
                     </span>
                   ))}
-                  {realm.frameworks.map((fw) => (
+                  {project.frameworks.map((fw) => (
                     <span key={fw} className="workspace-fw-tag">{fw}</span>
                   ))}
                 </div>
               </div>
               <button
-                className="realm-picker-delete"
+                className="project-picker-delete"
                 onClick={(e) => {
                   e.stopPropagation();
-                  deleteRealm(realm.id).then(() => {
-                    setAllRealms((prev) => prev.filter((r) => r.id !== realm.id));
+                  deleteProject(project.id).then(() => {
+                    setAllProjects((prev) => prev.filter((r) => r.id !== project.id));
                   }).catch(console.error);
                 }}
                 title="Delete project"
@@ -193,7 +210,7 @@ export function RealmPicker({ sessionId, onClose }: RealmPickerProps) {
           ))}
         </div>
 
-        <div className="realm-picker-footer">
+        <div className="project-picker-footer">
           <input
             className="workspace-scan-input"
             placeholder="Path or browse..."

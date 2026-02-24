@@ -6,14 +6,14 @@
  *   1. sessionSyncKey useMemo depended on `[session]` object reference —
  *      every SESSION_UPDATED event created a new reference, recomputing
  *      the key and unconditionally calling setContext.
- *   2. Realm listener called setContext with fresh array objects even when
- *      realm data was structurally identical.
+ *   2. Project listener called setContext with fresh array objects even when
+ *      project data was structurally identical.
  *
  * FIX:
  *   1. Replaced useMemo with a useRef-based guard that compares the
  *      serialized key string before calling setContext.
- *   2. Added structuralEqual guard in the realm listener's setContext
- *      callback to return `prev` when realms haven't changed.
+ *   2. Added structuralEqual guard in the project listener's setContext
+ *      callback to return `prev` when projects haven't changed.
  */
 import { describe, it, expect } from "vitest";
 import { structuralEqual, structuralClone } from "../utils/structuralEqual";
@@ -146,49 +146,49 @@ describe("Context dirty regression: sessionSyncKey guard", () => {
   });
 });
 
-// ─── Tests: Realm listener structuralEqual guard ─────────────────────
+// ─── Tests: Project listener structuralEqual guard ─────────────────────
 
-describe("Context dirty regression: realm listener guard", () => {
-  it("structuralEqual returns true for identical realm data with new references", () => {
-    const realms1 = [
+describe("Context dirty regression: project listener guard", () => {
+  it("structuralEqual returns true for identical project data with new references", () => {
+    const projects1 = [
       { realm_id: "r1", realm_name: "proj", languages: ["TypeScript"], frameworks: ["React"], conventions: ["camelCase"] },
     ];
-    const realms2 = [
+    const projects2 = [
       { realm_id: "r1", realm_name: "proj", languages: ["TypeScript"], frameworks: ["React"], conventions: ["camelCase"] },
     ];
 
     // Different references
-    expect(realms1).not.toBe(realms2);
+    expect(projects1).not.toBe(projects2);
     // But structurally equal
-    expect(structuralEqual(realms1, realms2)).toBe(true);
+    expect(structuralEqual(projects1, projects2)).toBe(true);
   });
 
-  it("structuralEqual returns false when realm data actually changes", () => {
-    const realms1 = [
+  it("structuralEqual returns false when project data actually changes", () => {
+    const projects1 = [
       { realm_id: "r1", realm_name: "proj", languages: ["TypeScript"], frameworks: ["React"], conventions: [] },
     ];
-    const realms2 = [
+    const projects2 = [
       { realm_id: "r1", realm_name: "proj", languages: ["TypeScript", "JavaScript"], frameworks: ["React"], conventions: [] },
     ];
 
-    expect(structuralEqual(realms1, realms2)).toBe(false);
+    expect(structuralEqual(projects1, projects2)).toBe(false);
   });
 
-  it("setContext guard returns prev when realms unchanged (no version bump)", () => {
+  it("setContext guard returns prev when projects unchanged (no version bump)", () => {
     const prevContext = {
       realms: [
         { realm_id: "r1", realm_name: "proj", languages: ["TypeScript"], frameworks: [], conventions: [] },
       ],
     };
 
-    const newRealms = [
+    const newProjects = [
       { realm_id: "r1", realm_name: "proj", languages: ["TypeScript"], frameworks: [], conventions: [] },
     ];
 
     // Simulate the guarded setContext callback
     const updater = (prev: typeof prevContext) => {
-      if (structuralEqual(prev.realms, newRealms)) return prev; // no-op
-      return { ...prev, realms: newRealms };
+      if (structuralEqual(prev.realms, newProjects)) return prev; // no-op
+      return { ...prev, realms: newProjects };
     };
 
     const result = updater(prevContext);
@@ -196,31 +196,31 @@ describe("Context dirty regression: realm listener guard", () => {
     expect(result).toBe(prevContext);
   });
 
-  it("setContext guard returns new object when realms actually changed", () => {
+  it("setContext guard returns new object when projects actually changed", () => {
     const prevContext = {
       realms: [
         { realm_id: "r1", realm_name: "proj", languages: ["TypeScript"], frameworks: [], conventions: [] },
       ],
     };
 
-    const newRealms = [
+    const newProjects = [
       { realm_id: "r1", realm_name: "proj", languages: ["TypeScript", "Rust"], frameworks: [], conventions: [] },
     ];
 
     const updater = (prev: typeof prevContext) => {
-      if (structuralEqual(prev.realms, newRealms)) return prev;
-      return { ...prev, realms: newRealms };
+      if (structuralEqual(prev.realms, newProjects)) return prev;
+      return { ...prev, realms: newProjects };
     };
 
     const result = updater(prevContext);
     expect(result).not.toBe(prevContext);
-    expect(result.realms).toEqual(newRealms);
+    expect(result.realms).toEqual(newProjects);
   });
 
-  it("empty realms → empty realms stays clean", () => {
-    const prevRealms: unknown[] = [];
-    const newRealms: unknown[] = [];
-    expect(structuralEqual(prevRealms, newRealms)).toBe(true);
+  it("empty projects → empty projects stays clean", () => {
+    const prevProjects: unknown[] = [];
+    const newProjects: unknown[] = [];
+    expect(structuralEqual(prevProjects, newProjects)).toBe(true);
   });
 });
 

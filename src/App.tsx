@@ -5,7 +5,7 @@ import "./styles/topbar.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeToSession } from "./api/sessions";
 import { sendShortcutCommand } from "./terminal/TerminalPool";
-import { createRealm } from "./api/realms";
+import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
@@ -24,7 +24,7 @@ import { FlowToast } from "./components/FlowToast";
 import { ExecutionTimeline } from "./components/ExecutionTimeline";
 import { AutoToast } from "./components/AutoToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
-import { RealmPicker } from "./components/RealmPicker";
+import { ProjectPicker } from "./components/ProjectPicker";
 import { SessionCreator } from "./components/SessionCreator";
 import { PromptComposer } from "./components/PromptComposer";
 import { SplitLayout } from "./components/SplitLayout";
@@ -43,7 +43,7 @@ function AppContent() {
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [costDashboardOpen, setCostDashboardOpen] = useState(false);
-  const [realmPickerOpen, setRealmPickerOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -305,12 +305,12 @@ function AppContent() {
           onOpenWorkspace={() => setWorkspaceOpen(true)}
           onOpenCostDashboard={() => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
-          onAttachRealm={() => setRealmPickerOpen(true)}
+          onAttachProject={() => setProjectPickerOpen(true)}
           onOpenComposer={() => setComposerOpen(true)}
           onOpenShortcuts={() => { setShortcutsOpen(true); }}
           onScanCwd={() => {
             if (activeSession?.working_directory) {
-              createRealm(activeSession.working_directory, null).catch(console.error);
+              createProject(activeSession.working_directory, null).catch(console.error);
             }
           }}
         />
@@ -332,8 +332,8 @@ function AppContent() {
         <WorkspacePanel onClose={() => setWorkspaceOpen(false)} />
       )}
 
-      {realmPickerOpen && activeSession && (
-        <RealmPicker sessionId={activeSession.id} onClose={() => setRealmPickerOpen(false)} />
+      {projectPickerOpen && activeSession && (
+        <ProjectPicker sessionId={activeSession.id} onClose={() => setProjectPickerOpen(false)} />
       )}
 
       {sessionCreatorOpen && (

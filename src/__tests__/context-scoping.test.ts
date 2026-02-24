@@ -2,11 +2,11 @@
  * Tests for context scoping improvements:
  *
  * 1. Project-scoped pins (default to project, not session)
- * 2. Project-scoped memory (realm scope instead of global-only)
+ * 2. Project-scoped memory (project scope instead of global-only)
  * 3. Token budget visibility in ContextManager
  * 4. Context fork semantics
  * 5. Pin scope indicators in formatContextMarkdown
- * 6. Realm path matching (exact match with trailing separator)
+ * 6. Project path matching (exact match with trailing separator)
  * 7. Memory dedup with project-scoped memory
  * 8. HermesProjectConfig type validation
  */
@@ -104,7 +104,7 @@ function makeProjectPin(target: string, label?: string): ContextPin {
   return {
     id: Math.floor(Math.random() * 10000),
     session_id: null,       // project-scoped (no session)
-    project_id: "realm-1",  // attached to a realm
+    project_id: "realm-1",  // attached to a project
     kind: "file",
     target,
     label: label ?? null,
@@ -275,21 +275,21 @@ describe("Suite 3: Token Budget in ApplyContextResult", () => {
 // =====================================================================
 
 describe("Suite 4: Context Fork Semantics", () => {
-  it("forked sessions share the same realm context data", () => {
-    const sharedRealm = {
+  it("forked sessions share the same project context data", () => {
+    const sharedProject = {
       realm_id: "r1", realm_name: "my-project", path: "/home/user/my-project",
       languages: ["TypeScript"], frameworks: ["React"],
       architecture_pattern: "MVC", architecture_layers: [],
       conventions: ["camelCase"], scan_status: "deep",
     };
 
-    const ctx1 = makeBaseContext({ realms: [sharedRealm] });
-    const ctx2 = makeBaseContext({ realms: [sharedRealm] });
+    const ctx1 = makeBaseContext({ realms: [sharedProject] });
+    const ctx2 = makeBaseContext({ realms: [sharedProject] });
 
     const out1 = formatContextMarkdown(ctx1, 1, "manual");
     const out2 = formatContextMarkdown(ctx2, 2, "manual");
 
-    // Same realm data should produce identical project sections
+    // Same project data should produce identical project sections
     expect(out1).toContain("### my-project");
     expect(out2).toContain("### my-project");
     expect(out1).toContain("Languages: TypeScript");
@@ -324,40 +324,40 @@ describe("Suite 4: Context Fork Semantics", () => {
 });
 
 // =====================================================================
-// Suite 5: Realm Path Matching
+// Suite 5: Project Path Matching
 // =====================================================================
 
-describe("Suite 5: Realm Path Matching", () => {
-  // Helper to simulate the realm matching logic used in SessionContext.tsx
-  function isRealmMatch(wd: string, rp: string): boolean {
+describe("Suite 5: Project Path Matching", () => {
+  // Helper to simulate the project matching logic used in SessionContext.tsx
+  function isProjectMatch(wd: string, rp: string): boolean {
     return wd === rp || wd.startsWith(rp + "/");
   }
 
   it("exact path match succeeds", () => {
-    expect(isRealmMatch("/home/user/app", "/home/user/app")).toBe(true);
+    expect(isProjectMatch("/home/user/app", "/home/user/app")).toBe(true);
   });
 
   it("subdirectory match succeeds", () => {
-    expect(isRealmMatch("/home/user/app/src/components", "/home/user/app")).toBe(true);
+    expect(isProjectMatch("/home/user/app/src/components", "/home/user/app")).toBe(true);
   });
 
   it("prefix-only match is rejected (the startsWith bug fix)", () => {
     // OLD (buggy): "/home/user/app-legacy".startsWith("/home/user/app") → true
-    // NEW (fixed): isRealmMatch → false
+    // NEW (fixed): isProjectMatch → false
     expect("/home/user/app-legacy".startsWith("/home/user/app")).toBe(true); // the bug
-    expect(isRealmMatch("/home/user/app-legacy", "/home/user/app")).toBe(false); // the fix
+    expect(isProjectMatch("/home/user/app-legacy", "/home/user/app")).toBe(false); // the fix
   });
 
   it("sibling directory with similar prefix is rejected", () => {
-    expect(isRealmMatch("/home/user/app2", "/home/user/app")).toBe(false);
+    expect(isProjectMatch("/home/user/app2", "/home/user/app")).toBe(false);
   });
 
   it("child with deep nesting matches correctly", () => {
-    expect(isRealmMatch("/home/user/app/packages/frontend/src/components/Button.tsx", "/home/user/app")).toBe(true);
+    expect(isProjectMatch("/home/user/app/packages/frontend/src/components/Button.tsx", "/home/user/app")).toBe(true);
   });
 
   it("root directory edge case", () => {
-    expect(isRealmMatch("/", "/")).toBe(true);
+    expect(isProjectMatch("/", "/")).toBe(true);
   });
 });
 
@@ -491,7 +491,7 @@ describe("Suite 8: Full Scoped Context Lifecycle", () => {
     expect(output).toContain("- Mode: assisted");
     expect(output).toContain("- Provider: anthropic (claude-sonnet)");
 
-    // Realm info
+    // Project info
     expect(output).toContain("### my-app");
     expect(output).toContain("Languages: TypeScript, Rust");
     expect(output).toContain("Frameworks: React, Tauri");

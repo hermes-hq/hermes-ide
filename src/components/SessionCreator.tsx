@@ -1,9 +1,9 @@
 import "../styles/components/SessionCreator.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Realm } from "../hooks/useSessionRealms";
+import { Project } from "../hooks/useSessionProjects";
 import { CreateSessionOpts } from "../state/SessionContext";
-import { getRealms, createRealm } from "../api/realms";
+import { getProjects, createProject } from "../api/projects";
 
 const AI_PROVIDERS = [
   { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
@@ -20,10 +20,10 @@ interface SessionCreatorProps {
 
 export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [selectedRealmIds, setSelectedRealmIds] = useState<string[]>([]);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [label, setLabel] = useState("");
-  const [allRealms, setAllRealms] = useState<Realm[]>([]);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -31,9 +31,9 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getRealms()
-      .then((r) => setAllRealms(r))
-      .catch((err) => console.warn("[SessionCreator] Failed to load realms:", err));
+    getProjects()
+      .then((r) => setAllProjects(r))
+      .catch((err) => console.warn("[SessionCreator] Failed to load projects:", err));
   }, []);
 
   useEffect(() => {
@@ -41,24 +41,24 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   }, [step]);
 
   const filtered = useMemo(() => {
-    if (!query) return allRealms;
+    if (!query) return allProjects;
     const q = query.toLowerCase();
-    return allRealms.filter(
+    return allProjects.filter(
       (r) =>
         r.name.toLowerCase().includes(q) ||
         r.path.toLowerCase().includes(q) ||
         r.languages.some((l: string) => l.toLowerCase().includes(q))
     );
-  }, [query, allRealms]);
+  }, [query, allProjects]);
 
-  const selectedRealmNames = useMemo(() => {
-    return selectedRealmIds
-      .map((id) => allRealms.find((r) => r.id === id)?.name)
+  const selectedProjectNames = useMemo(() => {
+    return selectedProjectIds
+      .map((id) => allProjects.find((r) => r.id === id)?.name)
       .filter(Boolean) as string[];
-  }, [selectedRealmIds, allRealms]);
+  }, [selectedProjectIds, allProjects]);
 
-  const toggleRealm = (id: string) => {
-    setSelectedRealmIds((prev) =>
+  const toggleProject = (id: string) => {
+    setSelectedProjectIds((prev) =>
       prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
     );
   };
@@ -67,14 +67,14 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
     if (!path.trim()) return;
     setScanning(true);
     try {
-      const realm = await createRealm(path.trim(), null);
-      setAllRealms((prev) => [realm, ...prev.filter((r) => r.id !== realm.id)]);
-      setSelectedRealmIds((prev) =>
-        prev.includes(realm.id) ? prev : [...prev, realm.id]
+      const project = await createProject(path.trim(), null);
+      setAllProjects((prev) => [project, ...prev.filter((r) => r.id !== project.id)]);
+      setSelectedProjectIds((prev) =>
+        prev.includes(project.id) ? prev : [...prev, project.id]
       );
       setScanPath("");
     } catch (err) {
-      console.error("Failed to create realm:", err);
+      console.error("Failed to create project:", err);
     } finally {
       setScanning(false);
     }
@@ -95,14 +95,14 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   const handleConfirm = async () => {
     setCreating(true);
     try {
-      const firstRealmPath = selectedRealmIds.length > 0
-        ? allRealms.find((r) => r.id === selectedRealmIds[0])?.path
+      const firstProjectPath = selectedProjectIds.length > 0
+        ? allProjects.find((r) => r.id === selectedProjectIds[0])?.path
         : undefined;
       await onCreate({
         label: label || undefined,
         aiProvider: aiProvider || undefined,
-        realmIds: selectedRealmIds.length > 0 ? selectedRealmIds : undefined,
-        workingDirectory: firstRealmPath,
+        projectIds: selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
+        workingDirectory: firstProjectPath,
       });
     } finally {
       setCreating(false);
@@ -156,23 +156,23 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                   No projects matching &ldquo;{query}&rdquo;
                 </div>
               )}
-              {filtered.map((realm) => (
+              {filtered.map((project) => (
                 <div
-                  key={realm.id}
-                  className={`realm-picker-item ${selectedRealmIds.includes(realm.id) ? "realm-picker-item-attached" : ""}`}
-                  onClick={() => toggleRealm(realm.id)}
+                  key={project.id}
+                  className={`project-picker-item ${selectedProjectIds.includes(project.id) ? "project-picker-item-attached" : ""}`}
+                  onClick={() => toggleProject(project.id)}
                 >
-                  <span className="realm-picker-check">
-                    {selectedRealmIds.includes(realm.id) ? "[x]" : "[ ]"}
+                  <span className="project-picker-check">
+                    {selectedProjectIds.includes(project.id) ? "[x]" : "[ ]"}
                   </span>
-                  <div className="realm-picker-info">
-                    <div className="realm-picker-name">{realm.name}</div>
-                    <div className="realm-picker-path">{shortPath(realm.path)}</div>
+                  <div className="project-picker-info">
+                    <div className="project-picker-name">{project.name}</div>
+                    <div className="project-picker-path">{shortPath(project.path)}</div>
                   </div>
                 </div>
               ))}
             </div>
-            <div className="realm-picker-footer">
+            <div className="project-picker-footer">
               <input
                 className="workspace-scan-input"
                 placeholder="Path or browse..."
@@ -198,11 +198,11 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
               </button>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={() => { setSelectedRealmIds([]); setStep(2); }}>
+              <button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); setStep(2); }}>
                 Skip
               </button>
               <button className="session-creator-btn-primary" onClick={() => setStep(2)}>
-                Next ({selectedRealmIds.length} selected)
+                Next ({selectedProjectIds.length} selected)
               </button>
             </div>
           </div>
@@ -253,7 +253,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
               <div className="session-creator-summary-row">
                 <span className="session-creator-summary-label">Projects:</span>
                 <span className="session-creator-summary-value">
-                  {selectedRealmNames.length > 0 ? selectedRealmNames.join(", ") : "None"}
+                  {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
                 </span>
               </div>
               <div className="session-creator-summary-row">

@@ -1,8 +1,8 @@
 import "../styles/components/ScopeBar.css";
 import { useState } from "react";
-import { useSessionRealms, Realm } from "../hooks/useSessionRealms";
+import { useSessionProjects, Project } from "../hooks/useSessionProjects";
 import { useSession } from "../state/SessionContext";
-import { RealmPicker } from "./RealmPicker";
+import { ProjectPicker } from "./ProjectPicker";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",
@@ -30,17 +30,17 @@ interface ScopeBarProps {
 export function ScopeBar({ sessionId }: ScopeBarProps) {
   const { state } = useSession();
   const activeSession = state.sessions[sessionId];
-  const { realms, detach } = useSessionRealms(sessionId);
+  const { projects, detach } = useSessionProjects(sessionId);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  if (realms.length === 0 && !pickerOpen) {
+  if (projects.length === 0 && !pickerOpen) {
     return (
       <div className="scope-bar scope-bar-empty">
         <button className="scope-bar-add" onClick={() => setPickerOpen(true)}>
           + Add Project
         </button>
         {pickerOpen && (
-          <RealmPicker
+          <ProjectPicker
             sessionId={sessionId}
             onClose={() => setPickerOpen(false)}
           />
@@ -49,8 +49,8 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
     );
   }
 
-  const getLangColor = (realm: Realm) => {
-    for (const lang of realm.languages) {
+  const getLangColor = (project: Project) => {
+    for (const lang of project.languages) {
       if (LANGUAGE_COLORS[lang]) return LANGUAGE_COLORS[lang];
     }
     return "#7b93db";
@@ -59,19 +59,19 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
   return (
     <>
       <div className="scope-bar">
-        {realms.map((realm) => (
-          <div key={realm.id} className="scope-pill" title={realm.path}>
+        {projects.map((project) => (
+          <div key={project.id} className="scope-pill" title={project.path}>
             <span
               className="scope-pill-dot"
-              style={{ background: getLangColor(realm) }}
+              style={{ background: getLangColor(project) }}
             />
-            <span className="scope-pill-name">{realm.name}</span>
-            <span className="scope-pill-status" data-status={realm.scan_status}>
-              {realm.scan_status === "pending" ? "..." : ""}
+            <span className="scope-pill-name">{project.name}</span>
+            <span className="scope-pill-status" data-status={project.scan_status}>
+              {project.scan_status === "pending" ? "..." : ""}
             </span>
             <button
               className="scope-pill-close"
-              onClick={() => detach(realm.id)}
+              onClick={() => detach(project.id)}
               title="Remove project"
             >
               x
@@ -86,7 +86,7 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
         </button>
       </div>
       {pickerOpen && (
-        <RealmPicker
+        <ProjectPicker
           sessionId={sessionId}
           onClose={() => setPickerOpen(false)}
         />
