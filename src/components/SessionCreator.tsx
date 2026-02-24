@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Project } from "../hooks/useSessionProjects";
 import { CreateSessionOpts } from "../state/SessionContext";
-import { getProjects, createProject } from "../api/projects";
+import { getProjects, createProject, deleteProject } from "../api/projects";
 
 const AI_PROVIDERS = [
   { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
@@ -61,6 +61,16 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
     setSelectedProjectIds((prev) =>
       prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
     );
+  };
+
+  const removeProject = async (id: string) => {
+    try {
+      await deleteProject(id);
+      setAllProjects((prev) => prev.filter((r) => r.id !== id));
+      setSelectedProjectIds((prev) => prev.filter((r) => r !== id));
+    } catch (err) {
+      console.error("Failed to delete project:", err);
+    }
   };
 
   const scanNewPath = async (path: string) => {
@@ -169,6 +179,13 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                     <div className="project-picker-name">{project.name}</div>
                     <div className="project-picker-path">{shortPath(project.path)}</div>
                   </div>
+                  <button
+                    className="session-creator-remove-btn"
+                    onClick={(e) => { e.stopPropagation(); removeProject(project.id); }}
+                    title="Remove project"
+                  >
+                    x
+                  </button>
                 </div>
               ))}
             </div>

@@ -211,8 +211,7 @@ const ProcessRow = memo(function ProcessRow({
       onContextMenu={(e) => onContextMenu(e, process)}
     >
       <div className="process-row-main">
-        <span className="process-col process-col-pid">{process.pid}</span>
-        <span className="process-col process-col-name" title={process.name}>
+        <span className="process-col process-col-name" title={`${process.name} (PID ${process.pid})`}>
           {process.is_protected && <span className="process-lock" title="Protected">&#128274;</span>}
           {process.name}
         </span>
@@ -222,18 +221,13 @@ const ProcessRow = memo(function ProcessRow({
         <span className="process-col process-col-mem">
           {formatBytes(process.memory_bytes)}
         </span>
-        <span className="process-col process-col-mempct" style={{ color: memColor(process.memory_percent) }}>
-          {process.memory_percent.toFixed(1)}%
-        </span>
-        <span className="process-col process-col-threads">{process.threads}</span>
-        <span className="process-col process-col-ppid">{process.ppid}</span>
-        <span className="process-col process-col-uptime">{formatUptime(process.start_time)}</span>
-        <span className="process-col process-col-user">{process.user}</span>
         <span className={`process-col process-col-status process-status-${process.status}`}>{process.status}</span>
       </div>
       {isExpanded && (
         <div className="process-row-detail" onClick={(e) => e.stopPropagation()}>
           <div className="process-detail-info">
+            <div><strong>PID:</strong> {process.pid} &nbsp; <strong>PPID:</strong> {process.ppid} &nbsp; <strong>User:</strong> {process.user}</div>
+            <div><strong>Mem%:</strong> <span style={{ color: memColor(process.memory_percent) }}>{process.memory_percent.toFixed(1)}%</span> &nbsp; <strong>Threads:</strong> {process.threads} &nbsp; <strong>Uptime:</strong> {formatUptime(process.start_time)}</div>
             <div><strong>Path:</strong> {(detail || process).exe_path || "-"}</div>
             <div><strong>CMD:</strong> {(detail || process).cmd_line.join(" ") || "-"}</div>
             {detail?.fd_count != null && <div><strong>FDs:</strong> {detail.fd_count}</div>}
@@ -574,20 +568,14 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
         {/* Table Header */}
         <div className="process-table-header">
           {([
-            ["pid", "PID"],
             ["name", "Name"],
             ["cpu_percent", "CPU%"],
             ["memory_bytes", "Mem"],
-            ["memory_percent", "Mem%"],
-            ["threads", "Thr"],
-            ["ppid", "PPID"],
-            ["start_time", "Uptime"],
-            ["user", "User"],
             ["status", "Status"],
           ] as [ProcessSortField, string][]).map(([field, label]) => (
             <button
               key={field}
-              className={`process-col-header process-col-${field === "memory_bytes" ? "mem" : field === "memory_percent" ? "mempct" : field}${sortField === field ? " process-col-sorted" : ""}`}
+              className={`process-col-header process-col-${field === "memory_bytes" ? "mem" : field}${sortField === field ? " process-col-sorted" : ""}`}
               onClick={() => handleSort(field)}
             >
               {label}

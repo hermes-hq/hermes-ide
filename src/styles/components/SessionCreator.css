@@ -79,6 +79,26 @@
 .session-creator-list::-webkit-scrollbar { width: 4px; }
 .session-creator-list::-webkit-scrollbar-thumb { background: var(--bg-3); }
 
+.session-creator-remove-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  opacity: 0.4;
+  transition: opacity 0.1s, color 0.1s, background 0.1s;
+}
+
+.session-creator-remove-btn:hover {
+  opacity: 1;
+  color: var(--danger, #e55);
+  background: var(--bg-hover);
+}
+
 .session-creator-provider-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

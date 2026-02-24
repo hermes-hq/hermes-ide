@@ -116,7 +116,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-x: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 
@@ -127,7 +127,6 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
   flex-shrink: 0;
-  min-width: 500px;
 }
 
 .process-col-header {
@@ -161,27 +160,14 @@
 
 /* ─── Column widths ────────────────────────────────────────── */
 
-.process-col-pid,
-.process-col-header.process-col-pid { width: 48px; min-width: 48px; }
 .process-col-name,
 .process-col-header.process-col-name { flex: 1; min-width: 60px; }
 .process-col-cpu,
 .process-col-header.process-col-cpu { width: 44px; min-width: 44px; text-align: right; }
 .process-col-mem,
-.process-col-header.process-col-mem { width: 52px; min-width: 52px; text-align: right; }
-.process-col-mempct,
-.process-col-header.process-col-mempct { width: 40px; min-width: 40px; text-align: right; }
-.process-col-threads,
-.process-col-header.process-col-threads { width: 28px; min-width: 28px; text-align: right; }
-.process-col-ppid,
-.process-col-header.process-col-ppid { width: 44px; min-width: 44px; }
-.process-col-uptime,
-.process-col-header.process-col-uptime,
-.process-col-header.process-col-start_time { width: 44px; min-width: 44px; }
-.process-col-user,
-.process-col-header.process-col-user { width: 52px; min-width: 52px; }
+.process-col-header.process-col-mem { width: 58px; min-width: 58px; text-align: right; }
 .process-col-status,
-.process-col-header.process-col-status { width: 52px; min-width: 52px; }
+.process-col-header.process-col-status { width: 56px; min-width: 56px; }
 
 /* ─── Table Scroll ─────────────────────────────────────────── */
 
@@ -208,7 +194,6 @@
   display: flex;
   align-items: center;
   height: 32px;
-  min-width: 500px;
 }
 
 .process-col {
