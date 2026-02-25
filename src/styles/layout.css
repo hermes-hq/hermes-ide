@@ -103,7 +103,7 @@
 .split-pane-drop-label {
   font-size: var(--text-base);
   font-weight: 600;
-  color: #fff;
+  color: var(--bg-0);
   background: var(--accent);
   padding: 3px 10px;
   border-radius: var(--radius-sm);
@@ -126,5 +126,5 @@
   top: 50%;
 }
 .split-pane-drop-center {
-  background: rgba(123, 147, 219, 0.1);
+  background: var(--accent-dim);
 }

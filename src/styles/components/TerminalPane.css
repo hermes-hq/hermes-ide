@@ -123,29 +123,29 @@
   background: var(--bg-3);
 }
 
-.suggestion-badge-git { color: #f78166; background: rgba(247, 129, 102, 0.12); }
-.suggestion-badge-npm { color: #cb3837; background: rgba(203, 56, 55, 0.12); }
-.suggestion-badge-yarn { color: #2c8ebb; background: rgba(44, 142, 187, 0.12); }
-.suggestion-badge-pnpm { color: #f9ad00; background: rgba(249, 173, 0, 0.12); }
-.suggestion-badge-bun { color: #fbf0df; background: rgba(251, 240, 223, 0.10); }
-.suggestion-badge-docker { color: #2496ed; background: rgba(36, 150, 237, 0.12); }
-.suggestion-badge-cargo { color: #dea584; background: rgba(222, 165, 132, 0.12); }
-.suggestion-badge-python { color: #3776ab; background: rgba(55, 118, 171, 0.12); }
-.suggestion-badge-go { color: #00add8; background: rgba(0, 173, 216, 0.12); }
+.suggestion-badge-git { color: var(--badge-git); background: rgba(247, 129, 102, 0.12); }
+.suggestion-badge-npm { color: var(--badge-npm); background: rgba(203, 56, 55, 0.12); }
+.suggestion-badge-yarn { color: var(--badge-yarn); background: rgba(44, 142, 187, 0.12); }
+.suggestion-badge-pnpm { color: var(--badge-pnpm); background: rgba(249, 173, 0, 0.12); }
+.suggestion-badge-bun { color: var(--badge-bun); background: rgba(251, 240, 223, 0.10); }
+.suggestion-badge-docker { color: var(--badge-docker); background: rgba(36, 150, 237, 0.12); }
+.suggestion-badge-cargo { color: var(--badge-cargo); background: rgba(222, 165, 132, 0.12); }
+.suggestion-badge-python { color: var(--badge-python); background: rgba(55, 118, 171, 0.12); }
+.suggestion-badge-go { color: var(--badge-go); background: rgba(0, 173, 216, 0.12); }
 .suggestion-badge-system { color: var(--text-2); background: var(--bg-3); }
-.suggestion-badge-k8s { color: #326ce5; background: rgba(50, 108, 229, 0.12); }
-.suggestion-badge-brew { color: #fbb040; background: rgba(251, 176, 64, 0.12); }
+.suggestion-badge-k8s { color: var(--badge-k8s); background: rgba(50, 108, 229, 0.12); }
+.suggestion-badge-brew { color: var(--badge-brew); background: rgba(251, 176, 64, 0.12); }
 .suggestion-badge-gh { color: var(--text-1); background: var(--bg-3); }
-.suggestion-badge-next { color: #ffffff; background: rgba(255, 255, 255, 0.08); }
-.suggestion-badge-vite { color: #646cff; background: rgba(100, 108, 255, 0.12); }
-.suggestion-badge-tauri { color: #ffc131; background: rgba(255, 193, 49, 0.12); }
-.suggestion-badge-terraform { color: #7b42bc; background: rgba(123, 66, 188, 0.12); }
+.suggestion-badge-next { color: var(--badge-next); background: rgba(255, 255, 255, 0.08); }
+.suggestion-badge-vite { color: var(--badge-vite); background: rgba(100, 108, 255, 0.12); }
+.suggestion-badge-tauri { color: var(--badge-tauri); background: rgba(255, 193, 49, 0.12); }
+.suggestion-badge-terraform { color: var(--badge-terraform); background: rgba(123, 66, 188, 0.12); }
 .suggestion-badge-make { color: var(--text-2); background: var(--bg-3); }
-.suggestion-badge-typescript { color: #3178c6; background: rgba(49, 120, 198, 0.12); }
-.suggestion-badge-test { color: #33ff99; background: rgba(51, 255, 153, 0.10); }
-.suggestion-badge-lint { color: #a78bfa; background: rgba(167, 139, 250, 0.12); }
-.suggestion-badge-prisma { color: #2d3748; background: rgba(45, 55, 72, 0.20); }
-.suggestion-badge-intent { color: var(--green); background: rgba(51, 255, 153, 0.10); }
+.suggestion-badge-typescript { color: var(--badge-typescript); background: rgba(49, 120, 198, 0.12); }
+.suggestion-badge-test { color: var(--badge-test); background: rgba(51, 255, 153, 0.10); }
+.suggestion-badge-lint { color: var(--violet); background: var(--violet-dim); }
+.suggestion-badge-prisma { color: var(--badge-prisma); background: rgba(45, 55, 72, 0.20); }
+.suggestion-badge-intent { color: var(--green); background: var(--green-dim); }
 
 /* ─── Error Annotation Bar ───────────────────────── */
 

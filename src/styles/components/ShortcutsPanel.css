@@ -42,7 +42,7 @@
   background: none;
   border: none;
   color: var(--text-3);
-  font-size: 18px;
+  font-size: var(--text-2xl);
   cursor: pointer;
   padding: 0 4px;
   line-height: 1;

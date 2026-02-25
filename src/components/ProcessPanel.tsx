@@ -523,6 +523,7 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
             className={`process-toggle${filter.showHermesOnly ? " process-toggle-active" : ""}`}
             onClick={() => setFilter((f) => ({ ...f, showHermesOnly: !f.showHermesOnly }))}
             title="Show Hermes sessions only"
+            aria-pressed={filter.showHermesOnly}
           >
             Hermes
           </button>
@@ -530,6 +531,7 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
             className={`process-toggle${filter.showZombiesOnly ? " process-toggle-active" : ""}`}
             onClick={() => setFilter((f) => ({ ...f, showZombiesOnly: !f.showZombiesOnly }))}
             title="Show zombie processes only"
+            aria-pressed={filter.showZombiesOnly}
           >
             Zombies
           </button>
@@ -537,6 +539,7 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
             className={`process-toggle${advancedMode ? " process-toggle-active process-toggle-danger" : ""}`}
             onClick={handleAdvancedToggle}
             title="Advanced mode: enables SIGKILL and Kill Tree"
+            aria-pressed={advancedMode}
           >
             Advanced
           </button>

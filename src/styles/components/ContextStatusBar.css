@@ -7,17 +7,17 @@
 }
 
 .ctx-status-bar-outofsync {
-  background: rgba(255, 176, 0, 0.06);
+  background: var(--yellow-dim);
   border-bottom-color: var(--yellow);
 }
 
 .ctx-status-bar-applying {
-  background: rgba(100, 180, 255, 0.06);
+  background: var(--accent-dim);
   border-bottom-color: var(--accent);
 }
 
 .ctx-status-bar-failed {
-  background: rgba(255, 80, 80, 0.06);
+  background: var(--red-dim);
   border-bottom-color: var(--red);
 }
 
@@ -169,7 +169,7 @@
 .ctx-apply-error {
   margin-top: 4px;
   padding: 3px 6px;
-  background: rgba(255, 80, 80, 0.1);
+  background: var(--red-dim);
   border-radius: var(--radius-sm);
   color: var(--red);
   font-size: var(--text-xs);

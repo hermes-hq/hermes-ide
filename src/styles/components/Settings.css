@@ -44,7 +44,7 @@
 }
 
 .settings-close {
-  font-size: 20px;
+  font-size: var(--text-2xl);
 }
 .settings-close:hover { color: var(--text-0); background: var(--bg-hover); }
 

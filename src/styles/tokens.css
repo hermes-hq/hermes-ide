@@ -4,7 +4,7 @@
  * Semantic:     --accent, --green, --red, --yellow, --violet, --error
  * Radius:       --radius (3px), --radius-sm (3px), --radius-lg (6px), --radius-pill (10px)
  * Spacing:      --space-1 (4px) → --space-6 (32px)
- * Font sizes:   --text-xs (9px) → --text-xl (15px)
+ * Font sizes:   --text-xs (9px) → --text-2xl (18px)
  * Fonts:        --font-mono, --font-ui
  * Layout:       --topbar-h, --statusbar-h, --sidebar-w, --context-w
  * ──────────────────────────────────────────────────────────── */
@@ -59,6 +59,25 @@
   --text-md: 12px;
   --text-lg: 13px;
   --text-xl: 15px;
+  --text-2xl: 18px;
   --icon-size: 18px;
   --btn-size: 28px;
+  --badge-git: #f78166;
+  --badge-npm: #cb3837;
+  --badge-yarn: #2c8ebb;
+  --badge-pnpm: #f9ad00;
+  --badge-bun: #fbf0df;
+  --badge-docker: #2496ed;
+  --badge-cargo: #dea584;
+  --badge-python: #3776ab;
+  --badge-go: #00add8;
+  --badge-k8s: #326ce5;
+  --badge-brew: #fbb040;
+  --badge-next: #ffffff;
+  --badge-vite: #646cff;
+  --badge-tauri: #ffc131;
+  --badge-terraform: #7b42bc;
+  --badge-typescript: #3178c6;
+  --badge-test: #33ff99;
+  --badge-prisma: #2d3748;
 }

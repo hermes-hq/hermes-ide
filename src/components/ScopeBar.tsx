@@ -73,8 +73,9 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
               className="scope-pill-close"
               onClick={() => detach(project.id)}
               title="Remove project"
+              aria-label="Remove project"
             >
-              x
+              &times;
             </button>
           </div>
         ))}

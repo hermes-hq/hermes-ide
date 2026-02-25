@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import "../styles/components/StuckOverlay.css";
 import { SessionData } from "../state/SessionContext";
 
@@ -8,6 +9,14 @@ interface StuckOverlayProps {
 }
 
 export function StuckOverlay({ session, onDismiss, onSendCtrlC }: StuckOverlayProps) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onDismiss]);
+
   const lastError = session.metrics.recent_errors.length > 0
     ? session.metrics.recent_errors[session.metrics.recent_errors.length - 1]
     : null;

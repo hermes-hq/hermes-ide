@@ -82,5 +82,5 @@
 
 .close-dialog-btn-confirm:hover {
   background: var(--red);
-  color: white;
+  color: var(--bg-0);
 }

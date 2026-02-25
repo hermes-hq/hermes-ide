@@ -95,7 +95,7 @@
 
 .session-creator-remove-btn:hover {
   opacity: 1;
-  color: var(--danger, #e55);
+  color: var(--red);
   background: var(--bg-hover);
 }
 

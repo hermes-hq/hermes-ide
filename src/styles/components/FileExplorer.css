@@ -161,3 +161,44 @@
 .file-tree-hidden {
   opacity: 0.5;
 }
+
+/* ─── File Explorer State Classes ─────────────────────────────────────── */
+
+.file-explorer-refresh {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-md);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.file-explorer-refresh:hover {
+  color: var(--text-0);
+  background: var(--bg-hover);
+}
+
+.file-explorer-error {
+  color: var(--red);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  background: var(--red-dim);
+  border-radius: var(--radius-sm);
+  margin: var(--space-1) var(--space-2);
+  word-break: break-word;
+}
+
+.file-explorer-empty {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-1);
+  text-align: center;
+}
+
+.file-explorer-empty-state {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  line-height: 1.6;
+}

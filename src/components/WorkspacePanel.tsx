@@ -41,6 +41,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const loadProjects = useCallback(() => {
     getProjects()
@@ -49,6 +50,14 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
   }, []);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   const scanDirectory = useCallback(async () => {
     if (!scanPath.trim()) return;
@@ -164,13 +173,30 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
                   >
                     Scan
                   </button>
-                  <button
-                    className="project-action-btn project-action-delete"
-                    onClick={() => deleteProjectById(project.id)}
-                    title="Delete project"
-                  >
-                    Delete
-                  </button>
+                  {confirmDeleteId === project.id ? (
+                    <>
+                      <button
+                        className="project-action-btn project-action-delete"
+                        onClick={() => { deleteProjectById(project.id); setConfirmDeleteId(null); }}
+                      >
+                        Confirm?
+                      </button>
+                      <button
+                        className="project-action-btn"
+                        onClick={() => setConfirmDeleteId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="project-action-btn project-action-delete"
+                      onClick={() => setConfirmDeleteId(project.id)}
+                      title="Delete project"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -155,6 +155,7 @@ export function SearchPanel({ visible }: SearchPanelProps) {
             className={`search-toggle${caseSensitive ? " search-toggle-active" : ""}`}
             onClick={() => setCaseSensitive((v) => !v)}
             title="Match Case"
+            aria-pressed={caseSensitive}
           >
             Aa
           </button>
@@ -162,6 +163,7 @@ export function SearchPanel({ visible }: SearchPanelProps) {
             className={`search-toggle${isRegex ? " search-toggle-active" : ""}`}
             onClick={() => setIsRegex((v) => !v)}
             title="Use Regular Expression"
+            aria-pressed={isRegex}
           >
             .*
           </button>

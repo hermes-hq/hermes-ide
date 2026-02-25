@@ -177,7 +177,7 @@
 .prompt-composer-btn-send {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--bg-0);
   font-weight: 600;
 }
 .prompt-composer-btn-send:hover:not(:disabled) {

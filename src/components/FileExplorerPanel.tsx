@@ -58,11 +58,11 @@ function ProjectTree({ projectPath, projectName, showHidden, searchQuery }: Proj
     <div className="file-explorer-project">
       <div className="file-explorer-project-header">
         <span className="file-explorer-project-name">{projectName}</span>
-        <button className="git-panel-refresh" onClick={refresh} title="Refresh">&#8635;</button>
+        <button className="file-explorer-refresh" onClick={refresh} title="Refresh">&#8635;</button>
       </div>
-      {error && <div className="git-error" style={{ margin: "4px 8px" }}>{error}</div>}
-      {!filtered && !error && <div className="git-empty">Loading...</div>}
-      {filtered && filtered.length === 0 && <div className="git-empty">No files</div>}
+      {error && <div className="file-explorer-error">{error}</div>}
+      {!filtered && !error && <div className="file-explorer-empty">Loading...</div>}
+      {filtered && filtered.length === 0 && <div className="file-explorer-empty">No files</div>}
       {filtered && filtered.map((entry) => (
         <FileTreeNode
           key={entry.path}
@@ -122,7 +122,7 @@ function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, sho
       </div>
       {entry.is_dir && isExpanded && (
         <>
-          {isLoading && <div className="git-empty" style={{ paddingLeft: `${((depth + 1) * 16) + 8}px` }}>Loading...</div>}
+          {isLoading && <div className="file-explorer-empty" style={{ paddingLeft: `${((depth + 1) * 16) + 8}px` }}>Loading...</div>}
           {filteredChildren && filteredChildren.map((child) => (
             <FileTreeNode
               key={child.path}
@@ -184,6 +184,7 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
             className={`file-explorer-toggle ${showHidden ? "file-explorer-toggle-active" : ""}`}
             onClick={() => setShowHidden((v) => !v)}
             title={showHidden ? "Hide hidden files" : "Show hidden files"}
+            aria-pressed={showHidden}
           >.*</button>
         </div>
       </div>
@@ -197,7 +198,7 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
 
       <div className="file-explorer-scroll">
         {projects.length === 0 && (
-          <div className="git-empty-state">
+          <div className="file-explorer-empty-state">
             No projects attached to this session.
             <br />
             Attach a project to browse files.

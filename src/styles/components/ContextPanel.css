@@ -457,15 +457,15 @@
   letter-spacing: 0.3px;
 }
 .ctx-pin-scope-project {
-  background: rgba(88, 166, 255, 0.12);
+  background: var(--accent-dim);
   color: var(--accent);
 }
 .ctx-pin-scope-session {
-  background: rgba(255, 176, 0, 0.12);
+  background: var(--yellow-dim);
   color: var(--yellow);
 }
 .ctx-pin-scope-global {
-  background: rgba(140, 140, 140, 0.12);
+  background: var(--bg-active);
   color: var(--text-3);
 }
 .ctx-pin-form-row {
