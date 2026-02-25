@@ -9,9 +9,10 @@ import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
-import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, ProcessesIcon, GitIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, ProcessesIcon, GitIcon, FilesIcon } from "./components/ActivityBar";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { GitPanel } from "./components/GitPanel";
+import { FileExplorerPanel } from "./components/FileExplorerPanel";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { EmptyState } from "./components/EmptyState";
@@ -114,6 +115,7 @@ function AppContent() {
         case "j": e.preventDefault(); setComposerOpen((v) => !v); break;
         case "p": e.preventDefault(); dispatch({ type: "TOGGLE_PROCESS_PANEL" }); break;
         case "g": e.preventDefault(); dispatch({ type: "TOGGLE_GIT_PANEL" }); break;
+        case "f": e.preventDefault(); dispatch({ type: "TOGGLE_FILE_EXPLORER" }); break;
         case "t": e.preventDefault(); dispatch({ type: "TOGGLE_TIMELINE" }); break;
         case ",": e.preventDefault(); setSettingsOpen((v) => v ? null : "general"); break;
         case "/": e.preventDefault(); setShortcutsOpen((v) => !v); break;
@@ -218,17 +220,19 @@ function AppContent() {
               { id: "sessions", label: "Sessions (⌘B)", icon: SessionsIcon, badge: sessions.length || undefined },
               { id: "processes", label: "Processes (⌘P)", icon: ProcessesIcon },
               { id: "git", label: "Git (⌘G)", icon: GitIcon },
+              { id: "files", label: "Files (⌘F)", icon: FilesIcon },
             ]}
             activeTabId={
+              ui.fileExplorerOpen ? "files" :
               ui.gitPanelOpen ? "git" :
               ui.processPanelOpen ? "processes" :
               ui.sessionListCollapsed ? null : "sessions"
             }
-            onTabClick={(tabId) => dispatch({ type: "SET_LEFT_TAB", tab: tabId as "sessions" | "processes" | "git" })}
+            onTabClick={(tabId) => dispatch({ type: "SET_LEFT_TAB", tab: tabId as "sessions" | "processes" | "git" | "files" })}
             topAction={{ icon: PlusIcon, label: "New Session (⌘N)", onClick: () => setSessionCreatorOpen(true) }}
           />
         )}
-        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !ui.gitPanelOpen && (
+        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !ui.gitPanelOpen && !ui.fileExplorerOpen && (
           <SessionList
             sessions={sessions}
             activeSessionId={state.activeSessionId}
@@ -241,6 +245,9 @@ function AppContent() {
         )}
         {ui.gitPanelOpen && !ui.flowMode && (
           <GitPanel visible={ui.gitPanelOpen} />
+        )}
+        {ui.fileExplorerOpen && !ui.flowMode && (
+          <FileExplorerPanel visible={ui.fileExplorerOpen} />
         )}
         <div className="main-area">
           <div className="terminal-and-timeline">

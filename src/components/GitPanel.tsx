@@ -11,11 +11,17 @@ interface GitPanelProps {
   visible: boolean;
 }
 
+export interface GitToast {
+  message: string;
+  type: "success" | "info" | "error";
+}
+
 export function GitPanel({ visible }: GitPanelProps) {
   const { state } = useSession();
   const [pollInterval, setPollInterval] = useState(3000);
   const { status, error, refresh } = useGitStatus(state.activeSessionId, visible, pollInterval);
   const [diffTarget, setDiffTarget] = useState<{ projectPath: string; file: GitFile } | null>(null);
+  const [toast, setToast] = useState<GitToast | null>(null);
 
   // Load poll interval setting on mount
   useEffect(() => {
@@ -26,10 +32,21 @@ export function GitPanel({ visible }: GitPanelProps) {
     }).catch(() => {});
   }, []);
 
-  // 2B: Clear diff when session changes
+  // Clear diff when session changes
   useEffect(() => {
     setDiffTarget(null);
   }, [state.activeSessionId]);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const showToast = useCallback((message: string, type: GitToast["type"] = "success") => {
+    setToast({ message, type });
+  }, []);
 
   const handleDiffFile = useCallback((projectPath: string, file: GitFile) => {
     setDiffTarget({ projectPath, file });
@@ -63,9 +80,20 @@ export function GitPanel({ visible }: GitPanelProps) {
             project={project}
             onRefresh={refresh}
             onDiffFile={handleDiffFile}
+            onToast={showToast}
           />
         ))}
       </div>
+
+      {/* Floating toast at bottom of panel */}
+      {toast && (
+        <div className={`git-toast git-toast-${toast.type}`} key={toast.message + Date.now()}>
+          <span className="git-toast-icon">
+            {toast.type === "success" ? "\u2713" : toast.type === "error" ? "\u2717" : "\u2139"}
+          </span>
+          {toast.message}
+        </div>
+      )}
 
       {diffTarget && (
         <GitDiffView

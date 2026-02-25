@@ -1,5 +1,5 @@
 use git2::{
-    Cred, DiffOptions, FetchOptions, IndexAddOption, PushOptions, RemoteCallbacks,
+    BranchType, Cred, DiffOptions, FetchOptions, IndexAddOption, PushOptions, RemoteCallbacks,
     Repository, StatusOptions,
 };
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ pub struct GitProjectStatus {
     pub behind: u32,
     pub files: Vec<GitFile>,
     pub has_conflicts: bool,
+    pub stash_count: u32,
     pub error: Option<String>,
 }
 
@@ -55,6 +56,27 @@ pub struct GitOperationResult {
     pub success: bool,
     pub message: String,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitBranch {
+    pub name: String,
+    pub is_current: bool,
+    pub is_remote: bool,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub last_commit_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub is_hidden: bool,
+    pub size: Option<u64>,
+    pub git_status: Option<String>,
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -210,7 +232,7 @@ fn get_project_git_status(
 ) -> GitProjectStatus {
     let path = Path::new(project_path);
 
-    let repo = match Repository::open(path) {
+    let mut repo = match Repository::open(path) {
         Ok(r) => r,
         Err(_) => {
             return GitProjectStatus {
@@ -224,6 +246,7 @@ fn get_project_git_status(
                 behind: 0,
                 files: Vec::new(),
                 has_conflicts: false,
+                stash_count: 0,
                 error: None,
             };
         }
@@ -242,6 +265,7 @@ fn get_project_git_status(
             behind: 0,
             files: Vec::new(),
             has_conflicts: false,
+            stash_count: 0,
             error: Some("Bare repository (no working directory)".to_string()),
         };
     }
@@ -398,10 +422,18 @@ fn get_project_git_status(
                 behind,
                 files: Vec::new(),
                 has_conflicts: false,
+                stash_count: 0,
                 error: Some(format!("Failed to get status: {}", e)),
             };
         }
     }
+
+    // Count stashes
+    let mut stash_count = 0u32;
+    let _ = repo.stash_foreach(|_index, _message, _oid| {
+        stash_count += 1;
+        true
+    });
 
     GitProjectStatus {
         project_id: project_id.to_string(),
@@ -414,6 +446,7 @@ fn get_project_git_status(
         behind,
         files,
         has_conflicts,
+        stash_count,
         error: None,
     }
 }
@@ -653,7 +686,66 @@ pub fn git_pull(
         });
     }
 
-    Err("Pull requires a merge. Please resolve in terminal.".to_string())
+    // Perform actual merge
+    if merge_analysis.is_normal() {
+        let fetch_commit_obj = repo
+            .find_commit(fetch_commit.id())
+            .map_err(|e| e.to_string())?;
+
+        // Merge the fetched commit
+        let mut merge_opts = git2::MergeOptions::new();
+        let mut checkout_builder = git2::build::CheckoutBuilder::new();
+        checkout_builder.allow_conflicts(true);
+
+        repo.merge(
+            &[&fetch_commit],
+            Some(&mut merge_opts),
+            Some(&mut checkout_builder),
+        )
+        .map_err(|e| format!("Merge failed: {}", e))?;
+
+        // Check for conflicts
+        let index = repo.index().map_err(|e| e.to_string())?;
+        if index.has_conflicts() {
+            return Ok(GitOperationResult {
+                success: true,
+                message: "Pull complete but merge has conflicts. Resolve them to finish the merge.".to_string(),
+                error: None,
+            });
+        }
+
+        // Auto-commit if no conflicts
+        let sig = repo.signature().map_err(|e| e.to_string())?;
+        let mut index = repo.index().map_err(|e| e.to_string())?;
+        let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
+        let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+
+        let head_commit = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|e| e.to_string())?;
+
+        let msg = format!("Merge branch '{}' of {}", branch_name, remote_name);
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            &msg,
+            &tree,
+            &[&head_commit, &fetch_commit_obj],
+        )
+        .map_err(|e| format!("Merge commit failed: {}", e))?;
+
+        repo.cleanup_state().map_err(|e| e.to_string())?;
+
+        return Ok(GitOperationResult {
+            success: true,
+            message: "Pull with merge complete".to_string(),
+            error: None,
+        });
+    }
+
+    Err("Pull failed: unexpected merge analysis result".to_string())
 }
 
 #[tauri::command]
@@ -734,4 +826,1133 @@ pub fn git_open_file(project_path: String, file_path: String) -> Result<(), Stri
         .spawn()
         .map_err(|e| format!("Failed to open file: {}", e))?;
     Ok(())
+}
+
+// ─── Branch Management Commands ─────────────────────────────────────
+
+#[tauri::command]
+pub fn git_list_branches(project_path: String) -> Result<Vec<GitBranch>, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let mut branches = Vec::new();
+
+    // Get current branch name
+    let current_branch = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+
+    // Local branches
+    let local_branches = repo
+        .branches(Some(BranchType::Local))
+        .map_err(|e| e.to_string())?;
+
+    for branch_result in local_branches {
+        let (branch, _) = branch_result.map_err(|e| e.to_string())?;
+        let name = branch
+            .name()
+            .map_err(|e| e.to_string())?
+            .unwrap_or("")
+            .to_string();
+
+        let is_current = current_branch.as_deref() == Some(&name);
+
+        // Compute ahead/behind vs upstream
+        let mut ahead = 0u32;
+        let mut behind = 0u32;
+        let mut upstream_name = None;
+
+        if let Ok(upstream) = branch.upstream() {
+            upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
+            if let (Some(local_ref), Some(upstream_ref)) = (
+                branch.get().name(),
+                upstream.get().name(),
+            ) {
+                if let (Ok(local_oid), Ok(remote_oid)) = (
+                    repo.refname_to_id(local_ref),
+                    repo.refname_to_id(upstream_ref),
+                ) {
+                    if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                        ahead = a as u32;
+                        behind = b as u32;
+                    }
+                }
+            }
+        }
+
+        // Last commit summary
+        let last_commit_summary = branch
+            .get()
+            .peel_to_commit()
+            .ok()
+            .map(|c| c.summary().unwrap_or("").to_string());
+
+        branches.push(GitBranch {
+            name,
+            is_current,
+            is_remote: false,
+            upstream: upstream_name,
+            ahead,
+            behind,
+            last_commit_summary,
+        });
+    }
+
+    // Remote branches
+    let remote_branches = repo
+        .branches(Some(BranchType::Remote))
+        .map_err(|e| e.to_string())?;
+
+    for branch_result in remote_branches {
+        let (branch, _) = branch_result.map_err(|e| e.to_string())?;
+        let name = branch
+            .name()
+            .map_err(|e| e.to_string())?
+            .unwrap_or("")
+            .to_string();
+
+        // Skip HEAD pointer references like origin/HEAD
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+
+        let last_commit_summary = branch
+            .get()
+            .peel_to_commit()
+            .ok()
+            .map(|c| c.summary().unwrap_or("").to_string());
+
+        branches.push(GitBranch {
+            name,
+            is_current: false,
+            is_remote: true,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            last_commit_summary,
+        });
+    }
+
+    Ok(branches)
+}
+
+#[tauri::command]
+pub fn git_create_branch(
+    project_path: String,
+    name: String,
+    checkout: bool,
+) -> Result<GitOperationResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let head_commit = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| format!("Cannot resolve HEAD: {}", e))?;
+
+    repo.branch(&name, &head_commit, false)
+        .map_err(|e| format!("Failed to create branch '{}': {}", name, e))?;
+
+    if checkout {
+        let refname = format!("refs/heads/{}", name);
+        repo.set_head(&refname).map_err(|e| e.to_string())?;
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::default().safe(),
+        ))
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!(
+            "Created branch '{}'{}",
+            name,
+            if checkout { " and checked out" } else { "" }
+        ),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_checkout_branch(
+    project_path: String,
+    name: String,
+) -> Result<GitOperationResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    // Check for dirty working tree
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(false);
+    let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
+    let has_changes = statuses.iter().any(|e| {
+        let s = e.status();
+        s.contains(git2::Status::INDEX_NEW)
+            || s.contains(git2::Status::INDEX_MODIFIED)
+            || s.contains(git2::Status::INDEX_DELETED)
+            || s.contains(git2::Status::WT_MODIFIED)
+            || s.contains(git2::Status::WT_DELETED)
+    });
+    if has_changes {
+        return Err(
+            "Cannot checkout: you have uncommitted changes. Commit or stash them first."
+                .to_string(),
+        );
+    }
+
+    // Try local branch first
+    let refname = format!("refs/heads/{}", name);
+    if repo.find_reference(&refname).is_ok() {
+        repo.set_head(&refname).map_err(|e| e.to_string())?;
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::default().safe(),
+        ))
+        .map_err(|e| e.to_string())?;
+        return Ok(GitOperationResult {
+            success: true,
+            message: format!("Switched to branch '{}'", name),
+            error: None,
+        });
+    }
+
+    // Try creating a local tracking branch from a remote branch
+    // e.g. name = "origin/feature" → local branch "feature" tracking "origin/feature"
+    let remote_refname = format!("refs/remotes/{}", name);
+    if let Ok(remote_ref) = repo.find_reference(&remote_refname) {
+        let commit = remote_ref
+            .peel_to_commit()
+            .map_err(|e| e.to_string())?;
+        // Extract local name (strip "origin/" prefix)
+        let local_name = name
+            .splitn(2, '/')
+            .nth(1)
+            .unwrap_or(&name);
+
+        let mut local_branch = repo
+            .branch(local_name, &commit, false)
+            .map_err(|e| format!("Failed to create tracking branch: {}", e))?;
+
+        // Set upstream
+        local_branch
+            .set_upstream(Some(&name))
+            .map_err(|e| format!("Failed to set upstream: {}", e))?;
+
+        let local_refname = format!("refs/heads/{}", local_name);
+        repo.set_head(&local_refname).map_err(|e| e.to_string())?;
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::default().safe(),
+        ))
+        .map_err(|e| e.to_string())?;
+
+        return Ok(GitOperationResult {
+            success: true,
+            message: format!(
+                "Created and switched to branch '{}' tracking '{}'",
+                local_name, name
+            ),
+            error: None,
+        });
+    }
+
+    Err(format!("Branch '{}' not found", name))
+}
+
+#[tauri::command]
+pub fn git_delete_branch(
+    project_path: String,
+    name: String,
+    force: bool,
+) -> Result<GitOperationResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    // Prevent deleting current branch
+    let current = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+    if current.as_deref() == Some(&name) {
+        return Err("Cannot delete the currently checked out branch".to_string());
+    }
+
+    let mut branch = repo
+        .find_branch(&name, BranchType::Local)
+        .map_err(|e| format!("Branch '{}' not found: {}", name, e))?;
+
+    if force {
+        // Force delete: rename away then delete ref directly
+        let refname = format!("refs/heads/{}", name);
+        let mut reference = repo
+            .find_reference(&refname)
+            .map_err(|e| e.to_string())?;
+        reference
+            .delete()
+            .map_err(|e| format!("Failed to force delete '{}': {}", name, e))?;
+    } else {
+        branch
+            .delete()
+            .map_err(|e| format!("Failed to delete '{}': {}. Use force delete if unmerged.", name, e))?;
+    }
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Deleted branch '{}'", name),
+        error: None,
+    })
+}
+
+// ─── File Explorer Command ──────────────────────────────────────────
+
+#[tauri::command]
+pub fn list_directory(
+    project_path: String,
+    relative_path: Option<String>,
+) -> Result<Vec<FileEntry>, String> {
+    let base = std::fs::canonicalize(&project_path)
+        .map_err(|e| format!("Invalid project path: {}", e))?;
+
+    let target_dir = match &relative_path {
+        Some(rel) if !rel.is_empty() => safe_join(&project_path, rel)?,
+        _ => base.clone(),
+    };
+
+    if !target_dir.is_dir() {
+        return Err(format!("Not a directory: {}", target_dir.display()));
+    }
+
+    // Build git status map
+    let mut git_status_map = std::collections::HashMap::new();
+    if let Ok(repo) = Repository::open(&project_path) {
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true).recurse_untracked_dirs(true);
+        if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+            for entry in statuses.iter() {
+                let s = entry.status();
+                if s.is_empty() {
+                    continue;
+                }
+                if let Some(path) = entry.path() {
+                    let status_str = if s.contains(git2::Status::CONFLICTED) {
+                        "conflicted"
+                    } else if s.contains(git2::Status::WT_NEW)
+                        || s.contains(git2::Status::INDEX_NEW)
+                    {
+                        "added"
+                    } else if s.contains(git2::Status::WT_DELETED)
+                        || s.contains(git2::Status::INDEX_DELETED)
+                    {
+                        "deleted"
+                    } else if s.contains(git2::Status::WT_RENAMED)
+                        || s.contains(git2::Status::INDEX_RENAMED)
+                    {
+                        "renamed"
+                    } else if s.contains(git2::Status::WT_MODIFIED)
+                        || s.contains(git2::Status::INDEX_MODIFIED)
+                    {
+                        "modified"
+                    } else {
+                        "untracked"
+                    };
+                    git_status_map.insert(path.to_string(), status_str.to_string());
+                }
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    let dir_entries =
+        std::fs::read_dir(&target_dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+
+    for entry in dir_entries {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip .git directory
+        if file_name == ".git" {
+            continue;
+        }
+
+        let metadata = entry.metadata().map_err(|e| format!("Failed to get metadata: {}", e))?;
+        let is_dir = metadata.is_dir();
+        let is_hidden = file_name.starts_with('.');
+
+        // Compute relative path from project root
+        let full_path = entry.path();
+        let rel_path = full_path
+            .strip_prefix(&base)
+            .unwrap_or(&full_path)
+            .to_string_lossy()
+            .to_string();
+
+        let size = if is_dir { None } else { Some(metadata.len()) };
+
+        // Look up git status — for files check exact path, for dirs check if any child has status
+        let git_status = if is_dir {
+            let prefix = if rel_path.ends_with('/') {
+                rel_path.clone()
+            } else {
+                format!("{}/", rel_path)
+            };
+            let has_status = git_status_map.keys().any(|k| k.starts_with(&prefix));
+            if has_status {
+                Some("modified".to_string())
+            } else {
+                None
+            }
+        } else {
+            git_status_map.get(&rel_path).cloned()
+        };
+
+        entries.push(FileEntry {
+            name: file_name,
+            path: rel_path,
+            is_dir,
+            is_hidden,
+            size,
+            git_status,
+        });
+    }
+
+    // Sort: directories first, then alphabetical (case-insensitive)
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(entries)
+}
+
+// ─── Stash Data Models ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitStashEntry {
+    pub index: usize,
+    pub message: String,
+    pub timestamp: u64,
+    pub branch_name: String,
+}
+
+fn parse_stash_branch(message: &str) -> String {
+    // Parse "WIP on main: abc1234 ..." or "On main: ..." format
+    if let Some(rest) = message.strip_prefix("WIP on ").or_else(|| message.strip_prefix("On ")) {
+        if let Some(colon_pos) = rest.find(':') {
+            return rest[..colon_pos].to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
+// ─── Stash Commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn git_stash_list(project_path: String) -> Result<Vec<GitStashEntry>, String> {
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    // Collect raw data first (can't borrow repo inside stash_foreach closure)
+    let mut raw: Vec<(usize, String, git2::Oid)> = Vec::new();
+    repo.stash_foreach(|index, message, oid| {
+        raw.push((index, message.to_string(), *oid));
+        true
+    })
+    .map_err(|e| e.to_string())?;
+
+    // Now resolve timestamps with separate repo borrows
+    let entries: Vec<GitStashEntry> = raw
+        .into_iter()
+        .map(|(index, msg, oid)| {
+            let timestamp = repo
+                .find_commit(oid)
+                .map(|c| c.time().seconds() as u64)
+                .unwrap_or(0);
+            let branch_name = parse_stash_branch(&msg);
+            GitStashEntry {
+                index,
+                message: msg,
+                timestamp,
+                branch_name,
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn git_stash_save(
+    project_path: String,
+    message: Option<String>,
+    include_untracked: Option<bool>,
+) -> Result<GitOperationResult, String> {
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let sig = repo.signature().map_err(|e| e.to_string())?;
+    let msg = message.as_deref().unwrap_or("WIP");
+    let mut flags = git2::StashFlags::DEFAULT;
+    if include_untracked.unwrap_or(true) {
+        flags |= git2::StashFlags::INCLUDE_UNTRACKED;
+    }
+
+    repo.stash_save(&sig, msg, Some(flags))
+        .map_err(|e| format!("Stash failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Stashed: {}", msg),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_stash_apply(
+    project_path: String,
+    index: usize,
+) -> Result<GitOperationResult, String> {
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let mut opts = git2::StashApplyOptions::new();
+    repo.stash_apply(index, Some(&mut opts))
+        .map_err(|e| format!("Stash apply failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Applied stash@{{{}}}", index),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_stash_pop(
+    project_path: String,
+    index: usize,
+) -> Result<GitOperationResult, String> {
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let mut opts = git2::StashApplyOptions::new();
+    repo.stash_pop(index, Some(&mut opts))
+        .map_err(|e| format!("Stash pop failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Popped stash@{{{}}}", index),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_stash_drop(
+    project_path: String,
+    index: usize,
+) -> Result<GitOperationResult, String> {
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    repo.stash_drop(index)
+        .map_err(|e| format!("Stash drop failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Dropped stash@{{{}}}", index),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_stash_clear(project_path: String) -> Result<GitOperationResult, String> {
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    // Count stashes first
+    let mut count = 0usize;
+    let _ = repo.stash_foreach(|_, _, _| { count += 1; true });
+
+    // Drop from index 0 repeatedly
+    for _ in 0..count {
+        repo.stash_drop(0)
+            .map_err(|e| format!("Stash clear failed: {}", e))?;
+    }
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Cleared {} stash(es)", count),
+        error: None,
+    })
+}
+
+// ─── Log / History Data Models ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitLogEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: u64,
+    pub message: String,
+    pub summary: String,
+    pub parent_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitLogResult {
+    pub entries: Vec<GitLogEntry>,
+    pub has_more: bool,
+    pub total_traversed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCommitFile {
+    pub path: String,
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub old_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCommitDetail {
+    pub hash: String,
+    pub short_hash: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: u64,
+    pub message: String,
+    pub parent_count: usize,
+    pub files: Vec<GitCommitFile>,
+    pub total_additions: u32,
+    pub total_deletions: u32,
+}
+
+// ─── Log / History Commands ─────────────────────────────────────────
+
+#[tauri::command]
+pub fn git_log(
+    project_path: String,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<GitLogResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let limit = limit.unwrap_or(50);
+    let offset = offset.unwrap_or(0);
+
+    let mut revwalk = repo.revwalk().map_err(|e| e.to_string())?;
+    revwalk
+        .push_head()
+        .map_err(|_| "No commits in repository".to_string())?;
+    revwalk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)
+        .map_err(|e| e.to_string())?;
+
+    let mut entries = Vec::new();
+    let mut total_traversed = 0usize;
+    let mut has_more = false;
+
+    for oid_result in revwalk {
+        let oid = oid_result.map_err(|e| e.to_string())?;
+        total_traversed += 1;
+
+        if total_traversed <= offset {
+            continue;
+        }
+
+        if entries.len() >= limit {
+            has_more = true;
+            break;
+        }
+
+        let commit = repo.find_commit(oid).map_err(|e| e.to_string())?;
+        let hash = oid.to_string();
+        let short_hash = hash[..8.min(hash.len())].to_string();
+
+        entries.push(GitLogEntry {
+            hash,
+            short_hash,
+            author_name: commit.author().name().unwrap_or("").to_string(),
+            author_email: commit.author().email().unwrap_or("").to_string(),
+            timestamp: commit.time().seconds() as u64,
+            message: commit
+                .message()
+                .unwrap_or("")
+                .to_string(),
+            summary: commit
+                .summary()
+                .unwrap_or("")
+                .to_string(),
+            parent_count: commit.parent_count(),
+        });
+    }
+
+    Ok(GitLogResult {
+        entries,
+        has_more,
+        total_traversed,
+    })
+}
+
+#[tauri::command]
+pub fn git_commit_detail(
+    project_path: String,
+    commit_hash: String,
+) -> Result<GitCommitDetail, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let oid = git2::Oid::from_str(&commit_hash)
+        .map_err(|e| format!("Invalid commit hash: {}", e))?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit not found: {}", e))?;
+
+    let tree = commit.tree().map_err(|e| e.to_string())?;
+
+    // Diff against first parent (or empty tree for root commits)
+    let parent_tree = if commit.parent_count() > 0 {
+        Some(
+            commit
+                .parent(0)
+                .map_err(|e| e.to_string())?
+                .tree()
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+        .map_err(|e| e.to_string())?;
+
+    let mut files = Vec::new();
+    let mut total_additions = 0u32;
+    let mut total_deletions = 0u32;
+
+    for (idx, delta) in diff.deltas().enumerate() {
+        let status_str = match delta.status() {
+            git2::Delta::Added => "added",
+            git2::Delta::Deleted => "deleted",
+            git2::Delta::Modified => "modified",
+            git2::Delta::Renamed => "renamed",
+            git2::Delta::Copied => "copied",
+            _ => "modified",
+        };
+
+        let path = delta
+            .new_file()
+            .path()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let old_path = if delta.status() == git2::Delta::Renamed {
+            delta
+                .old_file()
+                .path()
+                .map(|p| p.to_string_lossy().to_string())
+        } else {
+            None
+        };
+
+        // Get per-file stats
+        let mut additions = 0u32;
+        let mut deletions = 0u32;
+        if let Ok(patch) = git2::Patch::from_diff(&diff, idx) {
+            if let Some(patch) = patch {
+                let (_, adds, dels) = patch.line_stats().unwrap_or((0, 0, 0));
+                additions = adds as u32;
+                deletions = dels as u32;
+            }
+        }
+        total_additions += additions;
+        total_deletions += deletions;
+
+        files.push(GitCommitFile {
+            path,
+            status: status_str.to_string(),
+            additions,
+            deletions,
+            old_path,
+        });
+    }
+
+    let hash = oid.to_string();
+    let short_hash = hash[..8.min(hash.len())].to_string();
+    let author_name = commit.author().name().unwrap_or("").to_string();
+    let author_email = commit.author().email().unwrap_or("").to_string();
+    let timestamp = commit.time().seconds() as u64;
+    let message = commit.message().unwrap_or("").to_string();
+    let parent_count = commit.parent_count();
+
+    Ok(GitCommitDetail {
+        hash,
+        short_hash,
+        author_name,
+        author_email,
+        timestamp,
+        message,
+        parent_count,
+        files,
+        total_additions,
+        total_deletions,
+    })
+}
+
+// ─── Merge Conflict Data Models ─────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeStatus {
+    pub in_merge: bool,
+    pub conflicted_files: Vec<String>,
+    pub resolved_files: Vec<String>,
+    pub total_conflicts: u32,
+    pub merge_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictContent {
+    pub path: String,
+    pub base: Option<String>,
+    pub ours: String,
+    pub theirs: String,
+    pub working_tree: String,
+    pub is_binary: bool,
+}
+
+// ─── Merge Conflict Commands ────────────────────────────────────────
+
+#[tauri::command]
+pub fn git_merge_status(project_path: String) -> Result<MergeStatus, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let in_merge = repo.state() == git2::RepositoryState::Merge;
+
+    if !in_merge {
+        return Ok(MergeStatus {
+            in_merge: false,
+            conflicted_files: Vec::new(),
+            resolved_files: Vec::new(),
+            total_conflicts: 0,
+            merge_message: None,
+        });
+    }
+
+    let index = repo.index().map_err(|e| e.to_string())?;
+    let mut conflicted_files = Vec::new();
+
+    // Collect conflicted paths from index
+    for conflict in index.conflicts().map_err(|e| e.to_string())? {
+        let conflict = conflict.map_err(|e| e.to_string())?;
+        let path = conflict
+            .our
+            .as_ref()
+            .or(conflict.their.as_ref())
+            .or(conflict.ancestor.as_ref())
+            .and_then(|entry| std::str::from_utf8(&entry.path).ok())
+            .unwrap_or("")
+            .to_string();
+        if !path.is_empty() {
+            conflicted_files.push(path);
+        }
+    }
+
+    // Determine which files were involved in the merge by diffing HEAD vs MERGE_HEAD
+    let mut merge_involved_paths = std::collections::HashSet::new();
+    if let Ok(merge_head_ref) = repo.find_reference("MERGE_HEAD") {
+        if let Some(merge_head_oid) = merge_head_ref.target() {
+            if let Ok(merge_commit) = repo.find_commit(merge_head_oid) {
+                if let Ok(merge_tree) = merge_commit.tree() {
+                    if let Ok(head_ref) = repo.head() {
+                        if let Ok(head_commit) = head_ref.peel_to_commit() {
+                            if let Ok(head_tree) = head_commit.tree() {
+                                if let Ok(diff) = repo.diff_tree_to_tree(Some(&head_tree), Some(&merge_tree), None) {
+                                    for delta in diff.deltas() {
+                                        if let Some(p) = delta.new_file().path() {
+                                            merge_involved_paths.insert(p.to_string_lossy().to_string());
+                                        }
+                                        if let Some(p) = delta.old_file().path() {
+                                            merge_involved_paths.insert(p.to_string_lossy().to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolved = files that were staged (INDEX_MODIFIED/INDEX_NEW), part of the merge,
+    // and no longer in the conflicted list
+    let mut resolved_files = Vec::new();
+    let mut status_opts = StatusOptions::new();
+    status_opts.include_untracked(false);
+    if let Ok(statuses) = repo.statuses(Some(&mut status_opts)) {
+        for entry in statuses.iter() {
+            let s = entry.status();
+            if s.contains(git2::Status::INDEX_MODIFIED) || s.contains(git2::Status::INDEX_NEW) {
+                if let Some(path) = entry.path() {
+                    let path_str = path.to_string();
+                    if !conflicted_files.contains(&path_str) && merge_involved_paths.contains(&path_str) {
+                        resolved_files.push(path_str);
+                    }
+                }
+            }
+        }
+    }
+
+    let total_conflicts = (conflicted_files.len() + resolved_files.len()) as u32;
+
+    let merge_message = repo.message().ok();
+
+    Ok(MergeStatus {
+        in_merge,
+        conflicted_files,
+        resolved_files,
+        total_conflicts,
+        merge_message,
+    })
+}
+
+#[tauri::command]
+pub fn git_get_conflict_content(
+    project_path: String,
+    file_path: String,
+) -> Result<ConflictContent, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let index = repo.index().map_err(|e| e.to_string())?;
+
+    // Find the conflict entry for this path
+    let mut found = None;
+    for conflict in index.conflicts().map_err(|e| e.to_string())? {
+        let conflict = conflict.map_err(|e| e.to_string())?;
+        let path = conflict
+            .our
+            .as_ref()
+            .or(conflict.their.as_ref())
+            .or(conflict.ancestor.as_ref())
+            .and_then(|entry| std::str::from_utf8(&entry.path).ok())
+            .unwrap_or("")
+            .to_string();
+        if path == file_path {
+            found = Some(conflict);
+            break;
+        }
+    }
+
+    let conflict = found.ok_or_else(|| format!("No conflict found for '{}'", file_path))?;
+
+    let read_blob = |entry: &Option<git2::IndexEntry>| -> Result<Option<String>, String> {
+        match entry {
+            Some(e) => {
+                let blob = repo.find_blob(e.id).map_err(|err| err.to_string())?;
+                if blob.is_binary() {
+                    return Ok(None);
+                }
+                Ok(Some(
+                    std::str::from_utf8(blob.content())
+                        .map_err(|e| e.to_string())?
+                        .to_string(),
+                ))
+            }
+            None => Ok(None),
+        }
+    };
+
+    let is_binary_entry = |entry: &Option<git2::IndexEntry>| -> bool {
+        match entry {
+            Some(e) => repo
+                .find_blob(e.id)
+                .map(|b| b.is_binary())
+                .unwrap_or(false),
+            None => false,
+        }
+    };
+
+    let is_binary =
+        is_binary_entry(&conflict.our) || is_binary_entry(&conflict.their);
+
+    let base = read_blob(&conflict.ancestor).unwrap_or(None);
+    let ours = read_blob(&conflict.our)
+        .unwrap_or(None)
+        .unwrap_or_default();
+    let theirs = read_blob(&conflict.their)
+        .unwrap_or(None)
+        .unwrap_or_default();
+
+    // Read working tree file (with conflict markers)
+    let full_path = safe_join(&project_path, &file_path)?;
+    let working_tree = std::fs::read_to_string(&full_path)
+        .unwrap_or_else(|_| String::new());
+
+    Ok(ConflictContent {
+        path: file_path,
+        base,
+        ours,
+        theirs,
+        working_tree,
+        is_binary,
+    })
+}
+
+#[tauri::command]
+pub fn git_resolve_conflict(
+    project_path: String,
+    file_path: String,
+    strategy: String,
+    manual_content: Option<String>,
+) -> Result<GitOperationResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let full_path = safe_join(&project_path, &file_path)?;
+
+    match strategy.as_str() {
+        "ours" => {
+            let index = repo.index().map_err(|e| e.to_string())?;
+            let mut ours_content = None;
+            for conflict in index.conflicts().map_err(|e| e.to_string())? {
+                let conflict = conflict.map_err(|e| e.to_string())?;
+                if let Some(ref our) = conflict.our {
+                    let path = std::str::from_utf8(&our.path)
+                        .map_err(|e| e.to_string())?;
+                    if path == file_path {
+                        let blob = repo.find_blob(our.id).map_err(|e| e.to_string())?;
+                        ours_content = Some(blob.content().to_vec());
+                        break;
+                    }
+                }
+            }
+            let content = ours_content
+                .ok_or_else(|| format!("Could not find 'ours' version for '{}'", file_path))?;
+            std::fs::write(&full_path, &content)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+        }
+        "theirs" => {
+            let index = repo.index().map_err(|e| e.to_string())?;
+            let mut theirs_content = None;
+            for conflict in index.conflicts().map_err(|e| e.to_string())? {
+                let conflict = conflict.map_err(|e| e.to_string())?;
+                if let Some(ref their) = conflict.their {
+                    let path = std::str::from_utf8(&their.path)
+                        .map_err(|e| e.to_string())?;
+                    if path == file_path {
+                        let blob = repo.find_blob(their.id).map_err(|e| e.to_string())?;
+                        theirs_content = Some(blob.content().to_vec());
+                        break;
+                    }
+                }
+            }
+            let content = theirs_content
+                .ok_or_else(|| format!("Could not find 'theirs' version for '{}'", file_path))?;
+            std::fs::write(&full_path, &content)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+        }
+        "manual" => {
+            if let Some(content) = manual_content {
+                std::fs::write(&full_path, content.as_bytes())
+                    .map_err(|e| format!("Failed to write file: {}", e))?;
+            }
+            // If no manual_content, accept working tree as-is
+        }
+        _ => return Err(format!("Unknown strategy: {}", strategy)),
+    }
+
+    // Mark as resolved by adding to index
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    index
+        .add_path(Path::new(&file_path))
+        .map_err(|e| format!("Failed to mark as resolved: {}", e))?;
+    index.write().map_err(|e| e.to_string())?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Resolved '{}' using {}", file_path, strategy),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_abort_merge(project_path: String) -> Result<GitOperationResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    if repo.state() != git2::RepositoryState::Merge {
+        return Err("No merge in progress".to_string());
+    }
+
+    // Reset to HEAD
+    let head = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| format!("Cannot resolve HEAD: {}", e))?;
+    repo.reset(
+        head.as_object(),
+        git2::ResetType::Hard,
+        None,
+    )
+    .map_err(|e| format!("Reset failed: {}", e))?;
+
+    repo.cleanup_state()
+        .map_err(|e| format!("Cleanup failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: "Merge aborted".to_string(),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub fn git_continue_merge(
+    project_path: String,
+    message: Option<String>,
+    author_name: Option<String>,
+    author_email: Option<String>,
+) -> Result<GitOperationResult, String> {
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    if repo.state() != git2::RepositoryState::Merge {
+        return Err("No merge in progress".to_string());
+    }
+
+    let index = repo.index().map_err(|e| e.to_string())?;
+    if index.has_conflicts() {
+        return Err("Cannot complete merge: unresolved conflicts remain".to_string());
+    }
+
+    let sig = match (&author_name, &author_email) {
+        (Some(name), Some(email)) if !name.is_empty() && !email.is_empty() => {
+            git2::Signature::now(name, email).map_err(|e| e.to_string())?
+        }
+        _ => repo.signature().map_err(|e| e.to_string())?,
+    };
+
+    let merge_msg = message
+        .or_else(|| repo.message().ok())
+        .unwrap_or_else(|| "Merge commit".to_string());
+
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+
+    let head_commit = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| format!("Cannot resolve HEAD: {}", e))?;
+
+    // Read MERGE_HEAD
+    let merge_head_ref = repo
+        .find_reference("MERGE_HEAD")
+        .map_err(|e| format!("Cannot find MERGE_HEAD: {}", e))?;
+    let merge_head_oid = merge_head_ref
+        .target()
+        .ok_or_else(|| "MERGE_HEAD is not a direct reference".to_string())?;
+    let merge_commit = repo
+        .find_commit(merge_head_oid)
+        .map_err(|e| format!("Cannot find merge commit: {}", e))?;
+
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        &merge_msg,
+        &tree,
+        &[&head_commit, &merge_commit],
+    )
+    .map_err(|e| format!("Merge commit failed: {}", e))?;
+
+    repo.cleanup_state()
+        .map_err(|e| format!("Cleanup failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: "Merge completed".to_string(),
+        error: None,
+    })
 }

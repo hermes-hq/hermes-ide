@@ -133,6 +133,29 @@ pub fn run() {
             git::git_pull,
             git::git_diff,
             git::git_open_file,
+            // Git branch management
+            git::git_list_branches,
+            git::git_create_branch,
+            git::git_checkout_branch,
+            git::git_delete_branch,
+            // Git stash
+            git::git_stash_list,
+            git::git_stash_save,
+            git::git_stash_apply,
+            git::git_stash_pop,
+            git::git_stash_drop,
+            git::git_stash_clear,
+            // Git log / history
+            git::git_log,
+            git::git_commit_detail,
+            // Git merge / conflicts
+            git::git_merge_status,
+            git::git_get_conflict_content,
+            git::git_resolve_conflict,
+            git::git_abort_merge,
+            git::git_continue_merge,
+            // File explorer
+            git::list_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running HERMES-IDE");

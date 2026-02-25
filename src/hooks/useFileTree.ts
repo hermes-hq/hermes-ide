@@ -1,4 +1,8 @@
-import { useMemo } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
+import type { FileEntry } from "../types/git";
+import { listDirectory } from "../api/git";
+
+// ─── Legacy FileTreeNode (used by ContextPanel) ──────────────────────
 
 export interface FileTreeNode {
   name: string;
@@ -28,7 +32,6 @@ function buildTree(files: string[]): FileTreeNode[] {
     }
   }
 
-  // Sort: directories first, then alphabetically
   function sortTree(nodes: FileTreeNode[]): FileTreeNode[] {
     for (const node of nodes) {
       if (node.children.length > 0) {
@@ -44,7 +47,6 @@ function buildTree(files: string[]): FileTreeNode[] {
   return sortTree(root.children);
 }
 
-// Collapse single-child directories (e.g. src/components -> src/components)
 function collapse(nodes: FileTreeNode[]): FileTreeNode[] {
   return nodes.map((node) => {
     if (!node.isFile && node.children.length === 1 && !node.children[0].isFile) {
@@ -59,6 +61,109 @@ function collapse(nodes: FileTreeNode[]): FileTreeNode[] {
   });
 }
 
+/** Legacy hook for ContextPanel (builds tree from file paths) */
 export function useFileTree(files: string[]): FileTreeNode[] {
   return useMemo(() => collapse(buildTree(files)), [files]);
+}
+
+// ─── Pure helpers for File Explorer (exported for testing) ────────────
+
+export function buildTreePath(parentPath: string, name: string): string {
+  if (!name) return parentPath;
+  if (!parentPath) return name;
+  const clean = parentPath.endsWith("/") ? parentPath.slice(0, -1) : parentPath;
+  return `${clean}/${name}`;
+}
+
+export function sortEntries(entries: FileEntry[]): FileEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+}
+
+export function filterEntries(entries: FileEntry[], query: string, showHidden: boolean): FileEntry[] {
+  let filtered = entries;
+  if (!showHidden) {
+    filtered = filtered.filter((e) => !e.is_hidden);
+  }
+  if (query.trim()) {
+    const q = query.toLowerCase();
+    filtered = filtered.filter((e) => e.name.toLowerCase().includes(q));
+  }
+  return filtered;
+}
+
+// ─── File Explorer Hook (lazy-loading directory tree) ─────────────────
+
+export function useFileExplorer(projectPath: string | null) {
+  const [cache, setCache] = useState<Map<string, FileEntry[]>>(new Map());
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+
+  const loadDirectory = useCallback(async (relativePath: string) => {
+    if (!projectPath) return;
+    setLoadingDirs((prev) => new Set(prev).add(relativePath));
+    try {
+      const entries = await listDirectory(projectPath, relativePath || undefined);
+      if (!mounted.current) return;
+      setCache((prev) => {
+        const next = new Map(prev);
+        next.set(relativePath, entries);
+        return next;
+      });
+      setError(null);
+    } catch (e) {
+      if (!mounted.current) return;
+      setError(String(e));
+    } finally {
+      if (mounted.current) {
+        setLoadingDirs((prev) => {
+          const next = new Set(prev);
+          next.delete(relativePath);
+          return next;
+        });
+      }
+    }
+  }, [projectPath]);
+
+  const toggleDir = useCallback((relativePath: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(relativePath)) {
+        next.delete(relativePath);
+      } else {
+        next.add(relativePath);
+        if (!cache.has(relativePath)) {
+          loadDirectory(relativePath);
+        }
+      }
+      return next;
+    });
+  }, [cache, loadDirectory]);
+
+  const refresh = useCallback(() => {
+    setCache(new Map());
+    setError(null);
+    loadDirectory("");
+    expandedDirs.forEach((dir) => {
+      if (dir) loadDirectory(dir);
+    });
+  }, [loadDirectory, expandedDirs]);
+
+  const getEntries = useCallback((relativePath: string): FileEntry[] | null => {
+    return cache.get(relativePath) ?? null;
+  }, [cache]);
+
+  return {
+    expandedDirs,
+    loadingDirs,
+    error,
+    loadDirectory,
+    toggleDir,
+    refresh,
+    getEntries,
+  };
 }

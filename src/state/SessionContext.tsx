@@ -60,7 +60,8 @@ interface SessionState {
     autoToast: { command: string; reason: string; sessionId: string } | null;
     processPanelOpen: boolean;
     gitPanelOpen: boolean;
-    activeLeftTab: "sessions" | "processes" | "git";
+    fileExplorerOpen: boolean;
+    activeLeftTab: "sessions" | "processes" | "git" | "files";
   };
 }
 
@@ -167,6 +168,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           activeLeftTab: "sessions" as const,
           processPanelOpen: !state.ui.sessionListCollapsed ? state.ui.processPanelOpen : false,
           gitPanelOpen: !state.ui.sessionListCollapsed ? state.ui.gitPanelOpen : false,
+          fileExplorerOpen: !state.ui.sessionListCollapsed ? state.ui.fileExplorerOpen : false,
         },
       };
     case "TOGGLE_PALETTE":
@@ -320,6 +322,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ...state.ui,
           processPanelOpen: opening,
           gitPanelOpen: opening ? false : state.ui.gitPanelOpen,
+          fileExplorerOpen: opening ? false : state.ui.fileExplorerOpen,
           activeLeftTab: opening ? "processes" : "sessions",
           sessionListCollapsed: opening ? true : state.ui.sessionListCollapsed,
         },
@@ -330,7 +333,8 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const alreadyActive =
         (tab === "processes" && state.ui.processPanelOpen) ||
         (tab === "git" && state.ui.gitPanelOpen) ||
-        (tab === "sessions" && !state.ui.sessionListCollapsed && !state.ui.processPanelOpen && !state.ui.gitPanelOpen);
+        (tab === "files" && state.ui.fileExplorerOpen) ||
+        (tab === "sessions" && !state.ui.sessionListCollapsed && !state.ui.processPanelOpen && !state.ui.gitPanelOpen && !state.ui.fileExplorerOpen);
       if (alreadyActive) {
         // Clicking the active tab collapses it
         return {
@@ -339,6 +343,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
             ...state.ui,
             processPanelOpen: false,
             gitPanelOpen: false,
+            fileExplorerOpen: false,
             sessionListCollapsed: true,
             activeLeftTab: tab,
           },
@@ -351,6 +356,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           activeLeftTab: tab,
           processPanelOpen: tab === "processes",
           gitPanelOpen: tab === "git",
+          fileExplorerOpen: tab === "files",
           sessionListCollapsed: tab !== "sessions",
         },
       };
@@ -365,8 +371,25 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ...state.ui,
           gitPanelOpen: opening,
           processPanelOpen: opening ? false : state.ui.processPanelOpen,
+          fileExplorerOpen: opening ? false : state.ui.fileExplorerOpen,
           activeLeftTab: opening ? "git" : "sessions",
           sessionListCollapsed: opening ? true : state.ui.sessionListCollapsed,
+        },
+      };
+    }
+
+    // ─── File explorer actions ──────────────────────────────────────────
+    case "TOGGLE_FILE_EXPLORER": {
+      const opening = !state.ui.fileExplorerOpen;
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          fileExplorerOpen: opening,
+          processPanelOpen: opening ? false : state.ui.processPanelOpen,
+          gitPanelOpen: opening ? false : state.ui.gitPanelOpen,
+          sessionListCollapsed: opening ? true : state.ui.sessionListCollapsed,
+          activeLeftTab: opening ? "files" : "sessions",
         },
       };
     }
@@ -415,6 +438,7 @@ export const initialState: SessionState = {
     autoToast: null,
     processPanelOpen: false,
     gitPanelOpen: false,
+    fileExplorerOpen: false,
     activeLeftTab: "sessions" as const,
   },
 };

@@ -25,8 +25,8 @@
 
 .activity-bar-tab {
   position: relative;
-  width: 28px;
-  height: 28px;
+  width: var(--btn-size);
+  height: var(--btn-size);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -37,6 +37,12 @@
   cursor: pointer;
   padding: 0;
   transition: background 0.1s, color 0.1s;
+}
+
+.activity-bar-tab svg,
+.activity-bar-action svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
 }
 
 .activity-bar-tab:hover {
@@ -94,8 +100,8 @@
 /* ─── Top action button (+) ──────────────────────────────── */
 
 .activity-bar-action {
-  width: 28px;
-  height: 28px;
+  width: var(--btn-size);
+  height: var(--btn-size);
   display: flex;
   align-items: center;
   justify-content: center;

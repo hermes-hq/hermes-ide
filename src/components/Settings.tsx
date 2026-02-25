@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
-import { applyTheme, THEME_OPTIONS } from "../utils/themeManager";
+import { applyTheme, THEME_OPTIONS, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { useSession } from "../state/SessionContext";
 import {
   getSettings, setSetting, exportSettings, importSettings,
@@ -68,7 +68,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
     setSettings(next);
     if (key === "theme") {
       applyTheme(value, next);
-    } else if (["font_size", "font_family", "scrollback"].includes(key)) {
+    } else if (["font_size", "font_family", "scrollback", "ui_scale"].includes(key)) {
       applyTheme(next.theme || "dark", next);
     }
     setSetting(key, value).catch(console.error);
@@ -221,7 +221,21 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Font Size</label>
+                  <label className="settings-label">UI Scale</label>
+                  <span className="settings-hint-inline">Scales icons, text and spacing (not terminal)</span>
+                  <select
+                    className="settings-select"
+                    value={settings.ui_scale || "default"}
+                    onChange={(e) => updateSetting("ui_scale", e.target.value)}
+                  >
+                    {UI_SCALE_OPTIONS.map((o) => (
+                      <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Terminal Font Size</label>
                   <select
                     className="settings-select"
                     value={settings.font_size || "14"}
