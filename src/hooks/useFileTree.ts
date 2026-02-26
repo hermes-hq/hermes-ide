@@ -102,11 +102,23 @@ export function useFileExplorer(projectPath: string | null) {
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+  const expandedDirsRef = useRef(expandedDirs);
+  expandedDirsRef.current = expandedDirs;
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+
+  // Clear stale state when projectPath changes
+  useEffect(() => {
+    setCache(new Map());
+    setExpandedDirs(new Set());
+    setLoadingDirs(new Set());
+    setError(null);
+  }, [projectPath]);
 
   const loadDirectory = useCallback(async (relativePath: string) => {
     if (!projectPath) return;
@@ -141,22 +153,24 @@ export function useFileExplorer(projectPath: string | null) {
         next.delete(relativePath);
       } else {
         next.add(relativePath);
-        if (!cache.has(relativePath)) {
+        // Use ref to read the LATEST cache, avoiding stale closure
+        if (!cacheRef.current.has(relativePath)) {
           loadDirectory(relativePath);
         }
       }
       return next;
     });
-  }, [cache, loadDirectory]);
+  }, [loadDirectory]);
 
   const refresh = useCallback(() => {
     setCache(new Map());
     setError(null);
     loadDirectory("");
-    expandedDirs.forEach((dir) => {
+    // Use ref to read the LATEST expandedDirs, avoiding stale closure
+    expandedDirsRef.current.forEach((dir) => {
       if (dir) loadDirectory(dir);
     });
-  }, [loadDirectory, expandedDirs]);
+  }, [loadDirectory]);
 
   const getEntries = useCallback((relativePath: string): FileEntry[] | null => {
     return cache.get(relativePath) ?? null;

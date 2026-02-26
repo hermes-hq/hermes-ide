@@ -153,8 +153,8 @@ export function useContextState(session: SessionData | null, executionMode?: str
       try {
         const ctx = await assembleSessionContext(session.id, DEFAULT_TOKEN_BUDGET);
         initial.realms = ctx.realms;
-        if (ctx.token_budget) setTokenBudget(ctx.token_budget);
-        if (ctx.estimated_tokens) setEstimatedTokens(ctx.estimated_tokens);
+        if (ctx.token_budget != null) setTokenBudget(ctx.token_budget);
+        if (ctx.estimated_tokens != null) setEstimatedTokens(ctx.estimated_tokens);
       } catch (err) { console.warn("[useContextState] Failed to assemble session context:", err); }
 
       // Fetch persisted memory (global + project-scoped via backend merge)
@@ -251,8 +251,8 @@ export function useContextState(session: SessionData | null, executionMode?: str
               if (structuralEqual(prev.realms, ctx.realms)) return prev; // no-op if unchanged
               return { ...prev, realms: ctx.realms };
             });
-            if (ctx.token_budget) setTokenBudget(ctx.token_budget);
-            if (ctx.estimated_tokens) setEstimatedTokens(ctx.estimated_tokens);
+            if (ctx.token_budget != null) setTokenBudget(ctx.token_budget);
+            if (ctx.estimated_tokens != null) setEstimatedTokens(ctx.estimated_tokens);
           }
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh projects:", err));

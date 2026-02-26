@@ -56,6 +56,8 @@ type SuggestionCallback = (state: SuggestionState | null) => void;
 
 const pool = new Map<string, PoolEntry>();
 const suggestionSubscribers = new Map<string, Set<SuggestionCallback>>();
+/** Guard set: sessionIds currently being created (between pool.has check and pool.set) */
+const creating = new Set<string>();
 
 const SUGGESTION_DEBOUNCE_MS = 50;
 
@@ -212,10 +214,11 @@ const KEYDOWN_PASSTHROUGH = new Set([
 // ─── Terminal Lifecycle ──────────────────────────────────────────────
 
 export async function createTerminal(sessionId: string, color: string): Promise<void> {
-  if (pool.has(sessionId)) {
+  if (pool.has(sessionId) || creating.has(sessionId)) {
     console.warn(`[TerminalPool] duplicate create for session=${sessionId}`);
     return;
   }
+  creating.add(sessionId);
 
   const themeName = currentSettings.theme || "dark";
   const theme = THEMES[themeName] || THEMES.dark;
@@ -396,27 +399,39 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   });
 
   // Wire PTY output → terminal
-  const unlistenOutput = await listen<string>(`pty-output-${sessionId}`, (event) => {
-    const entry = pool.get(sessionId);
-    const scrolledUp = entry?.userScrolledUp ?? false;
-    const viewportY = scrolledUp ? terminal.buffer.active.viewportY : -1;
-    try {
-      const binary = atob(event.payload);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      terminal.write(bytes);
-    } catch {
-      // Corrupted base64 — silently drop to avoid garbled output
-      console.warn(`[TerminalPool] Failed to decode base64 PTY output for ${sessionId}, dropping chunk`);
-    }
-    if (scrolledUp && viewportY >= 0) {
-      terminal.scrollToLine(viewportY);
-    }
-  });
+  let unlistenOutput: UnlistenFn | null = null;
+  let unlistenExit: UnlistenFn | null = null;
+  try {
+    unlistenOutput = await listen<string>(`pty-output-${sessionId}`, (event) => {
+      const entry = pool.get(sessionId);
+      const scrolledUp = entry?.userScrolledUp ?? false;
+      const viewportY = scrolledUp ? terminal.buffer.active.viewportY : -1;
+      try {
+        const binary = atob(event.payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        terminal.write(bytes);
+      } catch {
+        // Corrupted base64 — silently drop to avoid garbled output
+        console.warn(`[TerminalPool] Failed to decode base64 PTY output for ${sessionId}, dropping chunk`);
+      }
+      if (scrolledUp && viewportY >= 0) {
+        terminal.scrollToLine(viewportY);
+      }
+    });
 
-  const unlistenExit = await listen(`pty-exit-${sessionId}`, () => {
-    terminal.write("\r\n\x1b[90m[Session ended]\x1b[0m\r\n");
-  });
+    unlistenExit = await listen(`pty-exit-${sessionId}`, () => {
+      terminal.write("\r\n\x1b[90m[Session ended]\x1b[0m\r\n");
+    });
+  } catch (err) {
+    // Clean up partial resources on failure
+    creating.delete(sessionId);
+    unlistenOutput?.();
+    unlistenExit?.();
+    terminal.dispose();
+    container.remove();
+    throw err;
+  }
 
   pool.set(sessionId, {
     terminal,
@@ -438,6 +453,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     sessionPhase: "creating",
     cwd: "",
   });
+  creating.delete(sessionId);
 }
 
 // ─── Input Handling & Intelligence ───────────────────────────────────
@@ -545,13 +561,27 @@ function handleTerminalInput(sessionId: string, data: string): void {
   }
 }
 
+/** Remove the last Unicode code point from the buffer (surrogate-pair safe) */
+function sliceLastCodePoint(buf: string): string {
+  if (buf.length === 0) return buf;
+  // Check if the last two code units form a surrogate pair
+  if (buf.length >= 2) {
+    const last = buf.charCodeAt(buf.length - 1);
+    const prev = buf.charCodeAt(buf.length - 2);
+    if (last >= 0xDC00 && last <= 0xDFFF && prev >= 0xD800 && prev <= 0xDBFF) {
+      return buf.slice(0, -2);
+    }
+  }
+  return buf.slice(0, -1);
+}
+
 function updateInputBuffer(entry: PoolEntry, data: string): void {
   // Single-char fast paths (keyboard input — one char per onData call)
   if (data.length === 1) {
     const code = data.charCodeAt(0);
     if (code === 0x7f) {
-      // Backspace
-      entry.inputBuffer = entry.inputBuffer.slice(0, -1);
+      // Backspace — surrogate-pair safe
+      entry.inputBuffer = sliceLastCodePoint(entry.inputBuffer);
     } else if (code === 0x03 || code === 0x15) {
       // Ctrl-C or Ctrl-U — clear
       entry.inputBuffer = "";
@@ -583,8 +613,8 @@ function updateInputBuffer(entry: PoolEntry, data: string): void {
   for (let i = 0; i < data.length; i++) {
     const code = data.charCodeAt(i);
     if (code === 0x7f) {
-      // Backspace within paste
-      entry.inputBuffer = entry.inputBuffer.slice(0, -1);
+      // Backspace within paste — surrogate-pair safe
+      entry.inputBuffer = sliceLastCodePoint(entry.inputBuffer);
     } else if (code === 0x03 || code === 0x15) {
       // Ctrl-C or Ctrl-U within paste — clear buffer
       entry.inputBuffer = "";
@@ -954,6 +984,7 @@ export function detach(sessionId: string): void {
 }
 
 export function destroy(sessionId: string): void {
+  creating.delete(sessionId); // Clean up in case destroy races with create
   const entry = pool.get(sessionId);
   if (!entry) return;
   entry.unlistenOutput?.();

@@ -14,12 +14,12 @@ describe("mergeRoles", () => {
 
   it("uses 'and' for 2 roles", () => {
     const result = mergeRoles(["debugger", "backend-eng"], BUILT_IN_ROLES);
-    expect(result).toContain("You are a Expert Debugger and Senior Backend Engineer.");
+    expect(result).toContain("You are an Expert Debugger and Senior Backend Engineer.");
   });
 
   it("uses Oxford comma for 3+ roles", () => {
     const result = mergeRoles(["debugger", "backend-eng", "architect"], BUILT_IN_ROLES);
-    expect(result).toContain("You are a Expert Debugger, Senior Backend Engineer, and Software Architect.");
+    expect(result).toContain("You are an Expert Debugger, Senior Backend Engineer, and Software Architect.");
   });
 
   it("is deterministic — same input produces same output", () => {

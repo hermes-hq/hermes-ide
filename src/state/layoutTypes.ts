@@ -125,6 +125,7 @@ export function updateSplitRatio(
   splitId: string,
   ratio: number,
 ): LayoutNode {
+  if (!Number.isFinite(ratio)) return root; // Guard against NaN/Infinity
   const clamped = Math.min(0.85, Math.max(0.15, ratio));
   if (root.type === "pane") return root;
   if (root.id === splitId) {

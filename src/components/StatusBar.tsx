@@ -46,7 +46,7 @@ export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
     setSetting("execution_mode", next).catch(console.error);
   };
 
-  const cwdBasename = active ? active.working_directory.split("/").pop() || active.working_directory : "";
+  const cwdBasename = active && active.working_directory ? active.working_directory.split("/").pop() || active.working_directory : "";
 
   return (
     <div className="status-bar">

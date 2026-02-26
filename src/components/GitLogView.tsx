@@ -92,9 +92,12 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const fetchingRef = useRef(false);
+  // Track the current projectPath so stale fetches from a previous path are discarded
+  const projectPathRef = useRef(projectPath);
 
   // Reset when projectPath changes
   useEffect(() => {
+    projectPathRef.current = projectPath;
     setEntries([]);
     setHasMore(true);
     setLoading(false);
@@ -111,8 +114,14 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
     setLoading(true);
     setError(null);
 
+    const fetchPath = projectPath;
     gitLog(projectPath, PAGE_SIZE, offsetRef.current)
       .then((result: GitLogResult) => {
+        // Discard result if projectPath changed while fetching
+        if (projectPathRef.current !== fetchPath) {
+          fetchingRef.current = false;
+          return;
+        }
         setEntries((prev) => [...prev, ...result.entries]);
         setHasMore(result.has_more);
         offsetRef.current += result.entries.length;
@@ -121,6 +130,10 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
         fetchingRef.current = false;
       })
       .catch((e) => {
+        if (projectPathRef.current !== fetchPath) {
+          fetchingRef.current = false;
+          return;
+        }
         setError(String(e));
         setInitialLoading(false);
         setLoading(false);

@@ -12,6 +12,7 @@ export function useProcesses(enabled: boolean) {
   const [removedPids, setRemovedPids] = useState<Set<number>>(new Set());
   const prevPids = useRef<Set<number>>(new Set());
   const mounted = useRef(true);
+  const highlightTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const fetchProcesses = useCallback(async () => {
     try {
@@ -39,11 +40,13 @@ export function useProcesses(enabled: boolean) {
 
       if (added.size > 0) {
         setNewPids(added);
-        setTimeout(() => { if (mounted.current) setNewPids(new Set()); }, HIGHLIGHT_DURATION);
+        const t = setTimeout(() => { if (mounted.current) setNewPids(new Set()); }, HIGHLIGHT_DURATION);
+        highlightTimers.current.push(t);
       }
       if (removed.size > 0) {
         setRemovedPids(removed);
-        setTimeout(() => { if (mounted.current) setRemovedPids(new Set()); }, HIGHLIGHT_DURATION);
+        const t = setTimeout(() => { if (mounted.current) setRemovedPids(new Set()); }, HIGHLIGHT_DURATION);
+        highlightTimers.current.push(t);
       }
     } catch (err) {
       if (mounted.current) {
@@ -64,6 +67,9 @@ export function useProcesses(enabled: boolean) {
     return () => {
       mounted.current = false;
       clearInterval(interval);
+      // Clear all pending highlight timers to prevent state updates after cleanup
+      highlightTimers.current.forEach(clearTimeout);
+      highlightTimers.current = [];
     };
   }, [enabled, fetchProcesses]);
 

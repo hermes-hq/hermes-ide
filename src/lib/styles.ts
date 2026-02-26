@@ -208,7 +208,8 @@ export function mergeStyles(selections: SelectedStyle[], allStyles: StyleDefinit
   for (const sel of selections) {
     const def = allStyles.find((s) => s.id === sel.id);
     if (!def) continue;
-    const idx = Math.max(0, Math.min(4, sel.level - 1));
+    const raw = sel.level - 1;
+    const idx = Number.isFinite(raw) ? Math.max(0, Math.min(4, raw)) : 0;
     instructions.push(def.levels[idx]);
   }
 

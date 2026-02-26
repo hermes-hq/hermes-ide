@@ -286,7 +286,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         inputMode="numeric"
                         placeholder="1200"
                         value={winWidth}
-                        onChange={(e) => { setWinWidth(e.target.value); applyWindowSize(e.target.value, winHeight); }}
+                        onChange={(e) => { setWinWidth(e.target.value); applyWindowSize(e.target.value, latestH.current); }}
                       />
                       <button
                         className="settings-stepper-btn"
@@ -309,7 +309,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         inputMode="numeric"
                         placeholder="800"
                         value={winHeight}
-                        onChange={(e) => { setWinHeight(e.target.value); applyWindowSize(winWidth, e.target.value); }}
+                        onChange={(e) => { setWinHeight(e.target.value); applyWindowSize(latestW.current, e.target.value); }}
                       />
                       <button
                         className="settings-stepper-btn"

@@ -159,8 +159,15 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     const newFields: ComposerFields = {
       ...EMPTY_FIELDS,
       ...tpl.fields,
-      roleIds: tpl.recommendedRoles || [],
-      styleSelections: tpl.recommendedStyles || [],
+      // For user-saved templates, prefer the saved fields (roleIds/styleSelections)
+      // over the recommended* arrays. For built-in templates (which don't store
+      // roleIds/styleSelections in fields), use the recommended* arrays.
+      roleIds: (tpl.fields.roleIds && tpl.fields.roleIds.length > 0)
+        ? tpl.fields.roleIds
+        : (tpl.recommendedRoles || []),
+      styleSelections: (tpl.fields.styleSelections && tpl.fields.styleSelections.length > 0)
+        ? tpl.fields.styleSelections
+        : (tpl.recommendedStyles || []),
     };
     setFields(newFields);
     // Open advanced if template has constraints or free-text style

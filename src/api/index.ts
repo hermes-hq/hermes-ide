@@ -7,3 +7,4 @@ export * from "./settings";
 export * from "./intelligence";
 export * from "./execution";
 export * from "./processes";
+export * from "./git";

@@ -16,26 +16,27 @@ export function useSessionProjects(sessionId: string | null) {
       return;
     }
 
-    getSessionProjects(sessionId)
-      .then((r) => setProjects(r))
-      .catch(() => setProjects([]));
-
     // Listen for updates to this session's projects
     let cancelled = false;
+
+    getSessionProjects(sessionId)
+      .then((r) => { if (!cancelled) setProjects(r); })
+      .catch(() => { if (!cancelled) setProjects([]); });
     let unlisten: (() => void) | null = null;
     let unlistenGlobal: (() => void) | null = null;
 
     listen<Project[]>(`session-realms-updated-${sessionId}`, (event) => {
-      setProjects(event.payload);
+      if (!cancelled) setProjects(event.payload);
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });
 
     // Listen for global project updates (scan completions)
     listen<Project>("realm-updated", () => {
+      if (cancelled) return;
       // Refetch to get updated data
       getSessionProjects(sessionId)
-        .then((r) => setProjects(r))
+        .then((r) => { if (!cancelled) setProjects(r); })
         .catch((err) => console.warn("[useSessionProjects] Failed to refresh projects:", err));
     }).then((u) => {
       if (cancelled) { u(); } else { unlistenGlobal = u; }
@@ -51,11 +52,25 @@ export function useSessionProjects(sessionId: string | null) {
   const attach = useCallback(async (projectId: string) => {
     if (!sessionId) return;
     await attachSessionProject(sessionId, projectId, "primary");
+    // Re-fetch to ensure UI stays consistent even if the backend event is delayed
+    try {
+      const updated = await getSessionProjects(sessionId);
+      setProjects(updated);
+    } catch (err) {
+      console.warn("[useSessionProjects] Failed to refresh after attach:", err);
+    }
   }, [sessionId]);
 
   const detach = useCallback(async (projectId: string) => {
     if (!sessionId) return;
     await detachSessionProject(sessionId, projectId);
+    // Re-fetch to ensure UI stays consistent even if the backend event is delayed
+    try {
+      const updated = await getSessionProjects(sessionId);
+      setProjects(updated);
+    } catch (err) {
+      console.warn("[useSessionProjects] Failed to refresh after detach:", err);
+    }
   }, [sessionId]);
 
   return { projects, attach, detach };

@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<string, { letter: string; className: string }> = {
   renamed: { letter: "R", className: "git-status-renamed" },
   copied: { letter: "C", className: "git-status-copied" },
   untracked: { letter: "?", className: "git-status-untracked" },
-  conflicted: { letter: "C", className: "git-status-conflicted" },
+  conflicted: { letter: "!", className: "git-status-conflicted" },
 };
 
 export const GitFileRow = memo(function GitFileRow({

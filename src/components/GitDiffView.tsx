@@ -15,14 +15,16 @@ export function GitDiffView({ projectPath, file, onClose }: GitDiffViewProps) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     // 2F: Clear old diff immediately before fetching new one
     setDiff(null);
     setLoading(true);
     setError(null);
     const staged = file.area === "staged";
     gitDiff(projectPath, file.path, staged)
-      .then((d) => { setDiff(d); setLoading(false); })
-      .catch((e) => { setError(String(e)); setLoading(false); });
+      .then((d) => { if (!cancelled) { setDiff(d); setLoading(false); } })
+      .catch((e) => { if (!cancelled) { setError(String(e)); setLoading(false); } });
+    return () => { cancelled = true; };
   }, [projectPath, file.path, file.area]);
 
   useEffect(() => {
@@ -56,7 +58,9 @@ export function GitDiffView({ projectPath, file, onClose }: GitDiffViewProps) {
             <pre className="git-diff-text">
               {diff.diff_text.split("\n").map((line, i) => {
                 let className = "git-diff-line";
-                if (line.startsWith("+")) className += " git-diff-line-add";
+                if (line.startsWith("@@")) className += " git-diff-line-hunk";
+                else if (line.startsWith("+++") || line.startsWith("---")) className += " git-diff-line-header";
+                else if (line.startsWith("+")) className += " git-diff-line-add";
                 else if (line.startsWith("-")) className += " git-diff-line-del";
                 return (
                   <div key={i} className={className}>

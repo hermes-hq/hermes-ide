@@ -356,10 +356,11 @@ export function lookupByFirstToken(token: string): CommandEntry[] {
 
 /** Get all first tokens that start with a prefix (for partial first-token matching) */
 export function lookupByPrefix(prefix: string): CommandEntry[] {
-  if (!prefix) return [];
+  const trimmed = prefix.trim();
+  if (!trimmed) return [];
   const results: CommandEntry[] = [];
   for (const [token, entries] of index) {
-    if (token.startsWith(prefix)) {
+    if (token.startsWith(trimmed)) {
       results.push(...entries);
     }
   }

@@ -41,6 +41,12 @@ export function useGitStatus(
     if (!enabled || !sessionId) return;
 
     fetchStatus();
+
+    // pollInterval of 0 means polling is disabled — only fetch once on mount
+    if (pollInterval <= 0) {
+      return () => { mounted.current = false; };
+    }
+
     const interval = setInterval(fetchStatus, pollInterval);
 
     return () => {

@@ -50,15 +50,14 @@ export function createHistoryProvider(): HistoryProvider {
     markLoaded() { loaded = true; },
 
     match(prefix: string): HistoryMatch[] {
-      if (!prefix.trim()) return [];
+      const trimmedPrefix = prefix.trim();
+      if (!trimmedPrefix) return [];
 
       const results: HistoryMatch[] = [];
-      const seen = new Set<string>();
 
       for (let i = 0; i < recencyList.length; i++) {
         const cmd = recencyList[i];
-        if (cmd.startsWith(prefix) && !seen.has(cmd)) {
-          seen.add(cmd);
+        if (cmd.startsWith(trimmedPrefix)) {
           results.push({
             command: cmd,
             frequency: frequencyMap.get(cmd) ?? 1,
@@ -76,12 +75,16 @@ export function createHistoryProvider(): HistoryProvider {
   };
 }
 
-/** Load history from shell history file + session commands */
+/** Load history from shell history file + session commands.
+ *  Guarded: calling multiple times is safe — only the first call loads. */
 export async function loadHistory(
   provider: HistoryProvider,
   sessionId: string,
   shell: string,
 ): Promise<void> {
+  // Prevent duplicate/concurrent loads — only the first call proceeds
+  if (provider.loaded) return;
+
   try {
     // Load shell history file (most recent 500)
     const shellHistory = await readShellHistory(shell, MAX_HISTORY);

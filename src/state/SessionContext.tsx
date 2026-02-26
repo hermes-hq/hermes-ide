@@ -112,12 +112,17 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const newAutoToast = state.ui.autoToast?.sessionId === action.id
         ? null
         : state.ui.autoToast;
+      // Clear pending close dialog if the removed session is the one being confirmed
+      const newPendingClose = state.pendingCloseSessionId === action.id
+        ? null
+        : state.pendingCloseSessionId;
       return {
         ...state,
         sessions: rest,
         activeSessionId: newActive,
         executionModes: restModes,
         injectionLocks: restLocks,
+        pendingCloseSessionId: newPendingClose,
         layout: { root: newRoot, focusedPaneId: newFocused },
         ui: { ...state.ui, dismissedStuckSessions: newDismissed, autoToast: newAutoToast },
       };
@@ -272,6 +277,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       if (!newRoot) {
         return {
           ...state,
+          activeSessionId: null,
           layout: { root: null, focusedPaneId: null },
         };
       }
@@ -685,20 +691,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const closeSession = useCallback(async (id: string) => {
+    if (closingSessionIds.current.has(id)) return; // Prevent double-close race
+    closingSessionIds.current.add(id);
     try {
       await apiCloseSession(id);
     } catch (err) {
       console.error("Failed to close session:", err);
+      closingSessionIds.current.delete(id);
     }
   }, []);
 
+  const skipCloseConfirmRef = useRef(state.skipCloseConfirm);
+  skipCloseConfirmRef.current = state.skipCloseConfirm;
+
   const requestCloseSession = useCallback((id: string) => {
-    if (state.skipCloseConfirm) {
+    if (skipCloseConfirmRef.current) {
       closeSession(id);
     } else {
       dispatch({ type: "REQUEST_CLOSE_SESSION", id });
     }
-  }, [state.skipCloseConfirm, closeSession]);
+  }, [closeSession, dispatch]);
 
   const setActive = useCallback((id: string | null) => {
     dispatch({ type: "SET_ACTIVE", id });

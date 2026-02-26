@@ -87,7 +87,7 @@ export function GitPanel({ visible }: GitPanelProps) {
 
       {/* Floating toast at bottom of panel */}
       {toast && (
-        <div className={`git-toast git-toast-${toast.type}`} key={toast.message + Date.now()}>
+        <div className={`git-toast git-toast-${toast.type}`} key={toast.message}>
           <span className="git-toast-icon">
             {toast.type === "success" ? "\u2713" : toast.type === "error" ? "\u2717" : "\u2139"}
           </span>

@@ -177,13 +177,14 @@ export function mergeRoles(roleIds: string[], allRoles: RoleDefinition[]): strin
 
   // Build combined opening: "You are a X and Y." or "You are a X, Y, and Z."
   const labels = resolved.map((r) => r.label);
+  const article = /^[aeiou]/i.test(labels[0]) ? "an" : "a";
   let opening: string;
   if (labels.length === 2) {
-    opening = `You are a ${labels[0]} and ${labels[1]}.`;
+    opening = `You are ${article} ${labels[0]} and ${labels[1]}.`;
   } else {
     const last = labels[labels.length - 1];
     const rest = labels.slice(0, -1);
-    opening = `You are a ${rest.join(", ")}, and ${last}.`;
+    opening = `You are ${article} ${rest.join(", ")}, and ${last}.`;
   }
 
   // Build capabilities as sentences

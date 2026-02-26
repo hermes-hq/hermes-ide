@@ -45,6 +45,7 @@ export function validateBranchName(name: string): string | null {
   if (name.startsWith("-")) return "Branch name cannot start with '-'";
   if (name.startsWith(".")) return "Branch name cannot start with '.'";
   if (name.includes("..")) return "Branch name cannot contain '..'";
+  if (name.includes("//")) return "Branch name cannot contain consecutive slashes";
   if (name.endsWith(".lock")) return "Branch name cannot end with '.lock'";
   if (name.endsWith(".")) return "Branch name cannot end with '.'";
   if (name.endsWith("/")) return "Branch name cannot end with '/'";

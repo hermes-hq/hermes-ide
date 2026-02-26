@@ -56,19 +56,20 @@ export function GitCommitDetailView({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setDetail(null);
     setLoading(true);
     setError(null);
 
     gitCommitDetail(projectPath, commitHash)
       .then((d) => {
-        setDetail(d);
-        setLoading(false);
+        if (!cancelled) { setDetail(d); setLoading(false); }
       })
       .catch((e) => {
-        setError(String(e));
-        setLoading(false);
+        if (!cancelled) { setError(String(e)); setLoading(false); }
       });
+
+    return () => { cancelled = true; };
   }, [projectPath, commitHash]);
 
   useEffect(() => {

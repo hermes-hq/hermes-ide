@@ -26,8 +26,8 @@ export function gitCommit(
   return invoke<GitOperationResult>("git_commit", {
     projectPath,
     message,
-    authorName: authorName || null,
-    authorEmail: authorEmail || null,
+    authorName: authorName ?? null,
+    authorEmail: authorEmail ?? null,
   });
 }
 
@@ -80,7 +80,7 @@ export function gitStashSave(
 ): Promise<GitOperationResult> {
   return invoke<GitOperationResult>("git_stash_save", {
     projectPath,
-    message: message || null,
+    message: message ?? null,
     includeUntracked: includeUntracked ?? true,
   });
 }
@@ -135,7 +135,7 @@ export function gitResolveConflict(
     projectPath,
     filePath,
     strategy,
-    manualContent: manualContent || null,
+    manualContent: manualContent ?? null,
   });
 }
 
@@ -151,9 +151,9 @@ export function gitContinueMerge(
 ): Promise<GitOperationResult> {
   return invoke<GitOperationResult>("git_continue_merge", {
     projectPath,
-    message: message || null,
-    authorName: authorName || null,
-    authorEmail: authorEmail || null,
+    message: message ?? null,
+    authorName: authorName ?? null,
+    authorEmail: authorEmail ?? null,
   });
 }
 

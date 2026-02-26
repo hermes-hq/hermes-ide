@@ -76,9 +76,13 @@ export function CommandPalette({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { onClose(); return; }
-    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1)); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((i) => filtered.length === 0 ? 0 : Math.min(i + 1, filtered.length - 1)); return; }
     if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((i) => Math.max(i - 1, 0)); return; }
-    if (e.key === "Enter" && filtered[selectedIndex]) { filtered[selectedIndex].action(); return; }
+    if (e.key === "Enter") {
+      const safeIdx = Math.min(selectedIndex, filtered.length - 1);
+      if (safeIdx >= 0 && filtered[safeIdx]) { filtered[safeIdx].action(); }
+      return;
+    }
   };
 
   return (

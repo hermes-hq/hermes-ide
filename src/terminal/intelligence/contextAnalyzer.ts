@@ -64,9 +64,9 @@ export function isContextRelevant(category: string, context: ProjectContext): bo
   if (context.frameworks.includes(category)) return true;
 
   // Check if any context string matches
-  if (category === "docker") return true; // Docker is always potentially relevant
-  if (category === "k8s") return true;
-  if (category === "make") return true;
+  if (category === "docker" && context.frameworks.includes("docker")) return true;
+  if (category === "k8s" && context.frameworks.includes("k8s")) return true;
+  if (category === "make" && context.frameworks.includes("make")) return true;
 
   return false;
 }

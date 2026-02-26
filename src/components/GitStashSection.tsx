@@ -30,6 +30,9 @@ export function parseStashLabel(message: string): string {
   // "On main: abc1234 Fix bug" -> "Fix bug"
   const wipMatch = message.match(/^(?:WIP )?[Oo]n\s+[^:]+:\s+[a-f0-9]+\s+(.+)$/);
   if (wipMatch) return wipMatch[1];
+  // Custom stash messages: "On main: my custom message" (no commit hash)
+  const customMatch = message.match(/^(?:WIP )?[Oo]n\s+[^:]+:\s+(.+)$/);
+  if (customMatch) return customMatch[1];
   return message;
 }
 

@@ -39,12 +39,6 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
         <button className="scope-bar-add" onClick={() => setPickerOpen(true)}>
           + Add Project
         </button>
-        {pickerOpen && (
-          <ProjectPicker
-            sessionId={sessionId}
-            onClose={() => setPickerOpen(false)}
-          />
-        )}
       </div>
     );
   }

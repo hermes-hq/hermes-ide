@@ -55,19 +55,19 @@ export function GitConflictViewer({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     setContent(null);
     setLoading(true);
     setError(null);
 
     gitGetConflictContent(projectPath, filePath)
       .then((c) => {
-        setContent(c);
-        setLoading(false);
+        if (!cancelled) { setContent(c); setLoading(false); }
       })
       .catch((e) => {
-        setError(String(e));
-        setLoading(false);
+        if (!cancelled) { setError(String(e)); setLoading(false); }
       });
+    return () => { cancelled = true; };
   }, [projectPath, filePath]);
 
   useEffect(() => {

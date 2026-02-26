@@ -31,6 +31,7 @@ export function SplitDivider({ splitId, direction }: SplitDividerProps) {
           rafRef.current = null;
           const pos = isH ? ev.clientX - rect.left : ev.clientY - rect.top;
           const size = isH ? rect.width : rect.height;
+          if (size <= 0) return; // Avoid NaN/Infinity from division by zero
           const ratio = pos / size;
           dispatch({ type: "RESIZE_SPLIT", splitId, ratio });
         });
