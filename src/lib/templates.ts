@@ -16,6 +16,7 @@ export type TemplateCategory =
 export interface PromptTemplate {
   id: string;
   name: string;
+  description?: string;
   category: TemplateCategory;
   fields: Partial<import("./compilePrompt").ComposerFields>;
   recommendedRoles: string[];
@@ -42,6 +43,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "debug-root-cause",
     name: "Root Cause Analysis",
+    description: "Systematically trace a bug to its origin before proposing a minimal fix.",
     category: "debugging",
     recommendedRoles: ["debugger", "backend-eng"],
     recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "diff-format", level: 3 }],
@@ -54,6 +56,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "debug-error-trace",
     name: "Error Trace Analysis",
+    description: "Walk through a stack trace step by step to pinpoint the failure.",
     category: "debugging",
     recommendedRoles: ["debugger"],
     recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "detailed", level: 3 }],
@@ -66,6 +69,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "debug-race-condition",
     name: "Race Condition Hunt",
+    description: "Find shared mutable state, timing bugs, and missing synchronization.",
     category: "debugging",
     recommendedRoles: ["debugger", "concurrency-specialist"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "step-by-step", level: 3 }],
@@ -78,6 +82,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "debug-memory-leak",
     name: "Memory Leak Investigation",
+    description: "Track down retained references, unclosed resources, and growing collections.",
     category: "debugging",
     recommendedRoles: ["debugger", "performance-specialist"],
     recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "visual", level: 2 }],
@@ -90,6 +95,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "debug-flaky-test",
     name: "Flaky Test Diagnosis",
+    description: "Identify non-deterministic factors causing intermittent test failures.",
     category: "debugging",
     recommendedRoles: ["debugger", "test-engineer"],
     recommendedStyles: [{ id: "actionable", level: 3 }, { id: "code-heavy", level: 2 }],
@@ -104,6 +110,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "refactor-extract",
     name: "Extract & Simplify",
+    description: "Break down complex code into smaller, focused functions and modules.",
     category: "refactoring",
     recommendedRoles: ["refactoring-specialist"],
     recommendedStyles: [{ id: "diff-format", level: 4 }, { id: "code-heavy", level: 3 }],
@@ -116,6 +123,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "refactor-patterns",
     name: "Apply Design Patterns",
+    description: "Introduce well-known design patterns to reduce complexity.",
     category: "refactoring",
     recommendedRoles: ["refactoring-specialist", "architect"],
     recommendedStyles: [{ id: "diff-format", level: 3 }, { id: "balanced", level: 3 }],
@@ -128,6 +136,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "refactor-naming",
     name: "Naming & Readability",
+    description: "Improve variable, function, and type names for self-documenting code.",
     category: "refactoring",
     recommendedRoles: ["refactoring-specialist"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "diff-format", level: 3 }],
@@ -140,6 +149,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "refactor-dedup",
     name: "Remove Duplication",
+    description: "Find and unify duplicated code without premature abstraction.",
     category: "refactoring",
     recommendedRoles: ["refactoring-specialist"],
     recommendedStyles: [{ id: "diff-format", level: 4 }, { id: "code-heavy", level: 3 }],
@@ -152,6 +162,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "refactor-types",
     name: "Strengthen Types",
+    description: "Replace any/unknown with precise types and discriminated unions.",
     category: "refactoring",
     recommendedRoles: ["refactoring-specialist", "typescript-specialist"],
     recommendedStyles: [{ id: "code-heavy", level: 4 }, { id: "diff-format", level: 3 }],
@@ -166,6 +177,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "perf-profile",
     name: "Performance Profiling",
+    description: "Measure hotspots and rank optimizations by expected impact.",
     category: "performance",
     recommendedRoles: ["performance-specialist"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 3 }],
@@ -178,6 +190,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "perf-database",
     name: "Query Optimization",
+    description: "Analyze query plans, fix N+1 issues, and optimize indexing.",
     category: "performance",
     recommendedRoles: ["performance-specialist", "backend-eng"],
     recommendedStyles: [{ id: "code-heavy", level: 3 }, { id: "diff-format", level: 3 }],
@@ -190,6 +203,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "perf-bundle",
     name: "Bundle Size Reduction",
+    description: "Find large deps, unused code, and code-splitting opportunities.",
     category: "performance",
     recommendedRoles: ["performance-specialist", "frontend-eng"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 4 }],
@@ -202,6 +216,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "perf-render",
     name: "Render Performance",
+    description: "Fix unnecessary re-renders, expensive computations, and DOM thrashing.",
     category: "performance",
     recommendedRoles: ["performance-specialist", "frontend-eng"],
     recommendedStyles: [{ id: "code-heavy", level: 3 }, { id: "diff-format", level: 3 }],
@@ -214,6 +229,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "perf-algorithm",
     name: "Algorithm Optimization",
+    description: "Analyze time/space complexity and find more efficient approaches.",
     category: "performance",
     recommendedRoles: ["performance-specialist"],
     recommendedStyles: [{ id: "code-heavy", level: 3 }, { id: "visual", level: 2 }],
@@ -228,6 +244,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "sec-audit",
     name: "Security Audit",
+    description: "Check OWASP Top 10 vulnerabilities with proof-of-concept for each.",
     category: "security",
     recommendedRoles: ["security-auditor"],
     recommendedStyles: [{ id: "formal", level: 3 }, { id: "detailed", level: 4 }],
@@ -240,6 +257,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "sec-auth",
     name: "Auth Flow Review",
+    description: "Map trust boundaries in your auth flow and find bypass risks.",
     category: "security",
     recommendedRoles: ["security-auditor", "backend-eng"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "step-by-step", level: 3 }],
@@ -252,6 +270,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "sec-input",
     name: "Input Validation Review",
+    description: "Audit all user inputs for injection, XSS, and path traversal.",
     category: "security",
     recommendedRoles: ["security-auditor"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 3 }],
@@ -264,6 +283,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "sec-deps",
     name: "Dependency Audit",
+    description: "Scan for known CVEs, outdated packages, and supply chain risks.",
     category: "security",
     recommendedRoles: ["security-auditor"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "actionable", level: 3 }],
@@ -278,6 +298,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "test-unit",
     name: "Unit Test Generation",
+    description: "Generate tests covering happy path, edge cases, and error conditions.",
     category: "testing",
     recommendedRoles: ["test-engineer"],
     recommendedStyles: [{ id: "code-heavy", level: 4 }, { id: "step-by-step", level: 2 }],
@@ -290,6 +311,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "test-integration",
     name: "Integration Test Plan",
+    description: "Plan tests for component interactions, API contracts, and data flow.",
     category: "testing",
     recommendedRoles: ["test-engineer", "architect"],
     recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "visual", level: 3 }],
@@ -302,6 +324,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "test-coverage",
     name: "Coverage Gap Analysis",
+    description: "Find untested code paths, missing edge cases, and weak assertions.",
     category: "testing",
     recommendedRoles: ["test-engineer"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 3 }],
@@ -314,6 +337,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "test-refactor",
     name: "Test Refactoring",
+    description: "Clean up tests for clarity and maintainability without losing coverage.",
     category: "testing",
     recommendedRoles: ["test-engineer", "refactoring-specialist"],
     recommendedStyles: [{ id: "diff-format", level: 4 }, { id: "code-heavy", level: 3 }],
@@ -328,6 +352,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "arch-review",
     name: "Architecture Review",
+    description: "Evaluate coupling, cohesion, scalability, and architectural smells.",
     category: "architecture",
     recommendedRoles: ["architect"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "opinionated", level: 3 }],
@@ -340,6 +365,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "arch-migration",
     name: "Migration Strategy",
+    description: "Plan a zero-downtime migration with phased rollout and rollback.",
     category: "architecture",
     recommendedRoles: ["architect", "backend-eng"],
     recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "visual", level: 3 }],
@@ -352,6 +378,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "arch-api-design",
     name: "API Design Review",
+    description: "Review API consistency, versioning, errors, and backwards compat.",
     category: "architecture",
     recommendedRoles: ["architect", "api-designer"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "opinionated", level: 3 }],
@@ -364,6 +391,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "arch-decompose",
     name: "Service Decomposition",
+    description: "Identify bounded contexts and propose service boundaries.",
     category: "architecture",
     recommendedRoles: ["architect"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "balanced", level: 3 }],
@@ -378,6 +406,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "doc-api",
     name: "API Documentation",
+    description: "Document endpoints, params, responses, and error codes with examples.",
     category: "documentation",
     recommendedRoles: ["technical-writer"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "code-heavy", level: 3 }],
@@ -390,6 +419,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "doc-readme",
     name: "README Generation",
+    description: "Create a welcoming README with setup, usage, and contributing guide.",
     category: "documentation",
     recommendedRoles: ["technical-writer"],
     recommendedStyles: [{ id: "beginner", level: 3 }, { id: "visual", level: 3 }],
@@ -402,6 +432,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "doc-architecture",
     name: "Architecture Doc",
+    description: "Document system design decisions, tradeoffs, and boundaries.",
     category: "documentation",
     recommendedRoles: ["technical-writer", "architect"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "formal", level: 3 }],
@@ -414,6 +445,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "doc-changelog",
     name: "Changelog Entry",
+    description: "Write a changelog in Keep a Changelog format (Added/Changed/Fixed).",
     category: "documentation",
     recommendedRoles: ["technical-writer"],
     recommendedStyles: [{ id: "concise", level: 4 }, { id: "actionable", level: 2 }],
@@ -428,6 +460,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "git-review",
     name: "Code Review",
+    description: "Review code for correctness, performance, security, and style.",
     category: "git-review",
     recommendedRoles: ["code-reviewer"],
     recommendedStyles: [{ id: "concise", level: 3 }, { id: "formal", level: 2 }],
@@ -440,6 +473,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "git-commit-msg",
     name: "Commit Message",
+    description: "Draft a conventional commit message explaining the why, not the what.",
     category: "git-review",
     recommendedRoles: ["code-reviewer"],
     recommendedStyles: [{ id: "concise", level: 5 }, { id: "formal", level: 3 }],
@@ -452,6 +486,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "git-pr-review",
     name: "PR Review",
+    description: "Review a pull request for design, coverage, and regressions.",
     category: "git-review",
     recommendedRoles: ["code-reviewer", "architect"],
     recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "opinionated", level: 3 }],
@@ -464,6 +499,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "git-bisect",
     name: "Git Bisect Guide",
+    description: "Walk through git bisect to find the commit that introduced a bug.",
     category: "git-review",
     recommendedRoles: ["debugger", "code-reviewer"],
     recommendedStyles: [{ id: "step-by-step", level: 5 }, { id: "code-heavy", level: 3 }],
@@ -478,6 +514,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "product-prd",
     name: "PRD Writing",
+    description: "Write a PRD with problem, goals, personas, and success metrics.",
     category: "product",
     recommendedRoles: ["product-manager"],
     recommendedStyles: [{ id: "detailed", level: 4 }, { id: "visual", level: 3 }],
@@ -490,6 +527,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "product-user-stories",
     name: "User Story Generation",
+    description: "Generate user stories with acceptance criteria, grouped by epic.",
     category: "product",
     recommendedRoles: ["product-manager"],
     recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 2 }],
@@ -502,6 +540,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "product-prioritization",
     name: "Feature Prioritization",
+    description: "Score and rank features using RICE, ICE, or MoSCoW frameworks.",
     category: "product",
     recommendedRoles: ["product-manager", "data-analyst"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "balanced", level: 3 }],
@@ -514,6 +553,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "product-competitive",
     name: "Competitive Analysis",
+    description: "Compare competitors on features, pricing, and strategic gaps.",
     category: "product",
     recommendedRoles: ["product-manager"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "detailed", level: 3 }],
@@ -528,6 +568,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "planning-sprint",
     name: "Sprint Planning",
+    description: "Define sprint goal, backlog, task breakdown, and capacity check.",
     category: "planning",
     recommendedRoles: ["project-manager", "product-manager"],
     recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 3 }],
@@ -540,6 +581,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "planning-roadmap",
     name: "Roadmap Planning",
+    description: "Build a now/next/later roadmap aligned to strategic goals.",
     category: "planning",
     recommendedRoles: ["product-manager", "architect"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "opinionated", level: 3 }],
@@ -552,6 +594,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "planning-spike",
     name: "Technical Spike",
+    description: "Time-boxed investigation with options, pros/cons, and a recommendation.",
     category: "planning",
     recommendedRoles: ["architect", "project-manager"],
     recommendedStyles: [{ id: "balanced", level: 4 }, { id: "step-by-step", level: 3 }],
@@ -564,6 +607,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "planning-release",
     name: "Release Planning",
+    description: "Plan release scope, timeline, go/no-go criteria, and rollback.",
     category: "planning",
     recommendedRoles: ["project-manager", "product-manager"],
     recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "visual", level: 3 }],
@@ -578,6 +622,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "design-ux-review",
     name: "UX Heuristic Review",
+    description: "Evaluate against Nielsen's 10 heuristics with severity ratings.",
     category: "design",
     recommendedRoles: ["ux-designer"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 4 }],
@@ -590,6 +635,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "design-system",
     name: "Design System Audit",
+    description: "Check component consistency, token usage, and naming conventions.",
     category: "design",
     recommendedRoles: ["ux-designer", "frontend-eng"],
     recommendedStyles: [{ id: "visual", level: 4 }, { id: "detailed", level: 3 }],
@@ -602,6 +648,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "design-user-flow",
     name: "User Flow Mapping",
+    description: "Map the full user journey with decision points and drop-off risks.",
     category: "design",
     recommendedRoles: ["ux-designer", "product-manager"],
     recommendedStyles: [{ id: "visual", level: 5 }, { id: "step-by-step", level: 3 }],
@@ -614,6 +661,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "design-wireframe",
     name: "Wireframe Description",
+    description: "Describe screen layout, hierarchy, and interactions as ASCII/text.",
     category: "design",
     recommendedRoles: ["ux-designer"],
     recommendedStyles: [{ id: "visual", level: 5 }, { id: "detailed", level: 3 }],
@@ -628,6 +676,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "analysis-error-discovery",
     name: "Error Discovery & Fix",
+    description: "Systematically hunt for logic errors, edge cases, and type gaps across the codebase.",
     category: "debugging",
     recommendedRoles: ["debugger", "test-engineer"],
     recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "diff-format", level: 3 }, { id: "actionable", level: 3 }],
@@ -640,6 +689,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "analysis-codebase-health",
     name: "Codebase Health Check",
+    description: "Audit for error-prone patterns, missing guards, and silent failures.",
     category: "debugging",
     recommendedRoles: ["code-reviewer", "architect"],
     recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 4 }, { id: "step-by-step", level: 3 }],
@@ -652,6 +702,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "analysis-test-and-fix",
     name: "Test-Driven Error Hunt",
+    description: "Write tests that expose real bugs, then fix the source code.",
     category: "testing",
     recommendedRoles: ["test-engineer", "debugger"],
     recommendedStyles: [{ id: "code-heavy", level: 4 }, { id: "step-by-step", level: 3 }, { id: "diff-format", level: 3 }],
@@ -666,6 +717,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "bug-fix",
     name: "Bug Fix",
+    description: "Diagnose and apply a minimal, targeted fix with a diff.",
     category: "debugging",
     recommendedRoles: ["debugger"],
     recommendedStyles: [{ id: "diff-format", level: 3 }, { id: "step-by-step", level: 3 }],
@@ -678,6 +730,7 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
   {
     id: "explain",
     name: "Explain",
+    description: "Break down code or concepts step by step at the right level.",
     category: "documentation",
     recommendedRoles: ["technical-writer"],
     recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "beginner", level: 3 }],

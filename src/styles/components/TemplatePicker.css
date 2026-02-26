@@ -5,32 +5,100 @@
 }
 
 .template-picker-btn {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: var(--radius);
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: var(--text-md);
+  font-weight: 600;
   cursor: pointer;
-  color: var(--text-1);
-  transition: background 0.15s;
+  color: var(--bg-0);
+  transition: filter 0.15s;
 }
 .template-picker-btn:hover {
-  background: var(--bg-active);
+  filter: brightness(1.1);
+}
+
+.template-picker-btn-icon {
+  font-size: var(--text-base);
+  line-height: 1;
 }
 
 .template-picker-dropdown {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
+  position: fixed;
   background: var(--bg-1);
   border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  width: 420px;
+  max-height: min(70vh, 560px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Search ───────────────── */
+
+.template-picker-search-wrap {
+  position: relative;
+  padding: 10px 10px 6px;
+  flex-shrink: 0;
+}
+
+.template-picker-search {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-  max-height: 360px;
+  color: var(--text-0);
+  font-size: var(--text-md);
+  font-family: var(--font-ui);
+  padding: 7px 30px 7px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.template-picker-search:focus {
+  border-color: var(--accent);
+}
+.template-picker-search::placeholder {
+  color: var(--text-3);
+}
+
+.template-picker-search-clear {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--text-base);
+  padding: 2px 4px;
+  line-height: 1;
+}
+.template-picker-search-clear:hover {
+  color: var(--text-1);
+}
+
+/* ─── Template List ───────────────── */
+
+.template-picker-list {
   overflow-y: auto;
-  width: 260px;
-  z-index: 20;
+  flex: 1;
+  min-height: 80px;
+  padding-bottom: 4px;
+}
+
+.template-picker-empty {
+  padding: 20px 14px;
+  font-size: var(--text-md);
+  color: var(--text-3);
+  text-align: center;
 }
 
 .template-picker-category {
@@ -78,11 +146,13 @@
   padding-left: 12px;
 }
 
+/* ─── Template Item ───────────────── */
+
 .template-picker-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 5px 10px;
+  gap: 8px;
+  padding: 6px 10px;
   font-size: var(--text-md);
   color: var(--text-1);
   cursor: pointer;
@@ -90,6 +160,20 @@
 }
 .template-picker-item:hover {
   background: var(--bg-hover);
+}
+
+.template-picker-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-picker-item-cat {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  flex-shrink: 0;
 }
 
 .template-picker-item-delete {
@@ -101,6 +185,7 @@
   font-family: monospace;
   opacity: 0;
   padding: 2px 4px;
+  flex-shrink: 0;
 }
 .template-picker-item:hover .template-picker-item-delete {
   opacity: 1;
@@ -118,4 +203,28 @@
   padding: 8px 10px 4px;
   border-top: 1px solid var(--border);
   margin-top: 4px;
+}
+
+/* ─── Description Preview ───────────────── */
+
+.template-picker-preview {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.template-picker-preview-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.template-picker-preview-desc {
+  font-size: var(--text-md);
+  color: var(--text-2);
+  line-height: 1.4;
 }

@@ -76,8 +76,21 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
   const [saveTemplateName, setSaveTemplateName] = useState("");
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
   const taskRef = useRef<HTMLTextAreaElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleTemplatePicker = useCallback(() => {
+    setTemplatePickerOpen((prev) => !prev);
+  }, []);
+
+  const clearFields = useCallback(() => {
+    setFields({ ...EMPTY_FIELDS });
+    setAdvancedOpen(false);
+    setConfirmingClear(false);
+    taskRef.current?.focus();
+  }, []);
 
   const allRoles = useMemo(() => [...BUILT_IN_ROLES, ...customRoles], [customRoles]);
   const allStyles = useMemo(() => [...BUILT_IN_STYLES, ...customStyles], [customStyles]);
@@ -247,37 +260,76 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     }));
   }, [customStyles]);
 
+  // Detect whether all fields are empty (for the empty-state CTA)
+  const fieldsEmpty = useMemo(() => {
+    return (
+      fields.roleIds.length === 0 &&
+      fields.styleSelections.length === 0 &&
+      !fields.task.trim() &&
+      !fields.scope.trim() &&
+      !fields.constraints.trim() &&
+      !fields.style.trim()
+    );
+  }, [fields]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
+      if (templatePickerOpen) {
+        setTemplatePickerOpen(false);
+        return;
+      }
       onClose();
+      return;
+    }
+    // ⌘T — toggle template picker
+    if (e.key === "t" && e.metaKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      toggleTemplatePicker();
       return;
     }
     if (e.key === "Enter" && e.metaKey) {
       e.preventDefault();
       sendPrompt();
     }
-  }, [onClose, sendPrompt]);
+  }, [onClose, sendPrompt, templatePickerOpen, toggleTemplatePicker]);
 
   return (
-    <div className="command-palette-overlay" onClick={onClose}>
-      <div className="prompt-composer" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
+    <div className="command-palette-overlay">
+      <div className="prompt-composer" onKeyDown={handleKeyDown}>
         {/* Header */}
         <div className="prompt-composer-header">
-          <span className="prompt-composer-title">Prompt Composer</span>
-          <div className="prompt-composer-header-right">
+          <div className="prompt-composer-header-left">
+            <span className="prompt-composer-title">Prompt Composer</span>
             <TemplatePicker
               builtInTemplates={BUILT_IN_TEMPLATES}
               userTemplates={userTemplates}
               onSelect={applyTemplate}
               onDeleteUser={deleteTemplate}
+              open={templatePickerOpen}
+              onToggle={toggleTemplatePicker}
             />
-            <button className="prompt-composer-close" onClick={onClose} title="Close (Esc)">&#10005;</button>
           </div>
+          <button className="prompt-composer-close" onClick={onClose} title="Close (Esc)">&#10005;</button>
         </div>
 
         {/* Body: fields + preview */}
         <div className="prompt-composer-body">
           <div className="prompt-composer-fields">
+            {/* Empty state CTA */}
+            {fieldsEmpty && (
+              <button
+                className="prompt-composer-empty-cta"
+                onClick={toggleTemplatePicker}
+              >
+                <span className="prompt-composer-empty-cta-icon">&#9776;</span>
+                <span className="prompt-composer-empty-cta-text">
+                  <strong>Start from a template</strong>
+                  <span>Browse {BUILT_IN_TEMPLATES.length} ready-to-use prompt templates</span>
+                </span>
+                <kbd className="prompt-composer-empty-cta-kbd">&#8984;T</kbd>
+              </button>
+            )}
+
             {/* Role Selector */}
             <RoleSelector
               selectedIds={fields.roleIds}
@@ -372,6 +424,17 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
               </div>
             ) : (
               <button className="prompt-composer-btn" onClick={() => setShowSaveInput(true)}>Save Template</button>
+            )}
+            {!fieldsEmpty && (
+              confirmingClear ? (
+                <div className="prompt-composer-clear-confirm">
+                  <span className="prompt-composer-clear-confirm-label">Clear all fields?</span>
+                  <button className="prompt-composer-btn prompt-composer-btn-sm prompt-composer-btn-danger" onClick={clearFields}>Yes, clear</button>
+                  <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={() => setConfirmingClear(false)}>Cancel</button>
+                </div>
+              ) : (
+                <button className="prompt-composer-btn prompt-composer-btn-clear" onClick={() => setConfirmingClear(true)}>Clear</button>
+              )
             )}
           </div>
           <div className="prompt-composer-actions-right">

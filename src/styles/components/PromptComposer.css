@@ -22,6 +22,12 @@
   border-bottom: 1px solid var(--border);
 }
 
+.prompt-composer-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .prompt-composer-title {
   font-size: var(--text-lg);
   font-weight: 600;
@@ -259,4 +265,87 @@
   flex-direction: column;
   gap: 10px;
   padding-top: 4px;
+}
+
+/* ─── Prompt Composer: Empty State CTA ───────────────── */
+
+.prompt-composer-empty-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+}
+.prompt-composer-empty-cta:hover {
+  background: var(--bg-3);
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+.prompt-composer-empty-cta-icon {
+  font-size: 20px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.prompt-composer-empty-cta-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.prompt-composer-empty-cta-text strong {
+  font-size: var(--text-lg);
+  color: var(--text-0);
+  font-weight: 600;
+}
+.prompt-composer-empty-cta-text span {
+  font-size: var(--text-md);
+  color: var(--text-3);
+}
+
+.prompt-composer-empty-cta-kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+/* ─── Prompt Composer: Clear Button & Confirmation ───────────────── */
+
+.prompt-composer-btn-clear {
+  color: var(--text-2);
+}
+
+.prompt-composer-clear-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prompt-composer-clear-confirm-label {
+  font-size: var(--text-md);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.prompt-composer-btn-danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: var(--bg-0);
+  font-weight: 600;
+}
+.prompt-composer-btn-danger:hover:not(:disabled) {
+  filter: brightness(1.15);
+  background: var(--error);
 }
