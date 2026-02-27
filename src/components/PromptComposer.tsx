@@ -2,7 +2,7 @@ import "../styles/components/PromptComposer.css";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { getSetting, setSetting } from "../api/settings";
 import { writeToSession } from "../api/sessions";
-import { dismissSuggestions, clearGhostText } from "../terminal/TerminalPool";
+import { dismissSuggestions, clearGhostText, getInputBufferLength, clearInputBuffer } from "../terminal/TerminalPool";
 import {
   ComposerFields,
   EMPTY_FIELDS,
@@ -176,19 +176,31 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     }
   }, []);
 
-  const sendPrompt = useCallback(() => {
+  const sendPrompt = useCallback(async () => {
     if (!compiled.trim()) return;
     // Clear any active terminal intelligence state so it doesn't interfere
     // with the submitted prompt (e.g. ghost text or suggestion overlay executing on focus)
     dismissSuggestions(sessionId);
     clearGhostText(sessionId);
+    // Erase any existing terminal input (same pattern as sendShortcutCommand) so
+    // the CLI's current line and ghost text are cleared before the composed prompt.
+    const eraseLen = getInputBufferLength(sessionId);
+    clearInputBuffer(sessionId);
+    const backspaces = eraseLen > 0 ? "\x7f".repeat(eraseLen) : "";
     // Wrap in bracketed paste so CLIs treat multi-line content as a single paste,
     // then append \r to submit. Use TextEncoder for proper UTF-8 base64 encoding.
-    const payload = "\x1b[200~" + compiled + "\x1b[201~" + "\r";
+    const payload = backspaces + "\x1b[200~" + compiled + "\x1b[201~" + "\r";
     const bytes = new TextEncoder().encode(payload);
     const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
     const data = btoa(binary);
-    writeToSession(sessionId, data).catch(console.error);
+    // IMPORTANT: await the write so the composed prompt reaches the PTY BEFORE
+    // the Prompt Composer closes. Closing first can cause focus to shift to xterm,
+    // producing a spurious Enter that races the composed prompt through the PTY mutex.
+    try {
+      await writeToSession(sessionId, data);
+    } catch (err) {
+      console.error(err);
+    }
     onClose();
   }, [compiled, sessionId, onClose]);
 
@@ -296,6 +308,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     }
     if (e.key === "Enter" && e.metaKey) {
       e.preventDefault();
+      e.stopPropagation();
       sendPrompt();
     }
   }, [onClose, sendPrompt, templatePickerOpen, toggleTemplatePicker]);

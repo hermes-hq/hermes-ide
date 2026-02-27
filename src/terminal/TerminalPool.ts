@@ -1091,6 +1091,17 @@ export function clearGhostText(sessionId: string): void {
   }
 }
 
+/** Get the current inputBuffer length for a session (for erasing existing input). */
+export function getInputBufferLength(sessionId: string): number {
+  return pool.get(sessionId)?.inputBuffer.length ?? 0;
+}
+
+/** Clear the inputBuffer for a session (e.g. after composed prompt replaces all input). */
+export function clearInputBuffer(sessionId: string): void {
+  const entry = pool.get(sessionId);
+  if (entry) entry.inputBuffer = "";
+}
+
 /** Insert a shortcut command text on the current prompt line.
  *
  *  Replaces any existing input with the command text. Does NOT press Enter —
