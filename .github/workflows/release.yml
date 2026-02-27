@@ -145,7 +145,7 @@ jobs:
           fi
 
           BUNDLE_NAME=$(basename "${{ steps.artifacts.outputs.update_bundle }}")
-          DOWNLOAD_URL="https://github.com/gabrielanhaia/hermes-ide-releases/releases/download/v${VERSION}/${BUNDLE_NAME}"
+          DOWNLOAD_URL="https://github.com/Vinci-26/hermes-ide-releases/releases/download/v${VERSION}/${BUNDLE_NAME}"
 
           cat > latest.json <<MANIFEST
           {
@@ -177,7 +177,7 @@ jobs:
         run: |
           VERSION="${{ steps.artifacts.outputs.version }}"
           TAG="v${VERSION}"
-          REPO="gabrielanhaia/hermes-ide-releases"
+          REPO="Vinci-26/hermes-ide-releases"
 
           # Create the release
           gh release create "$TAG" \
