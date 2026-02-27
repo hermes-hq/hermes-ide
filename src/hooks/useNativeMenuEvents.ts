@@ -5,7 +5,7 @@ import { ensureListener, registerMenuBarHandler } from "./nativeMenuBridge";
 // ─── Menu Bar Action → React Dispatch Bridge ────────────────────────
 
 interface MenuEventHandlers {
-  dispatch: (action: { type: string; [key: string]: unknown }) => void;
+  dispatch: (action: any) => void;
   createSession: () => void;
   requestCloseSession: (id: string) => void;
   activeSessionId: string | null;

@@ -9,7 +9,7 @@ interface AutoToastProps {
   onExecute: () => void;
 }
 
-export function AutoToast({ command, reason, delayMs, onCancel, onExecute }: AutoToastProps) {
+export function AutoToast({ command, reason: _reason, delayMs, onCancel, onExecute }: AutoToastProps) {
   const [progress, setProgress] = useState(100);
   const startRef = useRef(Date.now());
   const executedRef = useRef(false);

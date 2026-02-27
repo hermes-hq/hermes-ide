@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect, memo } from "react";
+import { useState, useMemo, useCallback, useRef, memo } from "react";
 import "../styles/components/ProcessPanel.css";
 import { useProcesses } from "../hooks/useProcesses";
 import { killProcess, killProcessTree, getProcessDetail, revealProcessInFinder } from "../api/processes";
