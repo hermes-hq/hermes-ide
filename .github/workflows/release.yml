@@ -78,7 +78,7 @@ jobs:
             sign: true
             notarize: true
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-14
             platform_key: darwin-x86_64
             sign: true
             notarize: true
