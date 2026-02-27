@@ -144,13 +144,16 @@ fn get_fd_count(pid: u32) -> Option<u32> {
 
 fn collect_descendants(sys: &System, root_pid: u32) -> Vec<u32> {
     let mut descendants = Vec::new();
+    let mut visited = HashSet::new();
+    visited.insert(root_pid);
     let mut stack = vec![root_pid];
 
     while let Some(parent) = stack.pop() {
         for (pid, process) in sys.processes() {
             let ppid = process.parent().map(|p| p.as_u32()).unwrap_or(0);
-            if ppid == parent && pid.as_u32() != root_pid {
-                let p = pid.as_u32();
+            let p = pid.as_u32();
+            if ppid == parent && !visited.contains(&p) {
+                visited.insert(p);
                 descendants.push(p);
                 stack.push(p);
             }

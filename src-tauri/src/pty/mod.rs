@@ -1402,22 +1402,25 @@ fn extract_port(line: &str) -> Option<String> {
 }
 
 fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
+    let mut bytes = Vec::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
         if c == '%' {
             let hex: String = chars.by_ref().take(2).collect();
             if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
+                bytes.push(byte);
             } else {
-                result.push('%');
-                result.push_str(&hex);
+                bytes.push(b'%');
+                bytes.extend_from_slice(hex.as_bytes());
             }
+        } else if c.is_ascii() {
+            bytes.push(c as u8);
         } else {
-            result.push(c);
+            let mut buf = [0u8; 4];
+            bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
         }
     }
-    result
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 /// Detects common shell prompts across zsh, bash, fish, starship, oh-my-zsh, etc.
@@ -1514,6 +1517,7 @@ struct PtySession {
     writer: Arc<StdMutex<Box<dyn Write + Send>>>,
     session: Arc<StdMutex<Session>>,
     analyzer: Arc<StdMutex<OutputAnalyzer>>,
+    child: Box<dyn portable_pty::Child + Send>,
 }
 
 fn ai_launch_command(provider: &str) -> &str {
@@ -1716,7 +1720,7 @@ pub fn create_session(
     }
     cmd.env("HERMES_SESSION_ID", &session_id);
 
-    let _child = pair.slave.spawn_command(cmd).map_err(|e| format!("Failed to spawn shell: {}", e))?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| format!("Failed to spawn shell: {}", e))?;
 
     let writer = Arc::new(StdMutex::new(
         pair.master.take_writer().map_err(|e| format!("Failed to get PTY writer: {}", e))?
@@ -1972,7 +1976,7 @@ pub fn create_session(
         SessionUpdate::from(&*s)
     };
 
-    let pty_session = PtySession { master: pair.master, writer, session: session_arc, analyzer };
+    let pty_session = PtySession { master: pair.master, writer, session: session_arc, analyzer, child };
     mgr.sessions.insert(session_id.clone(), pty_session);
 
     // Save to DB
@@ -2101,7 +2105,11 @@ pub fn resize_session(state: State<'_, AppState>, session_id: String, rows: u16,
 pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: String) -> Result<(), String> {
     let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
 
-    if let Some(pty_session) = mgr.sessions.remove(&session_id) {
+    if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
+        // Kill the child shell process and wait to reap it (prevents zombies)
+        pty_session.child.kill().ok();
+        pty_session.child.wait().ok();
+
         // Save snapshot and persist token data
         if let Ok(analyzer) = pty_session.analyzer.lock() {
             let snapshot = analyzer.get_stripped_output();

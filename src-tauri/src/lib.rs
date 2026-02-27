@@ -1,5 +1,6 @@
 mod db;
 mod git;
+mod menu;
 mod process;
 mod pty;
 mod realm;
@@ -23,9 +24,12 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
-            std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
-            std::fs::create_dir_all(app_dir.join("context")).expect("Failed to create context dir");
+            let app_dir = app.path().app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+            std::fs::create_dir_all(&app_dir)
+                .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+            std::fs::create_dir_all(app_dir.join("context"))
+                .map_err(|e| format!("Failed to create context dir: {}", e))?;
 
             // Migrate old database name if needed
             let old_db_path = app_dir.join("axon_v3.db");
@@ -33,7 +37,8 @@ pub fn run() {
             if old_db_path.exists() && !db_path.exists() {
                 let _ = std::fs::copy(&old_db_path, &db_path);
             }
-            let database = db::Database::new(&db_path).expect("Failed to initialize database");
+            let database = db::Database::new(&db_path)
+                .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
@@ -45,6 +50,21 @@ pub fn run() {
             };
 
             app.manage(state);
+
+            // Build and set native menu bar
+            let handle = app.handle().clone();
+            match menu::build_app_menu(&handle) {
+                Ok(m) => {
+                    app.set_menu(m).expect("Failed to set menu");
+                    app.on_menu_event(move |app_handle, event| {
+                        menu::handle_menu_event(app_handle, event);
+                    });
+                }
+                Err(e) => {
+                    log::error!("Failed to build app menu: {}", e);
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -158,6 +178,9 @@ pub fn run() {
             git::list_directory,
             // Project search
             git::search_project,
+            // Menu
+            menu::show_context_menu,
+            menu::update_menu_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running HERMES-IDE");

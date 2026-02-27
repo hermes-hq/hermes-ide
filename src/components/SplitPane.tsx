@@ -6,6 +6,7 @@ import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
 import { focusTerminal } from "../terminal/TerminalPool";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
+import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
 
 // Use text/plain with a prefix so it works in all WebViews
 const DRAG_PREFIX = "hermes-session:";
@@ -66,6 +67,50 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       focusTerminal(sessionId);
     }
   }, [isFocused, paneId, sessionId, dispatch]);
+
+  const hasSiblings = !!(state.layout.root && collectPanes(state.layout.root).length > 1);
+
+  const handleTerminalAction = useCallback((actionId: string) => {
+    switch (actionId) {
+      case "terminal.copy": document.execCommand("copy"); break;
+      case "terminal.paste": document.execCommand("paste"); break;
+      case "terminal.select-all": /* handled by terminal */ break;
+      case "terminal.clear": /* TODO: wire to terminal clear */ break;
+      case "terminal.split-right":
+        dispatch({ type: "SPLIT_PANE", paneId, direction: "horizontal", newSessionId: sessionId });
+        break;
+      case "terminal.split-down":
+        dispatch({ type: "SPLIT_PANE", paneId, direction: "vertical", newSessionId: sessionId });
+        break;
+    }
+  }, [dispatch, paneId, sessionId]);
+
+  const { showMenu: showTerminalMenu } = useContextMenu(handleTerminalAction);
+
+  const handlePaneHeaderAction = useCallback((actionId: string) => {
+    switch (actionId) {
+      case "pane.split-right":
+        dispatch({ type: "SPLIT_PANE", paneId, direction: "horizontal", newSessionId: sessionId });
+        break;
+      case "pane.split-down":
+        dispatch({ type: "SPLIT_PANE", paneId, direction: "vertical", newSessionId: sessionId });
+        break;
+      case "pane.close":
+        dispatch({ type: "CLOSE_PANE", paneId });
+        break;
+      case "pane.close-others":
+        // Close all panes except this one
+        if (state.layout.root) {
+          const allPanes = collectPanes(state.layout.root);
+          for (const p of allPanes) {
+            if (p.id !== paneId) dispatch({ type: "CLOSE_PANE", paneId: p.id });
+          }
+        }
+        break;
+    }
+  }, [dispatch, paneId, sessionId, state.layout.root]);
+
+  const { showMenu: showPaneMenu } = useContextMenu(handlePaneHeaderAction);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -145,7 +190,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="split-pane-header">
+      <div className="split-pane-header" onContextMenu={(e) => showPaneMenu(e, buildPaneHeaderMenuItems(paneId, hasSiblings))}>
         <div className="split-pane-label">
           <span className="split-pane-dot" style={{ background: session.color }} />
           <span>{session.label}</span>
@@ -168,7 +213,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           />
         )}
       </div>
-      <div className="split-pane-terminal">
+      <div className="split-pane-terminal" onContextMenu={(e) => showTerminalMenu(e, buildTerminalMenuItems(window.getSelection()?.toString() ? true : false))}>
         <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
       </div>
 

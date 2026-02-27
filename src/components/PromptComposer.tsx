@@ -1,5 +1,6 @@
 import "../styles/components/PromptComposer.css";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { getSetting, setSetting } from "../api/settings";
 import { writeToSession } from "../api/sessions";
 import { dismissSuggestions, clearGhostText, getInputBufferLength, clearInputBuffer } from "../terminal/TerminalPool";
@@ -80,6 +81,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
   const [confirmingClear, setConfirmingClear] = useState(false);
   const taskRef = useRef<HTMLTextAreaElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
+  const { onContextMenu: textContextMenu } = useTextContextMenu();
 
   const toggleTemplatePicker = useCallback(() => {
     setTemplatePickerOpen((prev) => !prev);
@@ -314,8 +316,8 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
   }, [onClose, sendPrompt, templatePickerOpen, toggleTemplatePicker]);
 
   return (
-    <div className="command-palette-overlay">
-      <div className="prompt-composer" onKeyDown={handleKeyDown}>
+    <div className="command-palette-overlay" onClick={onClose}>
+      <div className="prompt-composer" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
         {/* Header */}
         <div className="prompt-composer-header">
           <div className="prompt-composer-header-left">
@@ -378,6 +380,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
                   placeholder={placeholder}
                   value={fields[key]}
                   onChange={(e) => updateField(key, e.target.value)}
+                  onContextMenu={textContextMenu}
                 />
               </div>
             ))}
@@ -401,6 +404,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
                     placeholder="Rules, limitations, requirements. e.g. No new dependencies. Keep backward compat."
                     value={fields.constraints}
                     onChange={(e) => updateField("constraints", e.target.value)}
+                    onContextMenu={textContextMenu}
                   />
                 </div>
                 <div className="prompt-composer-field">
@@ -410,6 +414,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
                     placeholder="Extra style instructions beyond the presets above. e.g. Show line references."
                     value={fields.style}
                     onChange={(e) => updateField("style", e.target.value)}
+                    onContextMenu={textContextMenu}
                   />
                 </div>
               </div>
@@ -438,6 +443,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
                     if (e.key === "Enter") { e.stopPropagation(); saveTemplate(); }
                     if (e.key === "Escape") { e.stopPropagation(); setShowSaveInput(false); }
                   }}
+                  onContextMenu={textContextMenu}
                 />
                 <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={saveTemplate}>Save</button>
                 <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={() => setShowSaveInput(false)}>Cancel</button>

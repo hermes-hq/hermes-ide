@@ -35,6 +35,8 @@ import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { decodeSessionDrag } from "./components/SplitPane";
 import { focusTerminal } from "./terminal/TerminalPool";
+import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
+import { useMenuStateSync } from "./hooks/useMenuStateSync";
 
 function AppContent() {
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive } = useSession();
@@ -51,10 +53,15 @@ function AppContent() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — only those NOT handled by native menu bar
+  // (Cmd+Alt+Arrow for pane nav, Cmd+1-9 for session switch, F1/F3 for overlays)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
+
+      // Suppress session-switch shortcuts while any modal/overlay is open
+      const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
+      if (anyOverlayOpen) return;
 
       // Alt combos — pane navigation
       if (e.altKey && state.layout.root) {
@@ -76,63 +83,16 @@ function AppContent() {
         return;
       }
 
-      // Shift combos
-      if (e.shiftKey) {
-        switch (e.key) {
-          case "D": case "d":
-            // Cmd+Shift+D → vertical split
-            e.preventDefault();
-            if (state.layout.focusedPaneId) {
-              pendingSplit.current = { paneId: state.layout.focusedPaneId, direction: "vertical" };
-              setSessionCreatorOpen(true);
-            }
-            return;
-          case "F": case "f": e.preventDefault(); dispatch({ type: "TOGGLE_SEARCH_PANEL" }); return;
-          case "Z": case "z": e.preventDefault(); dispatch({ type: "TOGGLE_FLOW_MODE" }); return;
-          case "C": case "c": e.preventDefault(); copyContextToClipboard(activeSession); return;
-        }
-      }
-      switch (e.key) {
-        case "d":
-          // Cmd+D → horizontal split
-          e.preventDefault();
-          if (state.layout.focusedPaneId) {
-            pendingSplit.current = { paneId: state.layout.focusedPaneId, direction: "horizontal" };
-            setSessionCreatorOpen(true);
-          }
-          break;
-        case "n": e.preventDefault(); setSessionCreatorOpen(true); break;
-        case "w":
-          e.preventDefault();
-          if (state.layout.focusedPaneId && state.layout.root) {
-            // Close just the pane, keep the session alive
-            dispatch({ type: "CLOSE_PANE", paneId: state.layout.focusedPaneId });
-          } else if (state.activeSessionId) {
-            requestCloseSession(state.activeSessionId);
-          }
-          break;
-        case "e": e.preventDefault(); dispatch({ type: "TOGGLE_CONTEXT" }); break;
-        case "k": e.preventDefault(); dispatch({ type: "TOGGLE_PALETTE" }); break;
-        case "b": e.preventDefault(); dispatch({ type: "TOGGLE_SIDEBAR" }); break;
-        case "j": e.preventDefault(); setComposerOpen((v) => !v); break;
-        case "p": e.preventDefault(); dispatch({ type: "TOGGLE_PROCESS_PANEL" }); break;
-        case "g": e.preventDefault(); dispatch({ type: "TOGGLE_GIT_PANEL" }); break;
-        case "f": e.preventDefault(); dispatch({ type: "TOGGLE_FILE_EXPLORER" }); break;
-        case "t": e.preventDefault(); dispatch({ type: "TOGGLE_TIMELINE" }); break;
-        case ",": e.preventDefault(); setSettingsOpen((v) => v ? null : "general"); break;
-        case "/": e.preventDefault(); setShortcutsOpen((v) => !v); break;
-        case "$": e.preventDefault(); setCostDashboardOpen((v) => !v); break;
-        default:
-          if (e.key >= "1" && e.key <= "9") {
-            e.preventDefault();
-            const idx = parseInt(e.key) - 1;
-            if (idx < sessions.length) setActive(sessions[idx].id);
-          }
+      // Cmd+1-9 — session switch
+      if (e.key >= "1" && e.key <= "9") {
+        e.preventDefault();
+        const idx = parseInt(e.key) - 1;
+        if (idx < sessions.length) setActive(sessions[idx].id);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.activeSessionId, state.layout, sessions, activeSession, createSession, closeSession, requestCloseSession, dispatch, setActive]);
+  }, [state.layout, sessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
 
   const sendCtrlC = useCallback(() => {
     const id = ui.stuckOverlaySessionId;
@@ -153,30 +113,47 @@ function AppContent() {
   // Re-focus the active terminal when the app window regains focus
   // (e.g. after a system dialog, Cmd+Tab, or notification steals focus).
   // Uses Tauri's onFocusChanged (reliable in WKWebView) + browser fallbacks.
+  // Skips re-focus when any modal/overlay with input fields is open so it
+  // doesn't steal focus from text inputs inside overlays.
+  const activeSessionIdRef = useRef(activeSession?.id ?? null);
+  activeSessionIdRef.current = activeSession?.id ?? null;
+  const anyOverlayOpenRef = useRef(false);
+  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen);
+
   useEffect(() => {
     if (!activeSession) return;
-    const sessionId = activeSession.id;
+    let cancelled = false;
+
+    const safeFocus = () => {
+      if (anyOverlayOpenRef.current) return;
+      const id = activeSessionIdRef.current;
+      if (id) focusTerminal(id);
+    };
 
     // Tauri window focus event — most reliable in WKWebView
     let unlistenTauri: (() => void) | null = null;
     getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-      if (focused) focusTerminal(sessionId);
-    }).then((u) => { unlistenTauri = u; });
+      if (cancelled) return;
+      if (focused) safeFocus();
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlistenTauri = u; }
+    });
 
     // Browser fallbacks for edge cases
-    const onFocus = () => focusTerminal(sessionId);
+    const onFocus = () => safeFocus();
     const onVisibility = () => {
-      if (document.visibilityState === "visible") focusTerminal(sessionId);
+      if (document.visibilityState === "visible") safeFocus();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
+      cancelled = true;
       unlistenTauri?.();
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [activeSession]);
+  }, [activeSession?.id]);
 
   // Global capture-phase window drag listener — bypasses React synthetic events,
   // WKWebView focus quirks, and Tauri's automatic injection.
@@ -192,6 +169,42 @@ function AppContent() {
     document.addEventListener("mousedown", handler, true);
     return () => document.removeEventListener("mousedown", handler, true);
   }, []);
+
+  // ── Global contextmenu suppression ──
+  // Capture-phase listener prevents the browser context menu on ALL surfaces.
+  // Components with custom menus call e.stopPropagation() to intercept first.
+  useEffect(() => {
+    const suppress = (e: Event) => { e.preventDefault(); };
+    document.addEventListener("contextmenu", suppress, true);
+    return () => document.removeEventListener("contextmenu", suppress, true);
+  }, []);
+
+  // ── Native menu bar event bridge ──
+  useNativeMenuEvents({
+    dispatch,
+    createSession: () => setSessionCreatorOpen(true),
+    requestCloseSession,
+    activeSessionId: state.activeSessionId,
+    focusedPaneId: state.layout.focusedPaneId,
+    setSettingsOpen,
+    setComposerOpen,
+    setShortcutsOpen,
+    setCostDashboardOpen,
+    setSessionCreatorOpen,
+    copyContextToClipboard: () => copyContextToClipboard(activeSession),
+    pendingSplit,
+  });
+
+  // ── Sync UI toggle state → native menu checkmarks ──
+  useMenuStateSync({
+    sidebarVisible: !ui.sessionListCollapsed,
+    processPanelOpen: ui.processPanelOpen,
+    gitPanelOpen: ui.gitPanelOpen,
+    contextPanelOpen: ui.contextPanelOpen,
+    timelineOpen: ui.timelineOpen,
+    searchPanelOpen: ui.searchPanelOpen,
+    flowMode: ui.flowMode,
+  });
 
   return (
     <div className={`app ${ui.flowMode ? "flow-mode" : ""}`}>
@@ -242,6 +255,7 @@ function AppContent() {
             activeSessionId={state.activeSessionId}
             onSelect={setActive}
             onClose={requestCloseSession}
+            onNewSession={() => setSessionCreatorOpen(true)}
           />
         )}
         {ui.processPanelOpen && !ui.flowMode && (

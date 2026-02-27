@@ -1,5 +1,5 @@
 import "../styles/components/RoleSelector.css";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import type { RoleDefinition } from "../lib/roles";
 import { validateCustomRole } from "../lib/roles";
 
@@ -30,6 +30,21 @@ export function RoleSelector({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+
+  // Position the fixed dropdown relative to the search input
+  useLayoutEffect(() => {
+    if (!open || !inputRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    const maxH = 240;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const top = spaceBelow >= maxH ? rect.bottom + 2 : Math.max(8, rect.top - maxH - 2);
+    setDropdownStyle({
+      top: `${top}px`,
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+    });
+  }, [open, query]);
 
   const filtered = allRoles.filter((r) => {
     const q = query.toLowerCase();
@@ -171,7 +186,7 @@ export function RoleSelector({
 
       {/* Dropdown */}
       {open && !showCreateForm && (
-        <div className="role-selector-dropdown" ref={dropdownRef}>
+        <div className="role-selector-dropdown" ref={dropdownRef} style={dropdownStyle}>
           {filtered.map((role, idx) => (
             <div
               key={role.id}

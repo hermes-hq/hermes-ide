@@ -1,7 +1,8 @@
 import "../styles/components/CostDashboard.css";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { CostDailyEntry, ProjectCostEntry } from "../types";
 import { getCostHistory, getCostByProject } from "../api/costs";
+import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 
 interface CostDashboardProps {
   onClose: () => void;
@@ -19,9 +20,22 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
   const [projectCosts, setProjectCosts] = useState<ProjectCostEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const contextCostRef = useRef("");
+  const handleCostAction = useCallback((actionId: string) => {
+    switch (actionId) {
+      case "cost.copy-value":
+        if (contextCostRef.current) navigator.clipboard.writeText(contextCostRef.current).catch(console.error);
+        break;
+    }
+  }, []);
+  const { showMenu: showCostMenu } = useContextMenu(handleCostAction);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        onClose();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -108,7 +122,12 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
               <div className="cost-section">
                 <div className="cost-section-title">Daily</div>
                 {dailyTotals.map(([date, cost]) => (
-                  <div key={date} className="cost-bar-row">
+                  <div key={date} className="cost-bar-row" onContextMenu={(e) => {
+                    contextCostRef.current = formatCost(cost);
+                    showCostMenu(e, [
+                      menuItem("cost.copy-value", `Copy ${formatCost(cost)}`),
+                    ]);
+                  }}>
                     <span className="cost-bar-label mono">{date.slice(5)}</span>
                     <div className="ctx-tool-bar-track">
                       <div
@@ -127,7 +146,12 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
               <div className="cost-section">
                 <div className="cost-section-title">By Provider</div>
                 {providerBreakdown.map(([provider, cost]) => (
-                  <div key={provider} className="cost-bar-row">
+                  <div key={provider} className="cost-bar-row" onContextMenu={(e) => {
+                    contextCostRef.current = formatCost(cost);
+                    showCostMenu(e, [
+                      menuItem("cost.copy-value", `Copy ${formatCost(cost)}`),
+                    ]);
+                  }}>
                     <span className="cost-bar-label">{provider}</span>
                     <div className="ctx-tool-bar-track">
                       <div
@@ -146,7 +170,12 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
               <div className="cost-section">
                 <div className="cost-section-title">By Project</div>
                 {projectBreakdown.map(([project, cost]) => (
-                  <div key={project} className="cost-bar-row">
+                  <div key={project} className="cost-bar-row" onContextMenu={(e) => {
+                    contextCostRef.current = formatCost(cost);
+                    showCostMenu(e, [
+                      menuItem("cost.copy-value", `Copy ${formatCost(cost)}`),
+                    ]);
+                  }}>
                     <span className="cost-bar-label mono truncate">{project}</span>
                     <div className="ctx-tool-bar-track">
                       <div

@@ -3,6 +3,8 @@ import { useActiveSession } from "../state/SessionContext";
 import { searchProject } from "../api/git";
 import type { SearchResponse, SearchFileResult } from "../types/git";
 import "../styles/components/SearchPanel.css";
+import { useContextMenu, buildSearchResultMenuItems } from "../hooks/useContextMenu";
+import { useTextContextMenu } from "../hooks/useTextContextMenu";
 
 // ─── Pure Helpers (exported for testing) ──────────────────────────────
 
@@ -51,6 +53,19 @@ export function SearchPanel({ visible }: SearchPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [width, setWidth] = useState(320);
   const resizing = useRef(false);
+
+  const contextPathRef = useRef<string>("");
+  const handleSearchAction = useCallback((actionId: string) => {
+    const path = contextPathRef.current;
+    if (!path) return;
+    switch (actionId) {
+      case "search.copy-path":
+        navigator.clipboard.writeText(path).catch(console.error);
+        break;
+    }
+  }, []);
+  const { showMenu: showSearchMenu } = useContextMenu(handleSearchAction);
+  const { onContextMenu: textContextMenu } = useTextContextMenu();
 
   const projectPath = activeSession?.working_directory ?? null;
 
@@ -149,6 +164,7 @@ export function SearchPanel({ visible }: SearchPanelProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           spellCheck={false}
+          onContextMenu={textContextMenu}
         />
         <div className="search-toggles">
           <button
@@ -202,6 +218,10 @@ export function SearchPanel({ visible }: SearchPanelProps) {
             file={file}
             collapsed={collapsedFiles.has(file.path)}
             onToggle={() => toggleCollapse(file.path)}
+            onContextMenu={(e) => {
+              contextPathRef.current = file.path;
+              showSearchMenu(e, buildSearchResultMenuItems({ path: file.path }));
+            }}
           />
         ))}
       </div>
@@ -215,14 +235,16 @@ function FileGroup({
   file,
   collapsed,
   onToggle,
+  onContextMenu,
 }: {
   file: SearchFileResult;
   collapsed: boolean;
   onToggle: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <div className="search-file-group">
-      <div className="search-file-header" onClick={onToggle}>
+      <div className="search-file-header" onClick={onToggle} onContextMenu={onContextMenu}>
         <span className="search-file-chevron">{collapsed ? "▸" : "▾"}</span>
         <span className="search-file-path" title={file.path}>{file.path}</span>
         <span className="search-match-count">{file.matches.length}</span>

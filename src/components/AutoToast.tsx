@@ -13,6 +13,8 @@ export function AutoToast({ command, reason, delayMs, onCancel, onExecute }: Aut
   const [progress, setProgress] = useState(100);
   const startRef = useRef(Date.now());
   const executedRef = useRef(false);
+  const onExecuteRef = useRef(onExecute);
+  onExecuteRef.current = onExecute;
 
   useEffect(() => {
     // Reset timer state when effect re-runs (delayMs or command changed)
@@ -27,11 +29,11 @@ export function AutoToast({ command, reason, delayMs, onCancel, onExecute }: Aut
       if (remaining <= 0 && !executedRef.current) {
         executedRef.current = true;
         clearInterval(interval);
-        onExecute();
+        onExecuteRef.current();
       }
     }, 50);
     return () => clearInterval(interval);
-  }, [delayMs, onExecute]);
+  }, [delayMs, command]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

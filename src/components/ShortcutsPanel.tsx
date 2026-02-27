@@ -57,7 +57,10 @@ interface ShortcutsPanelProps {
 export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        onClose();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);

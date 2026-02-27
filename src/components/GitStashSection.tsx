@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { GitStashEntry } from "../types/git";
 import {
   gitStashList,
@@ -8,6 +8,7 @@ import {
   gitStashDrop,
   gitStashClear,
 } from "../api/git";
+import { useContextMenu, buildStashMenuItems } from "../hooks/useContextMenu";
 
 // ─── Pure helpers (exported for testing) ──────────────────────────────
 
@@ -68,6 +69,32 @@ export function GitStashSection({
   const [confirmDrop, setConfirmDrop] = useState<number | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [prevStashCount, setPrevStashCount] = useState(stashCount);
+
+  const contextStashRef = useRef<GitStashEntry | null>(null);
+
+  const handleStashAction = useCallback((actionId: string) => {
+    const stash = contextStashRef.current;
+    if (!stash) return;
+    switch (actionId) {
+      case "stash.apply":
+        gitStashApply(projectPath, stash.index)
+          .then(() => { onRefresh(); onToast("Stash applied", "success"); })
+          .catch((e) => onToast(String(e), "error"));
+        break;
+      case "stash.pop":
+        gitStashPop(projectPath, stash.index)
+          .then(() => { onRefresh(); onToast("Stash popped", "success"); })
+          .catch((e) => onToast(String(e), "error"));
+        break;
+      case "stash.drop":
+        gitStashDrop(projectPath, stash.index)
+          .then(() => { onRefresh(); onToast("Stash dropped", "success"); })
+          .catch((e) => onToast(String(e), "error"));
+        break;
+    }
+  }, [projectPath, onRefresh, onToast]);
+
+  const { showMenu: showStashMenu } = useContextMenu(handleStashAction);
 
   // Auto-dismiss errors after 8 seconds
   useEffect(() => {
@@ -230,7 +257,7 @@ export function GitStashSection({
           )}
 
           {stashes.map((entry) => (
-            <div className="git-stash-entry" key={entry.index}>
+            <div className="git-stash-entry" key={entry.index} onContextMenu={(e) => { contextStashRef.current = entry; showStashMenu(e, buildStashMenuItems({ index: entry.index })); }}>
               <span className="git-stash-index">stash@{"{" + entry.index + "}"}</span>
               <span className="git-stash-message" title={entry.message}>
                 {parseStashLabel(entry.message)}

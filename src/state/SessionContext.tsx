@@ -180,6 +180,10 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     case "TOGGLE_PALETTE":
       return { ...state, ui: { ...state.ui, commandPaletteOpen: !state.ui.commandPaletteOpen } };
+    case "CLOSE_PALETTE":
+      return state.ui.commandPaletteOpen
+        ? { ...state, ui: { ...state.ui, commandPaletteOpen: false } }
+        : state;
     case "SHOW_STUCK_OVERLAY":
       return { ...state, ui: { ...state.ui, stuckOverlaySessionId: action.sessionId } };
     case "DISMISS_STUCK_OVERLAY": {

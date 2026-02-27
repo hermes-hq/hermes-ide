@@ -1,5 +1,6 @@
 import "../styles/components/Settings.css";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -22,6 +23,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
   const [settings, setSettings] = useState<SettingsMap>({});
   const [activeTab, setActiveTab] = useState(initialTab || "general");
   const { dispatch } = useSession();
+  const { onContextMenu: textContextMenu } = useTextContextMenu();
 
   // Live window size state (separate from DB settings)
   const [winWidth, setWinWidth] = useState("");
@@ -32,7 +34,10 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        onClose();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -208,6 +213,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                     placeholder="~ (home directory)"
                     value={settings.default_cwd || ""}
                     onChange={(e) => updateSetting("default_cwd", e.target.value)}
+                    onContextMenu={textContextMenu}
                   />
                 </div>
               </div>
@@ -287,6 +293,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         placeholder="1200"
                         value={winWidth}
                         onChange={(e) => { setWinWidth(e.target.value); applyWindowSize(e.target.value, latestH.current); }}
+                        onContextMenu={textContextMenu}
                       />
                       <button
                         className="settings-stepper-btn"
@@ -310,6 +317,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         placeholder="800"
                         value={winHeight}
                         onChange={(e) => { setWinHeight(e.target.value); applyWindowSize(latestW.current, e.target.value); }}
+                        onContextMenu={textContextMenu}
                       />
                       <button
                         className="settings-stepper-btn"
@@ -367,6 +375,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                     placeholder="Use git config (default)"
                     value={settings.git_author_name || ""}
                     onChange={(e) => updateSetting("git_author_name", e.target.value)}
+                    onContextMenu={textContextMenu}
                   />
                 </div>
 
@@ -377,6 +386,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                     placeholder="Use git config (default)"
                     value={settings.git_author_email || ""}
                     onChange={(e) => updateSetting("git_author_email", e.target.value)}
+                    onContextMenu={textContextMenu}
                   />
                 </div>
 

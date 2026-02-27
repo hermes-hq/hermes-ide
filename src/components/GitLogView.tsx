@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { gitLog } from "../api/git";
 import type { GitLogEntry, GitLogResult } from "../types/git";
 import { GitCommitDetailView } from "./GitCommitDetailView";
+import { useContextMenu, buildCommitMenuItems } from "../hooks/useContextMenu";
 import "../styles/components/GitPanel.css";
 
 // ─── Props ───────────────────────────────────────────────────────────
@@ -94,6 +95,26 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
   const fetchingRef = useRef(false);
   // Track the current projectPath so stale fetches from a previous path are discarded
   const projectPathRef = useRef(projectPath);
+
+  const contextCommitRef = useRef<GitLogEntry | null>(null);
+
+  const handleCommitAction = useCallback((actionId: string) => {
+    const commit = contextCommitRef.current;
+    if (!commit) return;
+    switch (actionId) {
+      case "commit.copy-sha":
+        navigator.clipboard.writeText(commit.hash).catch(console.error);
+        break;
+      case "commit.copy-message":
+        navigator.clipboard.writeText(commit.summary).catch(console.error);
+        break;
+      case "commit.view-details":
+        setSelectedHash(commit.hash === selectedHash ? null : commit.hash);
+        break;
+    }
+  }, [selectedHash]);
+
+  const { showMenu: showCommitMenu } = useContextMenu(handleCommitAction);
 
   // Reset when projectPath changes
   useEffect(() => {
@@ -218,6 +239,7 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
             key={entry.hash}
             className={`git-log-entry${selectedHash === entry.hash ? " git-log-entry-selected" : ""}`}
             onClick={() => setSelectedHash(entry.hash)}
+            onContextMenu={(e) => { contextCommitRef.current = entry; showCommitMenu(e, buildCommitMenuItems({ sha: entry.hash, message: entry.summary })); }}
           >
             <div className="git-log-row-top">
               <span className="git-log-hash">{entry.short_hash}</span>

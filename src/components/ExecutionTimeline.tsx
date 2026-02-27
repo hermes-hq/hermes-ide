@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ExecutionNode } from "../state/SessionContext";
 import { getExecutionNodes } from "../api/execution";
+import { useContextMenu, buildTimelineMenuItems } from "../hooks/useContextMenu";
 
 interface ExecutionTimelineProps {
   sessionId: string;
@@ -40,24 +41,46 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
   const offsetRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const contextNodeRef = useRef<ExecutionNode | null>(null);
+
+  const handleTimelineAction = useCallback((actionId: string) => {
+    const node = contextNodeRef.current;
+    if (!node) return;
+    switch (actionId) {
+      case "timeline.copy-command":
+        if (node.input) navigator.clipboard.writeText(node.input).catch(console.error);
+        break;
+      case "timeline.copy-output":
+        if (node.output_summary) navigator.clipboard.writeText(node.output_summary).catch(console.error);
+        break;
+    }
+  }, []);
+
+  const { showMenu: showTimelineMenu } = useContextMenu(handleTimelineAction);
+
   // Load initial nodes
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setNodes([]);
     offsetRef.current = 0;
     getExecutionNodes(sessionId, 50, 0)
       .then((fetched) => {
+        if (cancelled) return;
         setNodes(fetched);
         offsetRef.current = fetched.length;
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [sessionId]);
 
   // Listen for new execution nodes in real-time
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen<ExecutionNode>(`execution-node-${sessionId}`, (event) => {
+      if (cancelled) return;
       setNodes((prev) => {
         // Prepend (newest first since query is DESC)
         const exists = prev.find((n) => n.id === event.payload.id);
@@ -65,8 +88,10 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
         return [event.payload, ...prev];
       });
       offsetRef.current += 1;
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, [sessionId]);
 
   // Load more on scroll to bottom (throttled — one request at a time)
@@ -105,6 +130,7 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
           <div
             className="timeline-node"
             onClick={() => setExpandedId(expandedId === node.id ? null : node.id)}
+            onContextMenu={(e) => { contextNodeRef.current = node; showTimelineMenu(e, buildTimelineMenuItems({ command: node.input ?? undefined, output: node.output_summary ?? undefined })); }}
           >
             <span className="timeline-kind mono" style={{ color }}>{kindIcon(node.kind)}</span>
             <span className="timeline-input mono truncate">

@@ -1,7 +1,8 @@
 import "../styles/components/StatusBar.css";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { setSetting } from "../api/settings";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
+import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -30,6 +31,25 @@ export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
   const { dispatch } = useSession();
   const mode = useExecutionMode(active?.id ?? null);
   const [, setTick] = useState(0);
+
+  const handleStatusBarAction = useCallback((actionId: string) => {
+    switch (actionId) {
+      case "status.copy-branch":
+        if (active?.working_directory) {
+          navigator.clipboard.writeText(active.working_directory).catch(console.error);
+        }
+        break;
+      case "status.copy-cost":
+        navigator.clipboard.writeText(`$${totalCost.toFixed(2)}`).catch(console.error);
+        break;
+      case "status.copy-tokens": {
+        const total = totalTokens.input + totalTokens.output;
+        navigator.clipboard.writeText(String(total)).catch(console.error);
+        break;
+      }
+    }
+  }, [active, totalCost, totalTokens]);
+  const { showMenu: showStatusMenu } = useContextMenu(handleStatusBarAction);
 
   // Update elapsed time every 30s
   useEffect(() => {
@@ -108,7 +128,12 @@ export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
         )}
         {totalCost > 0 && (
           <>
-            <span className="status-bar-item status-bar-cost">${totalCost.toFixed(2)}</span>
+            <span className="status-bar-item status-bar-cost" onContextMenu={(e) => {
+              showStatusMenu(e, [
+                menuItem("status.copy-cost", "Copy Cost"),
+                menuItem("status.copy-tokens", "Copy Token Count"),
+              ]);
+            }}>${totalCost.toFixed(2)}</span>
             <span className="status-bar-divider" />
           </>
         )}
@@ -116,7 +141,11 @@ export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
           <>
             <span className="status-bar-item status-bar-elapsed">{formatElapsed(active.created_at)}</span>
             <span className="status-bar-divider" />
-            <span className="status-bar-item mono" title={active.working_directory}>{cwdBasename}</span>
+            <span className="status-bar-item mono" title={active.working_directory} onContextMenu={(e) => {
+              showStatusMenu(e, [
+                menuItem("status.copy-branch", "Copy Working Directory"),
+              ]);
+            }}>{cwdBasename}</span>
             <span className="status-bar-divider" />
           </>
         )}

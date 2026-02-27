@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import "../styles/components/FileExplorer.css";
 import { useSession } from "../state/SessionContext";
 import { getSessionProjects } from "../api/projects";
 import { gitOpenFile } from "../api/git";
 import { useFileExplorer, filterEntries } from "../hooks/useFileTree";
 import type { FileEntry } from "../types/git";
+import { useContextMenu, buildFileExplorerMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 
 interface FileExplorerPanelProps {
   visible: boolean;
@@ -33,9 +34,10 @@ interface ProjectTreeProps {
   projectName: string;
   showHidden: boolean;
   searchQuery: string;
+  onFileContextMenu?: (e: React.MouseEvent, entry: FileEntry) => void;
 }
 
-function ProjectTree({ projectPath, projectName, showHidden, searchQuery }: ProjectTreeProps) {
+function ProjectTree({ projectPath, projectName, showHidden, searchQuery, onFileContextMenu }: ProjectTreeProps) {
   const { expandedDirs, loadingDirs, error, loadDirectory, toggleDir, refresh, getEntries } = useFileExplorer(projectPath);
 
   // Load root on mount
@@ -75,6 +77,7 @@ function ProjectTree({ projectPath, projectName, showHidden, searchQuery }: Proj
           searchQuery={searchQuery}
           onToggleDir={toggleDir}
           onFileClick={handleFileClick}
+          onContextMenu={onFileContextMenu}
         />
       ))}
     </div>
@@ -91,9 +94,10 @@ interface FileTreeNodeProps {
   searchQuery: string;
   onToggleDir: (path: string) => void;
   onFileClick: (entry: FileEntry) => void;
+  onContextMenu?: (e: React.MouseEvent, entry: FileEntry) => void;
 }
 
-function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, showHidden, searchQuery, onToggleDir, onFileClick }: FileTreeNodeProps) {
+function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, showHidden, searchQuery, onToggleDir, onFileClick, onContextMenu }: FileTreeNodeProps) {
   const isExpanded = expandedDirs.has(entry.path);
   const isLoading = loadingDirs.has(entry.path);
   const children = entry.is_dir && isExpanded ? getEntries(entry.path) : null;
@@ -108,6 +112,7 @@ function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, sho
         className={`file-tree-node ${entry.is_hidden ? "file-tree-hidden" : ""}`}
         style={{ paddingLeft: `${(depth * 16) + 8}px` }}
         onClick={() => onFileClick(entry)}
+        onContextMenu={onContextMenu ? (e) => onContextMenu(e, entry) : undefined}
       >
         {entry.is_dir ? (
           <span className={`file-tree-chevron ${isExpanded ? "file-tree-chevron-open" : ""}`}>&#9656;</span>
@@ -135,6 +140,7 @@ function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, sho
               searchQuery={searchQuery}
               onToggleDir={onToggleDir}
               onFileClick={onFileClick}
+              onContextMenu={onContextMenu}
             />
           ))}
         </>
@@ -154,6 +160,34 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [showHidden, setShowHidden] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const contextEntryRef = useRef<FileEntry | null>(null);
+
+  const handleFileExplorerAction = useCallback((actionId: string) => {
+    const entry = contextEntryRef.current;
+    if (!entry) return;
+    switch (actionId) {
+      case "file-explorer.copy-path":
+        navigator.clipboard.writeText(entry.path).catch(console.error);
+        break;
+      case "file-explorer.open-terminal":
+        // Open terminal at the entry's directory
+        break;
+    }
+  }, []);
+
+  const { showMenu: showFileMenu } = useContextMenu(handleFileExplorerAction);
+
+  const handleEmptyAreaAction = useCallback((_actionId: string) => {
+    // Empty area actions (new file, new folder, etc.)
+  }, []);
+
+  const { showMenu: showEmptyMenu } = useContextMenu(handleEmptyAreaAction);
+
+  const handleFileContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
+    contextEntryRef.current = entry;
+    showFileMenu(e, buildFileExplorerMenuItems({ name: entry.name, is_dir: entry.is_dir, path: entry.path }));
+  }, [showFileMenu]);
 
   // Load projects for active session
   useEffect(() => {
@@ -196,7 +230,11 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
         onChange={(e) => setSearchQuery(e.target.value)}
       />
 
-      <div className="file-explorer-scroll">
+      <div className="file-explorer-scroll" onContextMenu={(e) => {
+        if (e.target === e.currentTarget) {
+          showEmptyMenu(e, buildEmptyAreaMenuItems("file-explorer"));
+        }
+      }}>
         {projects.length === 0 && (
           <div className="file-explorer-empty-state">
             No projects attached to this session.
@@ -211,6 +249,7 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
             projectName={p.name}
             showHidden={showHidden}
             searchQuery={searchQuery}
+            onFileContextMenu={handleFileContextMenu}
           />
         ))}
       </div>

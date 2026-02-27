@@ -3,6 +3,7 @@ import "../styles/components/ProcessPanel.css";
 import { useProcesses } from "../hooks/useProcesses";
 import { killProcess, killProcessTree, getProcessDetail, revealProcessInFinder } from "../api/processes";
 import type { ProcessInfo, ProcessSortField, SortDirection, ProcessFilter } from "../types/process";
+import { useContextMenu, buildProcessMenuItems } from "../hooks/useContextMenu";
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -96,84 +97,6 @@ function memColor(pct: number): string {
   return cpuColor(pct);
 }
 
-// ─── ContextMenu ────────────────────────────────────────────────────
-
-interface ContextMenuProps {
-  x: number;
-  y: number;
-  process: ProcessInfo;
-  advancedMode: boolean;
-  onKill: (pid: number, signal: string, name: string) => void;
-  onKillTree: (pid: number, signal: string, name: string) => void;
-  onReveal: (path: string) => void;
-  onClose: () => void;
-}
-
-function ProcessContextMenu({ x, y, process, advancedMode, onKill, onKillTree, onReveal, onClose }: ContextMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [onClose]);
-
-  // Adjust position so menu stays within viewport
-  const style: React.CSSProperties = {
-    position: "fixed",
-    top: y,
-    left: x,
-    zIndex: 9999,
-  };
-
-  return (
-    <div className="process-context-menu" ref={menuRef} style={style}>
-      <button className="process-context-item" onClick={() => { navigator.clipboard.writeText(String(process.pid)); onClose(); }}>
-        Copy PID
-      </button>
-      <button
-        className="process-context-item"
-        disabled={process.is_protected}
-        onClick={() => { onKill(process.pid, "SIGTERM", process.name); onClose(); }}
-      >
-        Send SIGTERM
-      </button>
-      {advancedMode && (
-        <>
-          <button
-            className="process-context-item process-context-item-danger"
-            disabled={process.is_protected}
-            onClick={() => { onKill(process.pid, "SIGKILL", process.name); onClose(); }}
-          >
-            Send SIGKILL
-          </button>
-          <button
-            className="process-context-item process-context-item-danger"
-            disabled={process.is_protected}
-            onClick={() => { onKillTree(process.pid, "SIGTERM", process.name); onClose(); }}
-          >
-            Kill Tree
-          </button>
-        </>
-      )}
-      {process.exe_path && (
-        <button className="process-context-item" onClick={() => { onReveal(process.exe_path); onClose(); }}>
-          Reveal in Finder
-        </button>
-      )}
-    </div>
-  );
-}
-
 // ─── ProcessRow ─────────────────────────────────────────────────────
 
 interface ProcessRowProps {
@@ -263,7 +186,7 @@ const ProcessRow = memo(function ProcessRow({
             )}
             <button
               className="process-action-btn"
-              onClick={() => navigator.clipboard.writeText(String(process.pid))}
+              onClick={() => navigator.clipboard.writeText(String(process.pid)).catch(console.error)}
               title="Copy PID"
             >
               Copy PID
@@ -371,8 +294,8 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
   const [panelWidth, setPanelWidth] = useState(PANEL_DEFAULT_WIDTH);
   const resizeRafRef = useRef<number | null>(null);
 
-  // Context menu state
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; process: ProcessInfo } | null>(null);
+  // Context menu (native popup)
+  const contextProcessRef = useRef<ProcessInfo | null>(null);
 
   // Virtualization
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -497,12 +420,38 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
     document.addEventListener("mouseup", onMouseUp);
   }, [panelWidth]);
 
-  const handleRowContextMenu = useCallback((e: React.MouseEvent, process: ProcessInfo) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, process });
-  }, []);
+  const handleContextAction = useCallback((actionId: string) => {
+    const proc = contextProcessRef.current;
+    if (!proc) return;
+    switch (actionId) {
+      case "process.copy-pid":
+        navigator.clipboard.writeText(String(proc.pid)).catch(console.error);
+        break;
+      case "process.sigterm":
+        handleKillRequest(proc.pid, "SIGTERM", proc.name, false);
+        break;
+      case "process.sigkill":
+        handleKillRequest(proc.pid, "SIGKILL", proc.name, false);
+        break;
+      case "process.kill-tree":
+        handleKillRequest(proc.pid, "SIGTERM", proc.name, true);
+        break;
+      case "process.reveal":
+        if (proc.exe_path) revealProcessInFinder(proc.exe_path).catch(console.error);
+        break;
+    }
+  }, [handleKillRequest]);
 
-  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const { showMenu } = useContextMenu(handleContextAction);
+
+  const handleRowContextMenu = useCallback((e: React.MouseEvent, process: ProcessInfo) => {
+    contextProcessRef.current = process;
+    const items = buildProcessMenuItems(
+      { pid: process.pid, is_protected: process.is_protected, exe_path: process.exe_path || undefined },
+      advancedMode,
+    );
+    showMenu(e, items);
+  }, [advancedMode, showMenu]);
 
   if (!visible) return null;
 
@@ -623,20 +572,6 @@ export function ProcessPanel({ visible }: ProcessPanelProps) {
 
       {/* Resize handle */}
       <div className="process-panel-resize-handle" onMouseDown={handleResizeMouseDown} />
-
-      {/* Context menu */}
-      {contextMenu && (
-        <ProcessContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          process={contextMenu.process}
-          advancedMode={advancedMode}
-          onKill={(pid, signal, name) => handleKillRequest(pid, signal, name, false)}
-          onKillTree={(pid, signal, name) => handleKillRequest(pid, signal, name, true)}
-          onReveal={revealProcessInFinder}
-          onClose={closeContextMenu}
-        />
-      )}
 
       {/* Kill Confirm Dialog */}
       {pendingKill && (

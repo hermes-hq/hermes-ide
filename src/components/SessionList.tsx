@@ -1,15 +1,16 @@
 import "../styles/components/SessionList.css";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { SessionData } from "../state/SessionContext";
 import { updateSessionGroup, updateSessionLabel } from "../api/sessions";
-import { SessionContextMenu } from "./SessionContextMenu";
 import { encodeSessionDrag } from "./SplitPane";
+import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 
 interface SessionListProps {
   sessions: SessionData[];
   activeSessionId: string | null;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onNewSession?: () => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -47,9 +48,15 @@ function sortSessions(sessions: SessionData[]): SessionData[] {
   });
 }
 
-export function SessionList({ sessions, activeSessionId, onSelect, onClose }: SessionListProps) {
+export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession }: SessionListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
+  const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+
+  // Track which session was right-clicked for action handlers
+  const contextSessionRef = useRef<string | null>(null);
 
   const { grouped, allGroups } = useMemo(() => {
     const map = new Map<string | null, SessionData[]>();
@@ -76,22 +83,51 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
     });
   }, []);
 
+  const handleContextAction = useCallback((actionId: string) => {
+    const sid = contextSessionRef.current;
+    if (!sid) return;
+    if (actionId === "session.rename") {
+      setRenameSessionId(sid);
+      setRenameValue("");
+    } else if (actionId === "session.new-group") {
+      setNewGroupSessionId(sid);
+      setNewGroupName("");
+    } else if (actionId === "session.remove-group") {
+      updateSessionGroup(sid, null).catch(console.error);
+    } else if (actionId === "session.duplicate") {
+      // Handled by parent via dispatch
+    } else if (actionId === "session.close") {
+      onClose(sid);
+    } else if (actionId.startsWith("session.set-group.")) {
+      const group = actionId.replace("session.set-group.", "");
+      updateSessionGroup(sid, group).catch(console.error);
+    }
+  }, [onClose]);
+
+  const { showMenu } = useContextMenu(handleContextAction);
+
+  const handleEmptyAreaAction = useCallback((actionId: string) => {
+    if (actionId === "empty.new-session") {
+      onNewSession?.();
+    }
+  }, [onNewSession]);
+
+  const { showMenu: showEmptyMenu } = useContextMenu(handleEmptyAreaAction);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, sessionId: string) => {
-    e.preventDefault();
-    setContextMenu({ sessionId, x: e.clientX, y: e.clientY });
-  }, []);
+    contextSessionRef.current = sessionId;
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    const items = buildSessionMenuItems(
+      { id: session.id, group: session.group || null, phase: session.phase },
+      allGroups,
+    );
+    showMenu(e, items);
+  }, [sessions, allGroups, showMenu]);
 
-  const handleSetGroup = useCallback((group: string | null) => {
-    if (!contextMenu) return;
-    updateSessionGroup(contextMenu.sessionId, group).catch(console.error);
-  }, [contextMenu]);
-
-  const handleRename = useCallback((newLabel: string) => {
-    if (!contextMenu) return;
-    updateSessionLabel(contextMenu.sessionId, newLabel).catch(console.error);
-  }, [contextMenu]);
-
-  const contextSession = contextMenu ? sessions.find((s) => s.id === contextMenu.sessionId) : null;
+  const handleEmptyAreaContextMenu = useCallback((e: React.MouseEvent) => {
+    showEmptyMenu(e, buildEmptyAreaMenuItems("sidebar"));
+  }, [showEmptyMenu]);
 
   const handleDragStart = useCallback((e: React.DragEvent, session: SessionData) => {
     e.dataTransfer.setData("text/plain", encodeSessionDrag(session.id));
@@ -128,7 +164,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
     <div
       key={session.id}
       className={`session-item ${session.id === activeSessionId ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
-      draggable
+      draggable={session.phase !== "destroyed"}
       onDragStart={(e) => handleDragStart(e, session)}
       onClick={() => onSelect(session.id)}
       onContextMenu={(e) => handleContextMenu(e, session.id)}
@@ -179,7 +215,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
       <div className="session-list-header">
         <span className="session-list-title">SESSIONS</span>
       </div>
-      <div className="session-list-body">
+      <div className="session-list-body" onContextMenu={handleEmptyAreaContextMenu}>
         {sessions.length === 0 && (
           <div className="session-list-empty">No active sessions<br/><span className="text-muted">Press ⌘N to create one</span></div>
         )}
@@ -219,17 +255,45 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose }: Se
         })}
       </div>
 
-      {contextMenu && (
-        <SessionContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          sessionId={contextMenu.sessionId}
-          currentGroup={contextSession?.group || null}
-          allGroups={allGroups}
-          onSetGroup={handleSetGroup}
-          onRename={handleRename}
-          onClose={() => setContextMenu(null)}
-        />
+      {/* Inline rename input (appears after native popup "Rename..." action) */}
+      {renameSessionId && (
+        <div className="session-inline-input-overlay" onClick={() => setRenameSessionId(null)}>
+          <div className="session-inline-input" onClick={(e) => e.stopPropagation()}>
+            <input
+              autoFocus
+              placeholder="New name..."
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && renameValue.trim()) {
+                  updateSessionLabel(renameSessionId, renameValue.trim()).catch(console.error);
+                  setRenameSessionId(null);
+                }
+                if (e.key === "Escape") setRenameSessionId(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
+      {/* Inline new group input */}
+      {newGroupSessionId && (
+        <div className="session-inline-input-overlay" onClick={() => setNewGroupSessionId(null)}>
+          <div className="session-inline-input" onClick={(e) => e.stopPropagation()}>
+            <input
+              autoFocus
+              placeholder="Group name..."
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newGroupName.trim()) {
+                  updateSessionGroup(newGroupSessionId, newGroupName.trim()).catch(console.error);
+                  setNewGroupSessionId(null);
+                }
+                if (e.key === "Escape") setNewGroupSessionId(null);
+              }}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

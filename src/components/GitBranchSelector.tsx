@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { GitBranch } from "../types/git";
 import { gitListBranches, gitCreateBranch, gitCheckoutBranch, gitDeleteBranch } from "../api/git";
 import type { GitToast } from "./GitPanel";
+import { useContextMenu, buildBranchMenuItems } from "../hooks/useContextMenu";
 
 interface GitBranchSelectorProps {
   projectPath: string;
@@ -9,6 +10,8 @@ interface GitBranchSelectorProps {
   onRefresh: () => void;
   onToast: (message: string, type?: GitToast["type"]) => void;
   onClose: () => void;
+  /** Ref to the element that triggered the dropdown, used for fixed positioning */
+  triggerRef?: React.RefObject<HTMLElement | null>;
 }
 
 // ─── Pure helpers (exported for testing) ──────────────────────────────
@@ -56,7 +59,7 @@ export function validateBranchName(name: string): string | null {
   return null;
 }
 
-export function GitBranchSelector({ projectPath, onRefresh, onToast, onClose }: GitBranchSelectorProps) {
+export function GitBranchSelector({ projectPath, currentBranch, onRefresh, onToast, onClose, triggerRef }: GitBranchSelectorProps) {
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -66,6 +69,48 @@ export function GitBranchSelector({ projectPath, onRefresh, onToast, onClose }: 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [fixedStyle, setFixedStyle] = useState<React.CSSProperties>({});
+
+  // Position the fixed dropdown below the trigger element's parent section
+  useLayoutEffect(() => {
+    const trigger = triggerRef?.current;
+    if (!trigger) return;
+    // Use the closest .git-project-section as the anchor for full-width alignment
+    const section = trigger.closest(".git-project-section") as HTMLElement | null;
+    const anchor = section || trigger;
+    const rect = anchor.getBoundingClientRect();
+    const maxH = 320;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const top = spaceBelow >= maxH ? rect.bottom + 2 : Math.max(8, rect.top - maxH - 2);
+    setFixedStyle({
+      top: `${top}px`,
+      left: `${rect.left + 8}px`,
+      width: `${rect.width - 16}px`,
+    });
+  }, [triggerRef]);
+
+  const handleBranchAction = useCallback((actionId: string) => {
+    const branch = contextBranchRef.current;
+    if (!branch) return;
+    switch (actionId) {
+      case "branch.checkout":
+        gitCheckoutBranch(projectPath, branch.name)
+          .then(() => { onRefresh(); onToast(`Checked out ${branch.name}`, "success"); })
+          .catch((e) => onToast(String(e), "error"));
+        break;
+      case "branch.copy-name":
+        navigator.clipboard.writeText(branch.name).catch(console.error);
+        break;
+      case "branch.delete":
+        gitDeleteBranch(projectPath, branch.name, false)
+          .then(() => { onRefresh(); onToast(`Deleted ${branch.name}`, "success"); })
+          .catch((e) => onToast(String(e), "error"));
+        break;
+    }
+  }, [projectPath, onRefresh, onToast]);
+
+  const contextBranchRef = useRef<GitBranch | null>(null);
+  const { showMenu: showBranchMenu } = useContextMenu(handleBranchAction);
 
   const loadBranches = useCallback(async () => {
     try {
@@ -172,7 +217,7 @@ export function GitBranchSelector({ projectPath, onRefresh, onToast, onClose }: 
   const { local, remote } = groupBranches(filtered);
 
   return (
-    <div className="git-branch-selector" ref={containerRef}>
+    <div className="git-branch-selector" ref={containerRef} style={fixedStyle}>
       <input
         ref={searchRef}
         className="git-branch-search"
@@ -193,6 +238,7 @@ export function GitBranchSelector({ projectPath, onRefresh, onToast, onClose }: 
                   key={b.name}
                   className={`git-branch-item ${b.is_current ? "git-branch-item-current" : ""}`}
                   onClick={() => !b.is_current && handleCheckout(b.name)}
+                  onContextMenu={(e) => { contextBranchRef.current = b; showBranchMenu(e, buildBranchMenuItems({ name: b.name, is_remote: b.is_remote }, currentBranch || "")); }}
                 >
                   <span className="git-branch-item-name">
                     {b.is_current && <span className="git-branch-current-marker">*</span>}
@@ -227,6 +273,7 @@ export function GitBranchSelector({ projectPath, onRefresh, onToast, onClose }: 
                   key={b.name}
                   className="git-branch-item git-branch-item-remote"
                   onClick={() => handleCheckout(b.name)}
+                  onContextMenu={(e) => { contextBranchRef.current = b; showBranchMenu(e, buildBranchMenuItems({ name: b.name, is_remote: b.is_remote }, currentBranch || "")); }}
                 >
                   <span className="git-branch-item-name">{b.name}</span>
                 </div>

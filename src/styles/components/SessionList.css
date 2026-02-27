@@ -146,41 +146,30 @@
 .session-group-header:hover { background: var(--bg-2); }
 .session-group-cost { color: var(--text-3); font-size: var(--text-sm); }
 
-.session-context-menu {
+/* ─── Inline Input Overlay (rename / new group) ──────── */
+
+.session-inline-input-overlay {
   position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+}
+
+.session-inline-input {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 4px 0;
-  min-width: 160px;
-  z-index: 100;
+  padding: 8px;
+  min-width: 200px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   animation: paletteIn 0.1s ease-out;
 }
 
-.session-context-menu-item {
-  padding: 6px 12px;
-  cursor: pointer;
-  font-size: var(--text-md);
-  color: var(--text-1);
-  transition: background 0.1s;
-}
-.session-context-menu-item:hover { background: var(--bg-3); }
-
-.session-context-menu-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
-}
-
-.session-context-menu-input-row {
-  display: flex;
-  gap: var(--space-1);
-  padding: 4px 8px;
-}
-
-.session-context-menu-input {
-  flex: 1;
+.session-inline-input input {
+  width: 100%;
   background: var(--bg-0);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -190,4 +179,7 @@
   outline: none;
   font-family: var(--font-ui);
 }
-.session-context-menu-input:focus { border-color: var(--accent); }
+
+.session-inline-input input:focus {
+  border-color: var(--accent);
+}

@@ -12,8 +12,8 @@ export function addContextPin(opts: {
   target: string;
   label: string | null;
   priority: number | null;
-}): Promise<void> {
-  return invoke("add_context_pin", opts);
+}): Promise<number> {
+  return invoke<number>("add_context_pin", opts);
 }
 
 export function removeContextPin(id: number): Promise<void> {

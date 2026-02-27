@@ -6,8 +6,11 @@ export function getSettings(): Promise<SettingsMap> {
   return invoke<SettingsMap>("get_settings");
 }
 
-export function getSetting(key: string): Promise<string> {
-  return invoke<string>("get_setting", { key });
+export async function getSetting(key: string): Promise<string> {
+  // NOTE: There is no singular "get_setting" Tauri command — only "get_settings"
+  // (plural) is registered.  We fetch all settings and extract the requested key.
+  const all = await invoke<SettingsMap>("get_settings");
+  return all[key] ?? "";
 }
 
 export function setSetting(key: string, value: string): Promise<void> {

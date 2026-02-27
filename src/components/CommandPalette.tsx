@@ -1,6 +1,7 @@
 import "../styles/components/CommandPalette.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { SessionData } from "../state/SessionContext";
+import { useTextContextMenu } from "../hooks/useTextContextMenu";
 
 interface CommandPaletteProps {
   onClose: () => void;
@@ -36,6 +37,7 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { onContextMenu: textContextMenu } = useTextContextMenu();
 
   const commands: Command[] = useMemo(() => [
     { id: "new", label: "New Session", category: "Session", shortcut: "⌘N", action: () => { onNewSession(); onClose(); } },
@@ -95,6 +97,7 @@ export function CommandPalette({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
+          onContextMenu={textContextMenu}
         />
         <div className="command-palette-results">
           {filtered.map((cmd, i) => (

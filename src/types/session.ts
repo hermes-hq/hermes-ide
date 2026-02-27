@@ -132,6 +132,7 @@ export type SessionAction =
   | { type: "TOGGLE_CONTEXT" }
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "TOGGLE_PALETTE" }
+  | { type: "CLOSE_PALETTE" }
   | { type: "SHOW_STUCK_OVERLAY"; sessionId: string }
   | { type: "DISMISS_STUCK_OVERLAY"; sessionId: string }
   | { type: "SET_EXECUTION_MODE"; sessionId: string; mode: ExecutionMode }

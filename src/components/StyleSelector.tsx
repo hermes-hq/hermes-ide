@@ -1,5 +1,5 @@
 import "../styles/components/StyleSelector.css";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import type { StyleDefinition, SelectedStyle } from "../lib/styles";
 import { validateCustomStyle } from "../lib/styles";
 
@@ -54,6 +54,21 @@ export function StyleSelector({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+
+  // Position the fixed dropdown relative to the search input
+  useLayoutEffect(() => {
+    if (!open || !inputRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    const maxH = 240;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const top = spaceBelow >= maxH ? rect.bottom + 2 : Math.max(8, rect.top - maxH - 2);
+    setDropdownStyle({
+      top: `${top}px`,
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+    });
+  }, [open, query]);
 
   const selectedIds = new Set(selections.map((s) => s.id));
 
@@ -207,7 +222,7 @@ export function StyleSelector({
 
       {/* Dropdown */}
       {open && !showCreateForm && (
-        <div className="style-selector-dropdown" ref={dropdownRef}>
+        <div className="style-selector-dropdown" ref={dropdownRef} style={dropdownStyle}>
           {filtered.map((style, idx) => {
             const sel = selections.find((s) => s.id === style.id);
             const isSelected = !!sel;

@@ -109,15 +109,19 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
 
   // Listen for CWD changes and auto-detect project
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen<string>(`cwd-changed-${sessionId}`, (event) => {
+      if (cancelled) return;
       const newCwd = event.payload;
       setSessionCwd(sessionId, newCwd);
       invalidateContext(newCwd);
       detectProject(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project:", err));
       detectProjectContext(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project context:", err));
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, [sessionId]);
 
   // Listen for command predictions — ghost text in assisted mode, auto-execute in autonomous mode
@@ -157,9 +161,10 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
   // Autonomous mode: auto-execute error resolutions
   useEffect(() => {
     if (mode !== "autonomous") return;
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen<ErrorMatchEvent>(`error-matched-${sessionId}`, (event) => {
-      if (mode !== "autonomous") return;
+      if (cancelled || mode !== "autonomous") return;
       const match = event.payload;
       if (match.resolution && match.occurrence_count >= autoSettings.errorMinOccurrences) {
         dispatch({
@@ -169,14 +174,18 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
           sessionId,
         });
       }
-    }).then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, [sessionId, mode, dispatch, autoSettings.errorMinOccurrences]);
 
   // Error annotation overlay — show known fix bar when a resolution is available
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
     listen<ErrorMatchEvent>(`error-matched-${sessionId}`, (event) => {
+      if (cancelled) return;
       const match = event.payload;
       if (match.resolution) {
         if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
@@ -187,8 +196,11 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
         });
         annotationTimerRef.current = setTimeout(() => setAnnotation(null), 15000);
       }
-    }).then((u) => { unlisten = u; });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
     return () => {
+      cancelled = true;
       unlisten?.();
       if (annotationTimerRef.current) clearTimeout(annotationTimerRef.current);
     };

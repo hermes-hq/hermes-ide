@@ -309,50 +309,6 @@
   background: var(--red-dim);
 }
 
-/* ─── Context Menu ─────────────────────────────────────────── */
-
-.process-context-menu {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  padding: 4px 0;
-  min-width: 140px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.process-context-item {
-  display: block;
-  width: 100%;
-  padding: 6px 12px;
-  background: none;
-  border: none;
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.process-context-item:hover:not(:disabled) {
-  background: var(--bg-hover);
-}
-
-.process-context-item:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.process-context-item-danger {
-  color: var(--red);
-}
-
-.process-context-item-danger:hover:not(:disabled) {
-  background: var(--red-dim);
-}
-
 /* ─── Kill Warning ─────────────────────────────────────────── */
 
 .process-kill-warning {

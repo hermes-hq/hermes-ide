@@ -1,4 +1,6 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useTextContextMenu } from "../hooks/useTextContextMenu";
+import { useContextMenu, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 import type { GitProjectStatus, GitFile, MergeStatus, ConflictStrategy } from "../types/git";
 import {
   gitStage, gitUnstage, gitCommit, gitPush, gitPull, gitOpenFile,
@@ -31,6 +33,7 @@ export function GitProjectSection({ project, onRefresh, onDiffFile, onToast }: G
   const [autoStage, setAutoStage] = useState(false);
   const [branchSelectorOpen, setBranchSelectorOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("changes");
+  const branchTriggerRef = useRef<HTMLSpanElement>(null);
 
   // Merge state
   const [mergeStatus, setMergeStatus] = useState<MergeStatus | null>(null);
@@ -38,6 +41,13 @@ export function GitProjectSection({ project, onRefresh, onDiffFile, onToast }: G
   const [completing, setCompleting] = useState(false);
   const [conflictViewTarget, setConflictViewTarget] = useState<string | null>(null);
   const [, setResolvedStrategies] = useState<Record<string, string>>({});
+
+  const { onContextMenu: textContextMenu } = useTextContextMenu();
+
+  const handleEmptyAreaAction = useCallback((_actionId: string) => {
+    // Empty area actions (refresh, etc.)
+  }, []);
+  const { showMenu: showEmptyMenu } = useContextMenu(handleEmptyAreaAction);
 
   const staged = useMemo(() => project.files.filter((f) => f.area === "staged"), [project.files]);
   const unstaged = useMemo(() => project.files.filter((f) => f.area === "unstaged"), [project.files]);
@@ -238,11 +248,12 @@ export function GitProjectSection({ project, onRefresh, onDiffFile, onToast }: G
 
   return (
     <div className="git-project-section" style={{ position: "relative" }}>
-      <div className="git-project-header" onClick={() => setExpanded((v) => !v)}>
+      <div className="git-project-header" onClick={() => setExpanded((v) => !v)} onContextMenu={(e) => showEmptyMenu(e, buildEmptyAreaMenuItems("git-section"))}>
         <span className={`git-project-chevron ${expanded ? "git-project-chevron-open" : ""}`}>&#9656;</span>
         <span className="git-project-name">{project.project_name}</span>
         {project.branch && (
           <span
+            ref={branchTriggerRef}
             className="git-project-branch git-project-branch-clickable"
             onClick={(e) => { e.stopPropagation(); setBranchSelectorOpen((v) => !v); }}
             title="Switch branch"
@@ -267,6 +278,7 @@ export function GitProjectSection({ project, onRefresh, onDiffFile, onToast }: G
           onRefresh={onRefresh}
           onToast={onToast}
           onClose={() => setBranchSelectorOpen(false)}
+          triggerRef={branchTriggerRef}
         />
       )}
 
@@ -412,6 +424,7 @@ export function GitProjectSection({ project, onRefresh, onDiffFile, onToast }: G
                         handleCommit();
                       }
                     }}
+                    onContextMenu={textContextMenu}
                   />
                   <div className="git-commit-actions">
                     <button

@@ -7,6 +7,7 @@ interface GitFileRowProps {
   onUnstage?: (path: string) => void;
   onOpen?: (path: string) => void;
   onClick?: (file: GitFile) => void;
+  onContextMenu?: (e: React.MouseEvent, file: GitFile) => void;
 }
 
 const STATUS_LABELS: Record<string, { letter: string; className: string }> = {
@@ -25,11 +26,12 @@ export const GitFileRow = memo(function GitFileRow({
   onUnstage,
   onOpen,
   onClick,
+  onContextMenu,
 }: GitFileRowProps) {
   const info = STATUS_LABELS[file.status] || { letter: "?", className: "git-status-untracked" };
 
   return (
-    <div className="git-file-row" onClick={() => onClick?.(file)}>
+    <div className="git-file-row" onClick={() => onClick?.(file)} onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); e.stopPropagation(); onContextMenu(e, file); } }}>
       <span className={`git-file-status ${info.className}`}>{info.letter}</span>
       <span className="git-file-path" title={file.path}>
         {file.path}
