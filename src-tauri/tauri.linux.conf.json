@@ -1,0 +1,13 @@
+{
+  "app": {
+    "windows": [
+      {
+        "titleBarStyle": "Visible",
+        "hiddenTitle": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["deb", "appimage"]
+  }
+}

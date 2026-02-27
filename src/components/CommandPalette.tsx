@@ -2,6 +2,7 @@ import "../styles/components/CommandPalette.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { SessionData } from "../state/SessionContext";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
+import { fmt } from "../utils/platform";
 
 interface CommandPaletteProps {
   onClose: () => void;
@@ -40,29 +41,29 @@ export function CommandPalette({
   const { onContextMenu: textContextMenu } = useTextContextMenu();
 
   const commands: Command[] = useMemo(() => [
-    { id: "new", label: "New Session", category: "Session", shortcut: "⌘N", action: () => { onNewSession(); onClose(); } },
-    { id: "ctx", label: "Toggle Context Panel", category: "View", shortcut: "⌘E", action: () => { onToggleContext(); onClose(); } },
-    { id: "sidebar", label: "Toggle Session List", category: "View", shortcut: "⌘B", action: () => { onToggleSessions(); onClose(); } },
-    { id: "settings", label: "Settings", category: "App", shortcut: "⌘,", action: () => { onOpenSettings(); onClose(); } },
+    { id: "new", label: "New Session", category: "Session", shortcut: fmt("{mod}N"), action: () => { onNewSession(); onClose(); } },
+    { id: "ctx", label: "Toggle Context Panel", category: "View", shortcut: fmt("{mod}E"), action: () => { onToggleContext(); onClose(); } },
+    { id: "sidebar", label: "Toggle Session List", category: "View", shortcut: fmt("{mod}B"), action: () => { onToggleSessions(); onClose(); } },
+    { id: "settings", label: "Settings", category: "App", shortcut: fmt("{mod},"), action: () => { onOpenSettings(); onClose(); } },
     { id: "settings-general", label: "Settings / General", category: "Settings", hidden: true, action: () => { onOpenSettings("general"); onClose(); } },
     { id: "settings-appearance", label: "Settings / Appearance", category: "Settings", hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
     { id: "settings-theme", label: "Settings / Theme", category: "Settings", hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
     { id: "settings-autonomous", label: "Settings / Autonomous", category: "Settings", hidden: true, action: () => { onOpenSettings("autonomous"); onClose(); } },
     { id: "settings-shortcuts", label: "Settings / Shortcuts", category: "Settings", hidden: true, action: () => { onOpenSettings("shortcuts"); onClose(); } },
     { id: "workspace", label: "Projects", category: "App", action: () => { onOpenWorkspace(); onClose(); } },
-    ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: "Cost Dashboard", category: "App", shortcut: "⌘$", action: () => { onOpenCostDashboard(); onClose(); } }] : []),
-    ...(onToggleFlowMode ? [{ id: "flow-mode", label: "Toggle Flow Mode", category: "View", shortcut: "⌘⇧Z", action: () => { onToggleFlowMode(); onClose(); } }] : []),
+    ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: "Cost Dashboard", category: "App", shortcut: fmt("{mod}$"), action: () => { onOpenCostDashboard(); onClose(); } }] : []),
+    ...(onToggleFlowMode ? [{ id: "flow-mode", label: "Toggle Flow Mode", category: "View", shortcut: fmt("{mod}{shift}Z"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
     ...(onAttachProject ? [{ id: "attach-project", label: "Add Project...", category: "Projects", action: () => { onAttachProject(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: "Scan Current Directory", category: "Projects", action: () => { onScanCwd(); onClose(); } }] : []),
-    ...(onOpenComposer ? [{ id: "composer", label: "Prompt Composer", category: "Tools", shortcut: "⌘J", action: () => { onOpenComposer(); onClose(); } }] : []),
-    ...(onOpenShortcuts ? [{ id: "shortcuts", label: "Keyboard Shortcuts", category: "Help", shortcut: "⌘/", action: () => { onOpenShortcuts(); onClose(); } }] : []),
-    ...(onToggleGit ? [{ id: "git", label: "Toggle Git Panel", category: "View", shortcut: "⌘G", action: () => { onToggleGit(); onClose(); } }] : []),
-    ...(onToggleSearch ? [{ id: "search", label: "Search Project", category: "View", shortcut: "⌘⇧F", action: () => { onToggleSearch(); onClose(); } }] : []),
+    ...(onOpenComposer ? [{ id: "composer", label: "Prompt Composer", category: "Tools", shortcut: fmt("{mod}J"), action: () => { onOpenComposer(); onClose(); } }] : []),
+    ...(onOpenShortcuts ? [{ id: "shortcuts", label: "Keyboard Shortcuts", category: "Help", shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
+    ...(onToggleGit ? [{ id: "git", label: "Toggle Git Panel", category: "View", shortcut: fmt("{mod}G"), action: () => { onToggleGit(); onClose(); } }] : []),
+    ...(onToggleSearch ? [{ id: "search", label: "Search Project", category: "View", shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,
       label: s.label,
       category: s.detected_agent?.name || "Session",
-      shortcut: i < 9 ? `⌘${i + 1}` : undefined,
+      shortcut: i < 9 ? fmt(`{mod}${i + 1}`) : undefined,
       action: () => { onSelectSession(s.id); onClose(); },
     })),
   ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch]);

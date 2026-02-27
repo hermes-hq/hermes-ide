@@ -1,6 +1,7 @@
 import "../styles/components/PromptComposer.css";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
+import { fmt, isActionMod } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { writeToSession } from "../api/sessions";
 import { dismissSuggestions, clearGhostText, getInputBufferLength, clearInputBuffer } from "../terminal/TerminalPool";
@@ -302,13 +303,13 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
       onClose();
       return;
     }
-    // ⌘T — toggle template picker
-    if (e.key === "t" && e.metaKey && !e.shiftKey && !e.altKey) {
+    // Mod+T — toggle template picker
+    if (e.key === "t" && isActionMod(e) && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       toggleTemplatePicker();
       return;
     }
-    if (e.key === "Enter" && e.metaKey) {
+    if (e.key === "Enter" && isActionMod(e)) {
       e.preventDefault();
       e.stopPropagation();
       sendPrompt();
@@ -348,7 +349,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
                   <strong>Start from a template</strong>
                   <span>Browse {BUILT_IN_TEMPLATES.length} ready-to-use prompt templates</span>
                 </span>
-                <kbd className="prompt-composer-empty-cta-kbd">&#8984;T</kbd>
+                <kbd className="prompt-composer-empty-cta-kbd">{fmt("{mod}T")}</kbd>
               </button>
             )}
 
@@ -466,7 +467,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
           <div className="prompt-composer-actions-right">
             <button className="prompt-composer-btn" onClick={copyPrompt} disabled={!compiled.trim()}>Copy</button>
             <button className="prompt-composer-btn prompt-composer-btn-send" onClick={sendPrompt} disabled={!compiled.trim()}>
-              Send <kbd>&#8984;&#8629;</kbd>
+              Send <kbd>{fmt("{mod}")}&#8629;</kbd>
             </button>
           </div>
         </div>

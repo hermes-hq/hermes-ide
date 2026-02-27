@@ -109,8 +109,7 @@ fn make_callbacks<'a>() -> RemoteCallbacks<'a> {
         if allowed_types.contains(git2::CredentialType::SSH_KEY)
             && !tried_ssh_key_file.swap(true, Ordering::SeqCst)
         {
-            if let Ok(home_str) = std::env::var("HOME") {
-                let home = std::path::PathBuf::from(home_str);
+            if let Some(home) = dirs::home_dir() {
                 let key_candidates = [
                     home.join(".ssh").join("id_ed25519"),
                     home.join(".ssh").join("id_rsa"),
@@ -831,11 +830,7 @@ pub fn git_diff(
 pub fn git_open_file(project_path: String, file_path: String) -> Result<(), String> {
     // 1F: Path traversal guard
     let full_path = safe_join(&project_path, &file_path)?;
-    std::process::Command::new("open")
-        .arg(full_path.to_string_lossy().to_string())
-        .spawn()
-        .map_err(|e| format!("Failed to open file: {}", e))?;
-    Ok(())
+    crate::platform::open_file(&full_path.to_string_lossy())
 }
 
 // ─── Branch Management Commands ─────────────────────────────────────
@@ -1188,7 +1183,8 @@ pub fn list_directory(
             .strip_prefix(&base)
             .unwrap_or(&full_path)
             .to_string_lossy()
-            .to_string();
+            .to_string()
+            .replace('\\', "/");
 
         let size = if is_dir { None } else { Some(metadata.len()) };
 

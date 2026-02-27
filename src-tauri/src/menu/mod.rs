@@ -54,22 +54,35 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let settings = MenuItemBuilder::with_id("hermes.settings", "Settings...")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
-    let services = PredefinedMenuItem::services(app, None)?;
-    let hide = PredefinedMenuItem::hide(app, None)?;
-    let hide_others = PredefinedMenuItem::hide_others(app, None)?;
-    let show_all = PredefinedMenuItem::show_all(app, None)?;
     let quit = PredefinedMenuItem::quit(app, None)?;
 
+    #[cfg(target_os = "macos")]
+    let hermes_menu = {
+        let services = PredefinedMenuItem::services(app, None)?;
+        let hide = PredefinedMenuItem::hide(app, None)?;
+        let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+        let show_all = PredefinedMenuItem::show_all(app, None)?;
+
+        SubmenuBuilder::new(app, "HERMES-IDE")
+            .item(&about)
+            .separator()
+            .item(&settings)
+            .separator()
+            .item(&services)
+            .separator()
+            .item(&hide)
+            .item(&hide_others)
+            .item(&show_all)
+            .separator()
+            .item(&quit)
+            .build()?
+    };
+
+    #[cfg(not(target_os = "macos"))]
     let hermes_menu = SubmenuBuilder::new(app, "HERMES-IDE")
         .item(&about)
         .separator()
         .item(&settings)
-        .separator()
-        .item(&services)
-        .separator()
-        .item(&hide)
-        .item(&hide_others)
-        .item(&show_all)
         .separator()
         .item(&quit)
         .build()?;
@@ -164,9 +177,7 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .accelerator("CmdOrCtrl+Shift+F")
         .build(app)?;
 
-    let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
-
-    let view_menu = SubmenuBuilder::new(app, "View")
+    let mut view_builder = SubmenuBuilder::new(app, "View")
         .item(&toggle_sidebar)
         .item(&command_palette)
         .item(&prompt_composer)
@@ -182,9 +193,23 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .separator()
         .item(&cost_dashboard)
         .item(&shortcuts)
-        .separator()
-        .item(&fullscreen)
-        .build()?;
+        .separator();
+
+    #[cfg(target_os = "macos")]
+    {
+        let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
+        view_builder = view_builder.item(&fullscreen);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let fullscreen = MenuItemBuilder::with_id("view.fullscreen", "Toggle Fullscreen")
+            .accelerator("F11")
+            .build(app)?;
+        view_builder = view_builder.item(&fullscreen);
+    }
+
+    let view_menu = view_builder.build()?;
 
     // ── Session menu ──
     let copy_context = MenuItemBuilder::with_id("session.copy-context", "Copy Context")

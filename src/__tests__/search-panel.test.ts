@@ -393,23 +393,23 @@ describe("ShortcutsPanel accuracy", () => {
   const allShortcuts = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
   const findShortcut = (keys: string) => allShortcuts.find((s) => s.keys === keys);
 
-  it("⌘⇧F is mapped to Search Project, not Flow Mode", () => {
-    const s = findShortcut("⌘⇧F");
+  it("{mod}{shift}F is mapped to Search Project, not Flow Mode", () => {
+    const s = findShortcut("{mod}{shift}F");
     expect(s).toBeDefined();
     expect(s!.action).toBe("Search Project");
     expect(s!.action).not.toContain("Flow");
   });
 
-  it("⌘⇧Z is mapped to Toggle Flow Mode", () => {
-    const s = findShortcut("⌘⇧Z");
+  it("{mod}{shift}Z is mapped to Toggle Flow Mode", () => {
+    const s = findShortcut("{mod}{shift}Z");
     expect(s).toBeDefined();
     expect(s!.action).toBe("Toggle Flow Mode");
   });
 
-  it("left-panel tabs are listed (⌘P, ⌘G, ⌘F)", () => {
-    expect(findShortcut("⌘P")).toBeDefined();
-    expect(findShortcut("⌘G")).toBeDefined();
-    expect(findShortcut("⌘F")).toBeDefined();
+  it("left-panel tabs are listed ({mod}P, {mod}G, {mod}F)", () => {
+    expect(findShortcut("{mod}P")).toBeDefined();
+    expect(findShortcut("{mod}G")).toBeDefined();
+    expect(findShortcut("{mod}F")).toBeDefined();
   });
 
   it("no duplicate key bindings", () => {

@@ -1,6 +1,7 @@
 mod db;
 mod git;
 mod menu;
+mod platform;
 mod process;
 mod pty;
 mod realm;

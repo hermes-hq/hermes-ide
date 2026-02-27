@@ -1,6 +1,7 @@
 import "../styles/components/TemplatePicker.css";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { TEMPLATE_CATEGORIES, type PromptTemplate, type TemplateCategory } from "../lib/templates";
+import { fmt } from "../utils/platform";
 
 interface TemplatePickerProps {
   builtInTemplates: PromptTemplate[];
@@ -137,7 +138,7 @@ export function TemplatePicker({
         ref={btnRef}
         className="template-picker-btn"
         onClick={onToggle}
-        title="Browse templates (⌘T)"
+        title={`Browse templates (${fmt("{mod}T")})`}
       >
         <span className="template-picker-btn-icon">&#9776;</span>
         Templates

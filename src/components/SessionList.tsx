@@ -4,6 +4,7 @@ import { SessionData } from "../state/SessionContext";
 import { updateSessionGroup, updateSessionLabel } from "../api/sessions";
 import { encodeSessionDrag } from "./SplitPane";
 import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
+import { fmt } from "../utils/platform";
 
 interface SessionListProps {
   sessions: SessionData[];
@@ -217,7 +218,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       </div>
       <div className="session-list-body" onContextMenu={handleEmptyAreaContextMenu}>
         {sessions.length === 0 && (
-          <div className="session-list-empty">No active sessions<br/><span className="text-muted">Press ⌘N to create one</span></div>
+          <div className="session-list-empty">No active sessions<br/><span className="text-muted">Press {fmt("{mod}N")} to create one</span></div>
         )}
 
         {/* Ungrouped sessions first */}

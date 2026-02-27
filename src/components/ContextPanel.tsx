@@ -1,5 +1,6 @@
 import "../styles/components/ContextPanel.css";
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
+import { fmt } from "../utils/platform";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SessionData, useExecutionMode, useSession } from "../state/SessionContext";
@@ -229,7 +230,7 @@ function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, 
   workspaceInput: string; setWorkspaceInput: (v: string) => void; onAddPath: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const basename = cwd.split("/").pop() || cwd;
+  const basename = cwd.replace(/\\/g, "/").split("/").pop() || cwd;
 
   return (
     <div className="ctx-section">
@@ -567,7 +568,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
           <button
             className={`ctx-copy-btn ${copyDone ? "ctx-copy-btn-done" : ""}`}
             onClick={handleCopyContext}
-            title="Copy context bundle (⌘⇧C)"
+            title={`Copy context bundle (${fmt("{mod}{shift}C")})`}
           >
             {copyDone ? "Copied" : "Copy"}
           </button>

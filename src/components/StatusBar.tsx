@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { setSetting } from "../api/settings";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
+import { fmt } from "../utils/platform";
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -71,7 +72,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
     setSetting("execution_mode", next).catch(console.error);
   };
 
-  const cwdBasename = active && active.working_directory ? active.working_directory.split("/").pop() || active.working_directory : "";
+  const cwdBasename = active && active.working_directory ? active.working_directory.replace(/\\/g, "/").split("/").pop() || active.working_directory : "";
 
   return (
     <div className="status-bar">
@@ -163,7 +164,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           <button
             className="status-shortcuts-btn"
             onClick={onOpenShortcuts}
-            title="Keyboard Shortcuts (⌘/)"
+            title={`Keyboard Shortcuts (${fmt("{mod}/")})`}
           >
             ⌨
           </button>

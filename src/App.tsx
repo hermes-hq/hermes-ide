@@ -4,6 +4,7 @@ import "./styles/themes.css";
 import "./styles/topbar.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { sendShortcutCommand } from "./terminal/TerminalPool";
+import { fmt, isActionMod, isMac } from "./utils/platform";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
@@ -58,7 +59,7 @@ function AppContent() {
   // (Cmd+Alt+Arrow for pane nav, Cmd+1-9 for session switch, F1/F3 for overlays)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!e.metaKey) return;
+      if (!isActionMod(e)) return;
 
       // Suppress session-switch shortcuts while any modal/overlay is open
       const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
@@ -203,8 +204,8 @@ function AppContent() {
     <div className={`app ${ui.flowMode ? "flow-mode" : ""}`}>
       {/* Top bar */}
       <div className="topbar">
-        {/* Traffic light spacer */}
-        <div className="topbar-traffic-spacer" />
+        {/* Traffic light spacer (macOS only — reserve space for native window controls) */}
+        {isMac && <div className="topbar-traffic-spacer" />}
 
         {/* Center — decorative, pass-through for drag */}
         <div className="topbar-center">
@@ -225,11 +226,11 @@ function AppContent() {
           <ActivityBar
             side="left"
             tabs={[
-              { id: "sessions", label: "Sessions (⌘B)", icon: SessionsIcon, badge: sessions.length || undefined },
-              { id: "processes", label: "Processes (⌘P)", icon: ProcessesIcon },
-              { id: "git", label: "Git (⌘G)", icon: GitIcon },
-              { id: "files", label: "Files (⌘F)", icon: FilesIcon },
-              { id: "search", label: "Search (⌘⇧F)", icon: SearchIcon },
+              { id: "sessions", label: `Sessions (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
+              { id: "processes", label: `Processes (${fmt("{mod}P")})`, icon: ProcessesIcon },
+              { id: "git", label: `Git (${fmt("{mod}G")})`, icon: GitIcon },
+              { id: "files", label: `Files (${fmt("{mod}F")})`, icon: FilesIcon },
+              { id: "search", label: `Search (${fmt("{mod}{shift}F")})`, icon: SearchIcon },
             ]}
             activeTabId={
               ui.searchPanelOpen ? "search" :
@@ -239,7 +240,7 @@ function AppContent() {
               ui.sessionListCollapsed ? null : "sessions"
             }
             onTabClick={(tabId) => dispatch({ type: "SET_LEFT_TAB", tab: tabId as "sessions" | "processes" | "git" | "files" | "search" })}
-            topAction={{ icon: PlusIcon, label: "New Session (⌘N)", onClick: () => setSessionCreatorOpen(true) }}
+            topAction={{ icon: PlusIcon, label: `New Session (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen(true) }}
           />
         )}
         {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !ui.gitPanelOpen && !ui.fileExplorerOpen && !ui.searchPanelOpen && (
@@ -310,7 +311,7 @@ function AppContent() {
           <ActivityBar
             side="right"
             tabs={[
-              { id: "context", label: "Context (⌘E)", icon: ContextIcon },
+              { id: "context", label: `Context (${fmt("{mod}E")})`, icon: ContextIcon },
             ]}
             activeTabId={ui.contextPanelOpen ? "context" : null}
             onTabClick={() => dispatch({ type: "TOGGLE_CONTEXT" })}

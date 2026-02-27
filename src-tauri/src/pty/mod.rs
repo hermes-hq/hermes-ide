@@ -910,6 +910,17 @@ impl OutputAnalyzer {
         let raw_text = String::from_utf8_lossy(raw);
         if let Some(caps) = OSC7_RE.captures(&raw_text) {
             let path = percent_decode(&caps[1]);
+            // On Windows, OSC 7 emits file:///C:/... which captures as /C:/...
+            // Strip the leading slash before the drive letter to get a valid path.
+            #[cfg(windows)]
+            let path = if path.len() >= 3
+                && path.starts_with('/')
+                && path.as_bytes().get(2) == Some(&b':')
+            {
+                path[1..].replace('/', "\\")
+            } else {
+                path
+            };
             if self.current_cwd.as_deref() != Some(&path) {
                 self.current_cwd = Some(path.clone());
                 self.pending_cwd = Some(path);
@@ -1521,11 +1532,40 @@ impl PtyManager {
 }
 
 fn detect_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    #[cfg(unix)]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| {
+            // Prefer zsh on macOS, bash on Linux
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        })
+    }
+
+    #[cfg(windows)]
+    {
+        // Try PowerShell first, then fall back to cmd.exe
+        if crate::platform::command_exists("pwsh") {
+            "pwsh".to_string()
+        } else if crate::platform::command_exists("powershell") {
+            "powershell".to_string()
+        } else {
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        }
+    }
 }
 
 fn get_working_directory() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+    crate::platform::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            #[cfg(windows)]
+            { std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string()) }
+            #[cfg(not(windows))]
+            { "/".to_string() }
+        })
 }
 
 // ─── Tauri Commands ─────────────────────────────────────────────────
@@ -1590,11 +1630,24 @@ pub fn create_session(
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    let mut cmd = CommandBuilder::new("env");
-    cmd.arg("-u"); cmd.arg("CLAUDECODE");
-    cmd.arg("-u"); cmd.arg("CLAUDE_CODE");
-    cmd.arg(&shell);
-    cmd.arg("-l");
+    #[cfg(unix)]
+    let mut cmd = {
+        let mut c = CommandBuilder::new("env");
+        c.arg("-u"); c.arg("CLAUDECODE");
+        c.arg("-u"); c.arg("CLAUDE_CODE");
+        c.arg(&shell);
+        c.arg("-l");
+        c
+    };
+
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = CommandBuilder::new(&shell);
+        c.env_remove("CLAUDECODE");
+        c.env_remove("CLAUDE_CODE");
+        c
+    };
+
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -2121,11 +2174,17 @@ pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) 
         "bash"
     } else if shell.contains("fish") {
         "fish"
+    } else if shell.contains("pwsh") || shell.contains("powershell") {
+        "powershell"
+    } else if shell.contains("cmd") {
+        "cmd"
     } else {
         "unknown"
     };
 
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::platform::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
     let mut plugins = Vec::new();
     let mut has_oh_my_zsh = false;
     let mut has_autosuggest = false;
@@ -2133,26 +2192,24 @@ pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) 
     let mut has_starship = false;
     let mut has_powerlevel10k = false;
 
-    // Check for Oh My Zsh
-    if std::path::Path::new(&format!("{}/.oh-my-zsh", home)).exists() {
+    let home_path = std::path::PathBuf::from(&home);
+
+    // Check for Oh My Zsh (Unix only)
+    if home_path.join(".oh-my-zsh").exists() {
         has_oh_my_zsh = true;
         plugins.push("oh-my-zsh".to_string());
     }
 
     // Check for starship (check config file and common install locations)
-    let starship_in_path = std::process::Command::new("which")
-        .arg("starship")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if starship_in_path || std::path::Path::new(&format!("{}/.config/starship.toml", home)).exists() {
+    let starship_in_path = crate::platform::command_exists("starship");
+    if starship_in_path || home_path.join(".config").join("starship.toml").exists() {
         has_starship = true;
         plugins.push("starship".to_string());
     }
 
     // Read .zshrc for plugin detection
     if shell_type == "zsh" {
-        if let Ok(zshrc) = std::fs::read_to_string(format!("{}/.zshrc", home)) {
+        if let Ok(zshrc) = std::fs::read_to_string(home_path.join(".zshrc")) {
             if zshrc.contains("zsh-autosuggestions") {
                 has_autosuggest = true;
                 plugins.push("zsh-autosuggestions".to_string());
@@ -2173,6 +2230,12 @@ pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) 
         has_autosuggest = true;
     }
 
+    // PowerShell has PSReadLine autosuggestions
+    if shell_type == "powershell" {
+        has_autosuggest = true;
+        plugins.push("PSReadLine".to_string());
+    }
+
     Ok(ShellEnvironment {
         shell_type: shell_type.to_string(),
         plugins_detected: plugins,
@@ -2186,21 +2249,42 @@ pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) 
 
 #[tauri::command]
 pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, String> {
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let home_dir = crate::platform::home_dir()
+        .ok_or_else(|| "Cannot determine home directory".to_string())?;
 
     let history_path = if shell.contains("zsh") || shell == "zsh" {
-        format!("{}/.zsh_history", home)
+        home_dir.join(".zsh_history").to_string_lossy().to_string()
     } else if shell.contains("bash") || shell == "bash" {
-        format!("{}/.bash_history", home)
+        home_dir.join(".bash_history").to_string_lossy().to_string()
     } else if shell.contains("fish") || shell == "fish" {
-        format!("{}/.local/share/fish/fish_history", home)
+        home_dir.join(".local").join("share").join("fish").join("fish_history")
+            .to_string_lossy().to_string()
+    } else if shell.contains("pwsh") || shell.contains("powershell") {
+        // PowerShell history via PSReadLine
+        #[cfg(windows)]
+        {
+            let appdata = std::env::var("APPDATA").unwrap_or_default();
+            if shell.contains("pwsh") {
+                // PowerShell 7+ (Core)
+                format!("{}\\Microsoft\\PowerShell\\PSReadLine\\ConsoleHost_history.txt", appdata)
+            } else {
+                // Windows PowerShell 5.1
+                format!("{}\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt", appdata)
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            home_dir.join(".local").join("share").join("powershell")
+                .join("PSReadLine").join("ConsoleHost_history.txt")
+                .to_string_lossy().to_string()
+        }
     } else {
         // Try zsh first, then bash
-        let zsh_path = format!("{}/.zsh_history", home);
-        if std::path::Path::new(&zsh_path).exists() {
-            zsh_path
+        let zsh_path = home_dir.join(".zsh_history");
+        if zsh_path.exists() {
+            zsh_path.to_string_lossy().to_string()
         } else {
-            format!("{}/.bash_history", home)
+            home_dir.join(".bash_history").to_string_lossy().to_string()
         }
     };
 

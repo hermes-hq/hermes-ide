@@ -4,6 +4,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { isMac } from "../utils/platform";
 import { writeToSession, resizeSession } from "../api/sessions";
 import { suggest } from "./intelligence/suggestionEngine";
 import { resolveIntent, getIntentSuggestions } from "./intentCommands";
@@ -268,7 +269,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   // that MUST go through keydown ensures dead keys are suppressed.
   //
   // onBinary was removed — it was a redundant duplicate path.
-  // ── Composition state for dead key handling ──
+  // ── Composition state for dead key handling (macOS WKWebView only) ──
   // WKWebView dead key flow:
   //   1. compositionend fires with composed char (e.g. "'")
   //   2. xterm fires onData("'") — legitimate, first occurrence
@@ -286,21 +287,23 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   let postCompChar: string | null = null; // The resolving character to dedup
   let postCompCharFired = false;
 
-  container.addEventListener("compositionend", (e: CompositionEvent) => {
-    lastComposedChar = e.data || null;
-    composedDataFired = false;
-    postCompPassOne = true;
-    postCompChar = null;
-    postCompCharFired = false;
-    // Safety timeout: clear all composition state
-    setTimeout(() => {
-      lastComposedChar = null;
+  if (isMac) {
+    container.addEventListener("compositionend", (e: CompositionEvent) => {
+      lastComposedChar = e.data || null;
       composedDataFired = false;
-      postCompPassOne = false;
+      postCompPassOne = true;
       postCompChar = null;
       postCompCharFired = false;
-    }, 200);
-  }, true); // capture phase — fires BEFORE xterm's bubbling-phase handler
+      // Safety timeout: clear all composition state
+      setTimeout(() => {
+        lastComposedChar = null;
+        composedDataFired = false;
+        postCompPassOne = false;
+        postCompChar = null;
+        postCompCharFired = false;
+      }, 200);
+    }, true); // capture phase — fires BEFORE xterm's bubbling-phase handler
+  }
 
   terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
     // Only intercept keydown — keyup is harmless

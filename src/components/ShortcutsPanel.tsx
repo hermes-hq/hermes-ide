@@ -1,5 +1,6 @@
 import "../styles/components/ShortcutsPanel.css";
 import { useEffect } from "react";
+import { fmt } from "../utils/platform";
 
 export interface Shortcut {
   keys: string;
@@ -15,37 +16,37 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     label: "General",
     shortcuts: [
-      { keys: "⌘N", action: "New Session" },
-      { keys: "⌘W", action: "Close Pane / Session" },
-      { keys: "⌘K", action: "Command Palette" },
-      { keys: "⌘,", action: "Settings" },
-      { keys: "⌘/", action: "Keyboard Shortcuts" },
-      { keys: "⌘J", action: "Prompt Composer" },
-      { keys: "⌘⇧C", action: "Copy Context" },
-      { keys: "⌘⇧F", action: "Search Project" },
-      { keys: "⌘⇧Z", action: "Toggle Flow Mode" },
+      { keys: "{mod}N", action: "New Session" },
+      { keys: "{mod}W", action: "Close Pane / Session" },
+      { keys: "{mod}K", action: "Command Palette" },
+      { keys: "{mod},", action: "Settings" },
+      { keys: "{mod}/", action: "Keyboard Shortcuts" },
+      { keys: "{mod}J", action: "Prompt Composer" },
+      { keys: "{mod}{shift}C", action: "Copy Context" },
+      { keys: "{mod}{shift}F", action: "Search Project" },
+      { keys: "{mod}{shift}Z", action: "Toggle Flow Mode" },
     ],
   },
   {
     label: "Panels",
     shortcuts: [
-      { keys: "⌘B", action: "Toggle Sessions Sidebar" },
-      { keys: "⌘E", action: "Toggle Context Panel" },
-      { keys: "⌘P", action: "Processes" },
-      { keys: "⌘G", action: "Git" },
-      { keys: "⌘F", action: "Files" },
-      { keys: "⌘T", action: "Toggle Timeline" },
-      { keys: "⌘$", action: "Cost Dashboard" },
+      { keys: "{mod}B", action: "Toggle Sessions Sidebar" },
+      { keys: "{mod}E", action: "Toggle Context Panel" },
+      { keys: "{mod}P", action: "Processes" },
+      { keys: "{mod}G", action: "Git" },
+      { keys: "{mod}F", action: "Files" },
+      { keys: "{mod}T", action: "Toggle Timeline" },
+      { keys: "{mod}$", action: "Cost Dashboard" },
     ],
   },
   {
     label: "Panes & Sessions",
     shortcuts: [
-      { keys: "⌘D", action: "Split Horizontal" },
-      { keys: "⌘⇧D", action: "Split Vertical" },
-      { keys: "⌘⌥→", action: "Focus Next Pane" },
-      { keys: "⌘⌥←", action: "Focus Previous Pane" },
-      { keys: "⌘1-9", action: "Switch to Session" },
+      { keys: "{mod}D", action: "Split Horizontal" },
+      { keys: "{mod}{shift}D", action: "Split Vertical" },
+      { keys: "{mod}{alt}→", action: "Focus Next Pane" },
+      { keys: "{mod}{alt}←", action: "Focus Previous Pane" },
+      { keys: "{mod}1-9", action: "Switch to Session" },
     ],
   },
 ];
@@ -81,7 +82,7 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
                 {group.shortcuts.map((s) => (
                   <div key={s.keys} className="shortcuts-row">
                     <span className="shortcuts-action">{s.action}</span>
-                    <kbd className="shortcuts-kbd">{s.keys}</kbd>
+                    <kbd className="shortcuts-kbd">{fmt(s.keys)}</kbd>
                   </div>
                 ))}
               </div>

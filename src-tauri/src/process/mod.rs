@@ -39,6 +39,7 @@ pub struct ProcessSnapshot {
 
 // ─── Protected Processes ────────────────────────────────────────────
 
+#[cfg(target_os = "macos")]
 const PROTECTED_NAMES: &[&str] = &[
     "launchd",
     "kernel_task",
@@ -57,6 +58,40 @@ const PROTECTED_NAMES: &[&str] = &[
     "logd",
     "UserEventAgent",
     "SystemUIServer",
+];
+
+#[cfg(target_os = "linux")]
+const PROTECTED_NAMES: &[&str] = &[
+    "systemd",
+    "init",
+    "kthreadd",
+    "kworker",
+    "ksoftirqd",
+    "rcu_sched",
+    "rcu_bh",
+    "migration",
+    "watchdog",
+    "dbus-daemon",
+    "NetworkManager",
+    "udevd",
+    "journald",
+    "logind",
+];
+
+#[cfg(target_os = "windows")]
+const PROTECTED_NAMES: &[&str] = &[
+    "System",
+    "Registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "services.exe",
+    "lsass.exe",
+    "svchost.exe",
+    "winlogon.exe",
+    "dwm.exe",
+    "explorer.exe",
+    "fontdrvhost.exe",
 ];
 
 fn is_protected(name: &str, pid: u32, uid: Option<u32>) -> bool {
@@ -113,7 +148,10 @@ fn get_hermes_child_pids(sys: &System) -> HashSet<u32> {
 }
 
 fn get_uid_for_process(process: &sysinfo::Process) -> Option<u32> {
-    process.user_id().map(|uid| **uid)
+    #[cfg(unix)]
+    { process.user_id().map(|uid| **uid) }
+    #[cfg(windows)]
+    { let _ = process; None }
 }
 
 fn get_username_for_uid(users: &Users, process: &sysinfo::Process) -> String {
@@ -128,16 +166,33 @@ fn get_username_for_uid(users: &Users, process: &sysinfo::Process) -> String {
 }
 
 fn get_fd_count(pid: u32) -> Option<u32> {
-    let output = Command::new("lsof")
-        .args(["-p", &pid.to_string()])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        // Subtract 1 for the header line
-        let count = stdout.lines().count().saturating_sub(1);
-        Some(count as u32)
-    } else {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("lsof")
+            .args(["-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let count = stdout.lines().count().saturating_sub(1);
+            Some(count as u32)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let fd_dir = format!("/proc/{}/fd", pid);
+        match std::fs::read_dir(&fd_dir) {
+            Ok(entries) => Some(entries.count() as u32),
+            Err(_) => None,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = pid;
         None
     }
 }
@@ -245,22 +300,41 @@ pub fn kill_process(state: State<'_, AppState>, pid: u32, signal: String) -> Res
     }
     drop(sys);
 
-    let sig = match signal.as_str() {
-        "SIGTERM" => "TERM",
-        "SIGKILL" => "KILL",
-        _ => return Err(format!("Unsupported signal: {}", signal)),
-    };
+    #[cfg(unix)]
+    {
+        let sig = match signal.as_str() {
+            "SIGTERM" => "TERM",
+            "SIGKILL" => "KILL",
+            _ => return Err(format!("Unsupported signal: {}", signal)),
+        };
 
-    let output = Command::new("kill")
-        .args([&format!("-{}", sig), &pid.to_string()])
-        .output()
-        .map_err(|e| format!("Failed to execute kill: {}", e))?;
+        let output = Command::new("kill")
+            .args([&format!("-{}", sig), &pid.to_string()])
+            .output()
+            .map_err(|e| format!("Failed to execute kill: {}", e))?;
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("kill failed: {}", stderr.trim()))
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("kill failed: {}", stderr.trim()))
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = signal;
+        let output = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output()
+            .map_err(|e| format!("Failed to execute taskkill: {}", e))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("taskkill failed: {}", stderr.trim()))
+        }
     }
 }
 
@@ -277,46 +351,66 @@ pub fn kill_process_tree(state: State<'_, AppState>, pid: u32, signal: String) -
         }
     }
 
-    // Collect descendants (leaf-first order by reversing)
-    let mut descendants = collect_descendants(&sys, pid);
-    descendants.reverse(); // Kill leaves first
-    drop(sys);
+    #[cfg(unix)]
+    {
+        // Collect descendants (leaf-first order by reversing)
+        let mut descendants = collect_descendants(&sys, pid);
+        descendants.reverse(); // Kill leaves first
+        drop(sys);
 
-    let sig = match signal.as_str() {
-        "SIGTERM" => "TERM",
-        "SIGKILL" => "KILL",
-        _ => return Err(format!("Unsupported signal: {}", signal)),
-    };
+        let sig = match signal.as_str() {
+            "SIGTERM" => "TERM",
+            "SIGKILL" => "KILL",
+            _ => return Err(format!("Unsupported signal: {}", signal)),
+        };
 
-    // Kill children first, then parent
-    let mut errors = Vec::new();
-    for child_pid in &descendants {
-        let output = Command::new("kill")
-            .args([&format!("-{}", sig), &child_pid.to_string()])
-            .output();
-        if let Ok(out) = output {
-            if !out.status.success() {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                errors.push(format!("PID {}: {}", child_pid, stderr.trim()));
+        // Kill children first, then parent
+        let mut errors = Vec::new();
+        for child_pid in &descendants {
+            let output = Command::new("kill")
+                .args([&format!("-{}", sig), &child_pid.to_string()])
+                .output();
+            if let Ok(out) = output {
+                if !out.status.success() {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    errors.push(format!("PID {}: {}", child_pid, stderr.trim()));
+                }
             }
+        }
+
+        // Kill parent
+        let output = Command::new("kill")
+            .args([&format!("-{}", sig), &pid.to_string()])
+            .output()
+            .map_err(|e| format!("Failed to kill parent PID {}: {}", pid, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            errors.push(format!("PID {}: {}", pid, stderr.trim()));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Some kills failed: {}", errors.join("; ")))
         }
     }
 
-    // Kill parent
-    let output = Command::new("kill")
-        .args([&format!("-{}", sig), &pid.to_string()])
-        .output()
-        .map_err(|e| format!("Failed to kill parent PID {}: {}", pid, e))?;
+    #[cfg(windows)]
+    {
+        let _ = signal;
+        drop(sys);
+        let output = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output()
+            .map_err(|e| format!("Failed to execute taskkill: {}", e))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        errors.push(format!("PID {}: {}", pid, stderr.trim()));
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("Some kills failed: {}", errors.join("; ")))
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("taskkill failed: {}", stderr.trim()))
+        }
     }
 }
 
@@ -367,11 +461,7 @@ pub fn get_process_detail(state: State<'_, AppState>, pid: u32) -> Result<Proces
 
 #[tauri::command]
 pub fn reveal_process_in_finder(path: String) -> Result<(), String> {
-    Command::new("open")
-        .args(["-R", &path])
-        .output()
-        .map_err(|e| format!("Failed to open Finder: {}", e))?;
-    Ok(())
+    crate::platform::reveal_in_file_manager(&path)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
@@ -381,10 +471,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn protected_by_name() {
+    #[cfg(target_os = "macos")]
+    fn protected_by_name_macos() {
         assert!(is_protected("launchd", 500, Some(501)));
         assert!(is_protected("kernel_task", 500, Some(501)));
         assert!(is_protected("WindowServer", 500, Some(501)));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn protected_by_name_linux() {
+        assert!(is_protected("systemd", 500, Some(501)));
+        assert!(is_protected("kthreadd", 500, Some(501)));
+        assert!(is_protected("journald", 500, Some(501)));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn protected_by_name_windows() {
+        assert!(is_protected("csrss.exe", 500, None));
+        assert!(is_protected("lsass.exe", 500, None));
+        assert!(is_protected("svchost.exe", 500, None));
     }
 
     #[test]
@@ -430,10 +537,26 @@ mod tests {
     }
 
     #[test]
-    fn protected_process_names_are_complete() {
-        // Verify key system processes are in the protected list
+    #[cfg(target_os = "macos")]
+    fn protected_process_names_are_complete_macos() {
         for name in &["launchd", "kernel_task", "WindowServer", "loginwindow", "mds", "coreaudiod", "securityd"] {
             assert!(is_protected(name, 500, Some(501)), "{} should be protected", name);
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn protected_process_names_are_complete_linux() {
+        for name in &["systemd", "init", "kthreadd", "dbus-daemon", "journald"] {
+            assert!(is_protected(name, 500, Some(501)), "{} should be protected", name);
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn protected_process_names_are_complete_windows() {
+        for name in &["csrss.exe", "lsass.exe", "svchost.exe", "winlogon.exe", "dwm.exe"] {
+            assert!(is_protected(name, 500, None), "{} should be protected", name);
         }
     }
 }
