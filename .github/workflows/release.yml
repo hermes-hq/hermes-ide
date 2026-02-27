@@ -93,9 +93,6 @@ jobs:
             sign: false
             notarize: false
     runs-on: ${{ matrix.runner }}
-    env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,6 +162,8 @@ jobs:
         shell: bash
         env:
           CI: false
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "${{ matrix.sign && 'Developer ID Application: Gabriel Anhaia da Silva (4987F43NL6)' || '' }}"
         run: npx tauri build --target ${{ matrix.target }}
 

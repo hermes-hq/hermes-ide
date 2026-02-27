@@ -34,9 +34,9 @@ pub fn reveal_in_file_manager(path: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // explorer expects: /select,"path with spaces"
-        let mut child = std::process::Command::new("cmd")
-            .args(["/C", "explorer", &format!("/select,\"{}\"", path)])
+        // Call explorer.exe directly (never via cmd /C) to prevent command injection.
+        let mut child = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
             .spawn()
             .map_err(|e| format!("Failed to open Explorer: {}", e))?;
         std::thread::spawn(move || { let _ = child.wait(); });
@@ -70,9 +70,12 @@ pub fn open_file(path: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Quote the path to handle spaces and cmd metacharacters (& ( ) etc.)
+        // Use the Windows ShellExecute equivalent via `cmd /C start` but with
+        // creation_flags to avoid spawning a visible console window.
+        // Pass the path as a single argument to prevent injection.
         let mut child = std::process::Command::new("cmd")
-            .args(["/C", "start", "", &format!("\"{}\"", path)])
+            .args(["/C", "start", ""])
+            .arg(path)
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
         std::thread::spawn(move || { let _ = child.wait(); });

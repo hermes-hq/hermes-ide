@@ -1417,14 +1417,14 @@ struct PtySession {
     child: Box<dyn portable_pty::Child + Send>,
 }
 
-fn ai_launch_command(provider: &str) -> &str {
+fn ai_launch_command(provider: &str) -> Option<&str> {
     match provider {
-        "claude" => "claude",
-        "aider" => "aider",
-        "codex" => "codex",
-        "gemini" => "gemini",
-        "copilot" => "gh copilot",
-        _ => provider,
+        "claude" => Some("claude"),
+        "aider" => Some("aider"),
+        "codex" => Some("codex"),
+        "gemini" => Some("gemini"),
+        "copilot" => Some("gh copilot"),
+        _ => None,
     }
 }
 
@@ -1797,13 +1797,15 @@ pub fn create_session(
                             let launch_info = session_clone.lock().ok()
                                 .map(|s| (s.ai_provider.clone(), s.has_initial_context));
                             if let Some((Some(ref provider), has_context)) = launch_info {
+                                // Only launch known/allowed AI providers (reject unknown values)
+                                if let Some(launch_cmd) = ai_launch_command(provider) {
                                 // For Claude/Gemini: pass context instruction as CLI argument
                                 // so it's processed immediately without PTY injection timing issues
                                 let supports_cli_prompt = provider == "claude" || provider == "gemini";
                                 let cmd = if has_context && supports_cli_prompt {
-                                    format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", ai_launch_command(provider))
+                                    format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
                                 } else {
-                                    ai_launch_command(provider).to_string()
+                                    launch_cmd.to_string()
                                 };
                                 if let Ok(mut w) = writer_for_reader.lock() {
                                     let _ = w.write_all(format!("{}\r", cmd).as_bytes());
@@ -1824,6 +1826,9 @@ pub fn create_session(
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
                                     }
+                                }
+                                } else {
+                                    log::warn!("Unknown AI provider rejected: {}", provider);
                                 }
                             }
                         }
