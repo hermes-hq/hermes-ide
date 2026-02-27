@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { open } from "@tauri-apps/plugin-shell";
 import { ensureListener, registerMenuBarHandler } from "./nativeMenuBridge";
 
 // ─── Menu Bar Action → React Dispatch Bridge ────────────────────────
@@ -121,6 +122,15 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           break;
 
         // ── Help menu ──
+        case "help.website":
+          open("https://hermes-ide.com");
+          break;
+        case "help.legal":
+          open("https://hermes-ide.com/legal");
+          break;
+        case "help.report-bug":
+          open("https://forms.gle/6KKQkqBYq8GE1Kh96");
+          break;
         case "help.shortcuts":
           dispatch({ type: "CLOSE_PALETTE" });
           setShortcutsOpen(true);

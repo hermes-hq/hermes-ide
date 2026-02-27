@@ -102,12 +102,10 @@
 /* ─── Version Badge ──────────────────────────── */
 
 .status-bar-version {
-  background: var(--yellow);
-  color: var(--bg-0);
+  color: var(--text-2);
   font-size: var(--text-sm);
-  font-weight: 700;
+  font-weight: 400;
   padding: 1px 7px;
-  border-radius: var(--radius-sm);
   white-space: nowrap;
   letter-spacing: 0.02em;
 }

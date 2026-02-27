@@ -205,10 +205,21 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .build()?;
 
     // ── Help menu ──
+    let help_website = MenuItemBuilder::with_id("help.website", "Hermes IDE Website")
+        .build(app)?;
+    let help_legal = MenuItemBuilder::with_id("help.legal", "Privacy, Terms & License")
+        .build(app)?;
+    let help_report_bug = MenuItemBuilder::with_id("help.report-bug", "Report a Bug...")
+        .build(app)?;
     let help_shortcuts = MenuItemBuilder::with_id("help.shortcuts", "Keyboard Shortcuts")
         .build(app)?;
 
     let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&help_website)
+        .item(&help_legal)
+        .separator()
+        .item(&help_report_bug)
+        .separator()
         .item(&help_shortcuts)
         .build()?;
 
