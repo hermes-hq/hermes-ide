@@ -165,7 +165,7 @@ jobs:
         shell: bash
         env:
           CI: false
-          APPLE_SIGNING_IDENTITY: ${{ matrix.sign && 'Developer ID Application: Gabriel Anhaia da Silva (4987F43NL6)' || '' }}
+          APPLE_SIGNING_IDENTITY: "${{ matrix.sign && 'Developer ID Application: Gabriel Anhaia da Silva (4987F43NL6)' || '' }}"
         run: npx tauri build --target ${{ matrix.target }}
 
       - name: Notarize DMG
