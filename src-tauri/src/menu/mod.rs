@@ -205,6 +205,8 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .build()?;
 
     // ── Help menu ──
+    let help_check_update = MenuItemBuilder::with_id("help.check-update", "Check for Updates...")
+        .build(app)?;
     let help_website = MenuItemBuilder::with_id("help.website", "Hermes IDE Website")
         .build(app)?;
     let help_legal = MenuItemBuilder::with_id("help.legal", "Privacy, Terms & License")
@@ -215,6 +217,8 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .build(app)?;
 
     let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&help_check_update)
+        .separator()
         .item(&help_website)
         .item(&help_legal)
         .separator()

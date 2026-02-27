@@ -57,5 +57,13 @@
         }
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/gabrielanhaia/hermes-ide-releases/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

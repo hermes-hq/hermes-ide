@@ -20,9 +20,14 @@ function formatElapsed(createdAt: string): string {
 
 interface StatusBarProps {
   onOpenShortcuts?: () => void;
+  updateAvailable?: boolean;
+  updateVersion?: string;
+  updateDownloading?: boolean;
+  updateProgress?: number;
+  onShowUpdate?: () => void;
 }
 
-export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
+export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, updateDownloading, updateProgress, onShowUpdate }: StatusBarProps) {
   const active = useActiveSession();
   const sessions = useSessionList();
   const totalCost = useTotalCost();
@@ -132,6 +137,22 @@ export function StatusBar({ onOpenShortcuts }: StatusBarProps) {
                 menuItem("status.copy-branch", "Copy Working Directory"),
               ]);
             }}>{cwdBasename}</span>
+            <span className="status-bar-divider" />
+          </>
+        )}
+        {updateAvailable && !updateDownloading && (
+          <>
+            <span className="status-bar-item status-bar-update" onClick={onShowUpdate} title={`Update to v${updateVersion}`}>
+              v{updateVersion} available
+            </span>
+            <span className="status-bar-divider" />
+          </>
+        )}
+        {updateDownloading && (
+          <>
+            <span className="status-bar-item status-bar-update" title="Downloading update...">
+              Updating {updateProgress}%
+            </span>
             <span className="status-bar-divider" />
           </>
         )}

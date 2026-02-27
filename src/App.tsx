@@ -35,6 +35,8 @@ import { decodeSessionDrag } from "./components/SplitPane";
 import { focusTerminal } from "./terminal/TerminalPool";
 import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
 import { useMenuStateSync } from "./hooks/useMenuStateSync";
+import { useAutoUpdater } from "./hooks/useAutoUpdater";
+import { UpdateDialog } from "./components/UpdateDialog";
 
 function AppContent() {
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive } = useSession();
@@ -50,6 +52,7 @@ function AppContent() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
+  const updater = useAutoUpdater();
 
   // Keyboard shortcuts — only those NOT handled by native menu bar
   // (Cmd+Alt+Arrow for pane nav, Cmd+1-9 for session switch, F1/F3 for overlays)
@@ -182,6 +185,7 @@ function AppContent() {
     setSessionCreatorOpen,
     copyContextToClipboard: () => copyContextToClipboard(activeSession),
     pendingSplit,
+    onCheckForUpdates: () => updater.manualCheck(),
   });
 
   // ── Sync UI toggle state → native menu checkmarks ──
@@ -314,7 +318,14 @@ function AppContent() {
         )}
       </div>
 
-      <StatusBar onOpenShortcuts={() => setShortcutsOpen(true)} />
+      <StatusBar
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+        updateAvailable={updater.state.available && !updater.state.dismissed}
+        updateVersion={updater.state.version}
+        updateDownloading={updater.state.downloading}
+        updateProgress={updater.state.progress}
+        onShowUpdate={() => updater.manualCheck()}
+      />
 
       {ui.commandPaletteOpen && (
         <CommandPalette
@@ -409,6 +420,12 @@ function AppContent() {
           onExecute={handleAutoExecute}
         />
       )}
+
+      <UpdateDialog
+        state={updater.state}
+        onDismiss={updater.dismiss}
+        onDownload={updater.downloadAndInstall}
+      />
 
       {state.pendingCloseSessionId && (
         <CloseSessionDialog

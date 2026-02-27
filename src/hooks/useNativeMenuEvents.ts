@@ -17,6 +17,7 @@ interface MenuEventHandlers {
   setSessionCreatorOpen: (v: boolean) => void;
   copyContextToClipboard: () => void;
   pendingSplit: React.MutableRefObject<{ paneId: string; direction: string } | null>;
+  onCheckForUpdates: () => void;
 }
 
 export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
@@ -33,6 +34,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
     copyContextToClipboard,
     pendingSplit,
     requestCloseSession,
+    onCheckForUpdates,
   } = handlers;
 
   const onMenuAction = useCallback(
@@ -122,6 +124,9 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           break;
 
         // ── Help menu ──
+        case "help.check-update":
+          onCheckForUpdates();
+          break;
         case "help.website":
           open("https://hermes-ide.com");
           break;
@@ -150,6 +155,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
       copyContextToClipboard,
       pendingSplit,
       requestCloseSession,
+      onCheckForUpdates,
     ],
   );
 
