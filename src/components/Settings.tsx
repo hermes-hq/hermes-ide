@@ -82,7 +82,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
     if (key === "theme") {
       applyTheme(value, next);
     } else if (["font_size", "font_family", "scrollback", "ui_scale"].includes(key)) {
-      applyTheme(next.theme || "dark", next);
+      applyTheme(next.theme || "tron", next);
     }
     setSetting(key, value).catch(console.error);
     // Sync autonomous settings to live state
@@ -226,7 +226,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                   <label className="settings-label">Theme</label>
                   <select
                     className="settings-select"
-                    value={settings.theme || "dark"}
+                    value={settings.theme || "tron"}
                     onChange={(e) => updateSetting("theme", e.target.value)}
                   >
                     {THEMES.map((t) => (

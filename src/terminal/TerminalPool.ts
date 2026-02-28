@@ -149,6 +149,18 @@ const THEMES: Record<string, Record<string, string>> = {
     brightYellow: "#ffe088", brightBlue: "#9dbcfc", brightMagenta: "#c4b5fd",
     brightCyan: "#a0dfff", brightWhite: "#d6d6f0",
   },
+  tron: {
+    background: "#030810",
+    foreground: "#8ecae6",
+    selectionBackground: "#00dffc33",
+    selectionForeground: "#ffffff",
+    cursor: "#00dffc",
+    black: "#030810", red: "#ff3855", green: "#00ffaa", yellow: "#ffe64d",
+    blue: "#00dffc", magenta: "#7df9ff", cyan: "#00dffc", white: "#8ecae6",
+    brightBlack: "#1e5070", brightRed: "#ff6680", brightGreen: "#44ffbb",
+    brightYellow: "#ffed77", brightBlue: "#44e8ff", brightMagenta: "#a0fcff",
+    brightCyan: "#44e8ff", brightWhite: "#d0f0ff",
+  },
   solarized: {
     background: "#fdf6e3",
     foreground: "#586e75",
@@ -179,8 +191,8 @@ let currentSettings: Record<string, string> = {};
 export function updateSettings(settings: Record<string, string>): void {
   currentSettings = settings;
   // Apply to all existing terminals
-  const themeName = settings.theme || "dark";
-  const theme = THEMES[themeName] || THEMES.dark;
+  const themeName = settings.theme || "tron";
+  const theme = THEMES[themeName] || THEMES.tron;
   const fontSize = parseInt(settings.font_size || "14", 10);
   const fontFamily = FONT_FAMILIES[settings.font_family || "default"] || FONT_FAMILIES.default;
   const scrollback = parseInt(settings.scrollback || "10000", 10);
@@ -221,8 +233,8 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   }
   creating.add(sessionId);
 
-  const themeName = currentSettings.theme || "dark";
-  const theme = THEMES[themeName] || THEMES.dark;
+  const themeName = currentSettings.theme || "tron";
+  const theme = THEMES[themeName] || THEMES.tron;
   const fontSize = parseInt(currentSettings.font_size || "14", 10);
   const fontFamily = FONT_FAMILIES[currentSettings.font_family || "default"] || FONT_FAMILIES.default;
   const scrollback = parseInt(currentSettings.scrollback || "10000", 10);

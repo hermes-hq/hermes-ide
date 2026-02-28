@@ -1,13 +1,13 @@
 import { updateSettings } from "../terminal/TerminalPool";
 
 export const THEME_OPTIONS = [
-  { id: "dark", label: "Dark (Default)" },
+  { id: "dark", label: "Dark" },
   { id: "hacker", label: "Hacker" },
   { id: "designer", label: "Atelier" },
   { id: "data", label: "Deep Lab" },
   { id: "corporate", label: "Enterprise" },
   { id: "nightowl", label: "Night Owl" },
-  { id: "tron", label: "Tron" },
+  { id: "tron", label: "Tron (Default)" },
   { id: "solarized", label: "Solarized Light" },
 ] as const;
 
