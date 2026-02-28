@@ -9,6 +9,7 @@ export const THEME_OPTIONS = [
   { id: "nightowl", label: "Night Owl" },
   { id: "tron", label: "Tron" },
   { id: "duel", label: "Duel" },
+  { id: "rainbow", label: "Rainbow" },
   { id: "solarized", label: "Solarized Light" },
 ] as const;
 

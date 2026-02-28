@@ -651,6 +651,278 @@ html[data-theme="duel"] .status-bar {
   100% { bottom: 100%; opacity: 0; }
 }
 
+/* ─── Rainbow ─────────────────────────────────────────────────── */
+html[data-theme="rainbow"] {
+  --bg-0: #08080e;
+  --bg-1: #0e0e18;
+  --bg-2: #161622;
+  --bg-3: #1e1e2c;
+  --bg-hover: #1e1e2c;
+  --bg-active: #262638;
+  --text-0: #eae8f0;
+  --text-1: #c0bcd0;
+  --text-2: #706c88;
+  --text-3: #44405a;
+  --accent: #d6a0ff;
+  --accent-dim: #d6a0ff18;
+  --green: #44dd88;
+  --green-dim: #44dd8826;
+  --red: #ff5577;
+  --red-dim: #ff557726;
+  --yellow: #ffcc44;
+  --yellow-dim: #ffcc4426;
+  --violet: #aa77ff;
+  --violet-dim: #aa77ff26;
+  --error: #ff5577;
+  --border: #ffffff10;
+  --border-light: #ffffff18;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+}
+
+/* ── Rainbow: rainbow gradient on borders ─────────────────────── */
+
+/* Shared rainbow gradient value */
+html[data-theme="rainbow"] {
+  --rainbow-rainbow: linear-gradient(
+    to right,
+    #ff5577, #ff8844, #ffcc44, #44dd88, #44aaff, #aa77ff, #ff5577
+  );
+  --rainbow-rainbow-v: linear-gradient(
+    to bottom,
+    #ff5577, #ff8844, #ffcc44, #44dd88, #44aaff, #aa77ff, #ff5577
+  );
+}
+
+/* Ambient rainbow glow in the background */
+html[data-theme="rainbow"] #root {
+  background:
+    radial-gradient(ellipse 60% 40% at 10% 20%,  #ff557708, transparent),
+    radial-gradient(ellipse 40% 40% at 30% 80%,  #ff884408, transparent),
+    radial-gradient(ellipse 40% 50% at 50% 10%,  #ffcc4406, transparent),
+    radial-gradient(ellipse 40% 40% at 70% 85%,  #44dd8808, transparent),
+    radial-gradient(ellipse 50% 40% at 85% 25%,  #44aaff08, transparent),
+    radial-gradient(ellipse 40% 50% at 95% 60%,  #aa77ff08, transparent),
+    var(--bg-0);
+}
+
+/* ── Topbar: static rainbow underline + traveling energy ────── */
+
+html[data-theme="rainbow"] .topbar {
+  border-bottom: none;
+  background:
+    linear-gradient(to right, #ff5577, #ff8844, #ffcc44, #44dd88, #44aaff, #aa77ff)
+      bottom / 100% 1px no-repeat,
+    var(--bg-1);
+  box-shadow: 0 1px 10px #aa77ff15;
+}
+
+html[data-theme="rainbow"] .topbar::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -25%;
+  width: 25%;
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    #ffffff00,
+    #ffffffcc,
+    #ffffff,
+    #ffffffcc,
+    #ffffff00,
+    transparent
+  );
+  animation: rainbow-energy-h 3.5s linear infinite;
+  z-index: 2;
+  mix-blend-mode: overlay;
+}
+
+/* ── Status bar: static rainbow top-line + traveling energy ─── */
+
+html[data-theme="rainbow"] .status-bar {
+  border-top: none;
+  box-shadow: 0 -1px 10px #ff557715;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(to right, #aa77ff, #44aaff, #44dd88, #ffcc44, #ff8844, #ff5577)
+      top / 100% 1px no-repeat,
+    var(--bg-1);
+}
+
+html[data-theme="rainbow"] .status-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -25%;
+  width: 25%;
+  height: 2px;
+  background: linear-gradient(
+    to left,
+    transparent,
+    #ffffff00,
+    #ffffffcc,
+    #ffffff,
+    #ffffffcc,
+    #ffffff00,
+    transparent
+  );
+  animation: rainbow-energy-h-reverse 4s linear infinite;
+  z-index: 2;
+  mix-blend-mode: overlay;
+}
+
+/* ── Left activity bar: rainbow right edge ──────────────────── */
+
+html[data-theme="rainbow"] .activity-bar-left {
+  border-right: none;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(to bottom, #ff5577, #ff8844, #ffcc44, #44dd88, #44aaff, #aa77ff)
+      right / 1px 100% no-repeat,
+    var(--bg-0);
+}
+
+html[data-theme="rainbow"] .activity-bar-left::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -40%;
+  width: 2px;
+  height: 40%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #ffffff00,
+    #ffffffcc,
+    #ffffff,
+    #ffffffcc,
+    #ffffff00,
+    transparent
+  );
+  animation: rainbow-energy-v 3s linear infinite;
+  z-index: 2;
+  mix-blend-mode: overlay;
+}
+
+/* ── Right activity bar: rainbow left edge ──────────────────── */
+
+html[data-theme="rainbow"] .activity-bar-right {
+  border-left: none;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(to bottom, #aa77ff, #44aaff, #44dd88, #ffcc44, #ff8844, #ff5577)
+      left / 1px 100% no-repeat,
+    var(--bg-0);
+}
+
+html[data-theme="rainbow"] .activity-bar-right::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -40%;
+  width: 2px;
+  height: 40%;
+  background: linear-gradient(
+    to top,
+    transparent,
+    #ffffff00,
+    #ffffffcc,
+    #ffffff,
+    #ffffffcc,
+    #ffffff00,
+    transparent
+  );
+  animation: rainbow-energy-v-reverse 3.5s linear infinite;
+  z-index: 2;
+  mix-blend-mode: overlay;
+}
+
+/* ── Sidebar panels: rainbow right edge ─────────────────────── */
+
+html[data-theme="rainbow"] .session-list,
+html[data-theme="rainbow"] .process-panel,
+html[data-theme="rainbow"] .git-panel-root,
+html[data-theme="rainbow"] .file-explorer-panel,
+html[data-theme="rainbow"] .search-panel {
+  border-right: none;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(to bottom, #ff5577, #ff8844, #ffcc44, #44dd88, #44aaff, #aa77ff)
+      right / 1px 100% no-repeat,
+    var(--bg-1);
+}
+
+html[data-theme="rainbow"] .session-list::after,
+html[data-theme="rainbow"] .process-panel::after,
+html[data-theme="rainbow"] .git-panel-root::after,
+html[data-theme="rainbow"] .file-explorer-panel::after,
+html[data-theme="rainbow"] .search-panel::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -40%;
+  width: 2px;
+  height: 40%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #ffffff00,
+    #ffffffcc,
+    #ffffff,
+    #ffffffcc,
+    #ffffff00,
+    transparent
+  );
+  animation: rainbow-energy-v 5s linear infinite;
+  z-index: 2;
+  mix-blend-mode: overlay;
+}
+
+/* Active item glow cycles through accent */
+html[data-theme="rainbow"] .session-item.active {
+  box-shadow: inset 2px 0 8px #d6a0ff22;
+}
+
+html[data-theme="rainbow"] .activity-bar-tab.active {
+  box-shadow: 0 0 8px #d6a0ff33;
+}
+
+/* ── Rainbow keyframes ─────────────────────────────────────────── */
+
+@keyframes rainbow-energy-h {
+  0%   { left: -25%; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+@keyframes rainbow-energy-h-reverse {
+  0%   { right: -25%; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { right: 100%; opacity: 0; }
+}
+
+@keyframes rainbow-energy-v {
+  0%   { top: -40%; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes rainbow-energy-v-reverse {
+  0%   { bottom: -40%; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { bottom: 100%; opacity: 0; }
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;
