@@ -421,14 +421,6 @@ html[data-theme="duel"] {
 
 html[data-theme="duel"] .topbar {
   border-bottom: 1px solid #ee444418;
-  background:
-    linear-gradient(to right,
-      #ee444410 0%,
-      transparent 30%,
-      transparent 70%,
-      #44ee8810 100%)
-    bottom / 100% 1px no-repeat,
-    var(--bg-1);
   box-shadow: 0 1px 12px #ee444412;
 }
 
@@ -459,8 +451,6 @@ html[data-theme="duel"] .topbar::after {
 html[data-theme="duel"] .status-bar {
   border-top: 1px solid #44ee8818;
   box-shadow: 0 -1px 12px #44ee8812;
-  position: relative;
-  overflow: hidden;
 }
 
 html[data-theme="duel"] .status-bar::before {
@@ -491,6 +481,7 @@ html[data-theme="duel"] .activity-bar-left {
   border-right: 1px solid #ee444420;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(to right, #ee444408, #ee444403), var(--bg-0);
 }
 
 html[data-theme="duel"] .activity-bar-left::after {
@@ -522,6 +513,7 @@ html[data-theme="duel"] .search-panel {
   border-right: 1px solid #ee444420;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(to right, #ee444406, transparent), var(--bg-1);
 }
 
 html[data-theme="duel"] .session-list::after,
@@ -560,6 +552,7 @@ html[data-theme="duel"] .activity-bar-right {
   border-left: 1px solid #44ee8820;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(to left, #44ee8808, #44ee8803), var(--bg-0);
 }
 
 html[data-theme="duel"] .activity-bar-right::before {
@@ -591,6 +584,41 @@ html[data-theme="duel"] .activity-bar-right .activity-bar-tab.active {
 /* Left activity bar tab glows red */
 html[data-theme="duel"] .activity-bar-left .activity-bar-tab.active {
   box-shadow: 0 0 8px #ee444433;
+}
+
+/* ── Duel: ambient background glow ──────────────────────────── */
+
+/* Full-viewport red/green opposing radial washes */
+html[data-theme="duel"] #root {
+  background:
+    radial-gradient(ellipse 50% 70% at 0% 50%,   #ee444412, transparent),
+    radial-gradient(ellipse 50% 70% at 100% 50%,  #44ee8812, transparent),
+    radial-gradient(ellipse 30% 50% at 0% 30%,    #ee444409, transparent),
+    radial-gradient(ellipse 30% 50% at 100% 70%,  #44ee8809, transparent),
+    var(--bg-0);
+}
+
+/* Terminal area gets a subtle green wash on the right edge */
+html[data-theme="duel"] .terminal-container {
+  background: linear-gradient(to left, #44ee8806, transparent 40%), var(--bg-0);
+}
+
+/* Topbar gradient: red-left to green-right ambient */
+html[data-theme="duel"] .topbar {
+  background:
+    linear-gradient(to right,
+      #ee444410, transparent 30%,
+      transparent 70%, #44ee8810),
+    var(--bg-1);
+}
+
+/* Status bar gradient: red-left to green-right ambient */
+html[data-theme="duel"] .status-bar {
+  background:
+    linear-gradient(to right,
+      #ee444408, transparent 30%,
+      transparent 70%, #44ee8808),
+    var(--bg-1);
 }
 
 /* ── Duel keyframes ──────────────────────────────────────────── */
