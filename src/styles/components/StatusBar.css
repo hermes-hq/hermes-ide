@@ -128,3 +128,74 @@
   opacity: 1;
   background: var(--bg-hover);
 }
+
+/* ─── Theme Picker ──────────────────────────── */
+
+.status-theme-picker {
+  position: relative;
+}
+
+.status-theme-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+}
+.status-theme-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.status-theme-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 300;
+  animation: paletteIn 0.12s ease-out;
+}
+
+.status-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--text-base);
+  font-family: var(--font-ui);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.1s;
+  text-align: left;
+}
+.status-theme-option:hover {
+  background: var(--bg-hover);
+}
+.status-theme-option.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.status-theme-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}

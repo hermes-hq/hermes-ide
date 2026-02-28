@@ -1,9 +1,10 @@
 import "../styles/components/StatusBar.css";
-import { useState, useEffect, useCallback } from "react";
-import { setSetting } from "../api/settings";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { setSetting, getSetting, getSettings } from "../api/settings";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
+import { THEME_OPTIONS, applyTheme } from "../utils/themeManager";
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -160,6 +161,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         <span className="status-bar-version" title={`HERMES-IDE v${__APP_VERSION__}`}>
           v{__APP_VERSION__}
         </span>
+        <ThemePicker />
         {onOpenShortcuts && (
           <button
             className="status-shortcuts-btn"
@@ -170,6 +172,80 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ─── Theme Picker (status bar) ────────────────────────────── */
+
+const THEME_COLORS: Record<string, string> = {
+  dark: "#7b93db",
+  hacker: "#33ff99",
+  designer: "#e07850",
+  data: "#22d3ee",
+  corporate: "#4a90d9",
+  nightowl: "#a78bfa",
+  tron: "#00dffc",
+  solarized: "#268bd2",
+};
+
+function ThemePicker() {
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState("tron");
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Load current theme on mount
+  useEffect(() => {
+    getSetting("theme").then((v) => { if (v) setCurrent(v); }).catch(() => {});
+  }, []);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const select = async (id: string) => {
+    setCurrent(id);
+    setOpen(false);
+    await setSetting("theme", id);
+    const all = await getSettings();
+    applyTheme(id, { ...all, theme: id });
+  };
+
+  return (
+    <div className="status-theme-picker" ref={ref}>
+      <button
+        className="status-theme-btn"
+        onClick={() => setOpen((o) => !o)}
+        title="Switch theme"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="8" cy="8" r="3" />
+          <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
+        </svg>
+      </button>
+      {open && (
+        <div className="status-theme-popover">
+          {THEME_OPTIONS.map((t) => (
+            <button
+              key={t.id}
+              className={`status-theme-option ${current === t.id ? "active" : ""}`}
+              onClick={() => select(t.id)}
+            >
+              <span
+                className="status-theme-swatch"
+                style={{ background: THEME_COLORS[t.id] || "#888" }}
+              />
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
