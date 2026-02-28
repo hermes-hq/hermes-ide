@@ -386,6 +386,243 @@ html[data-theme="tron"] #root {
   100% { bottom: 100%; opacity: 0; }
 }
 
+/* ─── Duel (opposing forces) ──────────────────────────────────── */
+html[data-theme="duel"] {
+  --bg-0: #06060a;
+  --bg-1: #0c0c14;
+  --bg-2: #14141e;
+  --bg-3: #1a1a28;
+  --bg-hover: #1a1a28;
+  --bg-active: #222234;
+  --text-0: #e0dce8;
+  --text-1: #b0aac0;
+  --text-2: #6a6480;
+  --text-3: #3e3a50;
+  --accent: #b0b0c8;
+  --accent-dim: #b0b0c818;
+  --green: #44ee88;
+  --green-dim: #44ee8826;
+  --red: #ee4444;
+  --red-dim: #ee444426;
+  --yellow: #f0c040;
+  --yellow-dim: #f0c04026;
+  --violet: #aa66dd;
+  --violet-dim: #aa66dd26;
+  --error: #ee4444;
+  --border: #ee444414;
+  --border-light: #ee444425;
+  --scanline-opacity: 0.03;
+  --accent-glow: none;
+  --duel-red: #ee4444;
+  --duel-green: #44ee88;
+}
+
+/* ── Duel: topbar — red-to-green gradient energy ────────────── */
+
+html[data-theme="duel"] .topbar {
+  border-bottom: 1px solid #ee444418;
+  background:
+    linear-gradient(to right,
+      #ee444410 0%,
+      transparent 30%,
+      transparent 70%,
+      #44ee8810 100%)
+    bottom / 100% 1px no-repeat,
+    var(--bg-1);
+  box-shadow: 0 1px 12px #ee444412;
+}
+
+html[data-theme="duel"] .topbar::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -30%;
+  width: 30%;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    #ee444400,
+    #ee4444,
+    #f06040,
+    #c8c040,
+    #44ee88,
+    #44ee8800,
+    transparent
+  );
+  animation: duel-energy-h 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* ── Duel: status bar — green-to-red gradient energy ────────── */
+
+html[data-theme="duel"] .status-bar {
+  border-top: 1px solid #44ee8818;
+  box-shadow: 0 -1px 12px #44ee8812;
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="duel"] .status-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -30%;
+  width: 30%;
+  height: 1px;
+  background: linear-gradient(
+    to left,
+    transparent,
+    #44ee8800,
+    #44ee88,
+    #c8c040,
+    #f06040,
+    #ee4444,
+    #ee444400,
+    transparent
+  );
+  animation: duel-energy-h-reverse 5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* ── Duel: left side — red energy ───────────────────────────── */
+
+html[data-theme="duel"] .activity-bar-left {
+  border-right: 1px solid #ee444420;
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="duel"] .activity-bar-left::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -40%;
+  width: 1px;
+  height: 40%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #ee444400,
+    #ee4444,
+    #ff6666,
+    #ee4444,
+    #ee444400,
+    transparent
+  );
+  animation: duel-energy-v 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+html[data-theme="duel"] .session-list,
+html[data-theme="duel"] .process-panel,
+html[data-theme="duel"] .git-panel-root,
+html[data-theme="duel"] .file-explorer-panel,
+html[data-theme="duel"] .search-panel {
+  border-right: 1px solid #ee444420;
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="duel"] .session-list::after,
+html[data-theme="duel"] .process-panel::after,
+html[data-theme="duel"] .git-panel-root::after,
+html[data-theme="duel"] .file-explorer-panel::after,
+html[data-theme="duel"] .search-panel::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -40%;
+  width: 1px;
+  height: 40%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #ee444400,
+    #ee4444,
+    #ff6666,
+    #ee4444,
+    #ee444400,
+    transparent
+  );
+  animation: duel-energy-v 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Left side active items glow red */
+html[data-theme="duel"] .session-item.active {
+  box-shadow: inset 2px 0 8px #ee444422;
+}
+
+/* ── Duel: right side — green energy ────────────────────────── */
+
+html[data-theme="duel"] .activity-bar-right {
+  border-left: 1px solid #44ee8820;
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="duel"] .activity-bar-right::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -40%;
+  width: 1px;
+  height: 40%;
+  background: linear-gradient(
+    to top,
+    transparent,
+    #44ee8800,
+    #44ee88,
+    #77ffaa,
+    #44ee88,
+    #44ee8800,
+    transparent
+  );
+  animation: duel-energy-v-reverse 4.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Right activity bar tab glows green */
+html[data-theme="duel"] .activity-bar-right .activity-bar-tab.active {
+  box-shadow: 0 0 8px #44ee8833;
+}
+
+/* Left activity bar tab glows red */
+html[data-theme="duel"] .activity-bar-left .activity-bar-tab.active {
+  box-shadow: 0 0 8px #ee444433;
+}
+
+/* ── Duel keyframes ──────────────────────────────────────────── */
+
+@keyframes duel-energy-h {
+  0%   { left: -30%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+@keyframes duel-energy-h-reverse {
+  0%   { right: -30%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { right: 100%; opacity: 0; }
+}
+
+@keyframes duel-energy-v {
+  0%   { top: -40%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes duel-energy-v-reverse {
+  0%   { bottom: -40%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { bottom: 100%; opacity: 0; }
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;

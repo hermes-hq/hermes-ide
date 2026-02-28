@@ -8,6 +8,7 @@ export const THEME_OPTIONS = [
   { id: "corporate", label: "Enterprise" },
   { id: "nightowl", label: "Night Owl" },
   { id: "tron", label: "Tron" },
+  { id: "duel", label: "Duel" },
   { id: "solarized", label: "Solarized Light" },
 ] as const;
 

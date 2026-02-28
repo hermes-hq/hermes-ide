@@ -186,6 +186,7 @@ const THEME_COLORS: Record<string, string> = {
   corporate: "#4a90d9",
   nightowl: "#a78bfa",
   tron: "#00dffc",
+  duel: "#ee4444",
   solarized: "#268bd2",
 };
 
