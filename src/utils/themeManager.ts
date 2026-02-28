@@ -7,7 +7,7 @@ export const THEME_OPTIONS = [
   { id: "data", label: "Deep Lab" },
   { id: "corporate", label: "Enterprise" },
   { id: "nightowl", label: "Night Owl" },
-  { id: "tron", label: "Tron (Default)" },
+  { id: "tron", label: "Tron" },
   { id: "solarized", label: "Solarized Light" },
 ] as const;
 
