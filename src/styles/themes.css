@@ -923,6 +923,237 @@ html[data-theme="rainbow"] .activity-bar-tab.active {
   100% { bottom: 100%; opacity: 0; }
 }
 
+/* ─── 80s (amber CRT retro computer) ───────────────────────────── */
+html[data-theme="80s"] {
+  /* Amber CRT monitor palette */
+  --bg-0: #0a0800;
+  --bg-1: #120e02;
+  --bg-2: #1c1604;
+  --bg-3: #261e06;
+  --bg-hover: #2a2208;
+  --bg-active: #34290a;
+  --text-0: #ffb000;
+  --text-1: #cc8c00;
+  --text-2: #886000;
+  --text-3: #554000;
+  --accent: #ffb000;
+  --accent-dim: #ffb00018;
+  --green: #33ff33;
+  --green-dim: #33ff3320;
+  --red: #ff3333;
+  --red-dim: #ff333320;
+  --yellow: #ffcc00;
+  --yellow-dim: #ffcc0020;
+  --violet: #ff6600;
+  --violet-dim: #ff660020;
+  --error: #ff3333;
+  --border: #ffb00020;
+  --border-light: #ffb00030;
+  --scanline-opacity: 0.18;
+  --accent-glow: 0 0 8px #ffb00044;
+
+  /* Sharp square corners — 80s had no rounded UI */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 1px;
+  --radius-pill: 1px;
+}
+
+/* ── CRT vignette — dark edges like a curved monitor ── */
+html[data-theme="80s"] #root {
+  background:
+    radial-gradient(ellipse at center, transparent 50%, #000000cc 100%),
+    var(--bg-0);
+}
+
+/* ── Phosphor glow on all text ── */
+html[data-theme="80s"] .topbar,
+html[data-theme="80s"] .status-bar,
+html[data-theme="80s"] .session-list,
+html[data-theme="80s"] .activity-bar,
+html[data-theme="80s"] .process-panel,
+html[data-theme="80s"] .git-panel-root,
+html[data-theme="80s"] .file-explorer-panel,
+html[data-theme="80s"] .search-panel,
+html[data-theme="80s"] .context-panel {
+  text-shadow: 0 0 6px #ffb00033;
+}
+
+/* ── Topbar — beveled 3D look like old OS title bars ── */
+html[data-theme="80s"] .topbar {
+  background: #12100a;
+  border-bottom: 2px solid #ffb00030;
+  box-shadow:
+    inset 0 1px 0 #ffb00018,
+    inset 0 -1px 0 #00000040,
+    0 2px 6px #00000080;
+}
+
+/* ── Status bar — thick border, raised 3D ── */
+html[data-theme="80s"] .status-bar {
+  background: #12100a;
+  border-top: 2px solid #ffb00030;
+  box-shadow:
+    inset 0 1px 0 #ffb00018,
+    0 -2px 6px #00000060;
+}
+
+/* ── Activity bars — solid double borders ── */
+html[data-theme="80s"] .activity-bar-left {
+  border-right: 2px solid #ffb00025;
+  box-shadow: inset -1px 0 0 #ffb00010;
+}
+
+html[data-theme="80s"] .activity-bar-right {
+  border-left: 2px solid #ffb00025;
+  box-shadow: inset 1px 0 0 #ffb00010;
+}
+
+/* ── Side panels — beveled inset borders ── */
+html[data-theme="80s"] .session-list,
+html[data-theme="80s"] .process-panel,
+html[data-theme="80s"] .git-panel-root,
+html[data-theme="80s"] .file-explorer-panel,
+html[data-theme="80s"] .search-panel {
+  border-right: 2px solid #ffb00018;
+  box-shadow:
+    inset 0 1px 0 #ffb00010,
+    inset 0 -1px 0 #00000030;
+}
+
+/* ── Icons — thick strokes + phosphor glow ── */
+html[data-theme="80s"] .activity-bar-tab svg,
+html[data-theme="80s"] .activity-bar-action svg,
+html[data-theme="80s"] .topbar-btn svg,
+html[data-theme="80s"] .status-bar svg {
+  stroke-width: 2.2;
+  filter: drop-shadow(0 0 3px #ffb00055);
+}
+
+/* ── Buttons — raised beveled 3D like old GUIs ── */
+html[data-theme="80s"] .topbar-btn {
+  border: 2px outset #ffb00030;
+  background: #1c1604;
+  box-shadow:
+    inset 1px 1px 0 #ffb00020,
+    inset -1px -1px 0 #00000040;
+}
+html[data-theme="80s"] .topbar-btn:hover {
+  background: #2a2208;
+  border-color: #ffb00050;
+  box-shadow:
+    inset 1px 1px 0 #ffb00030,
+    inset -1px -1px 0 #00000050,
+    0 0 8px #ffb00022;
+}
+
+html[data-theme="80s"] .status-mode-btn {
+  border: 2px outset #ffb00030;
+  background: #1c1604;
+  box-shadow:
+    inset 1px 1px 0 #ffb00020,
+    inset -1px -1px 0 #00000040;
+}
+html[data-theme="80s"] .status-mode-btn:hover {
+  background: #2a2208;
+  border-color: #ffb00050;
+}
+
+/* ── Active tab — sunken pressed button ── */
+html[data-theme="80s"] .activity-bar-tab.active,
+html[data-theme="80s"] .activity-bar-tab-active {
+  background: #1c1604;
+  box-shadow:
+    inset 2px 2px 0 #00000040,
+    inset -1px -1px 0 #ffb00015,
+    0 0 10px #ffb00020;
+}
+
+/* ── Active indicator — thick amber bar ── */
+html[data-theme="80s"] .activity-bar-left .activity-bar-tab-active::before {
+  width: 3px;
+  border-radius: 0;
+  background: #ffb000;
+  box-shadow: 0 0 6px #ffb00066;
+}
+html[data-theme="80s"] .activity-bar-right .activity-bar-tab-active::before {
+  width: 3px;
+  border-radius: 0;
+  background: #ffb000;
+  box-shadow: 0 0 6px #ffb00066;
+}
+
+/* ── Active session — amber glow stripe ── */
+html[data-theme="80s"] .session-item.active {
+  background: #ffb00012;
+  border-left: 3px solid #ffb000;
+  box-shadow: inset 0 0 12px #ffb00015;
+}
+
+/* ── Scrollbars — chunky retro style ── */
+html[data-theme="80s"] ::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+html[data-theme="80s"] ::-webkit-scrollbar-track {
+  background: #0a0800;
+  border: 1px solid #ffb00015;
+}
+html[data-theme="80s"] ::-webkit-scrollbar-thumb {
+  background: #ffb00030;
+  border: 2px outset #ffb00020;
+}
+html[data-theme="80s"] ::-webkit-scrollbar-thumb:hover {
+  background: #ffb00050;
+}
+html[data-theme="80s"] ::-webkit-scrollbar-corner {
+  background: #0a0800;
+}
+
+/* ── Pixel grid background on main area ── */
+html[data-theme="80s"] .app-body {
+  background:
+    linear-gradient(#ffb00004 1px, transparent 1px),
+    linear-gradient(90deg, #ffb00004 1px, transparent 1px),
+    var(--bg-0);
+  background-size: 8px 8px;
+}
+
+/* ── Badge — square amber ── */
+html[data-theme="80s"] .activity-bar-badge {
+  border-radius: 1px;
+  background: #ffb000;
+  color: #0a0800;
+  font-weight: 700;
+}
+
+/* ── Theme popover ── */
+html[data-theme="80s"] .status-theme-popover {
+  border: 2px outset #ffb00030;
+  box-shadow:
+    inset 1px 1px 0 #ffb00018,
+    inset -1px -1px 0 #00000040,
+    0 4px 16px #000000aa;
+}
+
+html[data-theme="80s"] .status-theme-option {
+  border-radius: 0;
+}
+
+/* ── Context menu — beveled ── */
+html[data-theme="80s"] .context-menu {
+  border: 2px outset #ffb00030;
+  border-radius: 0;
+  box-shadow:
+    inset 1px 1px 0 #ffb00018,
+    inset -1px -1px 0 #00000040,
+    0 4px 16px #000000aa;
+}
+
+html[data-theme="80s"] .context-menu-item {
+  border-radius: 0;
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;

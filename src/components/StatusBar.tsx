@@ -188,6 +188,7 @@ const THEME_COLORS: Record<string, string> = {
   tron: "#00dffc",
   duel: "#ee4444",
   rainbow: "#d6a0ff",
+  "80s": "#ffb000",
   solarized: "#268bd2",
 };
 

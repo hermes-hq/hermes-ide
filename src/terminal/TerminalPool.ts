@@ -185,6 +185,18 @@ const THEMES: Record<string, Record<string, string>> = {
     brightYellow: "#f5d466", brightBlue: "#88aadd", brightMagenta: "#cc88ee",
     brightCyan: "#77ccdd", brightWhite: "#e0dce8",
   },
+  "80s": {
+    background: "#0a0800",
+    foreground: "#cc8c00",
+    selectionBackground: "#ffb00033",
+    selectionForeground: "#ffb000",
+    cursor: "#ffb000",
+    black: "#0a0800", red: "#ff3333", green: "#33ff33", yellow: "#ffcc00",
+    blue: "#ffb000", magenta: "#ff6600", cyan: "#cc8c00", white: "#cc8c00",
+    brightBlack: "#554000", brightRed: "#ff6644", brightGreen: "#66ff66",
+    brightYellow: "#ffdd44", brightBlue: "#ffc033", brightMagenta: "#ff8833",
+    brightCyan: "#ddaa33", brightWhite: "#ffb000",
+  },
   solarized: {
     background: "#fdf6e3",
     foreground: "#586e75",
