@@ -148,6 +148,244 @@ html[data-theme="nightowl"] {
   --accent-glow: 0 0 10px #a78bfa33;
 }
 
+/* ─── Tron (digital frontier) ─────────────────────────────────── */
+html[data-theme="tron"] {
+  --bg-0: #030810;
+  --bg-1: #06101c;
+  --bg-2: #0b1a2a;
+  --bg-3: #0f2236;
+  --bg-hover: #0f2236;
+  --bg-active: #142d44;
+  --text-0: #d0f0ff;
+  --text-1: #8ecae6;
+  --text-2: #4a8aaa;
+  --text-3: #1e5070;
+  --accent: #00dffc;
+  --accent-dim: #00dffc18;
+  --green: #00ffaa;
+  --green-dim: #00ffaa26;
+  --red: #ff3855;
+  --red-dim: #ff385526;
+  --yellow: #ffe64d;
+  --yellow-dim: #ffe64d26;
+  --violet: #7df9ff;
+  --violet-dim: #7df9ff26;
+  --error: #ff3855;
+  --border: #00dffc18;
+  --border-light: #00dffc30;
+  --scanline-opacity: 0.04;
+  --accent-glow: 0 0 14px #00dffc55;
+  --tron-line-color: #00dffc;
+  --tron-line-secondary: #00ffaa;
+}
+
+/* ── Tron energy lines on borders ───────────────────────────── */
+
+html[data-theme="tron"] .topbar {
+  border-bottom: 1px solid var(--border-light);
+  background:
+    linear-gradient(to right,
+      transparent 0%,
+      #00dffc08 20%,
+      #00dffc15 50%,
+      #00dffc08 80%,
+      transparent 100%)
+    bottom / 100% 1px no-repeat,
+    var(--bg-1);
+  box-shadow: 0 1px 12px #00dffc18;
+}
+
+html[data-theme="tron"] .status-bar {
+  border-top: 1px solid var(--border-light);
+  box-shadow: 0 -1px 12px #00dffc18;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Animated energy pulse traveling across the status bar */
+html[data-theme="tron"] .status-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    #00dffc00,
+    #00dffc,
+    #7df9ff,
+    #00dffc,
+    #00dffc00,
+    transparent
+  );
+  animation: tron-energy-h 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Animated energy pulse traveling across the topbar */
+html[data-theme="tron"] .topbar::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: -40%;
+  width: 40%;
+  height: 1px;
+  background: linear-gradient(
+    to left,
+    transparent,
+    #00dffc00,
+    #00dffc,
+    #7df9ff,
+    #00dffc,
+    #00dffc00,
+    transparent
+  );
+  animation: tron-energy-h-reverse 5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Vertical energy line on left activity bar edge */
+html[data-theme="tron"] .activity-bar-left {
+  border-right: 1px solid var(--border-light);
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="tron"] .activity-bar-left::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -40%;
+  width: 1px;
+  height: 40%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #00dffc00,
+    #00ffaa,
+    #7df9ff,
+    #00ffaa,
+    #00dffc00,
+    transparent
+  );
+  animation: tron-energy-v 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Vertical energy line on right activity bar edge */
+html[data-theme="tron"] .activity-bar-right {
+  border-left: 1px solid var(--border-light);
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="tron"] .activity-bar-right::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -40%;
+  width: 1px;
+  height: 40%;
+  background: linear-gradient(
+    to top,
+    transparent,
+    #00dffc00,
+    #00dffc,
+    #7df9ff,
+    #00dffc,
+    #00dffc00,
+    transparent
+  );
+  animation: tron-energy-v-reverse 4.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Sidebar panel border energy */
+html[data-theme="tron"] .session-list,
+html[data-theme="tron"] .process-panel,
+html[data-theme="tron"] .git-panel-root,
+html[data-theme="tron"] .file-explorer-panel,
+html[data-theme="tron"] .search-panel {
+  border-right: 1px solid var(--border-light);
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="tron"] .session-list::after,
+html[data-theme="tron"] .process-panel::after,
+html[data-theme="tron"] .git-panel-root::after,
+html[data-theme="tron"] .file-explorer-panel::after,
+html[data-theme="tron"] .search-panel::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -40%;
+  width: 1px;
+  height: 40%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    #00dffc00,
+    #00dffc,
+    #7df9ff,
+    #00dffc,
+    #00dffc00,
+    transparent
+  );
+  animation: tron-energy-v 6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 2;
+}
+
+/* Accent glow on focused elements */
+html[data-theme="tron"] .session-item.active {
+  box-shadow: inset 2px 0 8px #00dffc22;
+}
+
+html[data-theme="tron"] .activity-bar-tab.active {
+  box-shadow: 0 0 8px #00dffc33;
+}
+
+/* Subtle grid pattern in background */
+html[data-theme="tron"] #root {
+  background:
+    linear-gradient(#00dffc06 1px, transparent 1px),
+    linear-gradient(90deg, #00dffc06 1px, transparent 1px),
+    var(--bg-0);
+  background-size: 60px 60px, 60px 60px, 100%;
+}
+
+/* ── Tron keyframes ──────────────────────────────────────────── */
+
+@keyframes tron-energy-h {
+  0%   { left: -40%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+@keyframes tron-energy-h-reverse {
+  0%   { right: -40%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { right: 100%; opacity: 0; }
+}
+
+@keyframes tron-energy-v {
+  0%   { top: -40%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes tron-energy-v-reverse {
+  0%   { bottom: -40%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { bottom: 100%; opacity: 0; }
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;
