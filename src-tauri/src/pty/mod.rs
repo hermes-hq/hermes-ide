@@ -447,9 +447,18 @@ impl ProviderAdapter for ClaudeCodeAdapter {
 
     fn is_prompt(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        // Claude Code specific prompts
-        if trimmed.ends_with(">") && trimmed.len() < 40 && !trimmed.contains('<') && !trimmed.contains("->") {
-            return true;
+        // Claude Code specific prompts: match lines like "claude>" or "project >" but
+        // reject HTML tags, arrows (->), comparison operators, and general code output.
+        if trimmed.ends_with(">") && trimmed.len() < 40
+            && !trimmed.contains('<') && !trimmed.contains("->")
+            && !trimmed.contains("=>") && !trimmed.contains(">>")
+        {
+            // Must look prompt-like: either a bare ">" or have a word-like prefix
+            // (not just a number like "0>" or punctuation)
+            let prefix = trimmed[..trimmed.len() - 1].trim();
+            if prefix.is_empty() || prefix.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ' ' || c == '-' || c == ':' || c == '/' || c == '~') {
+                return true;
+            }
         }
         is_shell_prompt(trimmed)
     }
@@ -1305,10 +1314,22 @@ fn slash_label(cmd: &str) -> String {
 }
 
 fn extract_between(text: &str, start: &str, end: &str) -> Option<String> {
+    // Use case-insensitive search on the original text to avoid byte offset
+    // mismatch between lowercased and original strings (to_lowercase can change
+    // byte lengths for certain Unicode characters like ß → ss).
     let lower = text.to_lowercase();
-    let s = lower.find(&start.to_lowercase())?;
-    let after = s + start.len();
-    let e = lower[after..].find(&end.to_lowercase())?;
+    let start_lower = start.to_lowercase();
+    let end_lower = end.to_lowercase();
+    let s = lower.find(&start_lower)?;
+    let after = s + start_lower.len();
+    let e = lower[after..].find(&end_lower)?;
+    // Byte offsets from `lower` may not be valid for `text` if to_lowercase
+    // changed byte lengths. Validate boundaries before slicing.
+    if after > text.len() || after + e > text.len()
+        || !text.is_char_boundary(after) || !text.is_char_boundary(after + e)
+    {
+        return None;
+    }
     Some(text[after..after + e].trim().to_string())
 }
 
@@ -1837,15 +1858,22 @@ pub fn create_session(
                         // (fallback for non-Claude agents that can't take CLI args)
                         if a.pending_context_inject && !a.context_injected {
                             a.pending_context_inject = false;
-                            a.context_injected = true;
+                            let mut write_ok = false;
                             if let Ok(mut w) = writer_for_reader.lock() {
                                 let msg = "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
-                                let _ = w.write_all(msg.as_bytes());
-                                let _ = w.flush();
+                                if w.write_all(msg.as_bytes()).is_ok() {
+                                    let _ = w.flush();
+                                    write_ok = true;
+                                }
                             }
-                            if let Ok(mut s) = session_clone.lock() {
-                                s.context_injected = true;
+                            if write_ok {
+                                a.context_injected = true;
+                                if let Ok(mut s) = session_clone.lock() {
+                                    s.context_injected = true;
+                                }
                             }
+                            // If write failed, pending_context_inject is cleared but
+                            // context_injected stays false — next prompt detection retries.
                         }
 
                         if chunk_count % 30 == 0 {
@@ -1915,7 +1943,8 @@ pub fn write_to_session(
         .ok_or_else(|| format!("Session {} not found", session_id))?;
 
     use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(&data).unwrap_or_else(|_| data.into_bytes());
+    let bytes = base64::engine::general_purpose::STANDARD.decode(&data)
+        .map_err(|e| format!("Invalid base64 input: {}", e))?;
 
     if let Ok(mut a) = session.analyzer.lock() {
         a.mark_input_sent();

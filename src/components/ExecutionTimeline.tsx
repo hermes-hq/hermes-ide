@@ -81,13 +81,15 @@ export function ExecutionTimeline({ sessionId, color }: ExecutionTimelineProps) 
     let unlisten: (() => void) | null = null;
     listen<ExecutionNode>(`execution-node-${sessionId}`, (event) => {
       if (cancelled) return;
+      let added = false;
       setNodes((prev) => {
         // Prepend (newest first since query is DESC)
         const exists = prev.find((n) => n.id === event.payload.id);
         if (exists) return prev;
+        added = true;
         return [event.payload, ...prev];
       });
-      offsetRef.current += 1;
+      if (added) offsetRef.current += 1;
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });

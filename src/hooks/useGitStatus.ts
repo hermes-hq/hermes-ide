@@ -37,9 +37,12 @@ export function useGitStatus(
   }, [sessionId]);
 
   useEffect(() => {
-    mounted.current = true;
-    if (!enabled || !sessionId) return;
+    if (!enabled || !sessionId) {
+      mounted.current = false;
+      return;
+    }
 
+    mounted.current = true;
     fetchStatus();
 
     // pollInterval of 0 means polling is disabled — only fetch once on mount

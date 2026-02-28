@@ -20,7 +20,13 @@ export function useContextMenu(onAction: (actionId: string) => void): {
       e.stopPropagation();
       ensureListener();
       registerContextMenuHandler((actionId) => onActionRef.current(actionId));
-      showContextMenu(items).catch(() => {
+      showContextMenu(items).then(() => {
+        // Menu closed (resolved) — clear stale handler if no action was fired.
+        // The handler is one-shot and self-clears on action, but if the user
+        // dismissed the menu without selecting, it stays registered and would
+        // intercept the next menu bar action.
+        clearContextMenuHandler();
+      }).catch(() => {
         clearContextMenuHandler();
       });
     },

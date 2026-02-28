@@ -244,7 +244,7 @@ export function GitProjectSection({ project, onRefresh, onDiffFile, onToast }: G
     : staged.length === 0 || !commitMsg.trim();
 
   const inMerge = mergeStatus?.in_merge ?? false;
-  const canCompleteMerge = inMerge && mergeStatus!.conflicted_files.length === 0;
+  const canCompleteMerge = inMerge && mergeStatus?.conflicted_files.length === 0;
 
   return (
     <div className="git-project-section" style={{ position: "relative" }}>

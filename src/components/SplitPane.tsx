@@ -4,7 +4,7 @@ import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
-import { focusTerminal } from "../terminal/TerminalPool";
+import { focusTerminal, terminalHasSelection, terminalGetSelection } from "../terminal/TerminalPool";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
 
@@ -72,7 +72,11 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
 
   const handleTerminalAction = useCallback((actionId: string) => {
     switch (actionId) {
-      case "terminal.copy": document.execCommand("copy"); break;
+      case "terminal.copy": {
+        const sel = terminalGetSelection(sessionId);
+        if (sel) navigator.clipboard.writeText(sel).catch(console.error);
+        break;
+      }
       case "terminal.paste": document.execCommand("paste"); break;
       case "terminal.select-all": /* handled by terminal */ break;
       case "terminal.clear": /* TODO: wire to terminal clear */ break;
@@ -213,7 +217,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           />
         )}
       </div>
-      <div className="split-pane-terminal" onContextMenu={(e) => showTerminalMenu(e, buildTerminalMenuItems(window.getSelection()?.toString() ? true : false))}>
+      <div className="split-pane-terminal" onContextMenu={(e) => showTerminalMenu(e, buildTerminalMenuItems(terminalHasSelection(sessionId)))}>
         <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
       </div>
 

@@ -5,7 +5,8 @@ type Platform = "mac" | "win" | "linux";
 
 function detectPlatform(): Platform {
   const ua = (typeof navigator !== "undefined" ? navigator.userAgent ?? "" : "").toLowerCase();
-  if (ua.includes("win")) return "win";
+  if (ua.includes("macintosh") || ua.includes("mac os")) return "mac";
+  if (ua.includes("windows")) return "win";
   if (ua.includes("linux")) return "linux";
   return "mac";
 }

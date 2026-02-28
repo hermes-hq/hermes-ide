@@ -20,7 +20,10 @@ export function useTextContextMenu(): {
     registerContextMenuHandler((actionId: string) => {
       handleTextAction(actionId, target);
     });
-    showContextMenu(items).catch(() => {
+    showContextMenu(items).then(() => {
+      // Clear handler on menu dismiss (no item selected)
+      clearContextMenuHandler();
+    }).catch(() => {
       clearContextMenuHandler();
     });
   }, []);

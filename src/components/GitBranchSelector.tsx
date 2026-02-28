@@ -89,6 +89,8 @@ export function GitBranchSelector({ projectPath, currentBranch, onRefresh, onToa
     });
   }, [triggerRef]);
 
+  const contextBranchRef = useRef<GitBranch | null>(null);
+
   const handleBranchAction = useCallback((actionId: string) => {
     const branch = contextBranchRef.current;
     if (!branch) return;
@@ -109,7 +111,6 @@ export function GitBranchSelector({ projectPath, currentBranch, onRefresh, onToa
     }
   }, [projectPath, onRefresh, onToast]);
 
-  const contextBranchRef = useRef<GitBranch | null>(null);
   const { showMenu: showBranchMenu } = useContextMenu(handleBranchAction);
 
   const loadBranches = useCallback(async () => {

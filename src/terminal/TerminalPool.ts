@@ -1152,3 +1152,13 @@ export function sendShortcutCommand(sessionId: string, command: string): void {
 export function getTerminal(sessionId: string): Terminal | null {
   return pool.get(sessionId)?.terminal ?? null;
 }
+
+/** Check if the terminal has an active text selection (canvas-based, not DOM). */
+export function terminalHasSelection(sessionId: string): boolean {
+  return pool.get(sessionId)?.terminal.hasSelection() ?? false;
+}
+
+/** Get the selected text from the terminal (canvas-based selection). */
+export function terminalGetSelection(sessionId: string): string {
+  return pool.get(sessionId)?.terminal.getSelection() ?? "";
+}

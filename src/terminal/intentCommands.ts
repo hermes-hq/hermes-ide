@@ -30,7 +30,7 @@ export function resolveIntent(input: string, _ctx: IntentContext): IntentResult 
   if (intent === "clean up" || intent === "cleanup") {
     return {
       resolved: true,
-      command: "git branch --merged | grep -v 'main\\|master\\|\\*'",
+      command: "git branch --merged | grep -vE 'main|master|\\*'",
       description: "Show merged branches",
     };
   }

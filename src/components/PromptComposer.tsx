@@ -201,10 +201,11 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     // producing a spurious Enter that races the composed prompt through the PTY mutex.
     try {
       await writeToSession(sessionId, data);
+      onClose();
     } catch (err) {
-      console.error(err);
+      console.error("[PromptComposer] Failed to send prompt:", err);
+      // Don't close — let user retry or copy their prompt
     }
-    onClose();
   }, [compiled, sessionId, onClose]);
 
   const copyPrompt = useCallback(() => {

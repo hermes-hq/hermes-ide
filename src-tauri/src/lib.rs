@@ -58,10 +58,16 @@ pub fn run() {
             let handle = app.handle().clone();
             match menu::build_app_menu(&handle) {
                 Ok(m) => {
-                    app.set_menu(m).expect("Failed to set menu");
-                    app.on_menu_event(move |app_handle, event| {
-                        menu::handle_menu_event(app_handle, event);
-                    });
+                    match app.set_menu(m) {
+                        Ok(_) => {
+                            app.on_menu_event(move |app_handle, event| {
+                                menu::handle_menu_event(app_handle, event);
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to set menu: {}", e);
+                        }
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to build app menu: {}", e);

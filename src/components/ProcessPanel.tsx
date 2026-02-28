@@ -218,7 +218,11 @@ const ProcessRow = memo(function ProcessRow({
     prev.isNew === next.isNew &&
     prev.top === next.top &&
     prev.height === next.height &&
-    prev.advancedMode === next.advancedMode
+    prev.advancedMode === next.advancedMode &&
+    prev.onKill === next.onKill &&
+    prev.onKillTree === next.onKillTree &&
+    prev.onReveal === next.onReveal &&
+    prev.onContextMenu === next.onContextMenu
   );
 });
 

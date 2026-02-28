@@ -46,8 +46,12 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
 
     if (!tryAttach()) {
       // Poll briefly if terminal hasn't been created yet
+      let attached = false;
       const interval = setInterval(() => {
-        if (tryAttach()) clearInterval(interval);
+        if (tryAttach()) {
+          attached = true;
+          clearInterval(interval);
+        }
       }, 50);
       const timeout = setTimeout(() => {
         clearInterval(interval);
@@ -56,7 +60,7 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       return () => {
         clearInterval(interval);
         clearTimeout(timeout);
-        detach(sessionId);
+        if (attached) detach(sessionId);
       };
     }
 

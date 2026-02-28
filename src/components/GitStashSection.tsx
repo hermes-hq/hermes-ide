@@ -104,12 +104,14 @@ export function GitStashSection({
   }, [error]);
 
   // Auto-expand only when stashes appear from zero (not on every count change)
-  if (stashCount !== prevStashCount) {
-    setPrevStashCount(stashCount);
-    if (prevStashCount === 0 && stashCount > 0) {
-      setExpanded(true);
+  useEffect(() => {
+    if (stashCount !== prevStashCount) {
+      if (prevStashCount === 0 && stashCount > 0) {
+        setExpanded(true);
+      }
+      setPrevStashCount(stashCount);
     }
-  }
+  }, [stashCount, prevStashCount]);
 
   const loadStashes = useCallback(async () => {
     try {
