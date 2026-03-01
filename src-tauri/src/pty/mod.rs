@@ -394,70 +394,64 @@ impl ProviderAdapter for ClaudeCodeAdapter {
         let mut result = empty_analysis();
         let now_str = now();
 
-        // Token detection — try multiple patterns
-        if let Some(caps) = CLAUDE_TOKEN_RE.captures(line) {
-            let input = parse_token_count(&caps[1]);
-            let output = parse_token_count(&caps[2]);
-            let cost = CLAUDE_COST_RE.captures(line)
-                .or_else(|| SESSION_COST_RE.captures(line))
-                .or_else(|| DOLLAR_AMOUNT_RE.captures(line))
-                .and_then(|c| c[1].parse().ok());
-            result.token_update = Some(TokenUpdate {
-                provider: "anthropic".into(),
-                model: "unknown".into(),
-                input_tokens: input,
-                output_tokens: output,
-                cost_usd: cost,
-                is_cumulative: true,
-            });
-        } else if let Some(caps) = CLAUDE_TOKEN_SHORT_RE.captures(line) {
-            let input = parse_token_count(&caps[1]);
-            let output = parse_token_count(&caps[2]);
-            let cost = DOLLAR_AMOUNT_RE.captures(line).and_then(|c| c[1].parse().ok());
-            result.token_update = Some(TokenUpdate {
-                provider: "anthropic".into(),
-                model: "unknown".into(),
-                input_tokens: input,
-                output_tokens: output,
-                cost_usd: cost,
-                is_cumulative: true,
-            });
-        } else if let Some(caps) = SESSION_COST_RE.captures(line) {
-            if let Ok(cost) = caps[1].parse::<f64>() {
+        // Token detection — try specific patterns only (no generic dollar-amount fallback
+        // to avoid false positives from code output like "$500.00")
+        // Skip long lines (>200 chars) — likely code output, not status bar
+        if line.len() <= 200 {
+            if let Some(caps) = CLAUDE_TOKEN_RE.captures(line) {
+                let input = parse_token_count(&caps[1]);
+                let output = parse_token_count(&caps[2]);
+                // Only trust explicit cost patterns — never DOLLAR_AMOUNT_RE
+                let cost = SESSION_COST_RE.captures(line)
+                    .or_else(|| CLAUDE_COST_RE.captures(line))
+                    .and_then(|c| c[1].parse().ok());
                 result.token_update = Some(TokenUpdate {
                     provider: "anthropic".into(),
                     model: "unknown".into(),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cost_usd: Some(cost),
-                    is_cumulative: true,
-                });
-            }
-        } else if let Some(caps) = CLAUDE_COST_RE.captures(line) {
-            if let Ok(cost) = caps[1].parse::<f64>() {
-                result.token_update = Some(TokenUpdate {
-                    provider: "anthropic".into(),
-                    model: "unknown".into(),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cost_usd: Some(cost),
-                    is_cumulative: true,
-                });
-            }
-        } else if let Some(caps) = CLAUDE_TOKEN_TOTAL_RE.captures(line) {
-            // Only "total tokens" without in/out split
-            let total = parse_token_count(&caps[1]);
-            if total > 0 {
-                let cost = DOLLAR_AMOUNT_RE.captures(line).and_then(|c| c[1].parse().ok());
-                result.token_update = Some(TokenUpdate {
-                    provider: "anthropic".into(),
-                    model: "unknown".into(),
-                    input_tokens: total / 2,  // rough estimate
-                    output_tokens: total / 2,
+                    input_tokens: input,
+                    output_tokens: output,
                     cost_usd: cost,
                     is_cumulative: true,
                 });
+            } else if let Some(caps) = CLAUDE_TOKEN_SHORT_RE.captures(line) {
+                let input = parse_token_count(&caps[1]);
+                let output = parse_token_count(&caps[2]);
+                // Only trust explicit cost patterns on the same line
+                let cost = SESSION_COST_RE.captures(line)
+                    .or_else(|| CLAUDE_COST_RE.captures(line))
+                    .and_then(|c| c[1].parse().ok());
+                result.token_update = Some(TokenUpdate {
+                    provider: "anthropic".into(),
+                    model: "unknown".into(),
+                    input_tokens: input,
+                    output_tokens: output,
+                    cost_usd: cost,
+                    is_cumulative: true,
+                });
+            } else if let Some(caps) = SESSION_COST_RE.captures(line) {
+                if let Ok(cost) = caps[1].parse::<f64>() {
+                    result.token_update = Some(TokenUpdate {
+                        provider: "anthropic".into(),
+                        model: "unknown".into(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cost_usd: Some(cost),
+                        is_cumulative: true,
+                    });
+                }
+            } else if let Some(caps) = CLAUDE_COST_RE.captures(line) {
+                if let Ok(cost) = caps[1].parse::<f64>() {
+                    result.token_update = Some(TokenUpdate {
+                        provider: "anthropic".into(),
+                        model: "unknown".into(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cost_usd: Some(cost),
+                        is_cumulative: true,
+                    });
+                }
             }
+            // Removed CLAUDE_TOKEN_TOTAL_RE — too greedy, matches "token: 1234" in any context
         }
 
         // Tool call detection (specific pattern with args)

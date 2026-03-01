@@ -49,6 +49,9 @@ interface PoolEntry {
   historyProvider: HistoryProvider;
   sessionPhase: string;
   cwd: string;
+  // Dedup: rolling window of recently-sent printable chars (prevents WKWebView
+  // composition flush from re-sending the entire textarea content)
+  sentChars: string;
 }
 
 type SuggestionCallback = (state: SuggestionState | null) => void;
@@ -61,6 +64,10 @@ const suggestionSubscribers = new Map<string, Set<SuggestionCallback>>();
 const creating = new Set<string>();
 
 const SUGGESTION_DEBOUNCE_MS = 50;
+
+// Dedup: maximum size for the per-session sent-chars buffer. Characters older
+// than this window are dropped.  The buffer is also cleared on Enter/Ctrl-C.
+const SENT_CHARS_MAX = 512;
 
 // ─── Themes & Fonts ──────────────────────────────────────────────────
 
@@ -503,6 +510,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     historyProvider: createHistoryProvider(),
     sessionPhase: "creating",
     cwd: "",
+    sentChars: "",
   });
   creating.delete(sessionId);
 }
@@ -562,6 +570,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
     const ghostContent = entry.ghostText;
     clearGhostText(sessionId);
     dismissSuggestions(sessionId);
+    entry.sentChars = ""; // Reset — ghost accept changes the prompt line
     writeToSession(sessionId, utf8ToBase64(ghostContent + "\r")).catch((err) => {
       console.warn(`[TerminalPool] write_to_session (ghost accept) failed for ${sessionId}:`, err);
     });
@@ -586,6 +595,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
       const fullData = eraseSequence + result.command + "\r";
       entry.historyProvider.addCommand(result.command);
       entry.inputBuffer = "";
+      entry.sentChars = "";
       dismissSuggestions(sessionId);
       clearGhostText(sessionId);
       writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
@@ -595,10 +605,48 @@ function handleTerminalInput(sessionId: string, data: string): void {
     }
   }
 
+  // ── Dedup guard: WKWebView composition flush ──
+  // xterm's hidden textarea accumulates typed characters (never cleared during
+  // normal typing).  Under heavy terminal.write() output, WKWebView can fire
+  // spurious compositionstart/compositionend events.  The compositionend handler
+  // reads the *entire* accumulated textarea value and sends it via onData,
+  // duplicating characters that were already sent individually.
+  //
+  // Guard: if a multi-char, non-escape, non-paste payload is a contiguous
+  // substring of the recently-sent character window, suppress it.
+  if (data.length > 4) {
+    const isEscapeSeq = data.charCodeAt(0) === 0x1b;
+    const isBracketedPaste = data.includes("\x1b[200~");
+    if (!isEscapeSeq && !isBracketedPaste && entry.sentChars.length >= data.length) {
+      // Extract only printable chars for comparison
+      let printable = "";
+      for (let i = 0; i < data.length; i++) {
+        if (data.charCodeAt(i) >= 32) printable += data[i];
+      }
+      if (printable.length > 4 && entry.sentChars.includes(printable)) {
+        return; // Suppress — this is a duplicate composition flush
+      }
+    }
+  }
+
   // ── Always pass data to PTY ──
   writeToSession(sessionId, utf8ToBase64(data)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session failed for ${sessionId}:`, err);
   });
+
+  // ── Track sent characters for dedup ──
+  for (let i = 0; i < data.length; i++) {
+    const code = data.charCodeAt(i);
+    if (code === 0x0d || code === 0x03) {
+      // Enter or Ctrl-C: reset sent window (new prompt line)
+      entry.sentChars = "";
+    } else if (code >= 32) {
+      entry.sentChars += data[i];
+      if (entry.sentChars.length > SENT_CHARS_MAX) {
+        entry.sentChars = entry.sentChars.slice(-SENT_CHARS_MAX);
+      }
+    }
+  }
 
   // ── Debounced suggestion computation ──
   if (intelligenceActive && entry.inputBuffer.trim()) {
@@ -934,6 +982,7 @@ export function setSessionPhase(sessionId: string, phase: string): void {
   // Dismiss suggestions when entering busy phase
   if (phase !== "idle" && phase !== "shell_ready") {
     entry.inputBuffer = "";
+    entry.sentChars = "";
     dismissSuggestions(sessionId);
     clearGhostText(sessionId);
   }
