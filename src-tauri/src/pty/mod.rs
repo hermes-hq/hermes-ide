@@ -1812,6 +1812,22 @@ pub fn create_session(
                             }
                         }
 
+                        // Emit immediately when an agent is first detected,
+                        // even if no phase change occurred (e.g. session was
+                        // already Idle when the CLI startup + prompt arrived
+                        // in the same chunk).
+                        if a.detected_agent.is_some() {
+                            if let Ok(mut s) = session_clone.lock() {
+                                if s.detected_agent.is_none() {
+                                    s.detected_agent = a.detected_agent.clone();
+                                    s.metrics = a.to_metrics();
+                                    s.last_activity_at = now();
+                                    let update = SessionUpdate::from(&*s);
+                                    let _ = app_clone.emit("session-updated", &update);
+                                }
+                            }
+                        }
+
                         // Auto-launch AI agent when shell is ready
                         if a.pending_ai_launch {
                             a.pending_ai_launch = false;
