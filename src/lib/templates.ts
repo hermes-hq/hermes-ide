@@ -11,7 +11,13 @@ export type TemplateCategory =
   | "git-review"
   | "product"
   | "planning"
-  | "design";
+  | "design"
+  | "devops"
+  | "data"
+  | "ai-ml"
+  | "incident"
+  | "business"
+  | "monetization";
 
 export interface PromptTemplate {
   id: string;
@@ -36,6 +42,12 @@ export const TEMPLATE_CATEGORIES: Record<TemplateCategory, { label: string; icon
   product:       { label: "Product Management", icon: "%" },
   planning:      { label: "Planning & Strategy", icon: "&" },
   design:        { label: "UX & Design",        icon: "+" },
+  devops:        { label: "DevOps & Infra",    icon: "!" },
+  data:          { label: "Data & Analytics",  icon: ":" },
+  "ai-ml":       { label: "AI & ML",           icon: "$" },
+  incident:      { label: "Incident Response", icon: ";" },
+  business:      { label: "Business & Growth", icon: "'" },
+  monetization:  { label: "Monetization",     icon: "¢" },
 };
 
 export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
@@ -713,6 +725,522 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
     },
   },
 
+  // ── Security (expanded) ──
+  {
+    id: "sec-secrets",
+    name: "Secrets & Credentials Audit",
+    description: "Scan for leaked API keys, hardcoded passwords, and .env exposure.",
+    category: "security",
+    recommendedRoles: ["security-auditor", "devops-eng"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Scan for hardcoded secrets, API keys, tokens, passwords, and .env files committed to version control. Check environment variable handling, secret rotation policies, and vault integration.",
+      style: "List each finding with file path, line number, and severity. Show the remediation (environment variable, vault reference, etc.) as a diff.",
+    },
+  },
+  {
+    id: "sec-compliance",
+    name: "Compliance Checklist (SOC2/GDPR)",
+    description: "Audit codebase for SOC2, GDPR, or HIPAA compliance gaps.",
+    category: "security",
+    recommendedRoles: ["security-auditor", "backend-eng"],
+    recommendedStyles: [{ id: "formal", level: 4 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Check for data encryption at rest and in transit, audit logging, access controls, data retention policies, PII handling, consent mechanisms, and right-to-deletion support.",
+      style: "Structure as a compliance checklist grouped by framework requirement. Mark each item as pass/fail/partial with remediation steps.",
+    },
+  },
+  {
+    id: "sec-rate-limit",
+    name: "Rate Limiting & Abuse Prevention",
+    description: "Design rate limiting, throttling, and abuse prevention for APIs.",
+    category: "security",
+    recommendedRoles: ["security-auditor", "backend-eng"],
+    recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "code-heavy", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Identify all public endpoints, authentication flows, and resource-intensive operations. Consider distributed rate limiting, token bucket vs sliding window, and graceful degradation.",
+      style: "Map each endpoint to its rate limit policy. Show implementation code for the rate limiter. Include bypass prevention for header spoofing.",
+    },
+  },
+
+  // ── Architecture (expanded) ──
+  {
+    id: "arch-event-driven",
+    name: "Event-Driven Architecture",
+    description: "Design pub/sub, CQRS, or event sourcing for decoupled systems.",
+    category: "architecture",
+    recommendedRoles: ["architect", "backend-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define event schemas, producers, consumers, and delivery guarantees. Consider idempotency, ordering, dead-letter queues, and eventual consistency tradeoffs.",
+      style: "Diagram the event flow. Define each event type with its schema. Show consumer retry and failure handling.",
+    },
+  },
+  {
+    id: "arch-caching",
+    name: "Caching Strategy",
+    description: "Design cache layers, invalidation policies, and consistency tradeoffs.",
+    category: "architecture",
+    recommendedRoles: ["architect", "backend-eng"],
+    recommendedStyles: [{ id: "visual", level: 3 }, { id: "balanced", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Identify cacheable data, TTLs, invalidation triggers, and cache-aside vs write-through patterns. Consider thundering herd, cache stampede, and stale-while-revalidate.",
+      style: "Map each data type to its caching strategy. Show cache hit/miss flow diagrams. Include invalidation logic.",
+    },
+  },
+  {
+    id: "arch-scaling",
+    name: "Scaling Plan",
+    description: "Identify bottlenecks and plan horizontal/vertical scaling strategies.",
+    category: "architecture",
+    recommendedRoles: ["architect", "devops-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Profile current load, identify bottlenecks (CPU, memory, I/O, network), and plan scaling steps. Consider read replicas, sharding, connection pooling, CDN, and auto-scaling policies.",
+      style: "Show current architecture with bottleneck markers. Propose phased scaling plan with estimated capacity at each phase.",
+    },
+  },
+
+  // ── Testing (expanded) ──
+  {
+    id: "test-e2e",
+    name: "E2E Test Scenario",
+    description: "Design end-to-end tests for critical user flows with browser automation.",
+    category: "testing",
+    recommendedRoles: ["test-engineer", "frontend-eng"],
+    recommendedStyles: [{ id: "code-heavy", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Cover critical user flows end-to-end. Handle async operations, network requests, and dynamic content. Tests must be deterministic and not flaky. Use page object pattern for maintainability.",
+      style: "Structure each test as a user scenario with clear setup, steps, and assertions. Show selector strategy and wait conditions.",
+    },
+  },
+  {
+    id: "test-load",
+    name: "Load Test Plan",
+    description: "Define load profiles, thresholds, and breaking points for your service.",
+    category: "testing",
+    recommendedRoles: ["test-engineer", "devops-eng"],
+    recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define realistic load profiles (ramp-up, sustained, spike). Set SLO thresholds for latency, error rate, and throughput. Identify the breaking point and degradation behavior.",
+      style: "Show load profile curves. Define pass/fail criteria as a table. Include the test script structure and key scenarios.",
+    },
+  },
+
+  // ── Documentation (expanded) ──
+  {
+    id: "doc-rfc",
+    name: "Technical RFC / Design Doc",
+    description: "Write a structured proposal for technical decisions with alternatives.",
+    category: "documentation",
+    recommendedRoles: ["architect", "technical-writer"],
+    recommendedStyles: [{ id: "formal", level: 3 }, { id: "balanced", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Include context, problem statement, proposed solution, alternatives considered, migration plan, and open questions. Define success criteria and rollback plan.",
+      style: "Use RFC structure: Summary, Motivation, Detailed Design, Alternatives, Unresolved Questions. Be opinionated on the recommendation but fair on alternatives.",
+    },
+  },
+  {
+    id: "doc-onboarding",
+    name: "Developer Onboarding Guide",
+    description: "Write a new-hire guide covering setup, architecture, and key workflows.",
+    category: "documentation",
+    recommendedRoles: ["technical-writer"],
+    recommendedStyles: [{ id: "beginner", level: 4 }, { id: "step-by-step", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Cover environment setup, project architecture overview, development workflow, testing approach, deployment process, and key contacts. Assume zero prior context.",
+      style: "Step-by-step with copy-pasteable commands. Include troubleshooting section for common setup issues. Use a checklist format for the first-day and first-week milestones.",
+    },
+  },
+
+  // ── Product Management (expanded) ──
+  {
+    id: "product-gtm",
+    name: "Go-to-Market Plan",
+    description: "Plan launch strategy, channels, messaging, and timeline.",
+    category: "product",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define target audience, value proposition, launch channels, messaging, timeline, success metrics, and post-launch iteration plan. Consider early adopter strategy and feedback loops.",
+      style: "Structure as a phased timeline (pre-launch, launch day, post-launch). Include channel-specific tactics and messaging templates.",
+    },
+  },
+  {
+    id: "product-pricing",
+    name: "Pricing Strategy",
+    description: "Design pricing tiers, packaging, and competitive positioning.",
+    category: "product",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "balanced", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Analyze cost structure, willingness to pay, competitor pricing, and value metrics. Design tier structure with clear upgrade triggers. Consider freemium, usage-based, and seat-based models.",
+      style: "Present pricing tiers as a comparison table. Show the value ladder. Include competitor benchmark and margin analysis.",
+    },
+  },
+  {
+    id: "product-okr",
+    name: "OKR Definition",
+    description: "Define objectives, key results, and initiatives aligned to strategy.",
+    category: "product",
+    recommendedRoles: ["product-manager", "project-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Objectives must be qualitative and inspiring. Key results must be measurable with clear targets. Initiatives map to key results. Limit to 3-5 objectives with 2-4 KRs each.",
+      style: "Structure as Objective → Key Results → Initiatives. Include baseline, target, and stretch values for each KR. Show alignment to company-level goals.",
+    },
+  },
+  {
+    id: "product-interview",
+    name: "Customer Interview Script",
+    description: "Design discovery interview questions with follow-ups and synthesis.",
+    category: "product",
+    recommendedRoles: ["product-manager", "ux-designer"],
+    recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Use open-ended questions. Avoid leading questions. Follow the 'jobs to be done' framework. Include warm-up, core discovery, and wrap-up phases. Plan for 30-45 minute sessions.",
+      style: "Structure as interview phases with primary and follow-up questions. Include a synthesis template for capturing insights, patterns, and action items.",
+    },
+  },
+
+  // ── Planning (expanded) ──
+  {
+    id: "planning-techdebt",
+    name: "Technical Debt Assessment",
+    description: "Catalog, score, and prioritize technical debt for remediation.",
+    category: "planning",
+    recommendedRoles: ["architect", "project-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "actionable", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Identify tech debt across code quality, architecture, infrastructure, and dependencies. Score each item by impact (developer velocity, reliability, security) and remediation effort.",
+      style: "Present as a scored table with impact vs effort quadrant. Group by category. Recommend a remediation roadmap with quick wins first.",
+    },
+  },
+  {
+    id: "planning-capacity",
+    name: "Capacity Planning",
+    description: "Allocate team capacity across projects, support, and tech debt.",
+    category: "planning",
+    recommendedRoles: ["project-manager", "product-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Account for team size, velocity, PTO, on-call rotation, and interrupt-driven work. Allocate capacity across features, tech debt, bugs, and support. Flag over-commitment risks.",
+      style: "Show capacity as a visual allocation (percentages or hours). Include a burndown forecast. Highlight bottlenecks and single-person dependencies.",
+    },
+  },
+  {
+    id: "planning-retro",
+    name: "Sprint Retrospective",
+    description: "Facilitate a retro with what went well, what didn't, and action items.",
+    category: "planning",
+    recommendedRoles: ["project-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "balanced", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Cover what went well, what didn't, and what to change. Focus on process improvements, not blame. Each action item must have an owner and due date. Limit to 3-5 actionable takeaways.",
+      style: "Structure as three columns: Keep, Stop, Start. Prioritize action items by impact. Include follow-up on previous retro items.",
+    },
+  },
+
+  // ── DevOps & Infrastructure (5 — NEW CATEGORY) ──
+  {
+    id: "devops-cicd",
+    name: "CI/CD Pipeline Design",
+    description: "Design build, test, and deploy stages with rollback triggers.",
+    category: "devops",
+    recommendedRoles: ["devops-eng", "backend-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define pipeline stages (lint, test, build, deploy), environments (dev, staging, prod), promotion gates, and rollback triggers. Consider parallelization, caching, and secrets management.",
+      style: "Diagram the pipeline stages. Show the configuration file structure. Include failure handling and notification setup.",
+    },
+  },
+  {
+    id: "devops-container",
+    name: "Containerization Review",
+    description: "Audit Dockerfiles for size, security, layer caching, and best practices.",
+    category: "devops",
+    recommendedRoles: ["devops-eng"],
+    recommendedStyles: [{ id: "diff-format", level: 4 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Check for multi-stage builds, minimal base images, non-root users, layer ordering for cache efficiency, .dockerignore, and security scanning. Minimize final image size.",
+      style: "Show the current Dockerfile with annotated issues, then the optimized version as a diff. Include image size before/after.",
+    },
+  },
+  {
+    id: "devops-infra",
+    name: "Infrastructure as Code Review",
+    description: "Review Terraform/Pulumi/CDK for drift, cost, and security posture.",
+    category: "devops",
+    recommendedRoles: ["devops-eng", "security-auditor"],
+    recommendedStyles: [{ id: "code-heavy", level: 3 }, { id: "actionable", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Check for state drift, resource tagging, cost optimization, security group rules, IAM least-privilege, encryption, and backup policies. Verify environment parity.",
+      style: "List findings by resource with severity. Show the fix as IaC code diff. Include cost impact estimates where applicable.",
+    },
+  },
+  {
+    id: "devops-monitoring",
+    name: "Observability Setup",
+    description: "Define metrics, alerts, dashboards, and SLOs for a service.",
+    category: "devops",
+    recommendedRoles: ["devops-eng", "backend-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define the four golden signals (latency, traffic, errors, saturation). Set SLOs with error budgets. Design alerts that are actionable (not noisy). Include logging standards and trace correlation.",
+      style: "Structure as: SLOs → Metrics → Alerts → Dashboards. Show alert rules with thresholds. Include a dashboard layout description.",
+    },
+  },
+  {
+    id: "devops-runbook",
+    name: "Runbook Generation",
+    description: "Write step-by-step operational playbooks for known failure modes.",
+    category: "devops",
+    recommendedRoles: ["devops-eng"],
+    recommendedStyles: [{ id: "step-by-step", level: 5 }, { id: "actionable", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Cover detection (how to know it is happening), diagnosis (how to confirm root cause), mitigation (how to stop the bleeding), resolution (how to fix permanently), and communication (who to notify).",
+      style: "Structure as numbered steps a sleep-deprived on-call engineer can follow at 3am. Include exact commands, expected outputs, and decision trees.",
+    },
+  },
+
+  // ── Data & Analytics (4 — NEW CATEGORY) ──
+  {
+    id: "data-schema",
+    name: "Database Schema Design",
+    description: "Design normalized/denormalized schemas with migration strategy.",
+    category: "data",
+    recommendedRoles: ["database-specialist", "backend-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "code-heavy", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define tables, columns, types, constraints, indexes, and relationships. Consider normalization level, read vs write patterns, and migration from existing schema. Plan for growth.",
+      style: "Show the schema as CREATE TABLE statements or an ERD description. Explain each index choice. Include the migration SQL with rollback.",
+    },
+  },
+  {
+    id: "data-pipeline",
+    name: "Data Pipeline Design",
+    description: "Design ETL/ELT architecture with error handling and idempotency.",
+    category: "data",
+    recommendedRoles: ["data-analyst", "backend-eng"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define data sources, transformations, destinations, and scheduling. Ensure idempotency, handle schema evolution, implement dead-letter queues, and plan for backfills.",
+      style: "Diagram the pipeline stages with data flow. Show transformation logic. Include error handling strategy and monitoring checkpoints.",
+    },
+  },
+  {
+    id: "data-query",
+    name: "Query Writing & Optimization",
+    description: "Write complex analytical queries with performance analysis.",
+    category: "data",
+    recommendedRoles: ["data-analyst", "database-specialist"],
+    recommendedStyles: [{ id: "code-heavy", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Write correct, performant SQL for the given analytical question. Use CTEs for readability. Consider index usage, join order, and query plan. Handle NULLs and edge cases explicitly.",
+      style: "Build the query step by step, adding complexity incrementally. Show the query plan analysis. Explain each CTE or subquery.",
+    },
+  },
+  {
+    id: "data-dashboard",
+    name: "Metrics Dashboard Spec",
+    description: "Define KPIs, dimensions, filters, and visualization types.",
+    category: "data",
+    recommendedRoles: ["data-analyst", "product-manager"],
+    recommendedStyles: [{ id: "visual", level: 5 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define each metric with its formula, data source, granularity, and refresh frequency. Group by business area. Include drill-down dimensions and filter options.",
+      style: "Describe the dashboard layout section by section. For each chart: metric name, chart type, axes, filters, and the underlying query logic.",
+    },
+  },
+
+  // ── AI & ML (4 — NEW CATEGORY) ──
+  {
+    id: "ai-prompt-eng",
+    name: "Prompt Engineering",
+    description: "Design, test, and iterate on LLM prompts with evaluation criteria.",
+    category: "ai-ml",
+    recommendedRoles: ["ml-engineer"],
+    recommendedStyles: [{ id: "step-by-step", level: 3 }, { id: "code-heavy", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define the task, desired output format, edge cases, and evaluation criteria. Test with diverse inputs. Consider few-shot examples, chain-of-thought, and output parsing. Measure quality systematically.",
+      style: "Show the prompt evolution: v1 → issues found → v2 → improvements. Include test cases with expected vs actual output. End with the final prompt and evaluation rubric.",
+    },
+  },
+  {
+    id: "ai-eval",
+    name: "AI/ML Evaluation Plan",
+    description: "Define test sets, metrics, baselines, and regression checks for AI features.",
+    category: "ai-ml",
+    recommendedRoles: ["ml-engineer", "test-engineer"],
+    recommendedStyles: [{ id: "visual", level: 3 }, { id: "actionable", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define evaluation datasets (golden sets), metrics (accuracy, latency, cost), baselines, and acceptable regression thresholds. Consider bias, fairness, and edge case coverage.",
+      style: "Structure as: Metrics → Dataset → Baseline → Pass/Fail Criteria. Show evaluation results as a scorecard. Include automated regression test setup.",
+    },
+  },
+  {
+    id: "ai-integration",
+    name: "LLM Integration Architecture",
+    description: "Design RAG pipelines, caching, fallbacks, and cost controls for LLM apps.",
+    category: "ai-ml",
+    recommendedRoles: ["ml-engineer", "architect"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "balanced", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Design the LLM call chain including retrieval, prompt assembly, model selection, response parsing, caching, fallback providers, rate limiting, and cost tracking. Plan for model upgrades and A/B testing.",
+      style: "Diagram the request flow from user input to final response. Show each component with its purpose. Include cost estimation per request and monthly projections.",
+    },
+  },
+  {
+    id: "ai-agent-design",
+    name: "Agent Workflow Design",
+    description: "Design multi-step agent flows with tool use, guardrails, and error recovery.",
+    category: "ai-ml",
+    recommendedRoles: ["ml-engineer", "architect"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define the agent's goal, available tools, decision logic, and termination conditions. Include guardrails for safety, cost limits, and human-in-the-loop checkpoints. Plan for loops, failures, and hallucination detection.",
+      style: "Show the agent loop as a state machine or flowchart. Define each tool with its input/output schema. Include error recovery and maximum iteration limits.",
+    },
+  },
+
+  // ── Incident Response (4 — NEW CATEGORY) ──
+  {
+    id: "incident-postmortem",
+    name: "Incident Postmortem",
+    description: "Write a blameless postmortem with timeline, root cause, and action items.",
+    category: "incident",
+    recommendedRoles: ["devops-eng", "backend-eng"],
+    recommendedStyles: [{ id: "formal", level: 3 }, { id: "step-by-step", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Be blameless. Include incident summary, impact (duration, users affected, revenue), timeline of events, root cause analysis (5 Whys), contributing factors, and action items with owners and deadlines.",
+      style: "Structure as: Summary → Impact → Timeline → Root Cause → Contributing Factors → Action Items → Lessons Learned. Timeline should be minute-by-minute during the incident.",
+    },
+  },
+  {
+    id: "incident-response",
+    name: "Incident Response Plan",
+    description: "Define severity levels, escalation paths, and communication templates.",
+    category: "incident",
+    recommendedRoles: ["devops-eng", "project-manager"],
+    recommendedStyles: [{ id: "actionable", level: 5 }, { id: "step-by-step", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define severity levels (P0-P3) with criteria, response time SLAs, escalation paths, roles (incident commander, comms lead, tech lead), and communication templates for internal and external stakeholders.",
+      style: "Structure as a quick-reference guide. Use tables for severity definitions. Include copy-pasteable communication templates. Show the escalation flowchart.",
+    },
+  },
+  {
+    id: "incident-sla",
+    name: "SLA/SLO Definition",
+    description: "Define reliability targets, error budgets, and alerting thresholds.",
+    category: "incident",
+    recommendedRoles: ["devops-eng", "product-manager"],
+    recommendedStyles: [{ id: "visual", level: 3 }, { id: "formal", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define SLIs (what to measure), SLOs (target values), and SLAs (contractual obligations). Calculate error budgets. Define what happens when error budget is exhausted (feature freeze, reliability sprint).",
+      style: "Present as a table of SLI → SLO → SLA for each service. Show error budget burn rate calculations. Include alerting thresholds tied to SLOs.",
+    },
+  },
+  {
+    id: "incident-chaos",
+    name: "Chaos Engineering Plan",
+    description: "Design controlled failure experiments to discover system weaknesses.",
+    category: "incident",
+    recommendedRoles: ["devops-eng", "architect"],
+    recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "balanced", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define steady state hypothesis, experiment scope, blast radius controls, abort conditions, and expected vs actual behavior. Start small (single service) and expand. Never run in production without rollback capability.",
+      style: "Structure each experiment as: Hypothesis → Method → Blast Radius → Abort Criteria → Results → Follow-up. Rank experiments by risk and learning value.",
+    },
+  },
+
+  // ── Business & Growth (4 — NEW CATEGORY) ──
+  {
+    id: "biz-pitch",
+    name: "Pitch Deck Outline",
+    description: "Structure a pitch deck with problem, solution, market, traction, and ask.",
+    category: "business",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "concise", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Cover: Problem, Solution, Market Size (TAM/SAM/SOM), Business Model, Traction, Competition, Team, Financials, and Ask. Keep each slide to one key message. Target 10-12 slides total.",
+      style: "Describe each slide with its headline, key message, and supporting data points. Keep it concise — investors spend 3 minutes per deck. Lead with the strongest traction metric.",
+    },
+  },
+  {
+    id: "biz-investor-update",
+    name: "Investor Update",
+    description: "Write a monthly investor update with metrics, wins, challenges, and asks.",
+    category: "business",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "concise", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Include key metrics (MRR, growth, burn, runway), highlights, lowlights, key hires, product milestones, and specific asks (intros, hiring, advice). Be transparent about challenges.",
+      style: "Structure as: TL;DR → Metrics → Wins → Challenges → Product → Team → Asks. Use bullet points. Include month-over-month trends for key metrics.",
+    },
+  },
+  {
+    id: "biz-experiment",
+    name: "Growth Experiment Design",
+    description: "Design a hypothesis-driven growth experiment with metrics and sample size.",
+    category: "business",
+    recommendedRoles: ["product-manager", "data-analyst"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define hypothesis, primary metric, secondary metrics, target lift, sample size, experiment duration, and success criteria. Consider statistical significance, novelty effects, and segment analysis.",
+      style: "Structure as: Hypothesis → Metric → Variant Design → Sample Size Calculation → Duration → Success Criteria → Analysis Plan. Include the decision framework for ship/iterate/kill.",
+    },
+  },
+  {
+    id: "biz-funnel",
+    name: "Funnel Analysis",
+    description: "Define funnel stages, measure conversion, and identify drop-off points.",
+    category: "business",
+    recommendedRoles: ["data-analyst", "product-manager"],
+    recommendedStyles: [{ id: "visual", level: 5 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define each funnel stage with entry/exit criteria. Measure conversion rates between stages. Identify the highest-impact drop-off points. Segment by acquisition channel, cohort, and user type.",
+      style: "Show the funnel as a visual with conversion rates at each step. Highlight the biggest leaks. Propose specific interventions ranked by expected lift.",
+    },
+  },
+
   // ── Migrated v1 templates ──
   {
     id: "bug-fix",
@@ -738,6 +1266,99 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
     fields: {
       constraints: "Explain at the appropriate level of abstraction for the audience.",
       style: "Use step-by-step explanations with examples. Start with a high-level overview, then dive into details.",
+    },
+  },
+
+  // ── Monetization ──
+  {
+    id: "monetize-revenue-model",
+    name: "Revenue Model Design",
+    description: "Evaluate and design revenue models: subscription, usage-based, marketplace, or hybrid.",
+    category: "monetization",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "balanced", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Analyze the product value chain and where value is captured. Compare revenue models (subscription, usage-based, marketplace, transaction-based, advertising, data licensing). For each, estimate TAM capture, revenue predictability, and implementation complexity. Recommend a primary + secondary model with rationale.",
+      style: "Present a comparison matrix of revenue models. Highlight the recommended model with a clear justification tied to the product's value proposition and customer behavior patterns.",
+    },
+  },
+  {
+    id: "monetize-unit-economics",
+    name: "Unit Economics Analysis",
+    description: "Calculate and optimize LTV, CAC, payback period, and contribution margin.",
+    category: "monetization",
+    recommendedRoles: ["data-analyst", "product-manager"],
+    recommendedStyles: [{ id: "visual", level: 5 }, { id: "detailed", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Calculate: Customer Acquisition Cost (CAC) by channel, Lifetime Value (LTV) with cohort analysis, LTV:CAC ratio (target >3x), payback period in months, gross margin per customer, contribution margin. Segment by plan tier, acquisition channel, and cohort. Flag unit economics that don't work at scale.",
+      style: "Show formulas, then calculated results in a clear table. Visualize LTV:CAC by segment. Highlight the most profitable segments and the ones that need fixing.",
+    },
+  },
+  {
+    id: "monetize-churn-analysis",
+    name: "Churn & Retention Strategy",
+    description: "Analyze churn patterns, identify at-risk segments, and design retention interventions.",
+    category: "monetization",
+    recommendedRoles: ["data-analyst", "product-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 4 }],
+    builtIn: true,
+    fields: {
+      constraints: "Segment churn by: voluntary vs involuntary, plan tier, tenure cohort, usage pattern, and acquisition channel. Identify leading indicators of churn (usage drop, support tickets, feature non-adoption). Design interventions: onboarding improvements, health score triggers, win-back campaigns, pricing adjustments, and involuntary churn recovery (dunning).",
+      style: "Start with churn metrics overview. Then show a cohort retention curve. Identify the critical drop-off points and propose specific, prioritized interventions with expected impact.",
+    },
+  },
+  {
+    id: "monetize-paywall",
+    name: "Paywall & Conversion Optimization",
+    description: "Design paywall strategy, free-to-paid triggers, and conversion experiments.",
+    category: "monetization",
+    recommendedRoles: ["product-manager", "ux-designer"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Define what's free vs paid (feature gating, usage limits, time trials). Design the upgrade trigger moments (aha moments, limit hits, social proof). Plan the conversion page: pricing display, plan comparison, social proof, objection handling, CTA placement. Propose A/B tests for pricing page, trial length, and feature gates.",
+      style: "Structure as: Current state → Proposed paywall strategy → Conversion page wireframe → Experiment roadmap. Be specific about what triggers the upgrade prompt and why.",
+    },
+  },
+  {
+    id: "monetize-subscription-lifecycle",
+    name: "Subscription Lifecycle Design",
+    description: "Map the full subscriber journey from trial to expansion to renewal.",
+    category: "monetization",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "visual", level: 4 }, { id: "step-by-step", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Map lifecycle stages: Awareness → Trial → Activation → Conversion → Engagement → Expansion → Renewal. For each stage define: key actions, success metrics, automated triggers, email/in-app touchpoints, and risk signals. Include trial-to-paid optimization, expansion revenue (upsell/cross-sell), and renewal/cancellation flows.",
+      style: "Present as a lifecycle journey map with stages, metrics, and interventions at each point. Highlight the highest-leverage moments for revenue impact.",
+    },
+  },
+  {
+    id: "monetize-pricing-experiment",
+    name: "Pricing Experiment Design",
+    description: "Design and analyze pricing experiments: A/B tests, willingness-to-pay studies, and tier optimization.",
+    category: "monetization",
+    recommendedRoles: ["product-manager", "data-analyst"],
+    recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "actionable", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Choose experiment type: Van Westendorp, Gabor-Granger, conjoint analysis, or live A/B test. Define hypothesis, metrics (ARPU, conversion rate, revenue per visitor), sample size, duration, and segmentation. Address risks: price anchoring, fairness perception, grandfathering existing customers, and legal/contractual constraints.",
+      style: "Structure as: Hypothesis → Method → Design → Analysis Plan → Decision Framework. Include a clear go/no-go decision tree based on results.",
+    },
+  },
+  {
+    id: "monetize-expansion-revenue",
+    name: "Expansion Revenue Playbook",
+    description: "Design upsell, cross-sell, and add-on strategies to grow revenue from existing customers.",
+    category: "monetization",
+    recommendedRoles: ["product-manager"],
+    recommendedStyles: [{ id: "actionable", level: 4 }, { id: "visual", level: 3 }],
+    builtIn: true,
+    fields: {
+      constraints: "Identify expansion levers: seat-based growth, tier upgrades, add-on modules, usage overage, and professional services. For each lever: define the trigger event, target segment, messaging, and expected revenue impact. Calculate net revenue retention (NRR) target. Design the in-product upgrade prompts and sales-assist handoff points.",
+      style: "Present a menu of expansion plays ranked by revenue impact and implementation effort. Include specific trigger conditions and messaging for each play.",
     },
   },
 ];
