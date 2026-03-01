@@ -111,6 +111,8 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       const newPendingClose = state.pendingCloseSessionId === action.id
         ? null
         : state.pendingCloseSessionId;
+      // When no sessions remain, collapse all panels to show clean empty state
+      const noSessionsLeft = ids.length === 0;
       return {
         ...state,
         sessions: rest,
@@ -119,7 +121,19 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         injectionLocks: restLocks,
         pendingCloseSessionId: newPendingClose,
         layout: { root: newRoot, focusedPaneId: newFocused },
-        ui: { ...state.ui, autoToast: newAutoToast },
+        ui: {
+          ...state.ui,
+          autoToast: newAutoToast,
+          ...(noSessionsLeft && {
+            sessionListCollapsed: true,
+            contextPanelOpen: false,
+            processPanelOpen: false,
+            gitPanelOpen: false,
+            fileExplorerOpen: false,
+            searchPanelOpen: false,
+            timelineOpen: false,
+          }),
+        },
       };
     }
     case "SET_ACTIVE": {
@@ -491,6 +505,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const setup = async () => {
       const u1 = await listen<SessionData>("session-updated", (event) => {
         const session = event.payload;
+
+        // Intercept destroyed phase: never show it in the UI.
+        // Trigger cleanup and wait for SESSION_REMOVED instead.
+        if (session.phase === "destroyed") {
+          if (!closingSessionIds.current.has(session.id)) {
+            closingSessionIds.current.add(session.id);
+            apiCloseSession(session.id).catch(() => {
+              closingSessionIds.current.delete(session.id);
+            });
+          }
+          return;
+        }
+
         dispatch({ type: "SESSION_UPDATED", session });
 
         // Auto-attach project on working_directory change
@@ -514,15 +541,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               }
             }
           }).catch((err) => console.warn("[SessionContext] Failed to load projects for auto-attach:", err));
-        }
-
-        // Auto-cleanup destroyed sessions (PTY exited on its own)
-        if (session.phase === "destroyed" && !closingSessionIds.current.has(session.id)) {
-          closingSessionIds.current.add(session.id);
-          apiCloseSession(session.id).catch(() => {
-            closingSessionIds.current.delete(session.id);
-          });
-          return;
         }
 
         // Track busy → idle transitions for long-running notifications
