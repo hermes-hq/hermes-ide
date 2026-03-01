@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "HERMES-IDE",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "identifier": "com.hermes-ide.terminal",
   "build": {
     "beforeDevCommand": "npm run dev",

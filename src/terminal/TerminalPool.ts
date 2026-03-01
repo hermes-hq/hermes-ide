@@ -344,7 +344,22 @@ export async function createTerminal(sessionId: string, color: string): Promise<
 
   if (isMac) {
     container.addEventListener("compositionend", (e: CompositionEvent) => {
-      lastComposedChar = e.data || null;
+      const composed = e.data || null;
+
+      // Detect spurious WKWebView compositionend: if the composed text was
+      // already sent character-by-character (exists in sentChars), this is a
+      // textarea accumulation flush, NOT a real dead-key/IME composition.
+      // Skip setting composition state so the onData dedup doesn't treat the
+      // flush as a "legitimate first occurrence".  The flush guard in
+      // handleTerminalInput will suppress the duplicate payload.
+      // Single-char compositions (dead keys) are always allowed through.
+      const entry = pool.get(sessionId);
+      if (composed && composed.length > 1 && entry &&
+          entry.sentChars.length > 0 && entry.sentChars.includes(composed)) {
+        return;
+      }
+
+      lastComposedChar = composed;
       composedDataFired = false;
       postCompPassOne = true;
       postCompChar = null;
@@ -607,23 +622,25 @@ function handleTerminalInput(sessionId: string, data: string): void {
 
   // ── Dedup guard: WKWebView composition flush ──
   // xterm's hidden textarea accumulates typed characters (never cleared during
-  // normal typing).  Under heavy PTY output, WKWebView can fire spurious
-  // compositionstart/compositionend events.  The compositionend handler reads
-  // the *entire* accumulated textarea value and sends it via onData,
-  // duplicating characters that were already sent individually.
+  // normal typing).  WKWebView can fire spurious compositionstart/compositionend
+  // events — even during light typing, not just under heavy PTY output.  The
+  // compositionend handler reads the *entire* accumulated textarea value and
+  // sends it via onData, duplicating characters that were already sent
+  // individually.  Flushes can be as short as 2–3 characters, so the threshold
+  // must be low.
   //
   // Guard: if a multi-char, non-escape, non-paste payload is a contiguous
   // substring of the recently-sent character window, suppress it.
-  if (data.length > 4) {
+  if (data.length > 1) {
     const isEscapeSeq = data.charCodeAt(0) === 0x1b;
     const isBracketedPaste = data.includes("\x1b[200~");
-    if (!isEscapeSeq && !isBracketedPaste && entry.sentChars.length >= data.length) {
+    if (!isEscapeSeq && !isBracketedPaste) {
       // Extract only printable chars for comparison
       let printable = "";
       for (let i = 0; i < data.length; i++) {
         if (data.charCodeAt(i) >= 32) printable += data[i];
       }
-      if (printable.length > 4 && entry.sentChars.includes(printable)) {
+      if (printable.length > 1 && entry.sentChars.includes(printable)) {
         return; // Suppress — this is a duplicate composition flush
       }
     }
