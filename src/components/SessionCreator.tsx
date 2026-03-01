@@ -9,9 +9,9 @@ import { LANG_COLORS } from "../utils/langColors";
 const AI_PROVIDERS = [
   { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
   { id: "gemini", label: "Gemini", description: "Google Gemini CLI", enabled: true },
-  { id: "aider", label: "Aider", description: "Aider AI pair programming", enabled: false },
-  { id: "codex", label: "Codex", description: "OpenAI Codex CLI", enabled: false },
-  { id: "copilot", label: "Copilot", description: "GitHub Copilot CLI", enabled: false },
+  { id: "aider", label: "Aider", description: "Aider AI pair programming", enabled: true },
+  { id: "codex", label: "Codex", description: "OpenAI Codex CLI", enabled: true },
+  { id: "copilot", label: "Copilot", description: "GitHub Copilot CLI", enabled: true },
 ] as const;
 
 interface SessionCreatorProps {

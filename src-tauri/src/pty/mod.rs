@@ -272,13 +272,100 @@ lazy_static! {
         r"^Edit file$"
     ).unwrap();
     static ref SLASH_CMD_RE: Regex = Regex::new(
-        r"(?:^|\s)(\/(?:init|build|test|run|review|commit|help|clear|compact|memory|config|cost|doctor|login|logout|bug|terminal-setup|allowed-tools|permissions|vim|add|drop|undo|diff|ls|tokens|model|settings|map|map-refresh|voice|paste|architect|ask|code|chat-mode|lint|web|read-only|reset|quit|git|apply|stats|save|restore|sandbox|tools|shell|edit|yolo)\b)"
+        r"(?:^|\s)(\/(?:init|build|test|run|review|commit|help|clear|compact|memory|config|cost|doctor|login|logout|bug|terminal-setup|allowed-tools|permissions|vim|add|drop|undo|diff|ls|tokens|model|models|settings|map|map-refresh|voice|paste|architect|ask|code|chat-mode|lint|web|read-only|reset|quit|exit|git|apply|stats|usage|save|restore|sandbox|tools|shell|edit|yolo|about|agents|auth|chat|commands|compress|copy|copy-context|docs|editor|editor-model|extensions|hooks|ide|mcp|ok|plan|policies|privacy|profile|resume|shortcuts|skills|theme|approvals|collab|agent|mention|status|debug-config|statusline|apps|feedback|ps|clean|personality|realtime|new|fork|rename|multiline-mode|reasoning-effort|report|think-tokens|weak-model|load|context)\b)"
     ).unwrap();
     static ref FILE_PATH_RE: Regex = Regex::new(
         r"(?:^|\s)((?:/[\w.@-]+)+\.[\w]+)"
     ).unwrap();
     static ref AIDER_TOKEN_RE: Regex = Regex::new(
         r"(?i)tokens?[:\s]*([0-9.]+k?)\s*sent[,\s]*([0-9.]+k?)\s*(?:received|recv)"
+    ).unwrap();
+
+    // ─── Gemini CLI patterns ────────────────────────────────────────
+    // Token line from /stats output: "gemini-2.5-pro  10  500  500  2,000"
+    // We detect the model usage table rows
+    static ref GEMINI_STATS_ROW_RE: Regex = Regex::new(
+        r"(?i)(gemini[\w.-]+)\s+(\d+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)"
+    ).unwrap();
+    // Tool call patterns: "✓ ReadFile /path" or "? Shell git status" or "x Edit file.ts"
+    static ref GEMINI_TOOL_RE: Regex = Regex::new(
+        r"^[✓?xo⊷\-]\s+(ReadFile|WriteFile|Edit|Shell|FindFiles|SearchText|ReadFolder|ReadManyFiles|GoogleSearch|WebFetch|SaveMemory|WriteTodos|GetInternalDocs)\b"
+    ).unwrap();
+    // Gemini slash commands — comprehensive set
+    static ref GEMINI_SLASH_RE: Regex = Regex::new(
+        r"(?:^|\s)(\/(?:about|agents|auth|bug|chat|clear|commands|compress|copy|docs|editor|extensions|help|hooks|ide|init|mcp|memory|model|permissions|plan|policies|privacy|profile|quit|exit|restore|resume|settings|shells|shortcuts|skills|stats|usage|terminal-setup|theme|tools|vim)\b)"
+    ).unwrap();
+
+    // ─── Aider patterns ─────────────────────────────────────────────
+    // Full token line: "Tokens: 22k sent, 21k cache write, 2.4k received."
+    static ref AIDER_FULL_TOKEN_RE: Regex = Regex::new(
+        r"(?i)^Tokens:\s*([\d.]+k?)\s*sent(?:,\s*([\d.]+k?)\s*cache\s*write)?(?:,\s*([\d.]+k?)\s*cache\s*hit)?,\s*([\d.]+k?)\s*received"
+    ).unwrap();
+    // Cost line: "Cost: $0.12 message, $0.67 session."
+    static ref AIDER_COST_RE: Regex = Regex::new(
+        r"(?i)Cost:\s*\$([\d.]+)\s*message,\s*\$([\d.]+)\s*session"
+    ).unwrap();
+    // Startup: "Aider v0.86.0"
+    static ref AIDER_VERSION_RE: Regex = Regex::new(
+        r"^Aider v(\d+\.\d+\.\d+)"
+    ).unwrap();
+    // Model line: "Main model: claude-3.5-sonnet with diff edit format" or "Model: gpt-4o with diff edit format"
+    static ref AIDER_MODEL_RE: Regex = Regex::new(
+        r"^(?:Main model|Model|Editor model|Weak model):\s*(.+?)(?:\s+with\s+\S+\s+edit\s+format)?"
+    ).unwrap();
+    // Applied edit: "Applied edit to src/main.py"
+    static ref AIDER_EDIT_RE: Regex = Regex::new(
+        r"^Applied edit to (.+)$"
+    ).unwrap();
+    // Git commit: "Commit 414c394 feat: something"
+    static ref AIDER_COMMIT_RE: Regex = Regex::new(
+        r"^Commit ([a-f0-9]{7}) (.+)$"
+    ).unwrap();
+    // Aider prompt: ">" "ask>" "architect>" "diff>" "diff multi>" etc.
+    static ref AIDER_PROMPT_RE: Regex = Regex::new(
+        r"^(?:\w+\s?)*>\s*$"
+    ).unwrap();
+    // Aider slash commands
+    static ref AIDER_SLASH_RE: Regex = Regex::new(
+        r"(?:^)(\/(?:add|architect|ask|chat-mode|clear|code|commit|context|copy|copy-context|diff|drop|edit|editor|editor-model|exit|quit|git|help|lint|load|ls|map|map-refresh|model|models|multiline-mode|ok|paste|read-only|reasoning-effort|report|reset|run|save|settings|test|think-tokens|tokens|undo|voice|weak-model|web)\b)"
+    ).unwrap();
+
+    // ─── Codex CLI patterns ─────────────────────────────────────────
+    // Token usage line from /status: "Token usage:      1.9K total  (1K input + 900 output)"
+    static ref CODEX_TOKEN_RE: Regex = Regex::new(
+        r"(?i)Token usage:\s*([\d.]+[KMBT]?)\s*total\s*\(([\d.]+[KMBT]?)\s*input\s*\+\s*([\d.]+[KMBT]?)\s*output\)"
+    ).unwrap();
+    // Tool patterns: "• Running echo hello" or "• Ran echo hello"
+    static ref CODEX_TOOL_RUN_RE: Regex = Regex::new(
+        r"^[•◦]\s*(?:Running|Ran)\s+(.+)"
+    ).unwrap();
+    // File patterns: "• Edited example.txt (+1 -1)" or "• Added new.txt (+2 -0)" or "• Deleted tmp.txt (+0 -3)"
+    static ref CODEX_FILE_OP_RE: Regex = Regex::new(
+        r"^[•◦]\s*(Edited|Added|Deleted)\s+(.+?)(?:\s+\(\+\d+\s+-\d+\))?"
+    ).unwrap();
+    // Exploring: "• Exploring" or "• Explored"
+    static ref CODEX_EXPLORE_RE: Regex = Regex::new(
+        r"^[•◦]\s*(?:Exploring|Explored)"
+    ).unwrap();
+    // MCP: "• Calling server.tool(...)" or "• Called server.tool(...)"
+    static ref CODEX_MCP_RE: Regex = Regex::new(
+        r"^[•◦]\s*(?:Calling|Called)\s+(\S+)\((.+?)\)"
+    ).unwrap();
+    // Startup: "OpenAI Codex v0.98.0" or ">_ OpenAI Codex (v0.98.0)"
+    static ref CODEX_VERSION_RE: Regex = Regex::new(
+        r"(?:>_\s*)?OpenAI Codex\s*(?:\(v|v)([\d.]+)"
+    ).unwrap();
+    // Model line: "Model:  gpt-5.1-codex-max" or "model: gpt-5.3-codex"
+    static ref CODEX_MODEL_RE: Regex = Regex::new(
+        r"(?i)^(?:\s*model:\s*)(\S+)"
+    ).unwrap();
+    // Approval: "✔ You approved codex to" or "✗ You did not approve"
+    static ref CODEX_APPROVAL_RE: Regex = Regex::new(
+        r"^[✔✗]\s*You\s+(?:approved|did not approve|canceled)"
+    ).unwrap();
+    // Codex slash commands
+    static ref CODEX_SLASH_RE: Regex = Regex::new(
+        r"(?:^|\s)(\/(?:model|approvals|permissions|setup-default-sandbox|experimental|skills|review|rename|new|resume|fork|init|compact|plan|collab|agent|diff|copy|mention|status|debug-config|statusline|theme|mcp|apps|logout|quit|exit|feedback|ps|clean|clear|personality|realtime|settings)\b)"
     ).unwrap();
 }
 
@@ -492,11 +579,36 @@ struct AiderAdapter;
 impl ProviderAdapter for AiderAdapter {
     fn detect_agent(&self, line: &str) -> Option<AgentInfo> {
         let lower = line.to_lowercase();
-        if lower.contains("aider") && (lower.contains("v0.") || lower.starts_with("aider")) {
+        // "Aider v0.86.0" or "aider" at start of line
+        if let Some(_caps) = AIDER_VERSION_RE.captures(line) {
             let provider = if lower.contains("claude") || lower.contains("anthropic") {
                 "anthropic"
             } else if lower.contains("gpt") || lower.contains("openai") {
                 "openai"
+            } else if lower.contains("deepseek") {
+                "deepseek"
+            } else if lower.contains("gemini") {
+                "google"
+            } else {
+                "unknown"
+            };
+            return Some(AgentInfo {
+                name: "Aider".into(),
+                provider: provider.into(),
+                model: extract_model_name(line),
+                detected_at: now(),
+                confidence: 0.95,
+            });
+        }
+        if lower.contains("aider") && (lower.contains("v0.") || lower.contains("v1.") || lower.starts_with("aider")) {
+            let provider = if lower.contains("claude") || lower.contains("anthropic") {
+                "anthropic"
+            } else if lower.contains("gpt") || lower.contains("openai") {
+                "openai"
+            } else if lower.contains("deepseek") {
+                "deepseek"
+            } else if lower.contains("gemini") {
+                "google"
             } else {
                 "unknown"
             };
@@ -516,40 +628,143 @@ impl ProviderAdapter for AiderAdapter {
         let mut result = empty_analysis();
         let now_str = now();
 
-        if let Some(caps) = AIDER_TOKEN_RE.captures(line) {
+        // Token tracking — full pattern: "Tokens: 22k sent, 21k cache write, 2.4k received."
+        if let Some(caps) = AIDER_FULL_TOKEN_RE.captures(line) {
+            let sent = parse_k_count(&caps[1]);
+            let received = parse_k_count(&caps[4]);
+            // Cost on same line or next: "Cost: $0.12 message, $0.67 session."
+            let cost = AIDER_COST_RE.captures(line).and_then(|c| c[2].parse::<f64>().ok());
+            result.token_update = Some(TokenUpdate {
+                provider: "unknown".into(),
+                model: "unknown".into(),
+                input_tokens: sent,
+                output_tokens: received,
+                cost_usd: cost,
+                is_cumulative: cost.is_some(), // session cost is cumulative
+            });
+        }
+        // Fallback: simpler token pattern
+        else if let Some(caps) = AIDER_TOKEN_RE.captures(line) {
+            let cost = AIDER_COST_RE.captures(line).and_then(|c| c[2].parse::<f64>().ok());
             result.token_update = Some(TokenUpdate {
                 provider: "unknown".into(),
                 model: "unknown".into(),
                 input_tokens: parse_k_count(&caps[1]),
                 output_tokens: parse_k_count(&caps[2]),
-                cost_usd: None,
-                is_cumulative: false,
+                cost_usd: cost,
+                is_cumulative: cost.is_some(),
             });
         }
-
-        // Aider tool-like patterns
-        let lower = line.to_lowercase();
-        if lower.contains("applied edit to") || lower.contains("wrote to file") {
-            result.tool_call = Some(ToolCall { tool: "Edit".into(), args: line.to_string(), timestamp: now_str.clone() });
-        }
-        if lower.starts_with("running:") || lower.starts_with("$ ") {
-            result.tool_call = Some(ToolCall { tool: "Bash".into(), args: line.to_string(), timestamp: now_str.clone() });
-        }
-
-        // Aider commands
-        if line.starts_with("/") {
-            let cmd = line.split_whitespace().next().unwrap_or("").to_string();
-            if ["/add", "/drop", "/run", "/test", "/commit", "/diff", "/help", "/clear", "/undo"].contains(&cmd.as_str()) {
-                result.action = Some(ActionEvent {
-                    label: slash_label(&cmd),
-                    command: cmd,
-                    provider: "aider".into(),
-                    is_suggestion: false,
-                    timestamp: now_str,
+        // Cost-only line: "Cost: $0.12 message, $0.67 session."
+        else if let Some(caps) = AIDER_COST_RE.captures(line) {
+            if let Ok(session_cost) = caps[2].parse::<f64>() {
+                result.token_update = Some(TokenUpdate {
+                    provider: "unknown".into(),
+                    model: "unknown".into(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cost_usd: Some(session_cost),
+                    is_cumulative: true,
                 });
             }
         }
 
+        // Model detection from startup banner
+        if let Some(caps) = AIDER_MODEL_RE.captures(line) {
+            let model_name = caps[1].trim().to_string();
+            if result.token_update.is_none() {
+                // Store model info — detected from "Main model:" or "Model:" line
+                if let Some(model) = extract_model_name(&model_name) {
+                    result.memory_fact = Some(MemoryFact {
+                        key: "model".into(),
+                        value: model,
+                        source: "agent_output".into(),
+                        confidence: 0.9,
+                    });
+                }
+            }
+        }
+
+        // File edit detection: "Applied edit to src/main.py"
+        if let Some(caps) = AIDER_EDIT_RE.captures(line) {
+            result.tool_call = Some(ToolCall {
+                tool: "Edit".into(),
+                args: caps[1].to_string(),
+                timestamp: now_str.clone(),
+            });
+            result.phase_hint = Some(PhaseHint::WorkStarted);
+        }
+        // Git commit detection: "Commit 414c394 feat: something"
+        else if let Some(caps) = AIDER_COMMIT_RE.captures(line) {
+            result.tool_call = Some(ToolCall {
+                tool: "Git Commit".into(),
+                args: format!("{} {}", &caps[1], &caps[2]),
+                timestamp: now_str.clone(),
+            });
+        }
+        // File creation: "Creating empty file app.py"
+        else if line.starts_with("Creating empty file ") {
+            let file = line.trim_start_matches("Creating empty file ").trim();
+            result.tool_call = Some(ToolCall {
+                tool: "Create".into(),
+                args: file.to_string(),
+                timestamp: now_str.clone(),
+            });
+            result.phase_hint = Some(PhaseHint::WorkStarted);
+        }
+        // Shell command: "Running: cmd" or "$ cmd"
+        else {
+            let lower = line.to_lowercase();
+            if lower.starts_with("running:") || (line.starts_with("$ ") && line.len() > 2) {
+                let cmd = if lower.starts_with("running:") {
+                    line[8..].trim()
+                } else {
+                    &line[2..]
+                };
+                result.tool_call = Some(ToolCall {
+                    tool: "Bash".into(),
+                    args: cmd.to_string(),
+                    timestamp: now_str.clone(),
+                });
+                result.phase_hint = Some(PhaseHint::WorkStarted);
+            }
+        }
+
+        // Slash command detection
+        if let Some(caps) = AIDER_SLASH_RE.captures(line) {
+            let cmd = caps[1].to_string();
+            result.action = Some(ActionEvent {
+                label: slash_label(&cmd),
+                command: cmd,
+                provider: "aider".into(),
+                is_suggestion: false,
+                timestamp: now_str.clone(),
+            });
+        }
+
+        // Added/removed file from chat
+        let lower = line.to_lowercase();
+        if lower.starts_with("added ") && lower.contains(" to the chat") {
+            let file = line.trim_start_matches("Added ").split(" to the chat").next().unwrap_or("").trim();
+            if !file.is_empty() {
+                result.tool_call = Some(ToolCall {
+                    tool: "Add File".into(),
+                    args: file.to_string(),
+                    timestamp: now_str.clone(),
+                });
+            }
+        } else if lower.starts_with("removed ") && lower.contains(" from the chat") {
+            let file = line.trim_start_matches("Removed ").split(" from the chat").next().unwrap_or("").trim();
+            if !file.is_empty() {
+                result.tool_call = Some(ToolCall {
+                    tool: "Drop File".into(),
+                    args: file.to_string(),
+                    timestamp: now_str.clone(),
+                });
+            }
+        }
+
+        // Prompt detection
         if self.is_prompt(line) {
             result.phase_hint = Some(PhaseHint::PromptDetected);
         }
@@ -559,38 +774,41 @@ impl ProviderAdapter for AiderAdapter {
 
     fn is_prompt(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        trimmed.starts_with("aider>") || trimmed.starts_with("> ") || is_shell_prompt(trimmed)
+        // Aider prompts: "> ", "ask> ", "architect> ", "diff> ", "diff multi> ", etc.
+        if AIDER_PROMPT_RE.is_match(trimmed) {
+            return true;
+        }
+        is_shell_prompt(trimmed)
     }
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
             ActionTemplate { command: "/add".into(), label: "Add File".into(), description: "Add file to chat context".into(), category: "Files".into() },
             ActionTemplate { command: "/drop".into(), label: "Drop File".into(), description: "Remove file from chat context".into(), category: "Files".into() },
+            ActionTemplate { command: "/ls".into(), label: "List Files".into(), description: "List files in chat".into(), category: "Files".into() },
+            ActionTemplate { command: "/read-only".into(), label: "Read-Only".into(), description: "Add file as read-only".into(), category: "Files".into() },
             ActionTemplate { command: "/run".into(), label: "Run Command".into(), description: "Run a shell command".into(), category: "Code".into() },
             ActionTemplate { command: "/test".into(), label: "Run Tests".into(), description: "Run test suite".into(), category: "Code".into() },
-            ActionTemplate { command: "/commit".into(), label: "Commit".into(), description: "Commit pending changes".into(), category: "Git".into() },
-            ActionTemplate { command: "/undo".into(), label: "Undo".into(), description: "Undo last AI change".into(), category: "Code".into() },
-            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show pending changes diff".into(), category: "Git".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear chat history".into(), category: "Context".into() },
-            ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Show available commands".into(), category: "Info".into() },
-            ActionTemplate { command: "/ls".into(), label: "List Files".into(), description: "List files in chat".into(), category: "Files".into() },
-            ActionTemplate { command: "/tokens".into(), label: "Tokens".into(), description: "Show token usage report".into(), category: "Info".into() },
-            ActionTemplate { command: "/model".into(), label: "Switch Model".into(), description: "Change AI model".into(), category: "Setup".into() },
-            ActionTemplate { command: "/settings".into(), label: "Settings".into(), description: "Show current settings".into(), category: "Setup".into() },
-            ActionTemplate { command: "/map".into(), label: "Repo Map".into(), description: "Show repository map".into(), category: "Context".into() },
-            ActionTemplate { command: "/map-refresh".into(), label: "Refresh Map".into(), description: "Refresh repository map".into(), category: "Context".into() },
-            ActionTemplate { command: "/voice".into(), label: "Voice".into(), description: "Toggle voice input".into(), category: "Setup".into() },
+            ActionTemplate { command: "/lint".into(), label: "Lint".into(), description: "Lint and fix files".into(), category: "Code".into() },
             ActionTemplate { command: "/paste".into(), label: "Paste".into(), description: "Paste from clipboard".into(), category: "Code".into() },
+            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show pending changes diff".into(), category: "Git".into() },
+            ActionTemplate { command: "/commit".into(), label: "Commit".into(), description: "Commit pending changes".into(), category: "Git".into() },
+            ActionTemplate { command: "/undo".into(), label: "Undo".into(), description: "Undo last AI change".into(), category: "Git".into() },
+            ActionTemplate { command: "/git".into(), label: "Git".into(), description: "Run git command".into(), category: "Git".into() },
+            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear chat history".into(), category: "Context".into() },
+            ActionTemplate { command: "/reset".into(), label: "Reset".into(), description: "Drop all files and clear history".into(), category: "Context".into() },
+            ActionTemplate { command: "/map".into(), label: "Repo Map".into(), description: "Show repository map".into(), category: "Context".into() },
+            ActionTemplate { command: "/web".into(), label: "Web Search".into(), description: "Scrape a webpage".into(), category: "Context".into() },
+            ActionTemplate { command: "/tokens".into(), label: "Tokens".into(), description: "Show token usage report".into(), category: "Info".into() },
+            ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Ask questions about aider".into(), category: "Info".into() },
+            ActionTemplate { command: "/copy".into(), label: "Copy".into(), description: "Copy last message to clipboard".into(), category: "Info".into() },
+            ActionTemplate { command: "/model".into(), label: "Switch Model".into(), description: "Change AI model".into(), category: "Setup".into() },
             ActionTemplate { command: "/architect".into(), label: "Architect".into(), description: "Switch to architect mode".into(), category: "Setup".into() },
             ActionTemplate { command: "/ask".into(), label: "Ask".into(), description: "Switch to ask mode".into(), category: "Setup".into() },
             ActionTemplate { command: "/code".into(), label: "Code".into(), description: "Switch to code mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/chat-mode".into(), label: "Chat Mode".into(), description: "Switch chat mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/lint".into(), label: "Lint".into(), description: "Lint edited files".into(), category: "Code".into() },
-            ActionTemplate { command: "/web".into(), label: "Web Search".into(), description: "Search the web".into(), category: "Context".into() },
-            ActionTemplate { command: "/read-only".into(), label: "Read-Only".into(), description: "Add file as read-only".into(), category: "Files".into() },
-            ActionTemplate { command: "/reset".into(), label: "Reset".into(), description: "Reset chat session".into(), category: "Context".into() },
+            ActionTemplate { command: "/settings".into(), label: "Settings".into(), description: "Show current settings".into(), category: "Setup".into() },
+            ActionTemplate { command: "/voice".into(), label: "Voice".into(), description: "Record and transcribe voice".into(), category: "Setup".into() },
             ActionTemplate { command: "/quit".into(), label: "Quit".into(), description: "Exit aider".into(), category: "Info".into() },
-            ActionTemplate { command: "/git".into(), label: "Git".into(), description: "Run git command".into(), category: "Git".into() },
         ]
     }
 }
@@ -602,16 +820,75 @@ struct CopilotAdapter;
 impl ProviderAdapter for CopilotAdapter {
     fn detect_agent(&self, line: &str) -> Option<AgentInfo> {
         let lower = line.to_lowercase();
-        if lower.contains("github copilot") || (lower.contains("copilot") && lower.contains("cli")) {
-            Some(AgentInfo { name: "Copilot CLI".into(), provider: "openai".into(), model: None, detected_at: now(), confidence: 0.85 })
-        } else { None }
+        // "GitHub Copilot", "gh copilot", "copilot cli", or copilot coding agent
+        if lower.contains("github copilot") || lower.contains("gh copilot") {
+            Some(AgentInfo {
+                name: "Copilot CLI".into(),
+                provider: "github".into(),
+                model: None,
+                detected_at: now(),
+                confidence: 0.9,
+            })
+        } else if lower.contains("copilot") && (lower.contains("cli") || lower.contains("agent") || lower.contains("coding")) {
+            Some(AgentInfo {
+                name: "Copilot CLI".into(),
+                provider: "github".into(),
+                model: None,
+                detected_at: now(),
+                confidence: 0.8,
+            })
+        } else {
+            None
+        }
     }
+
     fn analyze_line(&self, line: &str) -> LineAnalysis {
         let mut result = empty_analysis();
-        if self.is_prompt(line) { result.phase_hint = Some(PhaseHint::PromptDetected); }
+        let now_str = now();
+        let lower = line.to_lowercase();
+
+        // Detect suggestions: "Suggestion:" or "Command:" output from gh copilot suggest
+        if lower.starts_with("suggestion:") || lower.starts_with("command:") {
+            result.action = Some(ActionEvent {
+                label: "Suggestion".into(),
+                command: line.to_string(),
+                provider: "copilot".into(),
+                is_suggestion: true,
+                timestamp: now_str.clone(),
+            });
+        }
+        // Detect explanation blocks
+        else if lower.starts_with("explanation:") || lower.contains("copilot explains:") {
+            result.action = Some(ActionEvent {
+                label: "Explanation".into(),
+                command: line.to_string(),
+                provider: "copilot".into(),
+                is_suggestion: false,
+                timestamp: now_str.clone(),
+            });
+        }
+
+        // Selection prompt: "? What kind of command" or "? Select an option"
+        if line.starts_with("? ") && line.len() < 100 {
+            result.phase_hint = Some(PhaseHint::PromptDetected);
+        }
+
+        if self.is_prompt(line) {
+            result.phase_hint = Some(PhaseHint::PromptDetected);
+        }
+
         result
     }
-    fn is_prompt(&self, line: &str) -> bool { is_shell_prompt(line.trim()) }
+
+    fn is_prompt(&self, line: &str) -> bool {
+        let t = line.trim();
+        // Copilot interactive prompts start with "?" or "> "
+        if t.starts_with("? ") || t.starts_with("> ") {
+            return true;
+        }
+        is_shell_prompt(t)
+    }
+
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
             ActionTemplate { command: "gh copilot suggest".into(), label: "Suggest".into(), description: "Get command suggestions".into(), category: "AI".into() },
@@ -626,28 +903,180 @@ struct CodexAdapter;
 
 impl ProviderAdapter for CodexAdapter {
     fn detect_agent(&self, line: &str) -> Option<AgentInfo> {
+        // ">_ OpenAI Codex (v0.98.0)" or "OpenAI Codex v0.98.0"
+        if let Some(_caps) = CODEX_VERSION_RE.captures(line) {
+            return Some(AgentInfo {
+                name: "Codex CLI".into(),
+                provider: "openai".into(),
+                model: extract_model_name(line),
+                detected_at: now(),
+                confidence: 0.95,
+            });
+        }
         let lower = line.to_lowercase();
         if lower.contains("codex") && (lower.contains("openai") || lower.contains("cli")) {
-            Some(AgentInfo { name: "Codex CLI".into(), provider: "openai".into(), model: None, detected_at: now(), confidence: 0.85 })
-        } else { None }
+            Some(AgentInfo {
+                name: "Codex CLI".into(),
+                provider: "openai".into(),
+                model: extract_model_name(line),
+                detected_at: now(),
+                confidence: 0.85,
+            })
+        } else {
+            None
+        }
     }
+
     fn analyze_line(&self, line: &str) -> LineAnalysis {
         let mut result = empty_analysis();
-        if self.is_prompt(line) { result.phase_hint = Some(PhaseHint::PromptDetected); }
+        let now_str = now();
+
+        // Token tracking: "Token usage:  1.9K total  (1K input + 900 output)"
+        if let Some(caps) = CODEX_TOKEN_RE.captures(line) {
+            let input = parse_token_count(&caps[2]);
+            let output = parse_token_count(&caps[3]);
+            result.token_update = Some(TokenUpdate {
+                provider: "openai".into(),
+                model: "unknown".into(),
+                input_tokens: input,
+                output_tokens: output,
+                cost_usd: None, // Codex CLI doesn't report costs
+                is_cumulative: true,
+            });
+        }
+
+        // Shell command: "• Running echo hello" or "• Ran echo hello"
+        if let Some(caps) = CODEX_TOOL_RUN_RE.captures(line) {
+            let cmd = caps[1].to_string();
+            let is_running = line.contains("Running");
+            result.tool_call = Some(ToolCall {
+                tool: "Bash".into(),
+                args: cmd,
+                timestamp: now_str.clone(),
+            });
+            if is_running {
+                result.phase_hint = Some(PhaseHint::WorkStarted);
+            }
+        }
+        // File operations: "• Edited example.txt (+1 -1)" etc.
+        else if let Some(caps) = CODEX_FILE_OP_RE.captures(line) {
+            let op = &caps[1];
+            let file = caps[2].to_string();
+            let tool = match op {
+                "Added" => "Create",
+                "Edited" => "Edit",
+                "Deleted" => "Delete",
+                _ => "File",
+            };
+            result.tool_call = Some(ToolCall {
+                tool: tool.into(),
+                args: file,
+                timestamp: now_str.clone(),
+            });
+            result.phase_hint = Some(PhaseHint::WorkStarted);
+        }
+        // Exploring: "• Exploring" or "• Explored"
+        else if CODEX_EXPLORE_RE.is_match(line) {
+            result.tool_call = Some(ToolCall {
+                tool: "Explore".into(),
+                args: "(files)".into(),
+                timestamp: now_str.clone(),
+            });
+        }
+        // MCP tool calls: "• Calling server.tool(...)" or "• Called server.tool(...)"
+        else if let Some(caps) = CODEX_MCP_RE.captures(line) {
+            result.tool_call = Some(ToolCall {
+                tool: caps[1].to_string(),
+                args: caps[2].to_string(),
+                timestamp: now_str.clone(),
+            });
+            if line.contains("Calling") {
+                result.phase_hint = Some(PhaseHint::WorkStarted);
+            }
+        }
+
+        // Approval events
+        if CODEX_APPROVAL_RE.is_match(line) {
+            let approved = line.contains("✔");
+            result.action = Some(ActionEvent {
+                label: if approved { "Approved".into() } else { "Denied".into() },
+                command: line.to_string(),
+                provider: "codex".into(),
+                is_suggestion: false,
+                timestamp: now_str.clone(),
+            });
+        }
+
+        // Model detection from /status or exec mode: "Model: gpt-5.1-codex-max" or "model: gpt-5.3-codex"
+        if let Some(caps) = CODEX_MODEL_RE.captures(line) {
+            let model_name = caps[1].trim().to_string();
+            if result.memory_fact.is_none() {
+                if let Some(model) = extract_model_name(&model_name) {
+                    result.memory_fact = Some(MemoryFact {
+                        key: "model".into(),
+                        value: model,
+                        source: "agent_output".into(),
+                        confidence: 0.9,
+                    });
+                }
+            }
+        }
+
+        // Slash command detection
+        if let Some(caps) = CODEX_SLASH_RE.captures(line) {
+            let cmd = caps[1].to_string();
+            result.action = Some(ActionEvent {
+                label: slash_label(&cmd),
+                command: cmd,
+                provider: "codex".into(),
+                is_suggestion: false,
+                timestamp: now_str.clone(),
+            });
+        }
+
+        // Prompt detection
+        if self.is_prompt(line) {
+            result.phase_hint = Some(PhaseHint::PromptDetected);
+        }
+
         result
     }
-    fn is_prompt(&self, line: &str) -> bool { let t = line.trim(); t.ends_with("> ") || is_shell_prompt(t) }
+
+    fn is_prompt(&self, line: &str) -> bool {
+        let t = line.trim();
+        // Codex TUI prompt: "> " with placeholder text or bare
+        if t == ">" || t == "> " {
+            return true;
+        }
+        // "Ask Codex to do anything" is the placeholder
+        if t.contains("Ask Codex to do anything") {
+            return true;
+        }
+        is_shell_prompt(t)
+    }
+
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
-            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show pending changes".into(), category: "Code".into() },
-            ActionTemplate { command: "/apply".into(), label: "Apply".into(), description: "Apply suggested changes".into(), category: "Code".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear conversation".into(), category: "Context".into() },
-            ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Show available commands".into(), category: "Info".into() },
+            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show git diff including untracked files".into(), category: "Code".into() },
+            ActionTemplate { command: "/review".into(), label: "Review".into(), description: "Review current changes and find issues".into(), category: "Code".into() },
+            ActionTemplate { command: "/copy".into(), label: "Copy".into(), description: "Copy latest output to clipboard".into(), category: "Code".into() },
+            ActionTemplate { command: "/mention".into(), label: "Mention".into(), description: "Mention a file".into(), category: "Code".into() },
+            ActionTemplate { command: "/compact".into(), label: "Compact".into(), description: "Summarize conversation to save context".into(), category: "Context".into() },
+            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear terminal and start new chat".into(), category: "Context".into() },
+            ActionTemplate { command: "/plan".into(), label: "Plan".into(), description: "Switch to plan mode".into(), category: "Context".into() },
+            ActionTemplate { command: "/new".into(), label: "New Chat".into(), description: "Start a new chat".into(), category: "Context".into() },
+            ActionTemplate { command: "/resume".into(), label: "Resume".into(), description: "Resume a saved chat".into(), category: "Context".into() },
+            ActionTemplate { command: "/status".into(), label: "Status".into(), description: "Show session config and token usage".into(), category: "Info".into() },
+            ActionTemplate { command: "/mcp".into(), label: "MCP".into(), description: "List configured MCP tools".into(), category: "Info".into() },
+            ActionTemplate { command: "/feedback".into(), label: "Feedback".into(), description: "Send logs to maintainers".into(), category: "Info".into() },
+            ActionTemplate { command: "/model".into(), label: "Model".into(), description: "Choose model and reasoning effort".into(), category: "Setup".into() },
+            ActionTemplate { command: "/approvals".into(), label: "Approvals".into(), description: "Choose what Codex is allowed to do".into(), category: "Setup".into() },
+            ActionTemplate { command: "/init".into(), label: "Init AGENTS.md".into(), description: "Create instructions file for Codex".into(), category: "Setup".into() },
+            ActionTemplate { command: "/skills".into(), label: "Skills".into(), description: "Improve how Codex performs tasks".into(), category: "Setup".into() },
+            ActionTemplate { command: "/theme".into(), label: "Theme".into(), description: "Choose syntax highlighting theme".into(), category: "Setup".into() },
+            ActionTemplate { command: "/personality".into(), label: "Personality".into(), description: "Choose communication style".into(), category: "Setup".into() },
+            ActionTemplate { command: "/logout".into(), label: "Logout".into(), description: "Log out of Codex".into(), category: "Setup".into() },
             ActionTemplate { command: "/quit".into(), label: "Quit".into(), description: "Exit Codex".into(), category: "Info".into() },
-            ActionTemplate { command: "codex --full-auto".into(), label: "Full Auto".into(), description: "Run in full-auto mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "codex --suggest".into(), label: "Suggest Mode".into(), description: "Run in suggest mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "codex --auto-edit".into(), label: "Auto Edit".into(), description: "Run in auto-edit mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "codex --model".into(), label: "Set Model".into(), description: "Choose model to use".into(), category: "Setup".into() },
         ]
     }
 }
@@ -659,29 +1088,135 @@ struct GeminiAdapter;
 impl ProviderAdapter for GeminiAdapter {
     fn detect_agent(&self, line: &str) -> Option<AgentInfo> {
         let lower = line.to_lowercase();
-        if lower.contains("gemini") && (lower.contains("cli") || lower.contains("code")) {
-            Some(AgentInfo { name: "Gemini CLI".into(), provider: "google".into(), model: extract_model_name(line), detected_at: now(), confidence: 0.8 })
-        } else { None }
+        // Detect ASCII art banner with "GEMINI" block letters or "gemini cli" text
+        if (lower.contains("gemini") && (lower.contains("cli") || lower.contains("code")))
+            || lower.contains("g e m i n i")
+            || (lower.contains("███") && lower.contains("gemini"))
+        {
+            Some(AgentInfo {
+                name: "Gemini CLI".into(),
+                provider: "google".into(),
+                model: extract_model_name(line),
+                detected_at: now(),
+                confidence: 0.85,
+            })
+        } else {
+            None
+        }
     }
+
     fn analyze_line(&self, line: &str) -> LineAnalysis {
         let mut result = empty_analysis();
-        if self.is_prompt(line) { result.phase_hint = Some(PhaseHint::PromptDetected); }
+        let now_str = now();
+
+        // Token tracking from /stats model usage table rows:
+        // "gemini-2.5-pro  10  500  500  2,000"
+        if let Some(caps) = GEMINI_STATS_ROW_RE.captures(line) {
+            let model = caps[1].to_string();
+            let input = parse_token_count(&caps[3].replace(',', ""));
+            let cached = parse_token_count(&caps[4].replace(',', ""));
+            let output = parse_token_count(&caps[5].replace(',', ""));
+            result.token_update = Some(TokenUpdate {
+                provider: "google".into(),
+                model,
+                input_tokens: input + cached,
+                output_tokens: output,
+                cost_usd: None, // Gemini CLI doesn't report costs
+                is_cumulative: true,
+            });
+        }
+
+        // Tool call detection: "✓ ReadFile /path" "? Shell git status" "x Edit file"
+        if let Some(caps) = GEMINI_TOOL_RE.captures(line) {
+            let tool_name = caps[1].to_string();
+            let args = line[caps[0].len()..].trim().to_string();
+            result.tool_call = Some(ToolCall {
+                tool: tool_name,
+                args: if args.is_empty() { "(...)".into() } else { args },
+                timestamp: now_str.clone(),
+            });
+            result.phase_hint = Some(PhaseHint::WorkStarted);
+        }
+
+        // Slash command detection
+        if let Some(caps) = GEMINI_SLASH_RE.captures(line) {
+            let cmd = caps[1].to_string();
+            result.action = Some(ActionEvent {
+                label: slash_label(&cmd),
+                command: cmd,
+                provider: "gemini".into(),
+                is_suggestion: false,
+                timestamp: now_str.clone(),
+            });
+        }
+
+        // Memory fact extraction (same patterns as Claude — shared output)
+        let lower = line.to_lowercase();
+        if lower.contains("using") && lower.contains("as package manager") {
+            if let Some(pm) = extract_between(line, "using ", " as") {
+                result.memory_fact = Some(MemoryFact {
+                    key: "package_manager".into(),
+                    value: pm,
+                    source: "agent_output".into(),
+                    confidence: 0.8,
+                });
+            }
+        } else if lower.contains("running on port") || lower.contains("listening on port") {
+            if let Some(port) = extract_port(line) {
+                result.memory_fact = Some(MemoryFact {
+                    key: "dev_port".into(),
+                    value: port,
+                    source: "agent_output".into(),
+                    confidence: 0.7,
+                });
+            }
+        }
+
+        // Prompt detection
+        if self.is_prompt(line) {
+            result.phase_hint = Some(PhaseHint::PromptDetected);
+        }
+
         result
     }
-    fn is_prompt(&self, line: &str) -> bool { let t = line.trim(); t.ends_with("> ") || is_shell_prompt(t) }
+
+    fn is_prompt(&self, line: &str) -> bool {
+        let t = line.trim();
+        // Gemini CLI prompts: single char ">", "!", "*" followed by space
+        // Normal: "> ", Shell: "! ", YOLO: "* "
+        if t.len() <= 3 && (t == ">" || t == "! " || t == "* " || t == "> ") {
+            return true;
+        }
+        is_shell_prompt(t)
+    }
+
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
             ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Show available commands".into(), category: "Info".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear conversation".into(), category: "Context".into() },
-            ActionTemplate { command: "/stats".into(), label: "Stats".into(), description: "Show usage statistics".into(), category: "Info".into() },
-            ActionTemplate { command: "/save".into(), label: "Save".into(), description: "Save conversation".into(), category: "Context".into() },
-            ActionTemplate { command: "/restore".into(), label: "Restore".into(), description: "Restore saved conversation".into(), category: "Context".into() },
-            ActionTemplate { command: "/sandbox".into(), label: "Sandbox".into(), description: "Toggle sandbox mode".into(), category: "Setup".into() },
+            ActionTemplate { command: "/about".into(), label: "About".into(), description: "Show version info".into(), category: "Info".into() },
+            ActionTemplate { command: "/stats".into(), label: "Stats".into(), description: "Show session statistics and token usage".into(), category: "Info".into() },
             ActionTemplate { command: "/tools".into(), label: "Tools".into(), description: "List available tools".into(), category: "Info".into() },
+            ActionTemplate { command: "/bug".into(), label: "Bug Report".into(), description: "File an issue about Gemini CLI".into(), category: "Info".into() },
+            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear the terminal screen".into(), category: "Context".into() },
+            ActionTemplate { command: "/compress".into(), label: "Compress".into(), description: "Replace chat context with summary".into(), category: "Context".into() },
+            ActionTemplate { command: "/copy".into(), label: "Copy".into(), description: "Copy last output to clipboard".into(), category: "Context".into() },
+            ActionTemplate { command: "/memory".into(), label: "Memory".into(), description: "Manage AI memory".into(), category: "Context".into() },
+            ActionTemplate { command: "/chat".into(), label: "Chat History".into(), description: "Save and resume conversations".into(), category: "Context".into() },
+            ActionTemplate { command: "/resume".into(), label: "Resume".into(), description: "Resume a previous session".into(), category: "Context".into() },
             ActionTemplate { command: "/shell".into(), label: "Shell".into(), description: "Run shell command".into(), category: "Code".into() },
             ActionTemplate { command: "/edit".into(), label: "Edit".into(), description: "Edit a file".into(), category: "Code".into() },
             ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show file changes".into(), category: "Code".into() },
+            ActionTemplate { command: "/restore".into(), label: "Restore".into(), description: "Restore files to pre-tool state".into(), category: "Code".into() },
+            ActionTemplate { command: "/init".into(), label: "Init GEMINI.md".into(), description: "Analyze directory and generate GEMINI.md".into(), category: "Setup".into() },
+            ActionTemplate { command: "/model".into(), label: "Model".into(), description: "Model configuration".into(), category: "Setup".into() },
+            ActionTemplate { command: "/sandbox".into(), label: "Sandbox".into(), description: "Toggle sandbox mode".into(), category: "Setup".into() },
             ActionTemplate { command: "/yolo".into(), label: "YOLO Mode".into(), description: "Auto-approve all actions".into(), category: "Setup".into() },
+            ActionTemplate { command: "/theme".into(), label: "Theme".into(), description: "Change visual theme".into(), category: "Setup".into() },
+            ActionTemplate { command: "/vim".into(), label: "Vim Mode".into(), description: "Toggle vim mode".into(), category: "Setup".into() },
+            ActionTemplate { command: "/permissions".into(), label: "Permissions".into(), description: "Permission management".into(), category: "Setup".into() },
+            ActionTemplate { command: "/settings".into(), label: "Settings".into(), description: "Open settings editor".into(), category: "Setup".into() },
+            ActionTemplate { command: "/mcp".into(), label: "MCP".into(), description: "MCP server management".into(), category: "Setup".into() },
+            ActionTemplate { command: "/auth".into(), label: "Auth".into(), description: "Change authentication method".into(), category: "Setup".into() },
             ActionTemplate { command: "/quit".into(), label: "Quit".into(), description: "Exit Gemini CLI".into(), category: "Info".into() },
         ]
     }
@@ -1257,14 +1792,23 @@ fn extract_model_name(line: &str) -> Option<String> {
     if lower.contains("sonnet 4") { return Some("sonnet".into()); }
     if lower.contains("sonnet") { return Some("sonnet".into()); }
     if lower.contains("haiku") { return Some("haiku".into()); }
-    // OpenAI models
+    // OpenAI / Codex models
+    if lower.contains("codex") && lower.contains("gpt-5") { return Some("gpt-5-codex".into()); }
+    if lower.contains("gpt-5") { return Some("gpt-5".into()); }
     if lower.contains("gpt-4o") { return Some("gpt-4o".into()); }
     if lower.contains("gpt-4") { return Some("gpt-4".into()); }
     if lower.contains("o1") && !lower.contains("v0.1") && !lower.contains("v0.0") { return Some("o1".into()); }
     if lower.contains("o3") { return Some("o3".into()); }
+    if lower.contains("o4") { return Some("o4".into()); }
     // Google models
+    if lower.contains("gemini-3") && lower.contains("pro") { return Some("gemini-3-pro".into()); }
+    if lower.contains("gemini-3") && lower.contains("flash") { return Some("gemini-3-flash".into()); }
     if lower.contains("gemini") && lower.contains("pro") { return Some("gemini-pro".into()); }
+    if lower.contains("gemini") && lower.contains("flash-lite") { return Some("gemini-flash-lite".into()); }
     if lower.contains("gemini") && lower.contains("flash") { return Some("gemini-flash".into()); }
+    // Deepseek (used in Aider)
+    if lower.contains("deepseek-r1") { return Some("deepseek-r1".into()); }
+    if lower.contains("deepseek") { return Some("deepseek".into()); }
     None
 }
 
@@ -1297,18 +1841,41 @@ fn slash_label(cmd: &str) -> String {
         // Aider
         "/add" => "Add file", "/drop" => "Drop file", "/undo" => "Undo",
         "/diff" => "Show diff", "/ls" => "List files", "/tokens" => "Tokens",
-        "/model" => "Switch model", "/settings" => "Settings",
+        "/model" => "Switch model", "/models" => "Search models", "/settings" => "Settings",
         "/map" => "Repo map", "/map-refresh" => "Refresh map",
         "/voice" => "Voice", "/paste" => "Paste", "/architect" => "Architect mode",
         "/ask" => "Ask mode", "/code" => "Code mode", "/chat-mode" => "Chat mode",
         "/lint" => "Lint", "/web" => "Web search", "/read-only" => "Read-only",
-        "/reset" => "Reset", "/quit" => "Quit", "/git" => "Git command",
+        "/reset" => "Reset", "/quit" | "/exit" => "Quit", "/git" => "Git command",
+        "/editor" => "Open editor", "/editor-model" => "Switch editor model",
+        "/copy" => "Copy output", "/copy-context" => "Copy context",
+        "/context" => "Context mode", "/ok" => "Proceed", "/load" => "Load file",
+        "/multiline-mode" => "Multiline", "/reasoning-effort" => "Reasoning effort",
+        "/report" => "Report issue", "/think-tokens" => "Think tokens",
+        "/weak-model" => "Weak model",
         // Codex
-        "/apply" => "Apply changes",
+        "/apply" => "Apply changes", "/approvals" => "Approvals",
+        "/status" => "Status", "/mention" => "Mention file",
+        "/plan" => "Plan mode", "/collab" => "Collaboration",
+        "/agent" => "Switch agent", "/new" => "New chat",
+        "/fork" => "Fork chat", "/resume" => "Resume chat",
+        "/rename" => "Rename thread", "/ps" => "List terminals",
+        "/clean" => "Stop terminals", "/personality" => "Personality",
+        "/realtime" => "Realtime voice", "/feedback" => "Send feedback",
+        "/skills" => "Skills", "/mcp" => "MCP tools",
+        "/statusline" => "Status line", "/theme" => "Theme",
+        "/apps" => "Apps", "/debug-config" => "Debug config",
         // Gemini
-        "/stats" => "Stats", "/save" => "Save", "/restore" => "Restore",
+        "/stats" | "/usage" => "Stats", "/save" => "Save", "/restore" => "Restore",
         "/sandbox" => "Sandbox", "/tools" => "Tools", "/shell" => "Shell",
         "/edit" => "Edit file", "/yolo" => "YOLO mode",
+        "/about" => "About", "/agents" => "Agents", "/auth" => "Auth",
+        "/chat" => "Chat history", "/commands" => "Custom commands",
+        "/compress" => "Compress context", "/docs" => "Documentation",
+        "/extensions" => "Extensions", "/hooks" => "Hooks",
+        "/ide" => "IDE integration", "/policies" => "Policies",
+        "/privacy" => "Privacy", "/profile" => "Profile",
+        "/shortcuts" => "Shortcuts",
         _ => cmd,
     }.into()
 }
