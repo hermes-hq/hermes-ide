@@ -607,9 +607,9 @@ function handleTerminalInput(sessionId: string, data: string): void {
 
   // ── Dedup guard: WKWebView composition flush ──
   // xterm's hidden textarea accumulates typed characters (never cleared during
-  // normal typing).  Under heavy terminal.write() output, WKWebView can fire
-  // spurious compositionstart/compositionend events.  The compositionend handler
-  // reads the *entire* accumulated textarea value and sends it via onData,
+  // normal typing).  Under heavy PTY output, WKWebView can fire spurious
+  // compositionstart/compositionend events.  The compositionend handler reads
+  // the *entire* accumulated textarea value and sends it via onData,
   // duplicating characters that were already sent individually.
   //
   // Guard: if a multi-char, non-escape, non-paste payload is a contiguous
