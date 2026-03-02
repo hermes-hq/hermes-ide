@@ -345,7 +345,11 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   let postCompPassOne = false;     // Allow ONE keydown through after composition
   let postCompChar: string | null = null; // The resolving character to dedup
   let postCompCharFired = false;
-  let lastSpuriousFlush: string | null = null;
+  // Flag-based suppression: when we detect a spurious compositionend, we set this
+  // flag. The next multi-char onData within 100ms is suppressed unconditionally
+  // (no content matching needed — avoids the mismatch between e.data and textarea
+  // substring that caused all previous fix attempts to fail).
+  let suppressNextFlush = false;
 
   if (isMac) {
     container.addEventListener("compositionend", (e: CompositionEvent) => {
@@ -360,16 +364,29 @@ export async function createTerminal(sessionId: string, color: string): Promise<
       const entry = pool.get(sessionId);
       if (composed && composed.length > 1 && entry) {
         const accum = entry.textareaAccum;
-        if (accum.length > 0 && (accum === composed || accum.endsWith(composed) || composed.endsWith(accum))) {
-          // Do NOT neutralize event data via Object.defineProperty — that corrupts
-          // xterm's internal composition state and causes characters to be lost
-          // during fast typing. Instead, let xterm process the compositionend
-          // normally; the tertiary guard in onData will catch the flush.
-          lastSpuriousFlush = composed;
-          // Safety: clear tertiary guard after timeout
-          setTimeout(() => {
-            lastSpuriousFlush = null;
-          }, 200);
+        // Use includes() for detection only (lenient) — we're just setting a flag,
+        // not suppressing data. False-positive detection is harmless because the
+        // flag only suppresses multi-char non-escape non-paste data within 100ms.
+        const isSpurious = accum.length > 0 && (
+          accum === composed ||
+          accum.endsWith(composed) || composed.endsWith(accum) ||
+          accum.includes(composed) || composed.includes(accum)
+        );
+        if (isSpurious) {
+          // NUCLEAR FIX: Clear xterm's hidden textarea so _finalizeComposition's
+          // setTimeout(0) callback reads "" and sends nothing. This kills the
+          // flush at the source rather than trying to match and suppress it downstream.
+          const textarea = container.querySelector("textarea.xterm-helper-textarea") as HTMLTextAreaElement | null;
+          if (textarea) {
+            textarea.value = "";
+          }
+          // Also reset our tracking to stay in sync with the now-empty textarea
+          entry.textareaAccum = "";
+          entry.sentChars = "";
+          // Belt-and-suspenders: flag-based suppression in case the textarea clear
+          // didn't prevent xterm from sending data (e.g. it cached the value)
+          suppressNextFlush = true;
+          setTimeout(() => { suppressNextFlush = false; }, 100);
           return;
         }
       }
@@ -386,7 +403,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
         postCompPassOne = false;
         postCompChar = null;
         postCompCharFired = false;
-        lastSpuriousFlush = null;
+        suppressNextFlush = false;
       }, 200);
     }, true); // capture phase — fires BEFORE xterm's bubbling-phase handler
   }
@@ -475,11 +492,17 @@ export async function createTerminal(sessionId: string, color: string): Promise<
       postCompCharFired = true;
     }
 
-    // Tertiary guard: if compositionend was detected as spurious but the
-    // event data neutralization failed, catch the flush here.
-    if (lastSpuriousFlush !== null && data.length > 1 && data === lastSpuriousFlush) {
-      lastSpuriousFlush = null;
-      return;
+    // Flag-based guard: if compositionend was detected as spurious, suppress the
+    // next multi-char non-escape non-paste data. No content matching needed — the
+    // flag is the signal. This avoids the fundamental problem where e.data differs
+    // from what xterm's _finalizeComposition actually sends via onData.
+    if (suppressNextFlush && data.length > 1) {
+      const isEsc = data.charCodeAt(0) === 0x1b;
+      const isPaste = data.includes("\x1b[200~");
+      if (!isEsc && !isPaste) {
+        suppressNextFlush = false;
+        return;
+      }
     }
 
     handleTerminalInput(sessionId, data);
@@ -644,35 +667,34 @@ function handleTerminalInput(sessionId: string, data: string): void {
     }
   }
 
-  // ── Dedup guard: WKWebView composition flush ──
-  // xterm's hidden textarea accumulates typed characters (never cleared during
-  // normal typing).  WKWebView can fire spurious compositionstart/compositionend
-  // events — even during light typing, not just under heavy PTY output.  The
-  // compositionend handler reads the *entire* accumulated textarea value and
-  // sends it via onData, duplicating characters that were already sent
-  // individually.  Flushes can be as short as 2–3 characters, so the threshold
-  // must be low.
+  // ── Dedup guard (Layer 3): WKWebView composition flush ──
+  // Safety net for cases where Layer 1 (textarea clear) and Layer 2 (flag-based
+  // suppression) both fail. This is the last line of defense.
   //
-  // Guard: if a multi-char, non-escape, non-paste payload is found in either
-  // textareaAccum (primary, never cleared) or sentChars (secondary), suppress it.
+  // Only checks exact match (accum === printable). The suffix checks are removed
+  // because: (a) endsWith(printable) causes false positives on fast-typed batches
+  // like "lo" after "hello", and (b) printable.endsWith(accum) suppresses
+  // legitimate pastes ending with previously typed text.
+  //
+  // With the textarea-clearing approach in Layer 1, textareaAccum is reset after
+  // each spurious detection, so exact match is sufficient.
   if (data.length > 1) {
     const isEscapeSeq = data.charCodeAt(0) === 0x1b;
     const isBracketedPaste = data.includes("\x1b[200~");
     if (!isEscapeSeq && !isBracketedPaste) {
-      // Extract only printable chars for comparison
       let printable = "";
       for (let i = 0; i < data.length; i++) {
         if (data.charCodeAt(i) >= 32) printable += data[i];
       }
-      if (printable.length > 2) {
+      if (printable.length > 1) {
         const accum = entry.textareaAccum;
-        // Primary check: textareaAccum (never cleared on Enter/Ctrl-C/phase changes)
-        if (accum.length > 0 && (accum === printable || accum.endsWith(printable) || printable.endsWith(accum))) {
-          return; // Suppress — this is a duplicate composition flush
+        // Primary: exact match against textareaAccum
+        if (accum.length > 0 && accum === printable) {
+          return;
         }
-        // Secondary check: sentChars (for within-prompt dedup)
-        if (entry.sentChars.length > 0 && (entry.sentChars === printable || entry.sentChars.endsWith(printable) || printable.endsWith(entry.sentChars))) {
-          return; // Suppress — this is a duplicate composition flush
+        // Secondary: exact match against sentChars
+        if (entry.sentChars.length > 0 && entry.sentChars === printable) {
+          return;
         }
       }
     }
@@ -1283,6 +1305,12 @@ export function sendShortcutCommand(sessionId: string, command: string): void {
   entry.inputBuffer = "";
   dismissSuggestions(sessionId);
   clearGhostText(sessionId);
+
+  // Reset dedup tracking — the command text flows through triggerDataEvent → onData
+  // → handleTerminalInput. If textareaAccum matches the command (e.g. user typed the
+  // same command before), the dedup guard would falsely suppress it (BUG 6.5).
+  entry.textareaAccum = "";
+  entry.sentChars = "";
 
   // Send backspaces (to clear existing text) + command text.
   // NO \r — the command is inserted on the prompt, not executed.

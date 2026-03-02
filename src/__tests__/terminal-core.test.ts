@@ -131,8 +131,8 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
   });
 
   it("NO heuristic-based dedup exists (composition dedup is allowed)", () => {
-    // No TIMING heuristics in onData
-    const onDataBlock = SRC.match(/terminal\.onData\(\(data\)\s*=>\s*\{[\s\S]*?\}\);/);
+    // No TIMING heuristics in onData — extract full block up to handleTerminalInput
+    const onDataBlock = SRC.match(/terminal\.onData\(\(data\)\s*=>\s*\{[\s\S]*?handleTerminalInput\(sessionId, data\)/);
     expect(onDataBlock).not.toBeNull();
     // Must not have timing-based dedup
     expect(onDataBlock![0]).not.toContain("performance.now()");

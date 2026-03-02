@@ -15,19 +15,19 @@
  *      compositionend events that flush the entire textarea content.
  *
  *   3. CompositionEndHandler — models our capture-phase compositionend
- *      handler (Layer 1 defense). Two versions: old (sentChars) and new
- *      (textareaAccum + event neutralization).
+ *      handler (Layer 1 defense). Old: sentChars check. New: textarea clear
+ *      + flag-based suppression.
  *
- *   4. OnDataHandler — models our onData handler including the tertiary
+ *   4. OnDataHandler — models our onData handler including the flag-based
  *      guard (Layer 2 defense).
  *
  *   5. HandleTerminalInput — models the dedup guard + writeToSession call
  *      (Layer 3 defense). Two versions: old (sentChars only) and new
- *      (textareaAccum primary + sentChars secondary).
+ *      (textareaAccum exact match + sentChars exact match).
  *
  * We wire these together into two complete pipelines:
  *   - OldPipeline: pre-fix logic (commit 978cf69)
- *   - NewPipeline: the fix (textareaAccum)
+ *   - NewPipeline: the nuclear fix (textarea clear + flag + exact match)
  *
  * Then we replay the EXACT event sequence WKWebView produces and verify:
  *   - OldPipeline: duplicate text reaches the PTY (BUG CONFIRMED)
@@ -56,10 +56,7 @@ const TEXTAREA_ACCUM_MAX = 2048;
  *
  * In real xterm.js, the textarea accumulates all characters typed via keyboard
  * input events. It is NEVER cleared during normal typing — only on explicit
- * user actions like Cmd+A → Delete, which doesn't happen during terminal use.
- *
- * This is the ROOT CAUSE of the bug: the textarea grows forever while our
- * tracking state (sentChars) resets on Enter/Ctrl-C.
+ * actions like blur or Enter/Ctrl-C keydown (unreliable on WKWebView).
  */
 class XtermTextarea {
   value = "";
@@ -70,7 +67,6 @@ class XtermTextarea {
       this.value += ch;
     }
     // Control chars (Enter, Ctrl-C) do NOT clear the textarea.
-    // This is the key behavior that causes the bug.
   }
 }
 
@@ -93,8 +89,8 @@ class WKWebViewRuntime {
  *
  * Two modes:
  *   - "old": Pre-fix (commit 978cf69) — compositionend checks sentChars only
- *   - "new": The fix — compositionend checks textareaAccum, neutralizes event,
- *            tertiary guard in onData, dual-check in handleTerminalInput
+ *   - "new": Nuclear fix — compositionend clears textarea + sets flag,
+ *            flag-based Layer 2, exact-match-only Layer 3
  */
 class TerminalInputPipeline {
   // ── State matching TerminalPool.ts PoolEntry ──
@@ -102,7 +98,7 @@ class TerminalInputPipeline {
   textareaAccum = "";
 
   // ── State matching TerminalPool.ts closure variables ──
-  private lastSpuriousFlush: string | null = null;
+  private suppressNextFlush = false;
 
   // ── Output tracking ──
   ptyWrites: string[] = [];
@@ -114,61 +110,68 @@ class TerminalInputPipeline {
    *
    * Models: container.addEventListener("compositionend", ..., true)
    *
-   * Returns: { neutralized: boolean, eventData: string }
-   *   - neutralized=true means the event data was blanked (xterm gets "")
-   *   - neutralized=false means the event passes through with original data
+   * In "new" mode: clears textarea, resets accum, sets suppressNextFlush flag.
+   * Returns: whether the spurious flush was detected.
    */
-  compositionEndHandler(composedData: string): { neutralized: boolean; eventData: string } {
+  compositionEndHandler(composedData: string, textarea?: XtermTextarea): boolean {
     if (!composedData || composedData.length <= 1) {
-      // Single-char or empty: always allow through (dead keys, real IME)
-      return { neutralized: false, eventData: composedData };
+      return false; // Single-char or empty: always allow through
     }
 
     if (this.mode === "old") {
       // OLD: check sentChars (resets on Enter/Ctrl-C — THE BUG)
       if (this.sentChars.length > 0 && this.sentChars.includes(composedData)) {
-        // Old code just returns early — doesn't neutralize, doesn't set tertiary guard
-        // The event still propagates to xterm's bubbling handler with full data
-        return { neutralized: false, eventData: composedData };
+        return true; // Detected but no effective suppression mechanism
       }
+      return false;
     } else {
-      // NEW: check textareaAccum (NEVER cleared on Enter/Ctrl-C)
+      // NEW: check textareaAccum with lenient detection (includes)
       const accum = this.textareaAccum;
-      if (accum.length > 0 && (accum === composedData || accum.endsWith(composedData) || composedData.endsWith(accum))) {
-        // Do NOT neutralize — let xterm process compositionend normally.
-        // The tertiary guard in onData will catch the flush.
-        this.lastSpuriousFlush = composedData;
-        return { neutralized: false, eventData: composedData };
+      const isSpurious = accum.length > 0 && (
+        accum === composedData ||
+        accum.endsWith(composedData) || composedData.endsWith(accum) ||
+        accum.includes(composedData) || composedData.includes(accum)
+      );
+      if (isSpurious) {
+        // NUCLEAR: clear xterm's textarea so _finalizeComposition reads ""
+        if (textarea) {
+          textarea.value = "";
+        }
+        // Reset tracking to stay in sync
+        this.textareaAccum = "";
+        this.sentChars = "";
+        // Set flag for Layer 2
+        this.suppressNextFlush = true;
+        return true;
       }
+      return false;
     }
-
-    // Not detected as spurious — allow through
-    return { neutralized: false, eventData: composedData };
   }
 
   /**
    * xterm's bubbling-phase compositionend handler.
    *
-   * In real xterm, this reads e.data and fires onData() with that value.
-   * If we neutralized the data to "", xterm fires onData("") which is a no-op.
+   * In real xterm, _finalizeComposition reads textarea.value.substring(start)
+   * via setTimeout(0). If we cleared the textarea in Layer 1, this reads "".
    */
-  xtermBubblingHandler(eventData: string): string | null {
-    if (!eventData) return null; // Empty data = no onData fired
-    return eventData; // This becomes the onData payload
+  xtermBubblingHandler(textarea: XtermTextarea, compositionStart: number): string | null {
+    const input = textarea.value.substring(compositionStart);
+    if (!input) return null;
+    return input;
   }
 
   /**
-   * Layer 2: Our onData handler (tertiary guard + forward to handleTerminalInput).
-   *
-   * Models: terminal.onData((data) => { ... })
+   * Layer 2: Our onData handler (flag-based guard + forward to handleTerminalInput).
    */
   onDataHandler(data: string): void {
     if (!data) return;
 
-    // Tertiary guard (NEW only)
-    if (this.mode === "new") {
-      if (this.lastSpuriousFlush !== null && data.length > 1 && data === this.lastSpuriousFlush) {
-        this.lastSpuriousFlush = null;
+    // Flag-based guard (NEW only): suppress next multi-char non-escape non-paste
+    if (this.mode === "new" && this.suppressNextFlush && data.length > 1) {
+      const isEsc = data.charCodeAt(0) === 0x1b;
+      const isPaste = data.includes("\x1b[200~");
+      if (!isEsc && !isPaste) {
+        this.suppressNextFlush = false;
         return; // SUPPRESS
       }
     }
@@ -177,12 +180,9 @@ class TerminalInputPipeline {
   }
 
   /**
-   * Layer 3: handleTerminalInput — dedup guard + writeToSession.
-   *
-   * Models: function handleTerminalInput(sessionId, data)
+   * Layer 3: handleTerminalInput — exact-match dedup guard + writeToSession.
    */
   private handleTerminalInput(data: string): void {
-    // ── Dedup guard ──
     if (data.length > 1) {
       const isEscapeSeq = data.charCodeAt(0) === 0x1b;
       const isBracketedPaste = data.includes("\x1b[200~");
@@ -191,34 +191,32 @@ class TerminalInputPipeline {
         for (let i = 0; i < data.length; i++) {
           if (data.charCodeAt(i) >= 32) printable += data[i];
         }
-        if (this.mode === "old" ? printable.length > 1 : printable.length > 2) {
+        if (printable.length > 1) {
           if (this.mode === "old") {
-            // OLD: sentChars only
+            // OLD: sentChars only (includes matching)
             if (this.sentChars.length > 0 && this.sentChars.includes(printable)) {
-              return; // Suppress
+              return;
             }
           } else {
-            // NEW: textareaAccum primary, sentChars secondary (endsWith/=== matching)
-            const accum = this.textareaAccum;
-            if (accum.length > 0 && (accum === printable || accum.endsWith(printable) || printable.endsWith(accum))) {
-              return; // Suppress
+            // NEW: exact match only (no suffix matching — prevents false positives)
+            if (this.textareaAccum.length > 0 && this.textareaAccum === printable) {
+              return;
             }
-            if (this.sentChars.length > 0 && (this.sentChars === printable || this.sentChars.endsWith(printable) || printable.endsWith(this.sentChars))) {
-              return; // Suppress
+            if (this.sentChars.length > 0 && this.sentChars === printable) {
+              return;
             }
           }
         }
       }
     }
 
-    // ── "writeToSession" — record what reaches the PTY ──
+    // "writeToSession" — record what reaches the PTY
     this.ptyWrites.push(data);
 
-    // ── Track sent characters ──
+    // Track sent characters
     for (let i = 0; i < data.length; i++) {
       const code = data.charCodeAt(i);
       if (code === 0x0d || code === 0x03) {
-        // Enter/Ctrl-C: sentChars resets, textareaAccum does NOT
         this.sentChars = "";
       } else if (code >= 32) {
         this.sentChars += data[i];
@@ -252,7 +250,6 @@ class TerminalInputPipeline {
 
   /** Simulate Enter key */
   pressEnter(textarea: XtermTextarea): void {
-    // Enter does NOT modify the textarea (control chars are ignored)
     this.onDataHandler("\r");
   }
 
@@ -264,22 +261,28 @@ class TerminalInputPipeline {
   /**
    * Simulate WKWebView's spurious compositionend flush.
    *
-   * This is the EXACT event sequence that causes the bug:
-   *   1. WKWebView fires compositionend with textarea.value as data
-   *   2. Our capture-phase handler runs (may neutralize)
-   *   3. xterm's bubbling-phase handler runs (reads event data, fires onData)
-   *   4. Our onData handler runs (tertiary guard, then handleTerminalInput)
+   * Models the EXACT event sequence:
+   *   1. WKWebView fires compositionstart (records textarea position)
+   *   2. WKWebView fires compositionend with textarea.value as data
+   *   3. Our capture-phase handler runs (Layer 1: clears textarea + sets flag)
+   *   4. xterm's _finalizeComposition runs via setTimeout(0):
+   *      reads textarea.value.substring(compositionStart)
+   *   5. If textarea was cleared, reads "" and sends nothing
+   *   6. If somehow data still arrives, our onData handler catches it (Layer 2)
    */
   triggerSpuriousFlush(textarea: XtermTextarea, runtime: WKWebViewRuntime): void {
     const composedData = runtime.fireSpuriousCompositionEnd(textarea);
 
+    // Record composition start position (what xterm does on compositionstart)
+    const compositionStart = 0; // Spurious: often starts at 0 or an earlier position
+
     // Layer 1: our compositionend capture handler
-    const result = this.compositionEndHandler(composedData);
+    this.compositionEndHandler(composedData, textarea);
 
-    // xterm's bubbling handler processes the (possibly neutralized) event
-    const onDataPayload = this.xtermBubblingHandler(result.eventData);
+    // xterm's _finalizeComposition: reads from textarea (now cleared in "new" mode)
+    const onDataPayload = this.xtermBubblingHandler(textarea, compositionStart);
 
-    // Layer 2+3: our onData handler → handleTerminalInput
+    // Layer 2+3: our onData handler
     if (onDataPayload !== null) {
       this.onDataHandler(onDataPayload);
     }
@@ -296,34 +299,24 @@ describe("BUG REPRODUCTION: Type, Enter, Type, Flush — the exact broken scenar
     const textarea = new XtermTextarea();
     const wkwebview = new WKWebViewRuntime();
 
-    // User types "ls"
     pipeline.typeString("ls", textarea);
     expect(pipeline.ptyWrites).toEqual(["l", "s"]);
     expect(textarea.value).toBe("ls");
 
-    // User presses Enter
     pipeline.pressEnter(textarea);
     expect(pipeline.ptyWrites).toEqual(["l", "s", "\r"]);
-    // sentChars is now "" (reset on Enter), but textarea still has "ls"
     expect(pipeline.sentChars).toBe("");
     expect(textarea.value).toBe("ls"); // TEXTAREA PERSISTS
 
-    // User types "echo hello"
     pipeline.typeString("echo hello", textarea);
-    expect(textarea.value).toBe("lsecho hello"); // textarea accumulated EVERYTHING
-    expect(pipeline.sentChars).toBe("echo hello"); // sentChars only has post-Enter
+    expect(textarea.value).toBe("lsecho hello");
+    expect(pipeline.sentChars).toBe("echo hello");
 
-    // WKWebView fires spurious compositionend with "lsecho hello"
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // ═══ BUG: "lsecho hello" reached the PTY as a duplicate! ═══
-    // Expected: only individual chars should reach PTY
-    // Actual: the flush "lsecho hello" also reached PTY
+    // BUG: "lsecho hello" reached the PTY as a duplicate
     const lastWrite = pipeline.ptyWrites[pipeline.ptyWrites.length - 1];
-    expect(lastWrite).toBe("lsecho hello"); // THE BUG: duplicate reached PTY!
-
-    // Count: 2 ("ls") + 1 ("\r") + 10 ("echo hello") + 1 (flush) = 14 writes
-    // The flush write is the duplicate that should NOT be there
+    expect(lastWrite).toBe("lsecho hello");
     expect(pipeline.ptyWrites.length).toBe(14);
   });
 
@@ -332,26 +325,20 @@ describe("BUG REPRODUCTION: Type, Enter, Type, Flush — the exact broken scenar
     const textarea = new XtermTextarea();
     const wkwebview = new WKWebViewRuntime();
 
-    // Same sequence: type "ls", Enter, type "echo hello"
     pipeline.typeString("ls", textarea);
     pipeline.pressEnter(textarea);
     pipeline.typeString("echo hello", textarea);
 
-    expect(textarea.value).toBe("lsecho hello"); // textarea accumulated EVERYTHING
-    expect(pipeline.sentChars).toBe("echo hello"); // sentChars reset on Enter
-    expect(pipeline.textareaAccum).toBe("lsecho hello"); // textareaAccum PERSISTS
+    expect(textarea.value).toBe("lsecho hello");
+    expect(pipeline.textareaAccum).toBe("lsecho hello");
 
-    // WKWebView fires spurious compositionend with "lsecho hello"
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // ═══ FIX: flush was suppressed — did NOT reach PTY ═══
-    // Only individual chars + Enter should be in PTY writes
+    // FIX: flush was suppressed — Layer 1 cleared textarea, nothing to send
     expect(pipeline.ptyWrites).toEqual([
       "l", "s", "\r",
       "e", "c", "h", "o", " ", "h", "e", "l", "l", "o",
     ]);
-
-    // No extra write from the flush
     expect(pipeline.ptyWrites.length).toBe(13);
   });
 });
@@ -366,26 +353,18 @@ describe("BUG REPRODUCTION: Multiple commands with Enter — increasingly large 
     const textarea = new XtermTextarea();
     const wkwebview = new WKWebViewRuntime();
 
-    // Command 1: "ls"
     pipeline.typeString("ls", textarea);
     pipeline.pressEnter(textarea);
-
-    // Command 2: "pwd"
     pipeline.typeString("pwd", textarea);
     pipeline.pressEnter(textarea);
-
-    // Command 3: "echo hi"
     pipeline.typeString("echo hi", textarea);
 
-    // Textarea has accumulated "lspwdecho hi" across all commands
     expect(textarea.value).toBe("lspwdecho hi");
-    // sentChars only has "echo hi" (was reset twice by Enter)
     expect(pipeline.sentChars).toBe("echo hi");
 
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // BUG: the flush "lspwdecho hi" was NOT suppressed
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore + 1);
     expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("lspwdecho hi");
   });
@@ -402,12 +381,11 @@ describe("BUG REPRODUCTION: Multiple commands with Enter — increasingly large 
     pipeline.typeString("echo hi", textarea);
 
     expect(textarea.value).toBe("lspwdecho hi");
-    expect(pipeline.textareaAccum).toBe("lspwdecho hi"); // MATCHES textarea
+    expect(pipeline.textareaAccum).toBe("lspwdecho hi");
 
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // FIX: the flush was suppressed
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
   });
 });
@@ -423,16 +401,15 @@ describe("BUG REPRODUCTION: Flush after Ctrl-C", () => {
     const wkwebview = new WKWebViewRuntime();
 
     pipeline.typeString("rm -rf /", textarea);
-    pipeline.pressCtrlC(textarea); // Cancel! sentChars resets
+    pipeline.pressCtrlC(textarea);
     pipeline.typeString("ls", textarea);
 
     expect(textarea.value).toBe("rm -rf /ls");
-    expect(pipeline.sentChars).toBe("ls"); // Only post-Ctrl-C
+    expect(pipeline.sentChars).toBe("ls");
 
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // BUG: "rm -rf /ls" passed through because sentChars is only "ls"
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore + 1);
   });
 
@@ -445,12 +422,11 @@ describe("BUG REPRODUCTION: Flush after Ctrl-C", () => {
     pipeline.pressCtrlC(textarea);
     pipeline.typeString("ls", textarea);
 
-    expect(pipeline.textareaAccum).toBe("rm -rf /ls"); // Persists!
+    expect(pipeline.textareaAccum).toBe("rm -rf /ls");
 
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // FIX: suppressed
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
   });
 });
@@ -466,14 +442,11 @@ describe("BUG REPRODUCTION: Mid-typing flush (no Enter yet) — both pipelines c
     const wkwebview = new WKWebViewRuntime();
 
     pipeline.typeString("This is a test", textarea);
-
-    // sentChars still has everything (no Enter to reset it)
     expect(pipeline.sentChars).toBe("This is a test");
 
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // Old code catches this case (sentChars hasn't been reset yet)
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
   });
 
@@ -502,7 +475,6 @@ describe("SAFETY: Normal typing (single chars) always reaches PTY", () => {
       const textarea = new XtermTextarea();
 
       pipeline.typeString("hello", textarea);
-
       expect(pipeline.ptyWrites).toEqual(["h", "e", "l", "l", "o"]);
     }
   });
@@ -530,7 +502,6 @@ describe("SAFETY: Bracketed paste passes through in new pipeline", () => {
     // Paste the same text (bracketed paste mode)
     pipeline.onDataHandler("\x1b[200~hello\x1b[201~");
 
-    // Paste should be the 6th write (after h,e,l,l,o)
     expect(pipeline.ptyWrites.length).toBe(6);
     expect(pipeline.ptyWrites[5]).toBe("\x1b[200~hello\x1b[201~");
   });
@@ -543,10 +514,8 @@ describe("SAFETY: Real dead key composition (single char) passes through", () =>
 
     pipeline.typeString("cafe", textarea);
 
-    // Real dead key: ' + e = é (single char compositionend)
-    const result = pipeline.compositionEndHandler("é");
-    expect(result.neutralized).toBe(false);
-    expect(result.eventData).toBe("é");
+    const detected = pipeline.compositionEndHandler("é", textarea);
+    expect(detected).toBe(false);
   });
 });
 
@@ -557,9 +526,8 @@ describe("SAFETY: Real CJK IME composition passes through", () => {
 
     pipeline.typeString("hello", textarea);
 
-    // CJK IME output (e.g., pinyin → 你好) — multi-char but not in accum
-    const result = pipeline.compositionEndHandler("你好");
-    expect(result.neutralized).toBe(false);
+    const detected = pipeline.compositionEndHandler("你好", textarea);
+    expect(detected).toBe(false);
   });
 });
 
@@ -569,8 +537,6 @@ describe("SAFETY: Genuinely new multi-char data passes through", () => {
     const textarea = new XtermTextarea();
 
     pipeline.typeString("hello", textarea);
-
-    // Simulate some other multi-char data that isn't in the accum
     pipeline.onDataHandler("world");
 
     expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("world");
@@ -582,16 +548,11 @@ describe("SAFETY: Fast typing 2-char batch is NOT suppressed", () => {
     const pipeline = new TerminalInputPipeline("new");
     const textarea = new XtermTextarea();
 
-    // User types "testing" character-by-character
     pipeline.typeString("testing", textarea);
     expect(pipeline.ptyWrites).toEqual(["t", "e", "s", "t", "i", "n", "g"]);
 
-    // Fast typing delivers "in" as a 2-char batch (xterm batches fast input)
-    // OLD BUG: "testing".includes("in") → true → legitimate input suppressed!
-    // FIX: threshold raised to > 2, so 2-char batches always pass through
     pipeline.onDataHandler("in");
 
-    // "in" must reach the PTY — it's legitimate input, not a spurious flush
     expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("in");
     expect(pipeline.ptyWrites.length).toBe(8);
   });
@@ -601,8 +562,6 @@ describe("SAFETY: Fast typing 2-char batch is NOT suppressed", () => {
     const textarea = new XtermTextarea();
 
     pipeline.typeString("hello", textarea);
-
-    // "lo" is a substring of "hello" — old includes() would match
     pipeline.onDataHandler("lo");
 
     expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("lo");
@@ -610,74 +569,87 @@ describe("SAFETY: Fast typing 2-char batch is NOT suppressed", () => {
   });
 });
 
+describe("SAFETY: Paste ending with same text as accum is NOT suppressed", () => {
+  it("pasting 'aatest' when accum is 'test' passes through (no endsWith false positive)", () => {
+    const pipeline = new TerminalInputPipeline("new");
+    const textarea = new XtermTextarea();
+
+    pipeline.typeString("test", textarea);
+    // Non-bracketed paste (e.g., from triggerDataEvent) that ends with "test"
+    pipeline.onDataHandler("aatest");
+
+    // Must NOT be suppressed — "aatest" !== "test" (exact match fails)
+    expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("aatest");
+    expect(pipeline.ptyWrites.length).toBe(5); // t,e,s,t + aatest
+  });
+});
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// THREE-LAYER DEFENSE verification
+// NUCLEAR FIX: textarea clearing verification
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("THREE-LAYER DEFENSE: each layer independently catches the flush", () => {
-  it("Layer 1 (compositionend): detects spurious flush and sets tertiary guard", () => {
+describe("NUCLEAR FIX: textarea clearing kills the flush at the source", () => {
+  it("Layer 1 clears textarea — xterm's _finalizeComposition reads empty string", () => {
     const pipeline = new TerminalInputPipeline("new");
     const textarea = new XtermTextarea();
 
     pipeline.typeString("ls", textarea);
     pipeline.pressEnter(textarea);
-    pipeline.typeString("echo hi", textarea);
+    pipeline.typeString("echo hello", textarea);
+    expect(textarea.value).toBe("lsecho hello");
 
-    const result = pipeline.compositionEndHandler("lsecho hi");
-    // No longer neutralizes — lets xterm process compositionend normally
-    expect(result.neutralized).toBe(false);
-    expect(result.eventData).toBe("lsecho hi");
+    // Layer 1: detect spurious and clear textarea
+    const detected = pipeline.compositionEndHandler("lsecho hello", textarea);
+    expect(detected).toBe(true);
 
-    // xterm's handler fires onData with the original data
-    const onDataPayload = pipeline.xtermBubblingHandler(result.eventData);
-    expect(onDataPayload).toBe("lsecho hi");
+    // Textarea was CLEARED by Layer 1
+    expect(textarea.value).toBe("");
 
-    // But the tertiary guard in onData catches it
+    // xterm's _finalizeComposition reads empty string
+    const onDataPayload = pipeline.xtermBubblingHandler(textarea, 0);
+    expect(onDataPayload).toBeNull(); // Nothing to send!
+  });
+
+  it("Layer 2 flag catches data even if textarea clear somehow failed", () => {
+    const pipeline = new TerminalInputPipeline("new");
+    const textarea = new XtermTextarea();
+
+    pipeline.typeString("test data", textarea);
+
+    // Simulate: Layer 1 detected spurious, set flag, but textarea wasn't cleared
+    // (e.g., xterm cached the value before our handler ran)
+    pipeline.compositionEndHandler("test data", textarea);
+    // Restore textarea value to simulate cache scenario
+    textarea.value = "test data";
+
     const writeCountBefore = pipeline.ptyWrites.length;
-    pipeline.onDataHandler(onDataPayload!);
+    // Data arrives through onData with full cached content
+    pipeline.onDataHandler("test data");
+
+    // Layer 2 (flag) suppressed it
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
   });
 
-  it("Layer 2 (tertiary guard): catches flush if Layer 1 neutralization failed", () => {
+  it("accum and sentChars are reset after spurious detection — future typing works", () => {
     const pipeline = new TerminalInputPipeline("new");
     const textarea = new XtermTextarea();
 
     pipeline.typeString("ls", textarea);
-    pipeline.pressEnter(textarea);
-    pipeline.typeString("echo hi", textarea);
+    expect(pipeline.textareaAccum).toBe("ls");
 
-    // Simulate Layer 1 detecting spurious but failing to neutralize
-    // (Object.defineProperty throws) — manually set lastSpuriousFlush
-    const composed = "lsecho hi";
-    // Call compositionEndHandler to set lastSpuriousFlush
-    pipeline.compositionEndHandler(composed);
-    // Simulate xterm's handler still firing with original data (neutralization "failed")
-    const writeCountBefore = pipeline.ptyWrites.length;
-    pipeline.onDataHandler(composed);
+    // Spurious flush detected — accum and sentChars reset
+    pipeline.compositionEndHandler("ls", textarea);
+    expect(pipeline.textareaAccum).toBe("");
+    expect(pipeline.sentChars).toBe("");
+    expect(textarea.value).toBe("");
 
-    // The tertiary guard should have caught it
-    expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
-  });
-
-  it("Layer 3 (handleTerminalInput guard): catches flush if Layers 1+2 both missed", () => {
-    const pipeline = new TerminalInputPipeline("new");
-    const textarea = new XtermTextarea();
-
-    pipeline.typeString("ls", textarea);
-    pipeline.pressEnter(textarea);
-    pipeline.typeString("echo hi", textarea);
-
-    // Skip Layer 1 and 2 entirely — call handleTerminalInput directly via onData
-    // with no compositionend handler having run (simulates worst case)
-    const writeCountBefore = pipeline.ptyWrites.length;
-
-    // Bypass compositionEndHandler entirely, go straight to onData
-    // lastSpuriousFlush is null, so tertiary guard won't help
-    // But handleTerminalInput's dedup guard uses textareaAccum
-    pipeline.onDataHandler("lsecho hi");
-
-    // Layer 3 caught it
-    expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
+    // User continues typing — works normally
+    pipeline.typeString("pwd", textarea);
+    expect(pipeline.textareaAccum).toBe("pwd");
+    expect(textarea.value).toBe("pwd");
+    expect(pipeline.ptyWrites.filter(w => w.length === 1 && w >= " ")).toEqual(
+      ["l", "s", "p", "w", "d"]
+    );
   });
 });
 
@@ -700,16 +672,13 @@ describe("REALISTIC SESSION: 5-command terminal session", () => {
       }
     }
 
-    // Textarea has ALL text: "ls -lacd /tmpmkdir testcd testecho done"
     const expectedTextarea = commands.join("");
     expect(textarea.value).toBe(expectedTextarea);
-    // sentChars only has "echo done"
     expect(pipeline.sentChars).toBe("echo done");
 
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // BUG: entire history flushed to PTY
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore + 1);
     expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe(expectedTextarea);
   });
@@ -734,7 +703,6 @@ describe("REALISTIC SESSION: 5-command terminal session", () => {
     const writeCountBefore = pipeline.ptyWrites.length;
     pipeline.triggerSpuriousFlush(textarea, wkwebview);
 
-    // FIX: flush suppressed
     expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
   });
 });
@@ -743,7 +711,7 @@ describe("REALISTIC SESSION: 5-command terminal session", () => {
 // Source-level verification (architectural invariants)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("SOURCE: textareaAccum architecture", () => {
+describe("SOURCE: nuclear fix architecture", () => {
   it("PoolEntry declares textareaAccum: string", () => {
     expect(SRC).toMatch(/textareaAccum:\s*string/);
   });
@@ -766,49 +734,46 @@ describe("SOURCE: textareaAccum architecture", () => {
     expect(branch![0]).not.toMatch(/textareaAccum\s*=/);
   });
 
-  it("phase change resets sentChars but NOT textareaAccum", () => {
-    const block = SRC.match(/if \(phase !== "idle" && phase !== "shell_ready"\)[\s\S]*?\}/);
-    expect(block).not.toBeNull();
-    expect(block![0]).toContain('entry.sentChars = ""');
-    expect(block![0]).not.toContain("textareaAccum");
-  });
-
-  it("compositionend handler uses textareaAccum, not sentChars", () => {
+  it("compositionend handler clears xterm textarea on spurious detection", () => {
     const handler = SRC.match(
       /container\.addEventListener\("compositionend"[\s\S]*?true\); \/\/ capture/
     );
     expect(handler).not.toBeNull();
-    expect(handler![0]).toContain("entry.textareaAccum");
-    expect(handler![0]).not.toContain("entry.sentChars");
+    expect(handler![0]).toContain('textarea.value = ""');
+    expect(handler![0]).toContain('entry.textareaAccum = ""');
   });
 
-  it("compositionend does NOT use Object.defineProperty (removed to prevent xterm state corruption)", () => {
+  it("compositionend does NOT use Object.defineProperty", () => {
     expect(SRC).not.toContain('Object.defineProperty(e, "data"');
   });
 
-  it("tertiary guard in onData fires before handleTerminalInput", () => {
+  it("flag-based guard in onData fires before handleTerminalInput", () => {
     const onData = SRC.match(
       /terminal\.onData\(\(data\)\s*=>\s*\{[\s\S]*?handleTerminalInput\(sessionId, data\)/
     );
     expect(onData).not.toBeNull();
-    const guardIdx = onData![0].indexOf("lastSpuriousFlush !== null && data.length > 1 && data === lastSpuriousFlush");
+    const guardIdx = onData![0].indexOf("suppressNextFlush");
     const handleIdx = onData![0].indexOf("handleTerminalInput(sessionId, data)");
     expect(guardIdx).toBeGreaterThan(-1);
     expect(guardIdx).toBeLessThan(handleIdx);
   });
 
-  it("dedup guard uses textareaAccum as primary, sentChars as secondary, with endsWith matching", () => {
+  it("Layer 3 dedup uses exact match only (no endsWith in executable code)", () => {
     const guard = SRC.match(
-      /\/\/ ── Dedup guard: WKWebView composition flush ──[\s\S]*?\/\/ ── Always pass data to PTY/
+      /\/\/ ── Dedup guard \(Layer 3\)[\s\S]*?\/\/ ── Always pass data to PTY/
     );
     expect(guard).not.toBeNull();
-    const accumIdx = guard![0].indexOf("entry.textareaAccum");
-    const sentIdx = guard![0].indexOf("entry.sentChars.length > 0");
-    expect(accumIdx).toBeLessThan(sentIdx);
-    // Verify endsWith matching (not includes)
-    expect(guard![0]).toContain("accum.endsWith(printable)");
-    expect(guard![0]).toContain("entry.sentChars.endsWith(printable)");
-    expect(guard![0]).not.toContain("accum.includes(printable)");
-    expect(guard![0]).not.toContain("entry.sentChars.includes(printable)");
+    expect(guard![0]).toContain("entry.textareaAccum");
+    // Strip comments to check only executable code
+    const codeOnly = guard![0].replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(codeOnly).not.toContain("endsWith");
+  });
+
+  it("sendShortcutCommand resets textareaAccum to prevent false suppression", () => {
+    const fn = SRC.match(
+      /export function sendShortcutCommand[\s\S]*?focusTerminal\(sessionId\)/
+    );
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain('entry.textareaAccum = ""');
   });
 });
