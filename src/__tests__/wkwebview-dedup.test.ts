@@ -134,10 +134,11 @@ class TerminalInputPipeline {
     } else {
       // NEW: check textareaAccum (NEVER cleared on Enter/Ctrl-C)
       const accum = this.textareaAccum;
-      if (accum.length > 0 && (accum.includes(composedData) || composedData.endsWith(accum))) {
-        // Neutralize event data via Object.defineProperty
+      if (accum.length > 0 && (accum === composedData || accum.endsWith(composedData) || composedData.endsWith(accum))) {
+        // Do NOT neutralize — let xterm process compositionend normally.
+        // The tertiary guard in onData will catch the flush.
         this.lastSpuriousFlush = composedData;
-        return { neutralized: true, eventData: "" };
+        return { neutralized: false, eventData: composedData };
       }
     }
 
@@ -190,19 +191,19 @@ class TerminalInputPipeline {
         for (let i = 0; i < data.length; i++) {
           if (data.charCodeAt(i) >= 32) printable += data[i];
         }
-        if (printable.length > 1) {
+        if (this.mode === "old" ? printable.length > 1 : printable.length > 2) {
           if (this.mode === "old") {
             // OLD: sentChars only
             if (this.sentChars.length > 0 && this.sentChars.includes(printable)) {
               return; // Suppress
             }
           } else {
-            // NEW: textareaAccum primary, sentChars secondary
+            // NEW: textareaAccum primary, sentChars secondary (endsWith/=== matching)
             const accum = this.textareaAccum;
-            if (accum.length > 0 && (accum.includes(printable) || printable.endsWith(accum))) {
+            if (accum.length > 0 && (accum === printable || accum.endsWith(printable) || printable.endsWith(accum))) {
               return; // Suppress
             }
-            if (this.sentChars.length > 0 && this.sentChars.includes(printable)) {
+            if (this.sentChars.length > 0 && (this.sentChars === printable || this.sentChars.endsWith(printable) || printable.endsWith(this.sentChars))) {
               return; // Suppress
             }
           }
@@ -576,12 +577,45 @@ describe("SAFETY: Genuinely new multi-char data passes through", () => {
   });
 });
 
+describe("SAFETY: Fast typing 2-char batch is NOT suppressed", () => {
+  it("typing 'testing' then fast-typing 'in' as a multi-char batch is not suppressed", () => {
+    const pipeline = new TerminalInputPipeline("new");
+    const textarea = new XtermTextarea();
+
+    // User types "testing" character-by-character
+    pipeline.typeString("testing", textarea);
+    expect(pipeline.ptyWrites).toEqual(["t", "e", "s", "t", "i", "n", "g"]);
+
+    // Fast typing delivers "in" as a 2-char batch (xterm batches fast input)
+    // OLD BUG: "testing".includes("in") → true → legitimate input suppressed!
+    // FIX: threshold raised to > 2, so 2-char batches always pass through
+    pipeline.onDataHandler("in");
+
+    // "in" must reach the PTY — it's legitimate input, not a spurious flush
+    expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("in");
+    expect(pipeline.ptyWrites.length).toBe(8);
+  });
+
+  it("typing 'hello' then fast-typing 'lo' as a multi-char batch is not suppressed", () => {
+    const pipeline = new TerminalInputPipeline("new");
+    const textarea = new XtermTextarea();
+
+    pipeline.typeString("hello", textarea);
+
+    // "lo" is a substring of "hello" — old includes() would match
+    pipeline.onDataHandler("lo");
+
+    expect(pipeline.ptyWrites[pipeline.ptyWrites.length - 1]).toBe("lo");
+    expect(pipeline.ptyWrites.length).toBe(6);
+  });
+});
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // THREE-LAYER DEFENSE verification
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("THREE-LAYER DEFENSE: each layer independently catches the flush", () => {
-  it("Layer 1 (compositionend): neutralizes event data so xterm has nothing to flush", () => {
+  it("Layer 1 (compositionend): detects spurious flush and sets tertiary guard", () => {
     const pipeline = new TerminalInputPipeline("new");
     const textarea = new XtermTextarea();
 
@@ -590,12 +624,18 @@ describe("THREE-LAYER DEFENSE: each layer independently catches the flush", () =
     pipeline.typeString("echo hi", textarea);
 
     const result = pipeline.compositionEndHandler("lsecho hi");
-    expect(result.neutralized).toBe(true);
-    expect(result.eventData).toBe("");
+    // No longer neutralizes — lets xterm process compositionend normally
+    expect(result.neutralized).toBe(false);
+    expect(result.eventData).toBe("lsecho hi");
 
-    // xterm's handler receives "" → no onData fired → nothing reaches PTY
+    // xterm's handler fires onData with the original data
     const onDataPayload = pipeline.xtermBubblingHandler(result.eventData);
-    expect(onDataPayload).toBeNull();
+    expect(onDataPayload).toBe("lsecho hi");
+
+    // But the tertiary guard in onData catches it
+    const writeCountBefore = pipeline.ptyWrites.length;
+    pipeline.onDataHandler(onDataPayload!);
+    expect(pipeline.ptyWrites.length).toBe(writeCountBefore);
   });
 
   it("Layer 2 (tertiary guard): catches flush if Layer 1 neutralization failed", () => {
@@ -742,8 +782,8 @@ describe("SOURCE: textareaAccum architecture", () => {
     expect(handler![0]).not.toContain("entry.sentChars");
   });
 
-  it("compositionend neutralizes event data via Object.defineProperty", () => {
-    expect(SRC).toContain('Object.defineProperty(e, "data", { value: "", configurable: true })');
+  it("compositionend does NOT use Object.defineProperty (removed to prevent xterm state corruption)", () => {
+    expect(SRC).not.toContain('Object.defineProperty(e, "data"');
   });
 
   it("tertiary guard in onData fires before handleTerminalInput", () => {
@@ -757,13 +797,18 @@ describe("SOURCE: textareaAccum architecture", () => {
     expect(guardIdx).toBeLessThan(handleIdx);
   });
 
-  it("dedup guard uses textareaAccum as primary, sentChars as secondary", () => {
+  it("dedup guard uses textareaAccum as primary, sentChars as secondary, with endsWith matching", () => {
     const guard = SRC.match(
       /\/\/ ── Dedup guard: WKWebView composition flush ──[\s\S]*?\/\/ ── Always pass data to PTY/
     );
     expect(guard).not.toBeNull();
     const accumIdx = guard![0].indexOf("entry.textareaAccum");
-    const sentIdx = guard![0].indexOf("entry.sentChars.length > 0 && entry.sentChars.includes");
+    const sentIdx = guard![0].indexOf("entry.sentChars.length > 0");
     expect(accumIdx).toBeLessThan(sentIdx);
+    // Verify endsWith matching (not includes)
+    expect(guard![0]).toContain("accum.endsWith(printable)");
+    expect(guard![0]).toContain("entry.sentChars.endsWith(printable)");
+    expect(guard![0]).not.toContain("accum.includes(printable)");
+    expect(guard![0]).not.toContain("entry.sentChars.includes(printable)");
   });
 });

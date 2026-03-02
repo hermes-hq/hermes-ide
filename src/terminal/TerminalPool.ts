@@ -360,15 +360,11 @@ export async function createTerminal(sessionId: string, color: string): Promise<
       const entry = pool.get(sessionId);
       if (composed && composed.length > 1 && entry) {
         const accum = entry.textareaAccum;
-        if (accum.length > 0 && (accum.includes(composed) || composed.endsWith(accum))) {
-          // Neutralize the event data so xterm's bubbling-phase handler
-          // processes the compositionend (resets internal state) but with
-          // empty data — nothing to flush.
-          try {
-            Object.defineProperty(e, "data", { value: "", configurable: true });
-          } catch {
-            // Property override failed — fall through to tertiary guard
-          }
+        if (accum.length > 0 && (accum === composed || accum.endsWith(composed) || composed.endsWith(accum))) {
+          // Do NOT neutralize event data via Object.defineProperty — that corrupts
+          // xterm's internal composition state and causes characters to be lost
+          // during fast typing. Instead, let xterm process the compositionend
+          // normally; the tertiary guard in onData will catch the flush.
           lastSpuriousFlush = composed;
           // Safety: clear tertiary guard after timeout
           setTimeout(() => {
@@ -668,14 +664,14 @@ function handleTerminalInput(sessionId: string, data: string): void {
       for (let i = 0; i < data.length; i++) {
         if (data.charCodeAt(i) >= 32) printable += data[i];
       }
-      if (printable.length > 1) {
+      if (printable.length > 2) {
         const accum = entry.textareaAccum;
         // Primary check: textareaAccum (never cleared on Enter/Ctrl-C/phase changes)
-        if (accum.length > 0 && (accum.includes(printable) || printable.endsWith(accum))) {
+        if (accum.length > 0 && (accum === printable || accum.endsWith(printable) || printable.endsWith(accum))) {
           return; // Suppress — this is a duplicate composition flush
         }
         // Secondary check: sentChars (for within-prompt dedup)
-        if (entry.sentChars.length > 0 && entry.sentChars.includes(printable)) {
+        if (entry.sentChars.length > 0 && (entry.sentChars === printable || entry.sentChars.endsWith(printable) || printable.endsWith(entry.sentChars))) {
           return; // Suppress — this is a duplicate composition flush
         }
       }
