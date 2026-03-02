@@ -52,6 +52,9 @@ interface PoolEntry {
   // Dedup: rolling window of recently-sent printable chars (prevents WKWebView
   // composition flush from re-sending the entire textarea content)
   sentChars: string;
+  // Mirrors xterm's hidden textarea accumulation. Unlike sentChars, NEVER
+  // cleared on Enter/Ctrl-C/phase changes (textarea persists across those).
+  textareaAccum: string;
 }
 
 type SuggestionCallback = (state: SuggestionState | null) => void;
@@ -68,6 +71,7 @@ const SUGGESTION_DEBOUNCE_MS = 50;
 // Dedup: maximum size for the per-session sent-chars buffer. Characters older
 // than this window are dropped.  The buffer is also cleared on Enter/Ctrl-C.
 const SENT_CHARS_MAX = 512;
+const TEXTAREA_ACCUM_MAX = 2048;
 
 // ─── Themes & Fonts ──────────────────────────────────────────────────
 
@@ -341,22 +345,37 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   let postCompPassOne = false;     // Allow ONE keydown through after composition
   let postCompChar: string | null = null; // The resolving character to dedup
   let postCompCharFired = false;
+  let lastSpuriousFlush: string | null = null;
 
   if (isMac) {
     container.addEventListener("compositionend", (e: CompositionEvent) => {
       const composed = e.data || null;
 
       // Detect spurious WKWebView compositionend: if the composed text was
-      // already sent character-by-character (exists in sentChars), this is a
+      // already sent character-by-character (exists in textareaAccum), this is a
       // textarea accumulation flush, NOT a real dead-key/IME composition.
-      // Skip setting composition state so the onData dedup doesn't treat the
-      // flush as a "legitimate first occurrence".  The flush guard in
-      // handleTerminalInput will suppress the duplicate payload.
-      // Single-char compositions (dead keys) are always allowed through.
+      // Unlike sentChars, textareaAccum is NEVER cleared on Enter/Ctrl-C/phase
+      // changes, so it correctly detects flushes even after prompt resets.
+      // Single-char compositions (dead keys / real IME) are always allowed through.
       const entry = pool.get(sessionId);
-      if (composed && composed.length > 1 && entry &&
-          entry.sentChars.length > 0 && entry.sentChars.includes(composed)) {
-        return;
+      if (composed && composed.length > 1 && entry) {
+        const accum = entry.textareaAccum;
+        if (accum.length > 0 && (accum.includes(composed) || composed.endsWith(accum))) {
+          // Neutralize the event data so xterm's bubbling-phase handler
+          // processes the compositionend (resets internal state) but with
+          // empty data — nothing to flush.
+          try {
+            Object.defineProperty(e, "data", { value: "", configurable: true });
+          } catch {
+            // Property override failed — fall through to tertiary guard
+          }
+          lastSpuriousFlush = composed;
+          // Safety: clear tertiary guard after timeout
+          setTimeout(() => {
+            lastSpuriousFlush = null;
+          }, 200);
+          return;
+        }
       }
 
       lastComposedChar = composed;
@@ -371,6 +390,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
         postCompPassOne = false;
         postCompChar = null;
         postCompCharFired = false;
+        lastSpuriousFlush = null;
       }, 200);
     }, true); // capture phase — fires BEFORE xterm's bubbling-phase handler
   }
@@ -459,6 +479,13 @@ export async function createTerminal(sessionId: string, color: string): Promise<
       postCompCharFired = true;
     }
 
+    // Tertiary guard: if compositionend was detected as spurious but the
+    // event data neutralization failed, catch the flush here.
+    if (lastSpuriousFlush !== null && data.length > 1 && data === lastSpuriousFlush) {
+      lastSpuriousFlush = null;
+      return;
+    }
+
     handleTerminalInput(sessionId, data);
   });
 
@@ -526,6 +553,7 @@ export async function createTerminal(sessionId: string, color: string): Promise<
     sessionPhase: "creating",
     cwd: "",
     sentChars: "",
+    textareaAccum: "",
   });
   creating.delete(sessionId);
 }
@@ -629,8 +657,8 @@ function handleTerminalInput(sessionId: string, data: string): void {
   // individually.  Flushes can be as short as 2–3 characters, so the threshold
   // must be low.
   //
-  // Guard: if a multi-char, non-escape, non-paste payload is a contiguous
-  // substring of the recently-sent character window, suppress it.
+  // Guard: if a multi-char, non-escape, non-paste payload is found in either
+  // textareaAccum (primary, never cleared) or sentChars (secondary), suppress it.
   if (data.length > 1) {
     const isEscapeSeq = data.charCodeAt(0) === 0x1b;
     const isBracketedPaste = data.includes("\x1b[200~");
@@ -640,8 +668,16 @@ function handleTerminalInput(sessionId: string, data: string): void {
       for (let i = 0; i < data.length; i++) {
         if (data.charCodeAt(i) >= 32) printable += data[i];
       }
-      if (printable.length > 1 && entry.sentChars.includes(printable)) {
-        return; // Suppress — this is a duplicate composition flush
+      if (printable.length > 1) {
+        const accum = entry.textareaAccum;
+        // Primary check: textareaAccum (never cleared on Enter/Ctrl-C/phase changes)
+        if (accum.length > 0 && (accum.includes(printable) || printable.endsWith(accum))) {
+          return; // Suppress — this is a duplicate composition flush
+        }
+        // Secondary check: sentChars (for within-prompt dedup)
+        if (entry.sentChars.length > 0 && entry.sentChars.includes(printable)) {
+          return; // Suppress — this is a duplicate composition flush
+        }
       }
     }
   }
@@ -656,11 +692,18 @@ function handleTerminalInput(sessionId: string, data: string): void {
     const code = data.charCodeAt(i);
     if (code === 0x0d || code === 0x03) {
       // Enter or Ctrl-C: reset sent window (new prompt line)
+      // NOTE: only sentChars resets — textareaAccum persists (textarea is never cleared)
       entry.sentChars = "";
     } else if (code >= 32) {
       entry.sentChars += data[i];
       if (entry.sentChars.length > SENT_CHARS_MAX) {
         entry.sentChars = entry.sentChars.slice(-SENT_CHARS_MAX);
+      }
+      // textareaAccum mirrors what xterm's textarea holds — never cleared on
+      // Enter/Ctrl-C/phase changes, only truncated on overflow.
+      entry.textareaAccum += data[i];
+      if (entry.textareaAccum.length > TEXTAREA_ACCUM_MAX) {
+        entry.textareaAccum = entry.textareaAccum.slice(-TEXTAREA_ACCUM_MAX);
       }
     }
   }
