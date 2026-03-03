@@ -1469,4 +1469,20 @@ export const BUILT_IN_TEMPLATES: PromptTemplate[] = [
       style: "Split into two parts: (1) the cookie policy document text, and (2) the technical implementation guide for the consent banner. Include a cookie inventory table.",
     },
   },
+
+  // ── End-to-End Feature Development ──
+  {
+    id: "product-feature-e2e",
+    name: "Feature Development (End-to-End)",
+    description: "Take a single feature from discovery through PM spec, UX design, implementation plan, and code — all in one pass.",
+    category: "product",
+    recommendedRoles: ["product-manager", "ux-designer", "fullstack-eng"],
+    recommendedStyles: [{ id: "step-by-step", level: 4 }, { id: "actionable", level: 4 }, { id: "detailed", level: 3 }],
+    builtIn: true,
+    fields: {
+      task: "Develop the following feature end-to-end, covering every phase from investigation to working code.",
+      constraints: "Work through each phase in order — do not skip ahead:\n\n1. **Discovery & Research** — State the problem. Who is affected? What evidence or user feedback supports this? List assumptions to validate.\n2. **Product Spec** — Define the goal, success metrics, user stories (As a … I want … so that …), acceptance criteria, and out-of-scope items.\n3. **UX & Design** — Describe the user flow step by step, key screens or UI states (use ASCII wireframes where helpful), edge cases, error states, and accessibility considerations.\n4. **Technical Investigation** — Identify affected areas of the codebase, dependencies, risks, and open questions. Propose the approach and flag alternatives you considered.\n5. **Implementation Plan** — Break the work into ordered tasks with clear scope per task. Note which tasks can be parallelized.\n6. **Implementation** — Write the code. Show complete diffs or new files. Follow existing project conventions.\n7. **Verification** — Describe how to test the feature: manual QA steps, edge cases to verify, and any automated tests to add.",
+      style: "Use clear section headings for each phase. Keep each phase focused — finish one before moving to the next. Prefer concrete examples over abstract descriptions. Show code as diffs when modifying existing files.",
+    },
+  },
 ];

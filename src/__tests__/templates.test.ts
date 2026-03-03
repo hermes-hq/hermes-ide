@@ -6,7 +6,7 @@ import { compilePrompt, EMPTY_FIELDS } from "../lib/compilePrompt";
 
 describe("Template registry", () => {
   it("has 105 built-in templates with required fields", () => {
-    expect(BUILT_IN_TEMPLATES.length).toBe(105);
+    expect(BUILT_IN_TEMPLATES.length).toBe(106);
     for (const tpl of BUILT_IN_TEMPLATES) {
       expect(tpl.id).toBeTruthy();
       expect(tpl.name).toBeTruthy();
