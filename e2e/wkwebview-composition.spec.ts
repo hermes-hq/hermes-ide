@@ -233,4 +233,112 @@ test.describe("WKWebView composition fix (WebKit)", () => {
     const apostrophes = arr.filter((c) => c === "'");
     expect(apostrophes.length).toBe(1);
   });
+
+  test("don't — apostrophe not duplicated with extra insertText after compositionend", async () => {
+    // This simulates the hypothesized WKWebView behavior where an extra
+    // insertText input event fires after compositionend, potentially
+    // causing both CompositionHelper AND _inputEvent to emit the apostrophe.
+    await page.keyboard.type("don", { delay: 30 });
+    await page.waitForTimeout(50);
+
+    await page.evaluate(() => {
+      const ta = document.querySelector(".xterm-helper-textarea")!;
+      ta.dispatchEvent(new CompositionEvent("compositionstart", { data: "", bubbles: true }));
+      ta.dispatchEvent(new CompositionEvent("compositionupdate", { data: "'", bubbles: true }));
+      ta.dispatchEvent(
+        new InputEvent("input", {
+          data: "'",
+          inputType: "insertCompositionText",
+          isComposing: true,
+          bubbles: true,
+        }),
+      );
+      ta.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Dead",
+          code: "Quote",
+          keyCode: 229,
+          isComposing: true,
+          bubbles: true,
+        }),
+      );
+      ta.dispatchEvent(new CompositionEvent("compositionend", { data: "'", bubbles: true }));
+      // EXTRA: insertText after compositionend — the suspected cause of duplication
+      ta.dispatchEvent(
+        new InputEvent("input", {
+          data: "'",
+          inputType: "insertText",
+          isComposing: false,
+          bubbles: true,
+        }),
+      );
+      // Stale keypress that WKWebView fires after compositionend
+      ta.dispatchEvent(
+        new KeyboardEvent("keypress", {
+          key: "'",
+          charCode: 39,
+          bubbles: true,
+        }),
+      );
+      // Trailing 't' keystroke
+      ta.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "t",
+          code: "KeyT",
+          bubbles: true,
+        }),
+      );
+      ta.dispatchEvent(
+        new InputEvent("input", {
+          data: "t",
+          inputType: "insertText",
+          bubbles: true,
+        }),
+      );
+    });
+    await page.waitForTimeout(150);
+
+    const buffer = await getBuffer(page);
+    expect(buffer).toBe("don't");
+  });
+
+  test("standalone dead key apostrophe — exactly one apostrophe with stale keypress", async () => {
+    // Includes the stale keypress that the original test was missing
+    await page.evaluate(() => {
+      const ta = document.querySelector(".xterm-helper-textarea")!;
+      ta.dispatchEvent(new CompositionEvent("compositionstart", { data: "", bubbles: true }));
+      ta.dispatchEvent(new CompositionEvent("compositionupdate", { data: "'", bubbles: true }));
+      ta.dispatchEvent(
+        new InputEvent("input", {
+          data: "'",
+          inputType: "insertCompositionText",
+          isComposing: true,
+          bubbles: true,
+        }),
+      );
+      ta.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Dead",
+          code: "Quote",
+          keyCode: 229,
+          isComposing: true,
+          bubbles: true,
+        }),
+      );
+      ta.dispatchEvent(new CompositionEvent("compositionend", { data: "'", bubbles: true }));
+      // Stale keypress
+      ta.dispatchEvent(
+        new KeyboardEvent("keypress", {
+          key: "'",
+          charCode: 39,
+          bubbles: true,
+        }),
+      );
+    });
+    await page.waitForTimeout(150);
+
+    const arr = await getBufferArray(page);
+    const apostrophes = arr.filter((c) => c === "'");
+    expect(apostrophes.length).toBe(1);
+  });
 });

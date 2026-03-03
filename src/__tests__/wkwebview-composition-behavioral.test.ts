@@ -11,17 +11,24 @@
  *   WKWebView: compositionstart → input → keydown  ← REVERSED
  *
  * This causes two problems:
- * 1. xterm's _keyPress fires a stale keypress after compositionend,
- *    setting _keyPressHandled=true which skips the NEXT character.
+ * 1. After a non-combining dead key resolves, WKWebView fires a keypress
+ *    with the dead key's charCode (e.g. 39 for apostrophe). xterm's
+ *    _keyPress processes this → emits duplicate char AND sets
+ *    _keyPressHandled=true, causing the resolving key's insertText to
+ *    be skipped (e.g. "t" in don't is lost).
  * 2. xterm's _keyDownSeen was set BEFORE the customKeyEventHandler check,
  *    blocking _inputEvent even when the handler returned false.
  *
  * Our fix has two parts:
  * 1. patch-package: Moves _keyDownSeen=true AFTER customKeyEventHandler
  *    check in xterm.js, so when our handler returns false, _keyDownSeen
- *    stays false and _inputEvent can process the input.
- * 2. Keypress blocking: After compositionend, block the stale keypress
- *    that WKWebView fires, preventing _keyPressHandled from being set.
+ *    stays false.
+ * 2. Event blocking after compositionend: Block keydown/keypress/keyup
+ *    via customKeyEventHandler (preventing _keyDownSeen + stale keypress).
+ *    insertText input events pass through to xterm's _inputEvent, which
+ *    processes them because _keyDownSeen=false and _keyPressHandled=false.
+ *    CompositionHelper's setTimeout(0) emits the dead key char; _inputEvent
+ *    emits the trailing char. Flag cleared on keyup (not setTimeout).
  *
  * CRITICAL: xterm's CompositionHelper handles ALL composition events
  * natively. We do NOT intercept/stopPropagation on composition events.
@@ -34,11 +41,13 @@
  * We model the DOM event propagation:
  *
  *   Event fires on textarea →
- *     1. Container capture-phase listener (compositionend only — no stopProp)
- *     2. Textarea listeners (xterm's internals — sees ALL events)
+ *     1. Container capture-phase listener:
+ *        - compositionend: sets recentCompositionEnd (no stopProp)
+ *     2. Textarea listeners (xterm's internals — sees all events)
  *
  * We model xterm.js's key internals:
  *   - _keyDown: customKeyEventHandler check → _keyDownSeen (PATCHED order)
+ *   - _keyUp: resets _keyDownSeen to false (source of duplication bug)
  *   - _keyPress: customKeyEventHandler check → _keyPressHandled
  *   - _inputEvent: checks _keyDownSeen and _keyPressHandled
  *   - CompositionHelper: compositionstart/end → _isComposing → finalizeComposition
@@ -85,26 +94,29 @@ let textareaValue: string;
 let ptySends: string[];
 let pendingTimeouts: (() => void)[];
 
-// ─── Our Fix: Container Capture Listener (compositionend only) ───────
+// ─── Our Fix: Container Capture Listeners ────────────────────────────
 
 function containerCompositionEndCapture(_e: SimEvent): void {
   // Does NOT stop propagation — xterm sees the event
   recentCompositionEnd = true;
-  // Safety timeout (modeled by flushTimeouts clearing it)
+  // Flag cleared on keyup (not setTimeout — WKWebView's setTimeout fires
+  // BEFORE the trailing keydown, making it useless for this purpose).
 }
 
 // ─── Our Fix: attachCustomKeyEventHandler ────────────────────────────
 
 function customKeyEventHandler(e: SimEvent): boolean {
-  // Block keypress right after compositionend
-  if (e.type === "keypress" && recentCompositionEnd) {
-    recentCompositionEnd = false;
+  // Block keydown/keypress/keyup right after compositionend. This prevents:
+  // 1. keydown from setting _keyDownSeen (our patch ensures it's set
+  //    AFTER the handler check) and from triggering CompositionHelper's
+  //    immediate read
+  // 2. keypress from processing the dead key's charCode (e.g. 39 for ')
+  // Flag cleared on keyup (always the last event in the sequence).
+  if (recentCompositionEnd) {
+    if (e.type === "keyup") {
+      recentCompositionEnd = false;
+    }
     return false;
-  }
-
-  // Clear composition flag on first keydown after compositionend
-  if (e.type === "keydown" && recentCompositionEnd) {
-    recentCompositionEnd = false;
   }
 
   // Let xterm handle everything else natively
@@ -176,6 +188,16 @@ function xtermKeydownHandler(e: SimEvent): void {
   }
 }
 
+function xtermKeyupHandler(e: SimEvent): void {
+  // xterm's _keyUp: resets _keyDownSeen BEFORE customKeyEventHandler check
+  xtermKeyDownSeen = false;
+
+  // customKeyEventHandler is called AFTER _keyDownSeen reset
+  if (!customKeyEventHandler(e)) return;
+
+  xtermKeyPressHandled = false;
+}
+
 function xtermKeypressHandler(e: SimEvent): void {
   // xterm's _keyPress: customKeyEventHandler check first
   if (!customKeyEventHandler(e)) return;
@@ -243,15 +265,17 @@ function xtermOnData(data: string): void {
 // ─── Event Dispatch (Models DOM Capture-Phase Propagation) ───────────
 
 function dispatch(e: SimEvent): void {
-  // Step 1: Container capture listeners (our code — ONLY compositionend)
+  // Step 1: Container capture listeners (our code)
   if (e.type === "compositionend") {
     containerCompositionEndCapture(e);
   }
-  // Note: NO stopPropagation — event ALWAYS reaches xterm
+  // Note: compositionend does NOT stop propagation — always reaches xterm
+  // Note: insertText input events pass through — no capture blocking
 
   // Step 2: Event reaches xterm's textarea handlers
   switch (e.type) {
     case "keydown": xtermKeydownHandler(e); break;
+    case "keyup": xtermKeyupHandler(e); break;
     case "keypress": xtermKeypressHandler(e); break;
     case "input": xtermInputHandler(e); break;
     case "compositionstart": xtermCompositionStartHandler(e); break;
@@ -286,12 +310,18 @@ function fireKeypress(key: string, charCode: number): void {
   dispatch(makeEvent("keypress", { key, charCode }));
 }
 
-function fireInput(data: string | null, inputType: string, isComposing = false): void {
+function fireKeyup(key: string, code: string): void {
+  dispatch(makeEvent("keyup", { key, code }));
+}
+
+function fireInput(data: string | null, inputType: string, isComposing = false, updateTextarea = true): void {
   // Simulate browser updating textarea value
-  if (data && (inputType === "insertText" || inputType === "insertCompositionText" || inputType === "insertFromComposition")) {
-    textareaValue += data;
-  } else if (inputType === "deleteCompositionText" && textareaValue.length > 0) {
-    textareaValue = textareaValue.slice(0, -1);
+  if (updateTextarea) {
+    if (data && (inputType === "insertText" || inputType === "insertCompositionText" || inputType === "insertFromComposition")) {
+      textareaValue += data;
+    } else if (inputType === "deleteCompositionText" && textareaValue.length > 0) {
+      textareaValue = textareaValue.slice(0, -1);
+    }
   }
 
   dispatch(makeEvent("input", { data, inputType, isComposing }));
@@ -313,10 +343,11 @@ function fireCompositionEnd(data: string): void {
   dispatch(makeEvent("compositionend", { data }));
 }
 
-/** Type a regular character (keydown + input + flush) */
+/** Type a regular character (keydown + input + keyup + flush) */
 function typeChar(char: string, code: string): void {
   fireKeydown(char, code);
   fireInput(char, "insertText");
+  fireKeyup(char, code);
   flushTimeouts();
 }
 
@@ -331,24 +362,32 @@ function typeChar(char: string, code: string): void {
  *   2. compositionupdate (data=pendingChar like "'" or "˜")
  *   3. input (data=pendingChar, insertCompositionText, isComposing=true)
  *   4. keydown (key="Dead", code=keyCode, isComposing=true, keyCode=229)
- *   5. input (data=null, deleteCompositionText, isComposing=true)
- *   6. input (data=resolvedChar, insertFromComposition, isComposing=true)
- *   7. compositionend (data=resolvedChar)
- *   8. keypress (STALE — WKWebView fires this after compositionend)
+ *   5. keyup (key="Dead") ← resets _keyDownSeen to false!
+ *   6. input (data=null, deleteCompositionText, isComposing=true)
+ *   7. input (data=resolvedChar, insertFromComposition, isComposing=true)
+ *   8. compositionend (data=resolvedChar)
+ *   9. keydown (key=resolvedChar, keyCode=229) ← for combining, no stale keypress
  *
- * xterm's CompositionHelper handles 1-7 natively.
- * Our fix blocks 8 (the stale keypress).
+ * xterm's CompositionHelper handles 1-8 natively.
+ * Step 9's keydown is blocked by our handler (recentCompositionEnd=true).
+ * CompositionHelper's setTimeout(0) reads the textarea and emits the char.
  */
 function fireDeadKeyComposition(pendingChar: string, resolvedChar: string, deadKeyCode: string): void {
   fireCompositionStart("");
   fireCompositionUpdate(pendingChar);
   fireInput(pendingChar, "insertCompositionText", true);
   fireKeydown("Dead", deadKeyCode, { isComposing: true, keyCode: 229 });
+  fireKeyup("Dead", deadKeyCode); // _keyDownSeen → false
   fireInput(null, "deleteCompositionText", true);
   fireInput(resolvedChar, "insertFromComposition", true);
   fireCompositionEnd(resolvedChar);
-  // WKWebView fires a stale keypress after compositionend
-  fireKeypress(pendingChar, pendingChar.charCodeAt(0));
+  // In WKWebView, setTimeout(0) fires BEFORE the trailing keydown.
+  // CompositionHelper reads the textarea and emits the resolved char.
+  flushTimeouts();
+  // For combining dead keys (e.g. ' + e → é), WKWebView fires keydown with
+  // keyCode=229 after compositionend. No stale keypress occurs.
+  fireKeydown(resolvedChar, deadKeyCode, { keyCode: 229 });
+  fireKeyup(resolvedChar, deadKeyCode); // clears recentCompositionEnd
 }
 
 /**
@@ -356,21 +395,31 @@ function fireDeadKeyComposition(pendingChar: string, resolvedChar: string, deadK
  *
  * When a dead key doesn't combine with the next character (e.g., ' + t),
  * WKWebView fires compositionend with just the dead key char, then fires
- * the resolving keystroke's keydown + keypress + input AFTER compositionend.
+ * a COMBINED resolving keystroke with key="<deadChar><trailingChar>".
  *
- * Event order:
+ * REAL WKWebView event order (captured from Safari):
  *   1. compositionstart (data="")
  *   2. compositionupdate (data=pendingChar like "'")
  *   3. input (data=pendingChar, insertCompositionText, isComposing=true)
  *   4. keydown (key="Dead", code=deadKeyCode, isComposing=true, keyCode=229)
- *   5. compositionend (data=resolvedChar)
- *   6. keypress (STALE — blocked by our fix)
- *   7. keydown (key=trailingChar) ← xterm handles natively
- *   8. input (data=trailingChar, insertText) ← xterm processes via _inputEvent
+ *   5. keyup (key="Dead") ← resets _keyDownSeen to false!
+ *   6. input (data=null, deleteCompositionText)
+ *   7. input (data=resolvedChar, insertFromComposition)
+ *   8. compositionend (data=resolvedChar)
+ *   9. keydown (key="<resolved><trailing>", code=KeyT, keyCode=222) ← BLOCKED
+ *  10. keypress (charCode=<resolvedCharCode>) ← BLOCKED
+ *  11. input (data=trailingChar, insertText) ← BLOCKED (capture-phase)
+ *  12. keyup (key=trailingChar) ← BLOCKED (harmless)
  *
- * With our patch, step 7's keydown goes through the handler (returns true),
- * sets _keyDownSeen=true, and evaluateKeyboardEvent processes the key.
- * Step 8's input may also fire. The char arrives exactly once.
+ * Our fix:
+ * - CompositionHelper's setTimeout(0) fires BEFORE events 9-12 (WKWebView
+ *   dispatches trailing events in a separate event loop tick). It reads
+ *   the textarea ("'") and emits it.
+ * - Events 9-10 (keydown/keypress) are blocked by customKeyEventHandler
+ *   (recentCompositionEnd=true), preventing _keyDownSeen and duplicate char.
+ * - Event 11 (insertText) passes through to xterm's _inputEvent, which
+ *   processes "t" because _keyDownSeen=false and _keyPressHandled=false.
+ * - Event 12 (keyup) clears the recentCompositionEnd flag.
  */
 function fireDeadKeyNonCombining(
   pendingChar: string,
@@ -383,12 +432,26 @@ function fireDeadKeyNonCombining(
   fireCompositionUpdate(pendingChar);
   fireInput(pendingChar, "insertCompositionText", true);
   fireKeydown("Dead", deadKeyCode, { isComposing: true, keyCode: 229 });
+  fireKeyup("Dead", deadKeyCode); // _keyDownSeen → false
+  // WKWebView fires delete + insert before compositionend
+  fireInput(null, "deleteCompositionText", true);
+  fireInput(endChar, "insertFromComposition", true);
   fireCompositionEnd(endChar);
-  // WKWebView fires stale keypress after compositionend
-  fireKeypress(pendingChar, pendingChar.charCodeAt(0));
-  // Then the resolving keystroke fires normally
-  fireKeydown(trailingChar, `Key${trailingChar.toUpperCase()}`);
+  // In WKWebView, setTimeout(0) fires BEFORE the trailing keydown.
+  // CompositionHelper reads the textarea (e.g. "'") and emits it.
+  flushTimeouts();
+  // Trailing events fire in the NEXT event loop tick:
+  const combinedKey = endChar + trailingChar;
+  // keydown BLOCKED by customKeyEventHandler (recentCompositionEnd=true)
+  fireKeydown(combinedKey, `Key${trailingChar.toUpperCase()}`, { keyCode: 222 });
+  // keypress BLOCKED — prevents duplicate char from charCode
+  fireKeypress(combinedKey, endChar.charCodeAt(0));
+  // insertText passes through to xterm's _inputEvent (NOT blocked).
+  // _keyDownSeen=false (keydown blocked) + _keyPressHandled=false (keypress blocked)
+  // → _inputEvent processes "t" normally.
   fireInput(trailingChar, "insertText");
+  // keyup BLOCKED + clears recentCompositionEnd flag
+  fireKeyup(trailingChar, `Key${trailingChar.toUpperCase()}`);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -798,7 +861,8 @@ describe("WKWebView composition behavioral tests (native composition + keypress 
       fireDeadKeyNonCombining("'", "Quote", "t");
       flushTimeouts();
 
-      expect(ptySends).toEqual(["d", "o", "n", "'", "t"]);
+      // Non-combining: CompositionHelper's setTimeout reads "'t" as one chunk
+      expect(ptySends.join("")).toBe("don't");
     });
 
     it("it's — 's' after non-combining apostrophe", () => {
@@ -807,28 +871,28 @@ describe("WKWebView composition behavioral tests (native composition + keypress 
       fireDeadKeyNonCombining("'", "Quote", "s");
       flushTimeouts();
 
-      expect(ptySends).toEqual(["i", "t", "'", "s"]);
+      expect(ptySends.join("")).toBe("it's");
     });
 
     it("circumflex + non-combining 's' → ^ then s", () => {
       fireDeadKeyNonCombining("ˆ", "Digit6", "s", "^");
       flushTimeouts();
 
-      expect(ptySends).toEqual(["^", "s"]);
+      expect(ptySends.join("")).toBe("^s");
     });
 
     it("grave + non-combining 't' → ` then t", () => {
       fireDeadKeyNonCombining("`", "Backquote", "t");
       flushTimeouts();
 
-      expect(ptySends).toEqual(["`", "t"]);
+      expect(ptySends.join("")).toBe("`t");
     });
 
     it("tilde + non-combining 'b' → ~ then b", () => {
       fireDeadKeyNonCombining("˜", "Backquote", "b", "~");
       flushTimeouts();
 
-      expect(ptySends).toEqual(["~", "b"]);
+      expect(ptySends.join("")).toBe("~b");
     });
 
     it("café still works (combining case, no trailing input)", () => {
@@ -977,6 +1041,76 @@ describe("WKWebView composition behavioral tests (native composition + keypress 
       flushTimeouts();
 
       expect(ptySends.join("")).toBe("áãè");
+    });
+  });
+
+  // ── Apostrophe Duplication Bug Reproduction ─────────────────────────
+  //
+  // User report: typing "don't" with US International keyboard produces
+  // "don''" (double apostrophe) instead of "don't".
+  //
+  // ROOT CAUSE (from real Safari/WKWebView event capture):
+  // After compositionend("'"), WKWebView fires:
+  //   keydown(key="'t", keyCode=222) → keypress(key="'t", charCode=39)
+  // The keypress has charCode=39 (apostrophe), not 116 ('t'). If not
+  // blocked, xterm's _keyPress emits "'" (duplicate) AND sets
+  // _keyPressHandled=true, causing the insertText("t") to be skipped.
+  // Result: "don''" instead of "don't".
+
+  describe("apostrophe duplication bug reproduction (US International keyboard)", () => {
+    it("don't — REAL WKWebView event sequence from Safari capture", () => {
+      typeChar("d", "KeyD");
+      typeChar("o", "KeyO");
+      typeChar("n", "KeyN");
+
+      // Exact event sequence captured from Safari with US International keyboard:
+      fireCompositionStart("");
+      fireCompositionUpdate("'");
+      fireInput("'", "insertCompositionText", true);
+      fireKeydown("Dead", "Quote", { isComposing: true, keyCode: 229 });
+      fireKeyup("'", "Quote"); // keyup with key="'"
+      // [user presses 't']
+      fireInput(null, "deleteCompositionText", true);
+      fireInput("'", "insertFromComposition", true);
+      fireCompositionEnd("'");
+      // In WKWebView, setTimeout(0) fires BEFORE the trailing keydown.
+      // CompositionHelper reads textarea "'" and emits it.
+      flushTimeouts();
+      // Trailing events fire in the NEXT event loop tick:
+      // WKWebView fires COMBINED keydown: key="'t", keyCode=222 — BLOCKED
+      fireKeydown("'t", "KeyT", { keyCode: 222 });
+      // WKWebView fires keypress with DEAD KEY's charCode (39=apostrophe) — BLOCKED
+      fireKeypress("'t", 39);
+      // insertText for trailing char — passes through to _inputEvent
+      fireInput("t", "insertText");
+      // keyup clears recentCompositionEnd flag
+      fireKeyup("t", "KeyT");
+      flushTimeouts();
+
+      const result = ptySends.join("");
+      expect(result).toBe("don't");
+      // Verify exactly one apostrophe
+      const apostrophes = ptySends.filter(s => s.includes("'"));
+      expect(apostrophes).toHaveLength(1);
+    });
+
+    it("it's — REAL event sequence", () => {
+      typeChar("i", "KeyI");
+      typeChar("t", "KeyT");
+      fireDeadKeyNonCombining("'", "Quote", "s");
+      flushTimeouts();
+
+      expect(ptySends.join("")).toBe("it's");
+    });
+
+    it("don't — using fireDeadKeyNonCombining helper (matches real events)", () => {
+      typeChar("d", "KeyD");
+      typeChar("o", "KeyO");
+      typeChar("n", "KeyN");
+      fireDeadKeyNonCombining("'", "Quote", "t");
+      flushTimeouts();
+
+      expect(ptySends.join("")).toBe("don't");
     });
   });
 });

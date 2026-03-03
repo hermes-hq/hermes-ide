@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WKWebView Event Sequence Logger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+  h1 { font-size: 1.4em; margin-bottom: 10px; color: #00d4ff; }
+  .instructions { background: #16213e; border: 1px solid #0f3460; border-radius: 6px; padding: 14px; margin-bottom: 16px; font-size: 0.85em; line-height: 1.6; }
+  .instructions li { margin-left: 18px; margin-bottom: 2px; }
+  .instructions code { background: #0f3460; padding: 1px 5px; border-radius: 3px; color: #00d4ff; }
+  .test-phrases { margin-top: 8px; }
+  .test-phrases span { display: inline-block; background: #0f3460; padding: 2px 8px; border-radius: 3px; margin: 2px 4px 2px 0; color: #e94560; font-weight: bold; }
+  .input-area { margin-bottom: 16px; }
+  .input-area label { display: block; margin-bottom: 6px; font-weight: bold; color: #e94560; }
+  textarea#capture { width: 100%; height: 60px; font-size: 18px; padding: 10px; border: 2px solid #0f3460; border-radius: 6px; background: #16213e; color: #fff; outline: none; resize: none; }
+  textarea#capture:focus { border-color: #00d4ff; }
+  .controls { display: flex; gap: 8px; margin-bottom: 16px; }
+  button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; font-weight: bold; }
+  .btn-clear { background: #e94560; color: #fff; }
+  .btn-copy { background: #00d4ff; color: #1a1a2e; }
+  .btn-toggle { background: #0f3460; color: #e0e0e0; }
+  button:hover { opacity: 0.85; }
+  .stats { font-size: 0.8em; color: #888; margin-bottom: 8px; }
+  #log { background: #0d1117; border: 1px solid #0f3460; border-radius: 6px; padding: 10px; max-height: 55vh; overflow-y: auto; font-family: 'SF Mono', 'Menlo', 'Courier New', monospace; font-size: 0.78em; line-height: 1.5; }
+  .evt { padding: 2px 0; border-bottom: 1px solid #161b22; }
+  .evt-composition { color: #f0883e; }
+  .evt-key { color: #79c0ff; }
+  .evt-input { color: #7ee787; }
+  .evt-beforeinput { color: #a5d6ff; }
+  .evt-ts { color: #666; margin-right: 6px; }
+  .evt-type { font-weight: bold; min-width: 170px; display: inline-block; }
+  .evt-detail { color: #bbb; }
+  .composing-badge { background: #e94560; color: #fff; padding: 0 4px; border-radius: 3px; font-size: 0.8em; margin-left: 4px; }
+</style>
+</head>
+<body>
+<h1>WKWebView Event Sequence Logger</h1>
+
+<div class="instructions">
+  <ol>
+    <li>Open this file in <strong>Safari</strong> (same WebKit engine as WKWebView / Tauri)</li>
+    <li>Switch to <code>US International</code> keyboard layout (System Settings &gt; Keyboard &gt; Input Sources)</li>
+    <li>Type the test phrases below into the textarea and observe the event sequence</li>
+    <li>Click <strong>Copy JSON</strong> to export the full event log for analysis</li>
+  </ol>
+  <div class="test-phrases">
+    Test phrases:
+    <span>don't</span>
+    <span>caf&eacute;</span>
+    <span>s&atilde;o</span>
+    <span>na&iuml;ve</span>
+    <span>' then Space (dead key + space)</span>
+  </div>
+</div>
+
+<div class="input-area">
+  <label for="capture">Type here to capture events:</label>
+  <textarea id="capture" placeholder="Start typing..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+</div>
+
+<div class="controls">
+  <button class="btn-clear" onclick="clearLog()">Clear Log</button>
+  <button class="btn-copy" onclick="copyJSON()">Copy JSON</button>
+  <button class="btn-toggle" onclick="toggleRaw()">Toggle Raw/Formatted</button>
+</div>
+<div class="stats" id="stats">Events: 0</div>
+<div id="log"></div>
+
+<script>
+(function() {
+  var events = [];
+  var startTime = null;
+  var rawMode = false;
+  var textarea = document.getElementById('capture');
+  var logEl = document.getElementById('log');
+  var statsEl = document.getElementById('stats');
+
+  var TRACKED_EVENTS = [
+    'keydown', 'keypress', 'keyup',
+    'beforeinput', 'input',
+    'compositionstart', 'compositionupdate', 'compositionend'
+  ];
+
+  function relativeMs(ts) {
+    if (startTime === null) startTime = ts;
+    return Math.round(ts - startTime);
+  }
+
+  function extractEvent(e) {
+    var rec = {
+      type: e.type,
+      timeMs: relativeMs(e.timeStamp),
+      timeStamp: e.timeStamp
+    };
+
+    // KeyboardEvent properties
+    if (e instanceof KeyboardEvent) {
+      rec.key = e.key;
+      rec.code = e.code;
+      rec.keyCode = e.keyCode;
+      rec.which = e.which;
+      rec.charCode = e.charCode || undefined;
+      rec.isComposing = e.isComposing;
+      rec.repeat = e.repeat || undefined;
+      rec.altKey = e.altKey || undefined;
+      rec.ctrlKey = e.ctrlKey || undefined;
+      rec.metaKey = e.metaKey || undefined;
+      rec.shiftKey = e.shiftKey || undefined;
+    }
+
+    // InputEvent properties
+    if (e instanceof InputEvent) {
+      rec.data = e.data;
+      rec.inputType = e.inputType;
+      rec.isComposing = e.isComposing;
+    }
+
+    // CompositionEvent properties
+    if (e instanceof CompositionEvent) {
+      rec.data = e.data;
+    }
+
+    // Snapshot textarea value
+    rec.textareaValue = textarea.value;
+    rec.selectionStart = textarea.selectionStart;
+    rec.selectionEnd = textarea.selectionEnd;
+
+    return rec;
+  }
+
+  function evtClass(type) {
+    if (type.startsWith('composition')) return 'evt-composition';
+    if (type.startsWith('key')) return 'evt-key';
+    if (type === 'beforeinput') return 'evt-beforeinput';
+    if (type === 'input') return 'evt-input';
+    return '';
+  }
+
+  function formatEntry(rec) {
+    var parts = [];
+    parts.push('<span class="evt-ts">+' + String(rec.timeMs).padStart(5) + 'ms</span>');
+    parts.push('<span class="evt-type ' + evtClass(rec.type) + '">' + rec.type + '</span>');
+
+    var details = [];
+    if (rec.key !== undefined) details.push('key="' + rec.key + '"');
+    if (rec.code !== undefined) details.push('code=' + rec.code);
+    if (rec.keyCode !== undefined) details.push('keyCode=' + rec.keyCode);
+    if (rec.data !== undefined) details.push('data="' + (rec.data === null ? 'null' : rec.data) + '"');
+    if (rec.inputType !== undefined) details.push('inputType=' + rec.inputType);
+    if (rec.isComposing) parts.push('<span class="composing-badge">composing</span>');
+    if (rec.charCode) details.push('charCode=' + rec.charCode);
+
+    parts.push('<span class="evt-detail">' + details.join('  ') + '</span>');
+    return parts.join(' ');
+  }
+
+  function renderLog() {
+    if (rawMode) {
+      logEl.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-all;color:#ccc;">' +
+        JSON.stringify(events, null, 2).replace(/</g, '&lt;') + '</pre>';
+    } else {
+      var html = '';
+      for (var i = 0; i < events.length; i++) {
+        html += '<div class="evt">' + formatEntry(events[i]) + '</div>';
+      }
+      logEl.innerHTML = html;
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+    statsEl.textContent = 'Events: ' + events.length;
+  }
+
+  function handler(e) {
+    var rec = extractEvent(e);
+    events.push(rec);
+    renderLog();
+  }
+
+  TRACKED_EVENTS.forEach(function(evtName) {
+    textarea.addEventListener(evtName, handler, true);
+  });
+
+  window.clearLog = function() {
+    events = [];
+    startTime = null;
+    textarea.value = '';
+    renderLog();
+  };
+
+  window.copyJSON = function() {
+    var json = JSON.stringify(events, null, 2);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(json).then(function() {
+        alert('Copied ' + events.length + ' events to clipboard');
+      }, function() {
+        fallbackCopy(json);
+      });
+    } else {
+      fallbackCopy(json);
+    }
+  };
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('Copied ' + events.length + ' events to clipboard');
+  }
+
+  window.toggleRaw = function() {
+    rawMode = !rawMode;
+    renderLog();
+  };
+})();
+</script>
+</body>
+</html>

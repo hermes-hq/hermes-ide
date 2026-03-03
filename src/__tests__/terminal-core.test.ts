@@ -91,34 +91,41 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
     expect(SRC).toContain("terminal.attachCustomKeyEventHandler(");
   });
 
-  it("blocks keypress after compositionend (recentCompositionEnd flag)", () => {
-    // The key handler blocks stale keypress events after compositionend
+  it("blocks ALL keyboard events after compositionend (recentCompositionEnd flag)", () => {
+    // The key handler blocks ALL keyboard events after compositionend
     expect(SRC).toContain("recentCompositionEnd");
-    expect(SRC).toContain('event.type === "keypress" && recentCompositionEnd');
+    expect(SRC).toContain("if (recentCompositionEnd)");
   });
 
   it("lets all events through by default (returns true)", () => {
     // The new approach lets xterm handle everything natively
-    // Only keypress after compositionend is blocked
-    const handlerBlock = SRC.match(/attachCustomKeyEventHandler\(\(event[\s\S]*?\}\)/);
+    // Only events after compositionend are blocked
+    const handlerBlock = SRC.match(/attachCustomKeyEventHandler\(\(_?event[\s\S]*?\}\)/);
     expect(handlerBlock).not.toBeNull();
     expect(handlerBlock![0]).toContain("return true");
   });
 
-  it("clears recentCompositionEnd on keydown", () => {
-    expect(SRC).toContain('event.type === "keydown" && recentCompositionEnd');
+  it("blocks ALL keyboard events when recentCompositionEnd is true", () => {
+    // Block keydown, keypress, and keyup after compositionend so
+    // _keyDownSeen stays false and stale keypress isn't processed.
+    expect(SRC).toContain("if (recentCompositionEnd)");
   });
 
   it("compositionend listener does NOT stop propagation", () => {
-    // xterm's CompositionHelper must see all events
-    expect(SRC).not.toMatch(/compositionend[\s\S]*?stopPropagation/);
+    // xterm's CompositionHelper must see all composition events.
+    // The compositionend handler only sets recentCompositionEnd — no stopPropagation.
+    const compositionHandler = SRC.match(
+      /addEventListener\("compositionend"[\s\S]*?\}, true\)/
+    );
+    expect(compositionHandler).not.toBeNull();
+    expect(compositionHandler![0]).not.toContain("stopPropagation");
   });
 
-  it("returns false for printable keydown (suppress) — the key architectural decision", () => {
-    // After all passthrough checks (modifiers, KEYDOWN_PASSTHROUGH, isComposing),
-    // the handler returns false to suppress printable character keydowns.
-    // This means only textarea input events fire onData for printable chars.
-    const handlerBlock = SRC.match(/attachCustomKeyEventHandler\(\(event[\s\S]*?\}\)/);
+  it("returns false when recentCompositionEnd is true — the key architectural decision", () => {
+    // After compositionend, the handler returns false to block ALL keyboard
+    // events, preventing _keyDownSeen from being set and stale keypress
+    // from being processed.
+    const handlerBlock = SRC.match(/attachCustomKeyEventHandler\(\(_?event[\s\S]*?\}\)/);
     expect(handlerBlock).not.toBeNull();
     expect(handlerBlock![0]).toContain("return false");
   });

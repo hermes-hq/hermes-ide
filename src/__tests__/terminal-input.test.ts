@@ -56,10 +56,10 @@ describe("Terminal input: onBinary handler removed (double apostrophe fix)", () 
     expect(source).toContain("onBinary was removed");
   });
 
-  it("attachCustomKeyEventHandler blocks keypress after compositionend", () => {
+  it("attachCustomKeyEventHandler blocks ALL events after compositionend", () => {
     expect(source).toContain("attachCustomKeyEventHandler");
     expect(source).toContain("recentCompositionEnd");
-    expect(source).toContain('event.type === "keypress" && recentCompositionEnd');
+    expect(source).toContain("if (recentCompositionEnd)");
   });
 
   it("no timing-based dedup hack remains", () => {

@@ -40,9 +40,9 @@ const KEYDOWN_PASSTHROUGH = new Set([
 ]);
 
 describe("Bug 2 fix: keypress blocking after compositionend", () => {
-  it("source uses recentCompositionEnd flag for keypress blocking", () => {
+  it("source uses recentCompositionEnd flag for event blocking", () => {
     expect(SRC).toContain("recentCompositionEnd");
-    expect(SRC).toContain('event.type === "keypress" && recentCompositionEnd');
+    expect(SRC).toContain("if (recentCompositionEnd)");
   });
 
   it("customKeyEventHandler returns true by default (lets xterm handle natively)", () => {

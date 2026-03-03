@@ -7,7 +7,10 @@
  * Architecture (matches TerminalPool.ts):
  *   - xterm's CompositionHelper handles ALL composition events natively
  *   - We do NOT intercept/stopPropagation on composition events
- *   - Only block the stale keypress WKWebView fires after compositionend
+ *   - Block keydown/keypress/keyup after compositionend via customKeyEventHandler
+ *   - insertText input events pass through to xterm's _inputEvent (works because
+ *     _keyDownSeen=false and _keyPressHandled=false when keydown/keypress blocked)
+ *   - Flag cleared on keyup (with 200ms safety timeout)
  *   - patch-package fixes _keyDownSeen ordering in xterm.js
  */
 import { Terminal } from "@xterm/xterm";
@@ -31,29 +34,38 @@ window.__terminal = terminal;
 //
 // Two targeted fixes:
 // 1. patch-package: Moves _keyDownSeen=true AFTER customKeyEventHandler check
-// 2. Block stale keypress after compositionend
+// 2. Block keydown/keypress/keyup after compositionend; let insertText through
+//    so xterm's _inputEvent processes the trailing character (e.g. "t").
+//    Flag cleared on keyup (always the last event in the sequence).
 
 let recentCompositionEnd = false;
+let compositionEndSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
-// Track compositionend so we can block the stale keypress that follows.
-// Does NOT stop propagation — xterm's CompositionHelper sees all events.
+// Track compositionend so we can block the trailing keyboard events.
+// Does NOT stop propagation — xterm's CompositionHelper sees all
+// composition events.
 container.addEventListener("compositionend", () => {
   recentCompositionEnd = true;
-  setTimeout(() => { recentCompositionEnd = false; }, 50);
+  // Safety fallback: clear flag after 200ms in case keyup never fires.
+  if (compositionEndSafetyTimer) clearTimeout(compositionEndSafetyTimer);
+  compositionEndSafetyTimer = setTimeout(() => {
+    recentCompositionEnd = false;
+    compositionEndSafetyTimer = null;
+  }, 200);
 }, true);
 
 terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-  // Block keypress right after compositionend (WKWebView fires stale
-  // keypress for the dead key char, setting _keyPressHandled=true which
-  // causes the NEXT character's _inputEvent to be skipped).
-  if (event.type === "keypress" && recentCompositionEnd) {
-    recentCompositionEnd = false;
+  // Block keydown/keypress/keyup right after compositionend.
+  // Clear flag on keyup (always the last event in the sequence).
+  if (recentCompositionEnd) {
+    if (event.type === "keyup") {
+      recentCompositionEnd = false;
+      if (compositionEndSafetyTimer) {
+        clearTimeout(compositionEndSafetyTimer);
+        compositionEndSafetyTimer = null;
+      }
+    }
     return false;
-  }
-
-  // Clear composition flag on first keydown after compositionend.
-  if (event.type === "keydown" && recentCompositionEnd) {
-    recentCompositionEnd = false;
   }
 
   // Let xterm handle everything else natively.

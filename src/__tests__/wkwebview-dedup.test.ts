@@ -19,8 +19,13 @@
  *    check in xterm's _keyDown, so returning false from the handler
  *    prevents _keyDownSeen from being set.
  *
- * 2. Block keypress right after compositionend: Prevents the stale
- *    WKWebView keypress from setting _keyPressHandled.
+ * 2. Event blocking after compositionend: Block keydown/keypress/keyup
+ *    via customKeyEventHandler returning false, preventing _keyDownSeen
+ *    from being set and the stale keypress from being processed.
+ *    insertText input events pass through to xterm's _inputEvent
+ *    (which works because _keyDownSeen=false and _keyPressHandled=false).
+ *    CompositionHelper's setTimeout(0) emits the dead key char;
+ *    _inputEvent emits the trailing char. Flag cleared on keyup.
  *
  * xterm's CompositionHelper handles ALL composition events natively.
  * We do NOT intercept/stopPropagation on composition events.
@@ -59,13 +64,18 @@ describe("SOURCE: native composition + keypress blocking architecture", () => {
     expect(SRC).toContain("if (isMac)");
   });
 
-  it("blocks keypress when recentCompositionEnd is true", () => {
-    expect(SRC).toContain('event.type === "keypress" && recentCompositionEnd');
+  it("blocks ALL keyboard events when recentCompositionEnd is true (keypress check)", () => {
+    // The handler checks recentCompositionEnd for ALL keyboard events
+    expect(SRC).toContain("if (recentCompositionEnd)");
     expect(SRC).toContain("return false");
   });
 
-  it("clears recentCompositionEnd on keydown", () => {
-    expect(SRC).toContain('event.type === "keydown" && recentCompositionEnd');
+  it("blocks ALL keyboard events when recentCompositionEnd is true", () => {
+    // The handler blocks ALL events (keydown, keypress, keyup) after
+    // compositionend. This prevents _keyDownSeen from being set and
+    // the stale keypress from being processed.
+    expect(SRC).toContain("if (recentCompositionEnd)");
+    expect(SRC).toContain("return false");
   });
 
   it("lets all other events through (returns true)", () => {
@@ -108,8 +118,22 @@ describe("SOURCE: old approaches fully removed", () => {
     expect(SRC).not.toMatch(/addEventListener\("compositionupdate"/);
   });
 
-  it("no input event capture handler", () => {
-    expect(SRC).not.toMatch(/addEventListener\("input"/);
+  it("no insertText capture blocking (insertText passes through to _inputEvent)", () => {
+    // insertText is NOT blocked — _inputEvent processes the trailing char
+    // because _keyDownSeen=false (keydown blocked) and _keyPressHandled=false
+    // (keypress blocked). No stopPropagation on input events.
+    const handlerSection = SRC.match(/attachCustomKeyEventHandler[\s\S]*?terminal\.onData/);
+    expect(handlerSection).not.toBeNull();
+    expect(handlerSection![0]).not.toContain("stopPropagation");
+  });
+
+  it("flag cleared on keyup (not setTimeout)", () => {
+    // WKWebView's setTimeout(0) fires BEFORE the trailing keydown, making
+    // it useless for flag clearing. Keyup is always the last event.
+    const handlerBlock = SRC.match(/attachCustomKeyEventHandler[\s\S]*?\}\)/);
+    expect(handlerBlock).not.toBeNull();
+    expect(handlerBlock![0]).toContain('"keyup"');
+    expect(handlerBlock![0]).toContain("recentCompositionEnd = false");
   });
 
   it("no needTextareaScrub", () => {

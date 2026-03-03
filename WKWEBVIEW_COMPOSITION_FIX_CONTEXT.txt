@@ -392,35 +392,63 @@ NEW FILES:
       * Patched _keyDownSeen behavior
 
 ================================================================================
-6. WHAT STILL NEEDS TO BE DONE
+6. ROOT CAUSE OF APOSTROPHE DUPLICATION (DISCOVERED 2026-03-03)
+================================================================================
+
+The "don't → don''" duplication was caused by a THIRD root cause not previously
+identified:
+
+--- Root Cause 3b: _keyUp resets _keyDownSeen (causes duplication) ---
+
+xterm's _keyUp() unconditionally resets _keyDownSeen = false (line 1120 in
+CoreBrowserTerminal.ts). This happens when the user releases the dead key,
+BETWEEN the keydown(Dead) and compositionend events:
+
+    1. keydown(Dead, 229) → _keyDownSeen = true
+    2. keyup(Dead)        → _keyDownSeen = false  ← CRITICAL
+    3. compositionend     → CompositionHelper schedules setTimeout to read textarea
+    4. input(insertText)  → _inputEvent checks !_keyDownSeen → TRUE → processes!
+    5. setTimeout fires   → CompositionHelper reads textarea → ALSO processes!
+
+Steps 4 and 5 BOTH emit the apostrophe → duplication.
+
+--- Fix: Layer 3 — Block insertText input events after compositionend ---
+
+Added a capture-phase input event listener on the container that blocks
+insertText events during the recentCompositionEnd window:
+
+    container.addEventListener("input", (event) => {
+      if (recentCompositionEnd && (event as InputEvent).inputType === "insertText") {
+        event.stopPropagation();  // xterm's _inputEvent won't see it
+      }
+    }, true);
+
+This prevents _inputEvent from processing the post-compositionend insertText
+while CompositionHelper correctly handles the character via its textarea read.
+The insertText for the NEXT character (e.g., 't' in don't) is NOT blocked
+because recentCompositionEnd is cleared by the keydown that precedes it.
+
+================================================================================
+7. WHAT STILL NEEDS TO BE DONE
 ================================================================================
 
 Priority order:
 
-1. DONE — e2e/harness/main.ts updated to match new approach
-2. DONE — behavioral test rewritten with native composition model
-3. DONE — All 1292 vitest tests pass, TypeScript compiles clean
+1. DONE — e2e/harness/main.ts updated to match new 3-layer approach
+2. DONE — behavioral test rewritten with keyUp modeling and insertText blocking
+3. DONE — All 1297 vitest tests pass, TypeScript compiles clean
 4. TODO — Playwright e2e tests (npx playwright test)
-
-5. REAL WKWEBVIEW TESTING
+5. TODO — Real WKWebView testing via Tauri:
    - npm run tauri dev
-   - Type "don't" → should see "don't" (not "don'")
+   - Type "don't" → should see "don't" (not "don''" or "don'")
    - Type "café" → should see "café" with correct display
    - Type "são" → should see "são" with correct display
    - Type "naïve" → should see "naïve" with correct display
    - Test Enter after composition
    - Test Backspace after composition
    - Test rapid typing with interleaved compositions
-
-5. IF CURRENT APPROACH DOESN'T WORK
-   - The key question is whether xterm's CompositionHelper handles WKWebView's
-     reversed event ordering correctly
-   - We analyzed the code and believe it does (see Root Cause Analysis section),
-     but real testing is needed
-   - If display corruption persists, we may need a hybrid approach:
-     intercept only compositionstart/end (not update) to let CompositionHelper
-     partially work, while still fixing the keypress issue
-   - Another option: patch CompositionHelper itself via patch-package
+6. TODO — Use event-logger.html in Safari to capture real WKWebView events
+   and confirm the event sequence matches our model
 
 ================================================================================
 7. HOW TO TEST

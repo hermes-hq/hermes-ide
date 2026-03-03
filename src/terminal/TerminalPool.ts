@@ -313,44 +313,78 @@ export async function createTerminal(sessionId: string, color: string): Promise<
   //
   // 1. patch-package (@xterm/xterm): Moves `_keyDownSeen = true` AFTER the
   //    customKeyEventHandler check in _keyDown, so when the handler returns
-  //    false, _keyDownSeen stays false and _inputEvent can process the char.
+  //    false, _keyDownSeen stays false.
   //
-  // 2. Keypress blocking after compositionend: WKWebView fires a stale
-  //    keypress with the dead key char (e.g. keyCode=39 for apostrophe)
-  //    right after compositionend. xterm's _keyPress processes this and sets
-  //    _keyPressHandled=true, which causes _inputEvent to skip the NEXT
-  //    character (e.g. "t" in don't). Blocking this keypress prevents the
-  //    flag from being set.
+  // 2. Event blocking after compositionend: After a non-combining dead key
+  //    resolves (e.g. apostrophe + t on US International), WKWebView fires
+  //    events in SEPARATE event loop ticks:
+  //
+  //      Tick 1: compositionend("'")
+  //              → CompositionHelper setTimeout(0) emits "'" via onData
+  //      Tick 2: keydown(key="'t", keyCode=222) → keypress(charCode=39)
+  //              → input("t", insertText) → keyup("t")
+  //
+  //    Without blocking:
+  //      - keypress has charCode=39 (apostrophe!) → emits "'" (DUPLICATE)
+  //        AND sets _keyPressHandled=true
+  //      - insertText("t") is skipped (_keyPressHandled=true)
+  //      Result: "don''" (double apostrophe, missing 't')
+  //
+  //    With our fix:
+  //      - compositionend sets recentCompositionEnd flag
+  //      - customKeyEventHandler blocks keydown + keypress (returns false)
+  //        → _keyDownSeen stays false (patch), _keyPressHandled stays false
+  //      - insertText("t") reaches xterm's _inputEvent, which processes it
+  //        because _keyDownSeen=false AND _keyPressHandled=false
+  //      - Flag cleared on keyup (with 200ms safety timeout fallback)
+  //      Result: "don't" ✓
+  //
+  //    IMPORTANT: setTimeout(0) does NOT work for clearing the flag —
+  //    in WKWebView the setTimeout fires BEFORE the trailing keydown,
+  //    making the flag useless. Clearing on keyup is reliable because
+  //    keyup is always the last event in the sequence.
   //
   // xterm's CompositionHelper handles ALL composition display and data
   // injection natively — we do NOT intercept composition events.
 
   let recentCompositionEnd = false;
+  let compositionEndSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
   if (isMac) {
-    // Track compositionend so we can block the stale keypress that follows.
-    // Does NOT stop propagation — xterm's CompositionHelper sees all events.
+    // Track compositionend so we can block the trailing keyboard events.
+    // Does NOT stop propagation on compositionend itself — xterm's
+    // CompositionHelper sees all composition events.
     container.addEventListener("compositionend", () => {
       recentCompositionEnd = true;
-      // Safety timeout: clear if no keypress/keydown arrives within 50ms
-      setTimeout(() => { recentCompositionEnd = false; }, 50);
+      // Safety fallback: clear flag after 200ms in case keyup never fires.
+      // Normal path clears on keyup (see handler below).
+      if (compositionEndSafetyTimer) clearTimeout(compositionEndSafetyTimer);
+      compositionEndSafetyTimer = setTimeout(() => {
+        recentCompositionEnd = false;
+        compositionEndSafetyTimer = null;
+      }, 200);
     }, true);
   }
 
-  terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-    // Block keypress right after compositionend (WKWebView fires stale
-    // keypress for the dead key char, setting _keyPressHandled=true which
-    // causes the NEXT character's _inputEvent to be skipped).
-    if (event.type === "keypress" && recentCompositionEnd) {
-      recentCompositionEnd = false;
+  terminal.attachCustomKeyEventHandler((_event: KeyboardEvent) => {
+    // Block keydown/keypress/keyup right after compositionend.
+    // - Blocking keydown prevents _keyDownSeen from being set (patch)
+    //   and CompositionHelper.keydown() from running.
+    // - Blocking keypress prevents the stale charCode (e.g. 39 for ')
+    //   from emitting a duplicate character.
+    // - The insertText input event is NOT blocked — it flows through
+    //   xterm's _inputEvent which processes it normally because both
+    //   _keyDownSeen and _keyPressHandled are false.
+    // - Flag cleared on keyup (always the last event in the sequence).
+    if (recentCompositionEnd) {
+      if (_event.type === "keyup") {
+        recentCompositionEnd = false;
+        if (compositionEndSafetyTimer) {
+          clearTimeout(compositionEndSafetyTimer);
+          compositionEndSafetyTimer = null;
+        }
+      }
       return false;
-    }
-
-    // Clear composition flag on first keydown after compositionend.
-    // For non-combining dead keys, the resolving keydown fires after the
-    // keypress we just blocked.
-    if (event.type === "keydown" && recentCompositionEnd) {
-      recentCompositionEnd = false;
     }
 
     // Let xterm handle everything else natively.
