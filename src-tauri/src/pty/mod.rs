@@ -2169,7 +2169,12 @@ pub fn create_session(
     realm_ids: Option<Vec<String>>,
 ) -> Result<SessionUpdate, String> {
     let session_id = Uuid::new_v4().to_string();
-    let shell = detect_shell();
+    let shell = state.db.lock().map_err(|e| e.to_string())
+        .and_then(|db| db.get_setting("default_shell"))
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(detect_shell);
     let cwd = working_directory.unwrap_or_else(get_working_directory);
 
     let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
@@ -2239,6 +2244,18 @@ pub fn create_session(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "HERMES-IDE");
+
+    // Ensure UTF-8 locale so shells (especially old macOS bash 3.2) treat
+    // multi-byte characters correctly.  Without this, readline interprets
+    // UTF-8 bytes like 0xC3 0xA3 (ã) as two meta-key sequences (Meta-C +
+    // Meta-#) instead of a single Unicode character.  macOS GUI apps don't
+    // inherit terminal locale vars, so we must set them explicitly.
+    if std::env::var("LANG").unwrap_or_default().is_empty() {
+        cmd.env("LANG", "en_US.UTF-8");
+    }
+    if std::env::var("LC_CTYPE").unwrap_or_default().is_empty() {
+        cmd.env("LC_CTYPE", "UTF-8");
+    }
 
     // Set context file env vars so AI agents can read project info from disk
     if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id) {
