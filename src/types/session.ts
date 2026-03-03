@@ -163,4 +163,7 @@ export type SessionAction =
   // File explorer actions
   | { type: "TOGGLE_FILE_EXPLORER" }
   // Search panel actions
-  | { type: "TOGGLE_SEARCH_PANEL" };
+  | { type: "TOGGLE_SEARCH_PANEL" }
+  // Composer actions
+  | { type: "OPEN_COMPOSER" }
+  | { type: "CLOSE_COMPOSER" };

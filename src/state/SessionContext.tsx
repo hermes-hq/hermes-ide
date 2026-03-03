@@ -60,6 +60,7 @@ interface SessionState {
     gitPanelOpen: boolean;
     fileExplorerOpen: boolean;
     searchPanelOpen: boolean;
+    composerOpen: boolean;
     activeLeftTab: "sessions" | "processes" | "git" | "files" | "search";
   };
 }
@@ -435,6 +436,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "SET_SKIP_CLOSE_CONFIRM":
       return { ...state, skipCloseConfirm: action.skip };
 
+    // ─── Composer actions ────────────────────────────────────────────
+    case "OPEN_COMPOSER":
+      return { ...state, ui: { ...state.ui, composerOpen: true } };
+    case "CLOSE_COMPOSER":
+      return state.ui.composerOpen ? { ...state, ui: { ...state.ui, composerOpen: false } } : state;
+
     default:
       return state;
   }
@@ -470,6 +477,7 @@ export const initialState: SessionState = {
     gitPanelOpen: false,
     fileExplorerOpen: false,
     searchPanelOpen: false,
+    composerOpen: false,
     activeLeftTab: "sessions" as const,
   },
 };

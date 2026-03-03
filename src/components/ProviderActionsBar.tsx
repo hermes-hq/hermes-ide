@@ -1,7 +1,9 @@
 import "../styles/components/ProviderActionsBar.css";
-import { useMemo } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import { ActionTemplate, ActionEvent } from "../state/SessionContext";
 import { sendShortcutCommand } from "../terminal/TerminalPool";
+import { useSession } from "../state/SessionContext";
+import { CommandsPopover } from "./CommandsPopover";
 
 // Default actions per AI provider — shown immediately before agent detection
 const DEFAULT_ACTIONS: Record<string, ActionTemplate[]> = {
@@ -83,6 +85,18 @@ const DEFAULT_ACTIONS: Record<string, ActionTemplate[]> = {
   ],
 };
 
+// Curated pinned defaults per provider (top commands for quick access)
+const PINNED_DEFAULTS: Record<string, string[]> = {
+  claude: ["/compact", "/clear", "/cost", "/review", "/help"],
+  gemini: ["/clear", "/help", "/stats", "/tools"],
+  aider: ["/add", "/run", "/test", "/commit", "/undo"],
+  codex: ["/compact", "/clear", "/diff", "/review", "/status"],
+  copilot: ["gh copilot suggest", "gh copilot explain"],
+};
+
+const MAX_QUICK_ACTIONS = 5;
+const DROPDOWN_THRESHOLD = 5;
+
 interface ProviderActionsBarProps {
   sessionId: string;
   agentName: string;
@@ -92,15 +106,10 @@ interface ProviderActionsBarProps {
   aiProvider: string | null;
 }
 
-function sendCommand(sessionId: string, command: string) {
-  sendShortcutCommand(sessionId, command);
-}
-
 export function ProviderActionsBar({ sessionId, actions, recentActions, aiProvider }: ProviderActionsBarProps) {
-  const recentCmds = useMemo(
-    () => new Set(recentActions.map((a) => a.command)),
-    [recentActions]
-  );
+  const { dispatch } = useSession();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Use detected actions if available, otherwise fall back to defaults for the provider
   const effectiveActions = useMemo(() => {
@@ -109,31 +118,111 @@ export function ProviderActionsBar({ sessionId, actions, recentActions, aiProvid
     return [];
   }, [actions, aiProvider]);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, ActionTemplate[]>();
-    for (const action of effectiveActions) {
-      const list = map.get(action.category) || [];
-      list.push(action);
-      map.set(action.category, list);
+  // Compute quick actions: up to 3 recent, then fill from pinned defaults
+  const quickActions = useMemo(() => {
+    const pinned = (aiProvider && PINNED_DEFAULTS[aiProvider]) || [];
+    const commandSet = new Set(effectiveActions.map((a) => a.command));
+    const result: ActionTemplate[] = [];
+    const seen = new Set<string>();
+
+    // Up to 3 recently used commands
+    for (const event of recentActions) {
+      if (result.length >= 3) break;
+      if (!seen.has(event.command) && commandSet.has(event.command)) {
+        const tmpl = effectiveActions.find((a) => a.command === event.command);
+        if (tmpl) {
+          result.push(tmpl);
+          seen.add(event.command);
+        }
+      }
     }
-    return map;
-  }, [effectiveActions]);
+
+    // Fill remaining from pinned defaults
+    for (const cmd of pinned) {
+      if (result.length >= MAX_QUICK_ACTIONS) break;
+      if (!seen.has(cmd) && commandSet.has(cmd)) {
+        const tmpl = effectiveActions.find((a) => a.command === cmd);
+        if (tmpl) {
+          result.push(tmpl);
+          seen.add(cmd);
+        }
+      }
+    }
+
+    return result;
+  }, [effectiveActions, recentActions, aiProvider]);
+
+  const handleExecute = useCallback(
+    (command: string) => {
+      sendShortcutCommand(sessionId, command);
+    },
+    [sessionId],
+  );
+
+  const handleOpenComposer = useCallback(() => {
+    dispatch({ type: "OPEN_COMPOSER" });
+  }, [dispatch]);
+
+  const showDropdown = effectiveActions.length > DROPDOWN_THRESHOLD;
 
   if (effectiveActions.length === 0) return null;
 
   return (
     <div className="provider-actions-bar">
-      {Array.from(grouped.entries()).map(([, categoryActions]) =>
-        categoryActions.map((action) => (
-          <button
-            key={action.command}
-            className={`provider-action-btn ${recentCmds.has(action.command) ? "provider-action-btn-recent" : ""}`}
-            title={action.description}
-            onClick={() => sendCommand(sessionId, action.command)}
-          >
-            {action.label}
-          </button>
-        ))
+      {/* Compose button */}
+      <button
+        className="pab-compose-btn"
+        title="Open Prompt Composer"
+        onClick={handleOpenComposer}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </svg>
+        Compose
+      </button>
+
+      <div className="pab-divider" />
+
+      {/* Quick action pills */}
+      {quickActions.map((action) => (
+        <button
+          key={action.command}
+          className="pab-action"
+          title={action.description}
+          onClick={() => handleExecute(action.command)}
+        >
+          {action.command}
+        </button>
+      ))}
+
+      {/* Spacer pushes dropdown trigger to the right */}
+      {showDropdown && <div className="pab-spacer" />}
+
+      {/* Commands dropdown trigger */}
+      {showDropdown && (
+        <button
+          ref={triggerRef}
+          className={`pab-commands-trigger ${popoverOpen ? "pab-commands-trigger-active" : ""}`}
+          onClick={() => setPopoverOpen((v) => !v)}
+        >
+          Commands
+          <span className="pab-commands-count">{effectiveActions.length}</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+            <path d="M2 4l3 3 3-3" />
+          </svg>
+        </button>
+      )}
+
+      {/* Commands popover */}
+      {popoverOpen && triggerRef.current && (
+        <CommandsPopover
+          actions={effectiveActions}
+          recentActions={recentActions}
+          onExecute={handleExecute}
+          onClose={() => setPopoverOpen(false)}
+          anchorRect={triggerRef.current.getBoundingClientRect()}
+        />
       )}
     </div>
   );

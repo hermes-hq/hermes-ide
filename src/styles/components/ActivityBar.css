@@ -127,3 +127,9 @@
   background: var(--border-light);
   margin: var(--space-1) 0;
 }
+
+/* ─── Bottom spacer (pushes bottom action to end) ────────── */
+
+.activity-bar-bottom-spacer {
+  flex: 1;
+}

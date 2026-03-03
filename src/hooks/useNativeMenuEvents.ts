@@ -13,7 +13,6 @@ interface MenuEventHandlers {
   activeSessionId: string | null;
   focusedPaneId: string | null;
   setSettingsOpen: (v: string | null) => void;
-  setComposerOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   setShortcutsOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   setCostDashboardOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
   setSessionCreatorOpen: (v: boolean) => void;
@@ -30,7 +29,6 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
     activeSessionId,
     focusedPaneId,
     setSettingsOpen,
-    setComposerOpen,
     setShortcutsOpen,
     setCostDashboardOpen,
     setSessionCreatorOpen,
@@ -93,7 +91,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           break;
         case "view.prompt-composer":
           dispatch({ type: "CLOSE_PALETTE" });
-          setComposerOpen((v: boolean) => !v);
+          dispatch({ type: "OPEN_COMPOSER" });
           break;
         case "view.process-panel":
           dispatch({ type: "TOGGLE_PROCESS_PANEL" });
@@ -173,7 +171,6 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
       activeSessionId,
       focusedPaneId,
       setSettingsOpen,
-      setComposerOpen,
       setShortcutsOpen,
       setCostDashboardOpen,
       setSessionCreatorOpen,

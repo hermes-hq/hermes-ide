@@ -1,0 +1,112 @@
+/* ─── Commands Popover ────────────────────────────────── */
+
+.commands-popover-overlay {
+  position: fixed;
+  inset: 0;
+  z: 999;
+  z-index: 999;
+}
+
+.commands-popover {
+  position: fixed;
+  z-index: 1000;
+  width: 280px;
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.commands-popover-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.commands-popover-search input {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.commands-popover-search input:focus {
+  border-color: var(--accent);
+}
+
+.commands-popover-search input::placeholder {
+  color: var(--text-3);
+}
+
+.commands-popover-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+
+.commands-popover-category {
+  padding: 6px 12px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+  font-family: var(--font-ui);
+}
+
+.commands-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  color: var(--text-1);
+}
+
+.commands-popover-item:hover,
+.commands-popover-item[data-focused="true"] {
+  background: var(--bg-3);
+}
+
+.commands-popover-item-cmd {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  flex-shrink: 0;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+}
+
+.commands-popover-item-desc {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commands-popover-item-recent .commands-popover-item-cmd {
+  color: var(--accent);
+}
+
+.commands-popover-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+}

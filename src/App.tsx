@@ -9,7 +9,7 @@ import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
-import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, ProcessesIcon, GitIcon, FilesIcon, SearchIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, ProcessesIcon, GitIcon, FilesIcon, SearchIcon, SettingsIcon } from "./components/ActivityBar";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { GitPanel } from "./components/GitPanel";
 import { FileExplorerPanel } from "./components/FileExplorerPanel";
@@ -50,7 +50,6 @@ function AppContent() {
   const [costDashboardOpen, setCostDashboardOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpen] = useState(false);
-  const [composerOpen, setComposerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
   const updater = useAutoUpdater();
@@ -62,7 +61,7 @@ function AppContent() {
       if (!isActionMod(e)) return;
 
       // Suppress session-switch shortcuts while any modal/overlay is open
-      const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
+      const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
       if (anyOverlayOpen) return;
 
       // Alt combos — pane navigation
@@ -94,7 +93,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.layout, sessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
+  }, [state.layout, sessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, ui.composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
 
   const handleAutoExecute = useCallback(() => {
     if (!ui.autoToast) return;
@@ -111,7 +110,7 @@ function AppContent() {
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
   activeSessionIdRef.current = activeSession?.id ?? null;
   const anyOverlayOpenRef = useRef(false);
-  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen);
+  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen);
 
   useEffect(() => {
     if (!activeSession) return;
@@ -193,7 +192,6 @@ function AppContent() {
     activeSessionId: state.activeSessionId,
     focusedPaneId: state.layout.focusedPaneId,
     setSettingsOpen,
-    setComposerOpen,
     setShortcutsOpen,
     setCostDashboardOpen,
     setSessionCreatorOpen,
@@ -254,6 +252,7 @@ function AppContent() {
             }
             onTabClick={(tabId) => dispatch({ type: "SET_LEFT_TAB", tab: tabId as "sessions" | "processes" | "git" | "files" | "search" })}
             topAction={{ icon: PlusIcon, label: `New Session (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen(true) }}
+            bottomAction={{ icon: SettingsIcon, label: "Settings", onClick: () => setSettingsOpen("general") }}
           />
         )}
         {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !ui.gitPanelOpen && !ui.fileExplorerOpen && !ui.searchPanelOpen && (
@@ -354,7 +353,7 @@ function AppContent() {
           onOpenCostDashboard={() => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
           onAttachProject={() => setProjectPickerOpen(true)}
-          onOpenComposer={() => setComposerOpen(true)}
+          onOpenComposer={() => dispatch({ type: "OPEN_COMPOSER" })}
           onOpenShortcuts={() => { setShortcutsOpen(true); }}
           onToggleGit={() => dispatch({ type: "TOGGLE_GIT_PANEL" })}
           onToggleSearch={() => dispatch({ type: "TOGGLE_SEARCH_PANEL" })}
@@ -413,10 +412,10 @@ function AppContent() {
         />
       )}
 
-      {composerOpen && activeSession && (
+      {ui.composerOpen && activeSession && (
         <PromptComposer
           sessionId={activeSession.id}
-          onClose={() => setComposerOpen(false)}
+          onClose={() => dispatch({ type: "CLOSE_COMPOSER" })}
         />
       )}
 
