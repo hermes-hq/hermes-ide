@@ -91,6 +91,7 @@ pub fn run() {
             pty::update_session_color,
             pty::add_workspace_path,
             pty::update_session_group,
+            pty::get_available_shells,
             // Terminal Command Intelligence
             pty::detect_shell_environment,
             pty::read_shell_history,

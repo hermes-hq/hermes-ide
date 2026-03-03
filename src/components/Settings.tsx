@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { applyTheme, THEME_OPTIONS, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { useSession } from "../state/SessionContext";
+import { invoke } from "@tauri-apps/api/core";
 import {
   getSettings, setSetting, exportSettings, importSettings,
   type SettingsMap,
@@ -22,6 +23,7 @@ const THEMES = THEME_OPTIONS;
 
 export function Settings({ onClose, initialTab }: SettingsProps) {
   const [settings, setSettings] = useState<SettingsMap>({});
+  const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
   const [activeTab, setActiveTab] = useState(initialTab || "general");
   const { dispatch } = useSession();
   const { onContextMenu: textContextMenu } = useTextContextMenu();
@@ -47,6 +49,10 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
   useEffect(() => {
     getSettings()
       .then((s) => setSettings(s))
+      .catch(console.error);
+
+    invoke<{ name: string; path: string }[]>("get_available_shells")
+      .then(setShells)
       .catch(console.error);
 
     // Read live window size
@@ -187,9 +193,9 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                     onChange={(e) => updateSetting("default_shell", e.target.value)}
                   >
                     <option value="">System default</option>
-                    <option value="/bin/zsh">zsh</option>
-                    <option value="/bin/bash">bash</option>
-                    <option value="/usr/local/bin/fish">fish</option>
+                    {shells.map((s) => (
+                      <option key={s.path} value={s.path}>{s.name}</option>
+                    ))}
                   </select>
                 </div>
 

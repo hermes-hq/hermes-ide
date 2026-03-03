@@ -62,6 +62,12 @@ fn next_color(index: usize) -> String {
 // ─── Data Models ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInfo {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
     pub name: String,
     pub provider: String,
@@ -2142,6 +2148,58 @@ fn detect_shell() -> String {
             std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
         }
     }
+}
+
+/// Returns a list of `{ name, path }` objects for shells found on this machine.
+#[tauri::command]
+pub fn get_available_shells() -> Vec<ShellInfo> {
+    let mut shells: Vec<ShellInfo> = Vec::new();
+
+    #[cfg(unix)]
+    {
+        let candidates = [
+            ("zsh",    "/bin/zsh"),
+            ("bash",   "/bin/bash"),
+            ("fish",   "/usr/local/bin/fish"),
+            ("fish",   "/opt/homebrew/bin/fish"),
+            ("nu",     "/usr/local/bin/nu"),
+            ("nu",     "/opt/homebrew/bin/nu"),
+            ("sh",     "/bin/sh"),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for (name, path) in candidates {
+            if seen.contains(name) { continue; }
+            if std::path::Path::new(path).exists() {
+                seen.insert(name);
+                shells.push(ShellInfo { name: name.to_string(), path: path.to_string() });
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // PowerShell 7+ (pwsh)
+        if crate::platform::command_exists("pwsh") {
+            shells.push(ShellInfo { name: "PowerShell".to_string(), path: "pwsh".to_string() });
+        }
+        // Windows PowerShell 5.x
+        if crate::platform::command_exists("powershell") {
+            shells.push(ShellInfo { name: "Windows PowerShell".to_string(), path: "powershell".to_string() });
+        }
+        // cmd.exe
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            shells.push(ShellInfo { name: "Command Prompt".to_string(), path: comspec });
+        } else {
+            shells.push(ShellInfo { name: "Command Prompt".to_string(), path: "cmd.exe".to_string() });
+        }
+        // Git Bash
+        let git_bash = "C:\\Program Files\\Git\\bin\\bash.exe";
+        if std::path::Path::new(git_bash).exists() {
+            shells.push(ShellInfo { name: "Git Bash".to_string(), path: git_bash.to_string() });
+        }
+    }
+
+    shells
 }
 
 fn get_working_directory() -> String {
