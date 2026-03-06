@@ -675,16 +675,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
       await createTerminal(session.id, session.color);
 
-      // Create worktree for selected branch if specified
-      if (opts?.branchName && opts.projectIds && opts.projectIds.length > 0) {
-        const realmId = opts.projectIds[0];
-        try {
-          await createWorktree(session.id, realmId, opts.branchName, opts.createNewBranch ?? false);
-        } catch (wtErr) {
-          console.warn("[SessionContext] Failed to create worktree:", wtErr);
-        }
-      }
-
       // Restore scrollback from previous session if available
       if (opts?.restoreFromId) {
         try {
