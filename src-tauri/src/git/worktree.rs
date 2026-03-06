@@ -395,6 +395,12 @@ mod tests {
             .current_dir(dir.path())
             .output()
             .unwrap();
+        // Disable GPG signing for test commits
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         // Create initial commit so HEAD is valid
         std::fs::write(dir.path().join("README.md"), "# Test").unwrap();
         Command::new("git")
@@ -402,11 +408,16 @@ mod tests {
             .current_dir(dir.path())
             .output()
             .unwrap();
-        Command::new("git")
+        let output = Command::new("git")
             .args(["commit", "-m", "Initial commit"])
             .current_dir(dir.path())
             .output()
             .unwrap();
+        assert!(
+            output.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         dir
     }
 
