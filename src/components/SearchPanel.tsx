@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useActiveSession, useSession } from "../state/SessionContext";
+import { useSession } from "../state/SessionContext";
 import { searchProject } from "../api/git";
 import { getSessionProjects } from "../api/projects";
 import type { SearchResponse, SearchFileResult } from "../types/git";
@@ -43,7 +43,6 @@ interface SearchPanelProps {
 }
 
 export function SearchPanel({ visible }: SearchPanelProps) {
-  const activeSession = useActiveSession();
   const { state } = useSession();
   const [query, setQuery] = useState("");
   const [isRegex, setIsRegex] = useState(false);
