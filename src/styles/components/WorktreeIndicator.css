@@ -9,7 +9,7 @@
   padding: 0 6px;
   border-radius: var(--radius-pill);
   line-height: 1.6;
-  max-width: 140px;
+  max-width: 160px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -37,12 +37,20 @@
 
 .worktree-indicator-icon {
   flex-shrink: 0;
-  font-size: 10px;
-  line-height: 1;
+  width: 12px;
+  height: 12px;
 }
 
 .worktree-indicator-branch {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.worktree-indicator-label {
+  font-size: 9px;
+  opacity: 0.7;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
