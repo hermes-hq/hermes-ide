@@ -46,10 +46,11 @@ describe("Bug 1: gitResolveConflict preserves empty string manualContent", () =>
 
   it("passes empty string as manualContent (not null) when strategy is manual", async () => {
     const { gitResolveConflict } = await import("../api/git");
-    await gitResolveConflict("/project", "file.txt", "manual", "");
+    await gitResolveConflict("sess-1", "realm-1", "file.txt", "manual", "");
 
     expect(invoke).toHaveBeenCalledWith("git_resolve_conflict", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       filePath: "file.txt",
       strategy: "manual",
       manualContent: "",
@@ -58,10 +59,11 @@ describe("Bug 1: gitResolveConflict preserves empty string manualContent", () =>
 
   it("passes null when manualContent is undefined", async () => {
     const { gitResolveConflict } = await import("../api/git");
-    await gitResolveConflict("/project", "file.txt", "ours");
+    await gitResolveConflict("sess-1", "realm-1", "file.txt", "ours");
 
     expect(invoke).toHaveBeenCalledWith("git_resolve_conflict", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       filePath: "file.txt",
       strategy: "ours",
       manualContent: null,
@@ -70,10 +72,11 @@ describe("Bug 1: gitResolveConflict preserves empty string manualContent", () =>
 
   it("passes actual content when manualContent is non-empty", async () => {
     const { gitResolveConflict } = await import("../api/git");
-    await gitResolveConflict("/project", "file.txt", "manual", "resolved content");
+    await gitResolveConflict("sess-1", "realm-1", "file.txt", "manual", "resolved content");
 
     expect(invoke).toHaveBeenCalledWith("git_resolve_conflict", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       filePath: "file.txt",
       strategy: "manual",
       manualContent: "resolved content",
@@ -93,10 +96,11 @@ describe("Bug 2: gitContinueMerge preserves empty strings", () => {
 
   it("passes empty string message (not null)", async () => {
     const { gitContinueMerge } = await import("../api/git");
-    await gitContinueMerge("/project", "");
+    await gitContinueMerge("sess-1", "realm-1", "");
 
     expect(invoke).toHaveBeenCalledWith("git_continue_merge", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: "",
       authorName: null,
       authorEmail: null,
@@ -105,10 +109,11 @@ describe("Bug 2: gitContinueMerge preserves empty strings", () => {
 
   it("passes empty string authorName and authorEmail (not null)", async () => {
     const { gitContinueMerge } = await import("../api/git");
-    await gitContinueMerge("/project", "merge commit", "", "");
+    await gitContinueMerge("sess-1", "realm-1", "merge commit", "", "");
 
     expect(invoke).toHaveBeenCalledWith("git_continue_merge", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: "merge commit",
       authorName: "",
       authorEmail: "",
@@ -117,10 +122,11 @@ describe("Bug 2: gitContinueMerge preserves empty strings", () => {
 
   it("passes null when all optional params are undefined", async () => {
     const { gitContinueMerge } = await import("../api/git");
-    await gitContinueMerge("/project");
+    await gitContinueMerge("sess-1", "realm-1");
 
     expect(invoke).toHaveBeenCalledWith("git_continue_merge", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: null,
       authorName: null,
       authorEmail: null,
@@ -140,10 +146,11 @@ describe("Bug 3: gitStashSave preserves empty string message", () => {
 
   it("passes empty string message (not null)", async () => {
     const { gitStashSave } = await import("../api/git");
-    await gitStashSave("/project", "");
+    await gitStashSave("sess-1", "realm-1", "");
 
     expect(invoke).toHaveBeenCalledWith("git_stash_save", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: "",
       includeUntracked: true,
     });
@@ -151,10 +158,11 @@ describe("Bug 3: gitStashSave preserves empty string message", () => {
 
   it("passes null when message is undefined", async () => {
     const { gitStashSave } = await import("../api/git");
-    await gitStashSave("/project");
+    await gitStashSave("sess-1", "realm-1");
 
     expect(invoke).toHaveBeenCalledWith("git_stash_save", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: null,
       includeUntracked: true,
     });
@@ -173,10 +181,11 @@ describe("Bug 4: gitCommit preserves empty string author fields", () => {
 
   it("passes empty string authorName and authorEmail (not null)", async () => {
     const { gitCommit } = await import("../api/git");
-    await gitCommit("/project", "Initial commit", "", "");
+    await gitCommit("sess-1", "realm-1", "Initial commit", "", "");
 
     expect(invoke).toHaveBeenCalledWith("git_commit", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: "Initial commit",
       authorName: "",
       authorEmail: "",
@@ -185,10 +194,11 @@ describe("Bug 4: gitCommit preserves empty string author fields", () => {
 
   it("passes null when author fields are undefined", async () => {
     const { gitCommit } = await import("../api/git");
-    await gitCommit("/project", "Initial commit");
+    await gitCommit("sess-1", "realm-1", "Initial commit");
 
     expect(invoke).toHaveBeenCalledWith("git_commit", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       message: "Initial commit",
       authorName: null,
       authorEmail: null,
@@ -631,19 +641,20 @@ describe("Integration: || vs ?? consistency across git API", () => {
 
   it("gitPush passes remote correctly (|| null is acceptable for remote)", async () => {
     const { gitPush } = await import("../api/git");
-    // remote=undefined should become null (|| null is fine here since remote should never be "")
-    await gitPush("/project");
+    await gitPush("sess-1", "realm-1");
     expect(invoke).toHaveBeenCalledWith("git_push", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       remote: null,
     });
   });
 
   it("gitPull passes remote correctly", async () => {
     const { gitPull } = await import("../api/git");
-    await gitPull("/project", "upstream");
+    await gitPull("sess-1", "realm-1", "upstream");
     expect(invoke).toHaveBeenCalledWith("git_pull", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       remote: "upstream",
     });
   });
@@ -652,9 +663,10 @@ describe("Integration: || vs ?? consistency across git API", () => {
     const { gitLog } = await import("../api/git");
     invoke.mockResolvedValue({ entries: [], has_more: false, total_traversed: 0 });
 
-    await gitLog("/project", 0, 0);
+    await gitLog("sess-1", "realm-1", 0, 0);
     expect(invoke).toHaveBeenCalledWith("git_log", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       limit: 0,
       offset: 0,
     });
@@ -664,9 +676,10 @@ describe("Integration: || vs ?? consistency across git API", () => {
     const { searchProject } = await import("../api/git");
     invoke.mockResolvedValue({ results: [], total_matches: 0, truncated: false });
 
-    await searchProject("/project", "test", false, false, 0);
+    await searchProject("sess-1", "realm-1", "test", false, false, 0);
     expect(invoke).toHaveBeenCalledWith("search_project", {
-      projectPath: "/project",
+      sessionId: "sess-1",
+      realmId: "realm-1",
       query: "test",
       isRegex: false,
       caseSensitive: false,
