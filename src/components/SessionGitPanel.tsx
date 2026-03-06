@@ -25,7 +25,7 @@ interface SessionGitPanelProps {
 export function SessionGitPanel({ sessionId, realmId }: SessionGitPanelProps) {
   const [pollInterval, setPollInterval] = useState(3000);
   const { status, error, refresh } = useGitStatus(sessionId, true, pollInterval);
-  const [diffTarget, setDiffTarget] = useState<{ projectPath: string; file: GitFile } | null>(null);
+  const [diffTarget, setDiffTarget] = useState<{ sessionId: string; realmId: string; file: GitFile } | null>(null);
   const [toast, setToast] = useState<GitToast | null>(null);
   const [worktreeInfo, setWorktreeInfo] = useState<SessionWorktree | null>(null);
 
@@ -63,8 +63,8 @@ export function SessionGitPanel({ sessionId, realmId }: SessionGitPanelProps) {
     setToast({ message, type });
   }, []);
 
-  const handleDiffFile = useCallback((projectPath: string, file: GitFile) => {
-    setDiffTarget({ projectPath, file });
+  const handleDiffFile = useCallback((sid: string, rid: string, file: GitFile) => {
+    setDiffTarget({ sessionId: sid, realmId: rid, file });
   }, []);
 
   return (
@@ -105,6 +105,8 @@ export function SessionGitPanel({ sessionId, realmId }: SessionGitPanelProps) {
         {status && status.projects.map((project) => (
           <GitProjectSection
             key={project.project_id}
+            sessionId={sessionId}
+            realmId={project.project_id}
             project={project}
             onRefresh={refresh}
             onDiffFile={handleDiffFile}
@@ -125,7 +127,8 @@ export function SessionGitPanel({ sessionId, realmId }: SessionGitPanelProps) {
 
       {diffTarget && (
         <GitDiffView
-          projectPath={diffTarget.projectPath}
+          sessionId={diffTarget.sessionId}
+          realmId={diffTarget.realmId}
           file={diffTarget.file}
           onClose={() => setDiffTarget(null)}
         />

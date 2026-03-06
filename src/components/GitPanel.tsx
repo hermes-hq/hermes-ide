@@ -20,7 +20,7 @@ export function GitPanel({ visible }: GitPanelProps) {
   const { state } = useSession();
   const [pollInterval, setPollInterval] = useState(3000);
   const { status, error, refresh } = useGitStatus(state.activeSessionId, visible, pollInterval);
-  const [diffTarget, setDiffTarget] = useState<{ projectPath: string; file: GitFile } | null>(null);
+  const [diffTarget, setDiffTarget] = useState<{ sessionId: string; realmId: string; file: GitFile } | null>(null);
   const [toast, setToast] = useState<GitToast | null>(null);
 
   // Load poll interval setting on mount
@@ -48,8 +48,8 @@ export function GitPanel({ visible }: GitPanelProps) {
     setToast({ message, type });
   }, []);
 
-  const handleDiffFile = useCallback((projectPath: string, file: GitFile) => {
-    setDiffTarget({ projectPath, file });
+  const handleDiffFile = useCallback((sessionId: string, realmId: string, file: GitFile) => {
+    setDiffTarget({ sessionId, realmId, file });
   }, []);
 
   return (
@@ -74,9 +74,11 @@ export function GitPanel({ visible }: GitPanelProps) {
           </div>
         )}
 
-        {status && status.projects.map((project) => (
+        {status && state.activeSessionId && status.projects.map((project) => (
           <GitProjectSection
             key={project.project_id}
+            sessionId={state.activeSessionId!}
+            realmId={project.project_id}
             project={project}
             onRefresh={refresh}
             onDiffFile={handleDiffFile}
@@ -97,7 +99,8 @@ export function GitPanel({ visible }: GitPanelProps) {
 
       {diffTarget && (
         <GitDiffView
-          projectPath={diffTarget.projectPath}
+          sessionId={diffTarget.sessionId}
+          realmId={diffTarget.realmId}
           file={diffTarget.file}
           onClose={() => setDiffTarget(null)}
         />

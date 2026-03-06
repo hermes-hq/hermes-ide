@@ -30,15 +30,16 @@ const STATUS_LETTERS: Record<string, string> = {
 };
 
 interface ProjectTreeProps {
-  projectPath: string;
+  sessionId: string;
+  realmId: string;
   projectName: string;
   showHidden: boolean;
   searchQuery: string;
   onFileContextMenu?: (e: React.MouseEvent, entry: FileEntry) => void;
 }
 
-function ProjectTree({ projectPath, projectName, showHidden, searchQuery, onFileContextMenu }: ProjectTreeProps) {
-  const { expandedDirs, loadingDirs, error, loadDirectory, toggleDir, refresh, getEntries } = useFileExplorer(projectPath);
+function ProjectTree({ sessionId, realmId, projectName, showHidden, searchQuery, onFileContextMenu }: ProjectTreeProps) {
+  const { expandedDirs, loadingDirs, error, loadDirectory, toggleDir, refresh, getEntries } = useFileExplorer(sessionId, realmId);
 
   // Load root on mount
   useEffect(() => {
@@ -52,9 +53,9 @@ function ProjectTree({ projectPath, projectName, showHidden, searchQuery, onFile
     if (entry.is_dir) {
       toggleDir(entry.path);
     } else {
-      gitOpenFile(projectPath, entry.path).catch(console.error);
+      gitOpenFile(sessionId, realmId, entry.path).catch(console.error);
     }
-  }, [projectPath, toggleDir]);
+  }, [sessionId, realmId, toggleDir]);
 
   return (
     <div className="file-explorer-project">
@@ -242,10 +243,11 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
             Attach a project to browse files.
           </div>
         )}
-        {projects.map((p) => (
+        {state.activeSessionId && projects.map((p) => (
           <ProjectTree
             key={p.id}
-            projectPath={p.path}
+            sessionId={state.activeSessionId!}
+            realmId={p.id}
             projectName={p.name}
             showHidden={showHidden}
             searchQuery={searchQuery}
