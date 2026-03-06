@@ -57,7 +57,8 @@ interface GitStashSectionProps {
 }
 
 export function GitStashSection({
-  projectPath,
+  sessionId,
+  realmId,
   stashCount,
   hasChanges,
   onRefresh,
@@ -78,22 +79,22 @@ export function GitStashSection({
     if (!stash) return;
     switch (actionId) {
       case "stash.apply":
-        gitStashApply(projectPath, stash.index)
+        gitStashApply(sessionId, realmId, stash.index)
           .then(() => { onRefresh(); onToast("Stash applied", "success"); })
           .catch((e) => onToast(String(e), "error"));
         break;
       case "stash.pop":
-        gitStashPop(projectPath, stash.index)
+        gitStashPop(sessionId, realmId, stash.index)
           .then(() => { onRefresh(); onToast("Stash popped", "success"); })
           .catch((e) => onToast(String(e), "error"));
         break;
       case "stash.drop":
-        gitStashDrop(projectPath, stash.index)
+        gitStashDrop(sessionId, realmId, stash.index)
           .then(() => { onRefresh(); onToast("Stash dropped", "success"); })
           .catch((e) => onToast(String(e), "error"));
         break;
     }
-  }, [projectPath, onRefresh, onToast]);
+  }, [sessionId, realmId, onRefresh, onToast]);
 
   const { showMenu: showStashMenu } = useContextMenu(handleStashAction);
 
@@ -117,14 +118,14 @@ export function GitStashSection({
   const loadStashes = useCallback(async () => {
     try {
       setLoading(true);
-      const result = await gitStashList(projectPath);
+      const result = await gitStashList(sessionId, realmId);
       setStashes(result);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, [projectPath]);
+  }, [sessionId, realmId]);
 
   // Fetch stash list on mount
   useEffect(() => {
@@ -143,64 +144,64 @@ export function GitStashSection({
   const handleSave = useCallback(async () => {
     try {
       setError(null);
-      const result = await gitStashSave(projectPath, undefined, true);
+      const result = await gitStashSave(sessionId, realmId, undefined, true);
       onToast(result.message || "Stash saved");
       await loadStashes();
       onRefresh();
     } catch (e) {
       setError(String(e));
     }
-  }, [projectPath, loadStashes, onRefresh, onToast]);
+  }, [sessionId, realmId, loadStashes, onRefresh, onToast]);
 
   const handleApply = useCallback(async (index: number) => {
     try {
       setError(null);
-      const result = await gitStashApply(projectPath, index);
+      const result = await gitStashApply(sessionId, realmId, index);
       onToast(result.message || `Applied stash@{${index}}`, "info");
       await loadStashes();
       onRefresh();
     } catch (e) {
       setError(String(e));
     }
-  }, [projectPath, loadStashes, onRefresh, onToast]);
+  }, [sessionId, realmId, loadStashes, onRefresh, onToast]);
 
   const handlePop = useCallback(async (index: number) => {
     try {
       setError(null);
-      const result = await gitStashPop(projectPath, index);
+      const result = await gitStashPop(sessionId, realmId, index);
       onToast(result.message || `Popped stash@{${index}}`, "info");
       await loadStashes();
       onRefresh();
     } catch (e) {
       setError(String(e));
     }
-  }, [projectPath, loadStashes, onRefresh, onToast]);
+  }, [sessionId, realmId, loadStashes, onRefresh, onToast]);
 
   const handleDrop = useCallback(async (index: number) => {
     try {
       setError(null);
       setConfirmDrop(null);
-      const result = await gitStashDrop(projectPath, index);
+      const result = await gitStashDrop(sessionId, realmId, index);
       onToast(result.message || `Dropped stash@{${index}}`);
       await loadStashes();
       onRefresh();
     } catch (e) {
       setError(String(e));
     }
-  }, [projectPath, loadStashes, onRefresh, onToast]);
+  }, [sessionId, realmId, loadStashes, onRefresh, onToast]);
 
   const handleClear = useCallback(async () => {
     try {
       setError(null);
       setConfirmClear(false);
-      const result = await gitStashClear(projectPath);
+      const result = await gitStashClear(sessionId, realmId);
       onToast(result.message || "All stashes cleared");
       await loadStashes();
       onRefresh();
     } catch (e) {
       setError(String(e));
     }
-  }, [projectPath, loadStashes, onRefresh, onToast]);
+  }, [sessionId, realmId, loadStashes, onRefresh, onToast]);
 
   const nowSeconds = Math.floor(Date.now() / 1000);
 

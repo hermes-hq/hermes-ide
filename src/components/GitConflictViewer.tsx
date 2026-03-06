@@ -46,7 +46,8 @@ const MARKER_CLASS_MAP: Record<MarkerType, string> = {
 // ─── Component ───────────────────────────────────────────────────────
 
 export function GitConflictViewer({
-  projectPath,
+  sessionId,
+  realmId,
   filePath,
   onResolve,
   onClose,
@@ -61,7 +62,7 @@ export function GitConflictViewer({
     setLoading(true);
     setError(null);
 
-    gitGetConflictContent(projectPath, filePath)
+    gitGetConflictContent(sessionId, realmId, filePath)
       .then((c) => {
         if (!cancelled) { setContent(c); setLoading(false); }
       })
@@ -69,7 +70,7 @@ export function GitConflictViewer({
         if (!cancelled) { setError(String(e)); setLoading(false); }
       });
     return () => { cancelled = true; };
-  }, [projectPath, filePath]);
+  }, [sessionId, realmId, filePath]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

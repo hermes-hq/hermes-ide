@@ -82,7 +82,7 @@ const PAGE_SIZE = 50;
 
 // ─── Component ───────────────────────────────────────────────────────
 
-export function GitLogView({ projectPath }: GitLogViewProps) {
+export function GitLogView({ sessionId, realmId }: GitLogViewProps) {
   const [entries, setEntries] = useState<GitLogEntry[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -94,8 +94,8 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const fetchingRef = useRef(false);
-  // Track the current projectPath so stale fetches from a previous path are discarded
-  const projectPathRef = useRef(projectPath);
+  // Track the current realmId so stale fetches from a previous realm are discarded
+  const realmIdRef = useRef(realmId);
 
   const contextCommitRef = useRef<GitLogEntry | null>(null);
 
@@ -117,9 +117,9 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
 
   const { showMenu: showCommitMenu } = useContextMenu(handleCommitAction);
 
-  // Reset when projectPath changes
+  // Reset when sessionId or realmId changes
   useEffect(() => {
-    projectPathRef.current = projectPath;
+    realmIdRef.current = realmId;
     setEntries([]);
     setHasMore(true);
     setLoading(false);
@@ -128,7 +128,7 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
     setSelectedHash(null);
     offsetRef.current = 0;
     fetchingRef.current = false;
-  }, [projectPath]);
+  }, [sessionId, realmId]);
 
   const fetchPage = useCallback(() => {
     if (fetchingRef.current || !hasMore) return;
@@ -136,11 +136,11 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
     setLoading(true);
     setError(null);
 
-    const fetchPath = projectPath;
-    gitLog(projectPath, PAGE_SIZE, offsetRef.current)
+    const fetchRealm = realmId;
+    gitLog(sessionId, realmId, PAGE_SIZE, offsetRef.current)
       .then((result: GitLogResult) => {
-        // Discard result if projectPath changed while fetching
-        if (projectPathRef.current !== fetchPath) {
+        // Discard result if realmId changed while fetching
+        if (realmIdRef.current !== fetchRealm) {
           fetchingRef.current = false;
           return;
         }
@@ -152,7 +152,7 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
         fetchingRef.current = false;
       })
       .catch((e) => {
-        if (projectPathRef.current !== fetchPath) {
+        if (realmIdRef.current !== fetchRealm) {
           fetchingRef.current = false;
           return;
         }
@@ -161,12 +161,12 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
         setLoading(false);
         fetchingRef.current = false;
       });
-  }, [projectPath, hasMore]);
+  }, [sessionId, realmId, hasMore]);
 
   // Fetch initial page
   useEffect(() => {
     fetchPage();
-  }, [projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, realmId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // IntersectionObserver for lazy loading
   useEffect(() => {
@@ -285,7 +285,8 @@ export function GitLogView({ projectPath }: GitLogViewProps) {
 
       {selectedHash && (
         <GitCommitDetailView
-          projectPath={projectPath}
+          sessionId={sessionId}
+          realmId={realmId}
           commitHash={selectedHash}
           onClose={() => setSelectedHash(null)}
         />

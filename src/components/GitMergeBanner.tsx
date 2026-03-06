@@ -6,7 +6,6 @@ import { GitConflictFileRow } from "./GitConflictFileRow";
 
 interface GitMergeBannerProps {
   mergeStatus: MergeStatus;
-  projectPath: string;
   onResolve: (filePath: string, strategy: ConflictStrategy) => void;
   onViewConflict: (filePath: string) => void;
   onAbort: () => void;
@@ -131,7 +130,6 @@ export function validateMergeMessage(message: string): string | null {
 
 export const GitMergeBanner = memo(function GitMergeBanner({
   mergeStatus,
-  projectPath: _projectPath,
   onResolve,
   onViewConflict,
   onAbort,
