@@ -12,27 +12,14 @@
   max-width: 160px;
   overflow: hidden;
   flex-shrink: 0;
-}
-
-.worktree-indicator-main {
   background: var(--bg-2);
   color: var(--text-2);
   border: 1px solid var(--border);
 }
 
-.worktree-indicator-linked {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border: 1px solid var(--accent-dim);
-}
-
-.worktree-indicator-active.worktree-indicator-main {
+.worktree-indicator-active {
   color: var(--text-1);
   border-color: var(--border-light);
-}
-
-.worktree-indicator-active.worktree-indicator-linked {
-  border-color: var(--accent);
 }
 
 .worktree-indicator-icon {
@@ -45,12 +32,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.worktree-indicator-label {
-  font-size: 9px;
-  opacity: 0.7;
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
 }

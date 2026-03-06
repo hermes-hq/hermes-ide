@@ -76,11 +76,25 @@
   color: var(--text-0);
 }
 
+.split-pane-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
 .split-pane-terminal {
   flex: 1;
   overflow: hidden;
   display: flex;
   min-height: 0;
+}
+
+.split-pane-panel {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Dividers */

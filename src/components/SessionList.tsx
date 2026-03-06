@@ -5,6 +5,7 @@ import { updateSessionGroup, updateSessionLabel } from "../api/sessions";
 import { encodeSessionDrag, setDraggedSession } from "./SplitPane";
 import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
+import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 
 interface SessionListProps {
   sessions: SessionData[];
@@ -47,6 +48,40 @@ function sortSessions(sessions: SessionData[]): SessionData[] {
     if (aDestroyed !== bDestroyed) return aDestroyed - bDestroyed;
     return 0; // preserve original order within same group
   });
+}
+
+/** Sub-component: git branch + change summary for a session item. */
+function SessionItemGitInfo({ sessionId, isDestroyed }: { sessionId: string; isDestroyed: boolean }) {
+  const { branch, changeCount, ahead, behind, hasConflicts, isLoading } = useSessionGitSummary(
+    sessionId,
+    !isDestroyed,
+  );
+
+  if (isDestroyed || isLoading || !branch) return null;
+
+  return (
+    <div className="session-item-git">
+      <span className="session-item-git-branch">
+        <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10" aria-hidden="true">
+          <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
+        </svg>
+        {branch}
+      </span>
+      <span className="session-item-git-dot">&middot;</span>
+      {hasConflicts ? (
+        <span className="session-item-git-status session-item-git-conflicts">conflicts</span>
+      ) : changeCount > 0 ? (
+        <span className="session-item-git-status">{changeCount} {changeCount === 1 ? "change" : "changes"}</span>
+      ) : (
+        <span className="session-item-git-status session-item-git-clean">clean</span>
+      )}
+      {(ahead > 0 || behind > 0) && (
+        <span className="session-item-git-ahead-behind">
+          {ahead > 0 && `↑${ahead}`}{ahead > 0 && behind > 0 && " "}{behind > 0 && `↓${behind}`}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession }: SessionListProps) {
@@ -188,6 +223,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           </span>
           <span className="session-age">{timeAgo(session.last_activity_at)}</span>
         </div>
+        <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed"} />
       </div>
       <button
         className="session-item-close"

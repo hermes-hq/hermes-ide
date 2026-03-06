@@ -130,6 +130,59 @@
 .session-item:hover .session-item-close { opacity: 1; }
 .session-item-close:hover { background: var(--red-dim); color: var(--red); }
 
+/* ─── Git Branch Info ────────────────────────────────── */
+
+.session-item-git {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm, 11px);
+  color: var(--text-2);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item-git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-1);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-item-git-branch svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.session-item-git-dot {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.session-item-git-status {
+  flex-shrink: 0;
+}
+
+.session-item-git-clean {
+  color: var(--text-3);
+}
+
+.session-item-git-conflicts {
+  color: var(--warning, #e6a23c);
+}
+
+.session-item-git-ahead-behind {
+  color: var(--text-2);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
 /* ─── Session Groups ─────────────────────────────────── */
 
 .session-group-header {

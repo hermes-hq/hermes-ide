@@ -115,3 +115,20 @@
   font-size: var(--text-base);
   color: var(--text-3);
 }
+
+.topbar-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm, 11px);
+  color: var(--text-2);
+  background: var(--bg-2, #1a222d);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill, 12px);
+  cursor: default;
+}
+
+.topbar-branch svg {
+  opacity: 0.6;
+  flex-shrink: 0;
+}

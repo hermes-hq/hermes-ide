@@ -26,6 +26,21 @@ interface GitProjectSectionProps {
 
 type ViewMode = "changes" | "history";
 
+function truncatePath(fullPath: string, maxLen = 45): string {
+  const home = fullPath.replace(/^\/Users\/[^/]+/, "~");
+  if (home.length <= maxLen) return home;
+  const parts = home.split("/");
+  // Keep first and last 2 segments
+  if (parts.length > 4) {
+    return parts[0] + "/…/" + parts.slice(-2).join("/");
+  }
+  return "…" + home.slice(home.length - maxLen);
+}
+
+function isWorktreePath(path: string): boolean {
+  return path.includes("/.hermes/worktrees/");
+}
+
 export function GitProjectSection({ sessionId, realmId, project, onRefresh, onDiffFile, onToast }: GitProjectSectionProps) {
   const [expanded, setExpanded] = useState(true);
   const [commitMsg, setCommitMsg] = useState("");
@@ -254,6 +269,9 @@ export function GitProjectSection({ sessionId, realmId, project, onRefresh, onDi
       <div className="git-project-header" onClick={() => setExpanded((v) => !v)} onContextMenu={(e) => showEmptyMenu(e, buildEmptyAreaMenuItems("git-section"))}>
         <span className={`git-project-chevron ${expanded ? "git-project-chevron-open" : ""}`}>&#9656;</span>
         <span className="git-project-name">{project.project_name}</span>
+        {isWorktreePath(project.project_path) && (
+          <span className="git-project-isolated">Isolated copy</span>
+        )}
         {project.branch && (
           <span
             ref={branchTriggerRef}
@@ -273,6 +291,14 @@ export function GitProjectSection({ sessionId, realmId, project, onRefresh, onDi
         {project.ahead > 0 && <span className="git-project-ahead" title={`${project.ahead} ahead`}>&uarr;{project.ahead}</span>}
         {project.behind > 0 && <span className="git-project-behind" title={`${project.behind} behind`}>&darr;{project.behind}</span>}
       </div>
+      {expanded && project.project_path && (
+        <div className="git-project-path" title={project.project_path}>
+          <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" className="git-project-path-icon">
+            <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7Z" />
+          </svg>
+          <span className="git-project-path-text">{truncatePath(project.project_path)}</span>
+        </div>
+      )}
 
       {branchSelectorOpen && (
         <GitBranchSelector

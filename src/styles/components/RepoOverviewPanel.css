@@ -1,14 +1,18 @@
 /* ─── Repo Overview Panel ──────────────────────────────────────────── */
 
 .repo-overview-panel {
+  width: var(--sidebar-w);
+  min-width: 200px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
   background: var(--bg-1);
+  border-right: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--text-1);
   overflow: hidden;
-  flex: 1;
+  flex-shrink: 0;
 }
 
 .repo-overview-toolbar {
@@ -49,7 +53,7 @@
   background: var(--bg-hover);
 }
 
-/* ─── Worktree Row ────────────────────────────────────────────────── */
+/* ─── Session Row ────────────────────────────────────────────────── */
 
 .repo-overview-worktree-row {
   display: flex;
@@ -91,18 +95,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.repo-overview-main-badge {
-  background: var(--bg-2);
-  color: var(--text-3);
-  font-size: 9px;
-  padding: 0 4px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
 }
 
 /* ─── Available Branch Row ────────────────────────────────────────── */

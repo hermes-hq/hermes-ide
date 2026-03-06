@@ -310,7 +310,7 @@ export function SessionBranchSelector({ realmId, onBranchSelected, onSkip }: Ses
                 )}
                 {branch.taken && (
                   <span className="branch-selector-item-taken-label">
-                    in use
+                    Session is here
                   </span>
                 )}
                 {!branch.taken && branch.last_commit_summary && (
@@ -370,8 +370,9 @@ export function SessionBranchSelector({ realmId, onBranchSelected, onSkip }: Ses
       <div className="branch-selector-skip-warning">
         <span className="branch-selector-skip-warning-icon">!</span>
         <span>
-          Skipping creates the session on the main worktree. Multiple sessions
-          sharing a worktree may interfere with each other.
+          Skipping means this session will share the working directory with
+          other sessions on the same branch. Changes in one session will
+          affect the other.
         </span>
       </div>
 

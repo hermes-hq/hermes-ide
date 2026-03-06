@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { listWorktrees, gitListBranches } from "../api/git";
+import { listWorktrees, gitListBranches, gitStatus } from "../api/git";
 import type { WorktreeInfo, GitBranch } from "../types/git";
 import "../styles/components/RepoOverviewPanel.css";
 
 interface RepoOverviewPanelProps {
-  realmId: string;
+  realmId?: string;
   /** A sessionId to use for branch listing (any active session on this repo). */
   sessionId: string;
   onOpenSession: (sessionId: string) => void;
@@ -12,11 +12,11 @@ interface RepoOverviewPanelProps {
 }
 
 /**
- * Panel showing all worktrees (sessions) and available branches for a repo.
+ * Panel showing all active sessions and available branches for a repo.
  * Designed for the sidebar, giving a repo-level view across sessions.
  */
 export function RepoOverviewPanel({
-  realmId,
+  realmId: realmIdProp,
   sessionId,
   onOpenSession,
   onCreateSession,
@@ -26,14 +26,30 @@ export function RepoOverviewPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAvailable, setShowAvailable] = useState(false);
+  const [resolvedRealmId, setResolvedRealmId] = useState<string | null>(realmIdProp || null);
+
+  // Auto-detect realmId from the session's git status if not provided
+  useEffect(() => {
+    if (realmIdProp) {
+      setResolvedRealmId(realmIdProp);
+      return;
+    }
+    gitStatus(sessionId)
+      .then((status) => {
+        const gitProject = status.projects.find((p) => p.is_git_repo);
+        if (gitProject) setResolvedRealmId(gitProject.project_id);
+      })
+      .catch(() => {});
+  }, [sessionId, realmIdProp]);
 
   const loadData = useCallback(async () => {
+    if (!resolvedRealmId) return;
     try {
       setLoading(true);
       setError(null);
       const [wt, br] = await Promise.all([
-        listWorktrees(realmId),
-        gitListBranches(sessionId, realmId),
+        listWorktrees(resolvedRealmId),
+        gitListBranches(sessionId, resolvedRealmId),
       ]);
       setWorktrees(wt);
       setBranches(br);
@@ -42,11 +58,11 @@ export function RepoOverviewPanel({
     } finally {
       setLoading(false);
     }
-  }, [realmId, sessionId]);
+  }, [resolvedRealmId, sessionId]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (resolvedRealmId) loadData();
+  }, [loadData, resolvedRealmId]);
 
   // Branches checked out in worktrees
   const checkedOutBranches = useMemo(() => {
@@ -88,16 +104,16 @@ export function RepoOverviewPanel({
 
         {!loading && !error && (
           <>
-            {/* Active Worktrees */}
+            {/* Active Sessions */}
             <div className="repo-overview-section">
               <div className="git-file-group-header">
                 <span className="git-file-group-label">
-                  ACTIVE WORKTREES ({worktrees.length})
+                  ACTIVE SESSIONS ({worktrees.length})
                 </span>
               </div>
 
               {worktrees.length === 0 && (
-                <div className="git-empty">No worktrees found</div>
+                <div className="git-empty">No active sessions on this repo</div>
               )}
 
               {worktrees.map((wt) => (
@@ -122,9 +138,6 @@ export function RepoOverviewPanel({
                   <span className="repo-overview-session-label">
                     {wt.sessionLabel}
                   </span>
-                  {wt.isMainWorktree && (
-                    <span className="repo-overview-main-badge">main</span>
-                  )}
                 </div>
               ))}
             </div>
@@ -144,7 +157,7 @@ export function RepoOverviewPanel({
                 <>
                   {availableBranches.length === 0 && (
                     <div className="git-empty">
-                      All local branches are checked out
+                      All branches are in use
                     </div>
                   )}
                   {availableBranches.map((b) => (

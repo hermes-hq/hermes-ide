@@ -1,0 +1,77 @@
+.session-pane-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-1, #141c26);
+  border-bottom: 1px solid var(--border, #1a2332);
+  height: 28px;
+  padding: 0 4px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.session-pane-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-2, #5a6a7a);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  height: 100%;
+  white-space: nowrap;
+}
+
+.session-pane-tab:hover {
+  background: var(--bg-2, #1a222d);
+  color: var(--text-1, #8899aa);
+}
+
+.session-pane-tab-active {
+  color: var(--text-0, #c8d6e5);
+  border-bottom-color: var(--accent, #3b82f6);
+}
+
+.session-pane-tab-active:hover {
+  color: var(--text-0, #c8d6e5);
+}
+
+.session-pane-tab svg {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.session-pane-tab-active svg {
+  opacity: 1;
+}
+
+.session-pane-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.session-pane-tab-branch {
+  font-size: 10px;
+  color: var(--text-2, #5a6a7a);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-pane-tab-active .session-pane-tab-branch {
+  color: var(--text-1, #8899aa);
+}
