@@ -24,6 +24,7 @@ export const changelog: Record<string, ChangelogEntry> = {
       "Drag-and-drop files directly into terminal sessions",
       "Working directory indicator in the Git panel",
       "Isolated copy badge for worktree sessions",
+      "Hover tooltips added across all interactive elements for better discoverability",
     ],
   },
   "0.3.30": {
