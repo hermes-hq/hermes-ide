@@ -819,6 +819,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
           <button
             className="ctx-advanced-toggle"
             onClick={() => setShowAdvanced(!showAdvanced)}
+            title="Toggle advanced diagnostics"
           >
             {showAdvanced ? "\u25BE" : "\u25B8"} Advanced
           </button>

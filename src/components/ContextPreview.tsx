@@ -46,6 +46,7 @@ export function ContextPreview({ manager }: ContextPreviewProps) {
       <button
         className="ctx-preview-toggle"
         onClick={() => setExpanded(!expanded)}
+        title="Toggle context preview"
       >
         {expanded ? "\u25BE" : "\u25B8"} Context Preview
         {isDirty && (
@@ -60,18 +61,20 @@ export function ContextPreview({ manager }: ContextPreviewProps) {
                 <button
                   className={`ctx-preview-tab ${!showInjected ? "ctx-preview-tab-active" : ""}`}
                   onClick={() => setShowInjected(false)}
+                  title="Show current context"
                 >
                   Current
                 </button>
                 <button
                   className={`ctx-preview-tab ${showInjected ? "ctx-preview-tab-active" : ""}`}
                   onClick={() => setShowInjected(true)}
+                  title="Show injected context"
                 >
                   Injected
                 </button>
               </div>
             )}
-            <button className="ctx-preview-copy" onClick={handleCopy}>
+            <button className="ctx-preview-copy" onClick={handleCopy} title="Copy context to clipboard">
               {copied ? "Copied" : "Copy"}
             </button>
           </div>

@@ -114,6 +114,7 @@ function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, sho
         style={{ paddingLeft: `${(depth * 16) + 8}px` }}
         onClick={() => onFileClick(entry)}
         onContextMenu={onContextMenu ? (e) => onContextMenu(e, entry) : undefined}
+        title={entry.path}
       >
         {entry.is_dir ? (
           <span className={`file-tree-chevron ${isExpanded ? "file-tree-chevron-open" : ""}`}>&#9656;</span>

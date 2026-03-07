@@ -275,7 +275,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
         <div className="session-creator-header">
           <span className="session-creator-title">New Session</span>
           <span className="session-creator-step">Step {currentStepNumber} of {totalSteps}</span>
-          <button className="close-btn settings-close" onClick={onClose}>x</button>
+          <button className="close-btn settings-close" onClick={onClose} title="Close">x</button>
         </div>
 
         {/* Step indicator */}

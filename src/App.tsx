@@ -42,6 +42,7 @@ import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
 import { UpdateDialog } from "./components/UpdateDialog";
+import { WhatsNewDialog } from "./components/WhatsNewDialog";
 
 function AppContent() {
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive } = useSession();
@@ -468,6 +469,8 @@ function AppContent() {
         onDownload={updater.download}
         onInstall={updater.installAndRelaunch}
       />
+
+      <WhatsNewDialog version={__APP_VERSION__} />
 
       {state.pendingCloseSessionId && (
         <CloseSessionDialog

@@ -292,6 +292,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         onPointerDown={() => startRepeat("w", -10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
+                        title="Decrease width"
                       >&#9666;</button>
                       <input
                         className="settings-stepper-input"
@@ -307,6 +308,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         onPointerDown={() => startRepeat("w", 10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
+                        title="Increase width"
                       >&#9656;</button>
                     </div>
                     <span className="settings-size-separator">&times;</span>
@@ -316,6 +318,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         onPointerDown={() => startRepeat("h", -10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
+                        title="Decrease height"
                       >&#9666;</button>
                       <input
                         className="settings-stepper-input"
@@ -331,6 +334,7 @@ export function Settings({ onClose, initialTab }: SettingsProps) {
                         onPointerDown={() => startRepeat("h", 10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
+                        title="Increase height"
                       >&#9656;</button>
                     </div>
                     <span className="settings-size-unit">px</span>

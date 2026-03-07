@@ -415,6 +415,7 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
             <button
               className="prompt-composer-advanced-toggle"
               onClick={() => setAdvancedOpen(!advancedOpen)}
+              title="Toggle advanced options"
             >
               <span className="prompt-composer-advanced-chevron">
                 {advancedOpen ? "\u25be" : "\u25b8"}

@@ -82,7 +82,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
         <div className="workspace-header">
           <span className="workspace-title">Projects</span>
           <span className="workspace-count">{projects.length} projects</span>
-          <button className="settings-close" onClick={onClose}>&times;</button>
+          <button className="settings-close" onClick={onClose} title="Close">&times;</button>
         </div>
 
         <div className="workspace-scan-row">

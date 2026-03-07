@@ -280,6 +280,7 @@ function ThemePicker() {
               key={t.id}
               className={`status-theme-option ${current === t.id ? "active" : ""}`}
               onClick={() => select(t.id)}
+              title={t.label}
             >
               <span
                 className="status-theme-swatch"

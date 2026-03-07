@@ -76,7 +76,7 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
         {activeSession?.ai_provider && (
           <span className="scope-bar-provider">{activeSession.ai_provider}</span>
         )}
-        <button className="scope-bar-add" onClick={() => setPickerOpen(true)}>
+        <button className="scope-bar-add" onClick={() => setPickerOpen(true)} title="Attach project">
           +
         </button>
       </div>

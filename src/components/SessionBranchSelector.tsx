@@ -220,7 +220,7 @@ export function SessionBranchSelector({ realmId, onBranchSelected, onSkip }: Ses
         <div className="session-creator-section-title">Select Branch</div>
         <div className="branch-selector-error">
           <span>Failed to load branches: {error}</span>
-          <button className="branch-selector-error-retry" onClick={loadData}>
+          <button className="branch-selector-error-retry" onClick={loadData} title="Retry loading branches">
             Retry
           </button>
         </div>
