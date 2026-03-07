@@ -2,6 +2,22 @@ import { useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { ensureListener, registerMenuBarHandler } from "./nativeMenuBridge";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
+import { trackFeatureUsed } from "../utils/analytics";
+
+const TRACKED_ACTIONS: Record<string, string> = {
+  "view.git-panel": "git_panel",
+  "view.prompt-composer": "prompt_composer",
+  "hermes.settings": "settings",
+  "view.command-palette": "command_palette",
+  "view.flow-mode": "flow_mode",
+  "view.cost-dashboard": "cost_dashboard",
+  "view.context-panel": "context_panel",
+  "view.timeline": "timeline",
+  "view.search-panel": "search_panel",
+  "view.split-horizontal": "split_pane",
+  "view.split-vertical": "split_pane",
+  "file.file-explorer": "file_explorer",
+};
 
 // ─── Menu Bar Action → React Dispatch Bridge ────────────────────────
 
@@ -40,6 +56,9 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
 
   const onMenuAction = useCallback(
     (actionId: string) => {
+      const trackedFeature = TRACKED_ACTIONS[actionId];
+      if (trackedFeature) trackFeatureUsed(trackedFeature);
+
       switch (actionId) {
         // ── File menu ──
         case "file.new-session":

@@ -12,6 +12,7 @@ import { createTerminal, destroy as destroyTerminal, writeScrollback } from "../
 import { applyTheme } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
 import { initNotifications, notifyLongRunningDone } from "../utils/notifications";
+import { initAnalytics, trackAppStarted, trackSessionCreated } from "../utils/analytics";
 import {
   LayoutNode, PaneLeaf,
   nextPaneId, nextSplitId,
@@ -543,6 +544,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Initialize notifications on mount
     initNotifications().catch(console.warn);
 
+    // Initialize analytics (opt-in, default off)
+    initAnalytics().then(() => trackAppStarted()).catch(console.warn);
+
     const setup = async () => {
       const u1 = await listen<SessionData>("session-updated", (event) => {
         const session = event.payload;
@@ -727,6 +731,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: "SESSION_UPDATED", session });
       dispatch({ type: "SET_ACTIVE", id: session.id });
+      trackSessionCreated({
+        execution_mode: defaultModeRef.current,
+        has_ai_provider: !!opts?.aiProvider,
+      });
       return session;
     } catch (err) {
       console.error("Failed to create session:", err);

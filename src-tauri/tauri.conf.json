@@ -26,7 +26,7 @@
     ],
     "macOSPrivateApi": true,
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost https://ipc.localhost http://localhost:* https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://github.com https://api.github.com"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost https://ipc.localhost http://localhost:* https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://github.com https://api.github.com https://eu.aptabase.com"
     }
   },
   "bundle": {
