@@ -699,7 +699,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sessionId: preSessionId,
         label: opts?.label || null,
         workingDirectory: opts?.workingDirectory || null,
-        color: null,
+        color: opts?.color || null,
         workspacePaths: null,
         aiProvider: opts?.aiProvider || null,
         realmIds: opts?.projectIds || null,

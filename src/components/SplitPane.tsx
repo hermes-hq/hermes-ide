@@ -230,11 +230,11 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
     <div
       ref={paneRef}
       className={`split-pane ${isFocused ? "split-pane-focused" : ""} ${dropZone || fileDragOver ? "split-pane-dragging" : ""}`}
+      style={{ borderLeftColor: session.color, borderLeftWidth: 3, borderLeftStyle: "solid" }}
       onMouseDown={handleMouseDown}
     >
       <div className="split-pane-header" onContextMenu={(e) => showPaneMenu(e, buildPaneHeaderMenuItems(paneId, hasSiblings))}>
         <div className="split-pane-label">
-          <span className="split-pane-dot" style={{ background: session.color }} />
           <span>{session.label}</span>
           <span className="split-pane-phase">{session.phase}</span>
           <button

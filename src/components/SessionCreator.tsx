@@ -8,6 +8,7 @@ import { getSessions } from "../api/sessions";
 import { gitListBranchesForRealm } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector } from "./SessionBranchSelector";
+import { SESSION_COLORS } from "./SessionList";
 
 const AI_PROVIDERS = [
   { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
@@ -48,6 +49,11 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   const [newProjectName, setNewProjectName] = useState("");
   const [showNewProjectInput, setShowNewProjectInput] = useState(false);
 
+  // Color selection state
+  const [selectedColor, setSelectedColor] = useState<string>(
+    () => SESSION_COLORS[Math.floor(Math.random() * SESSION_COLORS.length)]
+  );
+
   // Branch selection state
   const [isGitRepo, setIsGitRepo] = useState(false);
   const [checkingGit, setCheckingGit] = useState(false);
@@ -57,8 +63,9 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
   // Determine whether to show the branch step
   const showBranchStep = isGitRepo && selectedProjectIds.length > 0;
 
-  // Existing project groups (from current sessions)
+  // Existing project groups (from current sessions) with their colors
   const [existingGroups, setExistingGroups] = useState<string[]>([]);
+  const [groupColors, setGroupColors] = useState<Record<string, string>>({});
 
   // Compute ordered steps for display
   const orderedSteps = useMemo<Step[]>(() => {
@@ -93,6 +100,14 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
       .then((sessions) => {
         const groups = [...new Set(sessions.map((s) => s.group).filter((g): g is string => !!g))].sort();
         setExistingGroups(groups);
+        // Build group→color map (use first non-destroyed session's color)
+        const colors: Record<string, string> = {};
+        for (const g of groups) {
+          const groupSession = sessions.find((s) => s.group === g && s.phase !== "destroyed")
+            || sessions.find((s) => s.group === g);
+          if (groupSession) colors[g] = groupSession.color;
+        }
+        setGroupColors(colors);
       })
       .catch((err) => console.warn("[SessionCreator] Failed to load sessions:", err));
   }, []);
@@ -216,6 +231,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
         label: label || undefined,
         description: description || undefined,
         group: selectedGroup || undefined,
+        color: selectedColor,
         aiProvider: aiProvider || undefined,
         projectIds: selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
         workingDirectory: firstProjectPath,
@@ -552,6 +568,9 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                     className={`session-creator-project-chip ${selectedGroup === group ? "selected" : ""}`}
                     onClick={() => setSelectedGroup(group)}
                   >
+                    {groupColors[group] && (
+                      <span className="session-creator-project-chip-dot" style={{ background: groupColors[group] }} />
+                    )}
                     <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="11" height="11">
                       <path d="M2 5C2 3.9 2.9 3 4 3H7L9 5H14C15.1 5 16 5.9 16 7V13C16 14.1 15.1 15 14 15H4C2.9 15 2 14.1 2 13V5Z" />
                     </svg>
@@ -602,6 +621,22 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                     onClick={(e) => e.stopPropagation()}
                   />
                 )}
+              </div>
+            </div>
+
+            {/* Color picker */}
+            <div className="session-creator-color-picker">
+              <span className="session-creator-color-picker-label">Color</span>
+              <div className="session-creator-color-swatches">
+                {SESSION_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    className={`session-creator-color-swatch ${selectedColor === c ? "selected" : ""}`}
+                    style={{ background: c }}
+                    onClick={() => setSelectedColor(c)}
+                    title={c}
+                  />
+                ))}
               </div>
             </div>
 

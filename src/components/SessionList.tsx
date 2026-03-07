@@ -1,11 +1,17 @@
 import "../styles/components/SessionList.css";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { SessionData } from "../state/SessionContext";
-import { updateSessionGroup, updateSessionLabel, updateSessionDescription } from "../api/sessions";
+import { updateSessionGroup, updateSessionLabel, updateSessionDescription, updateSessionColor } from "../api/sessions";
 import { encodeSessionDrag, setDraggedSession } from "./SplitPane";
 import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
+
+export const SESSION_COLORS = [
+  "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
+  "#39c5cf", "#d29922", "#f47067", "#d2a8ff",
+  "#e06c75", "#e5c07b", "#56b6c2", "#c678dd",
+];
 
 export type SessionView = "git" | "files" | "search" | null;
 
@@ -225,6 +231,56 @@ function InlineDescriptionEditor({ sessionId, description, isActive }: { session
   return null;
 }
 
+/** Color picker popover — shows a grid of preset colors. Uses fixed positioning to avoid overflow clipping. */
+function ColorPicker({
+  currentColor,
+  onSelect,
+  onClose,
+  anchorRef,
+}: {
+  currentColor: string;
+  onSelect: (color: string) => void;
+  onClose: () => void;
+  anchorRef?: React.RefObject<HTMLElement | null>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (anchorRef?.current) {
+      const rect = anchorRef.current.getBoundingClientRect();
+      setPos({ top: rect.top, left: rect.right + 6 });
+    }
+  }, [anchorRef]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="color-picker-popover"
+      style={pos ? { top: pos.top, left: pos.left } : undefined}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {SESSION_COLORS.map((c) => (
+        <button
+          key={c}
+          className={`color-picker-swatch ${c === currentColor ? "color-picker-swatch-active" : ""}`}
+          style={{ background: c }}
+          onClick={() => { onSelect(c); onClose(); }}
+          title={c}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** Inline editable project name — double-click to rename, same pattern as session names. */
 function InlineProjectNameEditor({
   group,
@@ -287,6 +343,10 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
+  // Color picker — can target a session OR a project group
+  const [colorPickerSessionId, setColorPickerSessionId] = useState<string | null>(null);
+  const [colorPickerGroup, setColorPickerGroup] = useState<string | null>(null);
+  const colorPickerAnchorRef = useRef<HTMLElement | null>(null);
   // Move-to-project dropdown for a specific session
   const [moveSessionId, setMoveSessionId] = useState<string | null>(null);
   const [moveNewName, setMoveNewName] = useState("");
@@ -320,6 +380,34 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     });
   }, []);
 
+  const handleRenameProject = useCallback((oldName: string, newName: string) => {
+    // Rename a project = move all sessions from the old group to the new group
+    const sessionsInGroup = sessions.filter((s) => s.group === oldName);
+    for (const s of sessionsInGroup) {
+      updateSessionGroup(s.id, newName).catch(console.error);
+    }
+  }, [sessions]);
+
+  const handleProjectColorChange = useCallback((group: string, color: string) => {
+    // Update ALL sessions in this project to the new color
+    const sessionsInGroup = sessions.filter((s) => s.group === group);
+    for (const s of sessionsInGroup) {
+      updateSessionColor(s.id, color).catch(console.error);
+    }
+  }, [sessions]);
+
+  const handleMoveToProject = useCallback((sessionId: string, targetGroup: string | null) => {
+    updateSessionGroup(sessionId, targetGroup).catch(console.error);
+    // If moving into a project, adopt the project's color
+    if (targetGroup) {
+      const projectSessions = sessions.filter((s) => s.group === targetGroup && s.id !== sessionId);
+      const projectColor = projectSessions.find((s) => s.phase !== "destroyed")?.color;
+      if (projectColor) {
+        updateSessionColor(sessionId, projectColor).catch(console.error);
+      }
+    }
+  }, [sessions]);
+
   const handleContextAction = useCallback((actionId: string) => {
     const sid = contextSessionRef.current;
     if (!sid) return;
@@ -329,24 +417,16 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       setNewGroupSessionId(sid);
       setNewGroupName("");
     } else if (actionId === "session.remove-group") {
-      updateSessionGroup(sid, null).catch(console.error);
+      handleMoveToProject(sid, null);
     } else if (actionId === "session.close") {
       onClose(sid);
     } else if (actionId.startsWith("session.set-group.")) {
       const group = actionId.replace("session.set-group.", "");
-      updateSessionGroup(sid, group).catch(console.error);
+      handleMoveToProject(sid, group);
     }
-  }, [onClose]);
+  }, [onClose, handleMoveToProject]);
 
   const { showMenu } = useContextMenu(handleContextAction);
-
-  const handleRenameProject = useCallback((oldName: string, newName: string) => {
-    // Rename a project = move all sessions from the old group to the new group
-    const sessionsInGroup = sessions.filter((s) => s.group === oldName);
-    for (const s of sessionsInGroup) {
-      updateSessionGroup(s.id, newName).catch(console.error);
-    }
-  }, [sessions]);
 
   const handleEmptyAreaAction = useCallback((actionId: string) => {
     if (actionId === "empty.new-session") {
@@ -429,7 +509,23 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <div
             className="session-item-color-band"
             style={{ background: session.phase === "destroyed" ? "var(--text-3)" : session.color }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const opening = colorPickerSessionId !== session.id;
+              setColorPickerSessionId(opening ? session.id : null);
+              setColorPickerGroup(null);
+              if (opening) colorPickerAnchorRef.current = e.currentTarget as HTMLElement;
+            }}
+            title="Change color"
           />
+          {colorPickerSessionId === session.id && (
+            <ColorPicker
+              currentColor={session.color}
+              onSelect={(color) => updateSessionColor(session.id, color).catch(console.error)}
+              onClose={() => setColorPickerSessionId(null)}
+              anchorRef={colorPickerAnchorRef}
+            />
+          )}
           <div className="session-item-info">
             <InlineNameEditor sessionId={session.id} label={session.label} triggerEdit={shouldTriggerRename} />
             <InlineDescriptionEditor sessionId={session.id} description={session.description} isActive={isActive} />
@@ -480,7 +576,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <div className="session-move-project-dropdown" onClick={(e) => e.stopPropagation()}>
             <button
               className={`session-move-project-option ${!session.group ? "active" : ""}`}
-              onClick={() => { updateSessionGroup(session.id, null).catch(console.error); setMoveSessionId(null); }}
+              onClick={() => { handleMoveToProject(session.id, null); setMoveSessionId(null); }}
             >
               No Project
             </button>
@@ -488,7 +584,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               <button
                 key={g}
                 className={`session-move-project-option ${session.group === g ? "active" : ""}`}
-                onClick={() => { updateSessionGroup(session.id, g).catch(console.error); setMoveSessionId(null); }}
+                onClick={() => { handleMoveToProject(session.id, g); setMoveSessionId(null); }}
               >
                 <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="11" height="11">
                   <path d="M2 5C2 3.9 2.9 3 4 3H7L9 5H14C15.1 5 16 5.9 16 7V13C16 14.1 15.1 15 14 15H4C2.9 15 2 14.1 2 13V5Z" />
@@ -513,7 +609,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 onKeyDown={(e) => {
                   e.stopPropagation();
                   if (e.key === "Enter" && moveNewName.trim()) {
-                    updateSessionGroup(session.id, moveNewName.trim()).catch(console.error);
+                    handleMoveToProject(session.id, moveNewName.trim());
                     setMoveSessionId(null);
                     setShowMoveNewInput(false);
                     setMoveNewName("");
@@ -591,7 +687,18 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 onClick={() => toggleGroup(group)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(group); } }}
               >
-                <div className="project-header-color-band" style={{ background: groupColor }} />
+                <div
+                  className="project-header-color-band"
+                  style={{ background: groupColor }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const opening = colorPickerGroup !== group;
+                    setColorPickerGroup(opening ? group : null);
+                    setColorPickerSessionId(null);
+                    if (opening) colorPickerAnchorRef.current = e.currentTarget as HTMLElement;
+                  }}
+                  title="Change project color"
+                />
                 <div className="project-header-left">
                   <span className="project-header-chevron">{isCollapsed ? "▸" : "▾"}</span>
                   <svg className="project-header-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
@@ -611,6 +718,14 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                   >+</button>
                 </div>
               </div>
+              {colorPickerGroup === group && (
+                <ColorPicker
+                  currentColor={groupColor}
+                  onSelect={(color) => handleProjectColorChange(group, color)}
+                  onClose={() => setColorPickerGroup(null)}
+                  anchorRef={colorPickerAnchorRef}
+                />
+              )}
               {!isCollapsed && (
                 <div className="project-sessions">
                   {groupSessions.map((session) => {

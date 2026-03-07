@@ -45,6 +45,10 @@ export function updateSessionGroup(sessionId: string, group: string | null): Pro
   return invoke("update_session_group", { sessionId, group });
 }
 
+export function updateSessionColor(sessionId: string, color: string): Promise<void> {
+  return invoke("update_session_color", { sessionId, color });
+}
+
 export function addWorkspacePath(sessionId: string, path: string): Promise<void> {
   return invoke("add_workspace_path", { sessionId, path });
 }

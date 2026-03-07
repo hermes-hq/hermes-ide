@@ -59,17 +59,59 @@
 .session-item-active:hover { background: var(--bg-active); }
 
 .session-item-color-band {
-  width: 3px;
+  width: 4px;
   flex-shrink: 0;
   border-radius: 2px;
   align-self: stretch;
   opacity: 0.8;
-  transition: opacity 0.12s;
+  transition: opacity 0.12s, width 0.12s;
+  cursor: pointer;
+}
+
+.session-item-color-band:hover {
+  width: 6px;
+  opacity: 1;
 }
 
 .session-item:hover .session-item-color-band,
 .session-item-active .session-item-color-band {
   opacity: 1;
+}
+
+/* ─── Color Picker Popover ───────────────────────── */
+
+.color-picker-popover {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  animation: paletteIn 0.1s ease-out;
+}
+
+.color-picker-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+  padding: 0;
+}
+
+.color-picker-swatch:hover {
+  transform: scale(1.2);
+  border-color: var(--text-0);
+}
+
+.color-picker-swatch-active {
+  border-color: var(--text-0);
+  box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 3px var(--text-0);
 }
 
 .session-item-info { flex: 1; min-width: 0; }
@@ -275,6 +317,7 @@
   padding: 6px 8px 6px 0;
   cursor: pointer;
   display: flex;
+  position: relative;
   align-items: center;
   user-select: none;
   border-radius: var(--radius);
@@ -283,13 +326,20 @@
 }
 
 .project-header-color-band {
-  width: 3px;
+  width: 4px;
   flex-shrink: 0;
   align-self: stretch;
   border-radius: 2px;
   margin-right: 6px;
   opacity: 0.8;
-  transition: opacity 0.12s;
+  transition: opacity 0.12s, width 0.12s;
+  cursor: pointer;
+  position: relative;
+}
+
+.project-header-color-band:hover {
+  width: 6px;
+  opacity: 1;
 }
 
 .project-header:hover .project-header-color-band {

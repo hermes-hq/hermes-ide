@@ -15,12 +15,7 @@
 }
 
 .terminal-color-accent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  opacity: 0.7;
+  display: none;
 }
 
 .terminal-loading {

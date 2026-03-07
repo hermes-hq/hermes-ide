@@ -118,6 +118,7 @@ export interface CreateSessionOpts {
   label?: string;
   description?: string;
   group?: string;
+  color?: string;
   workingDirectory?: string;
   restoreFromId?: string;
   aiProvider?: string;

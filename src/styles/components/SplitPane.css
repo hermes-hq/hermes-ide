@@ -20,6 +20,7 @@
   flex: 1;
   overflow: hidden;
   border: 1px solid transparent;
+  border-left: 3px solid var(--text-3);
   transition: border-color 0.15s;
   position: relative;
   min-width: 0;
@@ -27,7 +28,9 @@
 }
 
 .split-pane-focused {
-  border-color: var(--accent);
+  border-right-color: var(--accent);
+  border-top-color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .split-pane-header {
@@ -45,10 +48,7 @@
 }
 
 .split-pane-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  display: none;
 }
 
 .split-pane-phase {
