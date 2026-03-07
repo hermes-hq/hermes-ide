@@ -246,7 +246,18 @@ fn is_input_needed_line(line: &str) -> bool {
     if trimmed.is_empty() { return false; }
     let lower = trimmed.to_lowercase();
 
-    // Common patterns: (Y/n), (y/N), (y/n), [Y/n], [y/N], Yes/No
+    // ── Interactive menu indicators (strongest signal) ──────────────
+    // Numbered option lists: "› 1. Yes", "  2. No", "  3. Allow..."
+    // Selection cursors: "›", "❯" at start of a short option line
+    if (trimmed.starts_with("› ") || trimmed.starts_with("❯ ")) && trimmed.len() < 100 {
+        return true;
+    }
+    // "Esc to cancel" / "Tab to amend" — interactive UI footer
+    if lower.contains("esc to cancel") || lower.contains("tab to amend") {
+        return true;
+    }
+
+    // ── Common patterns: (Y/n), (y/N), (y/n), [Y/n], [y/N], Yes/No ──
     if lower.contains("(y/n)") || lower.contains("(y/n)")
         || lower.contains("[y/n]") || lower.contains("[y/n]")
         || lower.contains("(yes/no)") || lower.contains("[yes/no]")
@@ -254,16 +265,42 @@ fn is_input_needed_line(line: &str) -> bool {
         return true;
     }
 
-    // Claude Code permission prompts: lines starting with "? " that ask a question
-    // e.g. "? Allow Bash(...)" or "? Do you want to proceed?"
+    // ── Claude Code permission prompts: "? Allow ..." ──────────────
+    // Skip help hints like "? for shortcuts"
     if trimmed.starts_with("? ") && trimmed.len() > 3 {
-        return true;
+        let rest = &trimmed[2..];
+        let first_word = rest.split_whitespace().next().unwrap_or("");
+        let first_lower = first_word.to_lowercase();
+        if first_lower == "allow"
+            || first_lower == "deny"
+            || first_lower == "approve"
+            || first_lower == "do"
+            || first_lower == "are"
+            || first_lower == "should"
+            || first_lower == "would"
+            || first_lower == "can"
+            || first_lower == "may"
+            || rest.ends_with('?')
+            || rest.contains("(y/n)")
+            || rest.contains("(Y/n)")
+            || rest.contains("[y/N]")
+        {
+            return true;
+        }
     }
 
-    // Codex approval pattern: "✔ You approved" / "✗ You did not approve" — these
-    // are RESULTS, not prompts. But "Allow" / "Deny" selection lines are prompts.
+    // ── Questions ending with "?" starting with question words ──────
+    if trimmed.ends_with('?') && trimmed.len() > 5 && trimmed.len() < 120 {
+        let first_word = lower.split_whitespace().next().unwrap_or("");
+        if first_word == "do" || first_word == "are" || first_word == "should"
+            || first_word == "would" || first_word == "can" || first_word == "may"
+            || first_word == "will" || first_word == "is" || first_word == "shall"
+        {
+            return true;
+        }
+    }
 
-    // Generic "allow" / "deny" / "approve" choice patterns (word boundaries)
+    // ── Generic "allow" / "deny" / "approve" with question indicators ──
     let has_action_word = lower.split(|c: char| !c.is_alphabetic()).any(|w| w == "allow" || w == "deny" || w == "approve");
     if has_action_word
         && (trimmed.ends_with('?') || lower.contains("(y") || lower.contains("[y") || lower.contains("(n") || lower.contains("[n"))
@@ -1501,13 +1538,21 @@ impl OutputAnalyzer {
             }
         }
 
-        // Mark busy when new output arrives and we're idle — line analysis
-        // below will override back to Idle if a prompt is detected in this chunk.
-        if !self.is_busy {
-            self.is_busy = true;
-            self.pending_phase = Some(SessionPhase::Busy);
+        // Only mark busy when there's meaningful text content (not just
+        // control sequences, cursor movements, or terminal keepalives).
+        // Check if the stripped version has any visible characters.
+        let stripped_check = strip_ansi_escapes::strip(raw);
+        let text_check = String::from_utf8_lossy(&stripped_check);
+        let has_visible = text_check.chars().any(|c| !c.is_control() && !c.is_whitespace());
+        if has_visible {
+            if !self.is_busy {
+                let preview: String = text_check.chars().filter(|c| !c.is_control()).take(80).collect();
+                eprintln!("[BUSY] Transitioning to Busy. Preview: {:?}", preview);
+                self.is_busy = true;
+                self.pending_phase = Some(SessionPhase::Busy);
+            }
+            self.last_output_at = Some(std::time::Instant::now());
         }
-        self.last_output_at = Some(std::time::Instant::now());
 
         // Check for OSC 7 (CWD reporting) in raw data before stripping
         let raw_text = String::from_utf8_lossy(raw);
@@ -1676,6 +1721,9 @@ impl OutputAnalyzer {
                 self.memory_facts.push(fact);
             }
         }
+        if let Some(ref hint) = analysis.phase_hint {
+            eprintln!("[PHASE-HINT] {:?} from line analysis", hint);
+        }
         if let Some(hint) = analysis.phase_hint {
             match hint {
                 PhaseHint::PromptDetected => {
@@ -1787,6 +1835,51 @@ impl OutputAnalyzer {
 
     fn take_pending_phase(&mut self) -> Option<SessionPhase> {
         self.pending_phase.take()
+    }
+
+    /// Called by the silence timer when no output has arrived for a while.
+    /// If the analyzer still thinks it's busy, determine Idle vs NeedsInput.
+    ///
+    /// Key insight: instead of trying to detect every "needs input" pattern
+    /// (impossible — interactive TUI menus use cursor positioning, not plain text),
+    /// we detect the PROMPT (which we already handle well). If no prompt was
+    /// detected in the last few lines, we're NOT at a normal prompt → NeedsInput.
+    fn check_silence(&mut self) {
+        if !self.is_busy { return; }
+
+        // Check if any of the last few lines look like a recognized prompt
+        let last_lines: Vec<&str> = self.stripped_buffer.lines().rev().take(5).collect();
+        eprintln!("[SILENCE] Checking last 5 lines:");
+        for (i, l) in last_lines.iter().enumerate() {
+            eprintln!("[SILENCE]   {}: {:?}", i, l.trim());
+        }
+        let has_prompt = last_lines.iter().any(|l| {
+            let t = l.trim();
+            if t.is_empty() { return false; }
+            let is_p = if let Some(idx) = self.active_provider_idx {
+                self.registry.adapters[idx].is_prompt(t)
+            } else {
+                is_shell_prompt(t)
+            };
+            if is_p { eprintln!("[SILENCE]   -> prompt detected: {:?}", t); }
+            is_p
+        });
+
+        if self.node_builder.is_some() {
+            self.finalize_node(None);
+        }
+        self.is_busy = false;
+
+        if has_prompt {
+            eprintln!("[SILENCE] → Idle (prompt found)");
+            self.pending_phase = Some(SessionPhase::Idle);
+        } else if self.detected_agent.is_some() {
+            eprintln!("[SILENCE] → NeedsInput (agent active, no prompt)");
+            self.pending_phase = Some(SessionPhase::NeedsInput);
+        } else {
+            eprintln!("[SILENCE] → Idle (no agent)");
+            self.pending_phase = Some(SessionPhase::Idle);
+        }
     }
 
     fn take_pending_cwd(&mut self) -> Option<String> {
@@ -2679,6 +2772,46 @@ pub fn create_session(
         }
     });
 
+    // ─── Silence timer thread ─────────────────────────────────────────
+    // When the PTY goes silent for >1.5s while busy, transition to Idle
+    // or NeedsInput. This replaces fragile per-line text matching as the
+    // PRIMARY state transition mechanism for idle detection.
+    {
+        let analyzer_silence = Arc::clone(&analyzer);
+        let session_silence = Arc::clone(&session_arc);
+        let app_silence = app.clone();
+        thread::spawn(move || {
+            let interval = std::time::Duration::from_millis(500);
+            let silence_threshold = std::time::Duration::from_millis(2000);
+            loop {
+                thread::sleep(interval);
+                // Check if session is destroyed → stop
+                if let Ok(s) = session_silence.lock() {
+                    if matches!(s.phase, SessionPhase::Destroyed) { break; }
+                }
+                if let Ok(mut a) = analyzer_silence.lock() {
+                    if let Some(last) = a.last_output_at {
+                        if a.is_busy && last.elapsed() >= silence_threshold {
+                            a.check_silence();
+                            if let Some(new_phase) = a.take_pending_phase() {
+                                if let Ok(mut s) = session_silence.lock() {
+                                    if s.phase != new_phase {
+                                        s.phase = new_phase;
+                                        s.detected_agent = a.detected_agent.clone();
+                                        s.metrics = a.to_metrics();
+                                        s.last_activity_at = now();
+                                        let update = SessionUpdate::from(&*s);
+                                        let _ = app_silence.emit("session-updated", &update);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     let result = {
         let s = session_arc.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
         SessionUpdate::from(&*s)
@@ -3344,6 +3477,38 @@ mod tests {
         // "? " alone with nothing after should not match (too short)
         assert!(!is_input_needed_line("? "));
         assert!(!is_input_needed_line("?"));
+    }
+
+    #[test]
+    fn rejects_help_hints() {
+        // Claude Code help hints like "? for shortcuts" are not permission prompts
+        assert!(!is_input_needed_line("? for shortcuts"));
+        assert!(!is_input_needed_line("? for help"));
+        assert!(!is_input_needed_line("? to see commands"));
+    }
+
+    #[test]
+    fn detects_question_word_prompts() {
+        assert!(is_input_needed_line("Do you want to proceed?"));
+        assert!(is_input_needed_line("Are you sure you want to continue?"));
+        assert!(is_input_needed_line("Would you like to allow this?"));
+        assert!(is_input_needed_line("Should this file be overwritten?"));
+        assert!(is_input_needed_line("Can we proceed with the changes?"));
+        // Non-question words ending with ? should not match
+        assert!(!is_input_needed_line("Building project?"));
+        assert!(!is_input_needed_line("Error?"));
+    }
+
+    #[test]
+    fn detects_interactive_menu_indicators() {
+        // Selection cursors (Claude Code, Copilot)
+        assert!(is_input_needed_line("› 1. Yes"));
+        assert!(is_input_needed_line("❯ Allow"));
+        // Interactive UI footers
+        assert!(is_input_needed_line("Esc to cancel · Tab to amend"));
+        assert!(is_input_needed_line("  Esc to cancel"));
+        // But not bare selection chars
+        assert!(!is_input_needed_line("›"));
     }
 
     // ── is_shell_prompt ──
