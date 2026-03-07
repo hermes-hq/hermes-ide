@@ -469,6 +469,7 @@ function AppContent() {
         state={updater.state}
         onDismiss={updater.dismiss}
         onDownload={updater.download}
+        onCancel={updater.cancelDownload}
         onInstall={updater.installAndRelaunch}
       />
 

@@ -13,6 +13,10 @@ export interface UpdateState {
   downloading: boolean;
   /** Download progress 0-100 */
   progress: number;
+  /** Bytes downloaded so far */
+  downloadedBytes: number;
+  /** Total content length in bytes (0 if unknown) */
+  totalBytes: number;
   /** Download finished, ready to install */
   ready: boolean;
   /** User dismissed the dialog — hide until next launch */
@@ -21,6 +25,8 @@ export interface UpdateState {
   dismissedVersion: string;
   /** Download failed — show error feedback */
   error: boolean;
+  /** Download appears stalled (no progress for 15s) */
+  stalled: boolean;
 }
 
 const INITIAL: UpdateState = {
@@ -29,19 +35,26 @@ const INITIAL: UpdateState = {
   notes: "",
   downloading: false,
   progress: 0,
+  downloadedBytes: 0,
+  totalBytes: 0,
   ready: false,
   dismissed: false,
   dismissedVersion: "",
   error: false,
+  stalled: false,
 };
 
 const CHECK_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const STALL_TIMEOUT_MS = 15_000;
 
 export function useAutoUpdater() {
   const [state, setState] = useState<UpdateState>(INITIAL);
   const updateRef = useRef<Update | null>(null);
   const downloadingRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const lastProgressRef = useRef(0);
+  const stallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const doCheck = useCallback(async () => {
     // Skip periodic checks while a download is in progress or install is ready
@@ -107,41 +120,83 @@ export function useAutoUpdater() {
     });
   }, []);
 
+  const clearStallTimer = useCallback(() => {
+    if (stallTimerRef.current) {
+      clearInterval(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+  }, []);
+
   const download = useCallback(async () => {
     const update = updateRef.current;
     // Guard against double-click / concurrent downloads
     if (!update || downloadingRef.current) return;
     downloadingRef.current = true;
+    cancelledRef.current = false;
+    lastProgressRef.current = Date.now();
 
-    setState((s) => ({ ...s, downloading: true, progress: 0, error: false, ready: false }));
+    setState((s) => ({
+      ...s, downloading: true, progress: 0, downloadedBytes: 0,
+      totalBytes: 0, error: false, ready: false, stalled: false,
+    }));
+
+    // Stall detection: check every 5s if progress has stalled
+    stallTimerRef.current = setInterval(() => {
+      if (Date.now() - lastProgressRef.current > STALL_TIMEOUT_MS) {
+        setState((s) => s.downloading ? { ...s, stalled: true } : s);
+      }
+    }, 5000);
 
     try {
       let contentLength = 0;
       let downloaded = 0;
 
       await update.download((event) => {
+        if (cancelledRef.current) return;
         switch (event.event) {
           case "Started":
             contentLength = event.data.contentLength ?? 0;
+            setState((s) => ({ ...s, totalBytes: contentLength }));
             break;
           case "Progress": {
             downloaded += event.data.chunkLength;
+            lastProgressRef.current = Date.now();
             const pct = contentLength > 0 ? Math.round((downloaded / contentLength) * 100) : 0;
-            setState((s) => ({ ...s, progress: pct }));
+            setState((s) => ({ ...s, progress: pct, downloadedBytes: downloaded, stalled: false }));
             break;
           }
           case "Finished":
             break;
         }
       });
-      // Download complete — wait for user to press "Install & Relaunch"
-      setState((s) => ({ ...s, downloading: false, progress: 100, ready: true }));
+
+      clearStallTimer();
+
+      if (cancelledRef.current) {
+        setState((s) => ({ ...s, downloading: false, progress: 0, downloadedBytes: 0, stalled: false }));
+      } else {
+        // Download complete — wait for user to press "Install & Relaunch"
+        setState((s) => ({ ...s, downloading: false, progress: 100, ready: true, stalled: false }));
+      }
     } catch {
-      setState((s) => ({ ...s, downloading: false, error: true }));
+      clearStallTimer();
+      if (!cancelledRef.current) {
+        setState((s) => ({ ...s, downloading: false, error: true, stalled: false }));
+      }
     } finally {
       downloadingRef.current = false;
     }
-  }, []);
+  }, [clearStallTimer]);
+
+  const cancelDownload = useCallback(() => {
+    cancelledRef.current = true;
+    clearStallTimer();
+    setState((s) => ({
+      ...s, downloading: false, progress: 0, downloadedBytes: 0,
+      totalBytes: 0, stalled: false, error: false,
+    }));
+    downloadingRef.current = false;
+  }, [clearStallTimer]);
 
   const installAndRelaunch = useCallback(async () => {
     const update = updateRef.current;
@@ -163,5 +218,5 @@ export function useAutoUpdater() {
     return updateRef.current !== null;
   }, [doCheck]);
 
-  return { state, dismiss, download, installAndRelaunch, manualCheck };
+  return { state, dismiss, download, cancelDownload, installAndRelaunch, manualCheck };
 }

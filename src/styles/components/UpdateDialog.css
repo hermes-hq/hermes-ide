@@ -82,11 +82,26 @@
   transition: width 0.2s ease;
 }
 
+.update-dialog-progress-fill.update-dialog-progress-stalled {
+  background: var(--yellow);
+  animation: stallPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes stallPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .update-dialog-progress-label {
   font-size: var(--text-xs);
   color: var(--text-3);
   margin-top: 4px;
   text-align: right;
+}
+
+.update-dialog-stall-warning {
+  color: var(--yellow);
+  font-weight: 500;
 }
 
 .update-dialog-ready {
@@ -127,6 +142,15 @@
 .update-dialog-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.update-dialog-btn-cancel {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.update-dialog-btn-cancel:hover {
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
 }
 
 .update-dialog-btn-primary {

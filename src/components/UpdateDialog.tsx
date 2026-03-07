@@ -6,11 +6,21 @@ interface UpdateDialogProps {
   state: UpdateState;
   onDismiss: () => void;
   onDownload: () => void;
+  onCancel: () => void;
   onInstall: () => void;
 }
 
-export function UpdateDialog({ state, onDismiss, onDownload, onInstall }: UpdateDialogProps) {
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall }: UpdateDialogProps) {
   if (!state.available || state.dismissed) return null;
+
+  const showByteProgress = state.downloading && state.totalBytes > 0;
 
   return (
     <div className="update-dialog-backdrop" onClick={state.downloading ? undefined : onDismiss}>
@@ -33,12 +43,17 @@ export function UpdateDialog({ state, onDismiss, onDownload, onInstall }: Update
           <div className="update-dialog-progress">
             <div className="update-dialog-progress-bar">
               <div
-                className="update-dialog-progress-fill"
+                className={`update-dialog-progress-fill${state.stalled ? " update-dialog-progress-stalled" : ""}`}
                 style={{ width: `${state.progress}%` }}
               />
             </div>
             <div className="update-dialog-progress-label">
-              Downloading... {state.progress}%
+              {showByteProgress
+                ? `${formatBytes(state.downloadedBytes)} / ${formatBytes(state.totalBytes)}`
+                : `Downloading... ${state.progress}%`}
+              {state.stalled && (
+                <span className="update-dialog-stall-warning"> · Slow connection</span>
+              )}
             </div>
           </div>
         )}
@@ -63,7 +78,11 @@ export function UpdateDialog({ state, onDismiss, onDownload, onInstall }: Update
             Changelog
           </button>
 
-          {!state.downloading && (
+          {state.downloading ? (
+            <button className="update-dialog-btn update-dialog-btn-cancel" onClick={onCancel}>
+              Cancel
+            </button>
+          ) : (
             <button className="update-dialog-btn" onClick={onDismiss}>
               Later
             </button>
@@ -82,7 +101,7 @@ export function UpdateDialog({ state, onDismiss, onDownload, onInstall }: Update
               onClick={onDownload}
               disabled={state.downloading}
             >
-              {state.downloading ? "Downloading..." : state.error ? "Retry" : "Update Now"}
+              {state.downloading ? `Downloading ${state.progress}%` : state.error ? "Retry" : "Update Now"}
             </button>
           )}
         </div>

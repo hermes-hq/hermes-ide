@@ -87,10 +87,13 @@ const INITIAL: UpdateState = {
   notes: "",
   downloading: false,
   progress: 0,
+  downloadedBytes: 0,
+  totalBytes: 0,
   ready: false,
   dismissed: false,
   dismissedVersion: "",
   error: false,
+  stalled: false,
 };
 
 beforeEach(() => {
@@ -333,6 +336,43 @@ describe("install failure error handling", () => {
 
     expect(s.error).toBe(true);
     expect(s.ready).toBe(false); // not ready — download never completed
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Cancel download
+// ─────────────────────────────────────────────────────────────────
+/** Simulates cancel download */
+function applyCancelDownload(state: UpdateState): UpdateState {
+  return {
+    ...state, downloading: false, progress: 0, downloadedBytes: 0,
+    totalBytes: 0, stalled: false, error: false,
+  };
+}
+
+describe("cancel download", () => {
+  it("should reset download state but keep available", () => {
+    let s = INITIAL;
+    s = applyCheckResult(s, { version: "1.0.0", body: "" });
+    s = applyDownloadStart(s);
+    s = { ...s, progress: 45, downloadedBytes: 12_000_000, totalBytes: 27_000_000 };
+
+    s = applyCancelDownload(s);
+    expect(s.available).toBe(true);
+    expect(s.downloading).toBe(false);
+    expect(s.progress).toBe(0);
+    expect(s.downloadedBytes).toBe(0);
+    expect(s.error).toBe(false);
+  });
+
+  it("should allow re-downloading after cancel", () => {
+    let s = INITIAL;
+    s = applyCheckResult(s, { version: "1.0.0", body: "" });
+    s = applyDownloadStart(s);
+    s = applyCancelDownload(s);
+    s = applyDownloadStart(s);
+    expect(s.downloading).toBe(true);
+    expect(s.progress).toBe(0);
   });
 });
 
