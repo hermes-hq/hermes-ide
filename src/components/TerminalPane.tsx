@@ -177,7 +177,6 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       {suggestionState && (
         <SuggestionOverlay state={suggestionState} />
       )}
-      <div className="terminal-color-accent" style={{ background: color }} />
     </div>
   );
 }

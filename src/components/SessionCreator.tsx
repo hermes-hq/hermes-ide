@@ -566,7 +566,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                   <button
                     key={group}
                     className={`session-creator-project-chip ${selectedGroup === group ? "selected" : ""}`}
-                    onClick={() => setSelectedGroup(group)}
+                    onClick={() => { setSelectedGroup(group); if (groupColors[group]) setSelectedColor(groupColors[group]); }}
                   >
                     {groupColors[group] && (
                       <span className="session-creator-project-chip-dot" style={{ background: groupColors[group] }} />
@@ -598,6 +598,8 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                         if (!existingGroups.includes(name)) {
                           setExistingGroups((prev) => [...prev, name].sort());
                         }
+                        // Assign current color to the new project
+                        setGroupColors((prev) => ({ ...prev, [name]: selectedColor }));
                         setSelectedGroup(name);
                         setShowNewProjectInput(false);
                         setNewProjectName("");
@@ -613,6 +615,7 @@ export function SessionCreator({ onClose, onCreate }: SessionCreatorProps) {
                         if (!existingGroups.includes(name)) {
                           setExistingGroups((prev) => [...prev, name].sort());
                         }
+                        setGroupColors((prev) => ({ ...prev, [name]: selectedColor }));
                         setSelectedGroup(name);
                       }
                       setShowNewProjectInput(false);

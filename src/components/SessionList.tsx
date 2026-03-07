@@ -98,7 +98,7 @@ function SessionItemGitInfo({ sessionId, isDestroyed }: { sessionId: string; isD
 }
 
 /** Inline editable name field — activates on double-click or via ref trigger. */
-function InlineNameEditor({ sessionId, label, triggerEdit }: { sessionId: string; label: string; triggerEdit: boolean }) {
+function InlineNameEditor({ sessionId, label, triggerEdit, onTriggered }: { sessionId: string; label: string; triggerEdit: boolean; onTriggered?: () => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(label);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -107,8 +107,9 @@ function InlineNameEditor({ sessionId, label, triggerEdit }: { sessionId: string
     if (triggerEdit) {
       setEditing(true);
       setValue(label);
+      onTriggered?.();
     }
-  }, [triggerEdit]);
+  }, [triggerEdit, label, onTriggered]);
 
   useEffect(() => {
     if (editing) inputRef.current?.select();
@@ -249,16 +250,25 @@ function ColorPicker({
   useEffect(() => {
     if (anchorRef?.current) {
       const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.top, left: rect.right + 6 });
+      // Clamp so picker doesn't overflow bottom of viewport
+      const pickerHeight = 160; // approximate height of 3-row grid
+      const top = Math.min(rect.top, window.innerHeight - pickerHeight - 8);
+      setPos({ top, left: rect.right + 6 });
     }
   }, [anchorRef]);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handleMouseDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    // Close on scroll so the picker doesn't drift from its anchor
+    const handleScroll = () => onClose();
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("scroll", handleScroll, true);
+    };
   }, [onClose]);
 
   return (
@@ -491,12 +501,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
 
   const renderSession = (session: SessionData) => {
     const isActive = session.id === activeSessionId;
-    // Trigger inline rename when context menu "Rename..." is used
     const shouldTriggerRename = renameSessionId === session.id;
-    if (shouldTriggerRename) {
-      // Clear after triggering (one-shot)
-      requestAnimationFrame(() => setRenameSessionId(null));
-    }
     return (
       <div key={session.id} className={`session-item-wrapper${isActive ? " session-item-wrapper-active" : ""}`}>
         <div
@@ -527,7 +532,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             />
           )}
           <div className="session-item-info">
-            <InlineNameEditor sessionId={session.id} label={session.label} triggerEdit={shouldTriggerRename} />
+            <InlineNameEditor sessionId={session.id} label={session.label} triggerEdit={shouldTriggerRename} onTriggered={() => setRenameSessionId(null)} />
             <InlineDescriptionEditor sessionId={session.id} description={session.description} isActive={isActive} />
             <div className="session-item-meta">
               {session.detected_agent && (

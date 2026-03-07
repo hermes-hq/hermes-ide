@@ -20,7 +20,7 @@
   flex: 1;
   overflow: hidden;
   border: 1px solid transparent;
-  border-left: 3px solid var(--text-3);
+  border-left: 3px solid transparent;
   transition: border-color 0.15s;
   position: relative;
   min-width: 0;
@@ -47,9 +47,6 @@
   color: var(--text-2);
 }
 
-.split-pane-dot {
-  display: none;
-}
 
 .split-pane-phase {
   color: var(--text-3);

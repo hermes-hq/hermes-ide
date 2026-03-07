@@ -14,9 +14,6 @@
   overflow: hidden;
 }
 
-.terminal-color-accent {
-  display: none;
-}
 
 .terminal-loading {
   position: absolute;
