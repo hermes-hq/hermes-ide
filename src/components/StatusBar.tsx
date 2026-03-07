@@ -167,6 +167,10 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           onClick={onCheckForUpdates}
         >
           v{__APP_VERSION__}
+          <svg className="status-bar-version-icon" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 2v9M4.5 7.5L8 11l3.5-3.5" />
+            <path d="M2.5 13.5h11" />
+          </svg>
         </button>
         <ThemePicker />
         <button

@@ -120,6 +120,17 @@
   color: var(--text-1);
 }
 
+.status-bar-version-icon {
+  margin-left: 3px;
+  vertical-align: -1px;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+
+.status-bar-version:hover .status-bar-version-icon {
+  opacity: 1;
+}
+
 /* ─── Shortcuts Button ───────────────────────── */
 
 .status-shortcuts-btn {
