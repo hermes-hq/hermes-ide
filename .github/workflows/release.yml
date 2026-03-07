@@ -5,16 +5,66 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Platforms to build (comma-separated: macos,linux,windows or 'all')"
+        required: true
+        default: "all"
+        type: string
+      tag:
+        description: "Release tag (e.g. v0.3.31) — required for manual dispatch"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  # ── Determine what to build ──────────────────────────────────────────
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      build_macos: ${{ steps.platforms.outputs.macos }}
+      build_linux: ${{ steps.platforms.outputs.linux }}
+      build_windows: ${{ steps.platforms.outputs.windows }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - id: version
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - id: platforms
+        run: |
+          PLATFORMS="${{ inputs.platforms || 'all' }}"
+          if [[ "$PLATFORMS" == "all" ]]; then
+            echo "macos=true"   >> "$GITHUB_OUTPUT"
+            echo "linux=true"   >> "$GITHUB_OUTPUT"
+            echo "windows=true" >> "$GITHUB_OUTPUT"
+          else
+            [[ "$PLATFORMS" == *macos* ]]   && echo "macos=true"   >> "$GITHUB_OUTPUT" || echo "macos=false"   >> "$GITHUB_OUTPUT"
+            [[ "$PLATFORMS" == *linux* ]]   && echo "linux=true"   >> "$GITHUB_OUTPUT" || echo "linux=false"   >> "$GITHUB_OUTPUT"
+            [[ "$PLATFORMS" == *windows* ]] && echo "windows=true" >> "$GITHUB_OUTPUT" || echo "windows=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── Frontend Tests ──────────────────────────────────────────────────
   test-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -29,27 +79,41 @@ jobs:
       - name: Unit tests
         run: npx vitest run
 
-  # ── Rust Tests (3-OS matrix) ────────────────────────────────────────
+  # ── Rust Tests (only for selected platforms) ───────────────────────
   test-rust:
+    needs: config
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-14
+            enabled: ${{ needs.config.outputs.build_macos }}
           - os: ubuntu-22.04
+            enabled: ${{ needs.config.outputs.build_linux }}
           - os: windows-latest
+            enabled: ${{ needs.config.outputs.build_windows }}
     runs-on: ${{ matrix.os }}
+    if: always()
     steps:
+      - name: Skip if platform not selected
+        if: matrix.enabled != 'true'
+        run: echo "Skipping Rust tests for this platform"
+
       - uses: actions/checkout@v4
+        if: matrix.enabled == 'true'
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
+        if: matrix.enabled == 'true'
 
       - uses: swatinem/rust-cache@v2
+        if: matrix.enabled == 'true'
         with:
           workspaces: src-tauri
 
       - name: Install Linux dependencies
-        if: runner.os == 'Linux'
+        if: matrix.enabled == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -62,12 +126,14 @@ jobs:
             patchelf
 
       - name: Run Rust tests
+        if: matrix.enabled == 'true'
         working-directory: src-tauri
         run: cargo test
 
-  # ── Build (6-target matrix) ─────────────────────────────────────────
+  # ── Build (selected platforms) ─────────────────────────────────────
   build:
-    needs: [test-frontend, test-rust]
+    needs: [config, test-frontend, test-rust]
+    if: always() && needs.test-frontend.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -77,50 +143,76 @@ jobs:
             platform_key: darwin-aarch64
             sign: true
             notarize: true
+            platform_group: macos
           - target: x86_64-apple-darwin
             runner: macos-14
             platform_key: darwin-x86_64
             sign: true
             notarize: true
+            platform_group: macos
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
             platform_key: linux-x86_64
             sign: false
             notarize: false
+            platform_group: linux
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             platform_key: linux-aarch64
             sign: false
             notarize: false
+            platform_group: linux
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             platform_key: windows-x86_64
             sign: false
             notarize: false
+            platform_group: windows
           - target: aarch64-pc-windows-msvc
             runner: windows-latest
             platform_key: windows-aarch64
             sign: false
             notarize: false
+            platform_group: windows
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Check if this platform is enabled
+        id: check
+        shell: bash
+        run: |
+          GROUP="${{ matrix.platform_group }}"
+          MACOS="${{ needs.config.outputs.build_macos }}"
+          LINUX="${{ needs.config.outputs.build_linux }}"
+          WINDOWS="${{ needs.config.outputs.build_windows }}"
+          ENABLED=false
+          [[ "$GROUP" == "macos"   && "$MACOS"   == "true" ]] && ENABLED=true
+          [[ "$GROUP" == "linux"   && "$LINUX"   == "true" ]] && ENABLED=true
+          [[ "$GROUP" == "windows" && "$WINDOWS" == "true" ]] && ENABLED=true
+          echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.check.outputs.enabled == 'true'
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.enabled == 'true'
         with:
           node-version: 20
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.check.outputs.enabled == 'true'
         with:
           targets: ${{ matrix.target }}
 
       - uses: swatinem/rust-cache@v2
+        if: steps.check.outputs.enabled == 'true'
         with:
           workspaces: src-tauri
 
       - name: Install Linux dependencies
-        if: runner.os == 'Linux'
+        if: steps.check.outputs.enabled == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -134,9 +226,10 @@ jobs:
             libfuse2
 
       - run: npm ci
+        if: steps.check.outputs.enabled == 'true'
 
       - name: Validate version matches tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.check.outputs.enabled == 'true' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
@@ -147,7 +240,7 @@ jobs:
           fi
 
       - name: Import macOS signing certificate
-        if: matrix.sign && runner.os == 'macOS'
+        if: steps.check.outputs.enabled == 'true' && matrix.sign && runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -170,6 +263,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
       - name: Build and sign
+        if: steps.check.outputs.enabled == 'true'
         shell: bash
         env:
           CI: false
@@ -179,7 +273,7 @@ jobs:
         run: npx tauri build --target ${{ matrix.target }}
 
       - name: Notarize DMG
-        if: matrix.notarize
+        if: steps.check.outputs.enabled == 'true' && matrix.notarize
         timeout-minutes: 30
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -212,6 +306,7 @@ jobs:
           xcrun stapler staple "$DMG_PATH"
 
       - name: Collect installer artifacts
+        if: steps.check.outputs.enabled == 'true'
         shell: bash
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
@@ -242,12 +337,14 @@ jobs:
           fi
 
       - name: Upload installer artifacts
+        if: steps.check.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: hermes-ide-${{ matrix.platform_key }}-installer
           path: installer-artifacts/
 
       - name: Collect updater artifacts
+        if: steps.check.outputs.enabled == 'true'
         shell: bash
         run: |
           TARGET_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
@@ -277,6 +374,7 @@ jobs:
           done
 
       - name: Upload updater artifacts
+        if: steps.check.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: hermes-ide-${{ matrix.platform_key }}-updater
@@ -284,11 +382,16 @@ jobs:
 
   # ── Assemble Release ────────────────────────────────────────────────
   assemble-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [config, build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.config.outputs.version }}
+      TAG: ${{ needs.config.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -301,8 +404,6 @@ jobs:
 
       - name: Prepare release files
         run: |
-          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           RELEASE_DIR="release-files"
           mkdir -p "$RELEASE_DIR"
 
@@ -317,7 +418,6 @@ jobs:
           done
 
           # Copy updater bundles with platform prefix to avoid name collisions
-          # (both macOS targets produce HERMES-IDE.app.tar.gz)
           for dir in artifacts/hermes-ide-*-updater; do
             if [ -d "$dir" ]; then
               PLATFORM_KEY=$(basename "$dir" | sed 's/hermes-ide-//' | sed 's/-updater//')
@@ -333,81 +433,83 @@ jobs:
           echo "=== Release files ==="
           ls -la "$RELEASE_DIR/"
 
-      - name: Generate downloads manifest (downloads.json)
+      - name: Ensure GitHub Release exists
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
         run: |
+          REPO="Vinci-26/hermes-ide-releases"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — will upload new assets"
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "Hermes IDE $TAG" \
+              --notes "Download the installer for your platform, or update in-app. Full changelog: https://hermes-ide.com/changelog"
+          fi
+
+      - name: Upload build artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          REPO="Vinci-26/hermes-ide-releases"
           RELEASE_DIR="release-files"
 
-          # Build JSON by scanning actual files
-          PLATFORMS_JSON='{}'
+          shopt -s nullglob
+          FILES=( "$RELEASE_DIR"/* )
+          shopt -u nullglob
 
-          add_download() {
-            local platform="$1" arch="$2" format="$3" filename="$4"
-            PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
-              --arg p "$platform" --arg a "$arch" --arg f "$format" --arg n "$filename" \
-              '.[$p][$a][$f] = $n')
-          }
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No new artifacts to upload"
+          else
+            gh release upload "$TAG" \
+              --repo "$REPO" \
+              --clobber \
+              "${FILES[@]}"
+          fi
 
-          # macOS DMGs
-          for f in "$RELEASE_DIR"/*_aarch64.dmg; do [ -f "$f" ] && add_download "macos" "aarch64" "dmg" "$(basename "$f")"; done
-          for f in "$RELEASE_DIR"/*_x86_64.dmg; do [ -f "$f" ] && add_download "macos" "x86_64" "dmg" "$(basename "$f")"; done
-
-          # Linux
-          for f in "$RELEASE_DIR"/*_amd64.AppImage; do [ -f "$f" ] && add_download "linux" "x86_64" "appimage" "$(basename "$f")"; done
-          for f in "$RELEASE_DIR"/*_amd64.deb; do [ -f "$f" ] && add_download "linux" "x86_64" "deb" "$(basename "$f")"; done
-          for f in "$RELEASE_DIR"/*_arm64.AppImage; do [ -f "$f" ] && add_download "linux" "aarch64" "appimage" "$(basename "$f")"; done
-
-          # Windows
-          for f in "$RELEASE_DIR"/*_x64-setup.exe; do [ -f "$f" ] && add_download "windows" "x86_64" "exe" "$(basename "$f")"; done
-          for f in "$RELEASE_DIR"/*_arm64-setup.exe; do [ -f "$f" ] && add_download "windows" "aarch64" "exe" "$(basename "$f")"; done
-
-          jq -n \
-            --arg version "$VERSION" \
-            --argjson platforms "$PLATFORMS_JSON" \
-            '{version: $version, platforms: $platforms}' \
-            > "$RELEASE_DIR/downloads.json"
-
-          echo "=== downloads.json ==="
-          cat "$RELEASE_DIR/downloads.json"
-
-      - name: Generate update manifest (latest.json)
+      - name: Regenerate manifests from all release assets
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
         run: |
+          REPO="Vinci-26/hermes-ide-releases"
           RELEASE_DIR="release-files"
-          BASE_URL="https://github.com/Vinci-26/hermes-ide-releases/releases/download/v${VERSION}"
+          BASE_URL="https://github.com/$REPO/releases/download/$TAG"
 
-          # Helper: find bundle file and its corresponding .sig for a platform
-          # Uses the bundle glob to derive the exact .sig path (avoids mismatches)
-          find_bundle_file() {
-            local pattern="$1"
-            ls ${RELEASE_DIR}/${pattern} 2>/dev/null | grep -v '\.sig$' | head -1
-          }
+          # Download all .sig files from the release (includes previously uploaded ones)
+          SIG_DIR=$(mktemp -d)
+          gh release download "$TAG" \
+            --repo "$REPO" \
+            --pattern "*.sig" \
+            --dir "$SIG_DIR" \
+            --clobber 2>/dev/null || true
 
-          # Build platforms JSON safely using jq (handles multi-line sigs, special chars)
+          # Get full asset list from release
+          ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name')
+
+          # ── latest.json ───────────────────────────────────────────────
           PLATFORMS_JSON='{}'
 
           add_platform() {
-            local key="$1" bundle_glob="$2"
-            local bundle_file sig_content bundle_name
-            bundle_file=$(find_bundle_file "$bundle_glob")
-            if [ -n "$bundle_file" ] && [ -f "$bundle_file" ]; then
-              bundle_name=$(basename "$bundle_file")
-              sig_content=""
-              if [ -f "${bundle_file}.sig" ]; then
-                sig_content=$(cat "${bundle_file}.sig")
-              fi
-              PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
-                --arg k "$key" \
-                --arg sig "$sig_content" \
-                --arg url "${BASE_URL}/${bundle_name}" \
-                '.[$k] = {signature: $sig, url: $url}')
+            local key="$1" pattern="$2"
+            local bundle_name sig_content=""
+            bundle_name=$(echo "$ASSETS" | grep -E "$pattern" | grep -v '\.sig$' | head -1 || true)
+            [ -z "$bundle_name" ] && return 0
+            if [ -f "$SIG_DIR/${bundle_name}.sig" ]; then
+              sig_content=$(cat "$SIG_DIR/${bundle_name}.sig")
             fi
+            PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
+              --arg k "$key" \
+              --arg sig "$sig_content" \
+              --arg url "${BASE_URL}/${bundle_name}" \
+              '.[$k] = {signature: $sig, url: $url}')
           }
 
-          add_platform "darwin-aarch64"  "darwin-aarch64-*.tar.gz"
-          add_platform "darwin-x86_64"   "darwin-x86_64-*.tar.gz"
-          add_platform "linux-x86_64"    "linux-x86_64-*.AppImage"
-          add_platform "linux-aarch64"   "linux-aarch64-*.AppImage"
-          add_platform "windows-x86_64"  "windows-x86_64-*-setup.exe"
-          add_platform "windows-aarch64" "windows-aarch64-*-setup.exe"
+          add_platform "darwin-aarch64"  "^darwin-aarch64-.*\.tar\.gz$"
+          add_platform "darwin-x86_64"   "^darwin-x86_64-.*\.tar\.gz$"
+          add_platform "linux-x86_64"    "^linux-x86_64-.*\.AppImage$"
+          add_platform "linux-aarch64"   "^linux-aarch64-.*\.AppImage$"
+          add_platform "windows-x86_64"  "^windows-x86_64-.*-setup\.exe$"
+          add_platform "windows-aarch64" "^windows-aarch64-.*-setup\.exe$"
 
           jq -n \
             --arg version "$VERSION" \
@@ -420,26 +522,41 @@ jobs:
           echo "=== latest.json ==="
           cat "$RELEASE_DIR/latest.json"
 
-      - name: Create GitHub Release on releases repo
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
-        run: |
-          TAG="v${VERSION}"
-          REPO="Vinci-26/hermes-ide-releases"
-          RELEASE_DIR="release-files"
+          # ── downloads.json ────────────────────────────────────────────
+          DL_JSON='{}'
 
-          # Collect files safely (nullglob prevents literal glob on empty dir)
-          shopt -s nullglob
-          FILES=( "$RELEASE_DIR"/* )
-          shopt -u nullglob
+          add_download() {
+            local platform="$1" arch="$2" format="$3" pattern="$4"
+            local filename
+            filename=$(echo "$ASSETS" | grep -E "$pattern" | head -1 || true)
+            [ -z "$filename" ] && return 0
+            DL_JSON=$(echo "$DL_JSON" | jq \
+              --arg p "$platform" --arg a "$arch" --arg f "$format" --arg n "$filename" \
+              '.[$p][$a][$f] = $n')
+          }
 
-          if [ ${#FILES[@]} -eq 0 ]; then
-            echo "::error::No release files found. All builds may have failed."
-            exit 1
-          fi
+          add_download "macos"   "aarch64" "dmg"      "_aarch64\.dmg$"
+          add_download "macos"   "x86_64"  "dmg"      "_x86_64\.dmg$"
+          add_download "linux"   "x86_64"  "appimage" "_amd64\.AppImage$"
+          add_download "linux"   "x86_64"  "deb"      "_amd64\.deb$"
+          add_download "linux"   "aarch64" "appimage" "_arm64\.AppImage$"
+          add_download "windows" "x86_64"  "exe"      "_x64-setup\.exe$"
+          add_download "windows" "aarch64" "exe"      "_arm64-setup\.exe$"
 
-          gh release create "$TAG" \
+          jq -n \
+            --arg version "$VERSION" \
+            --argjson platforms "$DL_JSON" \
+            '{version: $version, platforms: $platforms}' \
+            > "$RELEASE_DIR/downloads.json"
+
+          echo "=== downloads.json ==="
+          cat "$RELEASE_DIR/downloads.json"
+
+          # Upload manifests
+          gh release upload "$TAG" \
             --repo "$REPO" \
-            --title "Hermes IDE $TAG" \
-            --notes "Download the installer for your platform, or update in-app. Full changelog: https://hermes-ide.com/changelog" \
-            "${FILES[@]}"
+            --clobber \
+            "$RELEASE_DIR/latest.json" \
+            "$RELEASE_DIR/downloads.json"
+
+          rm -rf "$SIG_DIR"

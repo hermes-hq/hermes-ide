@@ -1,0 +1,48 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System dependencies for Tauri on Linux
+RUN apt-get update && apt-get install -y \
+    curl build-essential pkg-config \
+    libwebkit2gtk-4.1-dev \
+    libgtk-3-dev \
+    libsoup-3.0-dev \
+    libjavascriptcoregtk-4.1-dev \
+    libappindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    libfuse2 \
+    libssl-dev \
+    file \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 20
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust (stable)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /build
+
+# Entrypoint: receives Rust target as argument
+# Source is mounted at /src (read-only), output goes to /out
+ENTRYPOINT ["bash", "-c", "\
+  set -euo pipefail && \
+  RUST_TARGET=\"${1:-x86_64-unknown-linux-gnu}\" && \
+  echo \"[linux-builder] Syncing source...\" && \
+  tar -C /src --exclude='./src-tauri/target' --exclude='./node_modules' --exclude='./.git' -cf - . | tar -C /build -xf - && \
+  echo \"[linux-builder] Installing npm dependencies...\" && \
+  npm ci --prefer-offline && \
+  echo \"[linux-builder] Building for $RUST_TARGET...\" && \
+  npx tauri build --target \"$RUST_TARGET\" && \
+  echo \"[linux-builder] Collecting artifacts...\" && \
+  TARGET_DIR=\"src-tauri/target/$RUST_TARGET/release/bundle\" && \
+  for f in \"$TARGET_DIR\"/appimage/*.AppImage \"$TARGET_DIR\"/appimage/*.AppImage.sig \"$TARGET_DIR\"/deb/*.deb; do \
+    [ -f \"$f\" ] && cp \"$f\" /out/ && echo \"  -> $(basename $f)\"; \
+  done && \
+  echo \"[linux-builder] Done.\" \
+", "--"]

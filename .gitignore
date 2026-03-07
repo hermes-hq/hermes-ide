@@ -31,3 +31,7 @@ playwright-report/
 # Logs
 *.log
 npm-debug.log*
+
+# Local release
+release-artifacts/
+scripts/release-local.env
