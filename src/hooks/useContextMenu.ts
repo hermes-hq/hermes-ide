@@ -71,14 +71,14 @@ export function buildSessionMenuItems(
       }),
     );
     groupChildren.push(separator());
-    groupChildren.push(menuItem("session.new-group", "New Group..."));
+    groupChildren.push(menuItem("session.new-group", "New Project..."));
     if (session.group) {
       groupChildren.push(separator());
-      groupChildren.push(menuItem("session.remove-group", "Remove from Group"));
+      groupChildren.push(menuItem("session.remove-group", "Remove from Project"));
     }
-    items.push(subMenu("Group", groupChildren));
+    items.push(subMenu("Project", groupChildren));
   } else {
-    items.push(menuItem("session.new-group", "New Group..."));
+    items.push(menuItem("session.new-group", "New Project..."));
   }
 
   items.push(separator());

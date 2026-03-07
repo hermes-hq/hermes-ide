@@ -23,14 +23,14 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "{mod}/", action: "Keyboard Shortcuts" },
       { keys: "{mod}J", action: "Prompt Composer" },
       { keys: "{mod}{shift}C", action: "Copy Context" },
-      { keys: "{mod}{shift}F", action: "Search Project" },
+      { keys: "{mod}{shift}F", action: "Search in Folder" },
       { keys: "{mod}{shift}Z", action: "Toggle Flow Mode" },
     ],
   },
   {
     label: "Panels",
     shortcuts: [
-      { keys: "{mod}B", action: "Toggle Sessions Sidebar" },
+      { keys: "{mod}B", action: "Toggle Sidebar" },
       { keys: "{mod}E", action: "Toggle Context Panel" },
       { keys: "{mod}P", action: "Processes" },
       { keys: "{mod}G", action: "Git" },

@@ -393,10 +393,10 @@ describe("ShortcutsPanel accuracy", () => {
   const allShortcuts = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
   const findShortcut = (keys: string) => allShortcuts.find((s) => s.keys === keys);
 
-  it("{mod}{shift}F is mapped to Search Project, not Flow Mode", () => {
+  it("{mod}{shift}F is mapped to Search in Folder, not Flow Mode", () => {
     const s = findShortcut("{mod}{shift}F");
     expect(s).toBeDefined();
-    expect(s!.action).toBe("Search Project");
+    expect(s!.action).toBe("Search in Folder");
     expect(s!.action).not.toContain("Flow");
   });
 

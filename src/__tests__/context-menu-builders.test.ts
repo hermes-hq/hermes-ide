@@ -99,7 +99,7 @@ describe("buildSessionMenuItems", () => {
 
   it("includes group submenu when groups exist", () => {
     const items = buildSessionMenuItems(session, ["dev", "staging"]);
-    const groupSub = items.find((i) => i.label === "Group");
+    const groupSub = items.find((i) => i.label === "Project");
     expect(groupSub).toBeDefined();
     expect(groupSub!.children).toBeDefined();
     expect(groupSub!.children!.length).toBeGreaterThanOrEqual(2);
@@ -108,14 +108,14 @@ describe("buildSessionMenuItems", () => {
   it("includes Remove from Group when session has a group", () => {
     const grouped = { id: "s1", group: "dev", phase: "idle" };
     const items = buildSessionMenuItems(grouped, ["dev"]);
-    const groupSub = items.find((i) => i.label === "Group");
+    const groupSub = items.find((i) => i.label === "Project");
     const remove = groupSub?.children?.find((c: { id: string }) => c.id === "session.remove-group");
     expect(remove).toBeDefined();
   });
 
   it("does not include Remove from Group when no group", () => {
     const items = buildSessionMenuItems(session, ["dev"]);
-    const groupSub = items.find((i) => i.label === "Group");
+    const groupSub = items.find((i) => i.label === "Project");
     const remove = groupSub?.children?.find((c: { id: string }) => c.id === "session.remove-group");
     expect(remove).toBeUndefined();
   });
