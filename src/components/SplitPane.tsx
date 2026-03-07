@@ -4,10 +4,6 @@ import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
-import { SessionPaneTabs } from "./SessionPaneTabs";
-import type { SessionPaneTab } from "./SessionPaneTabs";
-import { SessionGitPanel } from "./SessionGitPanel";
-import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths } from "../terminal/TerminalPool";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
@@ -70,9 +66,6 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
   const paneRef = useRef<HTMLDivElement>(null);
   const [dropZone, setDropZone] = useState<DropZone>(null);
   const [fileDragOver, setFileDragOver] = useState(false);
-  const [activeTab, setActiveTab] = useState<SessionPaneTab>("terminal");
-  const gitSummary = useSessionGitSummary(sessionId, session?.phase !== "destroyed");
-
   // Keep refs for values used inside the Tauri handler to avoid re-registering
   const layoutRef = useRef(state.layout.root);
   layoutRef.current = state.layout.root;
@@ -262,28 +255,13 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           />
         )}
       </div>
-      <SessionPaneTabs
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        sessionId={sessionId}
-        hasGitRepo={!!gitSummary.branch}
-        gitChangeCount={gitSummary.changeCount}
-        gitBranch={gitSummary.branch}
-      />
       <div className="split-pane-content">
         <div
           className="split-pane-terminal"
-          style={{ display: activeTab === "terminal" ? "flex" : "none" }}
           onContextMenu={(e) => showTerminalMenu(e, buildTerminalMenuItems(terminalHasSelection(sessionId)))}
         >
           <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
         </div>
-        {activeTab === "git" && (
-          <div className="split-pane-panel">
-            {/* TODO: Wire realmId from session projects once integration agent provides it */}
-            <SessionGitPanel sessionId={sessionId} realmId="" />
-          </div>
-        )}
       </div>
 
       {/* Drag capture overlay — sits above xterm canvas during drags */}

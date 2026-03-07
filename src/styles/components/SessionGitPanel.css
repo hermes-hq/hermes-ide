@@ -10,7 +10,12 @@
   font-size: var(--text-sm);
   color: var(--text-1);
   overflow: hidden;
-  flex: 1;
+  /* Sidebar dimensions when rendered from App.tsx */
+  width: var(--sidebar-w);
+  min-width: 200px;
+  max-width: 400px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
 }
 
 .session-git-panel-toolbar {

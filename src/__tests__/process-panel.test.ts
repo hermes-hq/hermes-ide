@@ -110,9 +110,9 @@ describe("Reducer: SET_LEFT_TAB", () => {
 });
 
 describe("Initial state", () => {
-  it("has processPanelOpen=false and activeLeftTab=sessions", () => {
+  it("has processPanelOpen=false and activeLeftTab=terminal", () => {
     expect(initialState.ui.processPanelOpen).toBe(false);
-    expect(initialState.ui.activeLeftTab).toBe("sessions");
+    expect(initialState.ui.activeLeftTab).toBe("terminal");
   });
 });
 

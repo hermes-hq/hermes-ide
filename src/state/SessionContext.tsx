@@ -62,7 +62,7 @@ interface SessionState {
     fileExplorerOpen: boolean;
     searchPanelOpen: boolean;
     composerOpen: boolean;
-    activeLeftTab: "sessions" | "processes" | "git" | "files" | "search";
+    activeLeftTab: "sessions" | "terminal" | "processes" | "git" | "files" | "search";
   };
 }
 
@@ -182,7 +182,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ui: {
           ...state.ui,
           sessionListCollapsed: !state.ui.sessionListCollapsed,
-          activeLeftTab: "sessions" as const,
+          activeLeftTab: "terminal" as const,
           processPanelOpen: !state.ui.sessionListCollapsed ? state.ui.processPanelOpen : false,
           gitPanelOpen: !state.ui.sessionListCollapsed ? state.ui.gitPanelOpen : false,
           fileExplorerOpen: !state.ui.sessionListCollapsed ? state.ui.fileExplorerOpen : false,
@@ -343,6 +343,21 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
     case "SET_LEFT_TAB": {
       const tab = action.tab;
+      // "terminal" closes all sidebar panels — full-width terminal
+      if (tab === "terminal") {
+        return {
+          ...state,
+          ui: {
+            ...state.ui,
+            activeLeftTab: "terminal",
+            processPanelOpen: false,
+            gitPanelOpen: false,
+            fileExplorerOpen: false,
+            searchPanelOpen: false,
+            sessionListCollapsed: true,
+          },
+        };
+      }
       const alreadyActive =
         (tab === "processes" && state.ui.processPanelOpen) ||
         (tab === "git" && state.ui.gitPanelOpen) ||
@@ -350,7 +365,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         (tab === "search" && state.ui.searchPanelOpen) ||
         (tab === "sessions" && !state.ui.sessionListCollapsed && !state.ui.processPanelOpen && !state.ui.gitPanelOpen && !state.ui.fileExplorerOpen && !state.ui.searchPanelOpen);
       if (alreadyActive) {
-        // Clicking the active tab collapses it
+        // Clicking the active tab collapses it → go to terminal view
         return {
           ...state,
           ui: {
@@ -360,7 +375,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
             fileExplorerOpen: false,
             searchPanelOpen: false,
             sessionListCollapsed: true,
-            activeLeftTab: tab,
+            activeLeftTab: "terminal",
           },
         };
       }
@@ -429,6 +444,23 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
 
+    // ─── Sub-view panel (keeps session list visible) ──────────────────
+    case "SET_SUBVIEW_PANEL": {
+      const panel = action.panel;
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          gitPanelOpen: panel === "git",
+          fileExplorerOpen: panel === "files",
+          searchPanelOpen: panel === "search",
+          processPanelOpen: false,
+          // Session list stays open — don't touch sessionListCollapsed
+          activeLeftTab: panel ?? "sessions",
+        },
+      };
+    }
+
     // ─── Close confirmation actions ───────────────────────────────────
     case "REQUEST_CLOSE_SESSION":
       return { ...state, pendingCloseSessionId: action.id };
@@ -479,7 +511,7 @@ export const initialState: SessionState = {
     fileExplorerOpen: false,
     searchPanelOpen: false,
     composerOpen: false,
-    activeLeftTab: "sessions" as const,
+    activeLeftTab: "terminal" as const,
   },
 };
 

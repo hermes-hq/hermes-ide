@@ -160,13 +160,15 @@ export type SessionAction =
   | { type: "SET_SKIP_CLOSE_CONFIRM"; skip: boolean }
   // Process panel actions
   | { type: "TOGGLE_PROCESS_PANEL" }
-  | { type: "SET_LEFT_TAB"; tab: "sessions" | "processes" | "git" | "files" | "search" }
+  | { type: "SET_LEFT_TAB"; tab: "sessions" | "terminal" | "processes" | "git" | "files" | "search" }
   // Git panel actions
   | { type: "TOGGLE_GIT_PANEL" }
   // File explorer actions
   | { type: "TOGGLE_FILE_EXPLORER" }
   // Search panel actions
   | { type: "TOGGLE_SEARCH_PANEL" }
+  // Sub-view panel (opens panel without collapsing session list)
+  | { type: "SET_SUBVIEW_PANEL"; panel: "git" | "files" | "search" | null }
   // Composer actions
   | { type: "OPEN_COMPOSER" }
   | { type: "CLOSE_COMPOSER" };

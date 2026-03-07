@@ -9,7 +9,9 @@ import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
-import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, ProcessesIcon, FilesIcon, SearchIcon, SettingsIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, SettingsIcon } from "./components/ActivityBar";
+import type { SessionView } from "./components/SessionList";
+
 import { ProcessPanel } from "./components/ProcessPanel";
 import { FileExplorerPanel } from "./components/FileExplorerPanel";
 import { SearchPanel } from "./components/SearchPanel";
@@ -29,6 +31,7 @@ import { ProjectPicker } from "./components/ProjectPicker";
 import { SessionCreator } from "./components/SessionCreator";
 import { PromptComposer } from "./components/PromptComposer";
 import { SplitLayout } from "./components/SplitLayout";
+import { SessionGitPanel } from "./components/SessionGitPanel";
 import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { getDraggedSession } from "./components/SplitPane";
@@ -280,29 +283,35 @@ function AppContent() {
             side="left"
             tabs={[
               { id: "sessions", label: `Sessions (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
-              { id: "processes", label: `Processes (${fmt("{mod}P")})`, icon: ProcessesIcon },
-              { id: "files", label: `Files (${fmt("{mod}F")})`, icon: FilesIcon },
-              { id: "search", label: `Search (${fmt("{mod}{shift}F")})`, icon: SearchIcon },
             ]}
-            activeTabId={
-              ui.searchPanelOpen ? "search" :
-              ui.fileExplorerOpen ? "files" :
-              ui.processPanelOpen ? "processes" :
-              ui.sessionListCollapsed ? null : "sessions"
-            }
-            onTabClick={(tabId) => dispatch({ type: "SET_LEFT_TAB", tab: tabId as "sessions" | "processes" | "git" | "files" | "search" })}
+            activeTabId={!ui.sessionListCollapsed ? "sessions" : null}
+            onTabClick={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
             topAction={{ icon: PlusIcon, label: `New Session (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen(true) }}
             bottomAction={{ icon: SettingsIcon, label: "Settings", onClick: () => setSettingsOpen("general") }}
           />
         )}
-        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !ui.fileExplorerOpen && !ui.searchPanelOpen && (
+        {/* Session list sidebar — sub-view buttons are inline under the active session */}
+        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && (
           <SessionList
             sessions={sessions}
             activeSessionId={state.activeSessionId}
             onSelect={setActive}
             onClose={requestCloseSession}
             onNewSession={() => setSessionCreatorOpen(true)}
+            activeView={
+              ui.searchPanelOpen ? "search" :
+              ui.fileExplorerOpen ? "files" :
+              ui.gitPanelOpen ? "git" :
+              null
+            }
+            onViewChange={(view: SessionView) => {
+              dispatch({ type: "SET_SUBVIEW_PANEL", panel: view });
+            }}
+            gitBadge={activeGitSummary.changeCount || undefined}
           />
+        )}
+        {ui.gitPanelOpen && !ui.flowMode && state.activeSessionId && (
+          <SessionGitPanel sessionId={state.activeSessionId} realmId="" />
         )}
         {ui.processPanelOpen && !ui.flowMode && (
           <ProcessPanel visible={ui.processPanelOpen} />

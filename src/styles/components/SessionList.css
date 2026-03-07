@@ -199,6 +199,88 @@
 .session-group-header:hover { background: var(--bg-2); }
 .session-group-cost { color: var(--text-3); font-size: var(--text-sm); }
 
+/* ─── Session Sub-Views (nested inside active session) ── */
+
+.session-item-wrapper {
+  border-radius: var(--radius);
+}
+
+.session-item-wrapper-active {
+  background: var(--bg-active);
+  border-radius: var(--radius);
+}
+
+/* When wrapped, the session-item itself doesn't need its own background */
+.session-item-wrapper-active .session-item-active {
+  background: none;
+}
+.session-item-wrapper-active .session-item-active:hover {
+  background: none;
+}
+
+.session-subviews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px 8px 38px; /* 38px = indent past the color dot + number */
+}
+
+.session-subview-btn {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.session-subview-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+.session-subview-active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.session-subview-active:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.session-subview-btn svg {
+  flex-shrink: 0;
+}
+
+.session-subview-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 8px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--bg-0);
+  min-width: 13px;
+  height: 13px;
+  line-height: 13px;
+  text-align: center;
+  border-radius: var(--radius-pill);
+  padding: 0 3px;
+  font-family: var(--font-ui);
+  pointer-events: none;
+}
+
 /* ─── Inline Input Overlay (rename / new group) ──────── */
 
 .session-inline-input-overlay {

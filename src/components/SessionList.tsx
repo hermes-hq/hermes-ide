@@ -7,12 +7,19 @@ import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "
 import { fmt } from "../utils/platform";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 
+export type SessionView = "git" | "files" | "search" | null;
+
 interface SessionListProps {
   sessions: SessionData[];
   activeSessionId: string | null;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onNewSession?: () => void;
+  /** Currently active sub-view panel for the active session */
+  activeView: SessionView;
+  onViewChange: (view: SessionView) => void;
+  /** Number of git changes for the active session */
+  gitBadge?: number;
 }
 
 function timeAgo(dateStr: string): string {
@@ -84,7 +91,7 @@ function SessionItemGitInfo({ sessionId, isDestroyed }: { sessionId: string; isD
   );
 }
 
-export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession }: SessionListProps) {
+export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, activeView, onViewChange, gitBadge }: SessionListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
@@ -199,39 +206,82 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     requestAnimationFrame(() => ghost.remove());
   }, []);
 
-  const renderSession = (session: SessionData, idx: number) => (
-    <div
-      key={session.id}
-      className={`session-item ${session.id === activeSessionId ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
-      draggable={session.phase !== "destroyed"}
-      onDragStart={(e) => handleDragStart(e, session)}
-      onClick={() => onSelect(session.id)}
-      onContextMenu={(e) => handleContextMenu(e, session.id)}
-    >
-      <div className="session-item-indicator">
-        <span className="session-color-dot" style={{ background: session.phase === "destroyed" ? "var(--text-3)" : session.color }} />
-        <span className="session-number">{idx < 9 ? idx + 1 : ""}</span>
-      </div>
-      <div className="session-item-info">
-        <div className="session-item-name">{session.label}</div>
-        <div className="session-item-meta">
-          {session.detected_agent && (
-            <span className="session-agent-tag">{session.detected_agent.name}</span>
-          )}
-          <span className="session-phase-tag" data-phase={session.phase}>
-            {session.phase === "busy" ? "working" : session.phase === "shell_ready" ? "ready" : session.phase === "creating" ? "starting" : session.phase}
-          </span>
-          <span className="session-age">{timeAgo(session.last_activity_at)}</span>
+  const toggleView = useCallback((view: "git" | "files" | "search") => {
+    onViewChange(activeView === view ? null : view);
+  }, [activeView, onViewChange]);
+
+  const renderSession = (session: SessionData, idx: number) => {
+    const isActive = session.id === activeSessionId;
+    return (
+      <div key={session.id} className={`session-item-wrapper${isActive ? " session-item-wrapper-active" : ""}`}>
+        <div
+          className={`session-item ${isActive ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
+          draggable={session.phase !== "destroyed"}
+          onDragStart={(e) => handleDragStart(e, session)}
+          onClick={() => onSelect(session.id)}
+          onContextMenu={(e) => handleContextMenu(e, session.id)}
+        >
+          <div className="session-item-indicator">
+            <span className="session-color-dot" style={{ background: session.phase === "destroyed" ? "var(--text-3)" : session.color }} />
+            <span className="session-number">{idx < 9 ? idx + 1 : ""}</span>
+          </div>
+          <div className="session-item-info">
+            <div className="session-item-name">{session.label}</div>
+            <div className="session-item-meta">
+              {session.detected_agent && (
+                <span className="session-agent-tag">{session.detected_agent.name}</span>
+              )}
+              <span className="session-phase-tag" data-phase={session.phase}>
+                {session.phase === "busy" ? "working" : session.phase === "shell_ready" ? "ready" : session.phase === "creating" ? "starting" : session.phase}
+              </span>
+              <span className="session-age">{timeAgo(session.last_activity_at)}</span>
+            </div>
+            <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed"} />
+          </div>
+          <button
+            className="session-item-close"
+            onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
+            title="End session"
+          >&times;</button>
         </div>
-        <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed"} />
+        {/* Sub-view toolbar — only shown for the active session */}
+        {isActive && session.phase !== "destroyed" && (
+          <div className="session-subviews">
+            {([
+              { id: "git" as const, title: "Git", badge: gitBadge, icon: (
+                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+                  <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
+                </svg>
+              )},
+              { id: "files" as const, title: "Files", icon: (
+                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                  <path d="M2 5C2 3.9 2.9 3 4 3H7L9 5H14C15.1 5 16 5.9 16 7V13C16 14.1 15.1 15 14 15H4C2.9 15 2 14.1 2 13V5Z" />
+                </svg>
+              )},
+              { id: "search" as const, title: "Search", icon: (
+                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+                  <circle cx="7.5" cy="7.5" r="5" />
+                  <line x1="11" y1="11" x2="15.5" y2="15.5" />
+                </svg>
+              )},
+            ]).map((item) => (
+              <button
+                key={item.id}
+                className={`session-subview-btn${activeView === item.id ? " session-subview-active" : ""}`}
+                onClick={() => toggleView(item.id)}
+                title={item.title}
+              >
+                {item.icon}
+                {item.badge != null && item.badge > 0 && (
+                  <span className="session-subview-badge">{item.badge}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <button
-        className="session-item-close"
-        onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
-        title="End session"
-      >&times;</button>
-    </div>
-  );
+    );
+  };
 
   // Pre-compute session index map for keyboard shortcuts (concurrent-mode safe)
   const sessionIndexMap = useMemo(() => {
