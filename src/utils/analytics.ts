@@ -1,27 +1,19 @@
-import { init, trackEvent } from "@aptabase/web";
+import { trackEvent } from "@aptabase/tauri";
 import { getSetting, setSetting } from "../api/settings";
-
-const APP_ID = "A-EU-1922161061";
 
 let enabled = false;
 
 export async function initAnalytics(): Promise<void> {
   const stored = await getSetting("telemetry_enabled").catch(() => null);
   enabled = stored === "true";
-  if (enabled) {
-    init(APP_ID);
-  }
 }
 
 export function setAnalyticsEnabled(value: boolean): void {
   enabled = value;
   setSetting("telemetry_enabled", value ? "true" : "false").catch(console.error);
-  if (value) {
-    init(APP_ID);
-  }
 }
 
-function track(name: string, props?: Record<string, string | number | boolean>): void {
+function track(name: string, props?: Record<string, string | number>): void {
   if (!enabled) return;
   try {
     trackEvent(name, props);
@@ -38,7 +30,10 @@ export function trackSessionCreated(props: {
   execution_mode: string;
   has_ai_provider: boolean;
 }): void {
-  track("session_created", props);
+  track("session_created", {
+    execution_mode: props.execution_mode,
+    has_ai_provider: props.has_ai_provider ? 1 : 0,
+  });
 }
 
 export function trackFeatureUsed(feature: string): void {

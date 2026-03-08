@@ -1,6 +1,5 @@
 import { vi } from "vitest";
 
-vi.mock("@aptabase/web", () => ({
+vi.mock("@aptabase/tauri", () => ({
   trackEvent: vi.fn(),
-  init: vi.fn(),
 }));

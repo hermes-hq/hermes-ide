@@ -35,7 +35,7 @@ export function OnboardingWizard() {
   const [selectedScale, setSelectedScale] = useState("default");
 
   // Privacy step
-  const [analyticsOptIn, setAnalyticsOptIn] = useState(false);
+  const [analyticsOptIn, setAnalyticsOptIn] = useState(true);
   const [policyAccepted, setPolicyAccepted] = useState(false);
 
   useEffect(() => {

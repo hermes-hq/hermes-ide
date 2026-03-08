@@ -28,6 +28,7 @@
     "core:window:allow-destroy",
     "updater:default",
     "process:allow-restart",
-    "process:allow-exit"
+    "process:allow-exit",
+    "aptabase:allow-track-event"
   ]
 }
