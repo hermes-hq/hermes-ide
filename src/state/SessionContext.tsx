@@ -914,7 +914,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const saveWorkspace = useCallback(async () => {
     const current = stateRef.current;
     const liveSessions = Object.values(current.sessions).filter((s) => s.phase !== "destroyed");
-    if (liveSessions.length === 0) return;
+    if (liveSessions.length === 0) {
+      // Clear stale workspace so closed sessions don't reappear on next launch
+      await setSetting("saved_workspace", "").catch(console.error);
+      return;
+    }
 
     try {
       // 1. Save scrollback snapshots for all live sessions (without closing them)
