@@ -128,9 +128,7 @@ fn detect_js_frameworks(content: &str) -> Vec<String> {
         ("electron", "Electron"),
     ];
     for (key, name) in checks {
-        if content.contains(&format!("\"{}\"", key))
-            || content.contains(&format!("\"@{}/", key))
-        {
+        if content.contains(&format!("\"{}\"", key)) || content.contains(&format!("\"@{}/", key)) {
             frameworks.push(name.to_string());
         }
     }
@@ -291,8 +289,7 @@ pub fn scan_directory(
             if let Some(project) = detect_project_at_path(entry.path()) {
                 // Save to database
                 let db = state.db.lock().map_err(|e| e.to_string())?;
-                let languages_json =
-                    serde_json::to_string(&project.languages).unwrap_or_default();
+                let languages_json = serde_json::to_string(&project.languages).unwrap_or_default();
                 let frameworks_json =
                     serde_json::to_string(&project.frameworks).unwrap_or_default();
                 db.upsert_project(
@@ -323,10 +320,8 @@ pub fn detect_project(
     loop {
         if let Some(project) = detect_project_at_path(&current) {
             let db = state.db.lock().map_err(|e| e.to_string())?;
-            let languages_json =
-                serde_json::to_string(&project.languages).unwrap_or_default();
-            let frameworks_json =
-                serde_json::to_string(&project.frameworks).unwrap_or_default();
+            let languages_json = serde_json::to_string(&project.languages).unwrap_or_default();
+            let frameworks_json = serde_json::to_string(&project.frameworks).unwrap_or_default();
             db.upsert_project(
                 &project.id,
                 &project.path,

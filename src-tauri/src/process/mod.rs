@@ -149,9 +149,14 @@ fn get_hermes_child_pids(sys: &System) -> HashSet<u32> {
 
 fn get_uid_for_process(process: &sysinfo::Process) -> Option<u32> {
     #[cfg(unix)]
-    { process.user_id().map(|uid| **uid) }
+    {
+        process.user_id().map(|uid| **uid)
+    }
     #[cfg(windows)]
-    { let _ = process; None }
+    {
+        let _ = process;
+        None
+    }
 }
 
 fn get_username_for_uid(users: &Users, process: &sysinfo::Process) -> String {
@@ -256,8 +261,15 @@ pub fn list_processes(state: State<'_, AppState>) -> Result<ProcessSnapshot, Str
             pid: p,
             ppid,
             name,
-            exe_path: process.exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
-            cmd_line: process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect(),
+            exe_path: process
+                .exe()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            cmd_line: process
+                .cmd()
+                .iter()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect(),
             cpu_percent,
             memory_bytes,
             memory_percent,
@@ -295,7 +307,10 @@ pub fn kill_process(state: State<'_, AppState>, pid: u32, signal: String) -> Res
         let name = process.name().to_string_lossy().to_string();
         let uid = get_uid_for_process(process);
         if is_protected(&name, pid, uid) {
-            return Err(format!("Cannot kill protected process: {} (PID {})", name, pid));
+            return Err(format!(
+                "Cannot kill protected process: {} (PID {})",
+                name, pid
+            ));
         }
     }
     drop(sys);
@@ -339,7 +354,11 @@ pub fn kill_process(state: State<'_, AppState>, pid: u32, signal: String) -> Res
 }
 
 #[tauri::command]
-pub fn kill_process_tree(state: State<'_, AppState>, pid: u32, signal: String) -> Result<(), String> {
+pub fn kill_process_tree(
+    state: State<'_, AppState>,
+    pid: u32,
+    signal: String,
+) -> Result<(), String> {
     let sys = state.sys.lock().map_err(|e| e.to_string())?;
 
     // Check if root is protected
@@ -347,7 +366,10 @@ pub fn kill_process_tree(state: State<'_, AppState>, pid: u32, signal: String) -
         let name = process.name().to_string_lossy().to_string();
         let uid = get_uid_for_process(process);
         if is_protected(&name, pid, uid) {
-            return Err(format!("Cannot kill protected process tree: {} (PID {})", name, pid));
+            return Err(format!(
+                "Cannot kill protected process tree: {} (PID {})",
+                name, pid
+            ));
         }
     }
 
@@ -423,7 +445,8 @@ pub fn get_process_detail(state: State<'_, AppState>, pid: u32) -> Result<Proces
     let hermes_pids = get_hermes_child_pids(&sys);
     let total_memory = sys.total_memory();
 
-    let process = sys.process(Pid::from_u32(pid))
+    let process = sys
+        .process(Pid::from_u32(pid))
         .ok_or_else(|| format!("Process {} not found", pid))?;
 
     let name = process.name().to_string_lossy().to_string();
@@ -443,8 +466,15 @@ pub fn get_process_detail(state: State<'_, AppState>, pid: u32) -> Result<Proces
         pid,
         ppid,
         name,
-        exe_path: process.exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
-        cmd_line: process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect(),
+        exe_path: process
+            .exe()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        cmd_line: process
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect(),
         cpu_percent: process.cpu_usage(),
         memory_bytes,
         memory_percent,
@@ -539,8 +569,20 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn protected_process_names_are_complete_macos() {
-        for name in &["launchd", "kernel_task", "WindowServer", "loginwindow", "mds", "coreaudiod", "securityd"] {
-            assert!(is_protected(name, 500, Some(501)), "{} should be protected", name);
+        for name in &[
+            "launchd",
+            "kernel_task",
+            "WindowServer",
+            "loginwindow",
+            "mds",
+            "coreaudiod",
+            "securityd",
+        ] {
+            assert!(
+                is_protected(name, 500, Some(501)),
+                "{} should be protected",
+                name
+            );
         }
     }
 
@@ -548,15 +590,29 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn protected_process_names_are_complete_linux() {
         for name in &["systemd", "init", "kthreadd", "dbus-daemon", "journald"] {
-            assert!(is_protected(name, 500, Some(501)), "{} should be protected", name);
+            assert!(
+                is_protected(name, 500, Some(501)),
+                "{} should be protected",
+                name
+            );
         }
     }
 
     #[test]
     #[cfg(target_os = "windows")]
     fn protected_process_names_are_complete_windows() {
-        for name in &["csrss.exe", "lsass.exe", "svchost.exe", "winlogon.exe", "dwm.exe"] {
-            assert!(is_protected(name, 500, None), "{} should be protected", name);
+        for name in &[
+            "csrss.exe",
+            "lsass.exe",
+            "svchost.exe",
+            "winlogon.exe",
+            "dwm.exe",
+        ] {
+            assert!(
+                is_protected(name, 500, None),
+                "{} should be protected",
+                name
+            );
         }
     }
 }

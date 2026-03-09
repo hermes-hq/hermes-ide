@@ -1,8 +1,8 @@
-pub mod models;
-pub mod patterns;
 pub mod adapters;
 pub mod analyzer;
 pub mod commands;
+pub mod models;
+pub mod patterns;
 
 // ─── Re-exports ─────────────────────────────────────────────────────
 // Maintain the existing public API so that `lib.rs`, `db/mod.rs`, and other
@@ -37,7 +37,10 @@ pub struct PtyManager {
 
 impl PtyManager {
     pub fn new() -> Self {
-        Self { sessions: HashMap::new(), session_counter: 0 }
+        Self {
+            sessions: HashMap::new(),
+            session_counter: 0,
+        }
     }
 
     /// Send a lightweight context nudge to a session's PTY if an AI agent is detected.
@@ -48,7 +51,10 @@ impl PtyManager {
             None => return false,
         };
 
-        let has_agent = pty.session.lock().ok()
+        let has_agent = pty
+            .session
+            .lock()
+            .ok()
             .map(|s| s.detected_agent.is_some())
             .unwrap_or(false);
 
@@ -56,7 +62,8 @@ impl PtyManager {
             return false;
         }
 
-        let msg = "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
+        let msg =
+            "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
         if let Ok(mut w) = pty.writer.lock() {
             let ok = w.write_all(msg.as_bytes()).is_ok() && w.flush().is_ok();
             ok
@@ -96,7 +103,9 @@ impl PtyManager {
         }
 
         // Determine provider-specific nudge message
-        let provider_name = session_guard.detected_agent.as_ref()
+        let provider_name = session_guard
+            .detected_agent
+            .as_ref()
             .map(|a| a.name.clone())
             .unwrap_or_default();
 
@@ -189,9 +198,13 @@ pub(crate) fn get_working_directory() -> String {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| {
             #[cfg(windows)]
-            { std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string()) }
+            {
+                std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string())
+            }
             #[cfg(not(windows))]
-            { "/".to_string() }
+            {
+                "/".to_string()
+            }
         })
 }
 
@@ -238,7 +251,9 @@ mod tests {
         assert!(!is_input_needed_line("Building project..."));
         assert!(!is_input_needed_line("const x = 42;"));
         // Don't match bare "?" in long code lines
-        assert!(!is_input_needed_line("const isAllowed = user.role === 'admin' ? true : false;"));
+        assert!(!is_input_needed_line(
+            "const isAllowed = user.role === 'admin' ? true : false;"
+        ));
     }
 
     #[test]
@@ -331,7 +346,10 @@ mod tests {
         };
         analyzer.apply_analysis(analysis);
         assert!(!analyzer.is_busy);
-        assert!(matches!(analyzer.pending_phase, Some(SessionPhase::NeedsInput)));
+        assert!(matches!(
+            analyzer.pending_phase,
+            Some(SessionPhase::NeedsInput)
+        ));
     }
 
     #[test]

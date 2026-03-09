@@ -67,12 +67,10 @@ pub fn ensure_hermes_gitignore(repo_path: &str) -> Result<(), String> {
             .map_err(|e| format!("Failed to read .gitignore: {}", e))?;
 
         // Check whether `.hermes/` (or `.hermes`) is already ignored
-        let already_ignored = content
-            .lines()
-            .any(|line| {
-                let trimmed = line.trim();
-                trimmed == ".hermes/" || trimmed == ".hermes"
-            });
+        let already_ignored = content.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed == ".hermes/" || trimmed == ".hermes"
+        });
 
         if already_ignored {
             return Ok(());
@@ -225,8 +223,12 @@ pub fn remove_worktree(
     // Step 3: Clean up the directory if it still exists
     let wt = Path::new(worktree_path);
     if wt.exists() {
-        fs::remove_dir_all(wt)
-            .map_err(|e| format!("Failed to remove worktree directory '{}': {}", worktree_path, e))?;
+        fs::remove_dir_all(wt).map_err(|e| {
+            format!(
+                "Failed to remove worktree directory '{}': {}",
+                worktree_path, e
+            )
+        })?;
     }
 
     Ok(())
@@ -266,9 +268,7 @@ pub fn is_branch_available(
         .map_err(|e| format!("Failed to open repository at '{}': {}", repo_path, e))?;
 
     // Check the main worktree's HEAD
-    let main_path = repo
-        .workdir()
-        .map(|p| p.to_string_lossy().to_string());
+    let main_path = repo.workdir().map(|p| p.to_string_lossy().to_string());
 
     let should_skip_main = match (&main_path, exclude_worktree_path) {
         (Some(main), Some(exclude)) => {
@@ -683,7 +683,11 @@ mod tests {
         assert!(branch.is_some());
         let name = branch.unwrap();
         // Could be "main" or "master" depending on git config
-        assert!(name == "main" || name == "master", "unexpected branch: {}", name);
+        assert!(
+            name == "main" || name == "master",
+            "unexpected branch: {}",
+            name
+        );
     }
 
     #[test]

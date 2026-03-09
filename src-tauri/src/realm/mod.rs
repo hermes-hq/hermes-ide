@@ -1,5 +1,5 @@
-pub mod cartography;
 pub mod attunement;
+pub mod cartography;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -48,8 +48,8 @@ pub fn create_realm(
     name: Option<String>,
 ) -> Result<Realm, String> {
     // Canonicalize so "." / "./" becomes an absolute path
-    let canonical = std::fs::canonicalize(&path)
-        .map_err(|e| format!("Cannot resolve path {}: {}", path, e))?;
+    let canonical =
+        std::fs::canonicalize(&path).map_err(|e| format!("Cannot resolve path {}: {}", path, e))?;
     let resolved_path = canonical.to_string_lossy().to_string();
 
     if !canonical.is_dir() {
@@ -57,7 +57,8 @@ pub fn create_realm(
     }
 
     let realm_name = name.unwrap_or_else(|| {
-        canonical.file_name()
+        canonical
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string()
@@ -68,14 +69,30 @@ pub fn create_realm(
     // Run surface scan immediately to get languages/frameworks
     let scan_result = cartography::surface_scan(&resolved_path);
 
-    let languages_json = serde_json::to_string(&scan_result.languages).unwrap_or_else(|_| "[]".to_string());
-    let frameworks_json = serde_json::to_string(&scan_result.frameworks).unwrap_or_else(|_| "[]".to_string());
+    let languages_json =
+        serde_json::to_string(&scan_result.languages).unwrap_or_else(|_| "[]".to_string());
+    let frameworks_json =
+        serde_json::to_string(&scan_result.frameworks).unwrap_or_else(|_| "[]".to_string());
 
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.insert_realm(&id, &resolved_path, &realm_name, &languages_json, &frameworks_json)?;
-    db.update_realm_scan(&id, "surface", None, None, Some(&languages_json), Some(&frameworks_json))?;
+    db.insert_realm(
+        &id,
+        &resolved_path,
+        &realm_name,
+        &languages_json,
+        &frameworks_json,
+    )?;
+    db.update_realm_scan(
+        &id,
+        "surface",
+        None,
+        None,
+        Some(&languages_json),
+        Some(&frameworks_json),
+    )?;
 
-    let realm = db.get_realm(&id)?
+    let realm = db
+        .get_realm(&id)?
         .ok_or_else(|| "Failed to fetch created realm".to_string())?;
 
     // Emit event for frontend
@@ -114,7 +131,8 @@ pub fn create_realm(
                 );
                 // Store conventions individually
                 for conv in &deep_result.conventions {
-                    let _ = db.insert_convention(&realm_id, &conv.rule, &conv.source, conv.confidence);
+                    let _ =
+                        db.insert_convention(&realm_id, &conv.rule, &conv.source, conv.confidence);
                 }
                 // Emit updated realm
                 if let Ok(Some(updated)) = db.get_realm(&realm_id) {
@@ -160,7 +178,11 @@ pub fn attach_session_realm(
     role: Option<String>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.attach_session_realm(&session_id, &realm_id, &role.unwrap_or_else(|| "primary".to_string()))?;
+    db.attach_session_realm(
+        &session_id,
+        &realm_id,
+        &role.unwrap_or_else(|| "primary".to_string()),
+    )?;
 
     // Write context file for the session
     let _ = attunement::write_session_context_file(&app, &db, &session_id);
@@ -198,7 +220,10 @@ pub fn detach_session_realm(
 }
 
 #[tauri::command]
-pub fn get_session_realms(state: State<'_, AppState>, session_id: String) -> Result<Vec<Realm>, String> {
+pub fn get_session_realms(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<Realm>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.get_session_realms(&session_id)
 }
@@ -211,7 +236,8 @@ pub fn scan_realm(
     depth: Option<String>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let realm = db.get_realm(&id)?
+    let realm = db
+        .get_realm(&id)?
         .ok_or_else(|| "Realm not found".to_string())?;
     drop(db);
 
@@ -235,7 +261,10 @@ pub fn scan_realm(
             _ => cartography::deep_scan(&scan_path),
         };
 
-        let arch_json = result.architecture.as_ref().and_then(|a| serde_json::to_string(a).ok());
+        let arch_json = result
+            .architecture
+            .as_ref()
+            .and_then(|a| serde_json::to_string(a).ok());
         let conv_json = serde_json::to_string(&result.conventions).ok();
         let langs_json = if !result.languages.is_empty() {
             serde_json::to_string(&result.languages).ok()
@@ -259,7 +288,8 @@ pub fn scan_realm(
                     fws_json.as_deref(),
                 );
                 for conv in &result.conventions {
-                    let _ = db.insert_convention(&realm_id, &conv.rule, &conv.source, conv.confidence);
+                    let _ =
+                        db.insert_convention(&realm_id, &conv.rule, &conv.source, conv.confidence);
                 }
                 if let Ok(Some(updated)) = db.get_realm(&realm_id) {
                     let _ = app_clone.emit("realm-updated", &updated);

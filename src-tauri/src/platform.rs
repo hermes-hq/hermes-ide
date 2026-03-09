@@ -16,7 +16,9 @@ pub fn reveal_in_file_manager(path: &str) -> Result<(), String> {
             .args(["-R", path])
             .spawn()
             .map_err(|e| format!("Failed to open Finder: {}", e))?;
-        std::thread::spawn(move || { let _ = child.wait(); });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     #[cfg(target_os = "linux")]
@@ -29,7 +31,9 @@ pub fn reveal_in_file_manager(path: &str) -> Result<(), String> {
             .arg(&parent)
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
-        std::thread::spawn(move || { let _ = child.wait(); });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     #[cfg(target_os = "windows")]
@@ -39,7 +43,9 @@ pub fn reveal_in_file_manager(path: &str) -> Result<(), String> {
             .arg(format!("/select,{}", path))
             .spawn()
             .map_err(|e| format!("Failed to open Explorer: {}", e))?;
-        std::thread::spawn(move || { let _ = child.wait(); });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     Ok(())
@@ -56,7 +62,9 @@ pub fn open_file(path: &str) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
-        std::thread::spawn(move || { let _ = child.wait(); });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     #[cfg(target_os = "linux")]
@@ -65,7 +73,9 @@ pub fn open_file(path: &str) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
-        std::thread::spawn(move || { let _ = child.wait(); });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     #[cfg(target_os = "windows")]
@@ -81,7 +91,9 @@ pub fn open_file(path: &str) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
-        std::thread::spawn(move || { let _ = child.wait(); });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     Ok(())

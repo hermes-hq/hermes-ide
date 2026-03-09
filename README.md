@@ -185,7 +185,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a detailed technical overview.
 
 ## Security
 
-Found a vulnerability? Please report it responsibly via [security@hermes-ide.com](mailto:security@hermes-ide.com). See our [Security Policy](https://github.com/hermes-hq/.github/blob/main/SECURITY.md) for details.
+Found a vulnerability? Please report it responsibly via [ga.contact.me@gmail.com](mailto:ga.contact.me@gmail.com). See our [Security Policy](https://github.com/hermes-hq/.github/blob/main/SECURITY.md) for details.
 
 ---
 

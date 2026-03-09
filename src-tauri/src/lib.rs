@@ -9,8 +9,8 @@ mod realm;
 mod workspace;
 
 use std::collections::HashSet;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::Manager;
 
 static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
@@ -34,9 +34,7 @@ fn cleanup_stale_worktrees(database: &db::Database) {
 
     for wt in &all_worktrees {
         // Check whether the owning session still exists
-        let session_exists = database
-            .session_exists(&wt.session_id)
-            .unwrap_or(true); // default to true (keep) on error
+        let session_exists = database.session_exists(&wt.session_id).unwrap_or(true); // default to true (keep) on error
 
         if session_exists {
             continue;
@@ -50,14 +48,13 @@ fn cleanup_stale_worktrees(database: &db::Database) {
         // Only remove linked worktrees from disk, not main worktrees
         if !wt.is_main_worktree {
             if let Ok(Some(realm)) = database.get_realm(&wt.realm_id) {
-                if let Err(e) = git::worktree::remove_worktree(
-                    &realm.path,
-                    &wt.session_id,
-                    &wt.worktree_path,
-                ) {
+                if let Err(e) =
+                    git::worktree::remove_worktree(&realm.path, &wt.session_id, &wt.worktree_path)
+                {
                     log::warn!(
                         "Startup worktree cleanup: failed to remove worktree '{}': {}",
-                        wt.worktree_path, e
+                        wt.worktree_path,
+                        e
                     );
                 }
                 repos_to_prune.insert(realm.path.clone());
@@ -68,7 +65,8 @@ fn cleanup_stale_worktrees(database: &db::Database) {
         if let Err(e) = database.delete_session_worktree(&wt.id) {
             log::warn!(
                 "Startup worktree cleanup: failed to delete DB record '{}': {}",
-                wt.id, e
+                wt.id,
+                e
             );
         }
     }
@@ -78,7 +76,8 @@ fn cleanup_stale_worktrees(database: &db::Database) {
         if let Err(e) = git::worktree::cleanup_stale_worktrees(repo_path) {
             log::warn!(
                 "Startup worktree cleanup: git worktree prune failed for '{}': {}",
-                repo_path, e
+                repo_path,
+                e
             );
         }
     }
@@ -121,10 +120,14 @@ fn do_save_workspace(app: &tauri::AppHandle) {
             let metrics = analyzer.to_metrics();
             for (provider, tokens) in &metrics.token_usage {
                 db.record_token_usage(
-                    session_id, provider, &tokens.model,
-                    tokens.input_tokens as i64, tokens.output_tokens as i64,
+                    session_id,
+                    provider,
+                    &tokens.model,
+                    tokens.input_tokens as i64,
+                    tokens.output_tokens as i64,
                     tokens.estimated_cost_usd,
-                ).ok();
+                )
+                .ok();
             }
         }
     }
@@ -156,7 +159,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_aptabase::Builder::new("A-EU-1922161061").build())
         .setup(|app| {
-            let app_dir = app.path().app_data_dir()
+            let app_dir = app
+                .path()
+                .app_data_dir()
                 .map_err(|e| format!("Failed to get app data dir: {}", e))?;
             std::fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
@@ -189,31 +194,27 @@ pub fn run() {
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
-                window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
-                            save_workspace_state(&save_handle);
-                        }
-                        _ => {}
+                window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                        save_workspace_state(&save_handle);
                     }
+                    _ => {}
                 });
             }
 
             // Build and set native menu bar
             let handle = app.handle().clone();
             match menu::build_app_menu(&handle) {
-                Ok(m) => {
-                    match app.set_menu(m) {
-                        Ok(_) => {
-                            app.on_menu_event(move |app_handle, event| {
-                                menu::handle_menu_event(app_handle, event);
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to set menu: {}", e);
-                        }
+                Ok(m) => match app.set_menu(m) {
+                    Ok(_) => {
+                        app.on_menu_event(move |app_handle, event| {
+                            menu::handle_menu_event(app_handle, event);
+                        });
                     }
-                }
+                    Err(e) => {
+                        log::error!("Failed to set menu: {}", e);
+                    }
+                },
                 Err(e) => {
                     log::error!("Failed to build app menu: {}", e);
                 }
@@ -345,25 +346,29 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building HERMES-IDE")
-        .run(|app, event| {
-            match &event {
-                tauri::RunEvent::ExitRequested { .. } => {
-                    eprintln!("[hermes] ExitRequested — saving workspace");
-                    save_workspace_state(app);
-                }
-                tauri::RunEvent::Exit => {
-                    eprintln!("[hermes] Exit — saving workspace");
-                    save_workspace_state(app);
-                }
-                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. } => {
-                    eprintln!("[hermes] WindowCloseRequested — saving workspace");
-                    save_workspace_state(app);
-                }
-                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Destroyed, .. } => {
-                    eprintln!("[hermes] WindowDestroyed — saving workspace");
-                    save_workspace_state(app);
-                }
-                _ => {}
+        .run(|app, event| match &event {
+            tauri::RunEvent::ExitRequested { .. } => {
+                eprintln!("[hermes] ExitRequested — saving workspace");
+                save_workspace_state(app);
             }
+            tauri::RunEvent::Exit => {
+                eprintln!("[hermes] Exit — saving workspace");
+                save_workspace_state(app);
+            }
+            tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::CloseRequested { .. },
+                ..
+            } => {
+                eprintln!("[hermes] WindowCloseRequested — saving workspace");
+                save_workspace_state(app);
+            }
+            tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } => {
+                eprintln!("[hermes] WindowDestroyed — saving workspace");
+                save_workspace_state(app);
+            }
+            _ => {}
         });
 }
