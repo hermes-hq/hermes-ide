@@ -237,6 +237,24 @@ pub fn install_plugin(app: tauri::AppHandle, data: Vec<u8>) -> Result<String, St
     Ok(plugin_id)
 }
 
+/// Fetch the plugin registry JSON from a URL.
+/// Done in Rust to bypass WebView CSP restrictions.
+#[tauri::command]
+pub async fn fetch_plugin_registry(url: String) -> Result<String, String> {
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Registry fetch failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Registry fetch failed: HTTP {}", response.status()));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read registry: {}", e))
+}
+
 /// Download a plugin .tgz from a URL and install it.
 /// The download happens in Rust to bypass WebView CSP restrictions.
 #[tauri::command]

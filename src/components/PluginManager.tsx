@@ -106,9 +106,8 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 
 	const loadRegistry = useCallback(async () => {
 		try {
-			const resp = await fetch(REGISTRY_URL);
-			if (!resp.ok) return;
-			const data = await resp.json();
+			const json = await invoke<string>("fetch_plugin_registry", { url: REGISTRY_URL });
+			const data = JSON.parse(json);
 			setRegistry(data.plugins ?? []);
 		} catch {
 			// Registry unavailable — not critical
