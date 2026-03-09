@@ -9,7 +9,7 @@ import {
   updateSessionDescription, updateSessionGroup,
   saveAllSnapshots,
 } from "../api/sessions";
-import { getProjects, getSessionProjects, attachSessionProject, nudgeProjectContext } from "../api/projects";
+import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
 import { createWorktree } from "../api/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback } from "../terminal/TerminalPool";
@@ -664,18 +664,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
       unlisteners.push(u2);
 
-      // Debounced nudge when projects change mid-session (e.g. user adds/removes projects)
-      const u3 = await listen<string>("session-realms-changed", (event) => {
-        const sessionId = event.payload;
-        const existing = nudgeTimers.current.get(sessionId);
-        if (existing) clearTimeout(existing);
-        const timer = setTimeout(() => {
-          nudgeTimers.current.delete(sessionId);
-          nudgeProjectContext(sessionId).catch((err) => console.warn("[SessionContext] Failed to nudge project context:", err));
-        }, 1500);
-        nudgeTimers.current.set(sessionId, timer);
-      });
-      unlisteners.push(u3);
+      // Note: project context nudge is now handled by ProjectPicker on close,
+      // to avoid duplicate instructions when toggling multiple projects.
     };
 
     setup();

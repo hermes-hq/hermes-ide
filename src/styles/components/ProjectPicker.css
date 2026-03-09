@@ -5,13 +5,13 @@
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   width: 560px;
-  max-height: 70vh;
+  max-height: min(70vh, calc(100vh - 80px));
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   align-self: flex-start;
-  margin-top: 16vh;
+  margin-top: min(16vh, 80px);
   animation: paletteIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -39,6 +39,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+  min-height: 0;
 }
 
 .project-picker-item {
@@ -127,6 +128,25 @@
   gap: 6px;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
+  align-items: center;
+}
+
+.project-picker-done {
+  margin-left: auto;
+  padding: 7px 28px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--bg-0);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.project-picker-done:hover {
+  opacity: 0.85;
 }
 
 /* ─── Project Scan Badge (WorkspacePanel) ────────────────── */

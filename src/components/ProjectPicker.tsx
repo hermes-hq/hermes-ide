@@ -2,7 +2,7 @@ import "../styles/components/ProjectPicker.css";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Project, useSessionProjects } from "../hooks/useSessionProjects";
-import { getProjects, createProject, deleteProject } from "../api/projects";
+import { getProjects, createProject, deleteProject, nudgeProjectContext } from "../api/projects";
 import { LANG_COLORS } from "../utils/langColors";
 
 interface ProjectPickerProps {
@@ -17,6 +17,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const changed = useRef(false);
 
   useEffect(() => {
     getProjects()
@@ -24,6 +25,16 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
       .catch((err) => console.warn("[ProjectPicker] Failed to load projects:", err));
     inputRef.current?.focus();
   }, []);
+
+  const handleClose = () => {
+    // Only nudge if the attached projects actually changed
+    if (changed.current) {
+      nudgeProjectContext(sessionId).catch((err) =>
+        console.warn("[ProjectPicker] Failed to nudge project context:", err)
+      );
+    }
+    onClose();
+  };
 
   const attachedIds = useMemo(
     () => new Set(attachedProjects.map((r) => r.id)),
@@ -47,6 +58,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
     } else {
       await attach(project.id);
     }
+    changed.current = true;
     // Refresh all projects in case of updates
     getProjects()
       .then((r) => {
@@ -70,11 +82,13 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
         setAllProjects((prev) => [existing, ...prev.filter((r) => r.id !== existing.id)]);
         if (!attachedIds.has(existing.id)) {
           await attach(existing.id);
+          changed.current = true;
         }
       } else {
         const project = await createProject(normalized, null);
         setAllProjects((prev) => [project, ...prev.filter((r) => r.id !== project.id)]);
         await attach(project.id);
+        changed.current = true;
       }
       setScanPath("");
     } catch (err) {
@@ -110,7 +124,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
   };
 
   return (
-    <div className="command-palette-overlay" onClick={onClose}>
+    <div className="command-palette-overlay" onClick={handleClose}>
       <div
         className="project-picker"
         onClick={(e) => e.stopPropagation()}
@@ -120,7 +134,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
           <span className="project-picker-count">
             {attachedProjects.length} attached
           </span>
-          <button className="close-btn settings-close" onClick={onClose} aria-label="Close">
+          <button className="close-btn settings-close" onClick={handleClose} aria-label="Close">
             &times;
           </button>
         </div>
@@ -131,7 +145,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
           placeholder="Filter projects..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Escape") onClose(); else e.stopPropagation(); }}
+          onKeyDown={(e) => { if (e.key === "Escape") handleClose(); else e.stopPropagation(); }}
         />
 
         <div className="project-picker-body">
@@ -218,6 +232,12 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
             disabled={scanning || !scanPath.trim()}
           >
             Scan
+          </button>
+          <button
+            className="project-picker-done"
+            onClick={handleClose}
+          >
+            Done
           </button>
         </div>
       </div>
