@@ -35,15 +35,22 @@ impl SessionPhase {
     }
 
     pub fn accepts_input(&self) -> bool {
-        matches!(self, SessionPhase::Idle | SessionPhase::Busy | SessionPhase::NeedsInput | SessionPhase::Initializing | SessionPhase::ShellReady | SessionPhase::LaunchingAgent)
+        matches!(
+            self,
+            SessionPhase::Idle
+                | SessionPhase::Busy
+                | SessionPhase::NeedsInput
+                | SessionPhase::Initializing
+                | SessionPhase::ShellReady
+                | SessionPhase::LaunchingAgent
+        )
     }
 }
 
 // ─── Session Colors ─────────────────────────────────────────────────
 
 pub const SESSION_COLORS: &[&str] = &[
-    "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
-    "#39c5cf", "#d29922", "#f47067", "#d2a8ff",
+    "#58a6ff", "#3fb950", "#bc8cff", "#f78166", "#39c5cf", "#d29922", "#f47067", "#d2a8ff",
 ];
 
 pub fn next_color(index: usize) -> String {

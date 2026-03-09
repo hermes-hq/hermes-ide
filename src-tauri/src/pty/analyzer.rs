@@ -40,7 +40,11 @@ impl NodeBuilder {
             timestamp: self.timestamp,
             kind: self.kind,
             input: self.input,
-            output_summary: if summary.is_empty() { None } else { Some(summary) },
+            output_summary: if summary.is_empty() {
+                None
+            } else {
+                Some(summary)
+            },
             exit_code,
             working_dir: self.working_dir,
             duration_ms,
@@ -162,7 +166,11 @@ impl OutputAnalyzer {
 
     pub fn start_node(&mut self, working_dir: &str) {
         let input = self.last_input_line.take();
-        let kind = if self.detected_agent.is_some() { "ai_interaction" } else { "command" };
+        let kind = if self.detected_agent.is_some() {
+            "ai_interaction"
+        } else {
+            "command"
+        };
         self.node_builder = Some(NodeBuilder::new(kind, input, working_dir));
     }
 
@@ -197,7 +205,9 @@ impl OutputAnalyzer {
         // Check if the stripped version has any visible characters.
         let stripped_check = strip_ansi_escapes::strip(raw);
         let text_check = String::from_utf8_lossy(&stripped_check);
-        let has_visible = text_check.chars().any(|c| !c.is_control() && !c.is_whitespace());
+        let has_visible = text_check
+            .chars()
+            .any(|c| !c.is_control() && !c.is_whitespace());
         if has_visible {
             if !self.is_busy {
                 self.is_busy = true;
@@ -233,17 +243,25 @@ impl OutputAnalyzer {
             let raw_stripped = strip_ansi_escapes::strip(raw);
             let raw_clean = String::from_utf8_lossy(&raw_stripped);
             // Check the full chunk for cost patterns (status bars often render in one chunk)
-            if let Some(caps) = SESSION_COST_RE.captures(&raw_clean)
+            if let Some(caps) = SESSION_COST_RE
+                .captures(&raw_clean)
                 .or_else(|| CLAUDE_COST_RE.captures(&raw_clean))
             {
                 if let Ok(cost) = caps[1].parse::<f64>() {
                     if cost > 0.0 {
                         let _ = idx; // used above
                         let key = "anthropic".to_string();
-                        let entry = self.token_usage.entry(key).or_insert_with(|| ProviderTokens {
-                            input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0.0,
-                            model: "unknown".into(), last_updated: now(), update_count: 0,
-                        });
+                        let entry = self
+                            .token_usage
+                            .entry(key)
+                            .or_insert_with(|| ProviderTokens {
+                                input_tokens: 0,
+                                output_tokens: 0,
+                                estimated_cost_usd: 0.0,
+                                model: "unknown".into(),
+                                last_updated: now(),
+                                update_count: 0,
+                            });
                         if cost > entry.estimated_cost_usd {
                             entry.estimated_cost_usd = cost;
                             entry.last_updated = now();
@@ -258,10 +276,17 @@ impl OutputAnalyzer {
                 let output = parse_token_count(&caps[2]);
                 if input > 0 || output > 0 {
                     let key = "anthropic".to_string();
-                    let entry = self.token_usage.entry(key).or_insert_with(|| ProviderTokens {
-                        input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0.0,
-                        model: "unknown".into(), last_updated: now(), update_count: 0,
-                    });
+                    let entry = self
+                        .token_usage
+                        .entry(key)
+                        .or_insert_with(|| ProviderTokens {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            estimated_cost_usd: 0.0,
+                            model: "unknown".into(),
+                            last_updated: now(),
+                            update_count: 0,
+                        });
                     entry.input_tokens = input;
                     entry.output_tokens = output;
                     entry.last_updated = now();
@@ -270,7 +295,9 @@ impl OutputAnalyzer {
                     let total_in: u64 = self.token_usage.values().map(|t| t.input_tokens).sum();
                     let total_out: u64 = self.token_usage.values().map(|t| t.output_tokens).sum();
                     self.token_history.push_back((total_in, total_out));
-                    if self.token_history.len() > 30 { self.token_history.pop_front(); }
+                    if self.token_history.len() > 30 {
+                        self.token_history.pop_front();
+                    }
                 }
             }
         }
@@ -280,7 +307,9 @@ impl OutputAnalyzer {
 
         for line in text.lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
 
             self.line_count += 1;
 
@@ -303,9 +332,10 @@ impl OutputAnalyzer {
                         || lower.contains("switching to");
                     let is_header = lower.contains("claude code")
                         || lower.contains("claude-code")
-                        || (lower.contains("claude") && (lower.contains("v2.") || lower.contains("v1.")));
-                    let is_unknown = agent.model.is_none()
-                        || agent.model.as_deref() == Some("unknown");
+                        || (lower.contains("claude")
+                            && (lower.contains("v2.") || lower.contains("v1.")));
+                    let is_unknown =
+                        agent.model.is_none() || agent.model.as_deref() == Some("unknown");
 
                     if is_unknown || is_model_change || is_header {
                         agent.model = Some(model);
@@ -346,7 +376,9 @@ impl OutputAnalyzer {
             self.stripped_buffer.push('\n');
             if self.stripped_buffer.len() > 16000 {
                 let mut drain = self.stripped_buffer.len() - 16000;
-                while drain < self.stripped_buffer.len() && !self.stripped_buffer.is_char_boundary(drain) {
+                while drain < self.stripped_buffer.len()
+                    && !self.stripped_buffer.is_char_boundary(drain)
+                {
                     drain += 1;
                 }
                 self.stripped_buffer.drain(..drain);
@@ -361,11 +393,15 @@ impl OutputAnalyzer {
         if let Some(tc) = analysis.tool_call {
             *self.tool_call_summary.entry(tc.tool.clone()).or_insert(0) += 1;
             self.tool_calls.push_back(tc);
-            if self.tool_calls.len() > 100 { self.tool_calls.pop_front(); }
+            if self.tool_calls.len() > 100 {
+                self.tool_calls.pop_front();
+            }
         }
         if let Some(action) = analysis.action {
             self.recent_actions.push_back(action);
-            if self.recent_actions.len() > 20 { self.recent_actions.pop_front(); }
+            if self.recent_actions.len() > 20 {
+                self.recent_actions.pop_front();
+            }
         }
         if let Some(fact) = analysis.memory_fact {
             if !self.memory_keys_seen.contains(&fact.key) {
@@ -448,10 +484,17 @@ impl OutputAnalyzer {
 
     fn apply_token_update(&mut self, tu: TokenUpdate) {
         let key = tu.provider.clone();
-        let entry = self.token_usage.entry(key).or_insert_with(|| ProviderTokens {
-            input_tokens: 0, output_tokens: 0, estimated_cost_usd: 0.0,
-            model: tu.model.clone(), last_updated: now(), update_count: 0,
-        });
+        let entry = self
+            .token_usage
+            .entry(key)
+            .or_insert_with(|| ProviderTokens {
+                input_tokens: 0,
+                output_tokens: 0,
+                estimated_cost_usd: 0.0,
+                model: tu.model.clone(),
+                last_updated: now(),
+                update_count: 0,
+            });
 
         if tu.is_cumulative {
             entry.input_tokens = tu.input_tokens;
@@ -464,18 +507,29 @@ impl OutputAnalyzer {
         if let Some(cost) = tu.cost_usd {
             entry.estimated_cost_usd = cost;
         } else if entry.estimated_cost_usd == 0.0 {
-            entry.estimated_cost_usd = estimate_cost(&tu.provider, &entry.model, entry.input_tokens, entry.output_tokens);
+            entry.estimated_cost_usd = estimate_cost(
+                &tu.provider,
+                &entry.model,
+                entry.input_tokens,
+                entry.output_tokens,
+            );
         }
 
         entry.update_count += 1;
         entry.last_updated = now();
-        entry.model = if tu.model != "unknown" { tu.model } else { entry.model.clone() };
+        entry.model = if tu.model != "unknown" {
+            tu.model
+        } else {
+            entry.model.clone()
+        };
 
         // Record history sample for sparkline
         let total_in: u64 = self.token_usage.values().map(|t| t.input_tokens).sum();
         let total_out: u64 = self.token_usage.values().map(|t| t.output_tokens).sum();
         self.token_history.push_back((total_in, total_out));
-        if self.token_history.len() > 30 { self.token_history.pop_front(); }
+        if self.token_history.len() > 30 {
+            self.token_history.pop_front();
+        }
     }
 
     pub fn stuck_score(&self) -> f32 {
@@ -494,12 +548,16 @@ impl OutputAnalyzer {
     /// we detect the PROMPT (which we already handle well). If no prompt was
     /// detected in the last few lines, we're NOT at a normal prompt → NeedsInput.
     pub fn check_silence(&mut self) {
-        if !self.is_busy { return; }
+        if !self.is_busy {
+            return;
+        }
 
         // Check if any of the last few lines look like a recognized prompt
         let has_prompt = self.stripped_buffer.lines().rev().take(5).any(|l| {
             let t = l.trim();
-            if t.is_empty() { return false; }
+            if t.is_empty() {
+                return false;
+            }
             if let Some(idx) = self.active_provider_idx {
                 self.registry.adapters[idx].is_prompt(t)
             } else {
@@ -542,7 +600,18 @@ impl OutputAnalyzer {
             memory_facts: self.memory_facts.clone(),
             latency_p50_ms: percentile(&self.latency_samples, 50.0),
             latency_p95_ms: percentile(&self.latency_samples, 95.0),
-            latency_samples: self.latency_samples.iter().copied().collect::<Vec<_>>().into_iter().rev().take(50).collect::<Vec<_>>().into_iter().rev().collect(),
+            latency_samples: self
+                .latency_samples
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .take(50)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect(),
             token_history: self.token_history.iter().cloned().collect(),
         }
     }
@@ -577,7 +646,9 @@ pub(crate) fn percent_decode(s: &str) -> String {
 }
 
 fn percentile(samples: &VecDeque<f64>, pct: f64) -> Option<f64> {
-    if samples.is_empty() { return None; }
+    if samples.is_empty() {
+        return None;
+    }
     let mut sorted: Vec<f64> = samples.iter().copied().collect();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = ((pct / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;

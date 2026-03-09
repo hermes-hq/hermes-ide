@@ -63,9 +63,11 @@ fn read_pin_file_content(target: &str, max_bytes: usize) -> Option<String> {
     }
     // Skip binary files
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let binary_exts = ["png", "jpg", "jpeg", "gif", "ico", "woff", "woff2", "ttf", "eot",
-                        "zip", "tar", "gz", "bz2", "7z", "exe", "dll", "so", "dylib",
-                        "pdf", "mp3", "mp4", "wav", "avi", "mov", "sqlite", "db"];
+    let binary_exts = [
+        "png", "jpg", "jpeg", "gif", "ico", "woff", "woff2", "ttf", "eot", "zip", "tar", "gz",
+        "bz2", "7z", "exe", "dll", "so", "dylib", "pdf", "mp3", "mp4", "wav", "avi", "mov",
+        "sqlite", "db",
+    ];
     if binary_exts.contains(&ext.to_lowercase().as_str()) {
         return None;
     }
@@ -76,7 +78,11 @@ fn read_pin_file_content(target: &str, max_bytes: usize) -> Option<String> {
                 while end < content.len() && !content.is_char_boundary(end) {
                     end += 1;
                 }
-                Some(format!("{}...\n[truncated at {} bytes]", &content[..end.min(content.len())], max_bytes))
+                Some(format!(
+                    "{}...\n[truncated at {} bytes]",
+                    &content[..end.min(content.len())],
+                    max_bytes
+                ))
             } else {
                 Some(content)
             }
@@ -134,7 +140,9 @@ pub struct MemoryContext {
     pub scope: String,
 }
 
-fn default_scope() -> String { "global".to_string() }
+fn default_scope() -> String {
+    "global".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorContext {
@@ -205,7 +213,9 @@ pub fn assemble_context(
         }
 
         let arch_pattern = realm.architecture.as_ref().map(|a| a.pattern.clone());
-        let arch_layers = realm.architecture.as_ref()
+        let arch_layers = realm
+            .architecture
+            .as_ref()
             .map(|a| a.layers.clone())
             .unwrap_or_default();
 
@@ -227,11 +237,18 @@ pub fn assemble_context(
         }
 
         // Estimate tokens: ~4 chars per token
-        let realm_token_est =
-            realm.name.len() / 4
+        let realm_token_est = realm.name.len() / 4
             + realm.path.len() / 4
-            + realm.languages.iter().map(|l| l.len() / 4 + 1).sum::<usize>()
-            + realm.frameworks.iter().map(|f| f.len() / 4 + 1).sum::<usize>()
+            + realm
+                .languages
+                .iter()
+                .map(|l| l.len() / 4 + 1)
+                .sum::<usize>()
+            + realm
+                .frameworks
+                .iter()
+                .map(|f| f.len() / 4 + 1)
+                .sum::<usize>()
             + arch_pattern.as_ref().map(|p| p.len() / 4 + 5).unwrap_or(0)
             + arch_layers.iter().map(|l| l.len() / 4 + 1).sum::<usize>()
             + conv_rules.iter().map(|c| c.len() / 4 + 1).sum::<usize>()
@@ -271,13 +288,18 @@ pub fn assemble_context(
     let realm_ids: Vec<String> = realms.iter().map(|r| r.id.clone()).collect();
     let primary_realm_id = realm_ids.first().cloned();
 
-    let mut pins_raw = db.get_context_pins(Some(session_id), primary_realm_id.as_deref()).unwrap_or_default();
+    let mut pins_raw = db
+        .get_context_pins(Some(session_id), primary_realm_id.as_deref())
+        .unwrap_or_default();
 
     // Add pins from .hermes/context.json (project defaults)
     for config in &hermes_configs {
         for hermes_pin in &config.pins {
             // Avoid duplicates
-            if !pins_raw.iter().any(|p| p.target == hermes_pin.target && p.kind == hermes_pin.kind) {
+            if !pins_raw
+                .iter()
+                .any(|p| p.target == hermes_pin.target && p.kind == hermes_pin.kind)
+            {
                 pins_raw.push(crate::db::ContextPin {
                     id: 0, // synthetic
                     session_id: None,
@@ -315,15 +337,19 @@ pub fn assemble_context(
 
     // Fetch merged memory: project-scoped → global (project takes precedence)
     let memory_raw = db.get_merged_memory(&realm_ids).unwrap_or_default();
-    let mut memory: Vec<MemoryContext> = memory_raw.iter().map(|m| MemoryContext {
-        key: m.key.clone(),
-        value: m.value.clone(),
-        source: m.source.clone(),
-        scope: m.scope.clone(),
-    }).collect();
+    let mut memory: Vec<MemoryContext> = memory_raw
+        .iter()
+        .map(|m| MemoryContext {
+            key: m.key.clone(),
+            value: m.value.clone(),
+            source: m.source.clone(),
+            scope: m.scope.clone(),
+        })
+        .collect();
 
     // Add memory from .hermes/context.json
-    let mut seen_memory_keys: std::collections::HashSet<String> = memory.iter().map(|m| m.key.clone()).collect();
+    let mut seen_memory_keys: std::collections::HashSet<String> =
+        memory.iter().map(|m| m.key.clone()).collect();
     for config in &hermes_configs {
         for hm in &config.memory {
             if seen_memory_keys.insert(hm.key.clone()) {
@@ -337,7 +363,10 @@ pub fn assemble_context(
         }
     }
 
-    estimated_tokens += memory.iter().map(|m| (m.key.len() + m.value.len()) / 4 + 3).sum::<usize>();
+    estimated_tokens += memory
+        .iter()
+        .map(|m| (m.key.len() + m.value.len()) / 4 + 3)
+        .sum::<usize>();
 
     let error_resolutions: Vec<ErrorContext> = vec![];
 
@@ -363,14 +392,20 @@ pub fn assemble_context(
 
 /// Compute the deterministic path for a session's context file (no I/O).
 pub fn session_context_path(app: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
-    let app_dir = app.path().app_data_dir().map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     Ok(app_dir.join("context").join(format!("{}.md", session_id)))
 }
 
 /// Format a SessionContext as a markdown string for AI agents to read.
 fn format_context_markdown(context: &SessionContext, execution_mode: Option<&str>) -> String {
     let mut md = String::new();
-    md.push_str(&format!("# Session Context (v{})\n\n", context.context_version));
+    md.push_str(&format!(
+        "# Session Context (v{})\n\n",
+        context.context_version
+    ));
 
     // Execution Mode
     if let Some(mode) = execution_mode {
@@ -378,7 +413,10 @@ fn format_context_markdown(context: &SessionContext, execution_mode: Option<&str
     }
 
     // Token budget info
-    md.push_str(&format!("- Token budget: ~{} / {} used\n", context.estimated_tokens, context.token_budget));
+    md.push_str(&format!(
+        "- Token budget: ~{} / {} used\n",
+        context.estimated_tokens, context.token_budget
+    ));
 
     // Projects
     if !context.realms.is_empty() {
@@ -395,7 +433,10 @@ fn format_context_markdown(context: &SessionContext, execution_mode: Option<&str
                 md.push_str(&format!("- Architecture: {}\n", arch));
             }
             if !realm.conventions.is_empty() {
-                md.push_str(&format!("- Conventions: {}\n", realm.conventions.join("; ")));
+                md.push_str(&format!(
+                    "- Conventions: {}\n",
+                    realm.conventions.join("; ")
+                ));
             }
             md.push('\n');
         }
@@ -428,7 +469,10 @@ fn format_context_markdown(context: &SessionContext, execution_mode: Option<&str
     if !context.error_resolutions.is_empty() {
         md.push_str("## Known Error Resolutions\n\n");
         for er in &context.error_resolutions {
-            md.push_str(&format!("- \"{}\" -> {} (seen {}x)\n", er.fingerprint, er.resolution, er.occurrence_count));
+            md.push_str(&format!(
+                "- \"{}\" -> {} (seen {}x)\n",
+                er.fingerprint, er.resolution, er.occurrence_count
+            ));
         }
         md.push('\n');
     }
@@ -437,10 +481,16 @@ fn format_context_markdown(context: &SessionContext, execution_mode: Option<&str
     if !context.combined_languages.is_empty() || !context.combined_frameworks.is_empty() {
         md.push_str("## Summary\n");
         if !context.combined_languages.is_empty() {
-            md.push_str(&format!("- All Languages: {}\n", context.combined_languages.join(", ")));
+            md.push_str(&format!(
+                "- All Languages: {}\n",
+                context.combined_languages.join(", ")
+            ));
         }
         if !context.combined_frameworks.is_empty() {
-            md.push_str(&format!("- All Frameworks: {}\n", context.combined_frameworks.join(", ")));
+            md.push_str(&format!(
+                "- All Frameworks: {}\n",
+                context.combined_frameworks.join(", ")
+            ));
         }
     }
 
@@ -498,7 +548,11 @@ pub fn assemble_session_context(
     token_budget: Option<usize>,
 ) -> Result<SessionContext, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    assemble_context(&db, &session_id, token_budget.unwrap_or(DEFAULT_TOKEN_BUDGET))
+    assemble_context(
+        &db,
+        &session_id,
+        token_budget.unwrap_or(DEFAULT_TOKEN_BUDGET),
+    )
 }
 
 #[tauri::command]
@@ -609,9 +663,13 @@ pub fn load_hermes_project_config(
     // Apply memory as project-scoped
     for mem in &config.memory {
         let _ = db.save_memory_entry(
-            "project", &realm_id,
-            &mem.key, &mem.value,
-            "hermes-config", "config", 1.0,
+            "project",
+            &realm_id,
+            &mem.key,
+            &mem.value,
+            "hermes-config",
+            "config",
+            1.0,
         );
     }
 

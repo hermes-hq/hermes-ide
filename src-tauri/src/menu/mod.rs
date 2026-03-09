@@ -45,12 +45,16 @@ pub struct MenuActionPayload {
 
 pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     // ── Hermes menu (app menu) ──
-    let about = PredefinedMenuItem::about(app, Some("About HERMES-IDE"), Some(
-        AboutMetadataBuilder::new()
-            .name(Some("HERMES-IDE"))
-            .version(Some(env!("CARGO_PKG_VERSION")))
-            .build(),
-    ))?;
+    let about = PredefinedMenuItem::about(
+        app,
+        Some("About HERMES-IDE"),
+        Some(
+            AboutMetadataBuilder::new()
+                .name(Some("HERMES-IDE"))
+                .version(Some(env!("CARGO_PKG_VERSION")))
+                .build(),
+        ),
+    )?;
     let settings = MenuItemBuilder::with_id("hermes.settings", "Settings...")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
@@ -116,8 +120,7 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let copy = PredefinedMenuItem::copy(app, None)?;
     let paste = PredefinedMenuItem::paste(app, None)?;
     let select_all = PredefinedMenuItem::select_all(app, None)?;
-    let find = MenuItemBuilder::with_id("edit.find", "Find...")
-        .build(app)?;
+    let find = MenuItemBuilder::with_id("edit.find", "Find...").build(app)?;
 
     let edit_menu = SubmenuBuilder::new(app, "Edit")
         .item(&undo)
@@ -234,16 +237,15 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .build()?;
 
     // ── Help menu ──
-    let help_check_update = MenuItemBuilder::with_id("help.check-update", "Check for Updates...")
-        .build(app)?;
-    let help_website = MenuItemBuilder::with_id("help.website", "Hermes IDE Website")
-        .build(app)?;
-    let help_legal = MenuItemBuilder::with_id("help.legal", "Privacy, Terms & License")
-        .build(app)?;
-    let help_report_bug = MenuItemBuilder::with_id("help.report-bug", "Report a Bug...")
-        .build(app)?;
-    let help_shortcuts = MenuItemBuilder::with_id("help.shortcuts", "Keyboard Shortcuts")
-        .build(app)?;
+    let help_check_update =
+        MenuItemBuilder::with_id("help.check-update", "Check for Updates...").build(app)?;
+    let help_website = MenuItemBuilder::with_id("help.website", "Hermes IDE Website").build(app)?;
+    let help_legal =
+        MenuItemBuilder::with_id("help.legal", "Privacy, Terms & License").build(app)?;
+    let help_report_bug =
+        MenuItemBuilder::with_id("help.report-bug", "Report a Bug...").build(app)?;
+    let help_shortcuts =
+        MenuItemBuilder::with_id("help.shortcuts", "Keyboard Shortcuts").build(app)?;
 
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&help_check_update)
@@ -404,10 +406,7 @@ fn append_context_submenu_item<'a>(
 // ─── Update Menu State (Tauri Command) ──────────────────────────────
 
 #[tauri::command]
-pub async fn update_menu_state(
-    app: AppHandle,
-    updates: Vec<MenuItemUpdate>,
-) -> Result<(), String> {
+pub async fn update_menu_state(app: AppHandle, updates: Vec<MenuItemUpdate>) -> Result<(), String> {
     let menu = match app.menu() {
         Some(m) => m,
         None => return Ok(()),

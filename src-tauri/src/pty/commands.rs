@@ -6,12 +6,12 @@ use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::db::ExecutionNode;
-use crate::pty::analyzer::{CommandPredictionEvent, OutputAnalyzer};
 use crate::pty::adapters::now;
+use crate::pty::analyzer::{CommandPredictionEvent, OutputAnalyzer};
 use crate::pty::models::*;
-use crate::pty::{PtySession, ai_launch_command, detect_shell, get_working_directory};
+use crate::pty::{ai_launch_command, detect_shell, get_working_directory, PtySession};
+use crate::AppState;
 
 // ─── Tauri Commands ─────────────────────────────────────────────────
 
@@ -29,7 +29,10 @@ pub fn create_session(
     auto_approve: Option<bool>,
 ) -> Result<SessionUpdate, String> {
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let shell = state.db.lock().map_err(|e| e.to_string())
+    let shell = state
+        .db
+        .lock()
+        .map_err(|e| e.to_string())
         .and_then(|db| db.get_setting("default_shell"))
         .ok()
         .flatten()
@@ -85,12 +88,21 @@ pub fn create_session(
         workspace_paths: workspace_paths.unwrap_or_default(),
         detected_agent: None,
         metrics: SessionMetrics {
-            output_lines: 0, error_count: 0, stuck_score: 0.0,
-            token_usage: HashMap::new(), tool_calls: Vec::new(),
-            tool_call_summary: HashMap::new(), files_touched: Vec::new(),
-            recent_errors: Vec::new(), recent_actions: Vec::new(),
-            available_actions: Vec::new(), memory_facts: Vec::new(),
-            latency_p50_ms: None, latency_p95_ms: None, latency_samples: Vec::new(), token_history: Vec::new(),
+            output_lines: 0,
+            error_count: 0,
+            stuck_score: 0.0,
+            token_usage: HashMap::new(),
+            tool_calls: Vec::new(),
+            tool_call_summary: HashMap::new(),
+            files_touched: Vec::new(),
+            recent_errors: Vec::new(),
+            recent_actions: Vec::new(),
+            available_actions: Vec::new(),
+            memory_facts: Vec::new(),
+            latency_p50_ms: None,
+            latency_p95_ms: None,
+            latency_samples: Vec::new(),
+            token_history: Vec::new(),
         },
         ai_provider: ai_provider.clone(),
         auto_approve: auto_approve.unwrap_or(false),
@@ -107,14 +119,21 @@ pub fn create_session(
     // Spawn PTY
     let pty_system = native_pty_system();
     let pair = pty_system
-        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
     #[cfg(unix)]
     let mut cmd = {
         let mut c = CommandBuilder::new("env");
-        c.arg("-u"); c.arg("CLAUDECODE");
-        c.arg("-u"); c.arg("CLAUDE_CODE");
+        c.arg("-u");
+        c.arg("CLAUDECODE");
+        c.arg("-u");
+        c.arg("CLAUDE_CODE");
         c.arg(&shell);
         c.arg("-l");
         c
@@ -151,16 +170,23 @@ pub fn create_session(
     }
     cmd.env("HERMES_SESSION_ID", &session_id);
 
-    let child = pair.slave.spawn_command(cmd).map_err(|e| format!("Failed to spawn shell: {}", e))?;
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("Failed to spawn shell: {}", e))?;
 
     let writer = Arc::new(StdMutex::new(
-        pair.master.take_writer().map_err(|e| format!("Failed to get PTY writer: {}", e))?
+        pair.master
+            .take_writer()
+            .map_err(|e| format!("Failed to get PTY writer: {}", e))?,
     ));
     let writer_for_reader = Arc::clone(&writer);
 
     // Transition to Initializing
     {
-        let mut s = session_arc.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let mut s = session_arc
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {}", e))?;
         s.phase = SessionPhase::Initializing;
         let update = SessionUpdate::from(&*s);
         let _ = app.emit("session-updated", &update);
@@ -170,7 +196,10 @@ pub fn create_session(
     let analyzer_clone = Arc::clone(&analyzer);
     let session_clone = Arc::clone(&session_arc);
 
-    let mut reader = pair.master.try_clone_reader().map_err(|e| format!("Failed to clone reader: {}", e))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Failed to clone reader: {}", e))?;
     let event_session_id = session_id.clone();
     let app_clone = app.clone();
 
@@ -201,7 +230,8 @@ pub fn create_session(
                             if let Ok(mut s) = session_clone.lock() {
                                 s.working_directory = new_cwd.clone();
                             }
-                            let _ = app_clone.emit(&format!("cwd-changed-{}", event_session_id), &new_cwd);
+                            let _ = app_clone
+                                .emit(&format!("cwd-changed-{}", event_session_id), &new_cwd);
                         }
 
                         // Drain completed nodes → insert into DB + emit events
@@ -210,22 +240,38 @@ pub fn create_session(
                         if !completed.is_empty() {
                             if let Ok(db) = app_clone.state::<AppState>().db.lock() {
                                 for node in &completed {
-                                    let node_id = db.insert_execution_node(
-                                        &event_session_id, node.timestamp, &node.kind,
-                                        node.input.as_deref(), node.output_summary.as_deref(),
-                                        node.exit_code, &node.working_dir, node.duration_ms, None,
-                                    ).ok();
+                                    let node_id = db
+                                        .insert_execution_node(
+                                            &event_session_id,
+                                            node.timestamp,
+                                            &node.kind,
+                                            node.input.as_deref(),
+                                            node.output_summary.as_deref(),
+                                            node.exit_code,
+                                            &node.working_dir,
+                                            node.duration_ms,
+                                            None,
+                                        )
+                                        .ok();
 
                                     // Emit execution-node event
                                     if let Some(id) = node_id {
                                         let exec_node = ExecutionNode {
-                                            id, session_id: event_session_id.clone(),
-                                            timestamp: node.timestamp, kind: node.kind.clone(),
-                                            input: node.input.clone(), output_summary: node.output_summary.clone(),
-                                            exit_code: node.exit_code, working_dir: node.working_dir.clone(),
-                                            duration_ms: node.duration_ms, metadata: None,
+                                            id,
+                                            session_id: event_session_id.clone(),
+                                            timestamp: node.timestamp,
+                                            kind: node.kind.clone(),
+                                            input: node.input.clone(),
+                                            output_summary: node.output_summary.clone(),
+                                            exit_code: node.exit_code,
+                                            working_dir: node.working_dir.clone(),
+                                            duration_ms: node.duration_ms,
+                                            metadata: None,
                                         };
-                                        let _ = app_clone.emit(&format!("execution-node-{}", event_session_id), &exec_node);
+                                        let _ = app_clone.emit(
+                                            &format!("execution-node-{}", event_session_id),
+                                            &exec_node,
+                                        );
                                     }
 
                                     let project_id: Option<String> = Some(node.working_dir.clone());
@@ -233,7 +279,11 @@ pub fn create_session(
                                     // Command sequence tracking — push FIRST then record
                                     if node.kind == "command" {
                                         if let Some(ref input) = node.input {
-                                            let normalized = input.trim().trim_start_matches('$').trim().to_string();
+                                            let normalized = input
+                                                .trim()
+                                                .trim_start_matches('$')
+                                                .trim()
+                                                .to_string();
                                             if !normalized.is_empty() {
                                                 // Push to recent_commands first
                                                 a.recent_commands.push_back(normalized.clone());
@@ -242,25 +292,74 @@ pub fn create_session(
                                                 }
 
                                                 // Now record sequences using the updated list
-                                                let cmds: Vec<String> = a.recent_commands.iter().cloned().collect();
+                                                let cmds: Vec<String> =
+                                                    a.recent_commands.iter().cloned().collect();
                                                 if cmds.len() >= 2 {
-                                                    let prev: Vec<&str> = cmds[..cmds.len()-1].iter().rev().take(2).map(|s| s.as_str()).collect::<Vec<_>>().into_iter().rev().collect();
-                                                    let seq_json = serde_json::to_string(&prev).unwrap_or_default();
-                                                    db.record_command_sequence(project_id.as_deref(), &seq_json, &normalized).ok();
+                                                    let prev: Vec<&str> = cmds[..cmds.len() - 1]
+                                                        .iter()
+                                                        .rev()
+                                                        .take(2)
+                                                        .map(|s| s.as_str())
+                                                        .collect::<Vec<_>>()
+                                                        .into_iter()
+                                                        .rev()
+                                                        .collect();
+                                                    let seq_json = serde_json::to_string(&prev)
+                                                        .unwrap_or_default();
+                                                    db.record_command_sequence(
+                                                        project_id.as_deref(),
+                                                        &seq_json,
+                                                        &normalized,
+                                                    )
+                                                    .ok();
                                                 }
                                                 if cmds.len() >= 3 {
-                                                    let prev: Vec<&str> = cmds[..cmds.len()-1].iter().rev().take(3).map(|s| s.as_str()).collect::<Vec<_>>().into_iter().rev().collect();
-                                                    let seq_json = serde_json::to_string(&prev).unwrap_or_default();
-                                                    db.record_command_sequence(project_id.as_deref(), &seq_json, &normalized).ok();
+                                                    let prev: Vec<&str> = cmds[..cmds.len() - 1]
+                                                        .iter()
+                                                        .rev()
+                                                        .take(3)
+                                                        .map(|s| s.as_str())
+                                                        .collect::<Vec<_>>()
+                                                        .into_iter()
+                                                        .rev()
+                                                        .collect();
+                                                    let seq_json = serde_json::to_string(&prev)
+                                                        .unwrap_or_default();
+                                                    db.record_command_sequence(
+                                                        project_id.as_deref(),
+                                                        &seq_json,
+                                                        &normalized,
+                                                    )
+                                                    .ok();
                                                 }
 
                                                 // Query predictions and emit
-                                                let seq: Vec<&str> = cmds.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev().map(|s| s.as_str()).collect();
-                                                let seq_json = serde_json::to_string(&seq).unwrap_or_default();
-                                                if let Ok(predictions) = db.predict_next_command(project_id.as_deref(), &seq_json, 3) {
+                                                let seq: Vec<&str> = cmds
+                                                    .iter()
+                                                    .rev()
+                                                    .take(2)
+                                                    .collect::<Vec<_>>()
+                                                    .into_iter()
+                                                    .rev()
+                                                    .map(|s| s.as_str())
+                                                    .collect();
+                                                let seq_json =
+                                                    serde_json::to_string(&seq).unwrap_or_default();
+                                                if let Ok(predictions) = db.predict_next_command(
+                                                    project_id.as_deref(),
+                                                    &seq_json,
+                                                    3,
+                                                ) {
                                                     if !predictions.is_empty() {
-                                                        let evt = CommandPredictionEvent { predictions };
-                                                        let _ = app_clone.emit(&format!("command-prediction-{}", event_session_id), &evt);
+                                                        let evt =
+                                                            CommandPredictionEvent { predictions };
+                                                        let _ = app_clone.emit(
+                                                            &format!(
+                                                                "command-prediction-{}",
+                                                                event_session_id
+                                                            ),
+                                                            &evt,
+                                                        );
                                                     }
                                                 }
                                             }
@@ -296,7 +395,9 @@ pub fn create_session(
                                     s.last_activity_at = now();
                                     let update = SessionUpdate::from(&*s);
                                     let _ = app_clone.emit("session-updated", &update);
-                                } else if let (Some(ref sa), Some(ref aa)) = (&s.detected_agent, &a.detected_agent) {
+                                } else if let (Some(ref sa), Some(ref aa)) =
+                                    (&s.detected_agent, &a.detected_agent)
+                                {
                                     // Model enrichment: agent detected but model was unknown, now resolved
                                     if sa.model.is_none() && aa.model.is_some() {
                                         s.detected_agent = a.detected_agent.clone();
@@ -311,39 +412,44 @@ pub fn create_session(
                         // Auto-launch AI agent when shell is ready
                         if a.pending_ai_launch {
                             a.pending_ai_launch = false;
-                            let launch_info = session_clone.lock().ok()
-                                .map(|s| (s.ai_provider.clone(), s.has_initial_context, s.auto_approve));
-                            if let Some((Some(ref provider), has_context, auto_approve)) = launch_info {
+                            let launch_info = session_clone.lock().ok().map(|s| {
+                                (s.ai_provider.clone(), s.has_initial_context, s.auto_approve)
+                            });
+                            if let Some((Some(ref provider), has_context, auto_approve)) =
+                                launch_info
+                            {
                                 // Only launch known/allowed AI providers (reject unknown values)
-                                if let Some(launch_cmd) = ai_launch_command(provider, auto_approve) {
-                                // For Claude/Gemini: pass context instruction as CLI argument
-                                // so it's processed immediately without PTY injection timing issues
-                                let supports_cli_prompt = provider == "claude" || provider == "gemini";
-                                let cmd = if has_context && supports_cli_prompt {
-                                    format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
-                                } else {
-                                    launch_cmd
-                                };
-                                if let Ok(mut w) = writer_for_reader.lock() {
-                                    let _ = w.write_all(format!("{}\r", cmd).as_bytes());
-                                    let _ = w.flush();
-                                }
-                                // Mark context as injected if it was baked into the launch command
-                                if has_context && supports_cli_prompt {
-                                    a.context_injected = true;
-                                    if let Ok(mut s) = session_clone.lock() {
-                                        s.context_injected = true;
-                                        s.phase = SessionPhase::LaunchingAgent;
-                                        let update = SessionUpdate::from(&*s);
-                                        let _ = app_clone.emit("session-updated", &update);
+                                if let Some(launch_cmd) = ai_launch_command(provider, auto_approve)
+                                {
+                                    // For Claude/Gemini: pass context instruction as CLI argument
+                                    // so it's processed immediately without PTY injection timing issues
+                                    let supports_cli_prompt =
+                                        provider == "claude" || provider == "gemini";
+                                    let cmd = if has_context && supports_cli_prompt {
+                                        format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
+                                    } else {
+                                        launch_cmd
+                                    };
+                                    if let Ok(mut w) = writer_for_reader.lock() {
+                                        let _ = w.write_all(format!("{}\r", cmd).as_bytes());
+                                        let _ = w.flush();
                                     }
-                                } else {
-                                    if let Ok(mut s) = session_clone.lock() {
-                                        s.phase = SessionPhase::LaunchingAgent;
-                                        let update = SessionUpdate::from(&*s);
-                                        let _ = app_clone.emit("session-updated", &update);
+                                    // Mark context as injected if it was baked into the launch command
+                                    if has_context && supports_cli_prompt {
+                                        a.context_injected = true;
+                                        if let Ok(mut s) = session_clone.lock() {
+                                            s.context_injected = true;
+                                            s.phase = SessionPhase::LaunchingAgent;
+                                            let update = SessionUpdate::from(&*s);
+                                            let _ = app_clone.emit("session-updated", &update);
+                                        }
+                                    } else {
+                                        if let Ok(mut s) = session_clone.lock() {
+                                            s.phase = SessionPhase::LaunchingAgent;
+                                            let update = SessionUpdate::from(&*s);
+                                            let _ = app_clone.emit("session-updated", &update);
+                                        }
                                     }
-                                }
                                 } else {
                                     log::warn!("Unknown AI provider rejected: {}", provider);
                                 }
@@ -415,7 +521,9 @@ pub fn create_session(
                 thread::sleep(interval);
                 // Check if session is destroyed → stop
                 if let Ok(s) = session_silence.lock() {
-                    if matches!(s.phase, SessionPhase::Destroyed) { break; }
+                    if matches!(s.phase, SessionPhase::Destroyed) {
+                        break;
+                    }
                 }
                 if let Ok(mut a) = analyzer_silence.lock() {
                     if let Some(last) = a.last_output_at {
@@ -441,11 +549,19 @@ pub fn create_session(
     }
 
     let result = {
-        let s = session_arc.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let s = session_arc
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {}", e))?;
         SessionUpdate::from(&*s)
     };
 
-    let pty_session = PtySession { master: pair.master, writer, session: session_arc, analyzer, child };
+    let pty_session = PtySession {
+        master: pair.master,
+        writer,
+        session: session_arc,
+        analyzer,
+        child,
+    };
     mgr.sessions.insert(session_id.clone(), pty_session);
 
     // Save to DB
@@ -456,7 +572,8 @@ pub fn create_session(
         // Attach realms if provided
         if let Some(ref ids) = realm_ids {
             for realm_id in ids {
-                db.attach_session_realm(&session_id, realm_id, "primary").ok();
+                db.attach_session_realm(&session_id, realm_id, "primary")
+                    .ok();
             }
             // Write context file so AI agents can read project info
             if !ids.is_empty() {
@@ -475,11 +592,14 @@ pub fn write_to_session(
     data: String,
 ) -> Result<(), String> {
     let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get_mut(&session_id)
+    let session = mgr
+        .sessions
+        .get_mut(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
 
     use base64::Engine;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(&data)
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
         .map_err(|e| format!("Invalid base64 input: {}", e))?;
 
     if let Ok(mut a) = session.analyzer.lock() {
@@ -516,18 +636,19 @@ pub fn write_to_session(
     }
 
     {
-        let mut w = session.writer.lock().map_err(|e| format!("Writer lock failed: {}", e))?;
-        w.write_all(&bytes).map_err(|e| format!("Write failed: {}", e))?;
+        let mut w = session
+            .writer
+            .lock()
+            .map_err(|e| format!("Writer lock failed: {}", e))?;
+        w.write_all(&bytes)
+            .map_err(|e| format!("Write failed: {}", e))?;
         w.flush().map_err(|e| format!("Flush failed: {}", e))?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn nudge_realm_context(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<bool, String> {
+pub fn nudge_realm_context(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
     // Check if there are realms attached
     let has_context = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -546,33 +667,61 @@ pub fn nudge_realm_context(
     };
 
     // Only nudge if an AI agent has been detected in this session
-    let has_agent = pty.session.lock()
+    let has_agent = pty
+        .session
+        .lock()
         .map_err(|e| format!("Session lock failed: {}", e))?
-        .detected_agent.is_some();
+        .detected_agent
+        .is_some();
 
     if !has_agent {
         return Ok(false);
     }
 
     // Send a minimal one-liner telling the agent to read the context file
-    let msg = "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
-    let mut w = pty.writer.lock().map_err(|e| format!("Writer lock failed: {}", e))?;
-    w.write_all(msg.as_bytes()).map_err(|e| format!("Write failed: {}", e))?;
+    let msg =
+        "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
+    let mut w = pty
+        .writer
+        .lock()
+        .map_err(|e| format!("Writer lock failed: {}", e))?;
+    w.write_all(msg.as_bytes())
+        .map_err(|e| format!("Write failed: {}", e))?;
     w.flush().map_err(|e| format!("Flush failed: {}", e))?;
 
     Ok(true)
 }
 
 #[tauri::command]
-pub fn resize_session(state: State<'_, AppState>, session_id: String, rows: u16, cols: u16) -> Result<(), String> {
+pub fn resize_session(
+    state: State<'_, AppState>,
+    session_id: String,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
-    session.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| format!("Resize failed: {}", e))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    session
+        .master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Resize failed: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+pub fn close_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<(), String> {
     let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
 
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
@@ -580,7 +729,9 @@ pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: Str
         // process may be hung. Spawn a reaper thread instead.
         pty_session.child.kill().ok();
         let mut child = pty_session.child;
-        thread::spawn(move || { child.wait().ok(); });
+        thread::spawn(move || {
+            child.wait().ok();
+        });
 
         // Save snapshot and persist token data
         if let Ok(analyzer) = pty_session.analyzer.lock() {
@@ -592,17 +743,27 @@ pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: Str
                 // Persist final token state
                 for (provider, tokens) in &metrics.token_usage {
                     db.record_token_usage(
-                        &session_id, provider, &tokens.model,
-                        tokens.input_tokens as i64, tokens.output_tokens as i64,
+                        &session_id,
+                        provider,
+                        &tokens.model,
+                        tokens.input_tokens as i64,
+                        tokens.output_tokens as i64,
                         tokens.estimated_cost_usd,
-                    ).ok();
+                    )
+                    .ok();
                 }
                 // Persist memory facts
                 for fact in &metrics.memory_facts {
                     db.save_memory_entry(
-                        "project", &"global", &fact.key, &fact.value,
-                        &fact.source, "auto", fact.confidence as f64,
-                    ).ok();
+                        "project",
+                        &"global",
+                        &fact.key,
+                        &fact.value,
+                        &fact.source,
+                        "auto",
+                        fact.confidence as f64,
+                    )
+                    .ok();
                 }
             }
         }
@@ -639,7 +800,9 @@ pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: Str
                             ) {
                                 log::warn!(
                                     "Failed to remove worktree '{}' for session '{}': {}",
-                                    wt.worktree_path, session_id, e
+                                    wt.worktree_path,
+                                    session_id,
+                                    e
                                 );
                             }
                         }
@@ -648,14 +811,16 @@ pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: Str
                     if let Err(e) = db.delete_worktrees_for_session(&session_id) {
                         log::warn!(
                             "Failed to delete worktree records for session '{}': {}",
-                            session_id, e
+                            session_id,
+                            e
                         );
                     }
                 }
                 Err(e) => {
                     log::warn!(
                         "Failed to get worktrees for session '{}': {}",
-                        session_id, e
+                        session_id,
+                        e
                     );
                 }
             }
@@ -668,9 +833,11 @@ pub fn close_session(app: AppHandle, state: State<'_, AppState>, session_id: Str
 #[tauri::command]
 pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<SessionUpdate>, String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    Ok(mgr.sessions.values().filter_map(|ps| {
-        ps.session.lock().ok().map(|s| SessionUpdate::from(&*s))
-    }).collect())
+    Ok(mgr
+        .sessions
+        .values()
+        .filter_map(|ps| ps.session.lock().ok().map(|s| SessionUpdate::from(&*s)))
+        .collect())
 }
 
 /// Save scrollback snapshots for ALL live sessions without closing them.
@@ -696,10 +863,14 @@ pub fn save_all_snapshots(state: State<'_, AppState>) -> Result<(), String> {
             let metrics = analyzer.to_metrics();
             for (provider, tokens) in &metrics.token_usage {
                 db.record_token_usage(
-                    session_id, provider, &tokens.model,
-                    tokens.input_tokens as i64, tokens.output_tokens as i64,
+                    session_id,
+                    provider,
+                    &tokens.model,
+                    tokens.input_tokens as i64,
+                    tokens.output_tokens as i64,
                     tokens.estimated_cost_usd,
-                ).ok();
+                )
+                .ok();
             }
         }
     }
@@ -708,17 +879,31 @@ pub fn save_all_snapshots(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_session_detail(state: State<'_, AppState>, session_id: String) -> Result<SessionUpdate, String> {
+pub fn get_session_detail(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<SessionUpdate, String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     let s = session.session.lock().map_err(|e| e.to_string())?;
     Ok(SessionUpdate::from(&*s))
 }
 
 #[tauri::command]
-pub fn update_session_label(app: AppHandle, state: State<'_, AppState>, session_id: String, label: String) -> Result<(), String> {
+pub fn update_session_label(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    label: String,
+) -> Result<(), String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
         let mut s = session.session.lock().map_err(|e| e.to_string())?;
         s.label = label.clone();
@@ -731,9 +916,17 @@ pub fn update_session_label(app: AppHandle, state: State<'_, AppState>, session_
 }
 
 #[tauri::command]
-pub fn update_session_description(app: AppHandle, state: State<'_, AppState>, session_id: String, description: String) -> Result<(), String> {
+pub fn update_session_description(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    description: String,
+) -> Result<(), String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
         let mut s = session.session.lock().map_err(|e| e.to_string())?;
         s.description = description.clone();
@@ -746,9 +939,17 @@ pub fn update_session_description(app: AppHandle, state: State<'_, AppState>, se
 }
 
 #[tauri::command]
-pub fn update_session_color(app: AppHandle, state: State<'_, AppState>, session_id: String, color: String) -> Result<(), String> {
+pub fn update_session_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    color: String,
+) -> Result<(), String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
         let mut s = session.session.lock().map_err(|e| e.to_string())?;
         s.color = color.clone();
@@ -761,9 +962,17 @@ pub fn update_session_color(app: AppHandle, state: State<'_, AppState>, session_
 }
 
 #[tauri::command]
-pub fn add_workspace_path(app: AppHandle, state: State<'_, AppState>, session_id: String, path: String) -> Result<(), String> {
+pub fn add_workspace_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    path: String,
+) -> Result<(), String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     let mut s = session.session.lock().map_err(|e| e.to_string())?;
     if !s.workspace_paths.contains(&path) {
         s.workspace_paths.push(path);
@@ -775,11 +984,16 @@ pub fn add_workspace_path(app: AppHandle, state: State<'_, AppState>, session_id
 
 #[tauri::command]
 pub fn update_session_group(
-    app: AppHandle, state: State<'_, AppState>,
-    session_id: String, group: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    group: Option<String>,
 ) -> Result<(), String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let pty_session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let pty_session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
         let mut s = pty_session.session.lock().map_err(|e| e.to_string())?;
         s.group = group.clone();
@@ -793,17 +1007,29 @@ pub fn update_session_group(
 }
 
 #[tauri::command]
-pub fn get_session_output(state: State<'_, AppState>, session_id: String) -> Result<String, String> {
+pub fn get_session_output(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<String, String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     let analyzer = session.analyzer.lock().map_err(|e| e.to_string())?;
     Ok(analyzer.get_stripped_output())
 }
 
 #[tauri::command]
-pub fn get_session_metadata(state: State<'_, AppState>, session_id: String) -> Result<SessionMetrics, String> {
+pub fn get_session_metadata(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<SessionMetrics, String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     let analyzer = session.analyzer.lock().map_err(|e| e.to_string())?;
     Ok(analyzer.to_metrics())
 }
@@ -816,20 +1042,25 @@ pub fn get_available_shells() -> Vec<ShellInfo> {
     #[cfg(unix)]
     {
         let candidates = [
-            ("zsh",    "/bin/zsh"),
-            ("bash",   "/bin/bash"),
-            ("fish",   "/usr/local/bin/fish"),
-            ("fish",   "/opt/homebrew/bin/fish"),
-            ("nu",     "/usr/local/bin/nu"),
-            ("nu",     "/opt/homebrew/bin/nu"),
-            ("sh",     "/bin/sh"),
+            ("zsh", "/bin/zsh"),
+            ("bash", "/bin/bash"),
+            ("fish", "/usr/local/bin/fish"),
+            ("fish", "/opt/homebrew/bin/fish"),
+            ("nu", "/usr/local/bin/nu"),
+            ("nu", "/opt/homebrew/bin/nu"),
+            ("sh", "/bin/sh"),
         ];
         let mut seen = std::collections::HashSet::new();
         for (name, path) in candidates {
-            if seen.contains(name) { continue; }
+            if seen.contains(name) {
+                continue;
+            }
             if std::path::Path::new(path).exists() {
                 seen.insert(name);
-                shells.push(ShellInfo { name: name.to_string(), path: path.to_string() });
+                shells.push(ShellInfo {
+                    name: name.to_string(),
+                    path: path.to_string(),
+                });
             }
         }
     }
@@ -838,22 +1069,37 @@ pub fn get_available_shells() -> Vec<ShellInfo> {
     {
         // PowerShell 7+ (pwsh)
         if crate::platform::command_exists("pwsh") {
-            shells.push(ShellInfo { name: "PowerShell".to_string(), path: "pwsh".to_string() });
+            shells.push(ShellInfo {
+                name: "PowerShell".to_string(),
+                path: "pwsh".to_string(),
+            });
         }
         // Windows PowerShell 5.x
         if crate::platform::command_exists("powershell") {
-            shells.push(ShellInfo { name: "Windows PowerShell".to_string(), path: "powershell".to_string() });
+            shells.push(ShellInfo {
+                name: "Windows PowerShell".to_string(),
+                path: "powershell".to_string(),
+            });
         }
         // cmd.exe
         if let Ok(comspec) = std::env::var("COMSPEC") {
-            shells.push(ShellInfo { name: "Command Prompt".to_string(), path: comspec });
+            shells.push(ShellInfo {
+                name: "Command Prompt".to_string(),
+                path: comspec,
+            });
         } else {
-            shells.push(ShellInfo { name: "Command Prompt".to_string(), path: "cmd.exe".to_string() });
+            shells.push(ShellInfo {
+                name: "Command Prompt".to_string(),
+                path: "cmd.exe".to_string(),
+            });
         }
         // Git Bash
         let git_bash = "C:\\Program Files\\Git\\bin\\bash.exe";
         if std::path::Path::new(git_bash).exists() {
-            shells.push(ShellInfo { name: "Git Bash".to_string(), path: git_bash.to_string() });
+            shells.push(ShellInfo {
+                name: "Git Bash".to_string(),
+                path: git_bash.to_string(),
+            });
         }
     }
 
@@ -861,9 +1107,15 @@ pub fn get_available_shells() -> Vec<ShellInfo> {
 }
 
 #[tauri::command]
-pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) -> Result<ShellEnvironment, String> {
+pub fn detect_shell_environment(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<ShellEnvironment, String> {
     let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
-    let session = mgr.sessions.get(&session_id).ok_or_else(|| format!("Session {} not found", session_id))?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
     let s = session.session.lock().map_err(|e| e.to_string())?;
 
     let shell = &s.shell;
@@ -913,7 +1165,9 @@ pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) 
                 has_autosuggest = true;
                 plugins.push("zsh-autosuggestions".to_string());
             }
-            if zshrc.contains("zsh-syntax-highlighting") || zshrc.contains("fast-syntax-highlighting") {
+            if zshrc.contains("zsh-syntax-highlighting")
+                || zshrc.contains("fast-syntax-highlighting")
+            {
                 has_syntax_highlighting = true;
                 plugins.push("zsh-syntax-highlighting".to_string());
             }
@@ -948,16 +1202,21 @@ pub fn detect_shell_environment(state: State<'_, AppState>, session_id: String) 
 
 #[tauri::command]
 pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, String> {
-    let home_dir = crate::platform::home_dir()
-        .ok_or_else(|| "Cannot determine home directory".to_string())?;
+    let home_dir =
+        crate::platform::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
 
     let history_path = if shell.contains("zsh") || shell == "zsh" {
         home_dir.join(".zsh_history").to_string_lossy().to_string()
     } else if shell.contains("bash") || shell == "bash" {
         home_dir.join(".bash_history").to_string_lossy().to_string()
     } else if shell.contains("fish") || shell == "fish" {
-        home_dir.join(".local").join("share").join("fish").join("fish_history")
-            .to_string_lossy().to_string()
+        home_dir
+            .join(".local")
+            .join("share")
+            .join("fish")
+            .join("fish_history")
+            .to_string_lossy()
+            .to_string()
     } else if shell.contains("pwsh") || shell.contains("powershell") {
         // PowerShell history via PSReadLine
         #[cfg(windows)]
@@ -965,17 +1224,28 @@ pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, St
             let appdata = std::env::var("APPDATA").unwrap_or_default();
             if shell.contains("pwsh") {
                 // PowerShell 7+ (Core)
-                format!("{}\\Microsoft\\PowerShell\\PSReadLine\\ConsoleHost_history.txt", appdata)
+                format!(
+                    "{}\\Microsoft\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
+                    appdata
+                )
             } else {
                 // Windows PowerShell 5.1
-                format!("{}\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt", appdata)
+                format!(
+                    "{}\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
+                    appdata
+                )
             }
         }
         #[cfg(not(windows))]
         {
-            home_dir.join(".local").join("share").join("powershell")
-                .join("PSReadLine").join("ConsoleHost_history.txt")
-                .to_string_lossy().to_string()
+            home_dir
+                .join(".local")
+                .join("share")
+                .join("powershell")
+                .join("PSReadLine")
+                .join("ConsoleHost_history.txt")
+                .to_string_lossy()
+                .to_string()
         }
     } else {
         // Try zsh first, then bash
@@ -1034,15 +1304,24 @@ pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, St
     }
 
     // Return the last `limit` entries (most recent)
-    let start = if commands.len() > limit { commands.len() - limit } else { 0 };
+    let start = if commands.len() > limit {
+        commands.len() - limit
+    } else {
+        0
+    };
     Ok(commands[start..].to_vec())
 }
 
 #[tauri::command]
-pub fn get_session_commands(state: State<'_, AppState>, session_id: String, limit: usize) -> Result<Vec<String>, String> {
+pub fn get_session_commands(
+    state: State<'_, AppState>,
+    session_id: String,
+    limit: usize,
+) -> Result<Vec<String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let entries = db.get_execution_log_entries(&session_id, Some(limit as i64))?;
-    Ok(entries.into_iter()
+    Ok(entries
+        .into_iter()
         .filter(|e| e.event_type == "command")
         .map(|e| e.content)
         .collect())
@@ -1074,21 +1353,37 @@ pub fn get_project_context(path: String) -> Result<ProjectContextInfo, String> {
 
     // Detect languages
     let mut languages = Vec::new();
-    if dir.join("Cargo.toml").exists() { languages.push("rust".to_string()); }
-    if dir.join("tsconfig.json").exists() { languages.push("typescript".to_string()); }
+    if dir.join("Cargo.toml").exists() {
+        languages.push("rust".to_string());
+    }
+    if dir.join("tsconfig.json").exists() {
+        languages.push("typescript".to_string());
+    }
     if dir.join("package.json").exists() && !languages.contains(&"typescript".to_string()) {
         languages.push("javascript".to_string());
     }
-    if dir.join("go.mod").exists() { languages.push("go".to_string()); }
-    if dir.join("requirements.txt").exists() || dir.join("pyproject.toml").exists() || dir.join("setup.py").exists() {
+    if dir.join("go.mod").exists() {
+        languages.push("go".to_string());
+    }
+    if dir.join("requirements.txt").exists()
+        || dir.join("pyproject.toml").exists()
+        || dir.join("setup.py").exists()
+    {
         languages.push("python".to_string());
     }
-    if dir.join("Gemfile").exists() { languages.push("ruby".to_string()); }
-    if dir.join("pubspec.yaml").exists() { languages.push("dart".to_string()); }
+    if dir.join("Gemfile").exists() {
+        languages.push("ruby".to_string());
+    }
+    if dir.join("pubspec.yaml").exists() {
+        languages.push("dart".to_string());
+    }
 
     // Detect frameworks
     let mut frameworks = Vec::new();
-    if dir.join("next.config.js").exists() || dir.join("next.config.ts").exists() || dir.join("next.config.mjs").exists() {
+    if dir.join("next.config.js").exists()
+        || dir.join("next.config.ts").exists()
+        || dir.join("next.config.mjs").exists()
+    {
         frameworks.push("next".to_string());
     }
     if dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists() {
@@ -1106,11 +1401,18 @@ pub fn get_project_context(path: String) -> Result<ProjectContextInfo, String> {
     if dir.join("tauri.conf.json").exists() || dir.join("src-tauri").exists() {
         frameworks.push("tauri".to_string());
     }
-    if dir.join("Dockerfile").exists() || dir.join("docker-compose.yml").exists() || dir.join("docker-compose.yaml").exists() {
+    if dir.join("Dockerfile").exists()
+        || dir.join("docker-compose.yml").exists()
+        || dir.join("docker-compose.yaml").exists()
+    {
         frameworks.push("docker".to_string());
     }
-    if dir.join("Makefile").exists() { frameworks.push("make".to_string()); }
-    if dir.join("pubspec.yaml").exists() { frameworks.push("flutter".to_string()); }
+    if dir.join("Makefile").exists() {
+        frameworks.push("make".to_string());
+    }
+    if dir.join("pubspec.yaml").exists() {
+        frameworks.push("flutter".to_string());
+    }
     if dir.join(".terraform").exists() || dir.join("main.tf").exists() {
         frameworks.push("terraform".to_string());
     }

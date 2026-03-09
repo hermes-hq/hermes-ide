@@ -38,12 +38,17 @@ pub(crate) trait ProviderAdapter: Send + Sync {
 
 // ─── Utility Functions ──────────────────────────────────────────────
 
-pub(crate) fn now() -> String { chrono::Utc::now().to_rfc3339() }
+pub(crate) fn now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
 
 pub(crate) fn empty_analysis() -> LineAnalysis {
     LineAnalysis {
-        token_update: None, tool_call: None,
-        action: None, phase_hint: None, memory_fact: None,
+        token_update: None,
+        tool_call: None,
+        action: None,
+        phase_hint: None,
+        memory_fact: None,
     }
 }
 
@@ -74,29 +79,69 @@ pub(crate) fn parse_k_count(s: &str) -> u64 {
 pub(crate) fn extract_model_name(line: &str) -> Option<String> {
     let lower = line.to_lowercase();
     // Claude models
-    if lower.contains("opus 4") { return Some("opus".into()); }
-    if lower.contains("opus") { return Some("opus".into()); }
-    if lower.contains("sonnet 4") { return Some("sonnet".into()); }
-    if lower.contains("sonnet") { return Some("sonnet".into()); }
-    if lower.contains("haiku") { return Some("haiku".into()); }
+    if lower.contains("opus 4") {
+        return Some("opus".into());
+    }
+    if lower.contains("opus") {
+        return Some("opus".into());
+    }
+    if lower.contains("sonnet 4") {
+        return Some("sonnet".into());
+    }
+    if lower.contains("sonnet") {
+        return Some("sonnet".into());
+    }
+    if lower.contains("haiku") {
+        return Some("haiku".into());
+    }
     // OpenAI / Codex models
-    if lower.contains("codex") && lower.contains("gpt-5") { return Some("gpt-5-codex".into()); }
-    if lower.contains("gpt-5") { return Some("gpt-5".into()); }
-    if lower.contains("gpt-4o") { return Some("gpt-4o".into()); }
-    if lower.contains("gpt-4") { return Some("gpt-4".into()); }
+    if lower.contains("codex") && lower.contains("gpt-5") {
+        return Some("gpt-5-codex".into());
+    }
+    if lower.contains("gpt-5") {
+        return Some("gpt-5".into());
+    }
+    if lower.contains("gpt-4o") {
+        return Some("gpt-4o".into());
+    }
+    if lower.contains("gpt-4") {
+        return Some("gpt-4".into());
+    }
     if (lower.contains(" o1") || lower.contains("-o1") || lower.starts_with("o1"))
-        && !lower.contains("v0.1") && !lower.contains("v0.0") { return Some("o1".into()); }
-    if lower.contains(" o3") || lower.contains("-o3") || lower.starts_with("o3") { return Some("o3".into()); }
-    if lower.contains(" o4") || lower.contains("-o4") || lower.starts_with("o4") { return Some("o4".into()); }
+        && !lower.contains("v0.1")
+        && !lower.contains("v0.0")
+    {
+        return Some("o1".into());
+    }
+    if lower.contains(" o3") || lower.contains("-o3") || lower.starts_with("o3") {
+        return Some("o3".into());
+    }
+    if lower.contains(" o4") || lower.contains("-o4") || lower.starts_with("o4") {
+        return Some("o4".into());
+    }
     // Google models
-    if lower.contains("gemini-3") && lower.contains("pro") { return Some("gemini-3-pro".into()); }
-    if lower.contains("gemini-3") && lower.contains("flash") { return Some("gemini-3-flash".into()); }
-    if lower.contains("gemini") && lower.contains("pro") { return Some("gemini-pro".into()); }
-    if lower.contains("gemini") && lower.contains("flash-lite") { return Some("gemini-flash-lite".into()); }
-    if lower.contains("gemini") && lower.contains("flash") { return Some("gemini-flash".into()); }
+    if lower.contains("gemini-3") && lower.contains("pro") {
+        return Some("gemini-3-pro".into());
+    }
+    if lower.contains("gemini-3") && lower.contains("flash") {
+        return Some("gemini-3-flash".into());
+    }
+    if lower.contains("gemini") && lower.contains("pro") {
+        return Some("gemini-pro".into());
+    }
+    if lower.contains("gemini") && lower.contains("flash-lite") {
+        return Some("gemini-flash-lite".into());
+    }
+    if lower.contains("gemini") && lower.contains("flash") {
+        return Some("gemini-flash".into());
+    }
     // Deepseek (used in Aider)
-    if lower.contains("deepseek-r1") { return Some("deepseek-r1".into()); }
-    if lower.contains("deepseek") { return Some("deepseek".into()); }
+    if lower.contains("deepseek-r1") {
+        return Some("deepseek-r1".into());
+    }
+    if lower.contains("deepseek") {
+        return Some("deepseek".into());
+    }
     None
 }
 
@@ -118,54 +163,111 @@ pub(crate) fn estimate_cost(provider: &str, model: &str, input: u64, output: u64
 pub(crate) fn slash_label(cmd: &str) -> String {
     match cmd {
         // Claude Code
-        "/init" => "Initialize project", "/build" => "Build", "/test" => "Run tests",
-        "/run" => "Run command", "/review" => "Code review", "/commit" => "Commit",
-        "/compact" => "Compact context", "/memory" => "Manage memory",
-        "/clear" => "Clear", "/config" => "Config", "/help" => "Help",
-        "/cost" => "Show cost", "/doctor" => "Doctor", "/bug" => "Bug report",
-        "/login" => "Login", "/logout" => "Logout",
-        "/terminal-setup" => "Terminal setup", "/allowed-tools" => "Allowed tools",
-        "/permissions" => "Permissions", "/vim" => "Vim mode",
+        "/init" => "Initialize project",
+        "/build" => "Build",
+        "/test" => "Run tests",
+        "/run" => "Run command",
+        "/review" => "Code review",
+        "/commit" => "Commit",
+        "/compact" => "Compact context",
+        "/memory" => "Manage memory",
+        "/clear" => "Clear",
+        "/config" => "Config",
+        "/help" => "Help",
+        "/cost" => "Show cost",
+        "/doctor" => "Doctor",
+        "/bug" => "Bug report",
+        "/login" => "Login",
+        "/logout" => "Logout",
+        "/terminal-setup" => "Terminal setup",
+        "/allowed-tools" => "Allowed tools",
+        "/permissions" => "Permissions",
+        "/vim" => "Vim mode",
         // Aider
-        "/add" => "Add file", "/drop" => "Drop file", "/undo" => "Undo",
-        "/diff" => "Show diff", "/ls" => "List files", "/tokens" => "Tokens",
-        "/model" => "Switch model", "/models" => "Search models", "/settings" => "Settings",
-        "/map" => "Repo map", "/map-refresh" => "Refresh map",
-        "/voice" => "Voice", "/paste" => "Paste", "/architect" => "Architect mode",
-        "/ask" => "Ask mode", "/code" => "Code mode", "/chat-mode" => "Chat mode",
-        "/lint" => "Lint", "/web" => "Web search", "/read-only" => "Read-only",
-        "/reset" => "Reset", "/quit" | "/exit" => "Quit", "/git" => "Git command",
-        "/editor" => "Open editor", "/editor-model" => "Switch editor model",
-        "/copy" => "Copy output", "/copy-context" => "Copy context",
-        "/context" => "Context mode", "/ok" => "Proceed", "/load" => "Load file",
-        "/multiline-mode" => "Multiline", "/reasoning-effort" => "Reasoning effort",
-        "/report" => "Report issue", "/think-tokens" => "Think tokens",
+        "/add" => "Add file",
+        "/drop" => "Drop file",
+        "/undo" => "Undo",
+        "/diff" => "Show diff",
+        "/ls" => "List files",
+        "/tokens" => "Tokens",
+        "/model" => "Switch model",
+        "/models" => "Search models",
+        "/settings" => "Settings",
+        "/map" => "Repo map",
+        "/map-refresh" => "Refresh map",
+        "/voice" => "Voice",
+        "/paste" => "Paste",
+        "/architect" => "Architect mode",
+        "/ask" => "Ask mode",
+        "/code" => "Code mode",
+        "/chat-mode" => "Chat mode",
+        "/lint" => "Lint",
+        "/web" => "Web search",
+        "/read-only" => "Read-only",
+        "/reset" => "Reset",
+        "/quit" | "/exit" => "Quit",
+        "/git" => "Git command",
+        "/editor" => "Open editor",
+        "/editor-model" => "Switch editor model",
+        "/copy" => "Copy output",
+        "/copy-context" => "Copy context",
+        "/context" => "Context mode",
+        "/ok" => "Proceed",
+        "/load" => "Load file",
+        "/multiline-mode" => "Multiline",
+        "/reasoning-effort" => "Reasoning effort",
+        "/report" => "Report issue",
+        "/think-tokens" => "Think tokens",
         "/weak-model" => "Weak model",
         // Codex
-        "/apply" => "Apply changes", "/approvals" => "Approvals",
-        "/status" => "Status", "/mention" => "Mention file",
-        "/plan" => "Plan mode", "/collab" => "Collaboration",
-        "/agent" => "Switch agent", "/new" => "New chat",
-        "/fork" => "Fork chat", "/resume" => "Resume chat",
-        "/rename" => "Rename thread", "/ps" => "List terminals",
-        "/clean" => "Stop terminals", "/personality" => "Personality",
-        "/realtime" => "Realtime voice", "/feedback" => "Send feedback",
-        "/skills" => "Skills", "/mcp" => "MCP tools",
-        "/statusline" => "Status line", "/theme" => "Theme",
-        "/apps" => "Apps", "/debug-config" => "Debug config",
+        "/apply" => "Apply changes",
+        "/approvals" => "Approvals",
+        "/status" => "Status",
+        "/mention" => "Mention file",
+        "/plan" => "Plan mode",
+        "/collab" => "Collaboration",
+        "/agent" => "Switch agent",
+        "/new" => "New chat",
+        "/fork" => "Fork chat",
+        "/resume" => "Resume chat",
+        "/rename" => "Rename thread",
+        "/ps" => "List terminals",
+        "/clean" => "Stop terminals",
+        "/personality" => "Personality",
+        "/realtime" => "Realtime voice",
+        "/feedback" => "Send feedback",
+        "/skills" => "Skills",
+        "/mcp" => "MCP tools",
+        "/statusline" => "Status line",
+        "/theme" => "Theme",
+        "/apps" => "Apps",
+        "/debug-config" => "Debug config",
         // Gemini
-        "/stats" | "/usage" => "Stats", "/save" => "Save", "/restore" => "Restore",
-        "/sandbox" => "Sandbox", "/tools" => "Tools", "/shell" => "Shell",
-        "/edit" => "Edit file", "/yolo" => "YOLO mode",
-        "/about" => "About", "/agents" => "Agents", "/auth" => "Auth",
-        "/chat" => "Chat history", "/commands" => "Custom commands",
-        "/compress" => "Compress context", "/docs" => "Documentation",
-        "/extensions" => "Extensions", "/hooks" => "Hooks",
-        "/ide" => "IDE integration", "/policies" => "Policies",
-        "/privacy" => "Privacy", "/profile" => "Profile",
+        "/stats" | "/usage" => "Stats",
+        "/save" => "Save",
+        "/restore" => "Restore",
+        "/sandbox" => "Sandbox",
+        "/tools" => "Tools",
+        "/shell" => "Shell",
+        "/edit" => "Edit file",
+        "/yolo" => "YOLO mode",
+        "/about" => "About",
+        "/agents" => "Agents",
+        "/auth" => "Auth",
+        "/chat" => "Chat history",
+        "/commands" => "Custom commands",
+        "/compress" => "Compress context",
+        "/docs" => "Documentation",
+        "/extensions" => "Extensions",
+        "/hooks" => "Hooks",
+        "/ide" => "IDE integration",
+        "/policies" => "Policies",
+        "/privacy" => "Privacy",
+        "/profile" => "Profile",
         "/shortcuts" => "Shortcuts",
         _ => cmd,
-    }.into()
+    }
+    .into()
 }
 
 pub(crate) fn extract_between(text: &str, start: &str, end: &str) -> Option<String> {
@@ -180,8 +282,10 @@ pub(crate) fn extract_between(text: &str, start: &str, end: &str) -> Option<Stri
     let e = lower[after..].find(&end_lower)?;
     // Byte offsets from `lower` may not be valid for `text` if to_lowercase
     // changed byte lengths. Validate boundaries before slicing.
-    if after > text.len() || after + e > text.len()
-        || !text.is_char_boundary(after) || !text.is_char_boundary(after + e)
+    if after > text.len()
+        || after + e > text.len()
+        || !text.is_char_boundary(after)
+        || !text.is_char_boundary(after + e)
     {
         return None;
     }
@@ -189,7 +293,9 @@ pub(crate) fn extract_between(text: &str, start: &str, end: &str) -> Option<Stri
 }
 
 pub(crate) fn extract_port(line: &str) -> Option<String> {
-    PORT_RE.captures(&line.to_lowercase()).map(|c| c[1].to_string())
+    PORT_RE
+        .captures(&line.to_lowercase())
+        .map(|c| c[1].to_string())
 }
 
 /// Detects common shell prompts across zsh, bash, fish, starship, oh-my-zsh, etc.
@@ -211,8 +317,14 @@ pub(crate) fn is_shell_prompt(trimmed: &str) -> bool {
     }
 
     // Prompts ending with $ or % with path context
-    if trimmed.len() < 80 && (trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#')) {
-        if trimmed.contains('@') || trimmed.contains(':') || trimmed.contains('~') || trimmed.contains('/') {
+    if trimmed.len() < 80
+        && (trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#'))
+    {
+        if trimmed.contains('@')
+            || trimmed.contains(':')
+            || trimmed.contains('~')
+            || trimmed.contains('/')
+        {
             return true;
         }
     }
@@ -220,9 +332,7 @@ pub(crate) fn is_shell_prompt(trimmed: &str) -> bool {
     // Custom prompt characters used by starship, oh-my-zsh, powerlevel10k, etc.
     // These are common prompt indicator characters:
     // → ❯ ➜ ▶ ╰─ λ ➤ ⟩ ⟫ ›
-    let custom_prompt_chars = [
-        '→', '❯', '➜', '▶', 'λ', '➤', '⟩', '⟫', '›',
-    ];
+    let custom_prompt_chars = ['→', '❯', '➜', '▶', 'λ', '➤', '⟩', '⟫', '›'];
 
     // Check if line starts with or contains a prompt char near the end
     let last_chars: String = trimmed.chars().rev().take(5).collect();
@@ -253,7 +363,9 @@ pub(crate) fn is_shell_prompt(trimmed: &str) -> bool {
 /// that requires user input (Y/n, allow/deny, etc.).
 pub(crate) fn is_input_needed_line(line: &str) -> bool {
     let trimmed = line.trim();
-    if trimmed.is_empty() { return false; }
+    if trimmed.is_empty() {
+        return false;
+    }
     let lower = trimmed.to_lowercase();
 
     // ── Interactive menu indicators (strongest signal) ──────────────
@@ -268,9 +380,12 @@ pub(crate) fn is_input_needed_line(line: &str) -> bool {
     }
 
     // ── Common patterns: (Y/n), (y/N), (y/n), [Y/n], [y/N], Yes/No ──
-    if lower.contains("(y/n)") || lower.contains("(y/n)")
-        || lower.contains("[y/n]") || lower.contains("[y/n]")
-        || lower.contains("(yes/no)") || lower.contains("[yes/no]")
+    if lower.contains("(y/n)")
+        || lower.contains("(y/n)")
+        || lower.contains("[y/n]")
+        || lower.contains("[y/n]")
+        || lower.contains("(yes/no)")
+        || lower.contains("[yes/no]")
     {
         return true;
     }
@@ -302,18 +417,30 @@ pub(crate) fn is_input_needed_line(line: &str) -> bool {
     // ── Questions ending with "?" starting with question words ──────
     if trimmed.ends_with('?') && trimmed.len() > 5 && trimmed.len() < 120 {
         let first_word = lower.split_whitespace().next().unwrap_or("");
-        if first_word == "do" || first_word == "are" || first_word == "should"
-            || first_word == "would" || first_word == "can" || first_word == "may"
-            || first_word == "will" || first_word == "is" || first_word == "shall"
+        if first_word == "do"
+            || first_word == "are"
+            || first_word == "should"
+            || first_word == "would"
+            || first_word == "can"
+            || first_word == "may"
+            || first_word == "will"
+            || first_word == "is"
+            || first_word == "shall"
         {
             return true;
         }
     }
 
     // ── Generic "allow" / "deny" / "approve" with question indicators ──
-    let has_action_word = lower.split(|c: char| !c.is_alphabetic()).any(|w| w == "allow" || w == "deny" || w == "approve");
+    let has_action_word = lower
+        .split(|c: char| !c.is_alphabetic())
+        .any(|w| w == "allow" || w == "deny" || w == "approve");
     if has_action_word
-        && (trimmed.ends_with('?') || lower.contains("(y") || lower.contains("[y") || lower.contains("(n") || lower.contains("[n"))
+        && (trimmed.ends_with('?')
+            || lower.contains("(y")
+            || lower.contains("[y")
+            || lower.contains("(n")
+            || lower.contains("[n"))
         && trimmed.len() < 120
     {
         return true;
@@ -329,7 +456,8 @@ pub(crate) struct ClaudeCodeAdapter;
 impl ProviderAdapter for ClaudeCodeAdapter {
     fn detect_agent(&self, line: &str) -> Option<AgentInfo> {
         let lower = line.to_lowercase();
-        if lower.contains("claude code") || lower.contains("claude-code")
+        if lower.contains("claude code")
+            || lower.contains("claude-code")
             || (lower.contains("claude") && (lower.contains("v2.") || lower.contains("v1.")))
         {
             let model = extract_model_name(line);
@@ -357,7 +485,8 @@ impl ProviderAdapter for ClaudeCodeAdapter {
                 let input = parse_token_count(&caps[1]);
                 let output = parse_token_count(&caps[2]);
                 // Only trust explicit cost patterns — never DOLLAR_AMOUNT_RE
-                let cost = SESSION_COST_RE.captures(line)
+                let cost = SESSION_COST_RE
+                    .captures(line)
                     .or_else(|| CLAUDE_COST_RE.captures(line))
                     .and_then(|c| c[1].parse().ok());
                 result.token_update = Some(TokenUpdate {
@@ -372,7 +501,8 @@ impl ProviderAdapter for ClaudeCodeAdapter {
                 let input = parse_token_count(&caps[1]);
                 let output = parse_token_count(&caps[2]);
                 // Only trust explicit cost patterns on the same line
-                let cost = SESSION_COST_RE.captures(line)
+                let cost = SESSION_COST_RE
+                    .captures(line)
                     .or_else(|| CLAUDE_COST_RE.captures(line))
                     .and_then(|c| c[1].parse().ok());
                 result.token_update = Some(TokenUpdate {
@@ -424,7 +554,11 @@ impl ProviderAdapter for ClaudeCodeAdapter {
             let args = line[caps[0].len()..].trim().to_string();
             result.tool_call = Some(ToolCall {
                 tool: tool_name,
-                args: if args.is_empty() { "(...)".into() } else { args },
+                args: if args.is_empty() {
+                    "(...)".into()
+                } else {
+                    args
+                },
                 timestamp: now_str.clone(),
             });
             result.phase_hint = Some(PhaseHint::WorkStarted);
@@ -462,7 +596,9 @@ impl ProviderAdapter for ClaudeCodeAdapter {
                     confidence: 0.7,
                 });
             }
-        } else if lower.contains("test framework") || (lower.contains("using") && lower.contains("for testing")) {
+        } else if lower.contains("test framework")
+            || (lower.contains("using") && lower.contains("for testing"))
+        {
             if let Some(tf) = extract_between(line, "using ", " for") {
                 result.memory_fact = Some(MemoryFact {
                     key: "test_framework".into(),
@@ -489,14 +625,27 @@ impl ProviderAdapter for ClaudeCodeAdapter {
         let trimmed = line.trim();
         // Claude Code specific prompts: match lines like "claude>" or "project >" but
         // reject HTML tags, arrows (->), comparison operators, and general code output.
-        if trimmed.ends_with(">") && trimmed.len() < 40
-            && !trimmed.contains('<') && !trimmed.contains("->")
-            && !trimmed.contains("=>") && !trimmed.contains(">>")
+        if trimmed.ends_with(">")
+            && trimmed.len() < 40
+            && !trimmed.contains('<')
+            && !trimmed.contains("->")
+            && !trimmed.contains("=>")
+            && !trimmed.contains(">>")
         {
             // Must look prompt-like: either a bare ">" or have a word-like prefix
             // (not just a number like "0>" or punctuation)
             let prefix = trimmed[..trimmed.len() - 1].trim();
-            if prefix.is_empty() || prefix.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ' ' || c == '-' || c == ':' || c == '/' || c == '~') {
+            if prefix.is_empty()
+                || prefix.chars().all(|c| {
+                    c.is_alphanumeric()
+                        || c == '_'
+                        || c == ' '
+                        || c == '-'
+                        || c == ':'
+                        || c == '/'
+                        || c == '~'
+                })
+            {
                 return true;
             }
         }
@@ -505,22 +654,102 @@ impl ProviderAdapter for ClaudeCodeAdapter {
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
-            ActionTemplate { command: "/init".into(), label: "Init CLAUDE.md".into(), description: "Create project memory file".into(), category: "Setup".into() },
-            ActionTemplate { command: "/compact".into(), label: "Compact".into(), description: "Compress context window".into(), category: "Context".into() },
-            ActionTemplate { command: "/memory".into(), label: "Memory".into(), description: "View/edit project memory".into(), category: "Context".into() },
-            ActionTemplate { command: "/review".into(), label: "Review".into(), description: "Review recent changes".into(), category: "Code".into() },
-            ActionTemplate { command: "/cost".into(), label: "Cost".into(), description: "Show token cost breakdown".into(), category: "Info".into() },
-            ActionTemplate { command: "/doctor".into(), label: "Doctor".into(), description: "Check installation health".into(), category: "Info".into() },
-            ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Show available commands".into(), category: "Info".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear conversation history".into(), category: "Context".into() },
-            ActionTemplate { command: "/config".into(), label: "Config".into(), description: "Open configuration".into(), category: "Setup".into() },
-            ActionTemplate { command: "/login".into(), label: "Login".into(), description: "Authenticate with Anthropic".into(), category: "Setup".into() },
-            ActionTemplate { command: "/logout".into(), label: "Logout".into(), description: "Sign out of Anthropic".into(), category: "Setup".into() },
-            ActionTemplate { command: "/bug".into(), label: "Bug Report".into(), description: "Report a bug".into(), category: "Info".into() },
-            ActionTemplate { command: "/terminal-setup".into(), label: "Terminal Setup".into(), description: "Configure terminal integration".into(), category: "Setup".into() },
-            ActionTemplate { command: "/allowed-tools".into(), label: "Allowed Tools".into(), description: "Manage tool permissions".into(), category: "Setup".into() },
-            ActionTemplate { command: "/permissions".into(), label: "Permissions".into(), description: "View/edit permissions".into(), category: "Setup".into() },
-            ActionTemplate { command: "/vim".into(), label: "Vim Mode".into(), description: "Toggle vim keybindings".into(), category: "Setup".into() },
+            ActionTemplate {
+                command: "/init".into(),
+                label: "Init CLAUDE.md".into(),
+                description: "Create project memory file".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/compact".into(),
+                label: "Compact".into(),
+                description: "Compress context window".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/memory".into(),
+                label: "Memory".into(),
+                description: "View/edit project memory".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/review".into(),
+                label: "Review".into(),
+                description: "Review recent changes".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/cost".into(),
+                label: "Cost".into(),
+                description: "Show token cost breakdown".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/doctor".into(),
+                label: "Doctor".into(),
+                description: "Check installation health".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/help".into(),
+                label: "Help".into(),
+                description: "Show available commands".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/clear".into(),
+                label: "Clear".into(),
+                description: "Clear conversation history".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/config".into(),
+                label: "Config".into(),
+                description: "Open configuration".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/login".into(),
+                label: "Login".into(),
+                description: "Authenticate with Anthropic".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/logout".into(),
+                label: "Logout".into(),
+                description: "Sign out of Anthropic".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/bug".into(),
+                label: "Bug Report".into(),
+                description: "Report a bug".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/terminal-setup".into(),
+                label: "Terminal Setup".into(),
+                description: "Configure terminal integration".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/allowed-tools".into(),
+                label: "Allowed Tools".into(),
+                description: "Manage tool permissions".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/permissions".into(),
+                label: "Permissions".into(),
+                description: "View/edit permissions".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/vim".into(),
+                label: "Vim Mode".into(),
+                description: "Toggle vim keybindings".into(),
+                category: "Setup".into(),
+            },
         ]
     }
 }
@@ -553,7 +782,9 @@ impl ProviderAdapter for AiderAdapter {
                 confidence: 0.95,
             });
         }
-        if lower.contains("aider") && (lower.contains("v0.") || lower.contains("v1.") || lower.starts_with("aider")) {
+        if lower.contains("aider")
+            && (lower.contains("v0.") || lower.contains("v1.") || lower.starts_with("aider"))
+        {
             let provider = if lower.contains("claude") || lower.contains("anthropic") {
                 "anthropic"
             } else if lower.contains("gpt") || lower.contains("openai") {
@@ -586,7 +817,9 @@ impl ProviderAdapter for AiderAdapter {
             let sent = parse_k_count(&caps[1]);
             let received = parse_k_count(&caps[4]);
             // Cost on same line or next: "Cost: $0.12 message, $0.67 session."
-            let cost = AIDER_COST_RE.captures(line).and_then(|c| c[2].parse::<f64>().ok());
+            let cost = AIDER_COST_RE
+                .captures(line)
+                .and_then(|c| c[2].parse::<f64>().ok());
             result.token_update = Some(TokenUpdate {
                 provider: "unknown".into(),
                 model: "unknown".into(),
@@ -598,7 +831,9 @@ impl ProviderAdapter for AiderAdapter {
         }
         // Fallback: simpler token pattern
         else if let Some(caps) = AIDER_TOKEN_RE.captures(line) {
-            let cost = AIDER_COST_RE.captures(line).and_then(|c| c[2].parse::<f64>().ok());
+            let cost = AIDER_COST_RE
+                .captures(line)
+                .and_then(|c| c[2].parse::<f64>().ok());
             result.token_update = Some(TokenUpdate {
                 provider: "unknown".into(),
                 model: "unknown".into(),
@@ -698,7 +933,11 @@ impl ProviderAdapter for AiderAdapter {
         // Added/removed file from chat (use byte offsets to avoid case-sensitivity issues)
         let lower = line.to_lowercase();
         if lower.starts_with("added ") && lower.contains(" to the chat") {
-            let file = line["added ".len()..].split(" to the chat").next().unwrap_or("").trim();
+            let file = line["added ".len()..]
+                .split(" to the chat")
+                .next()
+                .unwrap_or("")
+                .trim();
             if !file.is_empty() {
                 result.tool_call = Some(ToolCall {
                     tool: "Add File".into(),
@@ -707,7 +946,11 @@ impl ProviderAdapter for AiderAdapter {
                 });
             }
         } else if lower.starts_with("removed ") && lower.contains(" from the chat") {
-            let file = line["removed ".len()..].split(" from the chat").next().unwrap_or("").trim();
+            let file = line["removed ".len()..]
+                .split(" from the chat")
+                .next()
+                .unwrap_or("")
+                .trim();
             if !file.is_empty() {
                 result.tool_call = Some(ToolCall {
                     tool: "Drop File".into(),
@@ -740,32 +983,162 @@ impl ProviderAdapter for AiderAdapter {
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
-            ActionTemplate { command: "/add".into(), label: "Add File".into(), description: "Add file to chat context".into(), category: "Files".into() },
-            ActionTemplate { command: "/drop".into(), label: "Drop File".into(), description: "Remove file from chat context".into(), category: "Files".into() },
-            ActionTemplate { command: "/ls".into(), label: "List Files".into(), description: "List files in chat".into(), category: "Files".into() },
-            ActionTemplate { command: "/read-only".into(), label: "Read-Only".into(), description: "Add file as read-only".into(), category: "Files".into() },
-            ActionTemplate { command: "/run".into(), label: "Run Command".into(), description: "Run a shell command".into(), category: "Code".into() },
-            ActionTemplate { command: "/test".into(), label: "Run Tests".into(), description: "Run test suite".into(), category: "Code".into() },
-            ActionTemplate { command: "/lint".into(), label: "Lint".into(), description: "Lint and fix files".into(), category: "Code".into() },
-            ActionTemplate { command: "/paste".into(), label: "Paste".into(), description: "Paste from clipboard".into(), category: "Code".into() },
-            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show pending changes diff".into(), category: "Git".into() },
-            ActionTemplate { command: "/commit".into(), label: "Commit".into(), description: "Commit pending changes".into(), category: "Git".into() },
-            ActionTemplate { command: "/undo".into(), label: "Undo".into(), description: "Undo last AI change".into(), category: "Git".into() },
-            ActionTemplate { command: "/git".into(), label: "Git".into(), description: "Run git command".into(), category: "Git".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear chat history".into(), category: "Context".into() },
-            ActionTemplate { command: "/reset".into(), label: "Reset".into(), description: "Drop all files and clear history".into(), category: "Context".into() },
-            ActionTemplate { command: "/map".into(), label: "Repo Map".into(), description: "Show repository map".into(), category: "Context".into() },
-            ActionTemplate { command: "/web".into(), label: "Web Search".into(), description: "Scrape a webpage".into(), category: "Context".into() },
-            ActionTemplate { command: "/tokens".into(), label: "Tokens".into(), description: "Show token usage report".into(), category: "Info".into() },
-            ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Ask questions about aider".into(), category: "Info".into() },
-            ActionTemplate { command: "/copy".into(), label: "Copy".into(), description: "Copy last message to clipboard".into(), category: "Info".into() },
-            ActionTemplate { command: "/model".into(), label: "Switch Model".into(), description: "Change AI model".into(), category: "Setup".into() },
-            ActionTemplate { command: "/architect".into(), label: "Architect".into(), description: "Switch to architect mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/ask".into(), label: "Ask".into(), description: "Switch to ask mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/code".into(), label: "Code".into(), description: "Switch to code mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/settings".into(), label: "Settings".into(), description: "Show current settings".into(), category: "Setup".into() },
-            ActionTemplate { command: "/voice".into(), label: "Voice".into(), description: "Record and transcribe voice".into(), category: "Setup".into() },
-            ActionTemplate { command: "/quit".into(), label: "Quit".into(), description: "Exit aider".into(), category: "Info".into() },
+            ActionTemplate {
+                command: "/add".into(),
+                label: "Add File".into(),
+                description: "Add file to chat context".into(),
+                category: "Files".into(),
+            },
+            ActionTemplate {
+                command: "/drop".into(),
+                label: "Drop File".into(),
+                description: "Remove file from chat context".into(),
+                category: "Files".into(),
+            },
+            ActionTemplate {
+                command: "/ls".into(),
+                label: "List Files".into(),
+                description: "List files in chat".into(),
+                category: "Files".into(),
+            },
+            ActionTemplate {
+                command: "/read-only".into(),
+                label: "Read-Only".into(),
+                description: "Add file as read-only".into(),
+                category: "Files".into(),
+            },
+            ActionTemplate {
+                command: "/run".into(),
+                label: "Run Command".into(),
+                description: "Run a shell command".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/test".into(),
+                label: "Run Tests".into(),
+                description: "Run test suite".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/lint".into(),
+                label: "Lint".into(),
+                description: "Lint and fix files".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/paste".into(),
+                label: "Paste".into(),
+                description: "Paste from clipboard".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/diff".into(),
+                label: "Diff".into(),
+                description: "Show pending changes diff".into(),
+                category: "Git".into(),
+            },
+            ActionTemplate {
+                command: "/commit".into(),
+                label: "Commit".into(),
+                description: "Commit pending changes".into(),
+                category: "Git".into(),
+            },
+            ActionTemplate {
+                command: "/undo".into(),
+                label: "Undo".into(),
+                description: "Undo last AI change".into(),
+                category: "Git".into(),
+            },
+            ActionTemplate {
+                command: "/git".into(),
+                label: "Git".into(),
+                description: "Run git command".into(),
+                category: "Git".into(),
+            },
+            ActionTemplate {
+                command: "/clear".into(),
+                label: "Clear".into(),
+                description: "Clear chat history".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/reset".into(),
+                label: "Reset".into(),
+                description: "Drop all files and clear history".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/map".into(),
+                label: "Repo Map".into(),
+                description: "Show repository map".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/web".into(),
+                label: "Web Search".into(),
+                description: "Scrape a webpage".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/tokens".into(),
+                label: "Tokens".into(),
+                description: "Show token usage report".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/help".into(),
+                label: "Help".into(),
+                description: "Ask questions about aider".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/copy".into(),
+                label: "Copy".into(),
+                description: "Copy last message to clipboard".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/model".into(),
+                label: "Switch Model".into(),
+                description: "Change AI model".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/architect".into(),
+                label: "Architect".into(),
+                description: "Switch to architect mode".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/ask".into(),
+                label: "Ask".into(),
+                description: "Switch to ask mode".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/code".into(),
+                label: "Code".into(),
+                description: "Switch to code mode".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/settings".into(),
+                label: "Settings".into(),
+                description: "Show current settings".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/voice".into(),
+                label: "Voice".into(),
+                description: "Record and transcribe voice".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/quit".into(),
+                label: "Quit".into(),
+                description: "Exit aider".into(),
+                category: "Info".into(),
+            },
         ]
     }
 }
@@ -786,7 +1159,9 @@ impl ProviderAdapter for CopilotAdapter {
                 detected_at: now(),
                 confidence: 0.9,
             })
-        } else if lower.contains("copilot") && (lower.contains("cli") || lower.contains("agent") || lower.contains("coding")) {
+        } else if lower.contains("copilot")
+            && (lower.contains("cli") || lower.contains("agent") || lower.contains("coding"))
+        {
             Some(AgentInfo {
                 name: "Copilot CLI".into(),
                 provider: "github".into(),
@@ -848,8 +1223,18 @@ impl ProviderAdapter for CopilotAdapter {
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
-            ActionTemplate { command: "gh copilot suggest".into(), label: "Suggest".into(), description: "Get command suggestions".into(), category: "AI".into() },
-            ActionTemplate { command: "gh copilot explain".into(), label: "Explain".into(), description: "Explain a command".into(), category: "AI".into() },
+            ActionTemplate {
+                command: "gh copilot suggest".into(),
+                label: "Suggest".into(),
+                description: "Get command suggestions".into(),
+                category: "AI".into(),
+            },
+            ActionTemplate {
+                command: "gh copilot explain".into(),
+                label: "Explain".into(),
+                description: "Explain a command".into(),
+                category: "AI".into(),
+            },
         ]
     }
 }
@@ -956,7 +1341,11 @@ impl ProviderAdapter for CodexAdapter {
         if CODEX_APPROVAL_RE.is_match(line) {
             let approved = line.contains("✔");
             result.action = Some(ActionEvent {
-                label: if approved { "Approved".into() } else { "Denied".into() },
+                label: if approved {
+                    "Approved".into()
+                } else {
+                    "Denied".into()
+                },
                 command: line.to_string(),
                 provider: "codex".into(),
                 is_suggestion: false,
@@ -1018,26 +1407,126 @@ impl ProviderAdapter for CodexAdapter {
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
-            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show git diff including untracked files".into(), category: "Code".into() },
-            ActionTemplate { command: "/review".into(), label: "Review".into(), description: "Review current changes and find issues".into(), category: "Code".into() },
-            ActionTemplate { command: "/copy".into(), label: "Copy".into(), description: "Copy latest output to clipboard".into(), category: "Code".into() },
-            ActionTemplate { command: "/mention".into(), label: "Mention".into(), description: "Mention a file".into(), category: "Code".into() },
-            ActionTemplate { command: "/compact".into(), label: "Compact".into(), description: "Summarize conversation to save context".into(), category: "Context".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear terminal and start new chat".into(), category: "Context".into() },
-            ActionTemplate { command: "/plan".into(), label: "Plan".into(), description: "Switch to plan mode".into(), category: "Context".into() },
-            ActionTemplate { command: "/new".into(), label: "New Chat".into(), description: "Start a new chat".into(), category: "Context".into() },
-            ActionTemplate { command: "/resume".into(), label: "Resume".into(), description: "Resume a saved chat".into(), category: "Context".into() },
-            ActionTemplate { command: "/status".into(), label: "Status".into(), description: "Show session config and token usage".into(), category: "Info".into() },
-            ActionTemplate { command: "/mcp".into(), label: "MCP".into(), description: "List configured MCP tools".into(), category: "Info".into() },
-            ActionTemplate { command: "/feedback".into(), label: "Feedback".into(), description: "Send logs to maintainers".into(), category: "Info".into() },
-            ActionTemplate { command: "/model".into(), label: "Model".into(), description: "Choose model and reasoning effort".into(), category: "Setup".into() },
-            ActionTemplate { command: "/approvals".into(), label: "Approvals".into(), description: "Choose what Codex is allowed to do".into(), category: "Setup".into() },
-            ActionTemplate { command: "/init".into(), label: "Init AGENTS.md".into(), description: "Create instructions file for Codex".into(), category: "Setup".into() },
-            ActionTemplate { command: "/skills".into(), label: "Skills".into(), description: "Improve how Codex performs tasks".into(), category: "Setup".into() },
-            ActionTemplate { command: "/theme".into(), label: "Theme".into(), description: "Choose syntax highlighting theme".into(), category: "Setup".into() },
-            ActionTemplate { command: "/personality".into(), label: "Personality".into(), description: "Choose communication style".into(), category: "Setup".into() },
-            ActionTemplate { command: "/logout".into(), label: "Logout".into(), description: "Log out of Codex".into(), category: "Setup".into() },
-            ActionTemplate { command: "/quit".into(), label: "Quit".into(), description: "Exit Codex".into(), category: "Info".into() },
+            ActionTemplate {
+                command: "/diff".into(),
+                label: "Diff".into(),
+                description: "Show git diff including untracked files".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/review".into(),
+                label: "Review".into(),
+                description: "Review current changes and find issues".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/copy".into(),
+                label: "Copy".into(),
+                description: "Copy latest output to clipboard".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/mention".into(),
+                label: "Mention".into(),
+                description: "Mention a file".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/compact".into(),
+                label: "Compact".into(),
+                description: "Summarize conversation to save context".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/clear".into(),
+                label: "Clear".into(),
+                description: "Clear terminal and start new chat".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/plan".into(),
+                label: "Plan".into(),
+                description: "Switch to plan mode".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/new".into(),
+                label: "New Chat".into(),
+                description: "Start a new chat".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/resume".into(),
+                label: "Resume".into(),
+                description: "Resume a saved chat".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/status".into(),
+                label: "Status".into(),
+                description: "Show session config and token usage".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/mcp".into(),
+                label: "MCP".into(),
+                description: "List configured MCP tools".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/feedback".into(),
+                label: "Feedback".into(),
+                description: "Send logs to maintainers".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/model".into(),
+                label: "Model".into(),
+                description: "Choose model and reasoning effort".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/approvals".into(),
+                label: "Approvals".into(),
+                description: "Choose what Codex is allowed to do".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/init".into(),
+                label: "Init AGENTS.md".into(),
+                description: "Create instructions file for Codex".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/skills".into(),
+                label: "Skills".into(),
+                description: "Improve how Codex performs tasks".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/theme".into(),
+                label: "Theme".into(),
+                description: "Choose syntax highlighting theme".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/personality".into(),
+                label: "Personality".into(),
+                description: "Choose communication style".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/logout".into(),
+                label: "Logout".into(),
+                description: "Log out of Codex".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/quit".into(),
+                label: "Quit".into(),
+                description: "Exit Codex".into(),
+                category: "Info".into(),
+            },
         ]
     }
 }
@@ -1093,7 +1582,11 @@ impl ProviderAdapter for GeminiAdapter {
             let args = line[caps[0].len()..].trim().to_string();
             result.tool_call = Some(ToolCall {
                 tool: tool_name,
-                args: if args.is_empty() { "(...)".into() } else { args },
+                args: if args.is_empty() {
+                    "(...)".into()
+                } else {
+                    args
+                },
                 timestamp: now_str.clone(),
             });
             result.phase_hint = Some(PhaseHint::WorkStarted);
@@ -1149,7 +1642,8 @@ impl ProviderAdapter for GeminiAdapter {
         let t = line.trim();
         // Gemini CLI prompts: single char ">", "!", "*" with or without trailing space
         // Normal: ">" / "> ", Shell: "!" / "! ", YOLO: "*" / "* "
-        if t.len() <= 3 && (t == ">" || t == "!" || t == "*" || t == "> " || t == "! " || t == "* ") {
+        if t.len() <= 3 && (t == ">" || t == "!" || t == "*" || t == "> " || t == "! " || t == "* ")
+        {
             return true;
         }
         is_shell_prompt(t)
@@ -1157,32 +1651,162 @@ impl ProviderAdapter for GeminiAdapter {
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
         vec![
-            ActionTemplate { command: "/help".into(), label: "Help".into(), description: "Show available commands".into(), category: "Info".into() },
-            ActionTemplate { command: "/about".into(), label: "About".into(), description: "Show version info".into(), category: "Info".into() },
-            ActionTemplate { command: "/stats".into(), label: "Stats".into(), description: "Show session statistics and token usage".into(), category: "Info".into() },
-            ActionTemplate { command: "/tools".into(), label: "Tools".into(), description: "List available tools".into(), category: "Info".into() },
-            ActionTemplate { command: "/bug".into(), label: "Bug Report".into(), description: "File an issue about Gemini CLI".into(), category: "Info".into() },
-            ActionTemplate { command: "/clear".into(), label: "Clear".into(), description: "Clear the terminal screen".into(), category: "Context".into() },
-            ActionTemplate { command: "/compress".into(), label: "Compress".into(), description: "Replace chat context with summary".into(), category: "Context".into() },
-            ActionTemplate { command: "/copy".into(), label: "Copy".into(), description: "Copy last output to clipboard".into(), category: "Context".into() },
-            ActionTemplate { command: "/memory".into(), label: "Memory".into(), description: "Manage AI memory".into(), category: "Context".into() },
-            ActionTemplate { command: "/chat".into(), label: "Chat History".into(), description: "Save and resume conversations".into(), category: "Context".into() },
-            ActionTemplate { command: "/resume".into(), label: "Resume".into(), description: "Resume a previous session".into(), category: "Context".into() },
-            ActionTemplate { command: "/shell".into(), label: "Shell".into(), description: "Run shell command".into(), category: "Code".into() },
-            ActionTemplate { command: "/edit".into(), label: "Edit".into(), description: "Edit a file".into(), category: "Code".into() },
-            ActionTemplate { command: "/diff".into(), label: "Diff".into(), description: "Show file changes".into(), category: "Code".into() },
-            ActionTemplate { command: "/restore".into(), label: "Restore".into(), description: "Restore files to pre-tool state".into(), category: "Code".into() },
-            ActionTemplate { command: "/init".into(), label: "Init GEMINI.md".into(), description: "Analyze directory and generate GEMINI.md".into(), category: "Setup".into() },
-            ActionTemplate { command: "/model".into(), label: "Model".into(), description: "Model configuration".into(), category: "Setup".into() },
-            ActionTemplate { command: "/sandbox".into(), label: "Sandbox".into(), description: "Toggle sandbox mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/yolo".into(), label: "YOLO Mode".into(), description: "Auto-approve all actions".into(), category: "Setup".into() },
-            ActionTemplate { command: "/theme".into(), label: "Theme".into(), description: "Change visual theme".into(), category: "Setup".into() },
-            ActionTemplate { command: "/vim".into(), label: "Vim Mode".into(), description: "Toggle vim mode".into(), category: "Setup".into() },
-            ActionTemplate { command: "/permissions".into(), label: "Permissions".into(), description: "Permission management".into(), category: "Setup".into() },
-            ActionTemplate { command: "/settings".into(), label: "Settings".into(), description: "Open settings editor".into(), category: "Setup".into() },
-            ActionTemplate { command: "/mcp".into(), label: "MCP".into(), description: "MCP server management".into(), category: "Setup".into() },
-            ActionTemplate { command: "/auth".into(), label: "Auth".into(), description: "Change authentication method".into(), category: "Setup".into() },
-            ActionTemplate { command: "/quit".into(), label: "Quit".into(), description: "Exit Gemini CLI".into(), category: "Info".into() },
+            ActionTemplate {
+                command: "/help".into(),
+                label: "Help".into(),
+                description: "Show available commands".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/about".into(),
+                label: "About".into(),
+                description: "Show version info".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/stats".into(),
+                label: "Stats".into(),
+                description: "Show session statistics and token usage".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/tools".into(),
+                label: "Tools".into(),
+                description: "List available tools".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/bug".into(),
+                label: "Bug Report".into(),
+                description: "File an issue about Gemini CLI".into(),
+                category: "Info".into(),
+            },
+            ActionTemplate {
+                command: "/clear".into(),
+                label: "Clear".into(),
+                description: "Clear the terminal screen".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/compress".into(),
+                label: "Compress".into(),
+                description: "Replace chat context with summary".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/copy".into(),
+                label: "Copy".into(),
+                description: "Copy last output to clipboard".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/memory".into(),
+                label: "Memory".into(),
+                description: "Manage AI memory".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/chat".into(),
+                label: "Chat History".into(),
+                description: "Save and resume conversations".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/resume".into(),
+                label: "Resume".into(),
+                description: "Resume a previous session".into(),
+                category: "Context".into(),
+            },
+            ActionTemplate {
+                command: "/shell".into(),
+                label: "Shell".into(),
+                description: "Run shell command".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/edit".into(),
+                label: "Edit".into(),
+                description: "Edit a file".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/diff".into(),
+                label: "Diff".into(),
+                description: "Show file changes".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/restore".into(),
+                label: "Restore".into(),
+                description: "Restore files to pre-tool state".into(),
+                category: "Code".into(),
+            },
+            ActionTemplate {
+                command: "/init".into(),
+                label: "Init GEMINI.md".into(),
+                description: "Analyze directory and generate GEMINI.md".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/model".into(),
+                label: "Model".into(),
+                description: "Model configuration".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/sandbox".into(),
+                label: "Sandbox".into(),
+                description: "Toggle sandbox mode".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/yolo".into(),
+                label: "YOLO Mode".into(),
+                description: "Auto-approve all actions".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/theme".into(),
+                label: "Theme".into(),
+                description: "Change visual theme".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/vim".into(),
+                label: "Vim Mode".into(),
+                description: "Toggle vim mode".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/permissions".into(),
+                label: "Permissions".into(),
+                description: "Permission management".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/settings".into(),
+                label: "Settings".into(),
+                description: "Open settings editor".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/mcp".into(),
+                label: "MCP".into(),
+                description: "MCP server management".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/auth".into(),
+                label: "Auth".into(),
+                description: "Change authentication method".into(),
+                category: "Setup".into(),
+            },
+            ActionTemplate {
+                command: "/quit".into(),
+                label: "Quit".into(),
+                description: "Exit Gemini CLI".into(),
+                category: "Info".into(),
+            },
         ]
     }
 }
@@ -1210,7 +1834,10 @@ impl ProviderRegistry {
         let mut best: Option<(usize, AgentInfo)> = None;
         for (i, adapter) in self.adapters.iter().enumerate() {
             if let Some(sig) = adapter.detect_agent(line) {
-                if best.as_ref().map_or(true, |(_, b)| sig.confidence > b.confidence) {
+                if best
+                    .as_ref()
+                    .map_or(true, |(_, b)| sig.confidence > b.confidence)
+                {
                     best = Some((i, sig));
                 }
             }

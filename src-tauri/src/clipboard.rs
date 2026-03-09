@@ -8,8 +8,7 @@ use image::GenericImageView;
 /// X11/Wayland on Linux) — no shell commands are spawned.
 #[tauri::command]
 pub fn copy_image_to_clipboard(path: String) -> Result<(), String> {
-    let img =
-        image::open(&path).map_err(|e| format!("Failed to open image '{}': {}", path, e))?;
+    let img = image::open(&path).map_err(|e| format!("Failed to open image '{}': {}", path, e))?;
     let rgba = img.to_rgba8();
     let (width, height) = img.dimensions();
 
