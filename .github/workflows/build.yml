@@ -105,7 +105,7 @@ jobs:
           xcrun stapler staple "$DMG_PATH"
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hermes-ide-aarch64-apple-darwin
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg

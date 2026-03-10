@@ -342,7 +342,7 @@ jobs:
 
       - name: Upload installer artifacts
         if: steps.check.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hermes-ide-${{ matrix.platform_key }}-installer
           path: installer-artifacts/
@@ -380,7 +380,7 @@ jobs:
 
       - name: Upload updater artifacts
         if: steps.check.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hermes-ide-${{ matrix.platform_key }}-updater
           path: updater-artifacts/
