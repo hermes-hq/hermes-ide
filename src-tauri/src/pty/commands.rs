@@ -15,6 +15,8 @@ use crate::AppState;
 
 // ─── Tauri Commands ─────────────────────────────────────────────────
 
+// Tauri command handler — params come from frontend invocation
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn create_session(
     app: AppHandle,
@@ -107,7 +109,7 @@ pub fn create_session(
         ai_provider: ai_provider.clone(),
         auto_approve: auto_approve.unwrap_or(false),
         context_injected: false,
-        has_initial_context: realm_ids.as_ref().map_or(false, |ids| !ids.is_empty()),
+        has_initial_context: realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
         last_nudged_version: 0,
     };
 
@@ -478,7 +480,7 @@ pub fn create_session(
                             // context_injected stays false — next prompt detection retries.
                         }
 
-                        if chunk_count % 30 == 0 {
+                        if chunk_count.is_multiple_of(30) {
                             if let Ok(mut s) = session_clone.lock() {
                                 s.detected_agent = a.detected_agent.clone();
                                 s.metrics = a.to_metrics();
@@ -756,7 +758,7 @@ pub fn close_session(
                 for fact in &metrics.memory_facts {
                     db.save_memory_entry(
                         "project",
-                        &"global",
+                        "global",
                         &fact.key,
                         &fact.value,
                         &fact.source,
@@ -1343,9 +1345,7 @@ pub fn get_project_context(path: String) -> Result<ProjectContextInfo, String> {
         Some("pnpm".to_string())
     } else if dir.join("yarn.lock").exists() {
         Some("yarn".to_string())
-    } else if dir.join("package-lock.json").exists() {
-        Some("npm".to_string())
-    } else if dir.join("package.json").exists() {
+    } else if dir.join("package-lock.json").exists() || dir.join("package.json").exists() {
         Some("npm".to_string())
     } else {
         None

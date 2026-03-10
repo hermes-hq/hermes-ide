@@ -319,14 +319,12 @@ pub(crate) fn is_shell_prompt(trimmed: &str) -> bool {
     // Prompts ending with $ or % with path context
     if trimmed.len() < 80
         && (trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#'))
-    {
-        if trimmed.contains('@')
+        && (trimmed.contains('@')
             || trimmed.contains(':')
             || trimmed.contains('~')
-            || trimmed.contains('/')
-        {
-            return true;
-        }
+            || trimmed.contains('/'))
+    {
+        return true;
     }
 
     // Custom prompt characters used by starship, oh-my-zsh, powerlevel10k, etc.
@@ -1836,7 +1834,7 @@ impl ProviderRegistry {
             if let Some(sig) = adapter.detect_agent(line) {
                 if best
                     .as_ref()
-                    .map_or(true, |(_, b)| sig.confidence > b.confidence)
+                    .is_none_or(|(_, b)| sig.confidence > b.confidence)
                 {
                     best = Some((i, sig));
                 }

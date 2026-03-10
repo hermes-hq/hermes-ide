@@ -366,7 +366,7 @@ pub fn cleanup_stale_worktrees(repo_path: &str) -> Result<u32, String> {
     // Count worktrees after pruning
     let after = list_worktrees(repo_path)?.len() as u32;
 
-    let pruned = if before > after { before - after } else { 0 };
+    let pruned = before.saturating_sub(after);
 
     Ok(pruned)
 }

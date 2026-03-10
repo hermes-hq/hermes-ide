@@ -47,6 +47,7 @@ pub fn surface_scan(path: &str) -> SurfaceScanResult {
     let mut frameworks = Vec::new();
 
     // Check marker files at root
+    #[allow(clippy::type_complexity)]
     let markers: &[(&str, &str, Option<fn(&str) -> Vec<String>>)] = &[
         // JavaScript / TypeScript
         (
@@ -576,10 +577,10 @@ fn detect_architecture(root: &Path) -> ArchitectureInfo {
             "styles",
             "tests",
         ] {
-            if root.join(dir).is_dir() || root.join(format!("src/{}", dir)).is_dir() {
-                if !layers.contains(&dir.to_string()) {
-                    layers.push(dir.to_string());
-                }
+            if (root.join(dir).is_dir() || root.join(format!("src/{}", dir)).is_dir())
+                && !layers.contains(&dir.to_string())
+            {
+                layers.push(dir.to_string());
             }
         }
     }
@@ -1151,8 +1152,8 @@ fn extract_import_module(line: &str) -> Option<String> {
         }
     }
     // Rust: use crate_name::...
-    if line.starts_with("use ") {
-        let rest = line[4..].trim().trim_end_matches(';');
+    if let Some(stripped) = line.strip_prefix("use ") {
+        let rest = stripped.trim().trim_end_matches(';');
         let module = rest.split("::").next().unwrap_or(rest);
         if module != "std"
             && module != "core"
@@ -1168,7 +1169,7 @@ fn extract_import_module(line: &str) -> Option<String> {
     if line.starts_with("import ") && !line.contains("from") {
         let rest = line[7..]
             .trim()
-            .split(|c: char| c == ',' || c == ' ' || c == '.')
+            .split([',', ' ', '.'])
             .next()?;
         if !rest.is_empty() {
             return Some(rest.to_string());

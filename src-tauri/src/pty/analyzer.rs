@@ -532,10 +532,6 @@ impl OutputAnalyzer {
         }
     }
 
-    pub fn stuck_score(&self) -> f32 {
-        0.0
-    }
-
     pub fn take_pending_phase(&mut self) -> Option<SessionPhase> {
         self.pending_phase.take()
     }

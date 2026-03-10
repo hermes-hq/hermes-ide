@@ -210,10 +210,6 @@ fn status_to_string(status: git2::Status) -> &'static str {
         || status.contains(git2::Status::WT_RENAMED)
     {
         "renamed"
-    } else if status.contains(git2::Status::INDEX_MODIFIED)
-        || status.contains(git2::Status::WT_MODIFIED)
-    {
-        "modified"
     } else {
         "modified"
     }
@@ -1254,7 +1250,7 @@ pub fn git_checkout_branch(
     if let Ok(remote_ref) = repo.find_reference(&remote_refname) {
         let commit = remote_ref.peel_to_commit().map_err(|e| e.to_string())?;
         // Extract local name (strip "origin/" prefix)
-        let local_name = name.splitn(2, '/').nth(1).unwrap_or(&name);
+        let local_name = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
 
         let mut local_branch = repo
             .branch(local_name, &commit, false)
@@ -1864,12 +1860,10 @@ pub fn git_commit_detail(
         // Get per-file stats
         let mut additions = 0u32;
         let mut deletions = 0u32;
-        if let Ok(patch) = git2::Patch::from_diff(&diff, idx) {
-            if let Some(patch) = patch {
-                let (_, adds, dels) = patch.line_stats().unwrap_or((0, 0, 0));
-                additions = adds as u32;
-                deletions = dels as u32;
-            }
+        if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, idx) {
+            let (_, adds, dels) = patch.line_stats().unwrap_or((0, 0, 0));
+            additions = adds as u32;
+            deletions = dels as u32;
         }
         total_additions += additions;
         total_deletions += deletions;

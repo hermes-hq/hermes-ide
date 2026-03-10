@@ -185,9 +185,8 @@ pub fn install_plugin(app: tauri::AppHandle, data: Vec<u8>) -> Result<String, St
     }
 
     // Find hermes-plugin.json (may be at root or in a single subdirectory like "package/")
-    let (manifest_root, manifest_json) = find_manifest_in_dir(&temp_dir).map_err(|e| {
+    let (manifest_root, manifest_json) = find_manifest_in_dir(&temp_dir).inspect_err(|_| {
         let _ = fs::remove_dir_all(&temp_dir);
-        e
     })?;
 
     let manifest: serde_json::Value = serde_json::from_str(&manifest_json).map_err(|e| {

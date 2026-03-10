@@ -95,16 +95,12 @@ const PROTECTED_NAMES: &[&str] = &[
 ];
 
 fn is_protected(name: &str, pid: u32, uid: Option<u32>) -> bool {
-    if PROTECTED_NAMES.iter().any(|&n| n == name) {
+    if PROTECTED_NAMES.contains(&name) {
         return true;
     }
     // UID 0 processes with PID < 200
-    if pid < 200 {
-        if let Some(uid) = uid {
-            if uid == 0 {
-                return true;
-            }
-        }
+    if pid < 200 && uid == Some(0) {
+        return true;
     }
     false
 }

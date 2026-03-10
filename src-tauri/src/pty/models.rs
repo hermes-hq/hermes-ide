@@ -47,16 +47,6 @@ impl SessionPhase {
     }
 }
 
-// ─── Session Colors ─────────────────────────────────────────────────
-
-pub const SESSION_COLORS: &[&str] = &[
-    "#58a6ff", "#3fb950", "#bc8cff", "#f78166", "#39c5cf", "#d29922", "#f47067", "#d2a8ff",
-];
-
-pub fn next_color(index: usize) -> String {
-    SESSION_COLORS[index % SESSION_COLORS.len()].to_string()
-}
-
 // ─── Data Models ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

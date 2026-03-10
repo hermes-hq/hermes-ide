@@ -606,6 +606,8 @@ impl Database {
 
     // ─── Memory Operations ──────────────────────────────────────
 
+    // Tauri command handler — many params needed for DB insert
+    #[allow(clippy::too_many_arguments)]
     pub fn save_memory_entry(
         &self,
         scope: &str,
@@ -822,6 +824,8 @@ impl Database {
 
     // ─── Execution Nodes ─────────────────────────────────────────
 
+    // DB insert with many columns — keeping flat signature
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_execution_node(
         &self,
         session_id: &str,
@@ -1883,6 +1887,8 @@ pub fn get_cost_history(
     db.get_cost_daily(days.unwrap_or(7))
 }
 
+// Tauri command handler — params map to DB columns
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn save_memory(
     state: State<'_, AppState>,
@@ -2040,6 +2046,8 @@ pub fn get_execution_node(
 
 // ─── Context Pin Commands ────────────────────────────────────────────
 
+// Tauri command handler — params map to DB columns
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn add_context_pin(
     state: State<'_, AppState>,
@@ -2639,10 +2647,8 @@ pub fn get_plugin_settings_batch(
         })
         .map_err(|e| e.to_string())?;
     let mut map = std::collections::HashMap::new();
-    for row in rows {
-        if let Ok((k, v)) = row {
-            map.insert(k.trim_start_matches("__setting:").to_string(), v);
-        }
+    for (k, v) in rows.flatten() {
+        map.insert(k.trim_start_matches("__setting:").to_string(), v);
     }
     Ok(map)
 }
