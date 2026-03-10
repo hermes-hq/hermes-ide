@@ -1,5 +1,7 @@
 name: Build & Test
 
+# Security: workflow_dispatch only — forks cannot trigger this workflow.
+# This is intentional; it uses secrets for signing/notarization.
 on:
   workflow_dispatch:
 

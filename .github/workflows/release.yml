@@ -1,5 +1,7 @@
 name: Release
 
+# Security: only triggers on tags and manual dispatch — forks cannot trigger this workflow.
+# It requires secrets for signing, notarization, and release publishing.
 on:
   push:
     tags:
