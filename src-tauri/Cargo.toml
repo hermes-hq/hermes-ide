@@ -37,7 +37,7 @@ walkdir = "2"
 base64 = "0.22"
 regex = "1"
 lazy_static = "1"
-sysinfo = { version = "0.33", features = ["system", "user"] }
+sysinfo = { version = "0.38", features = ["system", "user"] }
 git2 = { version = "0.20", features = ["vendored-openssl"] }
 ignore = "0.4"
 dirs = "6"
