@@ -20,7 +20,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { sendShortcutCommand } from "./terminal/TerminalPool";
 import { fmt, isActionMod, isMac } from "./utils/platform";
 import { createProject } from "./api/projects";
-import { SessionProvider, useSession, useActiveSession, useSessionList, useAutonomousSettings } from "./state/SessionContext";
+import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions, useAutonomousSettings } from "./state/SessionContext";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
 import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, SettingsIcon } from "./components/ActivityBar";
@@ -64,6 +64,7 @@ function AppContent() {
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace } = useSession();
   const activeSession = useActiveSession();
   const sessions = useSessionList();
+  const sidebarSessions = useSidebarOrderedSessions();
   const { ui } = state;
   const autoSettings = useAutonomousSettings();
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
@@ -206,16 +207,16 @@ function AppContent() {
         return;
       }
 
-      // Cmd+1-9 — session switch
+      // Cmd+1-9 — session switch (matches sidebar visual order)
       if (e.key >= "1" && e.key <= "9") {
         e.preventDefault();
         const idx = parseInt(e.key) - 1;
-        if (idx < sessions.length) setActive(sessions[idx].id);
+        if (idx < sidebarSessions.length) setActive(sidebarSessions[idx].id);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.layout, sessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, ui.composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
+  }, [state.layout, sidebarSessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, ui.composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
 
   const handleAutoExecute = useCallback(() => {
     if (!ui.autoToast) return;

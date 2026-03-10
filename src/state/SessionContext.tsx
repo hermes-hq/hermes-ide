@@ -1041,6 +1041,46 @@ export function useSessionList(): SessionData[] {
   return useMemo(() => Object.values(state.sessions), [state.sessions]);
 }
 
+/**
+ * Orders sessions to match the sidebar visual order:
+ * named groups (alphabetically) → ungrouped, with destroyed sessions last within each group.
+ */
+export function sidebarOrderSessions(sessions: SessionData[]): SessionData[] {
+  const grouped = new Map<string | null, SessionData[]>();
+  for (const session of sessions) {
+    const group = session.group || null;
+    const list = grouped.get(group) || [];
+    list.push(session);
+    grouped.set(group, list);
+  }
+  // Sort within each group: destroyed sessions last
+  const sortGroup = (list: SessionData[]) =>
+    [...list].sort((a, b) => {
+      const aD = a.phase === "destroyed" ? 1 : 0;
+      const bD = b.phase === "destroyed" ? 1 : 0;
+      return aD - bD;
+    });
+  // Named groups alphabetically, then ungrouped
+  const namedKeys = Array.from(grouped.keys())
+    .filter((g): g is string => g !== null)
+    .sort();
+  const result: SessionData[] = [];
+  for (const key of namedKeys) {
+    result.push(...sortGroup(grouped.get(key)!));
+  }
+  const ungrouped = grouped.get(null);
+  if (ungrouped) {
+    result.push(...sortGroup(ungrouped));
+  }
+  return result;
+}
+
+/** Hook wrapper around sidebarOrderSessions. */
+export function useSidebarOrderedSessions(): SessionData[] {
+  const sessions = useSessionList();
+  return useMemo(() => sidebarOrderSessions(sessions), [sessions]);
+}
+
 export function useTotalCost(): number {
   const { state } = useSession();
   return useMemo(() => {
