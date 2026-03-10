@@ -32,7 +32,7 @@ jobs:
       build_linux: ${{ steps.platforms.outputs.linux }}
       build_windows: ${{ steps.platforms.outputs.windows }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -64,7 +64,7 @@ jobs:
   test-frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -101,7 +101,7 @@ jobs:
         if: matrix.enabled != 'true'
         run: echo "Skipping Rust tests for this platform"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: matrix.enabled == 'true'
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -193,7 +193,7 @@ jobs:
           [[ "$GROUP" == "windows" && "$WINDOWS" == "true" ]] && ENABLED=true
           echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: steps.check.outputs.enabled == 'true'
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -395,7 +395,7 @@ jobs:
       VERSION: ${{ needs.config.outputs.version }}
       TAG: ${{ needs.config.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
