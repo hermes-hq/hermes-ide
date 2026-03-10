@@ -194,6 +194,21 @@ export async function createTerminal(
       return false;
     }
 
+    // macOS: Cmd+Left/Right → Home/End (beginning/end of line)
+    // xterm.js doesn't map these like native macOS terminals do.
+    if (isMac && _event.type === "keydown" && _event.metaKey && !_event.altKey && !_event.ctrlKey) {
+      if (_event.key === "ArrowLeft") {
+        _event.preventDefault();
+        handleTerminalInput(sessionId, "\x1bOH"); // Home
+        return false;
+      }
+      if (_event.key === "ArrowRight") {
+        _event.preventDefault();
+        handleTerminalInput(sessionId, "\x1bOF"); // End
+        return false;
+      }
+    }
+
     // Let xterm handle everything else natively.
     return true;
   });
