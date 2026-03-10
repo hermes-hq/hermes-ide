@@ -334,6 +334,15 @@
   font-weight: 500;
 }
 
+.session-ssh-tag {
+  font-size: var(--text-sm);
+  background: rgba(57, 197, 207, 0.15);
+  color: #39c5cf;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
 .session-phase-tag { font-size: var(--text-sm); color: var(--text-3); }
 .session-phase-tag[data-phase="busy"] { color: var(--green); }
 .session-phase-tag[data-phase="needs_input"] { color: var(--yellow); }

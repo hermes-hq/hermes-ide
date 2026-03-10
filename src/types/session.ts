@@ -63,6 +63,12 @@ export interface SessionMetrics {
   token_history: [number, number][];
 }
 
+export interface SshConnectionInfo {
+  host: string;
+  port: number;
+  user: string;
+}
+
 export interface SessionData {
   id: string;
   label: string;
@@ -80,6 +86,7 @@ export interface SessionData {
   ai_provider: string | null;
   auto_approve: boolean;
   context_injected: boolean;
+  ssh_info: SshConnectionInfo | null;
 }
 
 export interface SessionHistoryEntry {
@@ -127,6 +134,9 @@ export interface CreateSessionOpts {
   projectIds?: string[];
   branchName?: string;
   createNewBranch?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────
@@ -141,6 +151,7 @@ export interface SavedSessionInfo {
   ai_provider: string | null;
   auto_approve: boolean;
   project_ids: string[];
+  ssh_info?: SshConnectionInfo | null;
 }
 
 export interface SavedWorkspace {

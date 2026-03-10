@@ -460,3 +460,72 @@
   font-size: var(--text-xs);
 }
 
+/* ─── Connection Type Toggle ───────────────────────────── */
+
+.session-creator-connection-type {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.session-creator-type-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.session-creator-type-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+}
+
+.session-creator-type-active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.session-creator-alpha-tag {
+  font-size: var(--text-xs);
+  padding: 1px 5px;
+  background: var(--accent);
+  color: var(--bg-0);
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ─── SSH Fields ───────────────────────────────────────── */
+
+.session-creator-ssh-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-creator-ssh-row {
+  display: flex;
+  gap: 8px;
+}
+
+.session-creator-ssh-user {
+  flex: 1;
+}
+
+.session-creator-ssh-port {
+  width: 80px;
+  flex-shrink: 0;
+}
+

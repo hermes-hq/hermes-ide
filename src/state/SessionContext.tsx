@@ -753,6 +753,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 aiProvider: saved.ai_provider,
                 realmIds: saved.project_ids.length > 0 ? saved.project_ids : null,
                 autoApprove: saved.auto_approve ?? false,
+                sshHost: saved.ssh_info?.host || null,
+                sshPort: saved.ssh_info?.port || null,
+                sshUser: saved.ssh_info?.user || null,
               });
               await createTerminal(newSession.id, newSession.color);
 
@@ -861,6 +864,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         aiProvider: opts?.aiProvider || null,
         realmIds: opts?.projectIds || null,
         autoApprove: opts?.autoApprove ?? false,
+        sshHost: opts?.sshHost || null,
+        sshPort: opts?.sshPort || null,
+        sshUser: opts?.sshUser || null,
       });
       await createTerminal(session.id, session.color);
 
@@ -975,6 +981,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             ai_provider: s.ai_provider,
             auto_approve: s.auto_approve ?? false,
             project_ids: projectIds,
+            ssh_info: s.ssh_info || null,
           };
         }),
       );

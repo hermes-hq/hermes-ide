@@ -27,6 +27,9 @@ pub fn create_session(
     ai_provider: Option<String>,
     realm_ids: Option<Vec<String>>,
     auto_approve: Option<bool>,
+    ssh_host: Option<String>,
+    ssh_port: Option<u16>,
+    ssh_user: Option<String>,
 ) -> Result<SessionUpdate, String> {
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let shell = state
@@ -109,11 +112,17 @@ pub fn create_session(
         context_injected: false,
         has_initial_context: realm_ids.as_ref().map_or(false, |ids| !ids.is_empty()),
         last_nudged_version: 0,
+        ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
+            host: host.clone(),
+            port: ssh_port.unwrap_or(22),
+            user: ssh_user.unwrap_or_else(|| std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "root".to_string())),
+        }),
     };
 
     let update = SessionUpdate::from(&session);
     let _ = app.emit("session-updated", &update);
 
+    let ssh_info_clone = session.ssh_info.clone();
     let session_arc = Arc::new(StdMutex::new(session));
 
     // Spawn PTY
@@ -127,24 +136,36 @@ pub fn create_session(
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    #[cfg(unix)]
-    let mut cmd = {
-        let mut c = CommandBuilder::new("env");
-        c.arg("-u");
-        c.arg("CLAUDECODE");
-        c.arg("-u");
-        c.arg("CLAUDE_CODE");
-        c.arg(&shell);
-        c.arg("-l");
-        c
-    };
+    let is_ssh = ssh_info_clone.is_some();
 
-    #[cfg(windows)]
-    let mut cmd = {
-        let mut c = CommandBuilder::new(&shell);
-        c.env_remove("CLAUDECODE");
-        c.env_remove("CLAUDE_CODE");
+    let mut cmd = if let Some(ref info) = ssh_info_clone {
+        let mut c = CommandBuilder::new("ssh");
+        c.arg("-t"); // Force TTY allocation
+        if info.port != 22 {
+            c.arg("-p");
+            c.arg(info.port.to_string());
+        }
+        c.arg(format!("{}@{}", info.user, info.host));
         c
+    } else {
+        #[cfg(unix)]
+        {
+            let mut c = CommandBuilder::new("env");
+            c.arg("-u");
+            c.arg("CLAUDECODE");
+            c.arg("-u");
+            c.arg("CLAUDE_CODE");
+            c.arg(&shell);
+            c.arg("-l");
+            c
+        }
+        #[cfg(windows)]
+        {
+            let mut c = CommandBuilder::new(&shell);
+            c.env_remove("CLAUDECODE");
+            c.env_remove("CLAUDE_CODE");
+            c
+        }
     };
 
     cmd.cwd(&cwd);
@@ -164,11 +185,13 @@ pub fn create_session(
         cmd.env("LC_CTYPE", "UTF-8");
     }
 
-    // Set context file env vars so AI agents can read project info from disk
-    if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id) {
-        cmd.env("HERMES_CONTEXT", context_path.to_string_lossy().as_ref());
+    // Set context file env vars for local sessions only (not useful over SSH)
+    if !is_ssh {
+        if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id) {
+            cmd.env("HERMES_CONTEXT", context_path.to_string_lossy().as_ref());
+        }
+        cmd.env("HERMES_SESSION_ID", &session_id);
     }
-    cmd.env("HERMES_SESSION_ID", &session_id);
 
     let child = pair
         .slave

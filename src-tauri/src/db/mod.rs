@@ -417,6 +417,11 @@ impl Database {
             .conn
             .execute_batch("ALTER TABLE sessions ADD COLUMN description TEXT NOT NULL DEFAULT '';");
 
+        // Add ssh_info column to sessions (idempotent)
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE sessions ADD COLUMN ssh_info TEXT;");
+
         Ok(())
     }
 
@@ -424,10 +429,11 @@ impl Database {
 
     pub fn create_session_v2(&self, s: &SessionUpdate) -> Result<(), String> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO sessions (id, label, description, color, group_name, phase, working_directory, shell, workspace_paths, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO sessions (id, label, description, color, group_name, phase, working_directory, shell, workspace_paths, created_at, ssh_info)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![s.id, s.label, s.description, s.color, s.group, s.phase, s.working_directory, s.shell,
-                    serde_json::to_string(&s.workspace_paths).unwrap_or_default(), s.created_at],
+                    serde_json::to_string(&s.workspace_paths).unwrap_or_default(), s.created_at,
+                    s.ssh_info.as_ref().map(|info| serde_json::to_string(info).unwrap_or_default())],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }

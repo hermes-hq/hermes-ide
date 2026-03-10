@@ -10,6 +10,9 @@ export function createSession(opts: {
   aiProvider: string | null;
   realmIds: string[] | null;
   autoApprove?: boolean;
+  sshHost?: string | null;
+  sshPort?: number | null;
+  sshUser?: string | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

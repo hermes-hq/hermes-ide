@@ -58,6 +58,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [newProjectName, setNewProjectName] = useState("");
   const [showNewProjectInput, setShowNewProjectInput] = useState(false);
 
+  // Connection type state (local or SSH remote)
+  const [connectionType, setConnectionType] = useState<"local" | "ssh">("local");
+  const [sshHost, setSshHost] = useState("");
+  const [sshUser, setSshUser] = useState("");
+  const [sshPort, setSshPort] = useState("22");
+
   // Color selection state — no color by default
   const [selectedColor, setSelectedColor] = useState<string>("");
 
@@ -79,11 +85,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
 
   // Compute ordered steps for display
   const orderedSteps = useMemo<Step[]>(() => {
+    if (connectionType === "ssh") return ["projects", "confirm"];
     const steps: Step[] = ["projects"];
     if (showBranchStep) steps.push("branch");
     steps.push("ai", "confirm");
     return steps;
-  }, [showBranchStep]);
+  }, [showBranchStep, connectionType]);
 
   const totalSteps = orderedSteps.length;
   const currentStepNumber = orderedSteps.indexOf(step) + 1;
@@ -242,16 +249,19 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         ? allProjects.find((r) => r.id === selectedProjectIds[0])?.path
         : undefined;
       await onCreate({
-        label: label || undefined,
+        label: label || (connectionType === "ssh" ? `${sshUser || "ssh"}@${sshHost}` : undefined),
         description: description || undefined,
         group: selectedGroup || undefined,
         color: selectedColor,
-        aiProvider: aiProvider || undefined,
-        autoApprove: autoApprove || undefined,
-        projectIds: selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
-        workingDirectory: firstProjectPath,
-        branchName: branchName || undefined,
-        createNewBranch: createNewBranch || undefined,
+        aiProvider: connectionType === "local" ? (aiProvider || undefined) : undefined,
+        autoApprove: connectionType === "local" ? (autoApprove || undefined) : undefined,
+        projectIds: connectionType === "local" && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
+        workingDirectory: connectionType === "local" ? firstProjectPath : undefined,
+        branchName: connectionType === "local" ? (branchName || undefined) : undefined,
+        createNewBranch: connectionType === "local" ? (createNewBranch || undefined) : undefined,
+        sshHost: connectionType === "ssh" ? sshHost : undefined,
+        sshPort: connectionType === "ssh" ? (parseInt(sshPort) || 22) : undefined,
+        sshUser: connectionType === "ssh" ? (sshUser || undefined) : undefined,
       });
     } finally {
       setCreating(false);
@@ -344,6 +354,49 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         {/* Step 1: Select Projects */}
         {step === "projects" && (
           <div className="session-creator-body">
+            <div className="session-creator-connection-type">
+              <button
+                className={`session-creator-type-btn ${connectionType === "local" ? "session-creator-type-active" : ""}`}
+                onClick={() => setConnectionType("local")}
+              >Local</button>
+              <button
+                className={`session-creator-type-btn ${connectionType === "ssh" ? "session-creator-type-active" : ""}`}
+                onClick={() => setConnectionType("ssh")}
+              >SSH Remote <span className="session-creator-alpha-tag">Alpha</span></button>
+            </div>
+
+            {connectionType === "ssh" && (
+              <div className="session-creator-ssh-fields">
+                <input
+                  ref={searchRef}
+                  className="command-palette-input"
+                  placeholder="Host (e.g. 192.168.1.100 or myserver.com)"
+                  value={sshHost}
+                  onChange={(e) => setSshHost(e.target.value)}
+                  autoComplete="off"
+                  autoFocus
+                />
+                <div className="session-creator-ssh-row">
+                  <input
+                    className="command-palette-input session-creator-ssh-user"
+                    placeholder="User (default: current user)"
+                    value={sshUser}
+                    onChange={(e) => setSshUser(e.target.value)}
+                    autoComplete="off"
+                  />
+                  <input
+                    className="command-palette-input session-creator-ssh-port"
+                    placeholder="Port"
+                    value={sshPort}
+                    onChange={(e) => setSshPort(e.target.value.replace(/\D/g, ""))}
+                    autoComplete="off"
+                  />
+                </div>
+                <span className="settings-hint-inline">Uses your system SSH config and agent for authentication</span>
+              </div>
+            )}
+
+            {connectionType === "local" && <>
             <div className="session-creator-section-title">Select Folders</div>
             <input
               ref={searchRef}
@@ -456,6 +509,19 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 {checkingGit ? "Checking..." : `Next (${selectedProjectIds.length} selected)`}
               </button>
             </div>
+            </>}
+
+            {connectionType === "ssh" && (
+              <div className="session-creator-actions">
+                <button
+                  className="session-creator-btn-primary"
+                  onClick={goNext}
+                  disabled={!sshHost.trim()}
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -536,29 +602,44 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           <div className="session-creator-body">
             <div className="session-creator-section-title">Confirm</div>
             <div className="session-creator-summary">
-              <div className="session-creator-summary-row">
-                <span className="session-creator-summary-label">Folders:</span>
-                <span className="session-creator-summary-value">
-                  {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
-                </span>
-              </div>
-              {branchName && (
-                <div className="session-creator-summary-row">
-                  <span className="session-creator-summary-label">Branch:</span>
-                  <span className="session-creator-summary-value">
-                    {branchName}{createNewBranch ? " (new)" : ""}
-                  </span>
-                </div>
-              )}
-              <div className="session-creator-summary-row">
-                <span className="session-creator-summary-label">AI Engine:</span>
-                <span className="session-creator-summary-value">
-                  {aiProvider ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider : "Shell Only"}
-                  {autoApprove && aiProvider && AUTO_APPROVE_FLAGS[aiProvider] && (
-                    <span className="session-creator-summary-flag"> (auto-approve)</span>
+              {connectionType === "ssh" ? (
+                <>
+                  <div className="session-creator-summary-row">
+                    <span className="session-creator-summary-label">Connection:</span>
+                    <span className="session-creator-summary-value">SSH Remote</span>
+                  </div>
+                  <div className="session-creator-summary-row">
+                    <span className="session-creator-summary-label">Host:</span>
+                    <span className="session-creator-summary-value">{sshUser ? `${sshUser}@` : ""}{sshHost}{sshPort !== "22" ? `:${sshPort}` : ""}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="session-creator-summary-row">
+                    <span className="session-creator-summary-label">Folders:</span>
+                    <span className="session-creator-summary-value">
+                      {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
+                    </span>
+                  </div>
+                  {branchName && (
+                    <div className="session-creator-summary-row">
+                      <span className="session-creator-summary-label">Branch:</span>
+                      <span className="session-creator-summary-value">
+                        {branchName}{createNewBranch ? " (new)" : ""}
+                      </span>
+                    </div>
                   )}
-                </span>
-              </div>
+                  <div className="session-creator-summary-row">
+                    <span className="session-creator-summary-label">AI Engine:</span>
+                    <span className="session-creator-summary-value">
+                      {aiProvider ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider : "Shell Only"}
+                      {autoApprove && aiProvider && AUTO_APPROVE_FLAGS[aiProvider] && (
+                        <span className="session-creator-summary-flag"> (auto-approve)</span>
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
             <input
               ref={labelRef}

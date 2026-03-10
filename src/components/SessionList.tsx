@@ -707,6 +707,9 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             <InlineNameEditor sessionId={session.id} label={session.label} triggerEdit={shouldTriggerRename} onTriggered={() => setRenameSessionId(null)} />
             <InlineDescriptionEditor sessionId={session.id} description={session.description} isActive={isActive} />
             <div className="session-item-meta">
+              {session.ssh_info && (
+                <span className="session-ssh-tag">SSH</span>
+              )}
               {session.detected_agent && (
                 <span className="session-agent-tag">{session.detected_agent.name}</span>
               )}
