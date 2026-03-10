@@ -258,7 +258,10 @@ pub async fn fetch_plugin_registry(url: String) -> Result<String, String> {
 /// Download a plugin .tgz from a URL and install it.
 /// The download happens in Rust to bypass WebView CSP restrictions.
 #[tauri::command]
-pub async fn download_and_install_plugin(app: tauri::AppHandle, url: String) -> Result<String, String> {
+pub async fn download_and_install_plugin(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<String, String> {
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Download failed: {}", e))?;

@@ -111,7 +111,11 @@ fn do_save_workspace(app: &tauri::AppHandle) {
         if let Ok(s) = pty_session.session.lock() {
             let update = pty::SessionUpdate::from(&*s);
             if let Err(e) = db.create_session_v2(&update) {
-                log::error!("Failed to save session metadata for '{}': {}", session_id, e);
+                log::error!(
+                    "Failed to save session metadata for '{}': {}",
+                    session_id,
+                    e
+                );
             }
         }
 
@@ -119,7 +123,11 @@ fn do_save_workspace(app: &tauri::AppHandle) {
         if let Ok(analyzer) = pty_session.analyzer.lock() {
             let snapshot = analyzer.get_stripped_output();
             if let Err(e) = db.save_session_snapshot(session_id, &snapshot) {
-                log::error!("Failed to save scrollback snapshot for '{}': {}", session_id, e);
+                log::error!(
+                    "Failed to save scrollback snapshot for '{}': {}",
+                    session_id,
+                    e
+                );
             }
 
             let metrics = analyzer.to_metrics();

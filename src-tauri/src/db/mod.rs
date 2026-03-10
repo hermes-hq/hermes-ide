@@ -2605,13 +2605,13 @@ pub fn set_plugin_enabled(
 /// Remove all database records for a plugin (plugins table + plugin_storage).
 /// Called during uninstall to prevent orphaned data.
 #[tauri::command]
-pub fn cleanup_plugin_data(
-    plugin_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub fn cleanup_plugin_data(plugin_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.conn
-        .execute("DELETE FROM plugin_storage WHERE plugin_id = ?1", params![plugin_id])
+        .execute(
+            "DELETE FROM plugin_storage WHERE plugin_id = ?1",
+            params![plugin_id],
+        )
         .map_err(|e| e.to_string())?;
     db.conn
         .execute("DELETE FROM plugins WHERE id = ?1", params![plugin_id])
@@ -2625,8 +2625,11 @@ pub fn get_plugin_settings_batch(
     state: State<'_, AppState>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db.conn
-        .prepare("SELECT key, value FROM plugin_storage WHERE plugin_id = ?1 AND key LIKE '__setting:%'")
+    let mut stmt = db
+        .conn
+        .prepare(
+            "SELECT key, value FROM plugin_storage WHERE plugin_id = ?1 AND key LIKE '__setting:%'",
+        )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![plugin_id], |row| {
@@ -2643,11 +2646,10 @@ pub fn get_plugin_settings_batch(
 }
 
 #[tauri::command]
-pub fn get_disabled_plugin_ids(
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+pub fn get_disabled_plugin_ids(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db.conn
+    let mut stmt = db
+        .conn
         .prepare("SELECT id FROM plugins WHERE enabled = 0")
         .map_err(|e| e.to_string())?;
     let ids = stmt
