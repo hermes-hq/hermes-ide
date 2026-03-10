@@ -115,7 +115,11 @@ pub fn create_session(
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
             port: ssh_port.unwrap_or(22),
-            user: ssh_user.unwrap_or_else(|| std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "root".to_string())),
+            user: ssh_user.unwrap_or_else(|| {
+                std::env::var("USER")
+                    .or_else(|_| std::env::var("USERNAME"))
+                    .unwrap_or_else(|_| "root".to_string())
+            }),
         }),
     };
 
@@ -187,7 +191,8 @@ pub fn create_session(
 
     // Set context file env vars for local sessions only (not useful over SSH)
     if !is_ssh {
-        if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id) {
+        if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id)
+        {
             cmd.env("HERMES_CONTEXT", context_path.to_string_lossy().as_ref());
         }
         cmd.env("HERMES_SESSION_ID", &session_id);
