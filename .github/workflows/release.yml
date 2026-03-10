@@ -593,3 +593,15 @@ jobs:
             "$RELEASE_DIR/downloads.json"
 
           rm -rf "$SIG_DIR"
+
+      - name: Trigger website rebuild
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$DEPLOY_HOOK_URL" ]; then
+            echo "Triggering Cloudflare Pages rebuild..."
+            curl -sf -X POST "$DEPLOY_HOOK_URL" > /dev/null
+            echo "Website rebuild triggered for v$VERSION"
+          else
+            echo "No CLOUDFLARE_DEPLOY_HOOK_URL set — skipping website rebuild"
+          fi
