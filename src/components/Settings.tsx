@@ -5,6 +5,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { applyTheme, THEME_OPTIONS, UI_SCALE_OPTIONS } from "../utils/themeManager";
+import { fmt } from "../utils/platform";
 import { useSession } from "../state/SessionContext";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -225,6 +226,19 @@ export function Settings({ onClose, initialTab, pluginRuntime }: SettingsProps) 
                     onChange={(e) => updateSetting("default_cwd", e.target.value)}
                     onContextMenu={textContextMenu}
                   />
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Command Palette Shortcut</label>
+                  <select
+                    className="settings-select"
+                    value={settings.command_palette_shortcut || "cmd_k"}
+                    onChange={(e) => updateSetting("command_palette_shortcut", e.target.value)}
+                  >
+                    <option value="cmd_k">{fmt("{mod}K")} (default)</option>
+                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} (frees {fmt("{mod}K")} for Clear Terminal)</option>
+                  </select>
+                  <span className="settings-hint-inline">Requires restart to update the native menu</span>
                 </div>
 
                 <div className="settings-group">

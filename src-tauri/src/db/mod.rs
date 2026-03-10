@@ -1974,6 +1974,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     // Autonomous mode
     "auto_command_min_frequency",
     "auto_cancel_delay_ms",
+    // Keyboard shortcuts
+    "command_palette_shortcut",
 ];
 
 #[tauri::command]

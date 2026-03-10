@@ -4,7 +4,7 @@ import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
-import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal } from "../terminal/TerminalPool";
+import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
@@ -242,7 +242,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       }
       case "terminal.paste": document.execCommand("paste"); break;
       case "terminal.select-all": /* handled by terminal */ break;
-      case "terminal.clear": /* TODO: wire to terminal clear */ break;
+      case "terminal.clear": clearTerminal(sessionId); break;
       case "terminal.split-right":
         dispatch({ type: "SPLIT_PANE", paneId, direction: "horizontal", newSessionId: sessionId });
         break;

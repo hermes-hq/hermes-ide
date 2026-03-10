@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { ensureListener, registerMenuBarHandler } from "./nativeMenuBridge";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { trackFeatureUsed } from "../utils/analytics";
+import { clearTerminal } from "../terminal/TerminalPool";
 
 const TRACKED_ACTIONS: Record<string, string> = {
   "view.git-panel": "git_panel",
@@ -35,6 +36,7 @@ interface MenuEventHandlers {
   copyContextToClipboard: () => void;
   pendingSplit: React.MutableRefObject<{ paneId: string; direction: string } | null>;
   onCheckForUpdates: () => void;
+  commandPaletteShortcut: string;
 }
 
 export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
@@ -52,6 +54,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
     pendingSplit,
     requestCloseSession,
     onCheckForUpdates,
+    commandPaletteShortcut,
   } = handlers;
 
   const onMenuAction = useCallback(
@@ -88,7 +91,12 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           dispatch({ type: "TOGGLE_SIDEBAR" });
           break;
         case "view.command-palette":
-          dispatch({ type: "TOGGLE_PALETTE" });
+          if (commandPaletteShortcut === "cmd_shift_p" && activeSessionId) {
+            // CMD+K clears terminal when palette is remapped to CMD+Shift+P
+            clearTerminal(activeSessionId);
+          } else {
+            dispatch({ type: "TOGGLE_PALETTE" });
+          }
           break;
         case "view.prompt-composer":
           dispatch({ type: "CLOSE_PALETTE" });
@@ -187,6 +195,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
       pendingSplit,
       requestCloseSession,
       onCheckForUpdates,
+      commandPaletteShortcut,
     ],
   );
 

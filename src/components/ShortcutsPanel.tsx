@@ -18,7 +18,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "{mod}N", action: "New Session" },
       { keys: "{mod}W", action: "Close Pane / Session" },
-      { keys: "{mod}K", action: "Command Palette" },
+      { keys: "{mod}K / {mod}{shift}P", action: "Command Palette" },
       { keys: "{mod},", action: "Settings" },
       { keys: "{mod}/", action: "Keyboard Shortcuts" },
       { keys: "{mod}J", action: "Prompt Composer" },

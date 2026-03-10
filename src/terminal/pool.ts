@@ -377,6 +377,12 @@ export function refitActive(): void {
   }
 }
 
+export function clearTerminal(sessionId: string): void {
+  const entry = pool.get(sessionId);
+  if (!entry) return;
+  entry.terminal.clear();
+}
+
 export function has(sessionId: string): boolean {
   return pool.has(sessionId);
 }

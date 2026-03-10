@@ -21,6 +21,7 @@ import { sendShortcutCommand } from "./terminal/TerminalPool";
 import { fmt, isActionMod, isMac } from "./utils/platform";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions, useAutonomousSettings } from "./state/SessionContext";
+import { getSetting } from "./api/settings";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
 import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, SettingsIcon } from "./components/ActivityBar";
@@ -73,9 +74,17 @@ function AppContent() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpen] = useState<false | { group?: string }>(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
   const updater = useAutoUpdater();
   const activeGitSummary = useSessionGitSummary(state.activeSessionId, !!activeSession);
+
+  // Load command palette shortcut setting (reload when settings panel closes)
+  useEffect(() => {
+    getSetting("command_palette_shortcut")
+      .then((v) => { if (v) setCmdPaletteShortcut(v); })
+      .catch(() => {});
+  }, [settingsOpen]);
 
   // Keep a ref to state so plugin callbacks always read fresh values
   const stateRef = useRef(state);
@@ -182,6 +191,13 @@ function AppContent() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!isActionMod(e)) return;
+
+      // Cmd+Shift+P — always toggles command palette (alternative shortcut)
+      if (e.shiftKey && (e.key === "P" || e.key === "p")) {
+        e.preventDefault();
+        dispatch({ type: "TOGGLE_PALETTE" });
+        return;
+      }
 
       // Suppress session-switch shortcuts while any modal/overlay is open
       const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
@@ -387,6 +403,7 @@ function AppContent() {
     copyContextToClipboard: () => copyContextToClipboard(activeSession),
     pendingSplit,
     onCheckForUpdates: () => updater.manualCheck(),
+    commandPaletteShortcut: cmdPaletteShortcut,
   });
 
   // ── Sync UI toggle state → native menu checkmarks ──
