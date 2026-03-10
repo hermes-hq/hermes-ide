@@ -26,6 +26,8 @@
     "core:window:allow-set-focus",
     "core:window:allow-close",
     "core:window:allow-destroy",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
     "updater:default",
     "process:allow-restart",
     "process:allow-exit",

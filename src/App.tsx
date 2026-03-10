@@ -272,17 +272,60 @@ function AppContent() {
 
   // Global capture-phase window drag listener — bypasses React synthetic events,
   // WKWebView focus quirks, and Tauri's automatic injection.
+  // startDragging() hands mouse control to the OS, swallowing all subsequent
+  // events — so we only call it once the mouse actually moves after mousedown.
+  // Double-click is detected via mouseup timing since WKWebView does not
+  // reliably fire dblclick events on the overlay titlebar.
   useEffect(() => {
     const win = getCurrentWindow();
-    const handler = (e: MouseEvent) => {
+    const DRAG_THRESHOLD = 3; // px of movement before initiating drag
+    const DOUBLE_CLICK_MS = 500;
+    let pending: { x: number; y: number } | null = null;
+    let dragged = false;
+    let lastClickTime = 0;
+
+    const isTopbarDragArea = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (!target) return;
-      if (!target.closest(".topbar")) return;
-      if (target.closest("button") || target.closest("input") || target.closest(".topbar-controls")) return;
-      win.startDragging().catch(() => {});
+      if (!target) return false;
+      if (!target.closest(".topbar")) return false;
+      if (target.closest("button") || target.closest("input") || target.closest(".topbar-controls")) return false;
+      return true;
     };
-    document.addEventListener("mousedown", handler, true);
-    return () => document.removeEventListener("mousedown", handler, true);
+    const onMouseDown = (e: MouseEvent) => {
+      if (!isTopbarDragArea(e)) return;
+      pending = { x: e.clientX, y: e.clientY };
+      dragged = false;
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!pending) return;
+      const dx = e.clientX - pending.x;
+      const dy = e.clientY - pending.y;
+      if (dx * dx + dy * dy >= DRAG_THRESHOLD * DRAG_THRESHOLD) {
+        pending = null;
+        dragged = true;
+        win.startDragging().catch(() => {});
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      pending = null;
+      if (dragged) { dragged = false; return; }
+      if (!isTopbarDragArea(e)) return;
+      const now = Date.now();
+      if (now - lastClickTime < DOUBLE_CLICK_MS) {
+        lastClickTime = 0;
+        win.toggleMaximize().catch(() => {});
+      } else {
+        lastClickTime = now;
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("mousemove", onMouseMove, true);
+    document.addEventListener("mouseup", onMouseUp, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("mousemove", onMouseMove, true);
+      document.removeEventListener("mouseup", onMouseUp, true);
+    };
   }, []);
 
   // ── Global contextmenu suppression ──
