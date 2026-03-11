@@ -392,13 +392,15 @@ export function destroy(sessionId: string): void {
 }
 
 export function refitActive(): void {
-  for (const entry of pool.values()) {
+  for (const [sessionId, entry] of pool) {
     if (entry.attached && entry.opened) {
       try {
         entry.fitAddon.fit();
         if (!entry.userScrolledUp) {
           entry.terminal.scrollToBottom();
         }
+        resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
+          .catch(() => {});
       } catch { /* ignore fit errors */ }
     }
   }
