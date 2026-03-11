@@ -48,7 +48,12 @@ const PackageIcon = () => (
 	</svg>
 );
 
-export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
+interface PluginManagerProps {
+	runtime?: PluginRuntime;
+	onConfirmUpdate?: (plugin: RegistryPlugin) => void;
+}
+
+export function PluginManager({ runtime, onConfirmUpdate }: PluginManagerProps) {
 	const [installed, setInstalled] = useState<PluginEntry[]>([]);
 	const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
 	const [pluginsDir, setPluginsDir] = useState("");
@@ -375,7 +380,13 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 								{p.enabled ? "Disable" : "Enable"}
 							</button>
 							{update && !isUpdating && (
-								<button className="pm-btn pm-btn-update" onClick={() => handleUpdate(update)}>
+								<button className="pm-btn pm-btn-update" onClick={() => {
+									if (onConfirmUpdate) {
+										onConfirmUpdate(update);
+									} else {
+										handleUpdate(update);
+									}
+								}}>
 									Update to v{update.version}
 								</button>
 							)}

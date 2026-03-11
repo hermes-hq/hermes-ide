@@ -63,6 +63,7 @@ import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { useToastStore } from "./hooks/useToastStore";
 import { WhatsNewDialog } from "./components/WhatsNewDialog";
+import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 
 function AppContent() {
@@ -144,6 +145,7 @@ function AppContent() {
 
   const { commands: pluginCommands, panels: pluginPanels, pluginsWithSettings } = usePluginRuntime(pluginRuntime);
   const pluginUpdater = usePluginUpdateChecker(pluginRuntime);
+  const [pendingUpdatePlugins, setPendingUpdatePlugins] = useState<typeof pluginUpdater.updatesAvailable | null>(null);
 
   useEffect(() => {
     const loader = new PluginLoader(pluginRuntime);
@@ -576,7 +578,11 @@ function AppContent() {
             </PluginPanelHost>
           );
         })()}
-        <PluginUpdateBanner updater={pluginUpdater} toastStore={toastStore} />
+        <PluginUpdateBanner
+          updater={pluginUpdater}
+          toastStore={toastStore}
+          onShowUpdateConfirm={() => setPendingUpdatePlugins([...pluginUpdater.updatesAvailable])}
+        />
         <div className="main-area">
           <div className="terminal-and-timeline">
             <div className="terminal-container">
@@ -669,7 +675,17 @@ function AppContent() {
       )}
 
       {settingsOpen && (
-        <Settings onClose={() => setSettingsOpen(null)} initialTab={settingsOpen} pluginRuntime={pluginRuntime} />
+        <Settings
+          onClose={() => setSettingsOpen(null)}
+          initialTab={settingsOpen}
+          pluginRuntime={pluginRuntime}
+          onConfirmPluginUpdate={(plugin) => {
+            const info = pluginUpdater.updatesAvailable.find((u) => u.id === plugin.id);
+            if (info) {
+              setPendingUpdatePlugins([info]);
+            }
+          }}
+        />
       )}
 
       {workspaceOpen && (
@@ -678,6 +694,22 @@ function AppContent() {
 
       {projectPickerOpen && activeSession && (
         <ProjectPicker sessionId={activeSession.id} onClose={() => setProjectPickerOpen(false)} />
+      )}
+
+      {pendingUpdatePlugins && pendingUpdatePlugins.length > 0 && (
+        <PluginUpdateConfirmDialog
+          plugins={pendingUpdatePlugins}
+          onConfirm={() => {
+            const plugins = pendingUpdatePlugins;
+            setPendingUpdatePlugins(null);
+            if (plugins.length === 1) {
+              pluginUpdater.updatePlugin(plugins[0]);
+            } else {
+              pluginUpdater.updateAll();
+            }
+          }}
+          onCancel={() => setPendingUpdatePlugins(null)}
+        />
       )}
 
       {sessionCreatorOpen && (

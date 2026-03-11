@@ -5,13 +5,14 @@ import type { ToastStore } from "../hooks/useToastStore";
 interface PluginUpdateNotifierProps {
 	updater: PluginUpdater;
 	toastStore: ToastStore;
+	onShowUpdateConfirm?: () => void;
 }
 
 /**
  * Effect-only component: watches plugin update state and pushes toasts
  * to the shared toast system. Renders nothing to the DOM.
  */
-export function PluginUpdateBanner({ updater, toastStore }: PluginUpdateNotifierProps) {
+export function PluginUpdateBanner({ updater, toastStore, onShowUpdateConfirm }: PluginUpdateNotifierProps) {
 	const { updatesAvailable, updateResults, autoUpdated, dismissed, updateAll, dismissAll, clearResults } = updater;
 
 	// Track which state snapshots we've already shown toasts for,
@@ -45,11 +46,21 @@ export function PluginUpdateBanner({ updater, toastStore }: PluginUpdateNotifier
 			type: "info",
 			duration: null, // persistent — user must act
 			actions: [
-				{ label: "Update All", primary: true, onClick: () => updateAll() },
+				{
+					label: "Review & Update",
+					primary: true,
+					onClick: () => {
+						if (onShowUpdateConfirm) {
+							onShowUpdateConfirm();
+						} else {
+							updateAll();
+						}
+					},
+				},
 				{ label: "Later", onClick: () => dismissAll() },
 			],
 		});
-	}, [updatesAvailable, dismissed, toastStore, updateAll, dismissAll]);
+	}, [updatesAvailable, dismissed, toastStore, updateAll, dismissAll, onShowUpdateConfirm]);
 
 	// ─── Post-update results → toast ───────────────────────
 	useEffect(() => {

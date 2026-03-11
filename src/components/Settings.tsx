@@ -20,11 +20,12 @@ interface SettingsProps {
   onClose: () => void;
   initialTab?: string;
   pluginRuntime?: import("../plugins/PluginRuntime").PluginRuntime;
+  onConfirmPluginUpdate?: (plugin: import("../plugins/types").RegistryPlugin) => void;
 }
 
 const THEMES = THEME_OPTIONS;
 
-export function Settings({ onClose, initialTab, pluginRuntime }: SettingsProps) {
+export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate }: SettingsProps) {
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
   const [activeTab, setActiveTab] = useState(initialTab || "general");
@@ -522,7 +523,7 @@ export function Settings({ onClose, initialTab, pluginRuntime }: SettingsProps) 
                     </p>
                   </div>
                 </div>
-                <PluginManager runtime={pluginRuntime} />
+                <PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} />
               </>
             )}
 
