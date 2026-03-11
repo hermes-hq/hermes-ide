@@ -13,7 +13,217 @@ use crate::pty::models::*;
 use crate::pty::{ai_launch_command, detect_shell, get_working_directory, PtySession};
 use crate::AppState;
 
+// ─── SSH / tmux helpers ─────────────────────────────────────────────
+
+fn resolve_ssh_user(user: Option<String>) -> String {
+    user.unwrap_or_else(|| {
+        std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "root".to_string())
+    })
+}
+
+/// Build a base SSH command with common options.
+fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.arg("-o").arg("ConnectTimeout=5");
+    cmd.arg("-o").arg("BatchMode=yes");
+    if port != 22 {
+        cmd.arg("-p").arg(port.to_string());
+    }
+    cmd.arg(format!("{}@{}", user, host));
+    cmd
+}
+
+/// Run a remote SSH command and return (stdout, stderr, success).
+fn ssh_exec(
+    user: &str,
+    host: &str,
+    port: u16,
+    remote_cmd: &str,
+) -> Result<(String, String, bool), String> {
+    let mut cmd = ssh_command(user, host, port);
+    cmd.arg(remote_cmd);
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run ssh: {}", e))?;
+    Ok((
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+        output.status.success(),
+    ))
+}
+
 // ─── Tauri Commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn ssh_list_tmux_sessions(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+) -> Result<Vec<TmuxSessionEntry>, String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let (stdout, stderr, success) = ssh_exec(
+        &user,
+        &host,
+        port,
+        "tmux list-sessions -F '#{session_name}|||#{session_windows}|||#{session_attached}'",
+    )?;
+
+    if !success {
+        if stderr.contains("no server running") || stderr.contains("no sessions") {
+            return Ok(Vec::new());
+        }
+        if stderr.contains("not found") || stderr.contains("No such file") {
+            return Err("tmux is not installed on the remote host".to_string());
+        }
+        return Err(format!("Failed to list tmux sessions: {}", stderr.trim()));
+    }
+
+    let entries: Vec<TmuxSessionEntry> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let line = line.trim().trim_matches('\'');
+            let parts: Vec<&str> = line.split("|||").collect();
+            if parts.len() >= 3 {
+                Some(TmuxSessionEntry {
+                    name: parts[0].to_string(),
+                    windows: parts[1].parse().unwrap_or(0),
+                    attached: parts[2] == "1",
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn ssh_list_tmux_windows(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+) -> Result<Vec<TmuxWindowEntry>, String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = format!(
+        "tmux list-windows -t '{}' -F '#{{window_index}}|||#{{window_name}}|||#{{window_active}}'",
+        tmux_session.replace('\'', "'\\''")
+    );
+    let (stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to list tmux windows: {}", stderr.trim()));
+    }
+
+    let entries: Vec<TmuxWindowEntry> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let line = line.trim().trim_matches('\'');
+            let parts: Vec<&str> = line.split("|||").collect();
+            if parts.len() >= 3 {
+                Some(TmuxWindowEntry {
+                    index: parts[0].parse().unwrap_or(0),
+                    name: parts[1].to_string(),
+                    active: parts[2] == "1",
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn ssh_tmux_select_window(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+    window_index: u32,
+) -> Result<(), String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = format!(
+        "tmux select-window -t '{}:{}'",
+        tmux_session.replace('\'', "'\\''"),
+        window_index
+    );
+    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to select tmux window: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_tmux_new_window(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+    window_name: Option<String>,
+) -> Result<(), String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = if let Some(name) = window_name {
+        format!(
+            "tmux new-window -t '{}' -n '{}'",
+            tmux_session.replace('\'', "'\\''"),
+            name.replace('\'', "'\\''")
+        )
+    } else {
+        format!(
+            "tmux new-window -t '{}'",
+            tmux_session.replace('\'', "'\\''")
+        )
+    };
+    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to create tmux window: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_tmux_rename_window(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+    window_index: u32,
+    new_name: String,
+) -> Result<(), String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = format!(
+        "tmux rename-window -t '{}:{}' '{}'",
+        tmux_session.replace('\'', "'\\''"),
+        window_index,
+        new_name.replace('\'', "'\\''")
+    );
+    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to rename tmux window: {}", stderr.trim()));
+    }
+    Ok(())
+}
 
 // Tauri command handler — params come from frontend invocation
 #[allow(clippy::too_many_arguments)]
@@ -32,6 +242,7 @@ pub fn create_session(
     ssh_host: Option<String>,
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
+    tmux_session: Option<String>,
 ) -> Result<SessionUpdate, String> {
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let shell = state
@@ -122,6 +333,7 @@ pub fn create_session(
                     .or_else(|_| std::env::var("USERNAME"))
                     .unwrap_or_else(|_| "root".to_string())
             }),
+            tmux_session: tmux_session.clone(),
         }),
     };
 
@@ -152,6 +364,14 @@ pub fn create_session(
             c.arg(info.port.to_string());
         }
         c.arg(format!("{}@{}", info.user, info.host));
+        // Attach to tmux session if specified.
+        // `new-session -A` attaches if it exists, creates if it doesn't.
+        if let Some(ref tmux_name) = info.tmux_session {
+            c.arg(format!(
+                "tmux new-session -A -s '{}'",
+                tmux_name.replace('\'', "'\\''")
+            ));
+        }
         c
     } else {
         #[cfg(unix)]

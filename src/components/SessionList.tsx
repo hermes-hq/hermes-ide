@@ -1,7 +1,8 @@
 import "../styles/components/SessionList.css";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { SessionData } from "../state/SessionContext";
-import { updateSessionGroup, updateSessionLabel, updateSessionDescription, updateSessionColor } from "../api/sessions";
+import { updateSessionGroup, updateSessionLabel, updateSessionDescription, updateSessionColor, sshListTmuxWindows, sshTmuxSelectWindow, sshTmuxNewWindow, sshTmuxRenameWindow } from "../api/sessions";
+import type { TmuxWindowEntry } from "../types/session";
 import { encodeSessionDrag, setDraggedSession, getDraggedSession } from "./SplitPane";
 // Note: HTML5 drag events don't fire in Tauri (dragDropEnabled: true intercepts them).
 // We use getCurrentWebview().onDragDropEvent() with position-based hit testing instead.
@@ -95,6 +96,112 @@ function SessionItemGitInfo({ sessionId, isDestroyed }: { sessionId: string; isD
         <span className="session-item-git-ahead-behind">
           {ahead > 0 && `↑${ahead}`}{ahead > 0 && behind > 0 && " "}{behind > 0 && `↓${behind}`}
         </span>
+      )}
+    </div>
+  );
+}
+
+/** Sub-component: tmux window tabs for SSH sessions with tmux attached. */
+function TmuxWindowTabs({ session }: { session: SessionData }) {
+  const [windows, setWindows] = useState<TmuxWindowEntry[]>([]);
+  const [expanded, setExpanded] = useState(true);
+  const [renamingIndex, setRenamingIndex] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const refreshRef = useRef<() => void>();
+  const info = session.ssh_info;
+
+  // Refresh tmux windows periodically
+  useEffect(() => {
+    if (!info?.tmux_session || session.phase === "destroyed") return;
+
+    let cancelled = false;
+    const refresh = () => {
+      sshListTmuxWindows(info.host, info.tmux_session!, info.port, info.user)
+        .then((w) => { if (!cancelled) setWindows(w); })
+        .catch(() => {});
+    };
+    refreshRef.current = refresh;
+
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [info?.host, info?.port, info?.user, info?.tmux_session, session.phase]);
+
+  if (!info?.tmux_session || session.phase === "destroyed" || windows.length === 0) return null;
+
+  const handleSelectWindow = (index: number) => {
+    // Optimistic: mark the clicked window as active immediately
+    setWindows((prev) => prev.map((w) => ({ ...w, active: w.index === index })));
+    sshTmuxSelectWindow(info.host, info.tmux_session!, index, info.port, info.user)
+      .then(() => refreshRef.current?.())
+      .catch((err) => { console.warn("[TmuxWindows] select failed:", err); refreshRef.current?.(); });
+  };
+
+  const handleNewWindow = () => {
+    sshTmuxNewWindow(info.host, info.tmux_session!, info.port, info.user)
+      .then(() => refreshRef.current?.())
+      .catch((err) => console.warn("[TmuxWindows] new window failed:", err));
+  };
+
+  const handleRename = (index: number, name: string) => {
+    if (!name.trim()) { setRenamingIndex(null); return; }
+    // Optimistic update
+    setWindows((prev) => prev.map((w) => w.index === index ? { ...w, name: name.trim() } : w));
+    setRenamingIndex(null);
+    sshTmuxRenameWindow(info.host, info.tmux_session!, index, name.trim(), info.port, info.user)
+      .then(() => refreshRef.current?.())
+      .catch((err) => { console.warn("[TmuxWindows] rename failed:", err); refreshRef.current?.(); });
+  };
+
+  return (
+    <div className="tmux-windows">
+      <div className="tmux-windows-header" onClick={() => setExpanded(!expanded)}>
+        <span className="tmux-windows-chevron">{expanded ? "▾" : "▸"}</span>
+        <span className="tmux-windows-label">tmux windows</span>
+        <button
+          className="tmux-windows-add"
+          onClick={(e) => { e.stopPropagation(); handleNewWindow(); }}
+          title="New tmux window"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" width="12" height="12">
+            <line x1="8" y1="3" x2="8" y2="13" />
+            <line x1="3" y1="8" x2="13" y2="8" />
+          </svg>
+        </button>
+      </div>
+      {expanded && (
+        <div className="tmux-windows-list">
+          {windows.map((w) => (
+            <div
+              key={w.index}
+              className={`tmux-window-item ${w.active ? "tmux-window-active" : ""}`}
+              onClick={(e) => { e.stopPropagation(); handleSelectWindow(w.index); }}
+              onDoubleClick={(e) => { e.stopPropagation(); setRenamingIndex(w.index); setRenameValue(w.name); }}
+            >
+              <span className="tmux-window-index">{w.index}</span>
+              {renamingIndex === w.index ? (
+                <input
+                  className="tmux-window-rename-input"
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") handleRename(w.index, renameValue);
+                    if (e.key === "Escape") setRenamingIndex(null);
+                  }}
+                  onBlur={() => handleRename(w.index, renameValue)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              ) : (
+                <span className="tmux-window-name">{w.name}</span>
+              )}
+              {w.active && <span className="tmux-window-active-dot" />}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -708,7 +815,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             <InlineDescriptionEditor sessionId={session.id} description={session.description} isActive={isActive} />
             <div className="session-item-meta">
               {session.ssh_info && (
-                <span className="session-ssh-tag">SSH</span>
+                <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
               {session.detected_agent && (
                 <span className="session-agent-tag">{session.detected_agent.name}</span>
@@ -751,6 +858,10 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             title="End session"
           >&times;</button>
         </div>
+        {/* Tmux window tabs for SSH+tmux sessions */}
+        {session.ssh_info?.tmux_session && isActive && (
+          <TmuxWindowTabs session={session} />
+        )}
         {/* Move-to-project dropdown */}
         {moveSessionId === session.id && (
           <div className="session-move-project-dropdown" onClick={(e) => e.stopPropagation()}>

@@ -130,6 +130,22 @@ pub struct SshConnectionInfo {
     pub host: String,
     pub port: u16,
     pub user: String,
+    #[serde(default)]
+    pub tmux_session: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TmuxSessionEntry {
+    pub name: String,
+    pub windows: u32,
+    pub attached: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TmuxWindowEntry {
+    pub index: u32,
+    pub name: String,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

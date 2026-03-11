@@ -1993,6 +1993,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "plugin_auto_update",
     "plugin_ignored_updates",
     "plugin_last_update_check",
+    // SSH
+    "ssh_connection_history",
 ];
 
 #[tauri::command]

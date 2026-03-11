@@ -239,6 +239,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Session management
             pty::create_session,
+            pty::ssh_list_tmux_sessions,
+            pty::ssh_list_tmux_windows,
+            pty::ssh_tmux_select_window,
+            pty::ssh_tmux_new_window,
+            pty::ssh_tmux_rename_window,
             pty::write_to_session,
             pty::nudge_realm_context,
             pty::resize_session,

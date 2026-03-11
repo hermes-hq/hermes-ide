@@ -756,6 +756,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshHost: saved.ssh_info?.host || null,
                 sshPort: saved.ssh_info?.port || null,
                 sshUser: saved.ssh_info?.user || null,
+                tmuxSession: saved.ssh_info?.tmux_session || null,
               });
               await createTerminal(newSession.id, newSession.color);
 
@@ -867,6 +868,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshHost: opts?.sshHost || null,
         sshPort: opts?.sshPort || null,
         sshUser: opts?.sshUser || null,
+        tmuxSession: opts?.tmuxSession || null,
       });
       await createTerminal(session.id, session.color);
 

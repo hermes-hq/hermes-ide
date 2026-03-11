@@ -910,3 +910,122 @@
   outline: none;
   font-family: var(--font-ui);
 }
+
+/* ─── Tmux Window Tabs ─────────────────────────────── */
+
+.tmux-windows {
+  margin-left: 12px;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  margin-bottom: 2px;
+}
+
+.tmux-windows-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tmux-windows-header:hover { color: var(--text-2); }
+
+.tmux-windows-chevron {
+  font-size: 9px;
+  width: 10px;
+  text-align: center;
+}
+
+.tmux-windows-label {
+  flex: 1;
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tmux-windows-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  opacity: 0.7;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.tmux-windows-header:hover .tmux-windows-add { opacity: 1; }
+
+.tmux-windows-add:hover {
+  color: var(--text-0);
+  background: var(--bg-3);
+  border-color: var(--text-3);
+  opacity: 1;
+}
+
+.tmux-windows-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tmux-window-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.tmux-window-item:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.tmux-window-active {
+  color: var(--text-1);
+}
+
+.tmux-window-index {
+  color: var(--text-3);
+  font-size: 10px;
+  min-width: 10px;
+  text-align: right;
+}
+
+.tmux-window-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tmux-window-active-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #39c5cf;
+  flex-shrink: 0;
+}
+
+.tmux-window-rename-input {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  padding: 1px 4px;
+  outline: none;
+  min-width: 0;
+}
