@@ -404,7 +404,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 1
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -455,11 +455,16 @@ jobs:
 
       - name: Prepare release notes
         run: |
-          if [ -f "RELEASE_NOTES.md" ]; then
-            echo "Using RELEASE_NOTES.md for release body"
+          # Generate changelog from git commits between tags
+          NOTES=$(bash scripts/generate-changelog.sh "$TAG" 2>/dev/null || true)
+          if [ -n "$NOTES" ]; then
+            echo "Using auto-generated changelog from git history"
+            echo "$NOTES" > release-notes.txt
+          elif [ -f "RELEASE_NOTES.md" ]; then
+            echo "Falling back to RELEASE_NOTES.md"
             cp RELEASE_NOTES.md release-notes.txt
           else
-            echo "No RELEASE_NOTES.md found — using default release notes"
+            echo "No changelog available — using default release notes"
             cat > release-notes.txt << 'NOTES'
           ## New
           - Release v${{ needs.config.outputs.version }}

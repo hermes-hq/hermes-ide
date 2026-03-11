@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# generate-changelog.sh — Generate changelog entries from git commits.
+# generate-changelog.sh — Generate user-facing changelog entries from git commits.
 #
 # Usage:
 #   ./scripts/generate-changelog.sh [VERSION_TAG]
@@ -12,6 +12,9 @@
 # Generates changelog entries grouped by category (New, Fixed, Improved, Removed)
 # based on conventional commit prefixes. Output follows the project's
 # RELEASE_TEMPLATE.md format with user-facing language only.
+#
+# Non-user-facing commits (version bumps, CI, dependency updates, tests) are
+# automatically filtered out to keep the changelog focused on what users notice.
 
 set -euo pipefail
 
@@ -52,12 +55,26 @@ fi
 
 # ── Collect commits ──────────────────────────────────────────────────────────
 
-COMMITS=$(git log --pretty=format:"%s" "$RANGE" 2>/dev/null || true)
+COMMITS=$(git log --first-parent --pretty=format:"%s" "$RANGE" 2>/dev/null || true)
 
 if [[ -z "$COMMITS" ]]; then
   echo "No commits found in range ${RANGE}." >&2
   exit 0
 fi
+
+# ── Helper: clean up a commit message for user-facing display ────────────────
+
+clean_message() {
+  local msg="$1"
+
+  # Strip trailing PR reference (#123)
+  msg=$(echo "$msg" | sed -E 's/ *\(#[0-9]+\)$//')
+
+  # Capitalize first letter
+  msg="$(echo "${msg:0:1}" | tr '[:lower:]' '[:upper:]')${msg:1}"
+
+  echo "$msg"
+}
 
 # ── Categorize commits ───────────────────────────────────────────────────────
 
@@ -70,16 +87,24 @@ UNCATEGORIZED=()
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
 
-  # Skip merge commits
+  # ── Skip non-user-facing commits ──────────────────────────────────────────
+  # Merge commits
   [[ "$line" =~ ^Merge\ (branch|pull\ request|remote) ]] && continue
+  # Version bumps
+  [[ "$line" =~ ^Bump\ v[0-9] ]] && continue
+  # Dependency bumps (Dependabot, manual)
+  [[ "$line" =~ ^Bump\ .+\ from\ .+\ to ]] && continue
+  # CI/build-only changes
+  CI_RE='^(ci|build|test|chore)(\(.*\))?(!)?: '
+  [[ "$line" =~ $CI_RE ]] && continue
+  # Commits that are purely CI/infra by content
+  [[ "$line" =~ CI|workflow|"artifact retention"|Dependabot|clippy|"cargo audit"|Cargo.lock ]] && continue
 
-  # Extract prefix and message
-  if [[ "$line" =~ ^(feat|fix|docs|refactor|perf|style|test|build|ci|chore|revert|remove|breaking)(\(.+\))?!?:\ (.+) ]]; then
+  # ── Extract prefix and message ────────────────────────────────────────────
+  CONV_RE='^(feat|fix|docs|refactor|perf|style|revert|remove|breaking)(\(.*\))?(!)?: (.+)'
+  if [[ "$line" =~ $CONV_RE ]]; then
     prefix="${BASH_REMATCH[1]}"
-    msg="${BASH_REMATCH[3]}"
-
-    # Capitalize first letter of message
-    msg="$(echo "${msg:0:1}" | tr '[:lower:]' '[:upper:]')${msg:1}"
+    msg=$(clean_message "${BASH_REMATCH[4]}")
 
     case "$prefix" in
       feat)
@@ -88,7 +113,7 @@ while IFS= read -r line; do
       fix)
         FIXED_ITEMS+=("$msg")
         ;;
-      refactor|perf|docs|style|build|ci|chore|test)
+      refactor|perf|docs|style)
         IMPROVED_ITEMS+=("$msg")
         ;;
       remove|revert)
@@ -99,9 +124,18 @@ while IFS= read -r line; do
         ;;
     esac
   else
-    # Non-conventional commit — include as uncategorized
-    msg="$(echo "${line:0:1}" | tr '[:lower:]' '[:upper:]')${line:1}"
-    UNCATEGORIZED+=("$msg")
+    # Non-conventional commit — categorize by keywords
+    msg=$(clean_message "$line")
+
+    if [[ "$line" =~ ^[Ff]ix ]]; then
+      FIXED_ITEMS+=("$msg")
+    elif [[ "$line" =~ ^[Aa]dd ]]; then
+      NEW_ITEMS+=("$msg")
+    elif [[ "$line" =~ ^[Rr]emove ]]; then
+      REMOVED_ITEMS+=("$msg")
+    else
+      IMPROVED_ITEMS+=("$msg")
+    fi
   fi
 done <<< "$COMMITS"
 
@@ -126,30 +160,9 @@ add_section() {
 }
 
 add_section "New" "${NEW_ITEMS[@]+"${NEW_ITEMS[@]}"}"
-add_section "Fixed" "${FIXED_ITEMS[@]+"${FIXED_ITEMS[@]}"}"
 add_section "Improved" "${IMPROVED_ITEMS[@]+"${IMPROVED_ITEMS[@]}"}"
+add_section "Fixed" "${FIXED_ITEMS[@]+"${FIXED_ITEMS[@]}"}"
 add_section "Removed" "${REMOVED_ITEMS[@]+"${REMOVED_ITEMS[@]}"}"
-
-# If no conventional commits were found, fall back to listing all commits
-if [[ "$HAS_CONTENT" == false ]]; then
-  if [[ ${#UNCATEGORIZED[@]} -gt 0 ]]; then
-    OUTPUT+="## Improved"$'\n'
-    for item in "${UNCATEGORIZED[@]}"; do
-      OUTPUT+="- ${item}"$'\n'
-    done
-    HAS_CONTENT=true
-  fi
-else
-  # Append uncategorized items under Improved if there are also categorized ones
-  if [[ ${#UNCATEGORIZED[@]} -gt 0 ]]; then
-    if [[ ${#IMPROVED_ITEMS[@]} -eq 0 ]]; then
-      OUTPUT+=$'\n'"## Improved"$'\n'
-    fi
-    for item in "${UNCATEGORIZED[@]}"; do
-      OUTPUT+="- ${item}"$'\n'
-    done
-  fi
-fi
 
 if [[ "$HAS_CONTENT" == false ]]; then
   echo "No notable changes found in range ${RANGE}." >&2
