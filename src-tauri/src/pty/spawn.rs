@@ -378,11 +378,30 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::*;
 
+    /// Read all available output from a PTY master reader in a background thread.
+    /// Must be called *before* the child exits, since the master returns EIO once
+    /// the slave side is fully closed — at that point no data can be retrieved.
+    #[cfg(target_os = "macos")]
+    fn read_pty_output(reader: Box<dyn std::io::Read + Send>) -> std::thread::JoinHandle<String> {
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 4096];
+            let mut output = String::new();
+            loop {
+                match std::io::Read::read(&mut reader, &mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => output.push_str(&String::from_utf8_lossy(&buf[..n])),
+                    Err(_) => break, // EIO when slave closes — expected
+                }
+            }
+            output
+        })
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_runs_simple_command() {
         use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
-        use std::io::Read;
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -405,18 +424,17 @@ mod tests {
         let mut child =
             posix_spawn_in_pty(&cmd, &tty_path).expect("posix_spawn_in_pty should succeed");
 
-        // Drop the slave so the master sees EOF after child exits
+        // Start reading *before* the child exits to avoid EIO race
+        let reader = pair.master.try_clone_reader().expect("reader");
+        let output_handle = read_pty_output(reader);
+
         drop(pair.slave);
 
         let status = child.wait().expect("wait should succeed");
         assert!(status.success(), "echo should exit 0");
         assert!(child.process_id().is_some());
 
-        // Read output from master
-        let mut reader = pair.master.try_clone_reader().expect("reader");
-        let mut output = String::new();
-        // Set a read timeout to avoid blocking forever
-        let _ = reader.read_to_string(&mut output);
+        let output = output_handle.join().expect("reader thread");
         assert!(
             output.contains("hello_posix_spawn"),
             "output should contain our string: {:?}",
@@ -428,7 +446,6 @@ mod tests {
     #[test]
     fn posix_spawn_sets_environment() {
         use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
-        use std::io::Read;
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -448,14 +465,16 @@ mod tests {
         cmd.env("TEST_SPAWN_VAR", "spawn_works_42");
 
         let mut child = posix_spawn_in_pty(&cmd, &tty_path).expect("spawn");
+
+        let reader = pair.master.try_clone_reader().expect("reader");
+        let output_handle = read_pty_output(reader);
+
         drop(pair.slave);
 
         let status = child.wait().expect("wait");
         assert!(status.success());
 
-        let mut reader = pair.master.try_clone_reader().expect("reader");
-        let mut output = String::new();
-        let _ = reader.read_to_string(&mut output);
+        let output = output_handle.join().expect("reader thread");
         assert!(
             output.contains("spawn_works_42"),
             "env var should be set: {:?}",
@@ -467,7 +486,6 @@ mod tests {
     #[test]
     fn posix_spawn_sets_working_directory() {
         use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
-        use std::io::Read;
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -485,14 +503,16 @@ mod tests {
         cmd.cwd("/tmp");
 
         let mut child = posix_spawn_in_pty(&cmd, &tty_path).expect("spawn");
+
+        let reader = pair.master.try_clone_reader().expect("reader");
+        let output_handle = read_pty_output(reader);
+
         drop(pair.slave);
 
         let status = child.wait().expect("wait");
         assert!(status.success());
 
-        let mut reader = pair.master.try_clone_reader().expect("reader");
-        let mut output = String::new();
-        let _ = reader.read_to_string(&mut output);
+        let output = output_handle.join().expect("reader thread");
         // macOS resolves /tmp to /private/tmp
         assert!(
             output.contains("/tmp") || output.contains("/private/tmp"),
@@ -593,7 +613,6 @@ mod tests {
     #[test]
     fn posix_spawn_in_multithreaded_context() {
         use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
-        use std::io::Read;
         use std::sync::{Arc, Mutex};
 
         // Simulate the multi-threaded environment that causes the fork crash.
@@ -634,14 +653,16 @@ mod tests {
 
             let mut child = posix_spawn_in_pty(&cmd, &tty_path)
                 .expect("posix_spawn should succeed even with multiple threads holding locks");
+
+            let reader = pair.master.try_clone_reader().expect("reader");
+            let output_handle = read_pty_output(reader);
+
             drop(pair.slave);
 
             let status = child.wait().expect("wait");
             assert!(status.success());
 
-            let mut reader = pair.master.try_clone_reader().expect("reader");
-            let mut output = String::new();
-            let _ = reader.read_to_string(&mut output);
+            let output = output_handle.join().expect("reader thread");
             assert!(output.contains("thread_safe"));
         }
 
