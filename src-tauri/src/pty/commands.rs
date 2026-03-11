@@ -323,7 +323,8 @@ pub fn create_session(
         ai_provider: ai_provider.clone(),
         auto_approve: auto_approve.unwrap_or(false),
         context_injected: false,
-        has_initial_context: ssh_host.is_none() && realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
+        has_initial_context: ssh_host.is_none()
+            && realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
         last_nudged_version: 0,
         pending_nudge: None,
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
@@ -739,7 +740,7 @@ pub fn create_session(
                         let is_ssh_session = session_clone
                             .lock()
                             .ok()
-                            .map_or(false, |s| s.ssh_info.is_some());
+                            .is_some_and(|s| s.ssh_info.is_some());
                         if a.pending_context_inject && !a.context_injected && !is_ssh_session {
                             a.pending_context_inject = false;
                             let mut write_ok = false;

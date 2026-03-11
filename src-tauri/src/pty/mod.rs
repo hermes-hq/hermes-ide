@@ -88,7 +88,10 @@ impl PtyManager {
                 version,
                 file_path: file_path.to_string(),
             });
-            return (false, Some("Agent busy — nudge deferred until idle".to_string()));
+            return (
+                false,
+                Some("Agent busy — nudge deferred until idle".to_string()),
+            );
         }
 
         Self::write_nudge(pty, &mut session_guard, version, file_path)
