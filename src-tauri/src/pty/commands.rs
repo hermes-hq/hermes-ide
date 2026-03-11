@@ -200,6 +200,24 @@ pub fn create_session(
         cmd.env("HERMES_SESSION_ID", &session_id);
     }
 
+    // On macOS, portable-pty's spawn_command() uses fork() + pre_exec which
+    // crashes in multi-threaded processes ("multi-threaded process forked").
+    // Use posix_spawn() instead which atomically creates the child process.
+    // See issue #31 and issue-31-investigation.md.
+    #[cfg(target_os = "macos")]
+    let child = {
+        let tty_path = pair
+            .master
+            .tty_name()
+            .ok_or_else(|| "Failed to get PTY device path for posix_spawn".to_string())?;
+        // Drop the slave end — the child opens the TTY by path via posix_spawn
+        // file actions, which also establishes it as the controlling terminal.
+        drop(pair.slave);
+        crate::pty::spawn::posix_spawn_in_pty(&cmd, &tty_path)
+            .map_err(|e| format!("Failed to spawn shell: {}", e))?
+    };
+
+    #[cfg(not(target_os = "macos"))]
     let child = pair
         .slave
         .spawn_command(cmd)

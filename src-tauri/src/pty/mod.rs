@@ -3,6 +3,7 @@ pub mod analyzer;
 pub mod commands;
 pub mod models;
 pub mod patterns;
+pub mod spawn;
 
 // ─── Re-exports ─────────────────────────────────────────────────────
 // Maintain the existing public API so that `lib.rs`, `db/mod.rs`, and other

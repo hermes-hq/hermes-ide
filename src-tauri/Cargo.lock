@@ -1877,6 +1877,7 @@ dependencies = [
  "ignore",
  "image",
  "lazy_static",
+ "libc",
  "log",
  "portable-pty",
  "regex",
