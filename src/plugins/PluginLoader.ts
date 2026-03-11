@@ -74,12 +74,15 @@ export class PluginLoader {
 
 	/**
 	 * Load a single plugin from its directory.
+	 * If the plugin is already loaded (e.g. during hot-reload), the old
+	 * version is fully cleaned up before the new one is loaded.
 	 */
 	private async loadPlugin(info: InstalledPluginInfo): Promise<void> {
-		if (this.loadedPlugins.has(info.id)) {
-			console.warn(`[PluginLoader] Plugin "${info.id}" already loaded, skipping`);
-			return;
-		}
+		// Clean up any previously loaded version of this plugin.
+		// Handles hot-reload: removes old script tag, global reference,
+		// and unregisters from the runtime so the new version can register.
+		// All operations are no-ops if the plugin isn't loaded yet.
+		await this.cleanupPlugin(info.id);
 
 		// Parse manifest
 		let manifest: PluginManifest;
