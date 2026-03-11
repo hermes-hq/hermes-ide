@@ -362,11 +362,7 @@ mod macos {
 
     fn check_spawn_err(ret: libc::c_int, context: &str) -> anyhow::Result<()> {
         if ret != 0 {
-            anyhow::bail!(
-                "{} failed: {}",
-                context,
-                io::Error::from_raw_os_error(ret)
-            );
+            anyhow::bail!("{} failed: {}", context, io::Error::from_raw_os_error(ret));
         }
         Ok(())
     }
@@ -636,9 +632,8 @@ mod tests {
             let mut cmd = CommandBuilder::new("echo");
             cmd.arg("thread_safe");
 
-            let mut child = posix_spawn_in_pty(&cmd, &tty_path).expect(
-                "posix_spawn should succeed even with multiple threads holding locks",
-            );
+            let mut child = posix_spawn_in_pty(&cmd, &tty_path)
+                .expect("posix_spawn should succeed even with multiple threads holding locks");
             drop(pair.slave);
 
             let status = child.wait().expect("wait");
