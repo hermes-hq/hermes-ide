@@ -24,8 +24,6 @@ function formatElapsed(createdAt: string): string {
 
 interface StatusBarProps {
   onOpenShortcuts?: () => void;
-  pluginStatusBarItems?: { id: string; text: string; tooltip?: string; alignment: "left" | "right"; priority?: number; command?: string; pluginId: string; visible: boolean }[];
-  onPluginStatusBarClick?: (command: string) => void;
   updateAvailable?: boolean;
   updateVersion?: string;
   updateDownloading?: boolean;
@@ -34,7 +32,7 @@ interface StatusBarProps {
   onCheckForUpdates?: () => void;
 }
 
-export function StatusBar({ onOpenShortcuts, pluginStatusBarItems, onPluginStatusBarClick, updateAvailable, updateVersion, updateDownloading, updateProgress, onShowUpdate, onCheckForUpdates }: StatusBarProps) {
+export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, updateDownloading, updateProgress, onShowUpdate, onCheckForUpdates }: StatusBarProps) {
   const active = useActiveSession();
   const sessions = useSessionList();
   const totalCost = useTotalCost();
@@ -148,19 +146,6 @@ export function StatusBar({ onOpenShortcuts, pluginStatusBarItems, onPluginStatu
             <span className="status-bar-divider" />
           </>
         )}
-        {pluginStatusBarItems?.filter(item => item.visible && item.alignment === "right").map(item => (
-          <span key={item.id} className="status-bar-plugin-group">
-            <span
-              className="status-bar-item"
-              title={item.tooltip}
-              style={{ cursor: item.command ? "pointer" : "default" }}
-              onClick={item.command ? () => onPluginStatusBarClick?.(item.command!) : undefined}
-            >
-              {item.text}
-            </span>
-            <span className="status-bar-divider" />
-          </span>
-        ))}
         {updateAvailable && !updateDownloading && (
           <>
             <span className="status-bar-item status-bar-update" onClick={onShowUpdate} title={`Update to v${updateVersion}`}>

@@ -241,9 +241,3 @@
   flex-shrink: 0;
   box-shadow: 0 0 4px currentColor;
 }
-
-/* ─── Plugin Status Bar Items ──────────────── */
-
-.status-bar-plugin-group {
-  display: contents;
-}

@@ -142,7 +142,7 @@ function AppContent() {
     return runtime;
   });
 
-  const { commands: pluginCommands, panels: pluginPanels, statusBarItems: pluginStatusBarItems, pluginsWithSettings } = usePluginRuntime(pluginRuntime);
+  const { commands: pluginCommands, panels: pluginPanels, pluginsWithSettings } = usePluginRuntime(pluginRuntime);
   const pluginUpdater = usePluginUpdateChecker(pluginRuntime);
 
   useEffect(() => {
@@ -618,8 +618,6 @@ function AppContent() {
 
       <StatusBar
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        pluginStatusBarItems={pluginStatusBarItems}
-        onPluginStatusBarClick={(command) => pluginRuntime.executeCommand(command)}
         updateAvailable={updater.state.available}
         updateVersion={updater.state.version}
         updateDownloading={updater.state.downloading}
