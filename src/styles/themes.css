@@ -1212,6 +1212,93 @@ html[data-theme="rose"] {
   --accent-glow: none;
 }
 
+/* ─── Lavender (soft purple light) ─────────────────────────────── */
+html[data-theme="lavender"] {
+  --bg-0: #f9f7fd;
+  --bg-1: #f0ecf6;
+  --bg-2: #e6e0f0;
+  --bg-3: #dad2e8;
+  --bg-hover: #dad2e8;
+  --bg-active: #cec4de;
+  --text-0: #1e1a2e;
+  --text-1: #3d3654;
+  --text-2: #7a7190;
+  --text-3: #a49cb4;
+  --accent: #7c4dff;
+  --accent-dim: #7c4dff20;
+  --green: #4caf6a;
+  --green-dim: #4caf6a22;
+  --red: #d04255;
+  --red-dim: #d0425522;
+  --yellow: #c48820;
+  --yellow-dim: #c4882022;
+  --violet: #9c64d8;
+  --violet-dim: #9c64d822;
+  --error: #d04255;
+  --border: #ddd6ea;
+  --border-light: #cfc6e0;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+}
+
+/* ─── Mint (fresh green light) ────────────────────────────────── */
+html[data-theme="mint"] {
+  --bg-0: #f6fcfa;
+  --bg-1: #ebf5f1;
+  --bg-2: #dfede8;
+  --bg-3: #d0e4dc;
+  --bg-hover: #d0e4dc;
+  --bg-active: #c2d9d0;
+  --text-0: #1a2c26;
+  --text-1: #345044;
+  --text-2: #6a8a7e;
+  --text-3: #96b0a6;
+  --accent: #0d9668;
+  --accent-dim: #0d966820;
+  --green: #12a35c;
+  --green-dim: #12a35c22;
+  --red: #c84848;
+  --red-dim: #c8484822;
+  --yellow: #b0850a;
+  --yellow-dim: #b0850a22;
+  --violet: #6e6aaf;
+  --violet-dim: #6e6aaf22;
+  --error: #c84848;
+  --border: #d2e6de;
+  --border-light: #c0d8ce;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+}
+
+/* ─── Sand (warm neutral light) ───────────────────────────────── */
+html[data-theme="sand"] {
+  --bg-0: #faf8f4;
+  --bg-1: #f2ede6;
+  --bg-2: #e8e2d8;
+  --bg-3: #ddd5c8;
+  --bg-hover: #ddd5c8;
+  --bg-active: #d0c7b8;
+  --text-0: #2a2520;
+  --text-1: #4d453a;
+  --text-2: #8a806e;
+  --text-3: #b0a694;
+  --accent: #c06a30;
+  --accent-dim: #c06a3020;
+  --green: #5a9952;
+  --green-dim: #5a995222;
+  --red: #c44040;
+  --red-dim: #c4404022;
+  --yellow: #b58a18;
+  --yellow-dim: #b58a1822;
+  --violet: #8868b0;
+  --violet-dim: #8868b022;
+  --error: #c44040;
+  --border: #e0d8cc;
+  --border-light: #d2c8ba;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;
