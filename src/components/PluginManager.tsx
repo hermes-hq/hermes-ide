@@ -310,24 +310,13 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 						{update && <span className="pm-badge pm-badge-update">update</span>}
 					</div>
 					<div className="pm-row-action">
-						{isUpdating ? (
-							<span className="pm-progress"><span className="pm-spinner" /></span>
-						) : update ? (
-							<button
-								className="pm-btn pm-btn-update pm-btn-sm"
-								onClick={(e) => { e.stopPropagation(); handleUpdate(update); }}
-							>
-								Update
-							</button>
-						) : (
-							<button
-								className="pm-btn pm-btn-sm"
-								onClick={(e) => { e.stopPropagation(); handleToggleEnabled(p.manifest.id, p.enabled); }}
-								disabled={isToggling}
-							>
-								{p.enabled ? "Disable" : "Enable"}
-							</button>
-						)}
+						<button
+							className="pm-btn pm-btn-sm"
+							onClick={(e) => { e.stopPropagation(); handleToggleEnabled(p.manifest.id, p.enabled); }}
+							disabled={isToggling}
+						>
+							{p.enabled ? "Disable" : "Enable"}
+						</button>
 					</div>
 				</div>
 				{isExpanded && (
