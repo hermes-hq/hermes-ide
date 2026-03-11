@@ -323,8 +323,9 @@ pub fn create_session(
         ai_provider: ai_provider.clone(),
         auto_approve: auto_approve.unwrap_or(false),
         context_injected: false,
-        has_initial_context: realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
+        has_initial_context: ssh_host.is_none() && realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
         last_nudged_version: 0,
+        pending_nudge: None,
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
             port: ssh_port.unwrap_or(22),
@@ -646,6 +647,14 @@ pub fn create_session(
                                     s.metrics = a.to_metrics();
                                     let update = SessionUpdate::from(&*s);
                                     let _ = app_clone.emit("session-updated", &update);
+
+                                    // Deliver any deferred context nudge now that the agent is idle
+                                    if new_phase == SessionPhase::NeedsInput {
+                                        super::PtyManager::deliver_pending_nudge_with_writer(
+                                            &writer_for_reader,
+                                            &mut s,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -725,8 +734,13 @@ pub fn create_session(
                         }
 
                         // Auto-inject context when agent prompt is first detected
-                        // (fallback for non-Claude agents that can't take CLI args)
-                        if a.pending_context_inject && !a.context_injected {
+                        // (fallback for non-Claude agents that can't take CLI args).
+                        // Skip for SSH sessions — $HERMES_CONTEXT isn't set remotely.
+                        let is_ssh_session = session_clone
+                            .lock()
+                            .ok()
+                            .map_or(false, |s| s.ssh_info.is_some());
+                        if a.pending_context_inject && !a.context_injected && !is_ssh_session {
                             a.pending_context_inject = false;
                             let mut write_ok = false;
                             if let Ok(mut w) = writer_for_reader.lock() {
@@ -744,6 +758,10 @@ pub fn create_session(
                             }
                             // If write failed, pending_context_inject is cleared but
                             // context_injected stays false — next prompt detection retries.
+                        } else if is_ssh_session && a.pending_context_inject {
+                            // Clear the flag so the analyzer doesn't keep retrying
+                            a.pending_context_inject = false;
+                            a.context_injected = true;
                         }
 
                         if chunk_count.is_multiple_of(30) {
@@ -844,7 +862,8 @@ pub fn create_session(
                     .ok();
             }
             // Write context file so AI agents can read project info
-            if !ids.is_empty() {
+            // (only for local sessions — the file isn't accessible over SSH)
+            if !is_ssh && !ids.is_empty() {
                 crate::realm::attunement::write_session_context_file(&app, &db, &session_id).ok();
             }
         }

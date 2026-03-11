@@ -169,6 +169,17 @@ pub struct Session {
     pub has_initial_context: bool,
     pub last_nudged_version: i64,
     pub ssh_info: Option<SshConnectionInfo>,
+    /// Deferred nudge: stored when context is applied while the agent is busy.
+    /// Delivered when the session phase transitions to NeedsInput.
+    #[serde(skip)]
+    pub pending_nudge: Option<PendingNudge>,
+}
+
+/// A context nudge that couldn't be delivered immediately (agent was busy).
+#[derive(Debug, Clone)]
+pub struct PendingNudge {
+    pub version: i64,
+    pub file_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

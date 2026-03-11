@@ -744,8 +744,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const oldToNew = new Map<string, string>();
           for (const saved of workspace.sessions) {
             try {
+              // Pre-generate ID and set up listener before PTY starts
+              // (same race-prevention as createSession above)
+              const restoreId = crypto.randomUUID();
+              await createTerminal(restoreId, saved.color);
+
               const newSession = await apiCreateSession({
-                sessionId: null,
+                sessionId: restoreId,
                 label: saved.label,
                 workingDirectory: saved.working_directory,
                 color: saved.color,
@@ -758,7 +763,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshUser: saved.ssh_info?.user || null,
                 tmuxSession: saved.ssh_info?.tmux_session || null,
               });
-              await createTerminal(newSession.id, newSession.color);
 
               // Restore description and group — await them to ensure they persist
               const metaPromises: Promise<void>[] = [];
@@ -835,15 +839,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const createSession = useCallback(async (opts?: CreateSessionOpts) => {
+    // Always pre-generate the session ID so we can set up the terminal
+    // output listener BEFORE the PTY starts.  This prevents a race where
+    // early output (SSH banner, tmux alternate-screen switch) is lost
+    // because no listener exists yet — which garbles tmux rendering.
+    const preSessionId = opts?.sessionId || crypto.randomUUID();
     try {
-      // If a branch name and project (realm) are provided, pre-generate a
-      // session ID and create the worktree first so the backend can look it
-      // up and start the terminal in the worktree directory.
-      let preSessionId = opts?.sessionId || null;
+
       if (opts?.branchName && opts?.projectIds?.length) {
-        if (!preSessionId) {
-          preSessionId = crypto.randomUUID();
-        }
         try {
           await createWorktree(
             preSessionId,
@@ -855,6 +858,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           console.warn("[SessionContext] Failed to create worktree, session will use default cwd:", wtErr);
         }
       }
+
+      // Set up the terminal + output listener BEFORE creating the backend
+      // session so no PTY output events are missed.
+      await createTerminal(preSessionId, opts?.color || "");
 
       const session = await apiCreateSession({
         sessionId: preSessionId,
@@ -870,7 +877,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshUser: opts?.sshUser || null,
         tmuxSession: opts?.tmuxSession || null,
       });
-      await createTerminal(session.id, session.color);
 
       // Restore scrollback from previous session if available
       if (opts?.restoreFromId) {
@@ -899,6 +905,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return session;
     } catch (err) {
       console.error("Failed to create session:", err);
+      // Clean up the pre-created terminal if backend session creation failed
+      destroyTerminal(preSessionId);
       return null;
     }
   }, []);

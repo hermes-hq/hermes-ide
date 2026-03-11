@@ -46,35 +46,13 @@ impl PtyManager {
 
     /// Send a lightweight context nudge to a session's PTY if an AI agent is detected.
     /// Returns true if the nudge was sent.
-    pub fn nudge_context(&mut self, session_id: &str) -> bool {
-        let pty = match self.sessions.get_mut(session_id) {
-            Some(p) => p,
-            None => return false,
-        };
-
-        let has_agent = pty
-            .session
-            .lock()
-            .ok()
-            .map(|s| s.detected_agent.is_some())
-            .unwrap_or(false);
-
-        if !has_agent {
-            return false;
-        }
-
-        let msg =
-            "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
-        if let Ok(mut w) = pty.writer.lock() {
-            let ok = w.write_all(msg.as_bytes()).is_ok() && w.flush().is_ok();
-            ok
-        } else {
-            false
-        }
-    }
-
     /// Send a versioned context nudge to a session's PTY.
     /// Deduplicates by tracking last_nudged_version on the Session.
+    ///
+    /// If the agent is busy (phase != NeedsInput), the nudge is stored as
+    /// `pending_nudge` on the Session and delivered later by the reader loop
+    /// when the phase transitions to NeedsInput.
+    ///
     /// Returns (nudge_sent, error_message).
     pub fn send_versioned_nudge(
         &self,
@@ -103,8 +81,27 @@ impl PtyManager {
             return (true, None);
         }
 
-        // Determine provider-specific nudge message
-        let provider_name = session_guard
+        // Only send the nudge when the agent is waiting for input.
+        // If the agent is busy, defer and deliver when it next becomes idle.
+        if session_guard.phase != SessionPhase::NeedsInput {
+            session_guard.pending_nudge = Some(PendingNudge {
+                version,
+                file_path: file_path.to_string(),
+            });
+            return (false, Some("Agent busy — nudge deferred until idle".to_string()));
+        }
+
+        Self::write_nudge(pty, &mut session_guard, version, file_path)
+    }
+
+    /// Format and write a nudge message to the PTY.
+    fn write_nudge(
+        pty: &PtySession,
+        session: &mut Session,
+        version: i64,
+        file_path: &str,
+    ) -> (bool, Option<String>) {
+        let provider_name = session
             .detected_agent
             .as_ref()
             .map(|a| a.name.clone())
@@ -112,7 +109,7 @@ impl PtyManager {
 
         let nudge_msg = match provider_name.to_lowercase().as_str() {
             "aider" => format!("/read {}\r", file_path),
-            "claude" | "claude-code" | "anthropic" => format!(
+            "claude" | "claude code" | "claude-code" | "anthropic" => format!(
                 "Read the file at {} — it contains updated project context (v{}).\r",
                 file_path, version
             ),
@@ -121,24 +118,63 @@ impl PtyManager {
                 version, file_path
             ),
             _ => format!(
-                "Context updated to v{}. Read the file at $HERMES_CONTEXT for project context.\r",
-                version
+                "Context updated to v{}. Read the file at {} for project context.\r",
+                version, file_path
             ),
         };
 
         match pty.writer.lock() {
-            Ok(mut w) => {
-                use std::io::Write;
-                match w.write_all(nudge_msg.as_bytes()) {
-                    Ok(_) => {
-                        let _ = w.flush();
-                        session_guard.last_nudged_version = version;
-                        (true, None)
-                    }
-                    Err(e) => (false, Some(format!("Write failed: {}", e))),
+            Ok(mut w) => match w.write_all(nudge_msg.as_bytes()) {
+                Ok(_) => {
+                    let _ = w.flush();
+                    session.last_nudged_version = version;
+                    (true, None)
+                }
+                Err(e) => (false, Some(format!("Write failed: {}", e))),
+            },
+            Err(e) => (false, Some(format!("Writer lock failed: {}", e))),
+        }
+    }
+
+    /// Deliver a pending nudge using a standalone writer reference
+    /// (for use inside the reader thread which doesn't have PtySession).
+    pub(crate) fn deliver_pending_nudge_with_writer(
+        writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
+        session: &mut Session,
+    ) {
+        if let Some(nudge) = session.pending_nudge.take() {
+            if session.last_nudged_version >= nudge.version {
+                return;
+            }
+
+            let provider_name = session
+                .detected_agent
+                .as_ref()
+                .map(|a| a.name.clone())
+                .unwrap_or_default();
+
+            let nudge_msg = match provider_name.to_lowercase().as_str() {
+                "aider" => format!("/read {}\r", nudge.file_path),
+                "claude" | "claude code" | "claude-code" | "anthropic" => format!(
+                    "Read the file at {} — it contains updated project context (v{}).\r",
+                    nudge.file_path, nudge.version
+                ),
+                "copilot" | "github-copilot" => format!(
+                    "@workspace Context updated to v{}. The context file is at {}.\r",
+                    nudge.version, nudge.file_path
+                ),
+                _ => format!(
+                    "Context updated to v{}. Read the file at {} for project context.\r",
+                    nudge.version, nudge.file_path
+                ),
+            };
+
+            if let Ok(mut w) = writer.lock() {
+                if w.write_all(nudge_msg.as_bytes()).is_ok() {
+                    let _ = w.flush();
+                    session.last_nudged_version = nudge.version;
                 }
             }
-            Err(e) => (false, Some(format!("Writer lock failed: {}", e))),
         }
     }
 }
