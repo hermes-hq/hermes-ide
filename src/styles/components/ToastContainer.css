@@ -1,0 +1,150 @@
+/* ─── Toast Container (fixed top-right) ──────────────────── */
+
+.toast-container {
+	position: fixed;
+	top: 36px;
+	right: 12px;
+	z-index: 9999;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: 380px;
+	pointer-events: none;
+}
+
+/* ─── Individual Toast ────────────────────────────────────── */
+
+.toast {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px 12px;
+	border-radius: var(--radius-sm);
+	background: var(--bg-2);
+	border: 1px solid var(--border);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+	font-size: var(--text-sm);
+	color: var(--text-1);
+	animation: toast-slide-in 0.2s ease-out;
+	pointer-events: auto;
+	min-width: 260px;
+}
+
+@keyframes toast-slide-in {
+	from {
+		opacity: 0;
+		transform: translateX(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+/* ─── Type Accents ────────────────────────────────────────── */
+
+.toast-success {
+	border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+	background: color-mix(in srgb, var(--green) 6%, var(--bg-2));
+}
+
+.toast-error {
+	border-color: color-mix(in srgb, var(--red) 40%, var(--border));
+	background: color-mix(in srgb, var(--red) 6%, var(--bg-2));
+}
+
+.toast-warning {
+	border-color: color-mix(in srgb, var(--yellow, #f0ad4e) 40%, var(--border));
+	background: color-mix(in srgb, var(--yellow, #f0ad4e) 6%, var(--bg-2));
+}
+
+.toast-info {
+	border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+/* ─── Icon ─────────────────────────────────────────────────── */
+
+.toast-icon {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	margin-top: 1px;
+}
+
+.toast-icon svg {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.toast-icon-info { color: var(--accent); }
+.toast-icon-success { color: var(--green); }
+.toast-icon-warning { color: var(--yellow, #f0ad4e); }
+.toast-icon-error { color: var(--red); }
+
+/* ─── Message ──────────────────────────────────────────────── */
+
+.toast-message {
+	flex: 1;
+	line-height: 1.4;
+	word-break: break-word;
+}
+
+/* ─── Actions ──────────────────────────────────────────────── */
+
+.toast-actions {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+	margin-left: 4px;
+}
+
+.toast-action-btn {
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-2);
+	font-family: var(--font-ui);
+	font-size: var(--text-xs);
+	padding: 2px 8px;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.toast-action-btn:hover {
+	background: var(--bg-hover);
+	color: var(--text-0);
+	border-color: var(--border-light);
+}
+
+.toast-action-primary {
+	background: var(--accent-dim);
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.toast-action-primary:hover {
+	background: var(--accent);
+	color: var(--bg-0);
+}
+
+/* ─── Close Button ─────────────────────────────────────────── */
+
+.toast-close {
+	background: none;
+	border: none;
+	color: var(--text-3);
+	cursor: pointer;
+	font-size: var(--text-lg);
+	padding: 0 2px;
+	line-height: 1;
+	flex-shrink: 0;
+	transition: color 0.1s;
+}
+
+.toast-close:hover {
+	color: var(--text-0);
+}
