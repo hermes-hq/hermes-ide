@@ -209,6 +209,14 @@ export async function createTerminal(
       }
     }
 
+    // Shift+Enter → send CSI u sequence (like iTerm2, Ghostty, Kitty)
+    // This allows CLI tools (e.g. Claude Code) to distinguish Shift+Enter from Enter.
+    if (_event.type === "keydown" && _event.key === "Enter" && _event.shiftKey && !_event.metaKey && !_event.altKey && !_event.ctrlKey) {
+      _event.preventDefault();
+      handleTerminalInput(sessionId, "\x1b[13;2u");
+      return false;
+    }
+
     // Let xterm handle everything else natively.
     return true;
   });
