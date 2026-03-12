@@ -147,7 +147,7 @@ jobs:
   # ── Build (selected platforms) ─────────────────────────────────────
   build:
     needs: [config, test-frontend, test-rust]
-    if: always() && needs.test-frontend.result == 'success'
+    if: always() && needs.test-frontend.result == 'success' && needs.test-rust.result == 'success'
     strategy:
       fail-fast: false
       matrix:
