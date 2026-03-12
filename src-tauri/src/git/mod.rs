@@ -109,6 +109,15 @@ pub struct FileEntry {
     pub git_status: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct FileContent {
+    pub content: String,
+    pub file_name: String,
+    pub language: String,
+    pub is_binary: bool,
+    pub size: u64,
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────
 
 /// Maximum diff size before truncation (2 MB)
@@ -900,6 +909,171 @@ pub fn git_open_file(
     // 1F: Path traversal guard
     let full_path = safe_join(&project_path, &file_path)?;
     crate::platform::open_file(&full_path.to_string_lossy())
+}
+
+#[tauri::command]
+pub fn read_file_content(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+    file_path: String,
+) -> Result<FileContent, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+
+    let full_path = safe_join(&project_path, &file_path)?;
+    let metadata = std::fs::metadata(&full_path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let size = metadata.len();
+
+    // Cap at 1 MB to avoid loading huge files into the webview
+    const MAX_SIZE: u64 = 1_048_576;
+
+    let file_name = full_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let extension = full_path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let language = match extension.as_str() {
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "py" => "python",
+        "rb" => "ruby",
+        "go" => "go",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cpp" | "hpp" | "cc" | "cxx" => "cpp",
+        "cs" => "csharp",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "html" | "htm" => "html",
+        "css" | "scss" | "sass" | "less" => "css",
+        "json" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "xml" | "svg" => "xml",
+        "sql" => "sql",
+        "sh" | "bash" | "zsh" => "bash",
+        "md" | "markdown" => "markdown",
+        "dockerfile" => "dockerfile",
+        "dart" => "dart",
+        "lua" => "lua",
+        "r" => "r",
+        "php" => "php",
+        "ex" | "exs" => "elixir",
+        _ => "plaintext",
+    }
+    .to_string();
+
+    if size > MAX_SIZE {
+        return Ok(FileContent {
+            content: String::new(),
+            file_name,
+            language,
+            is_binary: false,
+            size,
+        });
+    }
+
+    // Read raw bytes to detect binary
+    let bytes = std::fs::read(&full_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // Check first 8KB for null bytes (binary detection)
+    let check_len = bytes.len().min(8192);
+    let is_binary = bytes[..check_len].contains(&0);
+
+    let content = if is_binary {
+        String::new()
+    } else {
+        String::from_utf8_lossy(&bytes).to_string()
+    };
+
+    Ok(FileContent {
+        content,
+        file_name,
+        language,
+        is_binary,
+        size,
+    })
+}
+
+#[tauri::command]
+pub fn open_file_in_editor(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+    file_path: String,
+    editor: Option<String>,
+) -> Result<(), String> {
+    // SSH remote editors: editor string contains args (e.g. "code --remote ssh-remote+user@host")
+    // or file_path is a URI (e.g. "ssh://user@host/path") — skip local path resolution.
+    if realm_id == "__ssh_local__" {
+        return match editor {
+            Some(ref cmd) if !cmd.is_empty() => {
+                // Split "code --remote ssh-remote+user@host" into command + args
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let (bin, extra_args) = parts.split_first()
+                    .ok_or_else(|| "Empty editor command".to_string())?;
+
+                if !crate::platform::command_exists(bin) {
+                    return Err(format!("Editor '{}' not found on PATH", bin));
+                }
+
+                let mut child = std::process::Command::new(bin)
+                    .args(extra_args.iter())
+                    .arg(&file_path)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open remote file in {}: {}", bin, e))?;
+                std::thread::spawn(move || { let _ = child.wait(); });
+                Ok(())
+            }
+            _ => Err("No editor specified for SSH remote open".to_string()),
+        };
+    }
+
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+
+    let full_path = safe_join(&project_path, &file_path)?;
+    let path_str = full_path.to_string_lossy().to_string();
+
+    match editor {
+        Some(ref cmd) if !cmd.is_empty() => {
+            // Validate editor command: only allow simple command names (no paths with shell metacharacters)
+            if cmd.contains('/') || cmd.contains('\\') {
+                return Err("Editor command must be a simple command name (e.g. 'code', 'subl')".to_string());
+            }
+            // Try the preferred editor; fall back to system default if not found
+            if !crate::platform::command_exists(cmd) {
+                log::warn!("Editor '{}' not found on PATH, falling back to system default", cmd);
+                return crate::platform::open_file(&path_str);
+            }
+            let mut child = std::process::Command::new(cmd)
+                .arg(&path_str)
+                .spawn()
+                .map_err(|e| format!("Failed to open file in {}: {}", cmd, e))?;
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            Ok(())
+        }
+        _ => crate::platform::open_file(&path_str),
+    }
 }
 
 // ─── Branch Management Commands ─────────────────────────────────────

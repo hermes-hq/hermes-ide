@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  GitSessionStatus, GitDiff, GitOperationResult, GitBranch, FileEntry,
+  GitSessionStatus, GitDiff, GitOperationResult, GitBranch, FileEntry, FileContent,
+  SshFileEntry, SshFileContent,
   GitStashEntry, GitLogResult, GitCommitDetail, MergeStatus, ConflictContent, ConflictStrategy,
   SearchResponse,
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
@@ -72,6 +73,26 @@ export function gitDeleteBranch(sessionId: string, realmId: string, name: string
 
 export function listDirectory(sessionId: string, realmId: string, relativePath?: string): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("list_directory", { sessionId, realmId, relativePath: relativePath || null });
+}
+
+// ─── File Content API ────────────────────────────────────────────────
+
+export function readFileContent(sessionId: string, realmId: string, filePath: string): Promise<FileContent> {
+  return invoke<FileContent>("read_file_content", { sessionId, realmId, filePath });
+}
+
+export function openFileInEditor(sessionId: string, realmId: string, filePath: string, editor: string | null): Promise<void> {
+  return invoke("open_file_in_editor", { sessionId, realmId, filePath, editor });
+}
+
+// ─── SSH File API ────────────────────────────────────────────────────
+
+export function sshListDirectory(sessionId: string, path?: string): Promise<SshFileEntry[]> {
+  return invoke<SshFileEntry[]>("ssh_list_directory", { sessionId, path: path || null });
+}
+
+export function sshReadFile(sessionId: string, filePath: string): Promise<SshFileContent> {
+  return invoke<SshFileContent>("ssh_read_file", { sessionId, filePath });
 }
 
 // ─── Stash API ───────────────────────────────────────────────────────

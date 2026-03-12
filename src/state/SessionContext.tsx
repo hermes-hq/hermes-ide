@@ -112,6 +112,7 @@ interface SessionState {
     searchPanelOpen: boolean;
     composerOpen: boolean;
     activeLeftTab: "sessions" | "terminal" | "processes" | "git" | "files" | "search";
+    filePreview: { realmId: string; filePath: string } | null;
   };
 }
 
@@ -524,6 +525,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "CLOSE_COMPOSER":
       return state.ui.composerOpen ? { ...state, ui: { ...state.ui, composerOpen: false } } : state;
 
+    // ─── File preview actions ─────────────────────────────────────────
+    case "SET_FILE_PREVIEW":
+      return { ...state, ui: { ...state.ui, filePreview: { realmId: action.realmId, filePath: action.filePath } } };
+    case "CLOSE_FILE_PREVIEW":
+      return state.ui.filePreview ? { ...state, ui: { ...state.ui, filePreview: null } } : state;
+
     // ─── Workspace restore actions ───────────────────────────────────
     case "RESTORE_LAYOUT":
       return {
@@ -569,6 +576,7 @@ export const initialState: SessionState = {
     searchPanelOpen: false,
     composerOpen: false,
     activeLeftTab: "terminal" as const,
+    filePreview: null,
   },
 };
 

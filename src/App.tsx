@@ -29,6 +29,7 @@ import type { SessionView } from "./components/SessionList";
 
 import { ProcessPanel } from "./components/ProcessPanel";
 import { FileExplorerPanel } from "./components/FileExplorerPanel";
+import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { SearchPanel } from "./components/SearchPanel";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -585,6 +586,16 @@ function AppContent() {
         />
         <div className="main-area">
           <div className="terminal-and-timeline">
+            {ui.filePreview && state.activeSessionId ? (
+              <div className="file-preview-main-container">
+                <FilePreviewPanel
+                  sessionId={state.activeSessionId}
+                  realmId={ui.filePreview.realmId}
+                  filePath={ui.filePreview.filePath}
+                  onBack={() => dispatch({ type: "CLOSE_FILE_PREVIEW" })}
+                />
+              </div>
+            ) : (
             <div className="terminal-container">
               {state.layout.root ? (
                 <SplitLayout node={state.layout.root} />
@@ -596,6 +607,7 @@ function AppContent() {
                 />
               )}
             </div>
+            )}
             {/* Execution Timeline (F1) */}
             {ui.timelineOpen && activeSession && (
               <ExecutionTimeline
