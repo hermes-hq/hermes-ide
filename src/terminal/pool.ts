@@ -52,6 +52,31 @@ export function setCurrentSettings(settings: Record<string, string>): void {
   currentSettings = settings;
 }
 
+/**
+ * Estimate initial terminal dimensions from current window size and font settings.
+ * Used to pass approximate rows/cols to the backend at PTY creation time so the
+ * shell starts with dimensions close to the real size — avoiding the SIGWINCH
+ * race where the shell misses the initial resize.
+ */
+export function estimateInitialDimensions(): { rows: number; cols: number } {
+  const fontSize = parseInt(currentSettings.font_size || "14", 10);
+  const lineHeight = 1.2;
+  // Approximate cell dimensions (monospace font)
+  const cellWidth = fontSize * 0.6;
+  const cellHeight = fontSize * lineHeight;
+
+  // Use inner window size as a rough estimate of the terminal viewport.
+  // The actual viewport is smaller (sidebar, tabs, etc.) but this gets us
+  // within the right ballpark — far better than the default 80x24.
+  const availableWidth = Math.max(window.innerWidth * 0.7, 200);
+  const availableHeight = Math.max(window.innerHeight * 0.6, 100);
+
+  const cols = Math.max(10, Math.floor(availableWidth / cellWidth));
+  const rows = Math.max(2, Math.floor(availableHeight / cellHeight));
+
+  return { rows, cols };
+}
+
 // ─── Terminal Lifecycle ──────────────────────────────────────────────
 
 export async function createTerminal(
@@ -348,17 +373,30 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
   entry.viewport = viewport;
   entry.attached = true;
 
-  // Fit and focus after paint
+  // Fit and focus after paint.
+  // Double-rAF ensures CSS flex layout has distributed space to this pane
+  // before we measure it. A single rAF can fire before the browser has
+  // resolved percentage-based heights.
   requestAnimationFrame(() => {
-    try {
-      entry.fitAddon.fit();
-      // Only scroll to bottom if user hasn't scrolled up
-      if (!entry.userScrolledUp) {
-        entry.terminal.scrollToBottom();
-      }
-    } catch { /* terminal may not be ready */ }
-    if (autoFocus) entry.terminal.focus();
-    resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols).catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
+    requestAnimationFrame(() => {
+      try {
+        // Check proposed dimensions BEFORE calling fit(). fit() irreversibly
+        // resizes xterm's internal buffer. If the container hasn't been laid
+        // out yet (0 px wide), fit() would set cols=1 while the PTY stays at
+        // its old size → readline width mismatch → garbled history navigation.
+        // Guard against NaN (xterm.js issue #4338) and degenerate dimensions.
+        const proposed = entry.fitAddon.proposeDimensions();
+        if (!proposed || !isFinite(proposed.cols) || !isFinite(proposed.rows) || proposed.cols < 10 || proposed.rows < 2) return;
+        entry.fitAddon.fit();
+        entry.terminal.refresh(0, entry.terminal.rows - 1);
+        if (!entry.userScrolledUp) {
+          entry.terminal.scrollToBottom();
+        }
+        resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
+          .catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
+      } catch { /* terminal may not be ready */ }
+      if (autoFocus) entry.terminal.focus();
+    });
   });
 }
 
@@ -403,7 +441,20 @@ export function refitActive(): void {
   for (const [sessionId, entry] of pool) {
     if (entry.attached && entry.opened) {
       try {
+        // Clear ghost text before resize — pixel positions become stale.
+        clearGhostText(sessionId);
+
+        // Check proposed dimensions BEFORE calling fit(). fit() irreversibly
+        // resizes xterm's buffer — if the container has degenerate dimensions,
+        // xterm would shrink to cols=1 while the PTY keeps the old width,
+        // creating a mismatch that corrupts readline's line-wrap arithmetic.
+        // Also guard against NaN (xterm.js issue #4338).
+        const proposed = entry.fitAddon.proposeDimensions();
+        if (!proposed || !isFinite(proposed.cols) || !isFinite(proposed.rows) || proposed.cols < 10 || proposed.rows < 2) continue;
         entry.fitAddon.fit();
+        // Force a full redraw — the WebGL renderer leaves stale cell renders
+        // at old column positions after resize until the user scrolls.
+        entry.terminal.refresh(0, entry.terminal.rows - 1);
         if (!entry.userScrolledUp) {
           entry.terminal.scrollToBottom();
         }
@@ -463,7 +514,26 @@ export function notifySubscribers(sessionId: string, state: SuggestionState | nu
 export function setSessionPhase(sessionId: string, phase: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
+  const prevPhase = entry.sessionPhase;
   entry.sessionPhase = phase;
+
+  // ── Re-send PTY resize when shell becomes ready ──
+  // The PTY starts at a hardcoded 80×24. attach() sends resizeSession() via
+  // a double-rAF, but the shell may not have installed its SIGWINCH handler
+  // yet — the signal is lost and the shell keeps COLUMNS=80.  Re-sending
+  // the resize once the shell is confirmed ready guarantees it picks up the
+  // correct terminal dimensions.
+  if (
+    phase === "shell_ready" &&
+    prevPhase !== "shell_ready" &&
+    entry.attached &&
+    entry.opened
+  ) {
+    resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
+      .catch((err) =>
+        console.warn("[TerminalPool] shell_ready resize failed:", err),
+      );
+  }
 
   // Dismiss suggestions when entering busy phase
   if (phase !== "idle" && phase !== "shell_ready") {

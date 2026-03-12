@@ -14,7 +14,7 @@ import {
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
 import { createWorktree } from "../api/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
-import { createTerminal, destroy as destroyTerminal, writeScrollback } from "../terminal/TerminalPool";
+import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
 import { applyTheme } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
 import { initNotifications, notifyLongRunningDone } from "../utils/notifications";
@@ -757,6 +757,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               const restoreId = crypto.randomUUID();
               await createTerminal(restoreId, saved.color);
 
+              const restoreDims = estimateInitialDimensions();
               const newSession = await apiCreateSession({
                 sessionId: restoreId,
                 label: saved.label,
@@ -770,6 +771,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshPort: saved.ssh_info?.port || null,
                 sshUser: saved.ssh_info?.user || null,
                 tmuxSession: saved.ssh_info?.tmux_session || null,
+                initialRows: restoreDims.rows,
+                initialCols: restoreDims.cols,
               });
 
               // Restore description and group — await them to ensure they persist
@@ -871,6 +874,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // session so no PTY output events are missed.
       await createTerminal(preSessionId, opts?.color || "");
 
+      // Estimate terminal dimensions from window size and font settings so the
+      // PTY starts at the correct size.  This eliminates the SIGWINCH race where
+      // the shell starts at 80x24 and misses the initial resize from attach().
+      const initialDims = estimateInitialDimensions();
+
       const session = await apiCreateSession({
         sessionId: preSessionId,
         label: opts?.label || null,
@@ -884,6 +892,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshPort: opts?.sshPort || null,
         sshUser: opts?.sshUser || null,
         tmuxSession: opts?.tmuxSession || null,
+        initialRows: initialDims.rows,
+        initialCols: initialDims.cols,
       });
 
       // Restore scrollback from previous session if available

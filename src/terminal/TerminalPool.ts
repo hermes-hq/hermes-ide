@@ -46,6 +46,7 @@ import {
   getCursorPixelPosition,
   getCursorPosition,
   cleanSelection,
+  estimateInitialDimensions,
   type PoolEntry,
 } from "./pool";
 
@@ -79,7 +80,13 @@ export function updateSettings(settings: Record<string, string>): void {
     entry.terminal.options.scrollback = scrollback;
     entry.terminal.options.theme = { ...theme, cursor: entry.terminal.options.theme?.cursor, cursorAccent: theme.background };
     if (entry.attached && entry.opened) {
-      try { entry.fitAddon.fit(); } catch { /* ignore */ }
+      try {
+        const proposed = entry.fitAddon.proposeDimensions();
+        if (proposed && proposed.cols >= 10 && proposed.rows >= 2) {
+          entry.fitAddon.fit();
+          entry.terminal.refresh(0, entry.terminal.rows - 1);
+        }
+      } catch { /* ignore */ }
     }
   }
 }
@@ -576,4 +583,5 @@ export {
   clearGhostText,
   dismissSuggestions,
   getCursorPosition,
+  estimateInitialDimensions,
 };

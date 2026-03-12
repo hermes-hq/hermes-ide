@@ -538,6 +538,8 @@ pub fn create_session(
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
     tmux_session: Option<String>,
+    initial_rows: Option<u16>,
+    initial_cols: Option<u16>,
 ) -> Result<SessionUpdate, String> {
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let shell = state
@@ -641,11 +643,17 @@ pub fn create_session(
     let session_arc = Arc::new(StdMutex::new(session));
 
     // Spawn PTY
+    // Use dimensions from the frontend if provided; otherwise fall back to 80x24.
+    // Passing the real terminal size at PTY creation prevents the SIGWINCH race
+    // condition where the shell starts at 80x24 and misses the initial resize
+    // because its signal handler isn't installed yet.
+    let pty_rows = initial_rows.unwrap_or(24);
+    let pty_cols = initial_cols.unwrap_or(80);
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: pty_rows,
+            cols: pty_cols,
             pixel_width: 0,
             pixel_height: 0,
         })

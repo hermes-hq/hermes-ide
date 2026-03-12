@@ -137,7 +137,9 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
     expect(SRC).not.toContain("_lastOnDataValue");
     expect(SRC).not.toContain("_lastOnDataTime");
     expect(SRC).not.toMatch(/now - _lastOnData/);
-    expect(SRC).not.toMatch(/< 10/); // No 10ms window
+    // No 10ms dedup window — match the timing pattern, not bare "< 10"
+    // (the dimension guard "cols < 10" is unrelated)
+    expect(SRC).not.toMatch(/now\s*-\s*\w+\s*<\s*10/);
   });
 
   it("NO heuristic-based dedup exists (onData is clean)", () => {

@@ -14,6 +14,8 @@ export function createSession(opts: {
   sshPort?: number | null;
   sshUser?: string | null;
   tmuxSession?: string | null;
+  initialRows?: number | null;
+  initialCols?: number | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }
