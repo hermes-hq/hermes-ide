@@ -390,6 +390,35 @@ describe("Plugin Settings", () => {
 		});
 	});
 
+	describe("_notifySettingChanged (external trigger)", () => {
+		it("should notify onDidChange listeners when called externally", () => {
+			const api = createPluginAPI("test", new Set(), testSchema, callbacks, commandHandlers, panelComponents);
+
+			const listener = vi.fn();
+			api.settings.onDidChange("fontSize", listener);
+
+			api._notifySettingChanged("fontSize", 24);
+			expect(listener).toHaveBeenCalledWith(24);
+		});
+
+		it("should not throw when no listeners registered for key", () => {
+			const api = createPluginAPI("test", new Set(), testSchema, callbacks, commandHandlers, panelComponents);
+
+			expect(() => api._notifySettingChanged("fontSize", 24)).not.toThrow();
+		});
+
+		it("should not call disposed listeners", () => {
+			const api = createPluginAPI("test", new Set(), testSchema, callbacks, commandHandlers, panelComponents);
+
+			const listener = vi.fn();
+			const disposable = api.settings.onDidChange("fontSize", listener);
+			disposable.dispose();
+
+			api._notifySettingChanged("fontSize", 24);
+			expect(listener).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("settings without schema", () => {
 		it("settings.get() should return undefined when no schema", async () => {
 			const api = createPluginAPI("test", new Set(), undefined, callbacks, commandHandlers, panelComponents);

@@ -30,7 +30,6 @@ export class PluginRuntime {
 	private panelComponents = new Map<string, React.ComponentType<PluginPanelProps>>();
 	private statusBarOverrides = new Map<string, { text?: string; tooltip?: string; visible?: boolean }>();
 	private changeListeners = new Set<() => void>();
-	private settingsListeners = new Map<string, Map<string, Set<(value: string | number | boolean) => void>>>();
 	private eventListeners = new Map<HermesEvent, Set<(...args: unknown[]) => void>>();
 	private callbacks: PluginAPICallbacks;
 
@@ -164,13 +163,9 @@ export class PluginRuntime {
 	// ─── Settings & Events ────────────────────────────────────
 
 	notifySettingChanged(pluginId: string, key: string, value: string | number | boolean): void {
-		const pluginListeners = this.settingsListeners.get(pluginId);
-		if (!pluginListeners) return;
-		const keyListeners = pluginListeners.get(key);
-		if (!keyListeners) return;
-		for (const cb of keyListeners) {
-			try { cb(value); } catch { /* swallow */ }
-		}
+		const entry = this.plugins.get(pluginId);
+		if (!entry?.api) return;
+		entry.api._notifySettingChanged(key, value);
 	}
 
 	private subscribeEvent(event: HermesEvent, callback: (...args: unknown[]) => void): { dispose(): void } {

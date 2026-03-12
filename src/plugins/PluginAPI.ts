@@ -47,6 +47,8 @@ export interface HermesPluginAPI {
 		list(): Promise<{ id: string; name: string }[]>;
 	};
 	subscriptions: Disposable[];
+	/** @internal Used by PluginRuntime to forward UI settings changes to plugin listeners. */
+	_notifySettingChanged(key: string, value: string | number | boolean): void;
 }
 
 export class PermissionDeniedError extends Error {
@@ -86,6 +88,14 @@ export function createPluginAPI(
 	const settingsChangeListeners = new Map<string, Set<(value: string | number | boolean) => void>>();
 
 	return {
+		_notifySettingChanged(key: string, value: string | number | boolean) {
+			const listeners = settingsChangeListeners.get(key);
+			if (listeners) {
+				for (const cb of listeners) {
+					try { cb(value); } catch { /* swallow */ }
+				}
+			}
+		},
 		ui: {
 			registerPanel(panelId: string, component: React.ComponentType<PluginPanelProps>) {
 				if (panelComponents.has(panelId)) {
