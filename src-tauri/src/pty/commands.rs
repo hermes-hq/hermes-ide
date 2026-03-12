@@ -37,7 +37,8 @@ fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
     cmd.arg("-o").arg("BatchMode=yes");
     // Reuse existing TCP connection if available, or establish a new persistent one
     let socket_path = ssh_control_dir().join(format!("{}@{}:{}", user, host, port));
-    cmd.arg("-o").arg(format!("ControlPath={}", socket_path.display()));
+    cmd.arg("-o")
+        .arg(format!("ControlPath={}", socket_path.display()));
     cmd.arg("-o").arg("ControlMaster=auto");
     cmd.arg("-o").arg("ControlPersist=300");
     if port != 22 {
@@ -96,11 +97,21 @@ pub async fn ssh_list_directory(
 ) -> Result<Vec<SshFileEntry>, String> {
     // Look up SSH connection info from the session
     let (user, host, port) = {
-        let mgr = state.pty_manager.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let pty_session = mgr.sessions.get(&session_id)
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
             .ok_or_else(|| "Session not found".to_string())?;
-        let session = pty_session.session.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let ssh = session.ssh_info.as_ref()
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
             .ok_or_else(|| "Not an SSH session".to_string())?;
         (ssh.user.clone(), ssh.host.clone(), ssh.port)
     };
@@ -159,7 +170,11 @@ pub async fn ssh_list_directory(
         }
 
         let is_dir = line.ends_with('/');
-        let name = if is_dir { &line[..line.len() - 1] } else { line };
+        let name = if is_dir {
+            &line[..line.len() - 1]
+        } else {
+            line
+        };
         let is_hidden = name.starts_with('.');
 
         let full_path = if target.ends_with('/') {
@@ -168,7 +183,11 @@ pub async fn ssh_list_directory(
             format!("{}/{}", target, name)
         };
 
-        let size = if is_dir { None } else { size_map.get(name).copied() };
+        let size = if is_dir {
+            None
+        } else {
+            size_map.get(name).copied()
+        };
 
         entries.push(SshFileEntry {
             name: name.to_string(),
@@ -181,7 +200,9 @@ pub async fn ssh_list_directory(
 
     // Sort directories first, then alphabetically
     entries.sort_by(|a, b| {
-        b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
     Ok(entries)
@@ -194,16 +215,30 @@ pub async fn ssh_read_file(
     file_path: String,
 ) -> Result<SshFileContent, String> {
     let (user, host, port) = {
-        let mgr = state.pty_manager.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let pty_session = mgr.sessions.get(&session_id)
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
             .ok_or_else(|| "Session not found".to_string())?;
-        let session = pty_session.session.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let ssh = session.ssh_info.as_ref()
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
             .ok_or_else(|| "Not an SSH session".to_string())?;
         (ssh.user.clone(), ssh.host.clone(), ssh.port)
     };
 
-    let file_name = file_path.rsplit('/').next().unwrap_or(&file_path).to_string();
+    let file_name = file_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&file_path)
+        .to_string();
     let extension = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
 
     let language = match extension.as_str() {
@@ -294,7 +329,9 @@ pub async fn ssh_read_file(
     let content = if let Some(idx) = rest.find("---CONTENT---\n") {
         rest[idx + "---CONTENT---\n".len()..].to_string()
     } else if let Some(idx) = rest.find("---CONTENT---") {
-        rest[idx + "---CONTENT---".len()..].trim_start_matches('\n').to_string()
+        rest[idx + "---CONTENT---".len()..]
+            .trim_start_matches('\n')
+            .to_string()
     } else {
         rest.to_string()
     };

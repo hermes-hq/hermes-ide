@@ -986,8 +986,7 @@ pub fn read_file_content(
     }
 
     // Read raw bytes to detect binary
-    let bytes = std::fs::read(&full_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let bytes = std::fs::read(&full_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     // Check first 8KB for null bytes (binary detection)
     let check_len = bytes.len().min(8192);
@@ -1023,7 +1022,8 @@ pub fn open_file_in_editor(
             Some(ref cmd) if !cmd.is_empty() => {
                 // Split "code --remote ssh-remote+user@host" into command + args
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
-                let (bin, extra_args) = parts.split_first()
+                let (bin, extra_args) = parts
+                    .split_first()
                     .ok_or_else(|| "Empty editor command".to_string())?;
 
                 if !crate::platform::command_exists(bin) {
@@ -1035,7 +1035,9 @@ pub fn open_file_in_editor(
                     .arg(&file_path)
                     .spawn()
                     .map_err(|e| format!("Failed to open remote file in {}: {}", bin, e))?;
-                std::thread::spawn(move || { let _ = child.wait(); });
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
                 Ok(())
             }
             _ => Err("No editor specified for SSH remote open".to_string()),
@@ -1056,11 +1058,17 @@ pub fn open_file_in_editor(
         Some(ref cmd) if !cmd.is_empty() => {
             // Validate editor command: only allow simple command names (no paths with shell metacharacters)
             if cmd.contains('/') || cmd.contains('\\') {
-                return Err("Editor command must be a simple command name (e.g. 'code', 'subl')".to_string());
+                return Err(
+                    "Editor command must be a simple command name (e.g. 'code', 'subl')"
+                        .to_string(),
+                );
             }
             // Try the preferred editor; fall back to system default if not found
             if !crate::platform::command_exists(cmd) {
-                log::warn!("Editor '{}' not found on PATH, falling back to system default", cmd);
+                log::warn!(
+                    "Editor '{}' not found on PATH, falling back to system default",
+                    cmd
+                );
                 return crate::platform::open_file(&path_str);
             }
             let mut child = std::process::Command::new(cmd)
