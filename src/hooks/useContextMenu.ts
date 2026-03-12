@@ -155,6 +155,9 @@ export function buildFileExplorerMenuItems(
     items.push(separator());
   }
 
+  if (!entry.is_dir) {
+    items.push(menuItem("file-explorer.open-in-editor", "Open in Editor"));
+  }
   items.push(menuItem("file-explorer.open-terminal", "Open in Terminal"));
   items.push(separator());
   items.push(menuItem("file-explorer.rename", "Rename..."));

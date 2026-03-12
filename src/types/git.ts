@@ -63,6 +63,34 @@ export interface FileEntry {
   git_status: string | null;
 }
 
+// ─── File Content Types ──────────────────────────────────────────────
+
+export interface FileContent {
+  content: string;
+  file_name: string;
+  language: string;
+  is_binary: boolean;
+  size: number;
+}
+
+// ─── SSH File Types ──────────────────────────────────────────────────
+
+export interface SshFileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_hidden: boolean;
+  size: number | null;
+}
+
+export interface SshFileContent {
+  content: string;
+  file_name: string;
+  language: string;
+  is_binary: boolean;
+  size: number;
+}
+
 // ─── Stash Types ─────────────────────────────────────────────────────
 
 export interface GitStashEntry {

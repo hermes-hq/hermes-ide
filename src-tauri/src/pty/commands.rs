@@ -23,11 +23,24 @@ fn resolve_ssh_user(user: Option<String>) -> String {
     })
 }
 
-/// Build a base SSH command with common options.
+/// Directory for SSH ControlMaster sockets.
+fn ssh_control_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("hermes-ssh-mux");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Build a base SSH command with common options and connection multiplexing.
 fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
     let mut cmd = std::process::Command::new("ssh");
     cmd.arg("-o").arg("ConnectTimeout=5");
     cmd.arg("-o").arg("BatchMode=yes");
+    // Reuse existing TCP connection if available, or establish a new persistent one
+    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", user, host, port));
+    cmd.arg("-o")
+        .arg(format!("ControlPath={}", socket_path.display()));
+    cmd.arg("-o").arg("ControlMaster=auto");
+    cmd.arg("-o").arg("ControlPersist=300");
     if port != 22 {
         cmd.arg("-p").arg(port.to_string());
     }
@@ -54,7 +67,289 @@ fn ssh_exec(
     ))
 }
 
+// ─── SSH File Types ─────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct SshFileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub is_hidden: bool,
+    pub size: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct SshFileContent {
+    pub content: String,
+    pub file_name: String,
+    pub language: String,
+    pub is_binary: bool,
+    pub size: u64,
+}
+
 // ─── Tauri Commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn ssh_list_directory(
+    state: State<'_, AppState>,
+    session_id: String,
+    path: Option<String>,
+) -> Result<Vec<SshFileEntry>, String> {
+    // Look up SSH connection info from the session
+    let (user, host, port) = {
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
+            .ok_or_else(|| "Not an SSH session".to_string())?;
+        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+    };
+
+    // Use the given path, or detect the remote working directory via pwd
+    let target = match &path {
+        Some(p) if !p.is_empty() => p.clone(),
+        _ => {
+            // Ask the remote host for its home directory (session.working_directory is local)
+            let (pwd_out, _, ok) = ssh_exec(&user, &host, port, "echo $HOME")?;
+            if ok && !pwd_out.trim().is_empty() {
+                pwd_out.trim().to_string()
+            } else {
+                "/".to_string()
+            }
+        }
+    };
+
+    // Run ls with machine-readable output (portable: no GNU-only flags)
+    // -1: one entry per line, -a: show hidden, -p: append / to dirs
+    // For sizes: try GNU stat (-c) first, fall back to BSD/macOS stat (-f)
+    let remote_cmd = format!(
+        "ls -1ap {} 2>/dev/null && echo '---SIZES---' && (stat -c '%s %n' {}/* {}/.* 2>/dev/null || stat -f '%z %N' {}/* {}/.* 2>/dev/null)",
+        shell_escape(&target), shell_escape(&target), shell_escape(&target), shell_escape(&target), shell_escape(&target)
+    );
+
+    let (stdout, _stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    if !success && stdout.is_empty() {
+        return Err(format!("Failed to list directory: {}", target));
+    }
+
+    let parts: Vec<&str> = stdout.splitn(2, "---SIZES---").collect();
+    let ls_output = parts.first().unwrap_or(&"");
+    let sizes_output = parts.get(1).unwrap_or(&"");
+
+    // Parse sizes into a map
+    let mut size_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for line in sizes_output.lines() {
+        let line = line.trim();
+        if let Some(space_idx) = line.find(' ') {
+            if let Ok(size) = line[..space_idx].parse::<u64>() {
+                let name = &line[space_idx + 1..];
+                // Extract just the filename from the full path
+                if let Some(basename) = name.rsplit('/').next() {
+                    size_map.insert(basename.to_string(), size);
+                }
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    for line in ls_output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "." || line == ".." || line == "./" || line == "../" {
+            continue;
+        }
+
+        let is_dir = line.ends_with('/');
+        let name = if is_dir {
+            &line[..line.len() - 1]
+        } else {
+            line
+        };
+        let is_hidden = name.starts_with('.');
+
+        let full_path = if target.ends_with('/') {
+            format!("{}{}", target, name)
+        } else {
+            format!("{}/{}", target, name)
+        };
+
+        let size = if is_dir {
+            None
+        } else {
+            size_map.get(name).copied()
+        };
+
+        entries.push(SshFileEntry {
+            name: name.to_string(),
+            path: full_path,
+            is_dir,
+            is_hidden,
+            size,
+        });
+    }
+
+    // Sort directories first, then alphabetically
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn ssh_read_file(
+    state: State<'_, AppState>,
+    session_id: String,
+    file_path: String,
+) -> Result<SshFileContent, String> {
+    let (user, host, port) = {
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
+            .ok_or_else(|| "Not an SSH session".to_string())?;
+        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+    };
+
+    let file_name = file_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&file_path)
+        .to_string();
+    let extension = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    let language = match extension.as_str() {
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "py" => "python",
+        "rb" => "ruby",
+        "go" => "go",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cpp" | "hpp" | "cc" | "cxx" => "cpp",
+        "cs" => "csharp",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "html" | "htm" => "html",
+        "css" | "scss" | "sass" | "less" => "css",
+        "json" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "xml" | "svg" => "xml",
+        "sql" => "sql",
+        "sh" | "bash" | "zsh" => "bash",
+        "md" | "markdown" => "markdown",
+        "dockerfile" => "dockerfile",
+        "dart" => "dart",
+        "lua" => "lua",
+        "php" => "php",
+        "ex" | "exs" => "elixir",
+        _ => "plaintext",
+    }
+    .to_string();
+
+    // Single SSH call: get size, binary check, and content in one round-trip
+    let escaped = shell_escape(&file_path);
+    let combined_cmd = format!(
+        concat!(
+            "SIZE=$(stat -c '%s' {f} 2>/dev/null || stat -f '%z' {f} 2>/dev/null); ",
+            "echo \"SIZE:$SIZE\"; ",
+            "if [ \"$SIZE\" -gt 1048576 ] 2>/dev/null; then echo 'TOO_LARGE'; exit 0; fi; ",
+            "ORIG=$(head -c 8192 {f} | wc -c | tr -d ' '); ",
+            "CLEAN=$(head -c 8192 {f} | tr -d '\\0' | wc -c | tr -d ' '); ",
+            "if [ \"$ORIG\" -gt 0 ] && [ \"$CLEAN\" -lt \"$ORIG\" ]; then echo 'BINARY'; exit 0; fi; ",
+            "echo '---CONTENT---'; cat {f}",
+        ),
+        f = escaped,
+    );
+    let (stdout, _, success) = ssh_exec(&user, &host, port, &combined_cmd)?;
+    if !success && stdout.is_empty() {
+        return Err(format!("Failed to read file: {}", file_path));
+    }
+
+    // Parse size from first line
+    let mut size: u64 = 0;
+    let mut rest = stdout.as_str();
+    if let Some(size_line) = rest.lines().next() {
+        if let Some(s) = size_line.strip_prefix("SIZE:") {
+            size = s.trim().parse().unwrap_or(0);
+        }
+        // Advance past first line
+        if let Some(idx) = rest.find('\n') {
+            rest = &rest[idx + 1..];
+        }
+    }
+
+    // Check for too-large or binary markers
+    let first_remaining = rest.lines().next().unwrap_or("");
+    if first_remaining.trim() == "TOO_LARGE" {
+        return Ok(SshFileContent {
+            content: String::new(),
+            file_name,
+            language,
+            is_binary: false,
+            size,
+        });
+    }
+    if first_remaining.trim() == "BINARY" {
+        return Ok(SshFileContent {
+            content: String::new(),
+            file_name,
+            language,
+            is_binary: true,
+            size,
+        });
+    }
+
+    // Extract content after the marker
+    let content = if let Some(idx) = rest.find("---CONTENT---\n") {
+        rest[idx + "---CONTENT---\n".len()..].to_string()
+    } else if let Some(idx) = rest.find("---CONTENT---") {
+        rest[idx + "---CONTENT---".len()..]
+            .trim_start_matches('\n')
+            .to_string()
+    } else {
+        rest.to_string()
+    };
+
+    Ok(SshFileContent {
+        content,
+        file_name,
+        language,
+        is_binary: false,
+        size,
+    })
+}
+
+/// Escape a string for use in a remote shell command (single-quote wrapping).
+fn shell_escape(s: &str) -> String {
+    // Replace single quotes with '\'' and wrap in single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
 
 #[tauri::command]
 pub async fn ssh_list_tmux_sessions(

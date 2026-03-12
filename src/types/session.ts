@@ -261,5 +261,8 @@ export type SessionAction =
   // Composer actions
   | { type: "OPEN_COMPOSER" }
   | { type: "CLOSE_COMPOSER" }
+  // File preview
+  | { type: "SET_FILE_PREVIEW"; realmId: string; filePath: string }
+  | { type: "CLOSE_FILE_PREVIEW" }
   // Workspace restore
   | { type: "RESTORE_LAYOUT"; root: unknown; focusedPaneId: string | null; activeSessionId: string | null };
