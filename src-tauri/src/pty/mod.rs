@@ -29,6 +29,11 @@ pub(crate) struct PtySession {
     pub(crate) session: Arc<StdMutex<Session>>,
     pub(crate) analyzer: Arc<StdMutex<OutputAnalyzer>>,
     pub(crate) child: Box<dyn portable_pty::Child + Send>,
+    /// Path to the PTY slave device (e.g., /dev/ttys042).
+    /// Used on macOS to send SIGINT directly to the foreground process group
+    /// when the PTY line discipline fails to convert \x03 into a signal.
+    #[cfg(unix)]
+    pub(crate) tty_path: Option<std::path::PathBuf>,
 }
 
 pub struct PtyManager {

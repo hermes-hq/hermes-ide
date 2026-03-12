@@ -541,3 +541,146 @@ describe("Invariant 14: updateSettings clears ghost overlays on font/theme chang
     expect(body).toContain("clearGhostText(sessionId)");
   });
 });
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT 23: Ctrl+C → SIGINT via container capture-phase listener
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// WKWebView on macOS may consume Ctrl+C at the native level before
+// xterm.js's textarea receives the keydown event. To guarantee SIGINT
+// reaches the PTY, we intercept Ctrl+C on the container element in the
+// DOM capture phase — the earliest point JavaScript can see the event.
+
+describe("Invariant 23: Ctrl+C → SIGINT via container capture-phase listener", () => {
+  // Extract the container keydown capture listener block from pool.ts
+  function getCtrlCListenerBlock(): string {
+    const POOL_SRC: string = SRC.split("\n")
+      .filter((_, i, arr) => arr.join("\n").includes("container.addEventListener"))
+      ? SRC
+      : "";
+    // Find the container.addEventListener("keydown", ..., true) block
+    const match = POOL_SRC.match(
+      /container\.addEventListener\("keydown",\s*\(e:\s*KeyboardEvent\)\s*=>\s*\{[\s\S]*?\},\s*true\)/
+    );
+    expect(match).not.toBeNull();
+    return match![0];
+  }
+
+  it("container has a capture-phase keydown listener (third arg = true)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toMatch(/,\s*true\)$/);
+  });
+
+  it("listener checks ctrlKey is pressed", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("e.ctrlKey");
+  });
+
+  it("listener rejects metaKey (Cmd+C must not trigger SIGINT)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("!e.metaKey");
+  });
+
+  it("listener rejects altKey", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("!e.altKey");
+  });
+
+  it("listener rejects shiftKey", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("!e.shiftKey");
+  });
+
+  it("listener matches key 'c', 'C', or code 'KeyC' (keyboard layout safe)", () => {
+    const block = getCtrlCListenerBlock();
+    // Must match both lowercase and uppercase key, plus physical code
+    expect(block).toContain('"c"');
+    expect(block).toContain('"C"');
+    expect(block).toContain('"KeyC"');
+  });
+
+  it("listener calls preventDefault (prevent browser copy action)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("e.preventDefault()");
+  });
+
+  it("listener calls stopPropagation (prevent xterm from also processing it)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("e.stopPropagation()");
+  });
+
+  it("listener sends \\x03 via handleTerminalInput", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain('"\\x03"');
+    expect(block).toContain("handleTerminalInput");
+  });
+
+  it("preventDefault appears BEFORE handleTerminalInput (stop native action first)", () => {
+    const block = getCtrlCListenerBlock();
+    const preventIdx = block.indexOf("preventDefault");
+    const handleIdx = block.indexOf("handleTerminalInput");
+    expect(preventIdx).toBeGreaterThan(-1);
+    expect(handleIdx).toBeGreaterThan(-1);
+    expect(preventIdx).toBeLessThan(handleIdx);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT 24: PROMPT_EOL_MARK suppresses zsh's % indicator on fresh PTY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// zsh displays an inverse `%` when the previous output didn't end with a
+// newline (PROMPT_SP feature). On a freshly opened PTY, there is no prior
+// output, so the marker is always spurious. Setting PROMPT_EOL_MARK="" in
+// the shell environment suppresses it.
+
+// @ts-expect-error — fs is a Node built-in, not in browser tsconfig
+const RUST_COMMANDS_SRC: string = (() => {
+  try {
+    // @ts-expect-error — fs
+    return readFileSync(
+      new URL("../../src-tauri/src/pty/commands.rs", import.meta.url),
+      "utf-8",
+    );
+  } catch {
+    return "";
+  }
+})();
+
+describe("Invariant 24: PROMPT_EOL_MARK set to suppress zsh % indicator", () => {
+  it("Rust source is readable", () => {
+    expect(RUST_COMMANDS_SRC.length).toBeGreaterThan(0);
+  });
+
+  it("PTY spawner sets PROMPT_EOL_MARK to empty string", () => {
+    expect(RUST_COMMANDS_SRC).toContain('cmd.env("PROMPT_EOL_MARK", "")');
+  });
+
+  it("PROMPT_EOL_MARK is set BEFORE shell spawn (not after)", () => {
+    const eolIdx = RUST_COMMANDS_SRC.indexOf('cmd.env("PROMPT_EOL_MARK", "")');
+    // posix_spawn_in_pty or spawn_command must appear AFTER the env setup
+    const spawnIdx = RUST_COMMANDS_SRC.indexOf("posix_spawn_in_pty");
+    const spawnCmdIdx = RUST_COMMANDS_SRC.indexOf("spawn_command(cmd)");
+    expect(eolIdx).toBeGreaterThan(-1);
+    // At least one spawn call must appear after PROMPT_EOL_MARK
+    const laterSpawn = Math.max(spawnIdx, spawnCmdIdx);
+    expect(laterSpawn).toBeGreaterThan(eolIdx);
+  });
+
+  it("PROMPT_EOL_MARK is set unconditionally (not behind a conditional)", () => {
+    // Extract the lines around PROMPT_EOL_MARK to verify no if-guard
+    const lines = RUST_COMMANDS_SRC.split("\n");
+    const lineIdx = lines.findIndex((l) => l.includes('PROMPT_EOL_MARK'));
+    expect(lineIdx).toBeGreaterThan(-1);
+    // The previous non-empty, non-comment line should NOT be an if statement
+    let prevLine = "";
+    for (let i = lineIdx - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim();
+      if (trimmed && !trimmed.startsWith("//")) {
+        prevLine = trimmed;
+        break;
+      }
+    }
+    expect(prevLine).not.toMatch(/^\s*if\b/);
+  });
+});

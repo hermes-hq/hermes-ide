@@ -122,7 +122,17 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let select_all = PredefinedMenuItem::select_all(app, None)?;
     let find = MenuItemBuilder::with_id("edit.find", "Find...").build(app)?;
 
-    let edit_menu = SubmenuBuilder::new(app, "Edit")
+    // macOS: Ctrl+C → Send Interrupt (SIGINT to active terminal).
+    // WKWebView consumes Ctrl+C at the native level before JavaScript
+    // can see the keydown event.  By registering it as a menu accelerator,
+    // the macOS menu system intercepts it first and fires a menu event
+    // that we forward to the frontend as "native-sigint".
+    #[cfg(target_os = "macos")]
+    let send_interrupt = MenuItemBuilder::with_id("edit.send-interrupt", "Send Interrupt")
+        .accelerator("Ctrl+C")
+        .build(app)?;
+
+    let mut edit_builder = SubmenuBuilder::new(app, "Edit")
         .item(&undo)
         .item(&redo)
         .separator()
@@ -131,8 +141,14 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .item(&paste)
         .item(&select_all)
         .separator()
-        .item(&find)
-        .build()?;
+        .item(&find);
+
+    #[cfg(target_os = "macos")]
+    {
+        edit_builder = edit_builder.separator().item(&send_interrupt);
+    }
+
+    let edit_menu = edit_builder.build()?;
 
     // ── View menu ──
     let toggle_sidebar = CheckMenuItemBuilder::with_id("view.toggle-sidebar", "Sidebar")
@@ -279,6 +295,13 @@ pub fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
 
     // Skip predefined items (handled by the OS)
     if id.starts_with("__") {
+        return;
+    }
+
+    // Ctrl+C menu accelerator → emit dedicated SIGINT event.
+    // The frontend sends \x03 to the active terminal's PTY.
+    if id == "edit.send-interrupt" {
+        let _ = app.emit("native-sigint", ());
         return;
     }
 

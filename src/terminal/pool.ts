@@ -45,6 +45,11 @@ export const suggestionSubscribers = new Map<string, Set<SuggestionCallback>>();
 /** Guard set: sessionIds currently being created (between pool.has check and pool.set) */
 export const creating = new Set<string>();
 
+// Track which session is focused (set by attach, cleared by detach/destroy).
+// Used by the native SIGINT handler to send \x03 to the right PTY.
+let _focusedSessionId: string | null = null;
+export function getFocusedSessionId(): string | null { return _focusedSessionId; }
+
 // Current settings cache
 export let currentSettings: Record<string, string> = {};
 
@@ -234,6 +239,15 @@ export async function createTerminal(
       }
     }
 
+    // Ctrl+C → send SIGINT (\x03) explicitly.
+    // WKWebView on macOS may intercept Ctrl+C before xterm.js processes it.
+    // Handling it here guarantees the byte reaches the PTY.
+    if (_event.type === "keydown" && _event.key === "c" && _event.ctrlKey && !_event.metaKey && !_event.altKey && !_event.shiftKey) {
+      _event.preventDefault();
+      handleTerminalInput(sessionId, "\x03");
+      return false;
+    }
+
     // Shift+Enter → send CSI u sequence (like iTerm2, Ghostty, Kitty)
     // This allows CLI tools (e.g. Claude Code) to distinguish Shift+Enter from Enter.
     if (_event.type === "keydown" && _event.key === "Enter" && _event.shiftKey && !_event.metaKey && !_event.altKey && !_event.ctrlKey) {
@@ -249,6 +263,21 @@ export async function createTerminal(
   terminal.onData((data) => {
     handleTerminalInput(sessionId, data);
   });
+
+  // ── Ctrl+C → SIGINT at the DOM level (capture phase) ──
+  // WKWebView on macOS may consume Ctrl+C before it reaches xterm.js's
+  // internal textarea, so we intercept it on the container element in the
+  // capture phase — the earliest point JavaScript can see the event.
+  // We match on `code` ("KeyC") which is the physical key and is unaffected
+  // by modifiers or keyboard layout quirks.
+  container.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
+        (e.key === "c" || e.key === "C" || e.code === "KeyC")) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleTerminalInput(sessionId, "\x03");
+    }
+  }, true); // capture phase
 
   // Clean up copied text (Cmd+C / Ctrl+C):
   // 1. Join soft-wrapped lines — xterm inserts \n at visual line boundaries
@@ -372,6 +401,7 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
 
   entry.viewport = viewport;
   entry.attached = true;
+  _focusedSessionId = sessionId;
 
   // Fit and focus after paint.
   // Double-rAF ensures CSS flex layout has distributed space to this pane
@@ -419,10 +449,12 @@ export function detach(sessionId: string): void {
   clearGhostText(sessionId);
   entry.container.style.display = "none";
   entry.attached = false;
+  if (_focusedSessionId === sessionId) _focusedSessionId = null;
 }
 
 export function destroy(sessionId: string): void {
   creating.delete(sessionId); // Clean up in case destroy races with create
+  if (_focusedSessionId === sessionId) _focusedSessionId = null;
   const entry = pool.get(sessionId);
   if (!entry) return;
   entry.unlistenOutput?.();

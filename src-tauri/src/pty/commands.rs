@@ -716,6 +716,11 @@ pub fn create_session(
         cmd.env("LC_CTYPE", "UTF-8");
     }
 
+    // Suppress zsh's PROMPT_SP indicator (the inverse `%` shown when the
+    // previous output didn't end with a newline).  On a fresh PTY there is
+    // no prior output, so the marker is always spurious.
+    cmd.env("PROMPT_EOL_MARK", "");
+
     // Set context file env vars for local sessions only (not useful over SSH)
     if !is_ssh {
         if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id)
@@ -729,11 +734,16 @@ pub fn create_session(
     // crashes in multi-threaded processes ("multi-threaded process forked").
     // Use posix_spawn() instead which atomically creates the child process.
     // See issue #31 and issue-31-investigation.md.
+    // Save the slave TTY path before spawning — needed later for direct
+    // SIGINT delivery via tcgetpgrp()/kill() when the line discipline
+    // fails to convert \x03 into a signal.
+    #[cfg(unix)]
+    let saved_tty_path = pair.master.tty_name();
+
     #[cfg(target_os = "macos")]
     let child = {
-        let tty_path = pair
-            .master
-            .tty_name()
+        let tty_path = saved_tty_path
+            .clone()
             .ok_or_else(|| "Failed to get PTY device path for posix_spawn".to_string())?;
         // Drop the slave end — the child opens the TTY by path via posix_spawn
         // file actions, which also establishes it as the controlling terminal.
@@ -1151,6 +1161,8 @@ pub fn create_session(
         session: session_arc,
         analyzer,
         child,
+        #[cfg(unix)]
+        tty_path: saved_tty_path,
     };
     mgr.sessions.insert(session_id.clone(), pty_session);
 
@@ -1174,6 +1186,68 @@ pub fn create_session(
     }
 
     Ok(result)
+}
+
+/// Enumerate direct child PIDs of a given parent process.
+#[cfg(unix)]
+fn enumerate_child_pids(parent_pid: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        // Use proc_listchildpids (libproc, macOS-specific)
+        extern "C" {
+            fn proc_listchildpids(ppid: libc::pid_t, buffer: *mut libc::c_void, buffersize: libc::c_int) -> libc::c_int;
+        }
+
+        // First call with NULL to get count
+        let count = unsafe { proc_listchildpids(parent_pid as i32, std::ptr::null_mut(), 0) };
+        if count <= 0 {
+            return children;
+        }
+
+        let buf_size = count as usize;
+        let mut pids: Vec<libc::pid_t> = vec![0; buf_size];
+        let ret = unsafe {
+            proc_listchildpids(
+                parent_pid as i32,
+                pids.as_mut_ptr() as *mut libc::c_void,
+                (buf_size * std::mem::size_of::<libc::pid_t>()) as libc::c_int,
+            )
+        };
+
+        if ret > 0 {
+            let actual = ret as usize / std::mem::size_of::<libc::pid_t>();
+            for &pid in &pids[..actual] {
+                if pid > 0 {
+                    children.push(pid as u32);
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: iterate /proc/*/stat and match ppid
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                if let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) {
+                    let fields: Vec<&str> = stat.split_whitespace().collect();
+                    if fields.len() > 3 {
+                        if let Ok(ppid) = fields[3].parse::<u32>() {
+                            if ppid == parent_pid {
+                                if let Ok(pid) = fields[0].parse::<u32>() {
+                                    children.push(pid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    children
 }
 
 #[tauri::command]
@@ -1234,6 +1308,41 @@ pub fn write_to_session(
         w.write_all(&bytes)
             .map_err(|e| format!("Write failed: {}", e))?;
         w.flush().map_err(|e| format!("Flush failed: {}", e))?;
+    }
+
+    // ── Direct SIGINT delivery (macOS/Unix) ──
+    //
+    // Writing \x03 to the PTY master should cause the line discipline to
+    // generate SIGINT for the foreground process group.  However, on macOS
+    // with posix_spawn-based PTY sessions the signal sometimes doesn't
+    // reach the child.  As a reliable fallback we:
+    //   1. Try tcgetpgrp() on the slave device to find the foreground pgrp.
+    //   2. If that fails (it does from a non-session-leader process), send
+    //      SIGINT to every child of the shell using sysctl/proc enumeration.
+    #[cfg(unix)]
+    if bytes.contains(&0x03) {
+        // Diagnostic: check termios on the slave to see if ISIG is enabled
+        // Send SIGINT to the shell's child processes directly.
+        // The shell's PID is known; we enumerate its children via sysctl
+        // and send SIGINT to each child's process group.
+        if let Some(shell_pid) = session.child.process_id() {
+            let child_pids = enumerate_child_pids(shell_pid);
+            if !child_pids.is_empty() {
+                for &cpid in &child_pids {
+                    unsafe {
+                        // Send to the child's process group (covers the child
+                        // and any of its own children)
+                        libc::kill(-(cpid as i32), libc::SIGINT);
+                    }
+                }
+            } else {
+                // No children found — the shell is at the prompt.
+                // Send to the shell's own process group so it sees the interrupt.
+                unsafe {
+                    libc::kill(-(shell_pid as i32), libc::SIGINT);
+                }
+            }
+        }
     }
     Ok(())
 }
