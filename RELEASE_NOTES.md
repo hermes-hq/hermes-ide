@@ -1,3 +1,3 @@
-## New
-- Browse, view, and edit files directly in the app — with syntax highlighting and full SSH remote support
-- Shift+Enter now inserts a newline in CLI tools that support it, matching the behavior of other modern terminals
+## Fixed
+- Ctrl+C now reliably sends an interrupt signal on macOS, even when the system previously intercepted the keystroke
+- Terminal no longer displays garbled or misaligned text after resizing panes or windows
