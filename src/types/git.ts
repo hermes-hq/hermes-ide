@@ -226,3 +226,32 @@ export interface ConflictContent {
   working_tree: string;
   is_binary: boolean;
 }
+
+// ─── Worktree Overview & Cleanup Types ───────────────────────────────
+
+export interface WorktreeOverviewEntry {
+  worktree_path: string;
+  branch_name: string | null;
+  session_id: string;
+  session_label: string;
+  realm_id: string;
+  realm_name: string;
+  realm_path: string;
+  is_main_worktree: boolean;
+  created_at: string;
+  last_activity_at: string | null;
+}
+
+export interface OrphanWorktree {
+  worktree_path: string;
+  branch_name: string | null;
+  kind: "directory_only" | "record_only";
+  realm_path: string | null;
+  session_id: string | null;
+}
+
+export interface CleanupResult {
+  path: string;
+  success: boolean;
+  error: string | null;
+}
