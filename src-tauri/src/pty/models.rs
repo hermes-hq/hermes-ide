@@ -242,6 +242,7 @@ pub struct ShellEnvironment {
     pub has_syntax_highlighting: bool,
     pub has_starship: bool,
     pub has_powerlevel10k: bool,
+    pub shell_integration_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

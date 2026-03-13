@@ -661,6 +661,15 @@ pub fn create_session(
 
     let is_ssh = ssh_info_clone.is_some();
 
+    // Set up shell integration (disables conflicting autosuggestion plugins).
+    // Only for local sessions — SSH sessions run on the remote host where we
+    // can't create temp files.
+    let shell_integration = if !is_ssh {
+        crate::pty::shell_integration::setup(&shell, &session_id)
+    } else {
+        crate::pty::shell_integration::ShellIntegration::None
+    };
+
     let mut cmd = if let Some(ref info) = ssh_info_clone {
         let mut c = CommandBuilder::new("ssh");
         c.arg("-t"); // Force TTY allocation
@@ -687,7 +696,25 @@ pub fn create_session(
             c.arg("-u");
             c.arg("CLAUDE_CODE");
             c.arg(&shell);
-            c.arg("-l");
+
+            // Shell-specific launch args depend on integration type
+            match &shell_integration {
+                crate::pty::shell_integration::ShellIntegration::Bash { rcfile } => {
+                    // --rcfile replaces -l; the init script manually sources
+                    // /etc/profile and ~/.bash_profile for login-like behavior.
+                    c.arg("--rcfile");
+                    c.arg(rcfile.to_string_lossy().as_ref());
+                }
+                crate::pty::shell_integration::ShellIntegration::Fish => {
+                    c.arg("-l");
+                    c.arg("-C");
+                    c.arg(crate::pty::shell_integration::fish_init_command());
+                }
+                _ => {
+                    // Zsh, unknown, or no integration — use login shell
+                    c.arg("-l");
+                }
+            }
             c
         }
         #[cfg(windows)]
@@ -698,6 +725,20 @@ pub fn create_session(
             c
         }
     };
+
+    // Apply ZDOTDIR env vars for zsh shell integration
+    if let crate::pty::shell_integration::ShellIntegration::Zsh { ref zdotdir } = shell_integration
+    {
+        // Preserve the user's current ZDOTDIR (or HOME) so our .zshenv can
+        // restore it before sourcing the user's real .zshenv.
+        let original = std::env::var("ZDOTDIR").unwrap_or_else(|_| {
+            crate::platform::home_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()
+        });
+        cmd.env("HERMES_ORIGINAL_ZDOTDIR", &original);
+        cmd.env("ZDOTDIR", zdotdir.to_string_lossy().as_ref());
+    }
 
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
@@ -1205,6 +1246,7 @@ pub fn create_session(
         child,
         #[cfg(target_os = "macos")]
         tty_path: saved_tty_path,
+        shell_integration,
     };
     mgr.sessions.insert(session_id.clone(), pty_session);
 
@@ -1471,6 +1513,9 @@ pub fn close_session(
     let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
 
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
+        // Clean up shell integration temp files (ZDOTDIR, bash rcfile, etc.)
+        crate::pty::shell_integration::cleanup(&pty_session.shell_integration);
+
         // Kill the child shell process — don't block on wait() since the
         // process may be hung. Spawn a reaper thread instead.
         pty_session.child.kill().ok();
@@ -1935,6 +1980,8 @@ pub fn detect_shell_environment(
         plugins.push("PSReadLine".to_string());
     }
 
+    let integration_active = session.shell_integration.is_active();
+
     Ok(ShellEnvironment {
         shell_type: shell_type.to_string(),
         plugins_detected: plugins,
@@ -1943,6 +1990,7 @@ pub fn detect_shell_environment(
         has_syntax_highlighting,
         has_starship,
         has_powerlevel10k,
+        shell_integration_active: integration_active,
     })
 }
 

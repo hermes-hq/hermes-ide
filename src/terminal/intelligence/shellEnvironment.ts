@@ -12,6 +12,7 @@ export interface ShellEnvironment {
   hasSyntaxHighlighting: boolean;
   hasStarship: boolean;
   hasPowerlevel10k: boolean;
+  shellIntegrationActive: boolean;
 }
 
 export interface IntelligenceConfig {
@@ -45,13 +46,6 @@ export async function detectShellEnvironment(sessionId: string): Promise<ShellEn
   try {
     const env = await apiDetectShellEnvironment(sessionId);
     sessionShellEnv.set(sessionId, env);
-
-    // Auto-adjust defaults for fish
-    if (env.shellType === "fish" && globalConfig.mode === "augment") {
-      // Fish has strong built-in autosuggestions — disable ghost text by default
-      // but keep overlay available
-    }
-
     return env;
   } catch {
     const fallback: ShellEnvironment = {
@@ -62,6 +56,7 @@ export async function detectShellEnvironment(sessionId: string): Promise<ShellEn
       hasSyntaxHighlighting: false,
       hasStarship: false,
       hasPowerlevel10k: false,
+      shellIntegrationActive: false,
     };
     sessionShellEnv.set(sessionId, fallback);
     return fallback;
@@ -109,7 +104,12 @@ export function shouldShowGhostText(sessionId: string): boolean {
   const env = sessionShellEnv.get(sessionId);
   if (!env) return globalConfig.ghostTextEnabled;
 
-  // In augment mode, don't show ghost text if shell has native autosuggestions
+  // If shell integration is active, conflicting plugins have been disabled
+  // at the shell level — always show Hermes ghost text.
+  if (env.shellIntegrationActive) return true;
+
+  // Without integration, don't show ghost text if shell has native autosuggestions
+  // (they would overlap with ours)
   if (globalConfig.mode === "augment") {
     if (env.hasNativeAutosuggest) return false;
     if (env.shellType === "fish") return false;
@@ -133,17 +133,17 @@ export function shouldConsumeTab(sessionId: string, overlayVisible: boolean): bo
   const env = sessionShellEnv.get(sessionId);
   if (!env) return overlayVisible;
 
-  // In augment mode, prefer shell Tab completion over ours
-  // We only consume Tab in augment mode if we're confident shell isn't completing
+  // If shell integration is active, conflicting plugins have been disabled —
+  // safe to consume Tab for Hermes suggestions.
+  if (env.shellIntegrationActive) return true;
+
+  // Without integration, prefer shell Tab completion in augment mode
   if (globalConfig.mode === "augment") {
-    // Let shell handle Tab if it has native autosuggestions
-    // User can use Ctrl-Space or arrow-select + Enter instead
     if (env.hasNativeAutosuggest || env.shellType === "fish") {
       return false;
     }
   }
 
-  // In replace mode, always consume Tab when overlay is visible
   return true;
 }
 

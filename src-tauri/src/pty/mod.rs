@@ -3,6 +3,7 @@ pub mod analyzer;
 pub mod commands;
 pub mod models;
 pub mod patterns;
+pub mod shell_integration;
 pub mod spawn;
 
 // ─── Re-exports ─────────────────────────────────────────────────────
@@ -34,6 +35,8 @@ pub(crate) struct PtySession {
     /// when the PTY line discipline fails to convert \x03 into a signal.
     #[cfg(target_os = "macos")]
     pub(crate) tty_path: Option<std::path::PathBuf>,
+    /// Shell integration state — tracks temp files for cleanup on session close.
+    pub(crate) shell_integration: shell_integration::ShellIntegration,
 }
 
 pub struct PtyManager {

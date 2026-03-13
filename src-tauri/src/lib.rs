@@ -194,6 +194,9 @@ pub fn run() {
             // Clean up stale worktrees from previous sessions that no longer exist
             cleanup_stale_worktrees(&database);
 
+            // Clean up stale shell integration temp files from previous sessions
+            pty::shell_integration::cleanup_stale();
+
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
 
