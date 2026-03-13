@@ -194,6 +194,18 @@ export interface WorktreeCreateResult {
   isMainWorktree: boolean;
 }
 
+// ─── Worktree Changes Types ──────────────────────────────────────────
+
+export interface WorktreeChangedFile {
+  path: string;
+  status: string;
+}
+
+export interface WorktreeChanges {
+  has_changes: boolean;
+  files: WorktreeChangedFile[];
+}
+
 // ─── Merge Conflict Types ────────────────────────────────────────────
 
 export type ConflictStrategy = "ours" | "theirs" | "manual";

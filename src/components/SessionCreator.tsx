@@ -8,7 +8,7 @@ import { getSessions, sshListTmuxSessions } from "../api/sessions";
 import { getSetting, setSetting } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { TmuxSessionEntry } from "../types/session";
-import { gitListBranchesForRealm } from "../api/git";
+import { isGitRepo as checkIsGitRepo } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector } from "./SessionBranchSelector";
 import { SESSION_COLORS } from "./SessionList";
@@ -122,14 +122,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   // Auto-approve (skip permissions) state
   const [autoApprove, setAutoApprove] = useState(false);
 
-  // Branch selection state
-  const [isGitRepo, setIsGitRepo] = useState(false);
+  // Branch selection state — per-project
+  type BranchSelection = { branch: string; createNew: boolean };
+  const [gitRealmIds, setGitRealmIds] = useState<string[]>([]);
   const [checkingGit, setCheckingGit] = useState(false);
-  const [branchName, setBranchName] = useState<string | null>(null);
-  const [createNewBranch, setCreateNewBranch] = useState(false);
+  const [branchSelections, setBranchSelections] = useState<Record<string, BranchSelection>>({});
 
   // Determine whether to show the branch step
-  const showBranchStep = isGitRepo && selectedProjectIds.length > 0;
+  const showBranchStep = gitRealmIds.length > 0 && selectedProjectIds.length > 0;
 
   // Existing project groups (from current sessions) with their colors
   const [existingGroups, setExistingGroups] = useState<string[]>([]);
@@ -250,26 +250,41 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     }
   }, [highlightedIndex]);
 
-  // Check if the first selected project is a git repo when selection changes
+  // Check which selected projects are git repos when selection changes
   useEffect(() => {
     if (selectedProjectIds.length === 0) {
-      setIsGitRepo(false);
-      setBranchName(null);
-      setCreateNewBranch(false);
+      setGitRealmIds([]);
+      setBranchSelections({});
       return;
     }
-    const realmId = selectedProjectIds[0];
+    let cancelled = false;
     setCheckingGit(true);
-    gitListBranchesForRealm(realmId)
-      .then((branches) => {
-        setIsGitRepo(branches.length > 0);
-      })
-      .catch(() => {
-        setIsGitRepo(false);
+    Promise.all(
+      selectedProjectIds.map((realmId) =>
+        checkIsGitRepo(realmId)
+          .then((isGit) => ({ realmId, isGit }))
+          .catch(() => ({ realmId, isGit: false }))
+      )
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const gitIds = results.filter((r) => r.isGit).map((r) => r.realmId);
+        setGitRealmIds(gitIds);
+        // Remove branch selections for projects no longer selected or no longer git repos
+        setBranchSelections((prev) => {
+          const next: Record<string, BranchSelection> = {};
+          for (const [id, sel] of Object.entries(prev)) {
+            if (gitIds.includes(id) && selectedProjectIds.includes(id)) {
+              next[id] = sel;
+            }
+          }
+          return next;
+        });
       })
       .finally(() => {
-        setCheckingGit(false);
+        if (!cancelled) setCheckingGit(false);
       });
+    return () => { cancelled = true; };
   }, [selectedProjectIds]);
 
   const filtered = useMemo(() => {
@@ -352,8 +367,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         autoApprove: connectionType === "local" ? (autoApprove || undefined) : undefined,
         projectIds: connectionType === "local" && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
         workingDirectory: connectionType === "local" ? firstProjectPath : undefined,
-        branchName: connectionType === "local" ? (branchName || undefined) : undefined,
-        createNewBranch: connectionType === "local" ? (createNewBranch || undefined) : undefined,
+        branchSelections: connectionType === "local" && Object.keys(branchSelections).length > 0 ? branchSelections : undefined,
         sshHost: connectionType === "ssh" ? sshHost : undefined,
         sshPort: connectionType === "ssh" ? (parseInt(sshPort) || 22) : undefined,
         sshUser: connectionType === "ssh" ? (sshUser || undefined) : undefined,
@@ -406,15 +420,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     setStep("confirm");
   };
 
-  const handleBranchSelected = useCallback((name: string, isNew: boolean) => {
-    setBranchName(name);
-    setCreateNewBranch(isNew);
-    setStep("ai");
-  }, []);
-
   const handleBranchSkipped = useCallback(() => {
-    setBranchName(null);
-    setCreateNewBranch(false);
+    setBranchSelections({});
     setStep("ai");
   }, []);
 
@@ -734,13 +741,69 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           </div>
         )}
 
-        {/* Step 2 (conditional): Select Branch */}
-        {step === "branch" && selectedProjectIds.length > 0 && (
-          <SessionBranchSelector
-            realmId={selectedProjectIds[0]}
-            onBranchSelected={handleBranchSelected}
-            onSkip={handleBranchSkipped}
-          />
+        {/* Step 2 (conditional): Select Branch — per-project */}
+        {step === "branch" && gitRealmIds.length > 0 && (
+          <div className="session-creator-body">
+            <div className="session-creator-section-title">Select Branches</div>
+            <div className="session-creator-branch-multi">
+              {selectedProjectIds.map((realmId) => {
+                const isGit = gitRealmIds.includes(realmId);
+                const realmName = allProjects.find((r) => r.id === realmId)?.name || realmId;
+
+                if (!isGit) {
+                  return (
+                    <div key={realmId} className="session-creator-branch-realm">
+                      <div className="session-creator-branch-realm-header">
+                        <span className="session-creator-branch-realm-name">{realmName}</span>
+                        <span className="session-creator-branch-nonGit">Not a git repository</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={realmId} className="session-creator-branch-realm">
+                    <div className="session-creator-branch-realm-header">
+                      <span className="session-creator-branch-realm-name">{realmName}</span>
+                      {branchSelections[realmId] && (
+                        <span className="session-creator-branch-selected-label">
+                          {branchSelections[realmId].branch}
+                          {branchSelections[realmId].createNew ? " (new)" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <SessionBranchSelector
+                      realmId={realmId}
+                      onBranchSelected={(name, isNew) => {
+                        setBranchSelections((prev) => ({
+                          ...prev,
+                          [realmId]: { branch: name, createNew: isNew },
+                        }));
+                      }}
+                      onSkip={() => {
+                        setBranchSelections((prev) => {
+                          const next = { ...prev };
+                          delete next[realmId];
+                          return next;
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="session-creator-actions">
+              <button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
+                Skip branches
+              </button>
+              <button
+                className="session-creator-btn-primary"
+                onClick={() => setStep("ai")}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Tmux session picker (SSH only) */}
@@ -939,11 +1002,20 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                       {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
                     </span>
                   </div>
-                  {branchName && (
+                  {Object.keys(branchSelections).length > 0 && (
                     <div className="session-creator-summary-row">
-                      <span className="session-creator-summary-label">Branch:</span>
+                      <span className="session-creator-summary-label">{Object.keys(branchSelections).length === 1 ? "Branch:" : "Branches:"}</span>
                       <span className="session-creator-summary-value">
-                        {branchName}{createNewBranch ? " (new)" : ""}
+                        {Object.entries(branchSelections).map(([realmId, sel], idx) => {
+                          const name = allProjects.find((r) => r.id === realmId)?.name || realmId;
+                          return (
+                            <span key={realmId}>
+                              {idx > 0 && ", "}
+                              {Object.keys(branchSelections).length > 1 ? `${name}: ` : ""}
+                              {sel.branch}{sel.createNew ? " (new)" : ""}
+                            </span>
+                          );
+                        })}
                       </span>
                     </div>
                   )}

@@ -5,6 +5,7 @@ import type {
   GitStashEntry, GitLogResult, GitCommitDetail, MergeStatus, ConflictContent, ConflictStrategy,
   SearchResponse,
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
+  WorktreeChanges,
 } from "../types/git";
 
 export function gitStatus(sessionId: string): Promise<GitSessionStatus> {
@@ -257,4 +258,31 @@ export async function getSessionWorktreeInfo(
   realmId: string,
 ): Promise<SessionWorktree | null> {
   return invoke<SessionWorktree | null>("git_session_worktree_info", { sessionId, realmId });
+}
+
+export async function listBranchesForRealms(
+  realmIds: string[],
+): Promise<Record<string, GitBranch[]>> {
+  return invoke<Record<string, GitBranch[]>>("git_list_branches_for_realms", { realmIds });
+}
+
+export async function isGitRepo(
+  realmId: string,
+): Promise<boolean> {
+  return invoke<boolean>("git_is_git_repo", { realmId });
+}
+
+export async function worktreeHasChanges(
+  sessionId: string,
+  realmId: string,
+): Promise<WorktreeChanges> {
+  return invoke<WorktreeChanges>("git_worktree_has_changes", { sessionId, realmId });
+}
+
+export async function stashWorktree(
+  sessionId: string,
+  realmId: string,
+  message?: string,
+): Promise<GitOperationResult> {
+  return invoke<GitOperationResult>("git_stash_worktree", { sessionId, realmId, message: message ?? null });
 }

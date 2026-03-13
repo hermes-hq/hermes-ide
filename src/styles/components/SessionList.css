@@ -437,6 +437,28 @@
   flex-shrink: 0;
 }
 
+/* Prominent branch name styling */
+.session-item-git-branch-prominent {
+  font-weight: 500;
+  font-size: var(--text-base, 12px);
+  color: var(--text-0);
+}
+
+/* Worktree linked badge in session git info */
+.session-item-worktree-badge {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+  margin-left: 3px;
+  flex-shrink: 0;
+}
+
+/* Branch color accent on session wrapper */
+.session-item-wrapper {
+  border-radius: var(--radius);
+  border-left: 3px solid transparent;
+}
+
 /* ─── Projects (session groups) ──────────────────────── */
 
 .project-section {
