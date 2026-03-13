@@ -33,7 +33,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-RELEASES_REPO="hermes-hq/releases"
+RELEASES_REPO="hermes-hq/hermes-ide"
 ARTIFACTS_DIR="$PROJECT_DIR/release-artifacts"
 DOCKER_IMAGE="hermes-linux-builder"
 
@@ -451,31 +451,10 @@ regenerate_manifests() {
 
   ok "Manifests uploaded to release"
 
-  # Also commit downloads.json to the repo root so the site can fetch it
-  # via raw.githubusercontent.com (which has CORS, unlike release assets)
-  info "Updating downloads.json in releases repo..."
-  local tmp_repo
-  tmp_repo=$(mktemp -d)
-  (
-    cd "$tmp_repo"
-    gh repo clone "$RELEASES_REPO" . -- --depth 1 -q 2>/dev/null
-    cp "$ARTIFACTS_DIR/downloads.json" downloads.json
-    if ! git diff --quiet downloads.json 2>/dev/null; then
-      git add downloads.json
-      git commit -m "Update downloads.json for $TAG" -q
-      git push -q
-      info "Pushed downloads.json to repo root"
-    else
-      info "downloads.json unchanged in repo"
-    fi
-  )
-  rm -rf "$tmp_repo"
-
   ok "Manifests complete"
   echo
   echo "  latest.json:    ${base_url}/latest.json"
   echo "  downloads.json: ${base_url}/downloads.json"
-  echo "  raw (CORS):     https://raw.githubusercontent.com/${RELEASES_REPO}/main/downloads.json"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

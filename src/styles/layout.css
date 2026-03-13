@@ -172,30 +172,6 @@
   border-width: 2px;
 }
 
-/* ─── Plugin Toast ─────────────────────────────────────────── */
-
-.plugin-toast {
-  position: fixed;
-  bottom: 36px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  z-index: 9999;
-  animation: plugin-toast-in 0.2s ease;
-  pointer-events: none;
-}
-.plugin-toast-info { background: var(--bg-3); color: var(--text-1); border: 1px solid var(--border); }
-.plugin-toast-success { background: var(--green); color: var(--bg-1); }
-.plugin-toast-error { background: var(--red); color: #fff; }
-.plugin-toast-warning { background: var(--yellow, #f0ad4e); color: var(--bg-1); }
-
-@keyframes plugin-toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
 /* ─── Plugin Panel Container ───────────────────────────────── */
 
 .plugin-panel-container {

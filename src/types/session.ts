@@ -67,6 +67,19 @@ export interface SshConnectionInfo {
   host: string;
   port: number;
   user: string;
+  tmux_session?: string | null;
+}
+
+export interface TmuxSessionEntry {
+  name: string;
+  windows: number;
+  attached: boolean;
+}
+
+export interface TmuxWindowEntry {
+  index: number;
+  name: string;
+  active: boolean;
 }
 
 export interface SessionData {
@@ -137,6 +150,7 @@ export interface CreateSessionOpts {
   sshHost?: string;
   sshPort?: number;
   sshUser?: string;
+  tmuxSession?: string;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────
@@ -247,5 +261,8 @@ export type SessionAction =
   // Composer actions
   | { type: "OPEN_COMPOSER" }
   | { type: "CLOSE_COMPOSER" }
+  // File preview
+  | { type: "SET_FILE_PREVIEW"; realmId: string; filePath: string }
+  | { type: "CLOSE_FILE_PREVIEW" }
   // Workspace restore
   | { type: "RESTORE_LAYOUT"; root: unknown; focusedPaneId: string | null; activeSessionId: string | null };

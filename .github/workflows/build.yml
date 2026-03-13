@@ -5,14 +5,25 @@ name: Build & Test
 on:
   workflow_dispatch:
 
+concurrency:
+  group: build
+  cancel-in-progress: true
+
 permissions:
   contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
 
 jobs:
   test:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-node@v6
         with:
@@ -32,6 +43,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-node@v6
         with:
@@ -43,7 +56,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          shared-key: build
+          shared-key: build-macos-14
 
       - run: npm ci
 
@@ -113,3 +126,4 @@ jobs:
         with:
           name: hermes-ide-aarch64-apple-darwin
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 7

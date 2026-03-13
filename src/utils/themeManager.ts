@@ -11,6 +11,11 @@ export const THEME_OPTIONS = [
   { id: "duel", label: "Duel" },
   { id: "rainbow", label: "Rainbow" },
   { id: "80s", label: "80s" },
+  { id: "light", label: "Light" },
+  { id: "rose", label: "Rosé" },
+  { id: "lavender", label: "Lavender" },
+  { id: "mint", label: "Mint" },
+  { id: "sand", label: "Sand" },
   { id: "solarized", label: "Solarized Light" },
 ] as const;
 

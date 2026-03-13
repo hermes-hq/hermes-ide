@@ -29,6 +29,7 @@ import type { SessionView } from "./components/SessionList";
 
 import { ProcessPanel } from "./components/ProcessPanel";
 import { FileExplorerPanel } from "./components/FileExplorerPanel";
+import { FilePreviewPanel } from "./components/FilePreviewPanel";
 import { SearchPanel } from "./components/SearchPanel";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -56,9 +57,14 @@ import { focusTerminal } from "./terminal/TerminalPool";
 import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
 import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
+import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
 import { UpdateDialog } from "./components/UpdateDialog";
+import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
+import { ToastContainer } from "./components/ToastContainer";
+import { useToastStore } from "./hooks/useToastStore";
 import { WhatsNewDialog } from "./components/WhatsNewDialog";
+import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 
 function AppContent() {
@@ -92,7 +98,9 @@ function AppContent() {
 
   // ── Plugin System ──
   const [activePluginPanel, setActivePluginPanel] = useState<string | null>(null);
-  const [pluginToast, setPluginToast] = useState<{ message: string; type: string } | null>(null);
+  const toastStore = useToastStore();
+  const toastStoreRef = useRef(toastStore);
+  toastStoreRef.current = toastStore;
 
   const pluginRuntimeRef = useRef<PluginRuntime | null>(null);
 
@@ -105,8 +113,7 @@ function AppContent() {
       },
       onPanelHide: () => setActivePluginPanel(null),
       onToast: (message, type, duration) => {
-        setPluginToast({ message, type });
-        setTimeout(() => setPluginToast(null), duration ?? 3000);
+        toastStoreRef.current.addToast({ message, type: type as "info" | "success" | "warning" | "error", duration: duration ?? 3000 });
       },
       onStatusBarUpdate: (itemId, update) => {
         pluginRuntimeRef.current?.updateStatusBarItem(itemId, update);
@@ -116,8 +123,7 @@ function AppContent() {
           const { sendNotification } = await import("@tauri-apps/plugin-notification");
           await sendNotification(options);
         } catch {
-          setPluginToast({ message: options.title + (options.body ? `: ${options.body}` : ""), type: "info" });
-          setTimeout(() => setPluginToast(null), 3000);
+          toastStoreRef.current.addToast({ message: options.title + (options.body ? `: ${options.body}` : ""), type: "info", duration: 3000 });
         }
       },
       onSessionsGetActive: async () => {
@@ -138,7 +144,9 @@ function AppContent() {
     return runtime;
   });
 
-  const { commands: pluginCommands, panels: pluginPanels, statusBarItems: pluginStatusBarItems } = usePluginRuntime(pluginRuntime);
+  const { commands: pluginCommands, panels: pluginPanels, pluginsWithSettings } = usePluginRuntime(pluginRuntime);
+  const pluginUpdater = usePluginUpdateChecker(pluginRuntime);
+  const [pendingUpdatePlugins, setPendingUpdatePlugins] = useState<typeof pluginUpdater.updatesAvailable | null>(null);
 
   useEffect(() => {
     const loader = new PluginLoader(pluginRuntime);
@@ -571,8 +579,23 @@ function AppContent() {
             </PluginPanelHost>
           );
         })()}
+        <PluginUpdateBanner
+          updater={pluginUpdater}
+          toastStore={toastStore}
+          onShowUpdateConfirm={() => setPendingUpdatePlugins([...pluginUpdater.updatesAvailable])}
+        />
         <div className="main-area">
           <div className="terminal-and-timeline">
+            {ui.filePreview && state.activeSessionId ? (
+              <div className="file-preview-main-container">
+                <FilePreviewPanel
+                  sessionId={state.activeSessionId}
+                  realmId={ui.filePreview.realmId}
+                  filePath={ui.filePreview.filePath}
+                  onBack={() => dispatch({ type: "CLOSE_FILE_PREVIEW" })}
+                />
+              </div>
+            ) : (
             <div className="terminal-container">
               {state.layout.root ? (
                 <SplitLayout node={state.layout.root} />
@@ -584,6 +607,7 @@ function AppContent() {
                 />
               )}
             </div>
+            )}
             {/* Execution Timeline (F1) */}
             {ui.timelineOpen && activeSession && (
               <ExecutionTimeline
@@ -612,8 +636,6 @@ function AppContent() {
 
       <StatusBar
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        pluginStatusBarItems={pluginStatusBarItems}
-        onPluginStatusBarClick={(command) => pluginRuntime.executeCommand(command)}
         updateAvailable={updater.state.available}
         updateVersion={updater.state.version}
         updateDownloading={updater.state.downloading}
@@ -645,7 +667,14 @@ function AppContent() {
             }
           }}
           pluginCommands={pluginCommands}
+          pluginsWithSettings={pluginsWithSettings}
           onPluginCommand={(commandId) => pluginRuntime.executeCommand(commandId)}
+          onCheckPluginUpdates={async () => {
+            await pluginUpdater.checkNow();
+            if (pluginUpdater.updatesAvailable.length === 0) {
+              toastStore.addToast({ message: "All plugins are up to date", type: "info", duration: 3000 });
+            }
+          }}
         />
       )}
 
@@ -658,7 +687,17 @@ function AppContent() {
       )}
 
       {settingsOpen && (
-        <Settings onClose={() => setSettingsOpen(null)} initialTab={settingsOpen} pluginRuntime={pluginRuntime} />
+        <Settings
+          onClose={() => setSettingsOpen(null)}
+          initialTab={settingsOpen}
+          pluginRuntime={pluginRuntime}
+          onConfirmPluginUpdate={(plugin) => {
+            const info = pluginUpdater.updatesAvailable.find((u) => u.id === plugin.id);
+            if (info) {
+              setPendingUpdatePlugins([info]);
+            }
+          }}
+        />
       )}
 
       {workspaceOpen && (
@@ -667,6 +706,22 @@ function AppContent() {
 
       {projectPickerOpen && activeSession && (
         <ProjectPicker sessionId={activeSession.id} onClose={() => setProjectPickerOpen(false)} />
+      )}
+
+      {pendingUpdatePlugins && pendingUpdatePlugins.length > 0 && (
+        <PluginUpdateConfirmDialog
+          plugins={pendingUpdatePlugins}
+          onConfirm={() => {
+            const plugins = pendingUpdatePlugins;
+            setPendingUpdatePlugins(null);
+            if (plugins.length === 1) {
+              pluginUpdater.updatePlugin(plugins[0]);
+            } else {
+              pluginUpdater.updateAll();
+            }
+          }}
+          onCancel={() => setPendingUpdatePlugins(null)}
+        />
       )}
 
       {sessionCreatorOpen && (
@@ -748,11 +803,7 @@ function AppContent() {
         />
       )}
 
-      {pluginToast && (
-        <div className={`plugin-toast plugin-toast-${pluginToast.type}`}>
-          {pluginToast.message}
-        </div>
-      )}
+      <ToastContainer toasts={toastStore.toasts} onDismiss={toastStore.dismissToast} />
 
     </div>
   );

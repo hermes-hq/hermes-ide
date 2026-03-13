@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SessionData, SessionHistoryEntry } from "../types/session";
+import type { SessionData, SessionHistoryEntry, TmuxSessionEntry, TmuxWindowEntry } from "../types/session";
 
 export function createSession(opts: {
   sessionId: string | null;
@@ -13,8 +13,59 @@ export function createSession(opts: {
   sshHost?: string | null;
   sshPort?: number | null;
   sshUser?: string | null;
+  tmuxSession?: string | null;
+  initialRows?: number | null;
+  initialCols?: number | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
+}
+
+export function sshListTmuxSessions(
+  host: string,
+  port?: number,
+  user?: string,
+): Promise<TmuxSessionEntry[]> {
+  return invoke<TmuxSessionEntry[]>("ssh_list_tmux_sessions", { host, port, user });
+}
+
+export function sshListTmuxWindows(
+  host: string,
+  tmuxSession: string,
+  port?: number,
+  user?: string,
+): Promise<TmuxWindowEntry[]> {
+  return invoke<TmuxWindowEntry[]>("ssh_list_tmux_windows", { host, port, user, tmuxSession });
+}
+
+export function sshTmuxSelectWindow(
+  host: string,
+  tmuxSession: string,
+  windowIndex: number,
+  port?: number,
+  user?: string,
+): Promise<void> {
+  return invoke("ssh_tmux_select_window", { host, port, user, tmuxSession, windowIndex });
+}
+
+export function sshTmuxRenameWindow(
+  host: string,
+  tmuxSession: string,
+  windowIndex: number,
+  newName: string,
+  port?: number,
+  user?: string,
+): Promise<void> {
+  return invoke("ssh_tmux_rename_window", { host, port, user, tmuxSession, windowIndex, newName });
+}
+
+export function sshTmuxNewWindow(
+  host: string,
+  tmuxSession: string,
+  port?: number,
+  user?: string,
+  windowName?: string,
+): Promise<void> {
+  return invoke("ssh_tmux_new_window", { host, port, user, tmuxSession, windowName });
 }
 
 export function closeSession(sessionId: string): Promise<void> {
@@ -63,4 +114,9 @@ export function writeToSession(sessionId: string, data: string): Promise<void> {
 
 export function saveAllSnapshots(): Promise<void> {
   return invoke("save_all_snapshots");
+}
+
+/** Check if the shell is the foreground process (no child program running). */
+export function isShellForeground(sessionId: string): Promise<boolean> {
+  return invoke<boolean>("is_shell_foreground", { sessionId });
 }

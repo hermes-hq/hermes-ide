@@ -1,0 +1,184 @@
+/* ─── Plugin Update Confirm Dialog ──────────────────────── */
+
+.puc-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(2px);
+}
+
+.puc-dialog {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: overlayIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.puc-header {
+  padding: 20px 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.puc-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.puc-count {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  margin-left: auto;
+}
+
+.puc-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ─── Plugin card ──────────────────────────── */
+
+.puc-plugin {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-2);
+}
+
+.puc-plugin-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.puc-plugin-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.puc-plugin-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.puc-plugin-name {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.puc-plugin-versions {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.puc-plugin-versions .puc-arrow {
+  color: var(--green);
+}
+
+.puc-plugin-new-version {
+  color: var(--green);
+  font-weight: 500;
+}
+
+/* ─── Changelog within card ────────────────── */
+
+.puc-changelog {
+  margin-top: 8px;
+}
+
+.puc-changelog-entry + .puc-changelog-entry {
+  margin-top: 6px;
+}
+
+.puc-changelog-version {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+
+.puc-changelog-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  line-height: 1.6;
+}
+
+.puc-no-changelog {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ─── Footer ───────────────────────────────── */
+
+.puc-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.puc-btn {
+  padding: 7px 20px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  transition: background 0.1s, color 0.1s;
+}
+
+.puc-btn-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.puc-btn-cancel:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.puc-btn-confirm {
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+
+.puc-btn-confirm:hover {
+  background: var(--green);
+  color: var(--bg-0);
+}

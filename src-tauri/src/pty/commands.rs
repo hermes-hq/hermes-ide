@@ -13,7 +13,512 @@ use crate::pty::models::*;
 use crate::pty::{ai_launch_command, detect_shell, get_working_directory, PtySession};
 use crate::AppState;
 
+// ─── SSH / tmux helpers ─────────────────────────────────────────────
+
+fn resolve_ssh_user(user: Option<String>) -> String {
+    user.unwrap_or_else(|| {
+        std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "root".to_string())
+    })
+}
+
+/// Directory for SSH ControlMaster sockets.
+fn ssh_control_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("hermes-ssh-mux");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Build a base SSH command with common options and connection multiplexing.
+fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.arg("-o").arg("ConnectTimeout=5");
+    cmd.arg("-o").arg("BatchMode=yes");
+    // Reuse existing TCP connection if available, or establish a new persistent one
+    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", user, host, port));
+    cmd.arg("-o")
+        .arg(format!("ControlPath={}", socket_path.display()));
+    cmd.arg("-o").arg("ControlMaster=auto");
+    cmd.arg("-o").arg("ControlPersist=300");
+    if port != 22 {
+        cmd.arg("-p").arg(port.to_string());
+    }
+    cmd.arg(format!("{}@{}", user, host));
+    cmd
+}
+
+/// Run a remote SSH command and return (stdout, stderr, success).
+fn ssh_exec(
+    user: &str,
+    host: &str,
+    port: u16,
+    remote_cmd: &str,
+) -> Result<(String, String, bool), String> {
+    let mut cmd = ssh_command(user, host, port);
+    cmd.arg(remote_cmd);
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run ssh: {}", e))?;
+    Ok((
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+        output.status.success(),
+    ))
+}
+
+// ─── SSH File Types ─────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct SshFileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub is_hidden: bool,
+    pub size: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct SshFileContent {
+    pub content: String,
+    pub file_name: String,
+    pub language: String,
+    pub is_binary: bool,
+    pub size: u64,
+}
+
 // ─── Tauri Commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn ssh_list_directory(
+    state: State<'_, AppState>,
+    session_id: String,
+    path: Option<String>,
+) -> Result<Vec<SshFileEntry>, String> {
+    // Look up SSH connection info from the session
+    let (user, host, port) = {
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
+            .ok_or_else(|| "Not an SSH session".to_string())?;
+        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+    };
+
+    // Use the given path, or detect the remote working directory via pwd
+    let target = match &path {
+        Some(p) if !p.is_empty() => p.clone(),
+        _ => {
+            // Ask the remote host for its home directory (session.working_directory is local)
+            let (pwd_out, _, ok) = ssh_exec(&user, &host, port, "echo $HOME")?;
+            if ok && !pwd_out.trim().is_empty() {
+                pwd_out.trim().to_string()
+            } else {
+                "/".to_string()
+            }
+        }
+    };
+
+    // Run ls with machine-readable output (portable: no GNU-only flags)
+    // -1: one entry per line, -a: show hidden, -p: append / to dirs
+    // For sizes: try GNU stat (-c) first, fall back to BSD/macOS stat (-f)
+    let remote_cmd = format!(
+        "ls -1ap {} 2>/dev/null && echo '---SIZES---' && (stat -c '%s %n' {}/* {}/.* 2>/dev/null || stat -f '%z %N' {}/* {}/.* 2>/dev/null)",
+        shell_escape(&target), shell_escape(&target), shell_escape(&target), shell_escape(&target), shell_escape(&target)
+    );
+
+    let (stdout, _stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    if !success && stdout.is_empty() {
+        return Err(format!("Failed to list directory: {}", target));
+    }
+
+    let parts: Vec<&str> = stdout.splitn(2, "---SIZES---").collect();
+    let ls_output = parts.first().unwrap_or(&"");
+    let sizes_output = parts.get(1).unwrap_or(&"");
+
+    // Parse sizes into a map
+    let mut size_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for line in sizes_output.lines() {
+        let line = line.trim();
+        if let Some(space_idx) = line.find(' ') {
+            if let Ok(size) = line[..space_idx].parse::<u64>() {
+                let name = &line[space_idx + 1..];
+                // Extract just the filename from the full path
+                if let Some(basename) = name.rsplit('/').next() {
+                    size_map.insert(basename.to_string(), size);
+                }
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    for line in ls_output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "." || line == ".." || line == "./" || line == "../" {
+            continue;
+        }
+
+        let is_dir = line.ends_with('/');
+        let name = if is_dir {
+            &line[..line.len() - 1]
+        } else {
+            line
+        };
+        let is_hidden = name.starts_with('.');
+
+        let full_path = if target.ends_with('/') {
+            format!("{}{}", target, name)
+        } else {
+            format!("{}/{}", target, name)
+        };
+
+        let size = if is_dir {
+            None
+        } else {
+            size_map.get(name).copied()
+        };
+
+        entries.push(SshFileEntry {
+            name: name.to_string(),
+            path: full_path,
+            is_dir,
+            is_hidden,
+            size,
+        });
+    }
+
+    // Sort directories first, then alphabetically
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn ssh_read_file(
+    state: State<'_, AppState>,
+    session_id: String,
+    file_path: String,
+) -> Result<SshFileContent, String> {
+    let (user, host, port) = {
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
+            .ok_or_else(|| "Not an SSH session".to_string())?;
+        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+    };
+
+    let file_name = file_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&file_path)
+        .to_string();
+    let extension = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    let language = match extension.as_str() {
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "py" => "python",
+        "rb" => "ruby",
+        "go" => "go",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cpp" | "hpp" | "cc" | "cxx" => "cpp",
+        "cs" => "csharp",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "html" | "htm" => "html",
+        "css" | "scss" | "sass" | "less" => "css",
+        "json" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "xml" | "svg" => "xml",
+        "sql" => "sql",
+        "sh" | "bash" | "zsh" => "bash",
+        "md" | "markdown" => "markdown",
+        "dockerfile" => "dockerfile",
+        "dart" => "dart",
+        "lua" => "lua",
+        "php" => "php",
+        "ex" | "exs" => "elixir",
+        _ => "plaintext",
+    }
+    .to_string();
+
+    // Single SSH call: get size, binary check, and content in one round-trip
+    let escaped = shell_escape(&file_path);
+    let combined_cmd = format!(
+        concat!(
+            "SIZE=$(stat -c '%s' {f} 2>/dev/null || stat -f '%z' {f} 2>/dev/null); ",
+            "echo \"SIZE:$SIZE\"; ",
+            "if [ \"$SIZE\" -gt 1048576 ] 2>/dev/null; then echo 'TOO_LARGE'; exit 0; fi; ",
+            "ORIG=$(head -c 8192 {f} | wc -c | tr -d ' '); ",
+            "CLEAN=$(head -c 8192 {f} | tr -d '\\0' | wc -c | tr -d ' '); ",
+            "if [ \"$ORIG\" -gt 0 ] && [ \"$CLEAN\" -lt \"$ORIG\" ]; then echo 'BINARY'; exit 0; fi; ",
+            "echo '---CONTENT---'; cat {f}",
+        ),
+        f = escaped,
+    );
+    let (stdout, _, success) = ssh_exec(&user, &host, port, &combined_cmd)?;
+    if !success && stdout.is_empty() {
+        return Err(format!("Failed to read file: {}", file_path));
+    }
+
+    // Parse size from first line
+    let mut size: u64 = 0;
+    let mut rest = stdout.as_str();
+    if let Some(size_line) = rest.lines().next() {
+        if let Some(s) = size_line.strip_prefix("SIZE:") {
+            size = s.trim().parse().unwrap_or(0);
+        }
+        // Advance past first line
+        if let Some(idx) = rest.find('\n') {
+            rest = &rest[idx + 1..];
+        }
+    }
+
+    // Check for too-large or binary markers
+    let first_remaining = rest.lines().next().unwrap_or("");
+    if first_remaining.trim() == "TOO_LARGE" {
+        return Ok(SshFileContent {
+            content: String::new(),
+            file_name,
+            language,
+            is_binary: false,
+            size,
+        });
+    }
+    if first_remaining.trim() == "BINARY" {
+        return Ok(SshFileContent {
+            content: String::new(),
+            file_name,
+            language,
+            is_binary: true,
+            size,
+        });
+    }
+
+    // Extract content after the marker
+    let content = if let Some(idx) = rest.find("---CONTENT---\n") {
+        rest[idx + "---CONTENT---\n".len()..].to_string()
+    } else if let Some(idx) = rest.find("---CONTENT---") {
+        rest[idx + "---CONTENT---".len()..]
+            .trim_start_matches('\n')
+            .to_string()
+    } else {
+        rest.to_string()
+    };
+
+    Ok(SshFileContent {
+        content,
+        file_name,
+        language,
+        is_binary: false,
+        size,
+    })
+}
+
+/// Escape a string for use in a remote shell command (single-quote wrapping).
+fn shell_escape(s: &str) -> String {
+    // Replace single quotes with '\'' and wrap in single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+#[tauri::command]
+pub async fn ssh_list_tmux_sessions(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+) -> Result<Vec<TmuxSessionEntry>, String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let (stdout, stderr, success) = ssh_exec(
+        &user,
+        &host,
+        port,
+        "tmux list-sessions -F '#{session_name}|||#{session_windows}|||#{session_attached}'",
+    )?;
+
+    if !success {
+        if stderr.contains("no server running") || stderr.contains("no sessions") {
+            return Ok(Vec::new());
+        }
+        if stderr.contains("not found") || stderr.contains("No such file") {
+            return Err("tmux is not installed on the remote host".to_string());
+        }
+        return Err(format!("Failed to list tmux sessions: {}", stderr.trim()));
+    }
+
+    let entries: Vec<TmuxSessionEntry> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let line = line.trim().trim_matches('\'');
+            let parts: Vec<&str> = line.split("|||").collect();
+            if parts.len() >= 3 {
+                Some(TmuxSessionEntry {
+                    name: parts[0].to_string(),
+                    windows: parts[1].parse().unwrap_or(0),
+                    attached: parts[2] == "1",
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn ssh_list_tmux_windows(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+) -> Result<Vec<TmuxWindowEntry>, String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = format!(
+        "tmux list-windows -t '{}' -F '#{{window_index}}|||#{{window_name}}|||#{{window_active}}'",
+        tmux_session.replace('\'', "'\\''")
+    );
+    let (stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to list tmux windows: {}", stderr.trim()));
+    }
+
+    let entries: Vec<TmuxWindowEntry> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let line = line.trim().trim_matches('\'');
+            let parts: Vec<&str> = line.split("|||").collect();
+            if parts.len() >= 3 {
+                Some(TmuxWindowEntry {
+                    index: parts[0].parse().unwrap_or(0),
+                    name: parts[1].to_string(),
+                    active: parts[2] == "1",
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn ssh_tmux_select_window(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+    window_index: u32,
+) -> Result<(), String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = format!(
+        "tmux select-window -t '{}:{}'",
+        tmux_session.replace('\'', "'\\''"),
+        window_index
+    );
+    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to select tmux window: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_tmux_new_window(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+    window_name: Option<String>,
+) -> Result<(), String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = if let Some(name) = window_name {
+        format!(
+            "tmux new-window -t '{}' -n '{}'",
+            tmux_session.replace('\'', "'\\''"),
+            name.replace('\'', "'\\''")
+        )
+    } else {
+        format!(
+            "tmux new-window -t '{}'",
+            tmux_session.replace('\'', "'\\''")
+        )
+    };
+    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to create tmux window: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_tmux_rename_window(
+    host: String,
+    port: Option<u16>,
+    user: Option<String>,
+    tmux_session: String,
+    window_index: u32,
+    new_name: String,
+) -> Result<(), String> {
+    let user = resolve_ssh_user(user);
+    let port = port.unwrap_or(22);
+
+    let remote_cmd = format!(
+        "tmux rename-window -t '{}:{}' '{}'",
+        tmux_session.replace('\'', "'\\''"),
+        window_index,
+        new_name.replace('\'', "'\\''")
+    );
+    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+
+    if !success {
+        return Err(format!("Failed to rename tmux window: {}", stderr.trim()));
+    }
+    Ok(())
+}
 
 // Tauri command handler — params come from frontend invocation
 #[allow(clippy::too_many_arguments)]
@@ -32,6 +537,9 @@ pub fn create_session(
     ssh_host: Option<String>,
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
+    tmux_session: Option<String>,
+    initial_rows: Option<u16>,
+    initial_cols: Option<u16>,
 ) -> Result<SessionUpdate, String> {
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let shell = state
@@ -112,8 +620,10 @@ pub fn create_session(
         ai_provider: ai_provider.clone(),
         auto_approve: auto_approve.unwrap_or(false),
         context_injected: false,
-        has_initial_context: realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
+        has_initial_context: ssh_host.is_none()
+            && realm_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
         last_nudged_version: 0,
+        pending_nudge: None,
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
             port: ssh_port.unwrap_or(22),
@@ -122,6 +632,7 @@ pub fn create_session(
                     .or_else(|_| std::env::var("USERNAME"))
                     .unwrap_or_else(|_| "root".to_string())
             }),
+            tmux_session: tmux_session.clone(),
         }),
     };
 
@@ -132,17 +643,32 @@ pub fn create_session(
     let session_arc = Arc::new(StdMutex::new(session));
 
     // Spawn PTY
+    // Use dimensions from the frontend if provided; otherwise fall back to 80x24.
+    // Passing the real terminal size at PTY creation prevents the SIGWINCH race
+    // condition where the shell starts at 80x24 and misses the initial resize
+    // because its signal handler isn't installed yet.
+    let pty_rows = initial_rows.unwrap_or(24);
+    let pty_cols = initial_cols.unwrap_or(80);
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: pty_rows,
+            cols: pty_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
     let is_ssh = ssh_info_clone.is_some();
+
+    // Set up shell integration (disables conflicting autosuggestion plugins).
+    // Only for local sessions — SSH sessions run on the remote host where we
+    // can't create temp files.
+    let shell_integration = if !is_ssh {
+        crate::pty::shell_integration::setup(&shell, &session_id)
+    } else {
+        crate::pty::shell_integration::ShellIntegration::None
+    };
 
     let mut cmd = if let Some(ref info) = ssh_info_clone {
         let mut c = CommandBuilder::new("ssh");
@@ -152,6 +678,14 @@ pub fn create_session(
             c.arg(info.port.to_string());
         }
         c.arg(format!("{}@{}", info.user, info.host));
+        // Attach to tmux session if specified.
+        // `new-session -A` attaches if it exists, creates if it doesn't.
+        if let Some(ref tmux_name) = info.tmux_session {
+            c.arg(format!(
+                "tmux new-session -A -s '{}'",
+                tmux_name.replace('\'', "'\\''")
+            ));
+        }
         c
     } else {
         #[cfg(unix)]
@@ -161,8 +695,32 @@ pub fn create_session(
             c.arg("CLAUDECODE");
             c.arg("-u");
             c.arg("CLAUDE_CODE");
+            // Strip COLUMNS/LINES so the shell reads actual PTY dimensions
+            // from ioctl instead of inheriting stale values from the GUI app.
+            c.arg("-u");
+            c.arg("COLUMNS");
+            c.arg("-u");
+            c.arg("LINES");
             c.arg(&shell);
-            c.arg("-l");
+
+            // Shell-specific launch args depend on integration type
+            match &shell_integration {
+                crate::pty::shell_integration::ShellIntegration::Bash { rcfile } => {
+                    // --rcfile replaces -l; the init script manually sources
+                    // /etc/profile and ~/.bash_profile for login-like behavior.
+                    c.arg("--rcfile");
+                    c.arg(rcfile.to_string_lossy().as_ref());
+                }
+                crate::pty::shell_integration::ShellIntegration::Fish => {
+                    c.arg("-l");
+                    c.arg("-C");
+                    c.arg(crate::pty::shell_integration::fish_init_command());
+                }
+                _ => {
+                    // Zsh, unknown, or no integration — use login shell
+                    c.arg("-l");
+                }
+            }
             c
         }
         #[cfg(windows)]
@@ -173,6 +731,38 @@ pub fn create_session(
             c
         }
     };
+
+    // Apply ZDOTDIR env vars for zsh shell integration
+    if let crate::pty::shell_integration::ShellIntegration::Zsh { ref zdotdir } = shell_integration
+    {
+        // Preserve the user's current ZDOTDIR (or HOME) so our .zshenv can
+        // restore it before sourcing the user's real .zshenv.
+        let original = std::env::var("ZDOTDIR").unwrap_or_else(|_| {
+            crate::platform::home_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()
+        });
+        let zdotdir_str = zdotdir.to_string_lossy();
+        log::info!(
+            "[SHELL-INTEGRATION] Setting ZDOTDIR={:?}, HERMES_ORIGINAL_ZDOTDIR={:?}",
+            zdotdir,
+            original
+        );
+        cmd.env("HERMES_ORIGINAL_ZDOTDIR", &original);
+        cmd.env("ZDOTDIR", zdotdir_str.as_ref());
+        // _HERMES_ZDOTDIR remembers our temp dir path so each wrapper script
+        // can re-point ZDOTDIR back after sourcing the user's file.
+        cmd.env("_HERMES_ZDOTDIR", zdotdir_str.as_ref());
+    } else {
+        log::info!(
+            "[SHELL-INTEGRATION] No zsh integration (variant: {})",
+            if shell_integration.is_active() {
+                "active-non-zsh"
+            } else {
+                "none"
+            }
+        );
+    }
 
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
@@ -191,6 +781,11 @@ pub fn create_session(
         cmd.env("LC_CTYPE", "UTF-8");
     }
 
+    // Suppress zsh's PROMPT_SP indicator (the inverse `%` shown when the
+    // previous output didn't end with a newline).  On a fresh PTY there is
+    // no prior output, so the marker is always spurious.
+    cmd.env("PROMPT_EOL_MARK", "");
+
     // Set context file env vars for local sessions only (not useful over SSH)
     if !is_ssh {
         if let Ok(context_path) = crate::realm::attunement::session_context_path(&app, &session_id)
@@ -200,6 +795,29 @@ pub fn create_session(
         cmd.env("HERMES_SESSION_ID", &session_id);
     }
 
+    // On macOS, portable-pty's spawn_command() uses fork() + pre_exec which
+    // crashes in multi-threaded processes ("multi-threaded process forked").
+    // Use posix_spawn() instead which atomically creates the child process.
+    // See issue #31 and issue-31-investigation.md.
+    // Save the slave TTY path before spawning — needed later for direct
+    // SIGINT delivery via tcgetpgrp()/kill() when the line discipline
+    // fails to convert \x03 into a signal.
+    #[cfg(target_os = "macos")]
+    let saved_tty_path = pair.master.tty_name();
+
+    #[cfg(target_os = "macos")]
+    let child = {
+        let tty_path = saved_tty_path
+            .clone()
+            .ok_or_else(|| "Failed to get PTY device path for posix_spawn".to_string())?;
+        // Drop the slave end — the child opens the TTY by path via posix_spawn
+        // file actions, which also establishes it as the controlling terminal.
+        drop(pair.slave);
+        crate::pty::spawn::posix_spawn_in_pty(&cmd, &tty_path)
+            .map_err(|e| format!("Failed to spawn shell: {}", e))?
+    };
+
+    #[cfg(not(target_os = "macos"))]
     let child = pair
         .slave
         .spawn_command(cmd)
@@ -211,6 +829,7 @@ pub fn create_session(
             .map_err(|e| format!("Failed to get PTY writer: {}", e))?,
     ));
     let writer_for_reader = Arc::clone(&writer);
+    let writer_for_silence = Arc::clone(&writer);
 
     // Transition to Initializing
     {
@@ -408,6 +1027,14 @@ pub fn create_session(
                                     s.metrics = a.to_metrics();
                                     let update = SessionUpdate::from(&*s);
                                     let _ = app_clone.emit("session-updated", &update);
+
+                                    // Deliver any deferred context nudge now that the agent is idle
+                                    if new_phase == SessionPhase::NeedsInput {
+                                        super::PtyManager::deliver_pending_nudge_with_writer(
+                                            &writer_for_reader,
+                                            &mut s,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -487,8 +1114,13 @@ pub fn create_session(
                         }
 
                         // Auto-inject context when agent prompt is first detected
-                        // (fallback for non-Claude agents that can't take CLI args)
-                        if a.pending_context_inject && !a.context_injected {
+                        // (fallback for non-Claude agents that can't take CLI args).
+                        // Skip for SSH sessions — $HERMES_CONTEXT isn't set remotely.
+                        let is_ssh_session = session_clone
+                            .lock()
+                            .ok()
+                            .is_some_and(|s| s.ssh_info.is_some());
+                        if a.pending_context_inject && !a.context_injected && !is_ssh_session {
                             a.pending_context_inject = false;
                             let mut write_ok = false;
                             if let Ok(mut w) = writer_for_reader.lock() {
@@ -506,6 +1138,10 @@ pub fn create_session(
                             }
                             // If write failed, pending_context_inject is cleared but
                             // context_injected stays false — next prompt detection retries.
+                        } else if is_ssh_session && a.pending_context_inject {
+                            // Clear the flag so the analyzer doesn't keep retrying
+                            a.pending_context_inject = false;
+                            a.context_injected = true;
                         }
 
                         if chunk_count.is_multiple_of(30) {
@@ -562,12 +1198,53 @@ pub fn create_session(
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_silence.lock() {
                                     if s.phase != new_phase {
-                                        s.phase = new_phase;
+                                        s.phase = new_phase.clone();
                                         s.detected_agent = a.detected_agent.clone();
                                         s.metrics = a.to_metrics();
                                         s.last_activity_at = now();
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_silence.emit("session-updated", &update);
+                                    }
+                                }
+                            }
+
+                            // Fallback auto-launch: check_silence may have set
+                            // pending_ai_launch when an unrecognized prompt went
+                            // silent.  The reader thread is blocked on read() and
+                            // won't see the flag, so we consume it here.
+                            if a.pending_ai_launch {
+                                a.pending_ai_launch = false;
+                                let launch_info = session_silence.lock().ok().map(|s| {
+                                    (s.ai_provider.clone(), s.has_initial_context, s.auto_approve)
+                                });
+                                if let Some((Some(ref provider), has_context, auto_approve)) =
+                                    launch_info
+                                {
+                                    if let Some(launch_cmd) =
+                                        ai_launch_command(provider, auto_approve)
+                                    {
+                                        let supports_cli_prompt =
+                                            provider == "claude" || provider == "gemini";
+                                        let cmd = if has_context && supports_cli_prompt {
+                                            format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
+                                        } else {
+                                            launch_cmd
+                                        };
+                                        if let Ok(mut w) = writer_for_silence.lock() {
+                                            let _ = w.write_all(format!("{}\r", cmd).as_bytes());
+                                            let _ = w.flush();
+                                        }
+                                        if has_context && supports_cli_prompt {
+                                            a.context_injected = true;
+                                        }
+                                        if let Ok(mut s) = session_silence.lock() {
+                                            if has_context && supports_cli_prompt {
+                                                s.context_injected = true;
+                                            }
+                                            s.phase = SessionPhase::LaunchingAgent;
+                                            let update = SessionUpdate::from(&*s);
+                                            let _ = app_silence.emit("session-updated", &update);
+                                        }
                                     }
                                 }
                             }
@@ -591,6 +1268,9 @@ pub fn create_session(
         session: session_arc,
         analyzer,
         child,
+        #[cfg(target_os = "macos")]
+        tty_path: saved_tty_path,
+        shell_integration,
     };
     mgr.sessions.insert(session_id.clone(), pty_session);
 
@@ -606,13 +1286,80 @@ pub fn create_session(
                     .ok();
             }
             // Write context file so AI agents can read project info
-            if !ids.is_empty() {
+            // (only for local sessions — the file isn't accessible over SSH)
+            if !is_ssh && !ids.is_empty() {
                 crate::realm::attunement::write_session_context_file(&app, &db, &session_id).ok();
             }
         }
     }
 
     Ok(result)
+}
+
+/// Enumerate direct child PIDs of a given parent process.
+#[cfg(unix)]
+fn enumerate_child_pids(parent_pid: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        // Use proc_listchildpids (libproc, macOS-specific)
+        extern "C" {
+            fn proc_listchildpids(
+                ppid: libc::pid_t,
+                buffer: *mut libc::c_void,
+                buffersize: libc::c_int,
+            ) -> libc::c_int;
+        }
+
+        // First call with NULL to get count
+        let count = unsafe { proc_listchildpids(parent_pid as i32, std::ptr::null_mut(), 0) };
+        if count <= 0 {
+            return children;
+        }
+
+        let buf_size = count as usize;
+        let mut pids: Vec<libc::pid_t> = vec![0; buf_size];
+        let ret = unsafe {
+            proc_listchildpids(
+                parent_pid as i32,
+                pids.as_mut_ptr() as *mut libc::c_void,
+                (buf_size * std::mem::size_of::<libc::pid_t>()) as libc::c_int,
+            )
+        };
+
+        if ret > 0 {
+            let actual = ret as usize / std::mem::size_of::<libc::pid_t>();
+            for &pid in &pids[..actual] {
+                if pid > 0 {
+                    children.push(pid as u32);
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: iterate /proc/*/stat and match ppid
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                if let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) {
+                    let fields: Vec<&str> = stat.split_whitespace().collect();
+                    if fields.len() > 3 {
+                        if let Ok(ppid) = fields[3].parse::<u32>() {
+                            if ppid == parent_pid {
+                                if let Ok(pid) = fields[0].parse::<u32>() {
+                                    children.push(pid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    children
 }
 
 #[tauri::command]
@@ -674,7 +1421,125 @@ pub fn write_to_session(
             .map_err(|e| format!("Write failed: {}", e))?;
         w.flush().map_err(|e| format!("Flush failed: {}", e))?;
     }
+
+    // ── Direct SIGINT delivery (macOS/Unix) ──
+    //
+    // Writing \x03 to the PTY master should cause the line discipline to
+    // generate SIGINT for the foreground process group.  However, on macOS
+    // with posix_spawn-based PTY sessions the signal sometimes doesn't
+    // reach the child.  As a reliable fallback we:
+    //   1. Try tcgetpgrp() on the slave device to find the foreground pgrp.
+    //   2. If that fails (it does from a non-session-leader process), send
+    //      SIGINT to every child of the shell using sysctl/proc enumeration.
+    #[cfg(unix)]
+    if bytes.contains(&0x03) {
+        // Diagnostic: check termios on the slave to see if ISIG is enabled
+        // Send SIGINT to the shell's child processes directly.
+        // The shell's PID is known; we enumerate its children via sysctl
+        // and send SIGINT to each child's process group.
+        if let Some(shell_pid) = session.child.process_id() {
+            let child_pids = enumerate_child_pids(shell_pid);
+            if !child_pids.is_empty() {
+                for &cpid in &child_pids {
+                    unsafe {
+                        // Send to the child's process group (covers the child
+                        // and any of its own children)
+                        libc::kill(-(cpid as i32), libc::SIGINT);
+                    }
+                }
+            } else {
+                // No children found — the shell is at the prompt.
+                // Send to the shell's own process group so it sees the interrupt.
+                unsafe {
+                    libc::kill(-(shell_pid as i32), libc::SIGINT);
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+/// Check whether the shell is the foreground process in the PTY.
+///
+/// Returns `true` when the shell itself owns the terminal's foreground process
+/// group — i.e. the user is at a shell prompt and no child program (Claude Code,
+/// vim, htop, etc.) is running in the foreground.
+///
+/// Strategy:
+///   1. macOS — open the TTY slave device and call `tcgetpgrp()` to get the
+///      foreground PGID, then compare with the shell's own PGID.
+///   2. Linux — read `/proc/{pid}/stat` to obtain `pgrp` and `tpgid`.
+///   3. Fallback — enumerate the shell's direct children; if none exist the
+///      shell is assumed to be at its prompt.
+#[tauri::command]
+pub fn is_shell_foreground(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<bool, String> {
+    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+    let shell_pid = session
+        .child
+        .process_id()
+        .ok_or_else(|| "Shell process ID not available".to_string())?;
+
+    // ── macOS: tcgetpgrp on the TTY slave ──
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(ref tty_path) = session.tty_path {
+            if let Ok(tty_cstr) =
+                std::ffi::CString::new(tty_path.to_string_lossy().into_owned())
+            {
+                let fd = unsafe {
+                    libc::open(tty_cstr.as_ptr(), libc::O_RDONLY | libc::O_NOCTTY)
+                };
+                if fd >= 0 {
+                    let fg_pgid = unsafe { libc::tcgetpgrp(fd) };
+                    unsafe { libc::close(fd) };
+                    if fg_pgid > 0 {
+                        let shell_pgid = unsafe { libc::getpgid(shell_pid as i32) };
+                        if shell_pgid > 0 {
+                            return Ok(fg_pgid == shell_pgid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Linux: read tpgid from /proc/{pid}/stat ──
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{}/stat", shell_pid)) {
+            // stat format: pid (comm) state ppid pgrp session tty_nr tpgid ...
+            // comm can contain spaces/parens — find the last ')' first.
+            if let Some(after_comm) = stat.rfind(')').map(|i| &stat[i + 2..]) {
+                let fields: Vec<&str> = after_comm.split_whitespace().collect();
+                // fields: [0]=state [1]=ppid [2]=pgrp [3]=session [4]=tty_nr [5]=tpgid
+                if fields.len() > 5 {
+                    if let (Ok(pgrp), Ok(tpgid)) =
+                        (fields[2].parse::<i32>(), fields[5].parse::<i32>())
+                    {
+                        return Ok(tpgid == pgrp);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Fallback: no direct children → shell is at prompt ──
+    #[cfg(unix)]
+    {
+        let children = enumerate_child_pids(shell_pid);
+        return Ok(children.is_empty());
+    }
+
+    #[cfg(not(unix))]
+    Ok(true)
 }
 
 #[tauri::command]
@@ -755,6 +1620,9 @@ pub fn close_session(
     let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
 
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
+        // Clean up shell integration temp files (ZDOTDIR, bash rcfile, etc.)
+        crate::pty::shell_integration::cleanup(&pty_session.shell_integration);
+
         // Kill the child shell process — don't block on wait() since the
         // process may be hung. Spawn a reaper thread instead.
         pty_session.child.kill().ok();
@@ -1219,6 +2087,8 @@ pub fn detect_shell_environment(
         plugins.push("PSReadLine".to_string());
     }
 
+    let integration_active = session.shell_integration.is_active();
+
     Ok(ShellEnvironment {
         shell_type: shell_type.to_string(),
         plugins_detected: plugins,
@@ -1227,6 +2097,7 @@ pub fn detect_shell_environment(
         has_syntax_highlighting,
         has_starship,
         has_powerlevel10k,
+        shell_integration_active: integration_active,
     })
 }
 

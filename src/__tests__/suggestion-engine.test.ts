@@ -241,14 +241,14 @@ describe("SuggestionEngine - suggest()", () => {
       expect(texts).toContain("git stash");
     });
 
-    it("returns max 6 results", () => {
+    it("returns max 15 results", () => {
       // "git" prefix should match many commands in the index
       // Add a bunch of history entries too
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 20; i++) {
         history.addCommand(`git custom-cmd-${i}`);
       }
       const results = suggest("git", null, history);
-      expect(results.length).toBeLessThanOrEqual(6);
+      expect(results.length).toBeLessThanOrEqual(15);
     });
   });
 

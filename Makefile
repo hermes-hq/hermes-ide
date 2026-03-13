@@ -20,7 +20,7 @@ SHELL := /bin/bash
 VERSION := $(shell node -p "require('./src-tauri/tauri.conf.json').version")
 TAG := v$(VERSION)
 PRIVATE_REPO := hermes-hq/hermes-ide
-PUBLIC_REPO := hermes-hq/releases
+PUBLIC_REPO := hermes-hq/hermes-ide
 
 .PHONY: help dev build test bump release-push \
         release release-macos release-linux release-windows \

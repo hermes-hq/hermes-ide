@@ -9,6 +9,7 @@
  * This file contains the input handling & intelligence logic that ties everything together.
  */
 
+import { listen } from "@tauri-apps/api/event";
 import { writeToSession } from "../api/sessions";
 import { suggest } from "./intelligence/suggestionEngine";
 import { resolveIntent, getIntentSuggestions } from "./intentCommands";
@@ -45,6 +46,9 @@ import {
   dismissSuggestionsForEntry,
   getCursorPixelPosition,
   getCursorPosition,
+  cleanSelection,
+  estimateInitialDimensions,
+  getFocusedSessionId,
   type PoolEntry,
 } from "./pool";
 
@@ -78,14 +82,43 @@ export function updateSettings(settings: Record<string, string>): void {
     entry.terminal.options.scrollback = scrollback;
     entry.terminal.options.theme = { ...theme, cursor: entry.terminal.options.theme?.cursor, cursorAccent: theme.background };
     if (entry.attached && entry.opened) {
-      try { entry.fitAddon.fit(); } catch { /* ignore */ }
+      try {
+        const proposed = entry.fitAddon.proposeDimensions();
+        if (proposed && proposed.cols >= 10 && proposed.rows >= 2) {
+          entry.fitAddon.fit();
+          entry.terminal.refresh(0, entry.terminal.rows - 1);
+        }
+      } catch { /* ignore */ }
     }
   }
+}
+
+// ─── Native SIGINT Listener (macOS) ──────────────────────────────────
+//
+// On macOS, WKWebView consumes Ctrl+C at the native level before JavaScript
+// receives the keydown event. The Rust menu system intercepts it as a menu
+// accelerator and emits "native-sigint". We listen here and forward \x03
+// to the active terminal's PTY.
+
+let sigintListenerReady = false;
+
+export function setupNativeSigintListener(): void {
+  if (sigintListenerReady) return;
+  sigintListenerReady = true;
+  listen("native-sigint", () => {
+    const sessionId = getFocusedSessionId();
+    if (!sessionId) return;
+    handleTerminalInput(sessionId, "\x03");
+  }).catch((err) => {
+    console.warn("[TerminalPool] Failed to listen for native-sigint:", err);
+    sigintListenerReady = false;
+  });
 }
 
 // ─── Terminal Creation (wires input handler) ─────────────────────────
 
 export async function createTerminal(sessionId: string, color: string): Promise<void> {
+  setupNativeSigintListener(); // idempotent — sets up once
   return createTerminalCore(sessionId, color, handleTerminalInput);
 }
 
@@ -100,38 +133,64 @@ function handleTerminalInput(sessionId: string, data: string): void {
     (phase === "idle" || phase === "shell_ready");
   const overlayVisible = entry.suggestionState?.visible ?? false;
 
+  // ── Dismiss stale overlay when alternate buffer becomes active ──
+  // Interactive CLI tools (Claude Code, vim, etc.) switch to the alternate
+  // screen buffer. If the overlay was visible when this happened, dismiss it
+  // immediately so navigation keys reach the tool instead of the overlay.
+  if (overlayVisible && entry.terminal.buffer.active.type === "alternate") {
+    dismissSuggestions(sessionId);
+    clearGhostText(sessionId);
+  }
+
   // ── Overlay key interception (only when overlay is showing) ──
-  if (intelligenceActive && overlayVisible && entry.suggestionState) {
-    // Up arrow
-    if (data === "\x1b[A") {
+  // Guard on overlay visibility, NOT intelligenceActive — the phase can
+  // briefly flip to "busy" from shell echo while the overlay is still visible.
+  // Intelligence gating controls *showing* the overlay; once visible, we
+  // must always intercept navigation keys to prevent them reaching the PTY.
+  if (overlayVisible && entry.suggestionState) {
+    // Up arrow — move selection up (wrapping)
+    // Handles both normal mode (\x1b[A) and application cursor mode (\x1bOA)
+    if (data === "\x1b[A" || data === "\x1bOA") {
       moveSuggestionSelection(sessionId, -1);
       return; // CONSUME
     }
-    // Down arrow
-    if (data === "\x1b[B") {
+    // Down arrow — move selection down (wrapping)
+    if (data === "\x1b[B" || data === "\x1bOB") {
       moveSuggestionSelection(sessionId, 1);
       return; // CONSUME
     }
-    // Tab — accept selected (respects shell compatibility)
+    // Tab — accept selected if an item is highlighted (respects shell compatibility)
     if (data === "\t") {
-      if (shouldConsumeTab(sessionId, true)) {
+      if (entry.suggestionState.selectedIndex !== null && shouldConsumeTab(sessionId, true)) {
         acceptSuggestion(sessionId);
         return; // CONSUME
       }
-      // Fall through — let shell handle Tab
+      // Nothing highlighted or shell should handle Tab — fall through
     }
-    // Enter — execute selected suggestion
+    // Enter — accept highlighted suggestion, or pass through if nothing highlighted
     if (data === "\r") {
-      executeSuggestion(sessionId);
-      return; // CONSUME
+      if (entry.suggestionState.selectedIndex !== null) {
+        executeSuggestion(sessionId);
+        return; // CONSUME
+      }
+      // Nothing highlighted — dismiss overlay and let Enter pass through to PTY
+      dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
+      // Fall through to normal Enter handling (buffer update + PTY write)
     }
     // Escape — dismiss overlay
     if (data === "\x1b" || data === "\x1b\x1b") {
       dismissSuggestions(sessionId);
       return; // CONSUME
     }
+    // Ctrl-C — dismiss overlay, then pass through to PTY
+    if (data === "\x03") {
+      dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
+      // Fall through — Ctrl-C will be sent to PTY below
+    }
     // Right arrow — accept ghost text inline
-    if (data === "\x1b[C" && entry.ghostText) {
+    if ((data === "\x1b[C" || data === "\x1bOC") && entry.ghostText) {
       acceptGhostInline(sessionId);
       return; // CONSUME
     }
@@ -151,9 +210,10 @@ function handleTerminalInput(sessionId: string, data: string): void {
   }
 
   // ── Update input buffer ──
-  if (intelligenceActive) {
-    updateInputBuffer(entry, data);
-  }
+  // Always track input regardless of phase — the buffer must reflect what
+  // the user has typed. Only suggestion computation is gated on phase,
+  // because every keystroke echo briefly flips phase to "busy".
+  updateInputBuffer(entry, data);
 
   // ── Clear ghost text on any non-navigation keystroke ──
   if (entry.ghostText) {
@@ -183,12 +243,15 @@ function handleTerminalInput(sessionId: string, data: string): void {
   });
 
   // ── Debounced suggestion computation ──
-  if (intelligenceActive && entry.inputBuffer.trim()) {
+  // Always set up the debounce regardless of phase — every keystroke echo
+  // briefly flips phase to "busy", which would kill the timer. The actual
+  // phase/intelligence check happens inside computeSuggestions().
+  if (entry.inputBuffer.trim()) {
     if (entry.suggestionTimer) clearTimeout(entry.suggestionTimer);
     entry.suggestionTimer = setTimeout(() => {
       computeSuggestions(sessionId);
     }, SUGGESTION_DEBOUNCE_MS);
-  } else if (intelligenceActive) {
+  } else {
     // Empty buffer — dismiss
     dismissSuggestions(sessionId);
   }
@@ -288,6 +351,31 @@ function computeSuggestions(sessionId: string): void {
   if (isIntelligenceDisabled()) return;
   if (!shouldShowOverlay(sessionId)) return;
 
+  // Only show suggestions when the shell is at an interactive prompt.
+  // Use lastStablePhase instead of sessionPhase — the current phase can
+  // be "busy" from echo-flicker (both shell AND AI agent echo trigger it).
+  // lastStablePhase tracks the real state: "idle"/"shell_ready" = shell
+  // prompt, "needs_input" = AI agent, "creating"/etc. = lifecycle.
+  if (entry.lastStablePhase !== "idle" && entry.lastStablePhase !== "shell_ready") return;
+
+  // Don't show suggestions when the alternate screen buffer is active.
+  // Interactive CLI tools (Claude Code, vim, htop, etc.) use the alternate
+  // buffer — cursor coordinates in that buffer don't correspond to the shell
+  // prompt, and our input buffer tracking doesn't reflect the tool's input.
+  if (entry.terminal.buffer.active.type === "alternate") return;
+
+  // Don't show suggestions when the user has scrolled up — the cursor is
+  // off-screen and the overlay would appear at a misleading position.
+  if (entry.userScrolledUp) return;
+
+  // OS-level foreground process check — uses a cached value updated by a
+  // 300ms polling interval (see pool.ts createTerminal). Synchronous access
+  // avoids async gaps where state can change between the check and usage.
+  // This is the most reliable guard: tcgetpgrp() / /proc/stat tells us
+  // whether the shell or a child program (AI tools, editors, etc.) owns
+  // the terminal foreground process group.
+  if (!entry.shellIsForeground) return;
+
   // Intent suggestions (colon-prefixed commands)
   if (entry.inputBuffer.trimStart().startsWith(":")) {
     const intentResults = getIntentSuggestions(entry.inputBuffer.trim());
@@ -302,9 +390,10 @@ function computeSuggestions(sessionId: string): void {
           score: 1000 - i,
           badge: "intent",
         })),
-        selectedIndex: 0,
+        selectedIndex: null,
         cursorX: pos.x,
         cursorY: pos.y,
+        cellHeight: pos.cellHeight,
       };
       entry.suggestionState = state;
       notifySubscribers(sessionId, state);
@@ -326,9 +415,10 @@ function computeSuggestions(sessionId: string): void {
   const state: SuggestionState = {
     visible: true,
     suggestions: results,
-    selectedIndex: 0,
+    selectedIndex: null,
     cursorX: pos.x,
     cursorY: pos.y,
+    cellHeight: pos.cellHeight,
   };
 
   entry.suggestionState = state;
@@ -340,7 +430,8 @@ function computeSuggestions(sessionId: string): void {
     const input = entry.inputBuffer.trim();
     // Only show ghost text if it extends the current input
     if (topText.startsWith(input) && topText.length > input.length) {
-      showGhostText(sessionId, topText.slice(input.length));
+      const ghostSuffix = topText.slice(input.length);
+      showGhostText(sessionId, ghostSuffix);
     }
   }
 }
@@ -353,12 +444,20 @@ function moveSuggestionSelection(sessionId: string, delta: number): void {
 
   const s = entry.suggestionState;
   const count = s.suggestions.length;
-  const newIndex = Math.max(0, Math.min(count - 1, s.selectedIndex + delta));
+
+  let newIndex: number;
+  if (s.selectedIndex === null) {
+    // Nothing highlighted yet
+    newIndex = delta > 0 ? 0 : count - 1;
+  } else {
+    // Wrap around at boundaries
+    newIndex = ((s.selectedIndex + delta) % count + count) % count;
+  }
 
   entry.suggestionState = { ...s, selectedIndex: newIndex };
   notifySubscribers(sessionId, entry.suggestionState);
 
-  // Update ghost text to selected suggestion
+  // Update ghost text to preview the highlighted suggestion
   clearGhostText(sessionId);
   const selected = s.suggestions[newIndex];
   if (selected && shouldShowGhostText(sessionId)) {
@@ -369,9 +468,22 @@ function moveSuggestionSelection(sessionId: string, delta: number): void {
   }
 }
 
-function acceptSuggestion(sessionId: string): void {
+/** Accept a suggestion at a given index (used by click-to-select in the overlay) */
+export function acceptSuggestionAtIndex(sessionId: string, index: number): void {
   const entry = pool.get(sessionId);
   if (!entry?.suggestionState?.visible) return;
+
+  const s = entry.suggestionState;
+  if (index < 0 || index >= s.suggestions.length) return;
+
+  // Set the selected index then delegate to normal accept
+  entry.suggestionState = { ...s, selectedIndex: index };
+  acceptSuggestion(sessionId);
+}
+
+function acceptSuggestion(sessionId: string): void {
+  const entry = pool.get(sessionId);
+  if (!entry?.suggestionState?.visible || entry.suggestionState.selectedIndex === null) return;
 
   const selected = entry.suggestionState.suggestions[entry.suggestionState.selectedIndex];
   if (!selected) return;
@@ -397,7 +509,7 @@ function acceptSuggestion(sessionId: string): void {
 
 function executeSuggestion(sessionId: string): void {
   const entry = pool.get(sessionId);
-  if (!entry?.suggestionState?.visible) return;
+  if (!entry?.suggestionState?.visible || entry.suggestionState.selectedIndex === null) return;
 
   const selected = entry.suggestionState.suggestions[entry.suggestionState.selectedIndex];
   if (!selected) return;
@@ -431,6 +543,29 @@ function acceptGhostInline(sessionId: string): void {
   writeToSession(sessionId, utf8ToBase64(ghostContent)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (ghost inline) failed for ${sessionId}:`, err);
   });
+}
+
+// ─── Public Suggestion Interaction (for mouse clicks) ────────────────
+
+/** Highlight a suggestion by index (e.g. on mouse hover). */
+export function selectSuggestion(sessionId: string, index: number): void {
+  const entry = pool.get(sessionId);
+  if (!entry?.suggestionState?.visible) return;
+  const s = entry.suggestionState;
+  if (index < 0 || index >= s.suggestions.length) return;
+
+  entry.suggestionState = { ...s, selectedIndex: index };
+  notifySubscribers(sessionId, entry.suggestionState);
+
+  // Update ghost text to preview the highlighted suggestion
+  clearGhostText(sessionId);
+  const selected = s.suggestions[index];
+  if (selected && shouldShowGhostText(sessionId)) {
+    const input = entry.inputBuffer.trim();
+    if (selected.text.startsWith(input) && selected.text.length > input.length) {
+      showGhostText(sessionId, selected.text.slice(input.length));
+    }
+  }
 }
 
 // ─── Public Utility Exports ──────────────────────────────────────────
@@ -499,9 +634,15 @@ export function terminalHasSelection(sessionId: string): boolean {
   return pool.get(sessionId)?.terminal.hasSelection() ?? false;
 }
 
-/** Get the selected text from the terminal (canvas-based selection). */
+/** Get the selected text from the terminal (canvas-based selection).
+ *  Joins soft-wrapped lines and trims trailing whitespace so copied
+ *  text matches the logical content, not the visual terminal layout. */
 export function terminalGetSelection(sessionId: string): string {
-  return pool.get(sessionId)?.terminal.getSelection() ?? "";
+  const entry = pool.get(sessionId);
+  if (!entry) return "";
+  const raw = entry.terminal.getSelection();
+  if (!raw) return "";
+  return cleanSelection(entry.terminal, raw);
 }
 
 /** Write arbitrary text into the terminal as if pasted (e.g. a file path from a drop event).
@@ -569,4 +710,5 @@ export {
   clearGhostText,
   dismissSuggestions,
   getCursorPosition,
+  estimateInitialDimensions,
 };

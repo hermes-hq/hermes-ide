@@ -99,6 +99,28 @@ export interface PluginSettingSelect extends PluginSettingBase {
 	options: { value: string; label: string }[];
 }
 
+// ─── Registry Types ──────────────────────────────────────
+
+export interface ChangelogEntry {
+	version: string;
+	date: string;
+	changes: string[];
+}
+
+export interface RegistryPlugin {
+	id: string;
+	name: string;
+	version: string;
+	description: string;
+	author: string;
+	icon?: string;
+	category?: string;
+	downloadUrl: string;
+	minAppVersion?: string;
+	permissions?: string[];
+	changelog?: ChangelogEntry[];
+}
+
 export type HermesEvent =
 	| "theme.changed"
 	| "session.created"

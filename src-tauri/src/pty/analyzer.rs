@@ -548,6 +548,22 @@ impl OutputAnalyzer {
             return;
         }
 
+        // Fallback auto-launch: if the PTY went silent but we never detected a
+        // shell prompt (e.g. the user's prompt theme doesn't match any known
+        // pattern), treat the silence as "shell is ready" and trigger auto-launch.
+        // This guarantees AI sessions always start the agent command, even with
+        // exotic prompts.
+        if !self.shell_ready && self.detected_agent.is_none() {
+            self.shell_ready = true;
+            self.pending_ai_launch = true;
+            self.is_busy = false;
+            self.pending_phase = Some(SessionPhase::ShellReady);
+            if self.node_builder.is_some() {
+                self.finalize_node(None);
+            }
+            return;
+        }
+
         // Check if any of the last few lines look like a recognized prompt
         let has_prompt = self.stripped_buffer.lines().rev().take(5).any(|l| {
             let t = l.trim();

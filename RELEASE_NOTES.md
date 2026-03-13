@@ -1,11 +1,9 @@
-## Improved
-- Fully automated CI/CD release pipeline for all platforms
-- macOS builds are now signed and notarized in CI
-- Added Rust clippy and security auditing to CI
-- Hardened CI workflows for open-source fork safety
-- Added SHA256 checksums to release artifacts
-- Added Dependabot for automated dependency updates
+## New
+
+- Terminal now intelligently suggests commands as you type, with over 1,000 built-in commands covering AI tools, cloud CLIs, package managers, databases, and more
+- Shell integration automatically disables conflicting autosuggestion plugins so Hermes suggestions take priority
 
 ## Fixed
-- Fixed sponsor-thank-you workflow YAML
-- Fixed all Rust clippy warnings
+
+- Fixed terminal text wrapping and alignment issues caused by incorrect column size detection on startup
+- Command suggestions now appear reliably while typing instead of intermittently disappearing

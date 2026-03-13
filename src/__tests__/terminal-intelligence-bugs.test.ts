@@ -560,12 +560,12 @@ describe("Edge cases: suggestionEngine", () => {
     }
   });
 
-  it("suggest never returns more than MAX_RESULTS (6)", () => {
-    for (let i = 0; i < 20; i++) {
+  it("suggest never returns more than MAX_RESULTS (15)", () => {
+    for (let i = 0; i < 30; i++) {
       history.addCommand(`git custom-${i}`);
     }
     const results = suggest("git", null, history);
-    expect(results.length).toBeLessThanOrEqual(6);
+    expect(results.length).toBeLessThanOrEqual(15);
   });
 
   it("suggest deduplicates same command from history and index", () => {

@@ -1,12 +1,13 @@
 import "../styles/components/PluginManager.css";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { PluginManifest } from "../plugins/types";
+import type { PluginManifest, RegistryPlugin, ChangelogEntry } from "../plugins/types";
 import { downloadAndInstallPlugin, type InstallPhase } from "../plugins/pluginInstaller";
 import { hasUpdate, meetsMinVersion } from "../plugins/semver";
 import { PluginLoader } from "../plugins/PluginLoader";
 import type { PluginRuntime } from "../plugins/PluginRuntime";
 import { PluginSettingsForm } from "./PluginSettingsForm";
+import { REGISTRY_URL } from "../plugins/constants";
 
 interface InstalledPluginInfo {
 	id: string;
@@ -20,22 +21,7 @@ interface PluginEntry {
 	enabled: boolean;
 }
 
-interface RegistryPlugin {
-	id: string;
-	name: string;
-	version: string;
-	description: string;
-	author: string;
-	icon?: string;
-	category?: string;
-	downloadUrl: string;
-	minAppVersion?: string;
-	permissions?: string[];
-}
-
 type StoreTab = "installed" | "browse";
-
-const REGISTRY_URL = "https://raw.githubusercontent.com/hermes-hq/plugins/main/registry/index.json";
 
 declare const __APP_VERSION__: string;
 
@@ -62,7 +48,12 @@ const PackageIcon = () => (
 	</svg>
 );
 
-export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
+interface PluginManagerProps {
+	runtime?: PluginRuntime;
+	onConfirmUpdate?: (plugin: RegistryPlugin) => void;
+}
+
+export function PluginManager({ runtime, onConfirmUpdate }: PluginManagerProps) {
 	const [installed, setInstalled] = useState<PluginEntry[]>([]);
 	const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
 	const [pluginsDir, setPluginsDir] = useState("");
@@ -324,24 +315,13 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 						{update && <span className="pm-badge pm-badge-update">update</span>}
 					</div>
 					<div className="pm-row-action">
-						{isUpdating ? (
-							<span className="pm-progress"><span className="pm-spinner" /></span>
-						) : update ? (
-							<button
-								className="pm-btn pm-btn-update pm-btn-sm"
-								onClick={(e) => { e.stopPropagation(); handleUpdate(update); }}
-							>
-								Update
-							</button>
-						) : (
-							<button
-								className="pm-btn pm-btn-sm"
-								onClick={(e) => { e.stopPropagation(); handleToggleEnabled(p.manifest.id, p.enabled); }}
-								disabled={isToggling}
-							>
-								{p.enabled ? "Disable" : "Enable"}
-							</button>
-						)}
+						<button
+							className="pm-btn pm-btn-sm"
+							onClick={(e) => { e.stopPropagation(); handleToggleEnabled(p.manifest.id, p.enabled); }}
+							disabled={isToggling}
+						>
+							{p.enabled ? "Disable" : "Enable"}
+						</button>
 					</div>
 				</div>
 				{isExpanded && (
@@ -361,6 +341,29 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 								))}
 							</div>
 						)}
+						{update && registryInfo?.changelog && registryInfo.changelog.length > 0 && (() => {
+							const newEntries = registryInfo.changelog!.filter(
+								(entry: ChangelogEntry) => hasUpdate(p.manifest.version, entry.version)
+							);
+							if (newEntries.length === 0) return null;
+							return (
+								<div className="pm-changelog">
+									<div className="pm-changelog-title">What's new in v{update.version}</div>
+									{newEntries.map((entry: ChangelogEntry) => (
+										<div key={entry.version} className="pm-changelog-entry">
+											{newEntries.length > 1 && (
+												<div className="pm-changelog-version">v{entry.version} &middot; {entry.date}</div>
+											)}
+											<ul className="pm-changelog-list">
+												{entry.changes.map((change: string, i: number) => (
+													<li key={i}>{change}</li>
+												))}
+											</ul>
+										</div>
+									))}
+								</div>
+							);
+						})()}
 						{p.manifest.contributes.settings && Object.keys(p.manifest.contributes.settings).length > 0 && (
 							<PluginSettingsForm
 								pluginId={p.manifest.id}
@@ -377,7 +380,13 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 								{p.enabled ? "Disable" : "Enable"}
 							</button>
 							{update && !isUpdating && (
-								<button className="pm-btn pm-btn-update" onClick={() => handleUpdate(update)}>
+								<button className="pm-btn pm-btn-update" onClick={() => {
+									if (onConfirmUpdate) {
+										onConfirmUpdate(update);
+									} else {
+										handleUpdate(update);
+									}
+								}}>
 									Update to v{update.version}
 								</button>
 							)}
@@ -450,6 +459,16 @@ export function PluginManager({ runtime }: { runtime?: PluginRuntime }) {
 								{p.permissions.map(perm => (
 									<span key={perm} className="pm-detail-perm">{perm}</span>
 								))}
+							</div>
+						)}
+						{p.changelog && p.changelog.length > 0 && (
+							<div className="pm-changelog">
+								<div className="pm-changelog-title">Latest changes (v{p.changelog[0].version})</div>
+								<ul className="pm-changelog-list">
+									{p.changelog[0].changes.map((change: string, i: number) => (
+										<li key={i}>{change}</li>
+									))}
+								</ul>
 							</div>
 						)}
 						{!compatible && (

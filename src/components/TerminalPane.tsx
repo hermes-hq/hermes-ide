@@ -1,11 +1,12 @@
 import "../styles/components/TerminalPane.css";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { detectProject } from "../api/projects";
 import {
   attach, detach, has, showGhostText, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,
-  getHistoryProvider,
+  getHistoryProvider, refitActive,
+  acceptSuggestionAtIndex, selectSuggestion,
 } from "../terminal/TerminalPool";
 import { useExecutionMode, useAutonomousSettings, useSession } from "../state/SessionContext";
 import { SuggestionOverlay, type SuggestionState } from "../terminal/intelligence/SuggestionOverlay";
@@ -67,22 +68,41 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     return () => { detach(sessionId); };
   }, [sessionId]);
 
-  // Handle resize when container size changes (debounced)
+  // Handle resize when container size changes (debounced).
+  // Uses double-rAF to ensure CSS layout has settled before measuring.
   useEffect(() => {
     if (!viewportRef.current) return;
     let resizeTimer: ReturnType<typeof setTimeout>;
+
+    const doRefit = () => {
+      // Double-rAF: first frame triggers layout, second frame measures it.
+      // This is necessary because percentage-based CSS heights may not resolve
+      // within the same frame that triggered the ResizeObserver.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          refitActive();
+        });
+      });
+    };
+
     const observer = new ResizeObserver(() => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        if (has(sessionId) && viewportRef.current) {
-          attach(sessionId, viewportRef.current);
-        }
-      }, 100);
+      resizeTimer = setTimeout(doRefit, 100);
     });
     observer.observe(viewportRef.current);
+
+    // Fallback: also listen for window resize events.
+    // ResizeObserver can miss some cases (e.g. window restore from minimized).
+    const onWindowResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(doRefit, 100);
+    };
+    window.addEventListener("resize", onWindowResize);
+
     return () => {
       clearTimeout(resizeTimer);
       observer.disconnect();
+      window.removeEventListener("resize", onWindowResize);
     };
   }, [sessionId]);
 
@@ -160,6 +180,14 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     }
   }, [phase, sessionId]);
 
+  const handleSuggestionSelect = useCallback((index: number) => {
+    selectSuggestion(sessionId, index);
+  }, [sessionId]);
+
+  const handleSuggestionAccept = useCallback((index: number) => {
+    acceptSuggestionAtIndex(sessionId, index);
+  }, [sessionId]);
+
   const showLoading = !ready && (phase === "creating" || phase === "initializing");
   const phaseLabel = phase === "creating" ? "Spawning shell..." :
                      phase === "initializing" ? "Starting shell..." :
@@ -185,7 +213,11 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       <div className="terminal-viewport" ref={viewportRef} />
       {tintStyle && <div className="terminal-bg-tint" style={tintStyle} />}
       {suggestionState && (
-        <SuggestionOverlay state={suggestionState} />
+        <SuggestionOverlay
+          state={suggestionState}
+          onSelect={handleSuggestionSelect}
+          onAccept={handleSuggestionAccept}
+        />
       )}
     </div>
   );

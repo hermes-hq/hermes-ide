@@ -37,7 +37,7 @@ cd "$SCRIPT_DIR/.."
 VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
 TAG="v$VERSION"
 PRIVATE_REPO="hermes-hq/hermes-ide"
-PUBLIC_REPO="hermes-hq/releases"
+PUBLIC_REPO="hermes-hq/hermes-ide"
 
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'

@@ -4,11 +4,45 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Project } from "../hooks/useSessionProjects";
 import { CreateSessionOpts } from "../state/SessionContext";
 import { getProjects, createProject, deleteProject } from "../api/projects";
-import { getSessions } from "../api/sessions";
+import { getSessions, sshListTmuxSessions } from "../api/sessions";
+import { getSetting, setSetting } from "../api/settings";
+import type { TmuxSessionEntry } from "../types/session";
 import { gitListBranchesForRealm } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector } from "./SessionBranchSelector";
 import { SESSION_COLORS } from "./SessionList";
+
+// ─── SSH Connection History ──────────────────────────────────────────
+
+export interface SshHistoryEntry {
+  host: string;
+  user: string;
+  port: number;
+  lastUsed: string;
+}
+
+const SSH_HISTORY_KEY = "ssh_connection_history";
+const SSH_HISTORY_MAX = 10;
+
+export function parseSshHistory(json: string): SshHistoryEntry[] {
+  try {
+    const arr = JSON.parse(json);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addToSshHistory(
+  existing: SshHistoryEntry[],
+  entry: SshHistoryEntry,
+  maxEntries = SSH_HISTORY_MAX,
+): SshHistoryEntry[] {
+  const filtered = existing.filter(
+    (e) => !(e.host === entry.host && e.user === entry.user && e.port === entry.port),
+  );
+  return [entry, ...filtered].slice(0, maxEntries);
+}
 
 const AI_PROVIDERS = [
   { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
@@ -26,7 +60,7 @@ const AUTO_APPROVE_FLAGS: Record<string, { flag: string; description: string }> 
 };
 
 // Internal step identifiers (not displayed to user)
-type Step = "projects" | "branch" | "ai" | "confirm";
+type Step = "projects" | "branch" | "ai" | "tmux" | "confirm";
 
 interface SessionCreatorProps {
   onClose: () => void;
@@ -63,6 +97,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [sshHost, setSshHost] = useState("");
   const [sshUser, setSshUser] = useState("");
   const [sshPort, setSshPort] = useState("22");
+  const [sshHistory, setSshHistory] = useState<SshHistoryEntry[]>([]);
+
+  // Tmux session discovery state
+  const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionEntry[]>([]);
+  const [tmuxLoading, setTmuxLoading] = useState(false);
+  const [tmuxError, setTmuxError] = useState<string | null>(null);
+  const [selectedTmuxSession, setSelectedTmuxSession] = useState<string | null>(null);
+  const [tmuxAvailable, setTmuxAvailable] = useState(true);
+  const [newTmuxSessionName, setNewTmuxSessionName] = useState("");
+  const [showNewTmuxInput, setShowNewTmuxInput] = useState(false);
 
   // Color selection state — no color by default
   const [selectedColor, setSelectedColor] = useState<string>("");
@@ -85,7 +129,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
 
   // Compute ordered steps for display
   const orderedSteps = useMemo<Step[]>(() => {
-    if (connectionType === "ssh") return ["projects", "confirm"];
+    if (connectionType === "ssh") return ["projects", "tmux", "confirm"];
     const steps: Step[] = ["projects"];
     if (showBranchStep) steps.push("branch");
     steps.push("ai", "confirm");
@@ -113,6 +157,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     getProjects()
       .then((r) => setAllProjects(r))
       .catch((err) => console.warn("[SessionCreator] Failed to load projects:", err));
+    getSetting(SSH_HISTORY_KEY)
+      .then((json) => {
+        const history = parseSshHistory(json);
+        console.log("[SessionCreator] Loaded SSH history:", history.length, "entries");
+        setSshHistory(history);
+      })
+      .catch((err) => console.warn("[SessionCreator] Failed to load SSH history:", err));
     getSessions()
       .then((sessions) => {
         const groups = [...new Set(sessions.map((s) => s.group).filter((g): g is string => !!g))].sort();
@@ -132,6 +183,36 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       })
       .catch((err) => console.warn("[SessionCreator] Failed to load sessions:", err));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Discover tmux sessions when entering the tmux step.
+  // If tmux is not installed, skip straight to confirm.
+  useEffect(() => {
+    if (step !== "tmux" || !sshHost.trim()) return;
+    setTmuxLoading(true);
+    setTmuxError(null);
+    setTmuxAvailable(true);
+    sshListTmuxSessions(sshHost.trim(), parseInt(sshPort) || 22, sshUser || undefined)
+      .then((sessions) => {
+        console.log("[SessionCreator] Discovered tmux sessions:", sessions);
+        setTmuxSessions(sessions);
+        setTmuxLoading(false);
+      })
+      .catch((err) => {
+        console.warn("[SessionCreator] tmux discovery failed:", err);
+        const msg = String(err);
+        if (msg.includes("not installed")) {
+          // tmux not available — skip this step entirely
+          setTmuxAvailable(false);
+          setTmuxSessions([]);
+          setSelectedTmuxSession(null);
+          setTmuxLoading(false);
+          setStep("confirm");
+        } else {
+          setTmuxError(msg);
+          setTmuxLoading(false);
+        }
+      });
+  }, [step, sshHost, sshPort, sshUser]);
 
   useEffect(() => {
     if (step === "projects") searchRef.current?.focus();
@@ -248,8 +329,11 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       const firstProjectPath = selectedProjectIds.length > 0
         ? allProjects.find((r) => r.id === selectedProjectIds[0])?.path
         : undefined;
+      const sshLabel = selectedTmuxSession
+        ? `${sshUser || "ssh"}@${sshHost} [${selectedTmuxSession}]`
+        : `${sshUser || "ssh"}@${sshHost}`;
       await onCreate({
-        label: label || (connectionType === "ssh" ? `${sshUser || "ssh"}@${sshHost}` : undefined),
+        label: label || (connectionType === "ssh" ? sshLabel : undefined),
         description: description || undefined,
         group: selectedGroup || undefined,
         color: selectedColor,
@@ -262,7 +346,21 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         sshHost: connectionType === "ssh" ? sshHost : undefined,
         sshPort: connectionType === "ssh" ? (parseInt(sshPort) || 22) : undefined,
         sshUser: connectionType === "ssh" ? (sshUser || undefined) : undefined,
+        tmuxSession: connectionType === "ssh" ? (selectedTmuxSession || undefined) : undefined,
       });
+      // Save SSH connection to history
+      if (connectionType === "ssh" && sshHost.trim()) {
+        const entry: SshHistoryEntry = {
+          host: sshHost.trim(),
+          user: sshUser.trim() || "",
+          port: parseInt(sshPort) || 22,
+          lastUsed: new Date().toISOString(),
+        };
+        const updated = addToSshHistory(sshHistory, entry);
+        console.log("[SessionCreator] Saving SSH history:", updated.length, "entries");
+        setSetting(SSH_HISTORY_KEY, JSON.stringify(updated))
+          .catch((err) => console.warn("[SessionCreator] Failed to save SSH history:", err));
+      }
     } finally {
       setCreating(false);
     }
@@ -367,6 +465,31 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
 
             {connectionType === "ssh" && (
               <div className="session-creator-ssh-fields">
+                {sshHistory.length > 0 && !sshHost && (
+                  <div className="session-creator-ssh-history">
+                    <span className="session-creator-ssh-history-label">Recent</span>
+                    <div className="session-creator-ssh-history-list">
+                      {sshHistory.map((h, i) => (
+                        <button
+                          key={`${h.host}-${h.user}-${h.port}-${i}`}
+                          className="session-creator-ssh-history-item"
+                          onClick={() => {
+                            setSshHost(h.host);
+                            setSshUser(h.user);
+                            setSshPort(String(h.port));
+                          }}
+                        >
+                          <span className="session-creator-ssh-history-host">
+                            {h.user ? `${h.user}@` : ""}{h.host}
+                          </span>
+                          {h.port !== 22 && (
+                            <span className="session-creator-ssh-history-port">:{h.port}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <input
                   ref={searchRef}
                   className="command-palette-input"
@@ -534,6 +657,111 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           />
         )}
 
+        {/* Tmux session picker (SSH only) */}
+        {step === "tmux" && (
+          <div className="session-creator-body">
+            <div className="session-creator-section-title">tmux Sessions</div>
+            {tmuxLoading && (
+              <div className="command-palette-empty">Connecting to {sshHost}...</div>
+            )}
+            {tmuxError && (
+              <div className="command-palette-empty">
+                Failed to discover tmux sessions: {tmuxError}
+              </div>
+            )}
+            {!tmuxLoading && !tmuxError && tmuxAvailable && (
+              <>
+              <div className="session-creator-list">
+                {tmuxSessions.map((ts) => (
+                  <div
+                    key={ts.name}
+                    className={`project-picker-item ${selectedTmuxSession === ts.name ? "project-picker-item-attached" : ""}`}
+                    onClick={() => { setSelectedTmuxSession(ts.name); setShowNewTmuxInput(false); }}
+                  >
+                    <span className="project-picker-check">
+                      {selectedTmuxSession === ts.name ? "[x]" : "[ ]"}
+                    </span>
+                    <div className="project-picker-info">
+                      <div className="project-picker-name">{ts.name}</div>
+                      <div className="project-picker-path">
+                        {ts.windows} window{ts.windows !== 1 ? "s" : ""}
+                        {ts.attached ? " (attached)" : ""}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {/* Create new tmux session */}
+                {!showNewTmuxInput ? (
+                  <div
+                    className="project-picker-item"
+                    onClick={() => { setShowNewTmuxInput(true); setNewTmuxSessionName(""); }}
+                  >
+                    <span className="project-picker-check" style={{ opacity: 0.5 }}>+</span>
+                    <div className="project-picker-info">
+                      <div className="project-picker-name">New tmux session</div>
+                      <div className="project-picker-path">Create a new persistent session</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="project-picker-item project-picker-item-attached">
+                    <span className="project-picker-check">[x]</span>
+                    <div className="project-picker-info" style={{ width: "100%" }}>
+                      <input
+                        className="command-palette-input"
+                        autoFocus
+                        placeholder="Session name..."
+                        value={newTmuxSessionName}
+                        onChange={(e) => {
+                          setNewTmuxSessionName(e.target.value);
+                          // Keep selectedTmuxSession in sync so Next is enabled
+                          setSelectedTmuxSession(e.target.value.trim() || null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter" && newTmuxSessionName.trim()) {
+                            setSelectedTmuxSession(newTmuxSessionName.trim());
+                            setShowNewTmuxInput(false);
+                          }
+                          if (e.key === "Escape") {
+                            setShowNewTmuxInput(false);
+                            setSelectedTmuxSession(null);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (newTmuxSessionName.trim()) {
+                            setSelectedTmuxSession(newTmuxSessionName.trim());
+                          }
+                          setShowNewTmuxInput(false);
+                        }}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <span className="settings-hint-inline">
+                tmux sessions persist on the server — reconnect anytime to pick up where you left off
+              </span>
+              </>
+            )}
+            <div className="session-creator-actions">
+              <button className="session-creator-btn-secondary" onClick={goBack}>
+                Back
+              </button>
+              <button
+                className="session-creator-btn-primary"
+                onClick={goNext}
+                disabled={tmuxLoading || !selectedTmuxSession}
+              >
+                {tmuxLoading ? "Discovering..." : "Next"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Step 3: Pick AI Engine */}
         {step === "ai" && (
           <div className="session-creator-body" ref={aiStepRef} tabIndex={-1} style={{ outline: "none" }}>
@@ -611,6 +839,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">Host:</span>
                     <span className="session-creator-summary-value">{sshUser ? `${sshUser}@` : ""}{sshHost}{sshPort !== "22" ? `:${sshPort}` : ""}</span>
+                  </div>
+                  <div className="session-creator-summary-row">
+                    <span className="session-creator-summary-label">tmux:</span>
+                    <span className="session-creator-summary-value">{selectedTmuxSession || "None (plain shell)"}</span>
                   </div>
                 </>
               ) : (

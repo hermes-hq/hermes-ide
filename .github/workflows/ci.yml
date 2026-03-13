@@ -3,81 +3,155 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".github/RELEASE_TEMPLATE.md"
+      - ".github/dependabot.yml"
+      - ".github/FUNDING.yml"
+      - "SPONSORS.md"
+      - "scripts/release-*.sh"
+      - "scripts/generate-changelog.sh"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".github/RELEASE_TEMPLATE.md"
+      - ".github/dependabot.yml"
+      - ".github/FUNDING.yml"
+      - "SPONSORS.md"
+      - "scripts/release-*.sh"
+      - "scripts/generate-changelog.sh"
+
+# Cancel in-progress runs for the same branch/PR — no point running stale commits
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
 jobs:
-  typecheck:
-    name: TypeScript
+  # ── Detect what changed to skip irrelevant jobs ──────────────────────
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      rust: ${{ steps.filter.outputs.rust }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'src/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.json'
+              - 'vite.config.ts'
+              - 'index.html'
+            rust:
+              - 'src-tauri/**'
+            ci:
+              - '.github/workflows/ci.yml'
+
+  # ── Frontend: TypeScript + Tests (merged into one job) ───────────────
+  frontend:
+    name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
       - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx tsc --noEmit
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npx vitest run
 
-  test:
-    name: Frontend Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx vitest run
-
+  # ── Rust Formatting ──────────────────────────────────────────────────
   rust-fmt:
     name: Rust Formatting
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - name: Check formatting
         run: cd src-tauri && cargo fmt --check
 
+  # ── Rust Clippy ──────────────────────────────────────────────────────
   rust-clippy:
     name: Rust Clippy
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        with:
+          fetch-depth: 1
+      - name: Cache apt packages
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          version: 1.0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          shared-key: ci
+          shared-key: ci-clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run clippy
         run: cd src-tauri && cargo clippy -- -D warnings
 
+  # ── Rust Security Audit (main only) ─────────────────────────────────
   rust-audit:
     name: Rust Security Audit
+    needs: changes
+    # Only on main pushes + only when Rust deps changed
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
-    # Allow failures initially — there may be existing advisories we haven't addressed yet.
-    # Remove continue-on-error once all known advisories are resolved or explicitly ignored.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-          shared-key: ci
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo-audit binary
+        id: cache-audit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ runner.arch }}
       - name: Install cargo-audit
+        if: steps.cache-audit.outputs.cache-hit != 'true'
         run: cargo install cargo-audit
       - name: Run security audit
         run: cd src-tauri && cargo audit

@@ -168,6 +168,33 @@
   opacity: 0.5;
 }
 
+/* ─── File Type Icon Badges ───────────────────────────────────────── */
+
+.file-tree-icon-badge {
+  font-size: 8px;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 18px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  letter-spacing: -0.02em;
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+
+.file-icon-blue { background: color-mix(in srgb, var(--blue, #61afef) 20%, transparent); color: var(--blue, #61afef); }
+.file-icon-yellow { background: color-mix(in srgb, var(--yellow, #e5c07b) 20%, transparent); color: var(--yellow, #e5c07b); }
+.file-icon-green { background: color-mix(in srgb, var(--green, #98c379) 20%, transparent); color: var(--green, #98c379); }
+.file-icon-orange { background: color-mix(in srgb, var(--orange, #d19a66) 20%, transparent); color: var(--orange, #d19a66); }
+.file-icon-red { background: color-mix(in srgb, var(--red, #e06c75) 20%, transparent); color: var(--red, #e06c75); }
+.file-icon-purple { background: color-mix(in srgb, var(--magenta, #c678dd) 20%, transparent); color: var(--magenta, #c678dd); }
+.file-icon-cyan { background: color-mix(in srgb, var(--cyan, #56b6c2) 20%, transparent); color: var(--cyan, #56b6c2); }
+.file-icon-pink { background: color-mix(in srgb, var(--magenta, #c678dd) 20%, transparent); color: var(--magenta, #c678dd); }
+.file-icon-dim { background: var(--bg-2); color: var(--text-3); }
+
 /* ─── File Explorer State Classes ─────────────────────────────────────── */
 
 .file-explorer-refresh {

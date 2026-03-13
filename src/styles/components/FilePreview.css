@@ -1,0 +1,161 @@
+/* ─── File Preview Panel ───────────────────────────────────────────── */
+
+.file-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.file-preview-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 32px;
+}
+
+.file-preview-back {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-md);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.file-preview-back:hover {
+  color: var(--text-0);
+  background: var(--bg-hover);
+}
+
+.file-preview-filename {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-0);
+  font-weight: 500;
+  font-size: var(--text-sm);
+}
+
+.file-preview-lang {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
+.file-preview-open-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+  transition: background 0.1s, border-color 0.1s;
+}
+.file-preview-open-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text-0);
+}
+
+/* ─── Content Area ─────────────────────────────────────────────────── */
+
+.file-preview-content {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-0);
+}
+
+.file-preview-code {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  tab-size: 4;
+}
+
+.file-preview-line-numbers {
+  padding: var(--space-2) 0;
+  text-align: right;
+  color: var(--text-3);
+  user-select: none;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  min-width: 40px;
+}
+
+.file-preview-line-number {
+  padding: 0 var(--space-2);
+  display: block;
+}
+
+.file-preview-lines {
+  flex: 1;
+  padding: var(--space-2) 0;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.file-preview-line {
+  padding: 0 var(--space-3);
+  white-space: pre;
+  color: var(--text-1);
+}
+
+/* ─── Syntax Tokens ────────────────────────────────────────────────── */
+
+.syn-keyword { color: var(--magenta, #c678dd); }
+.syn-string { color: var(--green, #98c379); }
+.syn-comment { color: var(--text-3); font-style: italic; }
+.syn-number { color: var(--yellow, #e5c07b); }
+.syn-function { color: var(--blue, #61afef); }
+.syn-type { color: var(--cyan, #56b6c2); }
+.syn-operator { color: var(--text-2); }
+.syn-punctuation { color: var(--text-2); }
+.syn-property { color: var(--red, #e06c75); }
+.syn-tag { color: var(--red, #e06c75); }
+.syn-attribute { color: var(--yellow, #e5c07b); }
+
+/* ─── States ───────────────────────────────────────────────────────── */
+
+/* ─── Main Area Container ──────────────────────────────────────────── */
+
+.file-preview-main-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0;
+}
+
+.file-preview-main-container .file-preview {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* ─── States ───────────────────────────────────────────────────────── */
+
+.file-preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  padding: var(--space-4);
+  text-align: center;
+  line-height: 1.6;
+}

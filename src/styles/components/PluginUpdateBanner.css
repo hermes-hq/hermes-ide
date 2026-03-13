@@ -1,0 +1,246 @@
+/* ─── Plugin Update Banner ───────────────────────────────── */
+
+.pub {
+  flex-shrink: 0;
+  z-index: 50;
+  animation: pub-slideDown 0.2s ease-out;
+}
+
+@keyframes pub-slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pub-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.pub-bar-success {
+  background: color-mix(in srgb, var(--green) 8%, var(--bg-2));
+}
+
+.pub-icon {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.pub-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pub-icon-success {
+  color: var(--green);
+}
+
+.pub-text {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pub-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pub-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.pub-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+  border-color: var(--border-light);
+}
+
+.pub-btn-primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pub-btn-primary:hover {
+  background: var(--accent);
+  color: var(--bg-0);
+}
+
+.pub-btn-sm {
+  font-size: 8px;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+}
+
+.pub-close {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.1s;
+}
+
+.pub-close:hover {
+  color: var(--text-0);
+}
+
+/* ─── Details Panel ──────────────────────────────────────── */
+
+.pub-details {
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+  animation: pm-expand 0.12s ease-out;
+}
+
+.pub-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pub-detail-row:last-child {
+  border-bottom: none;
+}
+
+.pub-detail-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pub-detail-name {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-0);
+  white-space: nowrap;
+}
+
+.pub-detail-version {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.pub-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pub-detail-status {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.pub-result-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pub-result-success {
+  background: var(--green);
+}
+
+.pub-result-fail {
+  background: var(--red);
+}
+
+.pub-detail-changelog {
+  width: 100%;
+  padding-left: 0;
+}
+
+.pub-detail-change {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  padding-left: 4px;
+  line-height: 1.6;
+}
+
+/* ─── Spinner ─────────────────────────────────────────────── */
+
+.pub-spinner-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+@keyframes pub-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pub-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border-light);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pub-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+
+.pub-details::-webkit-scrollbar {
+  width: 4px;
+}
+
+.pub-details::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pub-details::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}

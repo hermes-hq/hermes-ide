@@ -14,7 +14,7 @@ import {
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
 import { createWorktree } from "../api/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
-import { createTerminal, destroy as destroyTerminal, writeScrollback } from "../terminal/TerminalPool";
+import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
 import { applyTheme } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
 import { initNotifications, notifyLongRunningDone } from "../utils/notifications";
@@ -112,6 +112,7 @@ interface SessionState {
     searchPanelOpen: boolean;
     composerOpen: boolean;
     activeLeftTab: "sessions" | "terminal" | "processes" | "git" | "files" | "search";
+    filePreview: { realmId: string; filePath: string } | null;
   };
 }
 
@@ -524,6 +525,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "CLOSE_COMPOSER":
       return state.ui.composerOpen ? { ...state, ui: { ...state.ui, composerOpen: false } } : state;
 
+    // ─── File preview actions ─────────────────────────────────────────
+    case "SET_FILE_PREVIEW":
+      return { ...state, ui: { ...state.ui, filePreview: { realmId: action.realmId, filePath: action.filePath } } };
+    case "CLOSE_FILE_PREVIEW":
+      return state.ui.filePreview ? { ...state, ui: { ...state.ui, filePreview: null } } : state;
+
     // ─── Workspace restore actions ───────────────────────────────────
     case "RESTORE_LAYOUT":
       return {
@@ -569,6 +576,7 @@ export const initialState: SessionState = {
     searchPanelOpen: false,
     composerOpen: false,
     activeLeftTab: "terminal" as const,
+    filePreview: null,
   },
 };
 
@@ -744,8 +752,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const oldToNew = new Map<string, string>();
           for (const saved of workspace.sessions) {
             try {
+              // Pre-generate ID and set up listener before PTY starts
+              // (same race-prevention as createSession above)
+              const restoreId = crypto.randomUUID();
+              await createTerminal(restoreId, saved.color);
+
+              const restoreDims = estimateInitialDimensions();
               const newSession = await apiCreateSession({
-                sessionId: null,
+                sessionId: restoreId,
                 label: saved.label,
                 workingDirectory: saved.working_directory,
                 color: saved.color,
@@ -756,8 +770,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshHost: saved.ssh_info?.host || null,
                 sshPort: saved.ssh_info?.port || null,
                 sshUser: saved.ssh_info?.user || null,
+                tmuxSession: saved.ssh_info?.tmux_session || null,
+                initialRows: restoreDims.rows,
+                initialCols: restoreDims.cols,
               });
-              await createTerminal(newSession.id, newSession.color);
 
               // Restore description and group — await them to ensure they persist
               const metaPromises: Promise<void>[] = [];
@@ -834,15 +850,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const createSession = useCallback(async (opts?: CreateSessionOpts) => {
+    // Always pre-generate the session ID so we can set up the terminal
+    // output listener BEFORE the PTY starts.  This prevents a race where
+    // early output (SSH banner, tmux alternate-screen switch) is lost
+    // because no listener exists yet — which garbles tmux rendering.
+    const preSessionId = opts?.sessionId || crypto.randomUUID();
     try {
-      // If a branch name and project (realm) are provided, pre-generate a
-      // session ID and create the worktree first so the backend can look it
-      // up and start the terminal in the worktree directory.
-      let preSessionId = opts?.sessionId || null;
+
       if (opts?.branchName && opts?.projectIds?.length) {
-        if (!preSessionId) {
-          preSessionId = crypto.randomUUID();
-        }
         try {
           await createWorktree(
             preSessionId,
@@ -854,6 +869,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           console.warn("[SessionContext] Failed to create worktree, session will use default cwd:", wtErr);
         }
       }
+
+      // Set up the terminal + output listener BEFORE creating the backend
+      // session so no PTY output events are missed.
+      await createTerminal(preSessionId, opts?.color || "");
+
+      // Estimate terminal dimensions from window size and font settings so the
+      // PTY starts at the correct size.  This eliminates the SIGWINCH race where
+      // the shell starts at 80x24 and misses the initial resize from attach().
+      const initialDims = estimateInitialDimensions();
 
       const session = await apiCreateSession({
         sessionId: preSessionId,
@@ -867,8 +891,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshHost: opts?.sshHost || null,
         sshPort: opts?.sshPort || null,
         sshUser: opts?.sshUser || null,
+        tmuxSession: opts?.tmuxSession || null,
+        initialRows: initialDims.rows,
+        initialCols: initialDims.cols,
       });
-      await createTerminal(session.id, session.color);
 
       // Restore scrollback from previous session if available
       if (opts?.restoreFromId) {
@@ -897,6 +923,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return session;
     } catch (err) {
       console.error("Failed to create session:", err);
+      // Clean up the pre-created terminal if backend session creation failed
+      destroyTerminal(preSessionId);
       return null;
     }
   }, []);

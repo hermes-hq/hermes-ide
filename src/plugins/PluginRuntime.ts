@@ -30,7 +30,6 @@ export class PluginRuntime {
 	private panelComponents = new Map<string, React.ComponentType<PluginPanelProps>>();
 	private statusBarOverrides = new Map<string, { text?: string; tooltip?: string; visible?: boolean }>();
 	private changeListeners = new Set<() => void>();
-	private settingsListeners = new Map<string, Map<string, Set<(value: string | number | boolean) => void>>>();
 	private eventListeners = new Map<HermesEvent, Set<(...args: unknown[]) => void>>();
 	private callbacks: PluginAPICallbacks;
 
@@ -164,13 +163,9 @@ export class PluginRuntime {
 	// ─── Settings & Events ────────────────────────────────────
 
 	notifySettingChanged(pluginId: string, key: string, value: string | number | boolean): void {
-		const pluginListeners = this.settingsListeners.get(pluginId);
-		if (!pluginListeners) return;
-		const keyListeners = pluginListeners.get(key);
-		if (!keyListeners) return;
-		for (const cb of keyListeners) {
-			try { cb(value); } catch { /* swallow */ }
-		}
+		const entry = this.plugins.get(pluginId);
+		if (!entry?.api) return;
+		entry.api._notifySettingChanged(key, value);
 	}
 
 	private subscribeEvent(event: HermesEvent, callback: (...args: unknown[]) => void): { dispose(): void } {
@@ -200,12 +195,24 @@ export class PluginRuntime {
 
 	// ─── Query Methods ─────────────────────────────────────────
 
-	getAllCommands(): (PluginCommandContribution & { pluginId: string })[] {
-		const result: (PluginCommandContribution & { pluginId: string })[] = [];
+	getAllCommands(): (PluginCommandContribution & { pluginId: string; pluginName: string })[] {
+		const result: (PluginCommandContribution & { pluginId: string; pluginName: string })[] = [];
 		for (const [id, entry] of this.plugins) {
 			if (entry.status !== "active") continue;
+			const pluginName = entry.module.manifest.name;
 			for (const cmd of entry.module.manifest.contributes.commands ?? []) {
-				result.push({ ...cmd, pluginId: id });
+				result.push({ ...cmd, pluginId: id, pluginName });
+			}
+		}
+		return result;
+	}
+
+	getPluginsWithSettings(): { pluginId: string; pluginName: string }[] {
+		const result: { pluginId: string; pluginName: string }[] = [];
+		for (const [id, entry] of this.plugins) {
+			if (entry.status !== "active") continue;
+			if (entry.module.manifest.contributes.settings && Object.keys(entry.module.manifest.contributes.settings).length > 0) {
+				result.push({ pluginId: id, pluginName: entry.module.manifest.name });
 			}
 		}
 		return result;

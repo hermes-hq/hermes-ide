@@ -1,7 +1,7 @@
 {
   "name": "hermes-ide",
   "private": true,
-  "version": "0.3.38",
+  "version": "0.5.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,9 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "postinstall": "patch-package",
-    "bump": "node scripts/bump-version.mjs"
+    "bump": "node scripts/bump-version.mjs",
+    "changelog": "bash scripts/generate-changelog.sh",
+    "changelog:update": "UPDATE_CHANGELOG=true bash scripts/generate-changelog.sh"
   },
   "dependencies": {
     "@aptabase/tauri": "^0.4.1",

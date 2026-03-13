@@ -3,6 +3,8 @@ pub mod analyzer;
 pub mod commands;
 pub mod models;
 pub mod patterns;
+pub mod shell_integration;
+pub mod spawn;
 
 // ─── Re-exports ─────────────────────────────────────────────────────
 // Maintain the existing public API so that `lib.rs`, `db/mod.rs`, and other
@@ -28,6 +30,13 @@ pub(crate) struct PtySession {
     pub(crate) session: Arc<StdMutex<Session>>,
     pub(crate) analyzer: Arc<StdMutex<OutputAnalyzer>>,
     pub(crate) child: Box<dyn portable_pty::Child + Send>,
+    /// Path to the PTY slave device (e.g., /dev/ttys042).
+    /// Used on macOS to send SIGINT directly to the foreground process group
+    /// when the PTY line discipline fails to convert \x03 into a signal.
+    #[cfg(target_os = "macos")]
+    pub(crate) tty_path: Option<std::path::PathBuf>,
+    /// Shell integration state — tracks temp files for cleanup on session close.
+    pub(crate) shell_integration: shell_integration::ShellIntegration,
 }
 
 pub struct PtyManager {
@@ -45,35 +54,13 @@ impl PtyManager {
 
     /// Send a lightweight context nudge to a session's PTY if an AI agent is detected.
     /// Returns true if the nudge was sent.
-    pub fn nudge_context(&mut self, session_id: &str) -> bool {
-        let pty = match self.sessions.get_mut(session_id) {
-            Some(p) => p,
-            None => return false,
-        };
-
-        let has_agent = pty
-            .session
-            .lock()
-            .ok()
-            .map(|s| s.detected_agent.is_some())
-            .unwrap_or(false);
-
-        if !has_agent {
-            return false;
-        }
-
-        let msg =
-            "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
-        if let Ok(mut w) = pty.writer.lock() {
-            let ok = w.write_all(msg.as_bytes()).is_ok() && w.flush().is_ok();
-            ok
-        } else {
-            false
-        }
-    }
-
     /// Send a versioned context nudge to a session's PTY.
     /// Deduplicates by tracking last_nudged_version on the Session.
+    ///
+    /// If the agent is busy (phase != NeedsInput), the nudge is stored as
+    /// `pending_nudge` on the Session and delivered later by the reader loop
+    /// when the phase transitions to NeedsInput.
+    ///
     /// Returns (nudge_sent, error_message).
     pub fn send_versioned_nudge(
         &self,
@@ -102,8 +89,30 @@ impl PtyManager {
             return (true, None);
         }
 
-        // Determine provider-specific nudge message
-        let provider_name = session_guard
+        // Only send the nudge when the agent is waiting for input.
+        // If the agent is busy, defer and deliver when it next becomes idle.
+        if session_guard.phase != SessionPhase::NeedsInput {
+            session_guard.pending_nudge = Some(PendingNudge {
+                version,
+                file_path: file_path.to_string(),
+            });
+            return (
+                false,
+                Some("Agent busy — nudge deferred until idle".to_string()),
+            );
+        }
+
+        Self::write_nudge(pty, &mut session_guard, version, file_path)
+    }
+
+    /// Format and write a nudge message to the PTY.
+    fn write_nudge(
+        pty: &PtySession,
+        session: &mut Session,
+        version: i64,
+        file_path: &str,
+    ) -> (bool, Option<String>) {
+        let provider_name = session
             .detected_agent
             .as_ref()
             .map(|a| a.name.clone())
@@ -111,7 +120,7 @@ impl PtyManager {
 
         let nudge_msg = match provider_name.to_lowercase().as_str() {
             "aider" => format!("/read {}\r", file_path),
-            "claude" | "claude-code" | "anthropic" => format!(
+            "claude" | "claude code" | "claude-code" | "anthropic" => format!(
                 "Read the file at {} — it contains updated project context (v{}).\r",
                 file_path, version
             ),
@@ -120,24 +129,63 @@ impl PtyManager {
                 version, file_path
             ),
             _ => format!(
-                "Context updated to v{}. Read the file at $HERMES_CONTEXT for project context.\r",
-                version
+                "Context updated to v{}. Read the file at {} for project context.\r",
+                version, file_path
             ),
         };
 
         match pty.writer.lock() {
-            Ok(mut w) => {
-                use std::io::Write;
-                match w.write_all(nudge_msg.as_bytes()) {
-                    Ok(_) => {
-                        let _ = w.flush();
-                        session_guard.last_nudged_version = version;
-                        (true, None)
-                    }
-                    Err(e) => (false, Some(format!("Write failed: {}", e))),
+            Ok(mut w) => match w.write_all(nudge_msg.as_bytes()) {
+                Ok(_) => {
+                    let _ = w.flush();
+                    session.last_nudged_version = version;
+                    (true, None)
+                }
+                Err(e) => (false, Some(format!("Write failed: {}", e))),
+            },
+            Err(e) => (false, Some(format!("Writer lock failed: {}", e))),
+        }
+    }
+
+    /// Deliver a pending nudge using a standalone writer reference
+    /// (for use inside the reader thread which doesn't have PtySession).
+    pub(crate) fn deliver_pending_nudge_with_writer(
+        writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
+        session: &mut Session,
+    ) {
+        if let Some(nudge) = session.pending_nudge.take() {
+            if session.last_nudged_version >= nudge.version {
+                return;
+            }
+
+            let provider_name = session
+                .detected_agent
+                .as_ref()
+                .map(|a| a.name.clone())
+                .unwrap_or_default();
+
+            let nudge_msg = match provider_name.to_lowercase().as_str() {
+                "aider" => format!("/read {}\r", nudge.file_path),
+                "claude" | "claude code" | "claude-code" | "anthropic" => format!(
+                    "Read the file at {} — it contains updated project context (v{}).\r",
+                    nudge.file_path, nudge.version
+                ),
+                "copilot" | "github-copilot" => format!(
+                    "@workspace Context updated to v{}. The context file is at {}.\r",
+                    nudge.version, nudge.file_path
+                ),
+                _ => format!(
+                    "Context updated to v{}. Read the file at {} for project context.\r",
+                    nudge.version, nudge.file_path
+                ),
+            };
+
+            if let Ok(mut w) = writer.lock() {
+                if w.write_all(nudge_msg.as_bytes()).is_ok() {
+                    let _ = w.flush();
+                    session.last_nudged_version = nudge.version;
                 }
             }
-            Err(e) => (false, Some(format!("Writer lock failed: {}", e))),
         }
     }
 }
@@ -384,5 +432,227 @@ mod tests {
         analyzer.apply_analysis(analysis);
         assert!(analyzer.is_busy);
         assert!(matches!(analyzer.pending_phase, Some(SessionPhase::Busy)));
+    }
+
+    // ── Prompt detection: start-of-line custom chars ──
+
+    #[test]
+    fn detects_prompt_chars_at_start_of_line() {
+        // oh-my-zsh robbyrussell theme
+        assert!(is_shell_prompt("➜  my-project git:(main) "));
+        assert!(is_shell_prompt("➜  ~ "));
+        // powerlevel10k / starship with leading indicator
+        assert!(is_shell_prompt("❯ "));
+        assert!(is_shell_prompt("❯ ~/code"));
+    }
+
+    #[test]
+    fn detects_custom_prompt_formats() {
+        // Bare prompt chars
+        assert!(is_shell_prompt("➜ "));
+        assert!(is_shell_prompt("❯"));
+        // Path context with prompt char at end
+        assert!(is_shell_prompt("~/projects ❯"));
+        assert!(is_shell_prompt("user@host ~/code ➜"));
+        // PS1 variants ending with $
+        assert!(is_shell_prompt("user@host:~/code$ "));
+    }
+
+    // ── Auto-launch lifecycle ──
+
+    #[test]
+    fn pending_ai_launch_set_on_first_prompt() {
+        let mut analyzer = OutputAnalyzer::new();
+        // Simulate an AI session: set ai_provider info
+        analyzer.pending_ai_launch = false;
+        analyzer.shell_ready = false;
+
+        // Feed a shell prompt line
+        let analysis = LineAnalysis {
+            token_update: None,
+            tool_call: None,
+            action: None,
+            phase_hint: Some(PhaseHint::PromptDetected),
+            memory_fact: None,
+        };
+        analyzer.apply_analysis(analysis);
+        // First prompt should set shell_ready and pending_ai_launch
+        assert!(analyzer.shell_ready);
+        assert!(analyzer.pending_ai_launch);
+    }
+
+    #[test]
+    fn pending_ai_launch_not_set_without_prompt() {
+        let mut analyzer = OutputAnalyzer::new();
+        analyzer.pending_ai_launch = false;
+        analyzer.shell_ready = false;
+
+        // Feed a work-started hint (not a prompt)
+        let analysis = LineAnalysis {
+            token_update: None,
+            tool_call: None,
+            action: None,
+            phase_hint: Some(PhaseHint::WorkStarted),
+            memory_fact: None,
+        };
+        analyzer.apply_analysis(analysis);
+        assert!(!analyzer.shell_ready);
+        assert!(!analyzer.pending_ai_launch);
+    }
+
+    #[test]
+    fn pending_ai_launch_not_set_on_subsequent_prompts() {
+        let mut analyzer = OutputAnalyzer::new();
+        analyzer.shell_ready = false;
+
+        // First prompt
+        let analysis = LineAnalysis {
+            token_update: None,
+            tool_call: None,
+            action: None,
+            phase_hint: Some(PhaseHint::PromptDetected),
+            memory_fact: None,
+        };
+        analyzer.apply_analysis(analysis);
+        assert!(analyzer.pending_ai_launch);
+
+        // Consume the flag
+        analyzer.pending_ai_launch = false;
+
+        // Second prompt should NOT re-set pending_ai_launch
+        let analysis2 = LineAnalysis {
+            token_update: None,
+            tool_call: None,
+            action: None,
+            phase_hint: Some(PhaseHint::PromptDetected),
+            memory_fact: None,
+        };
+        analyzer.apply_analysis(analysis2);
+        assert!(!analyzer.pending_ai_launch);
+    }
+
+    #[test]
+    fn pending_ai_launch_from_ohmyzsh_prompt() {
+        // Verify the prompt detection works for oh-my-zsh
+        assert!(is_shell_prompt("➜  my-project git:(main) "));
+    }
+
+    #[test]
+    fn pending_ai_launch_from_starship_prompt() {
+        // Verify the prompt detection works for starship
+        assert!(is_shell_prompt("~/code ❯"));
+        assert!(is_shell_prompt("~/projects ➤"));
+    }
+
+    // ── Silence fallback ──
+
+    #[test]
+    fn silence_fallback_triggers_ai_launch() {
+        let mut analyzer = OutputAnalyzer::new();
+        analyzer.is_busy = true;
+        analyzer.shell_ready = false;
+
+        analyzer.check_silence();
+
+        assert!(analyzer.shell_ready);
+        assert!(analyzer.pending_ai_launch);
+        assert!(!analyzer.is_busy);
+        assert!(matches!(
+            analyzer.pending_phase,
+            Some(SessionPhase::ShellReady)
+        ));
+    }
+
+    #[test]
+    fn silence_fallback_does_not_retrigger() {
+        let mut analyzer = OutputAnalyzer::new();
+        analyzer.is_busy = true;
+        analyzer.shell_ready = false;
+
+        // First silence → triggers fallback
+        analyzer.check_silence();
+        assert!(analyzer.pending_ai_launch);
+
+        // Consume flag, make busy again
+        analyzer.pending_ai_launch = false;
+        analyzer.is_busy = true;
+
+        // Second silence — shell_ready is already true, so fallback should NOT fire
+        analyzer.check_silence();
+        assert!(!analyzer.pending_ai_launch);
+    }
+
+    #[test]
+    fn rapid_output_before_prompt_no_premature_launch() {
+        let mut analyzer = OutputAnalyzer::new();
+        analyzer.shell_ready = false;
+
+        // Simulate rapid output (work started, not a prompt)
+        for _ in 0..10 {
+            let analysis = LineAnalysis {
+                token_update: None,
+                tool_call: None,
+                action: None,
+                phase_hint: Some(PhaseHint::WorkStarted),
+                memory_fact: None,
+            };
+            analyzer.apply_analysis(analysis);
+        }
+        // No prompt seen → no auto-launch
+        assert!(!analyzer.shell_ready);
+        assert!(!analyzer.pending_ai_launch);
+    }
+
+    // ── AI launch command coverage ──
+
+    #[test]
+    fn ai_launch_command_all_providers() {
+        use super::ai_launch_command;
+
+        // Without auto-approve
+        assert_eq!(ai_launch_command("claude", false), Some("claude".into()));
+        assert_eq!(ai_launch_command("aider", false), Some("aider".into()));
+        assert_eq!(ai_launch_command("codex", false), Some("codex".into()));
+        assert_eq!(ai_launch_command("gemini", false), Some("gemini".into()));
+        assert_eq!(
+            ai_launch_command("copilot", false),
+            Some("gh copilot".into())
+        );
+        assert_eq!(ai_launch_command("unknown", false), None);
+
+        // With auto-approve
+        assert_eq!(
+            ai_launch_command("claude", true),
+            Some("claude --dangerously-skip-permissions".into())
+        );
+        assert_eq!(ai_launch_command("aider", true), Some("aider --yes".into()));
+        assert_eq!(
+            ai_launch_command("codex", true),
+            Some("codex --full-auto".into())
+        );
+        assert_eq!(
+            ai_launch_command("gemini", true),
+            Some("gemini --yolo".into())
+        );
+        // copilot doesn't have auto-approve flag
+        assert_eq!(
+            ai_launch_command("copilot", true),
+            Some("gh copilot".into())
+        );
+    }
+
+    // ── Prompt detection after column fix ──
+
+    #[test]
+    fn prompt_detection_after_column_fix() {
+        // With PROMPT_EOL_MARK="" set, the "%" partial-line marker is gone.
+        // Verify that actual prompts are still detected.
+        assert!(is_shell_prompt("user@host:~$ "));
+        assert!(is_shell_prompt("% "));
+        assert!(is_shell_prompt("➜  project git:(main) "));
+        assert!(is_shell_prompt("~/code ❯"));
+
+        // "%" alone is a valid bare zsh prompt — it should still match.
+        assert!(is_shell_prompt("%"));
     }
 }

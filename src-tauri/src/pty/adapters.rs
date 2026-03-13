@@ -332,10 +332,14 @@ pub(crate) fn is_shell_prompt(trimmed: &str) -> bool {
     // → ❯ ➜ ▶ ╰─ λ ➤ ⟩ ⟫ ›
     let custom_prompt_chars = ['→', '❯', '➜', '▶', 'λ', '➤', '⟩', '⟫', '›'];
 
-    // Check if line starts with or contains a prompt char near the end
+    // Check if line contains a prompt char near the end OR near the start.
+    // Many themes (oh-my-zsh robbyrussell, powerlevel10k) put the indicator
+    // at the beginning of the line (e.g. "➜  dirname git:(branch)"), while
+    // others (starship, pure) put it at the end (e.g. "dirname ❯").
     let last_chars: String = trimmed.chars().rev().take(5).collect();
+    let first_chars: String = trimmed.chars().take(3).collect();
     for ch in &custom_prompt_chars {
-        if last_chars.contains(*ch) {
+        if last_chars.contains(*ch) || first_chars.contains(*ch) {
             return true;
         }
     }

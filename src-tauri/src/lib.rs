@@ -194,6 +194,9 @@ pub fn run() {
             // Clean up stale worktrees from previous sessions that no longer exist
             cleanup_stale_worktrees(&database);
 
+            // Clean up stale shell integration temp files from previous sessions
+            pty::shell_integration::cleanup_stale();
+
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
 
@@ -239,6 +242,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Session management
             pty::create_session,
+            pty::ssh_list_directory,
+            pty::ssh_read_file,
+            pty::ssh_list_tmux_sessions,
+            pty::ssh_list_tmux_windows,
+            pty::ssh_tmux_select_window,
+            pty::ssh_tmux_new_window,
+            pty::ssh_tmux_rename_window,
             pty::write_to_session,
             pty::nudge_realm_context,
             pty::resize_session,
@@ -254,6 +264,7 @@ pub fn run() {
             pty::add_workspace_path,
             pty::update_session_group,
             pty::get_available_shells,
+            pty::is_shell_foreground,
             // Terminal Command Intelligence
             pty::detect_shell_environment,
             pty::read_shell_history,
@@ -328,6 +339,8 @@ pub fn run() {
             git::git_pull,
             git::git_diff,
             git::git_open_file,
+            git::read_file_content,
+            git::open_file_in_editor,
             // Git branch management
             git::git_list_branches,
             git::git_list_branches_for_realm,

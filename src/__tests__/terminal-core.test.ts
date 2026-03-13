@@ -22,6 +22,21 @@ const SRC: string = [
   readFileSync(new URL("../terminal/ghostText.ts", import.meta.url), "utf-8"),
 ].join("\n");
 
+const SUGGESTION_OVERLAY_SRC: string = readFileSync(
+  new URL("../terminal/intelligence/SuggestionOverlay.tsx", import.meta.url),
+  "utf-8",
+);
+
+const TERMINAL_PANE_SRC: string = readFileSync(
+  new URL("../components/TerminalPane.tsx", import.meta.url),
+  "utf-8",
+);
+
+const TERMINAL_PANE_CSS: string = readFileSync(
+  new URL("../styles/components/TerminalPane.css", import.meta.url),
+  "utf-8",
+);
+
 const PROVIDER_ACTIONS: string = readFileSync(
   new URL("../components/ProviderActionsBar.tsx", import.meta.url),
   "utf-8",
@@ -137,7 +152,9 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
     expect(SRC).not.toContain("_lastOnDataValue");
     expect(SRC).not.toContain("_lastOnDataTime");
     expect(SRC).not.toMatch(/now - _lastOnData/);
-    expect(SRC).not.toMatch(/< 10/); // No 10ms window
+    // No 10ms dedup window — match the timing pattern, not bare "< 10"
+    // (the dimension guard "cols < 10" is unrelated)
+    expect(SRC).not.toMatch(/now\s*-\s*\w+\s*<\s*10/);
   });
 
   it("NO heuristic-based dedup exists (onData is clean)", () => {
@@ -500,7 +517,7 @@ describe("Invariant 11: Base64 decode failure drops data (no garbled terminal ou
 
 describe("Invariant 12: acceptSuggestion sets inputBuffer to selected text", () => {
   it("acceptSuggestion updates inputBuffer to selected.text (not empty)", () => {
-    const fn = SRC.match(/function acceptSuggestion[\s\S]*?\n\}/);
+    const fn = SRC.match(/function acceptSuggestion\(sessionId: string\): void[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
     const body = fn![0];
     // Must set inputBuffer to selected.text, not just ""
@@ -537,5 +554,235 @@ describe("Invariant 14: updateSettings clears ghost overlays on font/theme chang
     expect(fn).not.toBeNull();
     const body = fn![0];
     expect(body).toContain("clearGhostText(sessionId)");
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT 23: Ctrl+C → SIGINT via container capture-phase listener
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// WKWebView on macOS may consume Ctrl+C at the native level before
+// xterm.js's textarea receives the keydown event. To guarantee SIGINT
+// reaches the PTY, we intercept Ctrl+C on the container element in the
+// DOM capture phase — the earliest point JavaScript can see the event.
+
+describe("Invariant 23: Ctrl+C → SIGINT via container capture-phase listener", () => {
+  // Extract the container keydown capture listener block from pool.ts
+  function getCtrlCListenerBlock(): string {
+    const POOL_SRC: string = SRC.split("\n")
+      .filter((_, i, arr) => arr.join("\n").includes("container.addEventListener"))
+      ? SRC
+      : "";
+    // Find the container.addEventListener("keydown", ..., true) block
+    const match = POOL_SRC.match(
+      /container\.addEventListener\("keydown",\s*\(e:\s*KeyboardEvent\)\s*=>\s*\{[\s\S]*?\},\s*true\)/
+    );
+    expect(match).not.toBeNull();
+    return match![0];
+  }
+
+  it("container has a capture-phase keydown listener (third arg = true)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toMatch(/,\s*true\)$/);
+  });
+
+  it("listener checks ctrlKey is pressed", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("e.ctrlKey");
+  });
+
+  it("listener rejects metaKey (Cmd+C must not trigger SIGINT)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("!e.metaKey");
+  });
+
+  it("listener rejects altKey", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("!e.altKey");
+  });
+
+  it("listener rejects shiftKey", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("!e.shiftKey");
+  });
+
+  it("listener matches key 'c', 'C', or code 'KeyC' (keyboard layout safe)", () => {
+    const block = getCtrlCListenerBlock();
+    // Must match both lowercase and uppercase key, plus physical code
+    expect(block).toContain('"c"');
+    expect(block).toContain('"C"');
+    expect(block).toContain('"KeyC"');
+  });
+
+  it("listener calls preventDefault (prevent browser copy action)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("e.preventDefault()");
+  });
+
+  it("listener calls stopPropagation (prevent xterm from also processing it)", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain("e.stopPropagation()");
+  });
+
+  it("listener sends \\x03 via handleTerminalInput", () => {
+    const block = getCtrlCListenerBlock();
+    expect(block).toContain('"\\x03"');
+    expect(block).toContain("handleTerminalInput");
+  });
+
+  it("preventDefault appears BEFORE handleTerminalInput (stop native action first)", () => {
+    const block = getCtrlCListenerBlock();
+    const preventIdx = block.indexOf("preventDefault");
+    const handleIdx = block.indexOf("handleTerminalInput");
+    expect(preventIdx).toBeGreaterThan(-1);
+    expect(handleIdx).toBeGreaterThan(-1);
+    expect(preventIdx).toBeLessThan(handleIdx);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT 24: PROMPT_EOL_MARK suppresses zsh's % indicator on fresh PTY
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// zsh displays an inverse `%` when the previous output didn't end with a
+// newline (PROMPT_SP feature). On a freshly opened PTY, there is no prior
+// output, so the marker is always spurious. Setting PROMPT_EOL_MARK="" in
+// the shell environment suppresses it.
+
+// @ts-expect-error — fs is a Node built-in, not in browser tsconfig
+const RUST_COMMANDS_SRC: string = (() => {
+  try {
+    // @ts-expect-error — fs
+    return readFileSync(
+      new URL("../../src-tauri/src/pty/commands.rs", import.meta.url),
+      "utf-8",
+    );
+  } catch {
+    return "";
+  }
+})();
+
+describe("Invariant 24: PROMPT_EOL_MARK set to suppress zsh % indicator", () => {
+  it("Rust source is readable", () => {
+    expect(RUST_COMMANDS_SRC.length).toBeGreaterThan(0);
+  });
+
+  it("PTY spawner sets PROMPT_EOL_MARK to empty string", () => {
+    expect(RUST_COMMANDS_SRC).toContain('cmd.env("PROMPT_EOL_MARK", "")');
+  });
+
+  it("PROMPT_EOL_MARK is set BEFORE shell spawn (not after)", () => {
+    const eolIdx = RUST_COMMANDS_SRC.indexOf('cmd.env("PROMPT_EOL_MARK", "")');
+    // posix_spawn_in_pty or spawn_command must appear AFTER the env setup
+    const spawnIdx = RUST_COMMANDS_SRC.indexOf("posix_spawn_in_pty");
+    const spawnCmdIdx = RUST_COMMANDS_SRC.indexOf("spawn_command(cmd)");
+    expect(eolIdx).toBeGreaterThan(-1);
+    // At least one spawn call must appear after PROMPT_EOL_MARK
+    const laterSpawn = Math.max(spawnIdx, spawnCmdIdx);
+    expect(laterSpawn).toBeGreaterThan(eolIdx);
+  });
+
+  it("PROMPT_EOL_MARK is set unconditionally (not behind a conditional)", () => {
+    // Extract the lines around PROMPT_EOL_MARK to verify no if-guard
+    const lines = RUST_COMMANDS_SRC.split("\n");
+    const lineIdx = lines.findIndex((l) => l.includes('PROMPT_EOL_MARK'));
+    expect(lineIdx).toBeGreaterThan(-1);
+    // The previous non-empty, non-comment line should NOT be an if statement
+    let prevLine = "";
+    for (let i = lineIdx - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim();
+      if (trimmed && !trimmed.startsWith("//")) {
+        prevLine = trimmed;
+        break;
+      }
+    }
+    expect(prevLine).not.toMatch(/^\s*if\b/);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT: Suggestion overlay flips above cursor when near bottom
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+describe("Suggestion overlay flip-above positioning", () => {
+  it("getCursorPixelPosition returns cellHeight alongside x/y", () => {
+    const fn = SRC.match(/export function getCursorPixelPosition[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    // Return type must include cellHeight
+    expect(body).toContain("cellHeight");
+    // Must return cellHeight in the object literal
+    expect(body).toMatch(/cellHeight:\s*cellH/);
+  });
+
+  it("SuggestionState includes cellHeight field", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("cellHeight: number");
+  });
+
+  it("SuggestionOverlay uses a ref to measure overflow", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("useRef<HTMLDivElement>");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("useLayoutEffect");
+  });
+
+  it("SuggestionOverlay computes flip-above when overlay exceeds container", () => {
+    // Must check container height vs overlay bottom
+    expect(SUGGESTION_OVERLAY_SRC).toContain("containerHeight");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("setFlipAbove");
+    // Must apply a different top when flipped
+    expect(SUGGESTION_OVERLAY_SRC).toMatch(/flipAbove\s*\?/);
+  });
+
+  it("SuggestionOverlay applies suggestion-overlay-above CSS class when flipped", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("suggestion-overlay-above");
+  });
+
+  it("CSS defines the suggestion-overlay-above animation", () => {
+    expect(TERMINAL_PANE_CSS).toContain(".suggestion-overlay-above");
+    expect(TERMINAL_PANE_CSS).toContain("suggestionFadeInAbove");
+  });
+
+  it("suggestion state includes cellHeight at both call sites", () => {
+    // Both intent suggestions and regular suggestions must pass cellHeight
+    const matches = SRC.match(/cellHeight:\s*pos\.cellHeight/g);
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT: Suggestion overlay supports click-to-accept
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+describe("Suggestion overlay click-to-accept", () => {
+  it("acceptSuggestionAtIndex is exported from TerminalPool", () => {
+    expect(SRC).toContain("export function acceptSuggestionAtIndex");
+  });
+
+  it("acceptSuggestionAtIndex validates index bounds", () => {
+    const fn = SRC.match(/export function acceptSuggestionAtIndex[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    // Must guard against out-of-bounds index
+    expect(body).toMatch(/index\s*<\s*0/);
+    expect(body).toMatch(/index\s*>=\s*s\.suggestions\.length/);
+  });
+
+  it("SuggestionOverlay accepts onAccept prop and binds onClick to items", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("onAccept");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("onClick");
+  });
+
+  it("SuggestionOverlay prevents default on mouseDown to avoid stealing focus", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("onMouseDown");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("preventDefault");
+  });
+
+  it("TerminalPane imports acceptSuggestionAtIndex and passes onAccept to overlay", () => {
+    expect(TERMINAL_PANE_SRC).toContain("acceptSuggestionAtIndex");
+    expect(TERMINAL_PANE_SRC).toContain("onAccept={handleSuggestionAccept}");
+  });
+
+  it("suggestion items use pointer cursor", () => {
+    expect(TERMINAL_PANE_CSS).toMatch(/\.suggestion-item\s*\{[^}]*cursor:\s*pointer/);
   });
 });

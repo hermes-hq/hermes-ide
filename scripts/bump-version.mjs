@@ -46,7 +46,7 @@ console.log("  Updating Cargo.lock...");
 execSync("cargo generate-lockfile", { cwd: "src-tauri", stdio: "inherit" });
 
 // Stage, commit, tag
-execSync(`git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock`, { stdio: "inherit" });
+execSync(`git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock RELEASE_NOTES.md`, { stdio: "inherit" });
 execSync(`git commit -m "Bump v${version}"`, { stdio: "inherit" });
 execSync(`git tag v${version}`, { stdio: "inherit" });
 

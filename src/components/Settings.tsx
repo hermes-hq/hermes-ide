@@ -20,11 +20,12 @@ interface SettingsProps {
   onClose: () => void;
   initialTab?: string;
   pluginRuntime?: import("../plugins/PluginRuntime").PluginRuntime;
+  onConfirmPluginUpdate?: (plugin: import("../plugins/types").RegistryPlugin) => void;
 }
 
 const THEMES = THEME_OPTIONS;
 
-export function Settings({ onClose, initialTab, pluginRuntime }: SettingsProps) {
+export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate }: SettingsProps) {
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
   const [activeTab, setActiveTab] = useState(initialTab || "general");
@@ -239,6 +240,51 @@ export function Settings({ onClose, initialTab, pluginRuntime }: SettingsProps) 
                     <option value="cmd_shift_p">{fmt("{mod}{shift}P")} (frees {fmt("{mod}K")} for Clear Terminal)</option>
                   </select>
                   <span className="settings-hint-inline">Requires restart to update the native menu</span>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Preferred External Editor</label>
+                  <select
+                    className="settings-select"
+                    value={settings.preferred_editor || ""}
+                    onChange={(e) => updateSetting("preferred_editor", e.target.value)}
+                  >
+                    <option value="">System Default</option>
+                    <option value="code">VS Code</option>
+                    <option value="cursor">Cursor</option>
+                    <option value="zed">Zed</option>
+                    <option value="subl">Sublime Text</option>
+                    <option value="idea">IntelliJ IDEA</option>
+                    <option value="webstorm">WebStorm</option>
+                    <option value="atom">Atom</option>
+                    <option value="vim">Vim</option>
+                    <option value="nvim">Neovim</option>
+                    <option value="emacs">Emacs</option>
+                  </select>
+                  <span className="settings-hint-inline">Editor used when opening files from the file browser</span>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">SSH File Editor</label>
+                  <select
+                    className="settings-select"
+                    value={settings.preferred_ssh_editor || "vim"}
+                    onChange={(e) => updateSetting("preferred_ssh_editor", e.target.value)}
+                  >
+                    <optgroup label="Terminal editors (run in PTY)">
+                      <option value="vim">Vim</option>
+                      <option value="nvim">Neovim</option>
+                      <option value="nano">Nano</option>
+                      <option value="emacs">Emacs</option>
+                      <option value="vi">Vi</option>
+                    </optgroup>
+                    <optgroup label="GUI editors (open locally via SSH remote)">
+                      <option value="code">VS Code (Remote SSH)</option>
+                      <option value="cursor">Cursor (Remote SSH)</option>
+                      <option value="zed">Zed (Remote SSH)</option>
+                    </optgroup>
+                  </select>
+                  <span className="settings-hint-inline">Editor used when opening files on SSH sessions</span>
                 </div>
 
                 <div className="settings-group">
@@ -489,7 +535,42 @@ export function Settings({ onClose, initialTab, pluginRuntime }: SettingsProps) 
               </div>
             )}
 
-            {activeTab === "plugins" && <PluginManager runtime={pluginRuntime} />}
+            {activeTab === "plugins" && (
+              <>
+                <div className="settings-section">
+                  <h3 className="settings-section-title">Plugin Updates</h3>
+                  <div className="settings-group">
+                    <label className="settings-label">Check for plugin updates</label>
+                    <select
+                      className="settings-select"
+                      value={settings.plugin_update_check || "startup"}
+                      onChange={(e) => updateSetting("plugin_update_check", e.target.value)}
+                    >
+                      <option value="startup">On startup</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="never">Never</option>
+                    </select>
+                  </div>
+                  <div className="settings-group">
+                    <label className="settings-label-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.plugin_auto_update === "true"}
+                        onChange={(e) =>
+                          updateSetting("plugin_auto_update", e.target.checked ? "true" : "false")
+                        }
+                      />
+                      Auto-update plugins
+                    </label>
+                    <p className="settings-hint">
+                      Automatically install plugin updates when they become available.
+                    </p>
+                  </div>
+                </div>
+                <PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} />
+              </>
+            )}
 
             {activeTab === "privacy" && (
               <div className="settings-section">
