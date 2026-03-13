@@ -424,6 +424,10 @@ pub fn run() {
             git::git_list_worktrees,
             git::git_check_branch_available,
             git::git_session_worktree_info,
+            git::git_list_branches_for_realms,
+            git::git_is_git_repo,
+            git::git_worktree_has_changes,
+            git::git_stash_worktree,
             // Menu
             menu::show_context_menu,
             menu::update_menu_state,

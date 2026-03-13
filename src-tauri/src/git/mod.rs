@@ -2716,20 +2716,27 @@ pub fn git_create_worktree(
     // 2. Create the worktree
     let result = worktree::create_worktree(&realm_path, &session_id, &branch_name, create_branch)?;
 
-    // 3. Insert into session_worktrees table
+    // 3. Insert into session_worktrees table — if this fails, roll back the worktree
     let id = uuid::Uuid::new_v4().to_string();
     let db = state
         .db
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    db.insert_session_worktree(
+    if let Err(db_err) = db.insert_session_worktree(
         &id,
         &session_id,
         &realm_id,
         &result.worktree_path,
         Some(&result.branch_name),
         result.is_main_worktree,
-    )?;
+    ) {
+        // Rollback: remove the worktree we just created
+        log::warn!("DB insert failed for worktree, rolling back: {}", db_err);
+        if !result.is_main_worktree {
+            let _ = worktree::remove_worktree(&realm_path, &session_id, &result.worktree_path);
+        }
+        return Err(format!("Failed to record worktree: {}", db_err));
+    }
     drop(db);
 
     // 4. Emit event for frontend
@@ -2769,16 +2776,28 @@ pub fn git_remove_worktree(
     let realm_path = realm.path.clone();
     drop(db);
 
-    // 2. Remove the worktree from the filesystem
-    worktree::remove_worktree(&realm_path, &session_id, &wt_path)?;
+    // 2. Try to remove the worktree from the filesystem
+    let remove_result = worktree::remove_worktree(&realm_path, &session_id, &wt_path);
 
-    // 3. Delete from session_worktrees table
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    db.delete_session_worktree(&wt_id)?;
-    drop(db);
+    // 3. Only delete DB record if git removal succeeded (or directory no longer exists)
+    let dir_gone = !std::path::Path::new(&wt_path).is_dir();
+    if remove_result.is_ok() || dir_gone {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        db.delete_session_worktree(&wt_id)?;
+        drop(db);
+    } else {
+        // Git removal failed and directory still exists — keep DB record for retry
+        log::warn!(
+            "Git worktree removal failed, keeping DB record for retry: {:?}",
+            remove_result.err()
+        );
+        return Err(
+            "Failed to remove worktree from disk; DB record preserved for retry".to_string(),
+        );
+    }
 
     // 4. Emit event for frontend
     let _ = app.emit(&format!("worktree-removed-{}", realm_id), ());
@@ -2869,4 +2888,220 @@ pub fn git_session_worktree_info(
         .map_err(|e| format!("DB lock error: {}", e))?;
     db.get_worktree_by_session_and_realm(&session_id, &realm_id)
         .map_err(|e| format!("Failed to look up worktree: {}", e))
+}
+
+#[tauri::command]
+pub fn git_list_branches_for_realms(
+    state: State<'_, AppState>,
+    realm_ids: Vec<String>,
+) -> Result<HashMap<String, Vec<GitBranch>>, String> {
+    // Collect realm paths while holding the DB lock, then drop it before git I/O
+    let realm_paths: Vec<(String, Option<String>)> = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        realm_ids
+            .iter()
+            .map(|id| {
+                let path = db.get_realm(id).ok().flatten().map(|r| r.path);
+                (id.clone(), path)
+            })
+            .collect()
+    };
+
+    let mut result: HashMap<String, Vec<GitBranch>> = HashMap::new();
+
+    for (realm_id, realm_path) in &realm_paths {
+        let realm_path = match realm_path {
+            Some(p) => p,
+            None => {
+                result.insert(realm_id.clone(), Vec::new());
+                continue;
+            }
+        };
+
+        let repo = match Repository::open(realm_path) {
+            Ok(r) => r,
+            Err(_) => {
+                result.insert(realm_id.clone(), Vec::new());
+                continue;
+            }
+        };
+
+        let mut branches = Vec::new();
+
+        let current_branch = repo
+            .head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s.to_string()));
+
+        if let Ok(local_branches) = repo.branches(Some(BranchType::Local)) {
+            for branch_result in local_branches {
+                let (branch, _) = match branch_result {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let name = branch.name().ok().flatten().unwrap_or("").to_string();
+
+                let is_current = current_branch.as_deref() == Some(&name);
+
+                let mut ahead = 0u32;
+                let mut behind = 0u32;
+                let mut upstream_name = None;
+
+                if let Ok(upstream) = branch.upstream() {
+                    upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
+                    if let (Some(local_ref), Some(upstream_ref)) =
+                        (branch.get().name(), upstream.get().name())
+                    {
+                        if let (Ok(local_oid), Ok(remote_oid)) = (
+                            repo.refname_to_id(local_ref),
+                            repo.refname_to_id(upstream_ref),
+                        ) {
+                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                                ahead = a as u32;
+                                behind = b as u32;
+                            }
+                        }
+                    }
+                }
+
+                let last_commit_summary = branch
+                    .get()
+                    .peel_to_commit()
+                    .ok()
+                    .map(|c| c.summary().unwrap_or("").to_string());
+
+                branches.push(GitBranch {
+                    name,
+                    is_current,
+                    is_remote: false,
+                    upstream: upstream_name,
+                    ahead,
+                    behind,
+                    last_commit_summary,
+                });
+            }
+        }
+
+        result.insert(realm_id.clone(), branches);
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn git_is_git_repo(state: State<'_, AppState>, realm_id: String) -> Result<bool, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let realm = db
+        .get_realm(&realm_id)
+        .map_err(|e| format!("Failed to look up realm: {}", e))?
+        .ok_or_else(|| format!("Realm '{}' not found", realm_id))?;
+    drop(db);
+
+    Ok(Repository::open(&realm.path).is_ok())
+}
+
+// ─── Worktree Dirty Detection & Stash ───────────────────────────────
+
+#[derive(Clone, serde::Serialize)]
+pub struct WorktreeChanges {
+    pub has_changes: bool,
+    pub files: Vec<WorktreeChangedFile>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct WorktreeChangedFile {
+    pub path: String,
+    pub status: String,
+}
+
+fn map_status_flags(s: git2::Status) -> &'static str {
+    if s.intersects(git2::Status::WT_TYPECHANGE | git2::Status::INDEX_TYPECHANGE) {
+        "typechange"
+    } else if s.intersects(git2::Status::WT_RENAMED | git2::Status::INDEX_RENAMED) {
+        "renamed"
+    } else if s.intersects(git2::Status::WT_DELETED | git2::Status::INDEX_DELETED) {
+        "deleted"
+    } else if s.intersects(git2::Status::WT_NEW | git2::Status::INDEX_NEW) {
+        "added"
+    } else if s.intersects(git2::Status::WT_MODIFIED | git2::Status::INDEX_MODIFIED) {
+        "modified"
+    } else {
+        "modified"
+    }
+}
+
+#[tauri::command]
+pub fn git_worktree_has_changes(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+) -> Result<WorktreeChanges, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+
+    let statuses = repo
+        .statuses(Some(&mut opts))
+        .map_err(|e| format!("Failed to get statuses: {}", e))?;
+
+    let mut files = Vec::new();
+    for entry in statuses.iter() {
+        let s = entry.status();
+        if s.is_empty() {
+            continue;
+        }
+        let file_path = entry.path().unwrap_or("").to_string();
+        files.push(WorktreeChangedFile {
+            path: file_path,
+            status: map_status_flags(s).to_string(),
+        });
+    }
+
+    Ok(WorktreeChanges {
+        has_changes: !files.is_empty(),
+        files,
+    })
+}
+
+#[tauri::command]
+pub fn git_stash_worktree(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+    message: Option<String>,
+) -> Result<GitOperationResult, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let sig = repo.signature().map_err(|e| e.to_string())?;
+    let msg = message.as_deref().unwrap_or("WIP");
+    let flags = git2::StashFlags::DEFAULT | git2::StashFlags::INCLUDE_UNTRACKED;
+
+    repo.stash_save(&sig, msg, Some(flags))
+        .map_err(|e| format!("Stash failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Stashed: {}", msg),
+        error: None,
+    })
 }
