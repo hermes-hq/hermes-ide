@@ -5,7 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { isMac } from "../utils/platform";
-import { resizeSession } from "../api/sessions";
+import { resizeSession, isShellForeground } from "../api/sessions";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
 import { type SuggestionState } from "./intelligence/SuggestionOverlay";
 import { clearShellEnvironment } from "./intelligence/shellEnvironment";
@@ -33,6 +33,13 @@ export interface PoolEntry {
   suggestionTimer: ReturnType<typeof setTimeout> | null;
   historyProvider: HistoryProvider;
   sessionPhase: string;
+  /** Last phase that wasn't "busy" — immune to echo-flicker.
+   *  "busy" is transient (shell/agent echo); this tracks the real state. */
+  lastStablePhase: string;
+  /** Cached OS-level check: is the shell the foreground process?
+   *  Updated by a periodic poll — checked synchronously in computeSuggestions. */
+  shellIsForeground: boolean;
+  shellFgPollTimer: ReturnType<typeof setInterval> | null;
   cwd: string;
 }
 
@@ -343,7 +350,7 @@ export async function createTerminal(
     throw err;
   }
 
-  pool.set(sessionId, {
+  const entry: PoolEntry = {
     terminal,
     fitAddon,
     container,
@@ -361,9 +368,23 @@ export async function createTerminal(
     suggestionTimer: null,
     historyProvider: createHistoryProvider(),
     sessionPhase: "creating",
+    lastStablePhase: "creating",
+    shellIsForeground: true,
+    shellFgPollTimer: null,
     cwd: "",
-  });
+  };
+
+  pool.set(sessionId, entry);
   creating.delete(sessionId);
+
+  // Start polling the OS-level foreground process check.
+  // This runs every 300ms and caches the result so computeSuggestions
+  // can check it synchronously (no async IPC in the hot path).
+  entry.shellFgPollTimer = setInterval(() => {
+    isShellForeground(sessionId)
+      .then((isFg) => { entry.shellIsForeground = isFg; })
+      .catch(() => { /* IPC failure — keep last known value */ });
+  }, 300);
 }
 
 // ─── Attach / Detach / Destroy ───────────────────────────────────────
@@ -468,6 +489,7 @@ export function destroy(sessionId: string): void {
   entry.unlistenOutput?.();
   entry.unlistenExit?.();
   if (entry.suggestionTimer) clearTimeout(entry.suggestionTimer);
+  if (entry.shellFgPollTimer) clearInterval(entry.shellFgPollTimer);
   entry.terminal.dispose();
   entry.container.remove();
   pool.delete(sessionId);
@@ -556,6 +578,13 @@ export function setSessionPhase(sessionId: string, phase: string): void {
   if (!entry) return;
   const prevPhase = entry.sessionPhase;
   entry.sessionPhase = phase;
+
+  // Track the last non-"busy" phase. "busy" is transient (shell/agent echo
+  // flicker), so it doesn't represent the real session state. Everything
+  // else (idle, shell_ready, needs_input, creating, etc.) is stable.
+  if (phase !== "busy") {
+    entry.lastStablePhase = phase;
+  }
 
   // ── Re-send PTY resize when shell becomes ready ──
   // attach() sends resizeSession() via a double-rAF, but the shell may not
@@ -651,11 +680,27 @@ export function getCursorPixelPosition(entry: PoolEntry): { x: number; y: number
       const cellH = dims.css?.cell?.height ?? dims.actualCellHeight ?? (fontSize * lineHeight);
       const cursorX = entry.terminal.buffer.active.cursorX;
       const cursorY = entry.terminal.buffer.active.cursorY;
-      return {
-        x: cursorX * cellW,
-        y: (cursorY + 1) * cellH, // Below the cursor row
-        cellHeight: cellH,
-      };
+
+      // Cursor position relative to xterm's rendering area (.xterm-screen)
+      let x = cursorX * cellW;
+      let y = (cursorY + 1) * cellH; // Below the cursor row
+
+      // The suggestion overlay is positioned within .terminal-pane-wrapper,
+      // but cursor coordinates are relative to .xterm-screen. These live in
+      // different coordinate spaces — the viewport has padding (4px top/left)
+      // and xterm may add its own offsets. Use actual DOM positions to bridge
+      // the gap accurately.
+      if (entry.viewport?.parentElement) {
+        const screenEl = entry.container.querySelector(".xterm-screen");
+        if (screenEl) {
+          const screenRect = screenEl.getBoundingClientRect();
+          const wrapperRect = entry.viewport.parentElement.getBoundingClientRect();
+          x += screenRect.left - wrapperRect.left;
+          y += screenRect.top - wrapperRect.top;
+        }
+      }
+
+      return { x, y, cellHeight: cellH };
     }
   } catch { /* fallback */ }
   return { x: 0, y: 0, cellHeight: 0 };

@@ -1459,6 +1459,89 @@ pub fn write_to_session(
     Ok(())
 }
 
+/// Check whether the shell is the foreground process in the PTY.
+///
+/// Returns `true` when the shell itself owns the terminal's foreground process
+/// group — i.e. the user is at a shell prompt and no child program (Claude Code,
+/// vim, htop, etc.) is running in the foreground.
+///
+/// Strategy:
+///   1. macOS — open the TTY slave device and call `tcgetpgrp()` to get the
+///      foreground PGID, then compare with the shell's own PGID.
+///   2. Linux — read `/proc/{pid}/stat` to obtain `pgrp` and `tpgid`.
+///   3. Fallback — enumerate the shell's direct children; if none exist the
+///      shell is assumed to be at its prompt.
+#[tauri::command]
+pub fn is_shell_foreground(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<bool, String> {
+    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+    let shell_pid = session
+        .child
+        .process_id()
+        .ok_or_else(|| "Shell process ID not available".to_string())?;
+
+    // ── macOS: tcgetpgrp on the TTY slave ──
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(ref tty_path) = session.tty_path {
+            if let Ok(tty_cstr) =
+                std::ffi::CString::new(tty_path.to_string_lossy().into_owned())
+            {
+                let fd = unsafe {
+                    libc::open(tty_cstr.as_ptr(), libc::O_RDONLY | libc::O_NOCTTY)
+                };
+                if fd >= 0 {
+                    let fg_pgid = unsafe { libc::tcgetpgrp(fd) };
+                    unsafe { libc::close(fd) };
+                    if fg_pgid > 0 {
+                        let shell_pgid = unsafe { libc::getpgid(shell_pid as i32) };
+                        if shell_pgid > 0 {
+                            return Ok(fg_pgid == shell_pgid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Linux: read tpgid from /proc/{pid}/stat ──
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{}/stat", shell_pid)) {
+            // stat format: pid (comm) state ppid pgrp session tty_nr tpgid ...
+            // comm can contain spaces/parens — find the last ')' first.
+            if let Some(after_comm) = stat.rfind(')').map(|i| &stat[i + 2..]) {
+                let fields: Vec<&str> = after_comm.split_whitespace().collect();
+                // fields: [0]=state [1]=ppid [2]=pgrp [3]=session [4]=tty_nr [5]=tpgid
+                if fields.len() > 5 {
+                    if let (Ok(pgrp), Ok(tpgid)) =
+                        (fields[2].parse::<i32>(), fields[5].parse::<i32>())
+                    {
+                        return Ok(tpgid == pgrp);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Fallback: no direct children → shell is at prompt ──
+    #[cfg(unix)]
+    {
+        let children = enumerate_child_pids(shell_pid);
+        return Ok(children.is_empty());
+    }
+
+    #[cfg(not(unix))]
+    Ok(true)
+}
+
 #[tauri::command]
 pub fn nudge_realm_context(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
     // Check if there are realms attached

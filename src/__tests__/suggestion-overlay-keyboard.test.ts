@@ -420,6 +420,130 @@ describe("Overlay: Public functions for mouse interaction", () => {
 });
 
 // =============================================================================
+// ALTERNATE BUFFER & SCROLL GUARDS
+// =============================================================================
+
+describe("Overlay: Suppressed when phase is not shell-interactive", () => {
+  it("computeSuggestions uses lastStablePhase (immune to echo-flicker)", () => {
+    const computeFn = TERMINAL_POOL_SRC.match(
+      /function computeSuggestions[\s\S]*?\n\}/,
+    );
+    expect(computeFn).not.toBeNull();
+    // Must use lastStablePhase (not sessionPhase) to avoid echo-flicker
+    expect(computeFn![0]).toContain("lastStablePhase");
+    expect(computeFn![0]).toContain('lastStablePhase !== "idle"');
+    expect(computeFn![0]).toContain('lastStablePhase !== "shell_ready"');
+  });
+
+  it("setSessionPhase tracks lastStablePhase (excludes 'busy')", () => {
+    // pool.ts must update lastStablePhase for all phases except "busy"
+    expect(POOL_SRC).toContain("lastStablePhase");
+    expect(POOL_SRC).toContain('phase !== "busy"');
+  });
+});
+
+describe("Overlay: Suppressed during alternate screen buffer", () => {
+  it("computeSuggestions checks for alternate buffer and returns early", () => {
+    const computeFn = TERMINAL_POOL_SRC.match(
+      /function computeSuggestions[\s\S]*?\n\}/,
+    );
+    expect(computeFn).not.toBeNull();
+    expect(computeFn![0]).toContain('buffer.active.type === "alternate"');
+  });
+
+  it("handleTerminalInput dismisses overlay when alternate buffer is active", () => {
+    // When the terminal switches to alternate buffer (interactive CLI tool starts),
+    // the overlay should be dismissed so keys reach the tool
+    expect(TERMINAL_POOL_SRC).toContain(
+      'entry.terminal.buffer.active.type === "alternate"',
+    );
+    // The dismissal should happen BEFORE the overlay interception guard
+    const src = TERMINAL_POOL_SRC;
+    const altCheck = src.indexOf('buffer.active.type === "alternate"');
+    const overlayGuard = src.indexOf("Overlay key interception");
+    expect(altCheck).toBeGreaterThan(0);
+    expect(overlayGuard).toBeGreaterThan(altCheck);
+  });
+});
+
+describe("Overlay: Suppressed when user scrolled up", () => {
+  it("computeSuggestions checks userScrolledUp flag", () => {
+    const computeFn = TERMINAL_POOL_SRC.match(
+      /function computeSuggestions[\s\S]*?\n\}/,
+    );
+    expect(computeFn).not.toBeNull();
+    expect(computeFn![0]).toContain("userScrolledUp");
+  });
+});
+
+describe("Overlay: OS-level foreground process check (synchronous cached poll)", () => {
+  it("computeSuggestions checks entry.shellIsForeground synchronously", () => {
+    const computeFn = TERMINAL_POOL_SRC.match(
+      /function computeSuggestions[\s\S]*?\n\}/,
+    );
+    expect(computeFn).not.toBeNull();
+    expect(computeFn![0]).toContain("shellIsForeground");
+  });
+
+  it("computeSuggestions is synchronous (no async IPC in hot path)", () => {
+    // Must NOT be async — uses cached poll value instead
+    expect(TERMINAL_POOL_SRC).not.toContain(
+      "async function computeSuggestions(",
+    );
+    expect(TERMINAL_POOL_SRC).toContain(
+      "function computeSuggestions(",
+    );
+  });
+
+  it("pool.ts sets up a polling interval for isShellForeground", () => {
+    // The polling timer is started in createTerminal
+    expect(POOL_SRC).toContain("shellFgPollTimer");
+    expect(POOL_SRC).toContain("isShellForeground(sessionId)");
+    expect(POOL_SRC).toContain("setInterval");
+  });
+
+  it("pool.ts cleans up shellFgPollTimer in destroy()", () => {
+    const destroyFn = POOL_SRC.match(
+      /export function destroy[\s\S]*?\n\}/,
+    );
+    expect(destroyFn).not.toBeNull();
+    expect(destroyFn![0]).toContain("shellFgPollTimer");
+    expect(destroyFn![0]).toContain("clearInterval");
+  });
+
+  it("PoolEntry interface includes shellIsForeground and shellFgPollTimer", () => {
+    expect(POOL_SRC).toContain("shellIsForeground: boolean");
+    expect(POOL_SRC).toContain("shellFgPollTimer:");
+  });
+});
+
+// =============================================================================
+// CURSOR POSITION COORDINATE SPACE
+// =============================================================================
+
+describe("Overlay: Cursor position accounts for DOM offset", () => {
+  it("getCursorPixelPosition uses getBoundingClientRect for coordinate space translation", () => {
+    expect(POOL_SRC).toContain("getBoundingClientRect");
+    // Should query .xterm-screen for the rendering area position
+    expect(POOL_SRC).toContain(".xterm-screen");
+  });
+
+  it("getCursorPixelPosition adds offset from xterm-screen to wrapper", () => {
+    const cursorFn = POOL_SRC.match(
+      /export function getCursorPixelPosition[\s\S]*?\n\}/,
+    );
+    expect(cursorFn).not.toBeNull();
+    const body = cursorFn![0];
+    // Should compute offset between screen element and wrapper
+    expect(body).toContain("screenRect");
+    expect(body).toContain("wrapperRect");
+    // Should add the offset to x and y
+    expect(body).toContain("screenRect.left - wrapperRect.left");
+    expect(body).toContain("screenRect.top - wrapperRect.top");
+  });
+});
+
+// =============================================================================
 // WRAPPING ARITHMETIC
 // =============================================================================
 

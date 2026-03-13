@@ -264,6 +264,7 @@ pub fn run() {
             pty::add_workspace_path,
             pty::update_session_group,
             pty::get_available_shells,
+            pty::is_shell_foreground,
             // Terminal Command Intelligence
             pty::detect_shell_environment,
             pty::read_shell_history,

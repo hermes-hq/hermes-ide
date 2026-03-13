@@ -133,6 +133,15 @@ function handleTerminalInput(sessionId: string, data: string): void {
     (phase === "idle" || phase === "shell_ready");
   const overlayVisible = entry.suggestionState?.visible ?? false;
 
+  // ── Dismiss stale overlay when alternate buffer becomes active ──
+  // Interactive CLI tools (Claude Code, vim, etc.) switch to the alternate
+  // screen buffer. If the overlay was visible when this happened, dismiss it
+  // immediately so navigation keys reach the tool instead of the overlay.
+  if (overlayVisible && entry.terminal.buffer.active.type === "alternate") {
+    dismissSuggestions(sessionId);
+    clearGhostText(sessionId);
+  }
+
   // ── Overlay key interception (only when overlay is showing) ──
   // Guard on overlay visibility, NOT intelligenceActive — the phase can
   // briefly flip to "busy" from shell echo while the overlay is still visible.
@@ -341,6 +350,31 @@ function computeSuggestions(sessionId: string): void {
   if (!entry || !entry.inputBuffer.trim()) return;
   if (isIntelligenceDisabled()) return;
   if (!shouldShowOverlay(sessionId)) return;
+
+  // Only show suggestions when the shell is at an interactive prompt.
+  // Use lastStablePhase instead of sessionPhase — the current phase can
+  // be "busy" from echo-flicker (both shell AND AI agent echo trigger it).
+  // lastStablePhase tracks the real state: "idle"/"shell_ready" = shell
+  // prompt, "needs_input" = AI agent, "creating"/etc. = lifecycle.
+  if (entry.lastStablePhase !== "idle" && entry.lastStablePhase !== "shell_ready") return;
+
+  // Don't show suggestions when the alternate screen buffer is active.
+  // Interactive CLI tools (Claude Code, vim, htop, etc.) use the alternate
+  // buffer — cursor coordinates in that buffer don't correspond to the shell
+  // prompt, and our input buffer tracking doesn't reflect the tool's input.
+  if (entry.terminal.buffer.active.type === "alternate") return;
+
+  // Don't show suggestions when the user has scrolled up — the cursor is
+  // off-screen and the overlay would appear at a misleading position.
+  if (entry.userScrolledUp) return;
+
+  // OS-level foreground process check — uses a cached value updated by a
+  // 300ms polling interval (see pool.ts createTerminal). Synchronous access
+  // avoids async gaps where state can change between the check and usage.
+  // This is the most reliable guard: tcgetpgrp() / /proc/stat tells us
+  // whether the shell or a child program (AI tools, editors, etc.) owns
+  // the terminal foreground process group.
+  if (!entry.shellIsForeground) return;
 
   // Intent suggestions (colon-prefixed commands)
   if (entry.inputBuffer.trimStart().startsWith(":")) {

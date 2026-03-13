@@ -115,3 +115,8 @@ export function writeToSession(sessionId: string, data: string): Promise<void> {
 export function saveAllSnapshots(): Promise<void> {
   return invoke("save_all_snapshots");
 }
+
+/** Check if the shell is the foreground process (no child program running). */
+export function isShellForeground(sessionId: string): Promise<boolean> {
+  return invoke<boolean>("is_shell_foreground", { sessionId });
+}
