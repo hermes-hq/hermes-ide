@@ -127,6 +127,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [gitRealmIds, setGitRealmIds] = useState<string[]>([]);
   const [checkingGit, setCheckingGit] = useState(false);
   const [branchSelections, setBranchSelections] = useState<Record<string, BranchSelection>>({});
+  const [expandedRealmId, setExpandedRealmId] = useState<string | null>(null);
+
+  // Auto-expand first git project only when first entering the branch step
+  const prevStepRef = useRef(step);
+  useEffect(() => {
+    if (step === "branch" && prevStepRef.current !== "branch" && gitRealmIds.length > 0) {
+      const firstGit = selectedProjectIds.find((id) => gitRealmIds.includes(id));
+      if (firstGit) setExpandedRealmId(firstGit);
+    }
+    prevStepRef.current = step;
+  }, [step, gitRealmIds, selectedProjectIds]);
 
   // Determine whether to show the branch step
   const showBranchStep = gitRealmIds.length > 0 && selectedProjectIds.length > 0;
@@ -749,6 +760,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               {selectedProjectIds.map((realmId) => {
                 const isGit = gitRealmIds.includes(realmId);
                 const realmName = allProjects.find((r) => r.id === realmId)?.name || realmId;
+                const isExpanded = expandedRealmId === realmId;
 
                 if (!isGit) {
                   return (
@@ -762,8 +774,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 }
 
                 return (
-                  <div key={realmId} className="session-creator-branch-realm">
-                    <div className="session-creator-branch-realm-header">
+                  <div key={realmId} className={`session-creator-branch-realm ${isExpanded ? "expanded" : ""}`}>
+                    <div
+                      className="session-creator-branch-realm-header"
+                      onClick={() => setExpandedRealmId(isExpanded ? null : realmId)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <span className="session-creator-branch-realm-chevron">{isExpanded ? "\u25BC" : "\u25B6"}</span>
                       <span className="session-creator-branch-realm-name">{realmName}</span>
                       {branchSelections[realmId] && (
                         <span className="session-creator-branch-selected-label">
@@ -772,27 +789,41 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                         </span>
                       )}
                     </div>
-                    <SessionBranchSelector
-                      realmId={realmId}
-                      onBranchSelected={(name, isNew) => {
-                        setBranchSelections((prev) => ({
-                          ...prev,
-                          [realmId]: { branch: name, createNew: isNew },
-                        }));
-                      }}
-                      onSkip={() => {
-                        setBranchSelections((prev) => {
-                          const next = { ...prev };
-                          delete next[realmId];
-                          return next;
-                        });
-                      }}
-                    />
+                    {isExpanded && (
+                      <SessionBranchSelector
+                        realmId={realmId}
+                        onBranchSelected={(name, isNew) => {
+                          setBranchSelections((prev) => ({
+                            ...prev,
+                            [realmId]: { branch: name, createNew: isNew },
+                          }));
+                          // Auto-advance to next project without a selection
+                          const nextUnselected = selectedProjectIds.find(
+                            (id) => id !== realmId && gitRealmIds.includes(id) && !branchSelections[id],
+                          );
+                          setExpandedRealmId(nextUnselected || null);
+                        }}
+                        onSkip={() => {
+                          setBranchSelections((prev) => {
+                            const next = { ...prev };
+                            delete next[realmId];
+                            return next;
+                          });
+                          const nextUnselected = selectedProjectIds.find(
+                            (id) => id !== realmId && gitRealmIds.includes(id) && !branchSelections[id],
+                          );
+                          setExpandedRealmId(nextUnselected || null);
+                        }}
+                      />
+                    )}
                   </div>
                 );
               })}
             </div>
             <div className="session-creator-actions">
+              <button className="session-creator-btn-secondary" onClick={goBack}>
+                Back
+              </button>
               <button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
                 Skip branches
               </button>
