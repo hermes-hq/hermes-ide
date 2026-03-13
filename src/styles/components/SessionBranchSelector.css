@@ -44,7 +44,7 @@
 /* ─── Branch List ─────────────────────────────────────────────────── */
 
 .branch-selector-list {
-  max-height: 220px;
+  max-height: 160px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);

@@ -2,7 +2,7 @@
 
 .session-creator {
   width: 480px;
-  max-height: 70vh;
+  max-height: 80vh;
   background: var(--bg-1);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -582,10 +582,14 @@
 .session-creator-branch-multi {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 400px;
+  gap: 8px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
+
+.session-creator-branch-multi::-webkit-scrollbar { width: 4px; }
+.session-creator-branch-multi::-webkit-scrollbar-thumb { background: var(--bg-3); }
 
 .session-creator-branch-realm {
   border: 1px solid var(--border);
@@ -599,7 +603,26 @@
   gap: 8px;
   padding: 8px 12px;
   background: var(--bg-2);
+  transition: background 0.1s;
+}
+
+.session-creator-branch-realm.expanded > .session-creator-branch-realm-header {
   border-bottom: 1px solid var(--border);
+}
+
+.session-creator-branch-realm-header:hover {
+  background: var(--bg-hover);
+}
+
+.session-creator-branch-realm-chevron {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.session-creator-branch-realm-header:hover .session-creator-branch-realm-chevron {
+  color: var(--text-1);
 }
 
 .session-creator-branch-realm-name {
