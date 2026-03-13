@@ -1,5 +1,5 @@
 import "../styles/components/ContextPanel.css";
-import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
 import { fmt } from "../utils/platform";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -74,7 +74,7 @@ function FileTreeView({ nodes, onPin }: { nodes: FileTreeNode[]; onPin: (path: s
     });
   };
 
-  const render = (nodes: FileTreeNode[], depth: number): JSX.Element[] => {
+  const render = (nodes: FileTreeNode[], depth: number): React.JSX.Element[] => {
     return nodes.map((node) => {
       if (node.isFile) {
         return (

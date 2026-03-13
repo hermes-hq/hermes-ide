@@ -107,7 +107,7 @@ function TmuxWindowTabs({ session }: { session: SessionData }) {
   const [expanded, setExpanded] = useState(true);
   const [renamingIndex, setRenamingIndex] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const refreshRef = useRef<() => void>();
+  const refreshRef = useRef<() => void>(undefined);
   const info = session.ssh_info;
 
   // Refresh tmux windows periodically

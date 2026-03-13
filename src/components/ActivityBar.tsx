@@ -1,9 +1,10 @@
+import type { ReactNode } from "react";
 import "../styles/components/ActivityBar.css";
 
 export interface ActivityBarTab {
   id: string;
   label: string;
-  icon: JSX.Element;
+  icon: ReactNode;
   badge?: number;
 }
 
@@ -12,8 +13,8 @@ interface ActivityBarProps {
   tabs: ActivityBarTab[];
   activeTabId: string | null;
   onTabClick: (tabId: string) => void;
-  topAction?: { icon: JSX.Element; label: string; onClick: () => void };
-  bottomAction?: { icon: JSX.Element; label: string; onClick: () => void };
+  topAction?: { icon: ReactNode; label: string; onClick: () => void };
+  bottomAction?: { icon: ReactNode; label: string; onClick: () => void };
 }
 
 export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, bottomAction }: ActivityBarProps) {
