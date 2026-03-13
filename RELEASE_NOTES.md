@@ -1,3 +1,2 @@
 ## Fixed
-- Ctrl+C now reliably sends an interrupt signal on macOS, even when the system previously intercepted the keystroke
-- Terminal no longer displays garbled or misaligned text after resizing panes or windows
+- AI agent commands (Claude, Aider, Codex, etc.) now launch automatically when starting a new session, regardless of your shell prompt theme
