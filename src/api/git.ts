@@ -6,6 +6,7 @@ import type {
   SearchResponse,
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
   WorktreeChanges,
+  WorktreeOverviewEntry, OrphanWorktree, CleanupResult,
 } from "../types/git";
 
 export function gitStatus(sessionId: string): Promise<GitSessionStatus> {
@@ -285,4 +286,22 @@ export async function stashWorktree(
   message?: string,
 ): Promise<GitOperationResult> {
   return invoke<GitOperationResult>("git_stash_worktree", { sessionId, realmId, message: message ?? null });
+}
+
+// ─── Worktree Overview & Cleanup API ─────────────────────────────────
+
+export async function listAllWorktrees(): Promise<WorktreeOverviewEntry[]> {
+  return invoke<WorktreeOverviewEntry[]>("git_list_all_worktrees");
+}
+
+export async function detectOrphanWorktrees(): Promise<OrphanWorktree[]> {
+  return invoke<OrphanWorktree[]>("git_detect_orphan_worktrees");
+}
+
+export async function worktreeDiskUsage(worktreePath: string): Promise<number> {
+  return invoke<number>("git_worktree_disk_usage", { worktreePath });
+}
+
+export async function cleanupOrphanWorktrees(paths: string[]): Promise<CleanupResult[]> {
+  return invoke<CleanupResult[]>("git_cleanup_orphan_worktrees", { paths });
 }

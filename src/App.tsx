@@ -59,6 +59,7 @@ import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
+import { listen } from "@tauri-apps/api/event";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
 import { ToastContainer } from "./components/ToastContainer";
@@ -101,6 +102,26 @@ function AppContent() {
   const toastStore = useToastStore();
   const toastStoreRef = useRef(toastStore);
   toastStoreRef.current = toastStore;
+
+  // ── Worktree cleanup notification (R5.5) ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<number>("worktree-cleanup-summary", (event) => {
+      if (cancelled) return;
+      const count = event.payload;
+      if (count > 0) {
+        toastStoreRef.current.addToast({
+          message: `Cleaned up ${count} stale worktree${count !== 1 ? "s" : ""} on startup`,
+          type: "info",
+          duration: 5000,
+        });
+      }
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
 
   const pluginRuntimeRef = useRef<PluginRuntime | null>(null);
 
