@@ -134,37 +134,54 @@ function handleTerminalInput(sessionId: string, data: string): void {
   const overlayVisible = entry.suggestionState?.visible ?? false;
 
   // ── Overlay key interception (only when overlay is showing) ──
-  if (intelligenceActive && overlayVisible && entry.suggestionState) {
-    // Up arrow
-    if (data === "\x1b[A") {
+  // Guard on overlay visibility, NOT intelligenceActive — the phase can
+  // briefly flip to "busy" from shell echo while the overlay is still visible.
+  // Intelligence gating controls *showing* the overlay; once visible, we
+  // must always intercept navigation keys to prevent them reaching the PTY.
+  if (overlayVisible && entry.suggestionState) {
+    // Up arrow — move selection up (wrapping)
+    // Handles both normal mode (\x1b[A) and application cursor mode (\x1bOA)
+    if (data === "\x1b[A" || data === "\x1bOA") {
       moveSuggestionSelection(sessionId, -1);
       return; // CONSUME
     }
-    // Down arrow
-    if (data === "\x1b[B") {
+    // Down arrow — move selection down (wrapping)
+    if (data === "\x1b[B" || data === "\x1bOB") {
       moveSuggestionSelection(sessionId, 1);
       return; // CONSUME
     }
-    // Tab — accept selected (respects shell compatibility)
+    // Tab — accept selected if an item is highlighted (respects shell compatibility)
     if (data === "\t") {
-      if (shouldConsumeTab(sessionId, true)) {
+      if (entry.suggestionState.selectedIndex !== null && shouldConsumeTab(sessionId, true)) {
         acceptSuggestion(sessionId);
         return; // CONSUME
       }
-      // Fall through — let shell handle Tab
+      // Nothing highlighted or shell should handle Tab — fall through
     }
-    // Enter — execute selected suggestion
+    // Enter — accept highlighted suggestion, or pass through if nothing highlighted
     if (data === "\r") {
-      executeSuggestion(sessionId);
-      return; // CONSUME
+      if (entry.suggestionState.selectedIndex !== null) {
+        executeSuggestion(sessionId);
+        return; // CONSUME
+      }
+      // Nothing highlighted — dismiss overlay and let Enter pass through to PTY
+      dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
+      // Fall through to normal Enter handling (buffer update + PTY write)
     }
     // Escape — dismiss overlay
     if (data === "\x1b" || data === "\x1b\x1b") {
       dismissSuggestions(sessionId);
       return; // CONSUME
     }
+    // Ctrl-C — dismiss overlay, then pass through to PTY
+    if (data === "\x03") {
+      dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
+      // Fall through — Ctrl-C will be sent to PTY below
+    }
     // Right arrow — accept ghost text inline
-    if (data === "\x1b[C" && entry.ghostText) {
+    if ((data === "\x1b[C" || data === "\x1bOC") && entry.ghostText) {
       acceptGhostInline(sessionId);
       return; // CONSUME
     }
@@ -339,7 +356,7 @@ function computeSuggestions(sessionId: string): void {
           score: 1000 - i,
           badge: "intent",
         })),
-        selectedIndex: 0,
+        selectedIndex: null,
         cursorX: pos.x,
         cursorY: pos.y,
         cellHeight: pos.cellHeight,
@@ -364,7 +381,7 @@ function computeSuggestions(sessionId: string): void {
   const state: SuggestionState = {
     visible: true,
     suggestions: results,
-    selectedIndex: 0,
+    selectedIndex: null,
     cursorX: pos.x,
     cursorY: pos.y,
     cellHeight: pos.cellHeight,
@@ -393,12 +410,20 @@ function moveSuggestionSelection(sessionId: string, delta: number): void {
 
   const s = entry.suggestionState;
   const count = s.suggestions.length;
-  const newIndex = Math.max(0, Math.min(count - 1, s.selectedIndex + delta));
+
+  let newIndex: number;
+  if (s.selectedIndex === null) {
+    // Nothing highlighted yet
+    newIndex = delta > 0 ? 0 : count - 1;
+  } else {
+    // Wrap around at boundaries
+    newIndex = ((s.selectedIndex + delta) % count + count) % count;
+  }
 
   entry.suggestionState = { ...s, selectedIndex: newIndex };
   notifySubscribers(sessionId, entry.suggestionState);
 
-  // Update ghost text to selected suggestion
+  // Update ghost text to preview the highlighted suggestion
   clearGhostText(sessionId);
   const selected = s.suggestions[newIndex];
   if (selected && shouldShowGhostText(sessionId)) {
@@ -424,7 +449,7 @@ export function acceptSuggestionAtIndex(sessionId: string, index: number): void 
 
 function acceptSuggestion(sessionId: string): void {
   const entry = pool.get(sessionId);
-  if (!entry?.suggestionState?.visible) return;
+  if (!entry?.suggestionState?.visible || entry.suggestionState.selectedIndex === null) return;
 
   const selected = entry.suggestionState.suggestions[entry.suggestionState.selectedIndex];
   if (!selected) return;
@@ -450,7 +475,7 @@ function acceptSuggestion(sessionId: string): void {
 
 function executeSuggestion(sessionId: string): void {
   const entry = pool.get(sessionId);
-  if (!entry?.suggestionState?.visible) return;
+  if (!entry?.suggestionState?.visible || entry.suggestionState.selectedIndex === null) return;
 
   const selected = entry.suggestionState.suggestions[entry.suggestionState.selectedIndex];
   if (!selected) return;
@@ -484,6 +509,29 @@ function acceptGhostInline(sessionId: string): void {
   writeToSession(sessionId, utf8ToBase64(ghostContent)).catch((err) => {
     console.warn(`[TerminalPool] write_to_session (ghost inline) failed for ${sessionId}:`, err);
   });
+}
+
+// ─── Public Suggestion Interaction (for mouse clicks) ────────────────
+
+/** Highlight a suggestion by index (e.g. on mouse hover). */
+export function selectSuggestion(sessionId: string, index: number): void {
+  const entry = pool.get(sessionId);
+  if (!entry?.suggestionState?.visible) return;
+  const s = entry.suggestionState;
+  if (index < 0 || index >= s.suggestions.length) return;
+
+  entry.suggestionState = { ...s, selectedIndex: index };
+  notifySubscribers(sessionId, entry.suggestionState);
+
+  // Update ghost text to preview the highlighted suggestion
+  clearGhostText(sessionId);
+  const selected = s.suggestions[index];
+  if (selected && shouldShowGhostText(sessionId)) {
+    const input = entry.inputBuffer.trim();
+    if (selected.text.startsWith(input) && selected.text.length > input.length) {
+      showGhostText(sessionId, selected.text.slice(input.length));
+    }
+  }
 }
 
 // ─── Public Utility Exports ──────────────────────────────────────────

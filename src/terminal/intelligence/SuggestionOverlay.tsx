@@ -4,7 +4,7 @@ import { type Suggestion } from "./suggestionEngine";
 export interface SuggestionState {
   visible: boolean;
   suggestions: Suggestion[];
-  selectedIndex: number;
+  selectedIndex: number | null;
   cursorX: number;
   cursorY: number;
   cellHeight: number;
@@ -12,10 +12,11 @@ export interface SuggestionState {
 
 interface SuggestionOverlayProps {
   state: SuggestionState;
+  onSelect?: (index: number) => void;
   onAccept?: (index: number) => void;
 }
 
-export function SuggestionOverlay({ state, onAccept }: SuggestionOverlayProps) {
+export function SuggestionOverlay({ state, onSelect, onAccept }: SuggestionOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
   const [flipAbove, setFlipAbove] = useState(false);
@@ -53,26 +54,30 @@ export function SuggestionOverlay({ state, onAccept }: SuggestionOverlayProps) {
       }}
       onMouseDown={(e) => e.preventDefault()}
     >
-      {state.suggestions.map((s, i) => (
-        <div
-          key={s.text}
-          ref={i === state.selectedIndex ? selectedRef : undefined}
-          className={`suggestion-item${i === state.selectedIndex ? " suggestion-item-selected" : ""}`}
-          onClick={() => onAccept?.(i)}
-        >
-          <div className="suggestion-item-row">
-            <span className="suggestion-command">{s.text}</span>
-            {s.badge && (
-              <span className={`suggestion-badge suggestion-badge-${s.badge}`}>
-                {s.badge}
-              </span>
+      {state.suggestions.map((s, i) => {
+        const isSelected = state.selectedIndex !== null && i === state.selectedIndex;
+        return (
+          <div
+            key={s.text}
+            ref={isSelected ? selectedRef : undefined}
+            className={`suggestion-item${isSelected ? " suggestion-item-selected" : ""}`}
+            onMouseEnter={() => onSelect?.(i)}
+            onClick={() => onAccept?.(i)}
+          >
+            <div className="suggestion-item-row">
+              <span className="suggestion-command">{s.text}</span>
+              {s.badge && (
+                <span className={`suggestion-badge suggestion-badge-${s.badge}`}>
+                  {s.badge}
+                </span>
+              )}
+            </div>
+            {s.description && isSelected && (
+              <div className="suggestion-description">{s.description}</div>
             )}
           </div>
-          {s.description && i === state.selectedIndex && (
-            <div className="suggestion-description">{s.description}</div>
-          )}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

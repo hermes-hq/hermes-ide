@@ -5,7 +5,8 @@ import { detectProject } from "../api/projects";
 import {
   attach, detach, has, showGhostText, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,
-  getHistoryProvider, refitActive, acceptSuggestionAtIndex,
+  getHistoryProvider, refitActive,
+  acceptSuggestionAtIndex, selectSuggestion,
 } from "../terminal/TerminalPool";
 import { useExecutionMode, useAutonomousSettings, useSession } from "../state/SessionContext";
 import { SuggestionOverlay, type SuggestionState } from "../terminal/intelligence/SuggestionOverlay";
@@ -179,6 +180,10 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     }
   }, [phase, sessionId]);
 
+  const handleSuggestionSelect = useCallback((index: number) => {
+    selectSuggestion(sessionId, index);
+  }, [sessionId]);
+
   const handleSuggestionAccept = useCallback((index: number) => {
     acceptSuggestionAtIndex(sessionId, index);
   }, [sessionId]);
@@ -210,6 +215,7 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       {suggestionState && (
         <SuggestionOverlay
           state={suggestionState}
+          onSelect={handleSuggestionSelect}
           onAccept={handleSuggestionAccept}
         />
       )}

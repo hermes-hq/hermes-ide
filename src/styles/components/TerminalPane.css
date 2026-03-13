@@ -92,13 +92,15 @@
 .suggestion-item {
   padding: 5px 8px;
   cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 
 .suggestion-item:hover {
   background: var(--bg-hover);
 }
 
-.suggestion-item-selected {
+.suggestion-item-selected,
+.suggestion-item-selected:hover {
   background: var(--bg-hover);
 }
 
@@ -161,4 +163,3 @@
 .suggestion-badge-lint { color: var(--violet); background: var(--violet-dim); }
 .suggestion-badge-prisma { color: var(--badge-prisma); background: rgba(45, 55, 72, 0.20); }
 .suggestion-badge-intent { color: var(--green); background: var(--green-dim); }
-
