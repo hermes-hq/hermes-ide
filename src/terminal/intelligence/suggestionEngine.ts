@@ -10,7 +10,7 @@ export interface Suggestion {
   badge?: string;
 }
 
-const MAX_RESULTS = 6;
+const MAX_RESULTS = 15;
 const LENGTH_PENALTY_THRESHOLD = 60;
 
 /**

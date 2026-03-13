@@ -342,6 +342,7 @@ function computeSuggestions(sessionId: string): void {
         selectedIndex: 0,
         cursorX: pos.x,
         cursorY: pos.y,
+        cellHeight: pos.cellHeight,
       };
       entry.suggestionState = state;
       notifySubscribers(sessionId, state);
@@ -366,6 +367,7 @@ function computeSuggestions(sessionId: string): void {
     selectedIndex: 0,
     cursorX: pos.x,
     cursorY: pos.y,
+    cellHeight: pos.cellHeight,
   };
 
   entry.suggestionState = state;
@@ -405,6 +407,19 @@ function moveSuggestionSelection(sessionId: string, delta: number): void {
       showGhostText(sessionId, selected.text.slice(input.length));
     }
   }
+}
+
+/** Accept a suggestion at a given index (used by click-to-select in the overlay) */
+export function acceptSuggestionAtIndex(sessionId: string, index: number): void {
+  const entry = pool.get(sessionId);
+  if (!entry?.suggestionState?.visible) return;
+
+  const s = entry.suggestionState;
+  if (index < 0 || index >= s.suggestions.length) return;
+
+  // Set the selected index then delegate to normal accept
+  entry.suggestionState = { ...s, selectedIndex: index };
+  acceptSuggestion(sessionId);
 }
 
 function acceptSuggestion(sessionId: string): void {

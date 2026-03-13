@@ -65,8 +65,10 @@
   border: 1px solid var(--border);
   backdrop-filter: blur(2px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  min-width: 280px;
-  max-width: 480px;
+  min-width: 320px;
+  max-width: 500px;
+  max-height: 340px;
+  overflow-y: auto;
   padding: 4px;
   opacity: 0;
   animation: suggestionFadeIn 100ms ease-out forwards;
@@ -78,9 +80,22 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+.suggestion-overlay-above {
+  animation: suggestionFadeInAbove 100ms ease-out forwards;
+}
+
+@keyframes suggestionFadeInAbove {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .suggestion-item {
   padding: 5px 8px;
-  cursor: default;
+  cursor: pointer;
+}
+
+.suggestion-item:hover {
+  background: var(--bg-hover);
 }
 
 .suggestion-item-selected {

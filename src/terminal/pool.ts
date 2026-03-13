@@ -638,7 +638,7 @@ export function dismissSuggestionsForEntry(entry: PoolEntry): void {
 
 // ─── Cursor Position Calculation ─────────────────────────────────────
 
-export function getCursorPixelPosition(entry: PoolEntry): { x: number; y: number } {
+export function getCursorPixelPosition(entry: PoolEntry): { x: number; y: number; cellHeight: number } {
   try {
     const term = entry.terminal as any;
     const dims = term._core?._renderService?.dimensions;
@@ -654,10 +654,11 @@ export function getCursorPixelPosition(entry: PoolEntry): { x: number; y: number
       return {
         x: cursorX * cellW,
         y: (cursorY + 1) * cellH, // Below the cursor row
+        cellHeight: cellH,
       };
     }
   } catch { /* fallback */ }
-  return { x: 0, y: 0 };
+  return { x: 0, y: 0, cellHeight: 0 };
 }
 
 /** Get cursor position in pixels for a session (used by TerminalPane) */

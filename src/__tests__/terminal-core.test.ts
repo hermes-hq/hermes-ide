@@ -22,6 +22,21 @@ const SRC: string = [
   readFileSync(new URL("../terminal/ghostText.ts", import.meta.url), "utf-8"),
 ].join("\n");
 
+const SUGGESTION_OVERLAY_SRC: string = readFileSync(
+  new URL("../terminal/intelligence/SuggestionOverlay.tsx", import.meta.url),
+  "utf-8",
+);
+
+const TERMINAL_PANE_SRC: string = readFileSync(
+  new URL("../components/TerminalPane.tsx", import.meta.url),
+  "utf-8",
+);
+
+const TERMINAL_PANE_CSS: string = readFileSync(
+  new URL("../styles/components/TerminalPane.css", import.meta.url),
+  "utf-8",
+);
+
 const PROVIDER_ACTIONS: string = readFileSync(
   new URL("../components/ProviderActionsBar.tsx", import.meta.url),
   "utf-8",
@@ -502,7 +517,7 @@ describe("Invariant 11: Base64 decode failure drops data (no garbled terminal ou
 
 describe("Invariant 12: acceptSuggestion sets inputBuffer to selected text", () => {
   it("acceptSuggestion updates inputBuffer to selected.text (not empty)", () => {
-    const fn = SRC.match(/function acceptSuggestion[\s\S]*?\n\}/);
+    const fn = SRC.match(/function acceptSuggestion\(sessionId: string\): void[\s\S]*?\n\}/);
     expect(fn).not.toBeNull();
     const body = fn![0];
     // Must set inputBuffer to selected.text, not just ""
@@ -682,5 +697,92 @@ describe("Invariant 24: PROMPT_EOL_MARK set to suppress zsh % indicator", () => 
       }
     }
     expect(prevLine).not.toMatch(/^\s*if\b/);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT: Suggestion overlay flips above cursor when near bottom
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+describe("Suggestion overlay flip-above positioning", () => {
+  it("getCursorPixelPosition returns cellHeight alongside x/y", () => {
+    const fn = SRC.match(/export function getCursorPixelPosition[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    // Return type must include cellHeight
+    expect(body).toContain("cellHeight");
+    // Must return cellHeight in the object literal
+    expect(body).toMatch(/cellHeight:\s*cellH/);
+  });
+
+  it("SuggestionState includes cellHeight field", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("cellHeight: number");
+  });
+
+  it("SuggestionOverlay uses a ref to measure overflow", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("useRef<HTMLDivElement>");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("useLayoutEffect");
+  });
+
+  it("SuggestionOverlay computes flip-above when overlay exceeds container", () => {
+    // Must check container height vs overlay bottom
+    expect(SUGGESTION_OVERLAY_SRC).toContain("containerHeight");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("setFlipAbove");
+    // Must apply a different top when flipped
+    expect(SUGGESTION_OVERLAY_SRC).toMatch(/flipAbove\s*\?/);
+  });
+
+  it("SuggestionOverlay applies suggestion-overlay-above CSS class when flipped", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("suggestion-overlay-above");
+  });
+
+  it("CSS defines the suggestion-overlay-above animation", () => {
+    expect(TERMINAL_PANE_CSS).toContain(".suggestion-overlay-above");
+    expect(TERMINAL_PANE_CSS).toContain("suggestionFadeInAbove");
+  });
+
+  it("suggestion state includes cellHeight at both call sites", () => {
+    // Both intent suggestions and regular suggestions must pass cellHeight
+    const matches = SRC.match(/cellHeight:\s*pos\.cellHeight/g);
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVARIANT: Suggestion overlay supports click-to-accept
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+describe("Suggestion overlay click-to-accept", () => {
+  it("acceptSuggestionAtIndex is exported from TerminalPool", () => {
+    expect(SRC).toContain("export function acceptSuggestionAtIndex");
+  });
+
+  it("acceptSuggestionAtIndex validates index bounds", () => {
+    const fn = SRC.match(/export function acceptSuggestionAtIndex[\s\S]*?\n\}/);
+    expect(fn).not.toBeNull();
+    const body = fn![0];
+    // Must guard against out-of-bounds index
+    expect(body).toMatch(/index\s*<\s*0/);
+    expect(body).toMatch(/index\s*>=\s*s\.suggestions\.length/);
+  });
+
+  it("SuggestionOverlay accepts onAccept prop and binds onClick to items", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("onAccept");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("onClick");
+  });
+
+  it("SuggestionOverlay prevents default on mouseDown to avoid stealing focus", () => {
+    expect(SUGGESTION_OVERLAY_SRC).toContain("onMouseDown");
+    expect(SUGGESTION_OVERLAY_SRC).toContain("preventDefault");
+  });
+
+  it("TerminalPane imports acceptSuggestionAtIndex and passes onAccept to overlay", () => {
+    expect(TERMINAL_PANE_SRC).toContain("acceptSuggestionAtIndex");
+    expect(TERMINAL_PANE_SRC).toContain("onAccept={handleSuggestionAccept}");
+  });
+
+  it("suggestion items use pointer cursor", () => {
+    expect(TERMINAL_PANE_CSS).toMatch(/\.suggestion-item\s*\{[^}]*cursor:\s*pointer/);
   });
 });

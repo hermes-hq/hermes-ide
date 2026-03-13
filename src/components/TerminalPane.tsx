@@ -1,11 +1,11 @@
 import "../styles/components/TerminalPane.css";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { detectProject } from "../api/projects";
 import {
   attach, detach, has, showGhostText, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,
-  getHistoryProvider, refitActive,
+  getHistoryProvider, refitActive, acceptSuggestionAtIndex,
 } from "../terminal/TerminalPool";
 import { useExecutionMode, useAutonomousSettings, useSession } from "../state/SessionContext";
 import { SuggestionOverlay, type SuggestionState } from "../terminal/intelligence/SuggestionOverlay";
@@ -179,6 +179,10 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     }
   }, [phase, sessionId]);
 
+  const handleSuggestionAccept = useCallback((index: number) => {
+    acceptSuggestionAtIndex(sessionId, index);
+  }, [sessionId]);
+
   const showLoading = !ready && (phase === "creating" || phase === "initializing");
   const phaseLabel = phase === "creating" ? "Spawning shell..." :
                      phase === "initializing" ? "Starting shell..." :
@@ -204,7 +208,10 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       <div className="terminal-viewport" ref={viewportRef} />
       {tintStyle && <div className="terminal-bg-tint" style={tintStyle} />}
       {suggestionState && (
-        <SuggestionOverlay state={suggestionState} />
+        <SuggestionOverlay
+          state={suggestionState}
+          onAccept={handleSuggestionAccept}
+        />
       )}
     </div>
   );
