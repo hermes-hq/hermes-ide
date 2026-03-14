@@ -16,6 +16,8 @@ export const THEME_OPTIONS = [
   { id: "lavender", label: "Lavender" },
   { id: "mint", label: "Mint" },
   { id: "sand", label: "Sand" },
+  { id: "frosted-light", label: "Frosted Light" },
+  { id: "frosted-dark", label: "Frosted Dark" },
   { id: "solarized", label: "Solarized Light" },
 ] as const;
 
@@ -70,6 +72,18 @@ const THEME_TOKEN_OVERRIDES: Record<string, Partial<Record<string, number>>> = {
     "--radius-sm": 0,
     "--radius-lg": 1,
     "--radius-pill": 1,
+  },
+  "frosted-light": {
+    "--radius": 6,
+    "--radius-sm": 4,
+    "--radius-lg": 10,
+    "--radius-pill": 14,
+  },
+  "frosted-dark": {
+    "--radius": 6,
+    "--radius-sm": 4,
+    "--radius-lg": 10,
+    "--radius-pill": 14,
   },
 };
 

@@ -1299,6 +1299,206 @@ html[data-theme="sand"] {
   --accent-glow: none;
 }
 
+/* ─── Frosted Light ─────────────────────────────────────── */
+html[data-theme="frosted-light"] {
+  --bg-0: #ffffff;
+  --bg-1: #f5f5f7;
+  --bg-2: #e8e8ed;
+  --bg-3: #d1d1d6;
+  --bg-hover: #e8e8ed;
+  --bg-active: #d1d1d6;
+  --text-0: #1d1d1f;
+  --text-1: #333336;
+  --text-2: #636366;
+  --text-3: #8e8e93;
+  --accent: #007aff;
+  --accent-dim: #007aff18;
+  --green: #28cd41;
+  --green-dim: #28cd4118;
+  --red: #ff3b30;
+  --red-dim: #ff3b3018;
+  --yellow: #ff9f0a;
+  --yellow-dim: #ff9f0a18;
+  --violet: #bf5af2;
+  --violet-dim: #bf5af218;
+  --error: #ff3b30;
+  --border: #d1d1d6;
+  --border-light: #c7c7cc;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+  --radius-pill: 14px;
+}
+
+/* Frosted Light — frosted toolbar & sidebar */
+html[data-theme="frosted-light"] .topbar {
+  background: rgba(245, 245, 247, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="frosted-light"] .status-bar {
+  background: rgba(245, 245, 247, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-top: 0.5px solid rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="frosted-light"] .activity-bar-left,
+html[data-theme="frosted-light"] .activity-bar-right {
+  background: rgba(245, 245, 247, 0.6);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+html[data-theme="frosted-light"] .activity-bar-left {
+  border-right: 0.5px solid rgba(0, 0, 0, 0.1);
+}
+
+html[data-theme="frosted-light"] .activity-bar-right {
+  border-left: 0.5px solid rgba(0, 0, 0, 0.1);
+}
+
+html[data-theme="frosted-light"] .session-list,
+html[data-theme="frosted-light"] .process-panel,
+html[data-theme="frosted-light"] .git-panel-root,
+html[data-theme="frosted-light"] .file-explorer-panel,
+html[data-theme="frosted-light"] .search-panel {
+  background: rgba(245, 245, 247, 0.5);
+  border-right: 0.5px solid rgba(0, 0, 0, 0.1);
+}
+
+html[data-theme="frosted-light"] .session-item.active {
+  background: #007aff18;
+  box-shadow: none;
+}
+
+html[data-theme="frosted-light"] .activity-bar-tab.active {
+  background: rgba(0, 122, 255, 0.1);
+}
+
+html[data-theme="frosted-light"] .context-menu {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+
+html[data-theme="frosted-light"] .status-theme-popover {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Frosted Dark ─────────────────────────────────────── */
+html[data-theme="frosted-dark"] {
+  --bg-0: #1e1e1e;
+  --bg-1: #2a2a2c;
+  --bg-2: #363638;
+  --bg-3: #48484a;
+  --bg-hover: #363638;
+  --bg-active: #48484a;
+  --text-0: #f5f5f7;
+  --text-1: #e5e5ea;
+  --text-2: #8e8e93;
+  --text-3: #636366;
+  --accent: #0a84ff;
+  --accent-dim: #0a84ff20;
+  --green: #30d158;
+  --green-dim: #30d15822;
+  --red: #ff453a;
+  --red-dim: #ff453a22;
+  --yellow: #ffd60a;
+  --yellow-dim: #ffd60a22;
+  --violet: #bf5af2;
+  --violet-dim: #bf5af222;
+  --error: #ff453a;
+  --border: #3a3a3c;
+  --border-light: #48484a;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+  --radius-pill: 14px;
+}
+
+/* Frosted Dark — frosted toolbar & sidebar */
+html[data-theme="frosted-dark"] .topbar {
+  background: rgba(42, 42, 44, 0.75);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.3);
+}
+
+html[data-theme="frosted-dark"] .status-bar {
+  background: rgba(42, 42, 44, 0.75);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-top: 0.5px solid rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="frosted-dark"] .activity-bar-left,
+html[data-theme="frosted-dark"] .activity-bar-right {
+  background: rgba(42, 42, 44, 0.5);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+html[data-theme="frosted-dark"] .activity-bar-left {
+  border-right: 0.5px solid rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="frosted-dark"] .activity-bar-right {
+  border-left: 0.5px solid rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="frosted-dark"] .session-list,
+html[data-theme="frosted-dark"] .process-panel,
+html[data-theme="frosted-dark"] .git-panel-root,
+html[data-theme="frosted-dark"] .file-explorer-panel,
+html[data-theme="frosted-dark"] .search-panel {
+  background: rgba(42, 42, 44, 0.4);
+  border-right: 0.5px solid rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="frosted-dark"] .session-item.active {
+  background: #0a84ff20;
+  box-shadow: none;
+}
+
+html[data-theme="frosted-dark"] .activity-bar-tab.active {
+  background: rgba(10, 132, 255, 0.15);
+}
+
+html[data-theme="frosted-dark"] .context-menu {
+  background: rgba(44, 44, 46, 0.82);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+}
+
+html[data-theme="frosted-dark"] .status-theme-popover {
+  background: rgba(44, 44, 46, 0.82);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;
