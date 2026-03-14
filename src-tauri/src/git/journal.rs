@@ -6,7 +6,6 @@ const JOURNAL_FILENAME: &str = ".hermes/worktree-journal.log";
 
 /// Log format: ACTION|session_id|realm_id|branch|worktree_path|timestamp
 /// When ACTION completes, a COMPLETED line is appended.
-
 pub fn journal_path(repo_path: &str) -> std::path::PathBuf {
     Path::new(repo_path).join(JOURNAL_FILENAME)
 }
