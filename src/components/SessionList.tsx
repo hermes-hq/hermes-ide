@@ -12,6 +12,7 @@ import { fmt } from "../utils/platform";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 import { useRemoteSshInfo } from "../hooks/useRemoteSshInfo";
 import { PortForwardsPanel } from "./PortForwardsPanel";
+import type { PluginSessionActionContribution } from "../plugins/types";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -33,6 +34,9 @@ interface SessionListProps {
   onViewChange: (view: SessionView) => void;
   /** Number of git changes for the active session */
   gitBadge?: number;
+  pluginSessionActions?: (PluginSessionActionContribution & { pluginId: string; badge?: { text?: string; count?: number } })[];
+  activePluginPanel?: string | null;
+  onPluginActionClick?: (actionId: string, panelId: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -499,7 +503,7 @@ function InlineProjectNameEditor({
   );
 }
 
-export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, onReconnect, activeView, onViewChange, gitBadge }: SessionListProps) {
+export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, onReconnect, activeView, onViewChange, gitBadge, pluginSessionActions, activePluginPanel, onPluginActionClick }: SessionListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
@@ -978,6 +982,19 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 </svg>
               </button>
             )}
+            {pluginSessionActions?.map((action) => (
+              <button
+                key={action.id}
+                className={`session-subview-btn${activePluginPanel === action.panelId ? " session-subview-active" : ""}`}
+                onClick={() => onPluginActionClick?.(action.id, action.panelId)}
+                title={action.name}
+              >
+                <span dangerouslySetInnerHTML={{ __html: action.icon }} />
+                {action.badge?.count ? (
+                  <span className="session-subview-badge">{action.badge.count}</span>
+                ) : null}
+              </button>
+            ))}
           </div>
         )}
         {/* Port forwards panel for SSH sessions */}

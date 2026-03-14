@@ -1,4 +1,4 @@
-import type { PluginManifest, PluginCommandContribution, PluginPanelContribution, PluginStatusBarItem, HermesEvent } from "./types";
+import type { PluginManifest, PluginCommandContribution, PluginPanelContribution, PluginStatusBarItem, PluginSessionActionContribution, HermesEvent } from "./types";
 import { createPluginAPI, type HermesPluginAPI, type PluginPanelProps, type PluginAPICallbacks } from "./PluginAPI";
 
 export type PluginActivateFn = (api: HermesPluginAPI) => void | Promise<void>;
@@ -29,6 +29,7 @@ export class PluginRuntime {
 	private commandHandlers = new Map<string, () => void | Promise<void>>();
 	private panelComponents = new Map<string, React.ComponentType<PluginPanelProps>>();
 	private statusBarOverrides = new Map<string, { text?: string; tooltip?: string; visible?: boolean }>();
+	private sessionActionBadges = new Map<string, { text?: string; count?: number }>();
 	private changeListeners = new Set<() => void>();
 	private eventListeners = new Map<HermesEvent, Set<(...args: unknown[]) => void>>();
 	private callbacks: PluginAPICallbacks;
@@ -146,6 +147,9 @@ export class PluginRuntime {
 		for (const item of entry.module.manifest.contributes.statusBarItems ?? []) {
 			this.statusBarOverrides.delete(item.id);
 		}
+		for (const action of entry.module.manifest.contributes.sessionActions ?? []) {
+			this.sessionActionBadges.delete(action.id);
+		}
 
 		this.plugins.delete(pluginId);
 		this.notify();
@@ -249,6 +253,23 @@ export class PluginRuntime {
 			}
 		}
 		return result;
+	}
+
+	getAllSessionActions(): (PluginSessionActionContribution & { pluginId: string; badge?: { text?: string; count?: number } })[] {
+		const result: (PluginSessionActionContribution & { pluginId: string; badge?: { text?: string; count?: number } })[] = [];
+		for (const [id, entry] of this.plugins) {
+			if (entry.status !== "active") continue;
+			for (const action of entry.module.manifest.contributes.sessionActions ?? []) {
+				const badge = this.sessionActionBadges.get(action.id);
+				result.push({ ...action, pluginId: id, badge });
+			}
+		}
+		return result;
+	}
+
+	updateSessionActionBadge(actionId: string, badge: { text?: string; count?: number }): void {
+		this.sessionActionBadges.set(actionId, badge);
+		this.notify();
 	}
 
 	updateStatusBarItem(itemId: string, update: { text?: string; tooltip?: string; visible?: boolean }): void {

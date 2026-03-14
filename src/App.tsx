@@ -118,6 +118,9 @@ function AppContent() {
       onStatusBarUpdate: (itemId, update) => {
         pluginRuntimeRef.current?.updateStatusBarItem(itemId, update);
       },
+      onSessionActionBadgeUpdate: (actionId, badge) => {
+        pluginRuntimeRef.current?.updateSessionActionBadge(actionId, badge);
+      },
       onNotification: async (options) => {
         try {
           const { sendNotification } = await import("@tauri-apps/plugin-notification");
@@ -144,7 +147,7 @@ function AppContent() {
     return runtime;
   });
 
-  const { commands: pluginCommands, panels: pluginPanels, pluginsWithSettings } = usePluginRuntime(pluginRuntime);
+  const { commands: pluginCommands, panels: pluginPanels, pluginsWithSettings, sessionActions: pluginSessionActions } = usePluginRuntime(pluginRuntime);
   const pluginUpdater = usePluginUpdateChecker(pluginRuntime);
   const [pendingUpdatePlugins, setPendingUpdatePlugins] = useState<typeof pluginUpdater.updatesAvailable | null>(null);
 
@@ -521,7 +524,7 @@ function AppContent() {
             tabs={[
               { id: "sessions", label: `Sessions (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
               ...pluginPanels
-                .filter(p => p.side === "left")
+                .filter(p => p.side === "left" && !pluginSessionActions.some(a => a.panelId === p.id))
                 .map(p => ({
                   id: p.id,
                   label: p.name,
@@ -564,9 +567,20 @@ function AppContent() {
                 null
               }
               onViewChange={(view: SessionView) => {
+                if (view) setActivePluginPanel(null);
                 dispatch({ type: "SET_SUBVIEW_PANEL", panel: view });
               }}
               gitBadge={activeGitSummary.changeCount || undefined}
+              pluginSessionActions={pluginSessionActions}
+              activePluginPanel={activePluginPanel}
+              onPluginActionClick={(_actionId, panelId) => {
+                if (activePluginPanel === panelId) {
+                  setActivePluginPanel(null);
+                } else {
+                  dispatch({ type: "SET_SUBVIEW_PANEL", panel: null });
+                  setActivePluginPanel(panelId);
+                }
+              }}
             />
           </PanelErrorBoundary>
         )}
