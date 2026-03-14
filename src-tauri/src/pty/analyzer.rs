@@ -71,7 +71,6 @@ pub(crate) struct CommandPredictionEvent {
 
 // ─── Output Analyzer (uses Provider Registry) ───────────────────────
 
-#[allow(private_interfaces)]
 pub struct OutputAnalyzer {
     registry: ProviderRegistry,
     pub active_provider_idx: Option<usize>,
@@ -191,6 +190,7 @@ impl OutputAnalyzer {
         }
     }
 
+    #[allow(private_interfaces)]
     pub fn drain_completed_nodes(&mut self) -> Vec<CompletedNode> {
         self.completed_nodes.drain(..).collect()
     }
@@ -387,6 +387,7 @@ impl OutputAnalyzer {
         }
     }
 
+    #[allow(private_interfaces)]
     pub fn apply_analysis(&mut self, analysis: LineAnalysis) {
         if let Some(tu) = analysis.token_update {
             self.apply_token_update(tu);
