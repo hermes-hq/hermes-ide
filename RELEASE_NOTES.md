@@ -1,9 +1,7 @@
-## Improved
-- Command suggestions can now be navigated with arrow keys, accepted with Enter, and clicked with the mouse
-- Suggestion dropdown shows up to 15 results in a scrollable list, up from 6
-- Suggestion dropdown flips above the cursor when typing near the bottom of the terminal
-- Light themes now have better contrast for text, labels, and borders
+## New
+- Plugins can now fetch data from the internet, enabling new types of plugins like feed readers and API tools
+- Plugin Manager now shows your app version and clearer messages when a plugin requires a newer version
+- Plugin updates that require a newer app version are no longer offered, preventing incompatible installs
 
-## Fixed
-- Command suggestions no longer appear inside interactive CLI tools like vim, htop, or Claude Code
-- Suggestion overlay position is now correctly aligned with the cursor
+## Improved
+- Incompatible plugins in the store now show a detailed warning explaining what version is needed and how to update
