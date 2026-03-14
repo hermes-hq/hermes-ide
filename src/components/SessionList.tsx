@@ -722,50 +722,54 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       const x = event.payload.position.x / dpr;
       const y = event.payload.position.y / dpr;
 
-      if (type === "over") {
-        // Hit-test against project sections
-        let found: string | null = null;
-        for (const [group, el] of projectRefsMap.current) {
-          const rect = el.getBoundingClientRect();
-          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            found = group;
-            break;
+      if (type === "over" || type === "drop") {
+        // Hit-test against project sections and ungrouped area.
+        // Use generous padding (8px) around each target to make drop zones
+        // easier to hit — the visual indicators already show the active zone.
+        const PAD = 8;
+        const hitTest = (): string | null | undefined => {
+          // Check project sections first
+          for (const [group, el] of projectRefsMap.current) {
+            const rect = el.getBoundingClientRect();
+            if (x >= rect.left - PAD && x <= rect.right + PAD &&
+                y >= rect.top - PAD && y <= rect.bottom + PAD) {
+              return group;
+            }
           }
-        }
-        // Hit-test ungrouped area
-        if (!found && ungroupedRef.current) {
-          const rect = ungroupedRef.current.getBoundingClientRect();
-          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            found = "__ungrouped__";
+          // Check ungrouped area — use the entire remaining sidebar height
+          // below the last project section as a valid drop zone. This makes
+          // it much easier to drop into the ungrouped area instead of requiring
+          // the cursor to land in the tiny 4px default zone.
+          if (ungroupedRef.current) {
+            const rect = ungroupedRef.current.getBoundingClientRect();
+            const parent = ungroupedRef.current.parentElement;
+            const bottomEdge = parent ? parent.getBoundingClientRect().bottom : rect.bottom;
+            if (x >= rect.left - PAD && x <= rect.right + PAD &&
+                y >= rect.top - PAD && y <= bottomEdge + PAD) {
+              return "__ungrouped__";
+            }
           }
-        }
-        setDropTarget(found);
-      } else if (type === "drop") {
-        // Hit-test to find drop target
-        let targetGroup: string | null | undefined = undefined;
-        for (const [group, el] of projectRefsMap.current) {
-          const rect = el.getBoundingClientRect();
-          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            targetGroup = group;
-            break;
-          }
-        }
-        if (targetGroup === undefined && ungroupedRef.current) {
-          const rect = ungroupedRef.current.getBoundingClientRect();
-          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            targetGroup = null; // ungrouped
-          }
-        }
-        setDropTarget(null);
-        setIsDraggingSession(false);
+          return undefined;
+        };
 
-        if (targetGroup !== undefined && capturedSessionId) {
-          const session = sessionsRef.current.find((s) => s.id === capturedSessionId);
-          if (session && (session.group || null) !== targetGroup) {
-            handleMoveToProject(capturedSessionId, targetGroup!);
+        const result = hitTest();
+
+        if (type === "over") {
+          setDropTarget(result === undefined ? null : result);
+        } else {
+          // drop
+          const targetGroup = result === "__ungrouped__" ? null : result;
+          setDropTarget(null);
+          setIsDraggingSession(false);
+
+          if (targetGroup !== undefined && capturedSessionId) {
+            const session = sessionsRef.current.find((s) => s.id === capturedSessionId);
+            if (session && (session.group || null) !== targetGroup) {
+              handleMoveToProject(capturedSessionId, targetGroup!);
+            }
           }
+          capturedSessionId = null;
         }
-        capturedSessionId = null;
       }
     }).then((fn) => { if (!cancelled) unlisten = fn; });
 

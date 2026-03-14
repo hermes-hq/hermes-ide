@@ -446,15 +446,16 @@
 
 .ungrouped-section {
   min-height: 4px;
-  transition: min-height 0.15s ease, background 0.15s ease;
+  transition: min-height 0.15s ease, background 0.15s ease, padding 0.15s ease;
 }
 
 .ungrouped-section-drag-active {
-  min-height: 40px;
+  min-height: 60px;
   border: 1.5px dashed var(--border, #27272a);
   border-radius: var(--radius);
   margin: 4px 6px;
-  padding: 4px;
+  padding: 8px;
+  flex: 1;
 }
 
 .ungrouped-section-drop-target {
@@ -462,8 +463,9 @@
   outline-offset: -2px;
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent, #a78bfa) 12%, transparent);
-  min-height: 40px;
+  min-height: 60px;
   border-color: transparent;
+  flex: 1;
 }
 
 .ungrouped-section-drop-target .ungrouped-divider {

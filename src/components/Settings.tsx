@@ -299,6 +299,22 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   </select>
                   <span className="settings-hint-inline">Re-open previous sessions and layout when the app restarts</span>
                 </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">
+                    <input
+                      type="checkbox"
+                      checked={settings.skip_close_confirm !== "true"}
+                      onChange={(e) => {
+                        const skip = !e.target.checked;
+                        updateSetting("skip_close_confirm", skip ? "true" : "false");
+                        dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip });
+                      }}
+                    />
+                    {" "}Confirm before closing sessions
+                  </label>
+                  <span className="settings-hint-inline">Show a confirmation dialog when closing a terminal session</span>
+                </div>
               </div>
             )}
 
