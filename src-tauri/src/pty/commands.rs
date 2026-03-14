@@ -650,14 +650,20 @@ pub fn create_session(
     let pty_rows = initial_rows.unwrap_or(24);
     let pty_cols = initial_cols.unwrap_or(80);
     let pty_system = native_pty_system();
+    let pty_size = PtySize {
+        rows: pty_rows,
+        cols: pty_cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
     let pair = pty_system
-        .openpty(PtySize {
-            rows: pty_rows,
-            cols: pty_cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
+        .openpty(pty_size.clone())
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
+
+    // Workaround: portable-pty's openpty() does not apply the initial window
+    // size on macOS — get_size() returns (0, 0) right after creation.
+    // Explicitly resize to ensure the PTY starts with the correct dimensions.
+    let _ = pair.master.resize(pty_size);
 
     let is_ssh = ssh_info_clone.is_some();
 
@@ -1592,6 +1598,7 @@ pub fn resize_session(
         .sessions
         .get(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
+
     session
         .master
         .resize(PtySize {
@@ -1601,6 +1608,26 @@ pub fn resize_session(
             pixel_height: 0,
         })
         .map_err(|e| format!("Resize failed: {}", e))?;
+
+    // Explicitly send SIGWINCH to the child process.
+    // On macOS with posix_spawn(POSIX_SPAWN_SETSID), ioctl(TIOCSWINSZ) on the
+    // master fd does NOT automatically deliver SIGWINCH because the parent
+    // process is in a different session than the child.  tcgetpgrp() returns -1
+    // from the parent's context.  Send SIGWINCH directly to the child's process
+    // group (negative PID = entire process group) so the shell and its children
+    // pick up the new terminal dimensions.
+    #[cfg(unix)]
+    {
+        if let Some(child_pid) = session.child.process_id() {
+            let pgid = child_pid as i32;
+            unsafe {
+                // Send to the process group (negative PID), not just the shell.
+                // This ensures child processes (e.g. Claude Code) also receive it.
+                libc::kill(-(pgid), libc::SIGWINCH);
+            }
+        }
+    }
+
     Ok(())
 }
 

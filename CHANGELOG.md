@@ -7,6 +7,14 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 
 ---
 
+# 0.5.8 (2026-03-14)
+
+## Fixed
+- Terminal sessions now resize correctly when the window is resized on macOS
+- Shell and child processes (e.g. Claude Code) properly pick up new terminal dimensions after resize
+
+---
+
 # 0.5.6 (2026-03-14)
 
 ## New

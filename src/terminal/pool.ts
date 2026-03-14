@@ -521,7 +521,7 @@ export function refitActive(): void {
           entry.terminal.scrollToBottom();
         }
         resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
-          .catch(() => {});
+          .catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
       } catch { /* ignore fit errors */ }
     }
   }
