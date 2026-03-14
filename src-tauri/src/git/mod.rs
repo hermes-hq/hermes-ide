@@ -3049,8 +3049,6 @@ fn map_status_flags(s: git2::Status) -> &'static str {
         "deleted"
     } else if s.intersects(git2::Status::WT_NEW | git2::Status::INDEX_NEW) {
         "added"
-    } else if s.intersects(git2::Status::WT_MODIFIED | git2::Status::INDEX_MODIFIED) {
-        "modified"
     } else {
         "modified"
     }
@@ -3286,7 +3284,7 @@ pub fn git_detect_orphan_worktrees(
                         if !record_paths.contains(&path_str) {
                             // Extract branch name from directory name: {session_prefix}_{branch}
                             let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
-                            let branch = dir_name.splitn(2, '_').nth(1).map(|s| s.to_string());
+                            let branch = dir_name.split_once('_').map(|x| x.1.to_string());
                             orphans.push(OrphanWorktree {
                                 worktree_path: path_str,
                                 branch_name: branch,
