@@ -7,6 +7,13 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 
 ---
 
+# 0.5.5 (2026-03-14)
+
+## Fixed
+- Plugin update button now works reliably — previously clicking "Update" could silently do nothing when the update checker state was out of sync
+
+---
+
 # 0.5.4 (2026-03-14)
 
 ## New
