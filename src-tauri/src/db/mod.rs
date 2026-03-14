@@ -1049,7 +1049,11 @@ impl Database {
 
         // Batch-fetch all project-scoped entries in one query
         if !realm_ids.is_empty() {
-            let placeholders: Vec<String> = realm_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+            let placeholders: Vec<String> = realm_ids
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect();
             let sql = format!(
                 "SELECT id, scope, scope_id, category, key, value, source, confidence, access_count, created_at, updated_at
                  FROM memory WHERE scope = 'project' AND scope_id IN ({})
@@ -1058,7 +1062,10 @@ impl Database {
                 placeholders.join(", ")
             );
             let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
-            let params: Vec<&dyn rusqlite::types::ToSql> = realm_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = realm_ids
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
             let rows = stmt
                 .query_map(params.as_slice(), |row| {
                     Ok(MemoryEntry {

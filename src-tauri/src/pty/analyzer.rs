@@ -207,9 +207,7 @@ impl OutputAnalyzer {
 
         // Only mark busy when there's meaningful text content (not just
         // control sequences, cursor movements, or terminal keepalives).
-        let has_visible = text
-            .chars()
-            .any(|c| !c.is_control() && !c.is_whitespace());
+        let has_visible = text.chars().any(|c| !c.is_control() && !c.is_whitespace());
         if has_visible {
             if !self.is_busy {
                 self.is_busy = true;

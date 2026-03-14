@@ -7,7 +7,7 @@
 //! - `to_metrics()`: deep clone of accumulated state (runs every 5s + on phase changes)
 //! - Eviction paths: VecDeque front-removal for files_touched / memory_facts at capacity
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use hermes_ide_lib::pty::analyzer::OutputAnalyzer;
 
 /// Realistic 4KB chunk of ANSI-heavy terminal output (Claude Code style).
