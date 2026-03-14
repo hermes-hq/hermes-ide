@@ -686,7 +686,8 @@ pub fn create_session(
         c.arg("ServerAliveInterval=15");
         c.arg("-o");
         c.arg("ServerAliveCountMax=3");
-        let socket_path = ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
+        let socket_path =
+            ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
         c.arg("-o");
         c.arg(format!("ControlPath={}", socket_path.display()));
         c.arg("-o");
@@ -896,7 +897,11 @@ pub fn create_session(
                 match reader.read(&mut buf) {
                     Ok(0) => {
                         if let Ok(mut s) = session_clone.lock() {
-                            s.phase = if s.ssh_info.is_some() { SessionPhase::Disconnected } else { SessionPhase::Destroyed };
+                            s.phase = if s.ssh_info.is_some() {
+                                SessionPhase::Disconnected
+                            } else {
+                                SessionPhase::Destroyed
+                            };
                             let update = SessionUpdate::from(&*s);
                             let _ = app_clone.emit("session-updated", &update);
                         }
@@ -1210,7 +1215,11 @@ pub fn create_session(
                     }
                     Err(_) => {
                         if let Ok(mut s) = session_clone.lock() {
-                            s.phase = if s.ssh_info.is_some() { SessionPhase::Disconnected } else { SessionPhase::Destroyed };
+                            s.phase = if s.ssh_info.is_some() {
+                                SessionPhase::Disconnected
+                            } else {
+                                SessionPhase::Destroyed
+                            };
                             let update = SessionUpdate::from(&*s);
                             let _ = app_clone.emit("session-updated", &update);
                         }
@@ -1236,7 +1245,11 @@ pub fn create_session(
                     }))
             );
             if let Ok(mut s) = session_for_cleanup.lock() {
-                s.phase = if s.ssh_info.is_some() { SessionPhase::Disconnected } else { SessionPhase::Destroyed };
+                s.phase = if s.ssh_info.is_some() {
+                    SessionPhase::Disconnected
+                } else {
+                    SessionPhase::Destroyed
+                };
             }
             let _ = app_for_cleanup.emit(&format!("pty-exit-{}", exit_id), ());
         }
@@ -1260,7 +1273,12 @@ pub fn create_session(
                 let is_stopped = session_silence
                     .lock()
                     .ok()
-                    .map(|s| matches!(s.phase, SessionPhase::Destroyed | SessionPhase::Disconnected))
+                    .map(|s| {
+                        matches!(
+                            s.phase,
+                            SessionPhase::Destroyed | SessionPhase::Disconnected
+                        )
+                    })
                     .unwrap_or(false);
                 if is_stopped {
                     break;
@@ -1730,17 +1748,18 @@ pub fn resize_session(
 
     // Sync remote tmux dimensions when resizing SSH+tmux sessions.
     // Fire-and-forget on a background thread so resize doesn't block.
-    let ssh_tmux_info = session
-        .session
-        .lock()
-        .ok()
-        .and_then(|s| {
-            s.ssh_info.as_ref().and_then(|info| {
-                info.tmux_session.as_ref().map(|tmux_name| {
-                    (info.user.clone(), info.host.clone(), info.port, tmux_name.clone())
-                })
+    let ssh_tmux_info = session.session.lock().ok().and_then(|s| {
+        s.ssh_info.as_ref().and_then(|info| {
+            info.tmux_session.as_ref().map(|tmux_name| {
+                (
+                    info.user.clone(),
+                    info.host.clone(),
+                    info.port,
+                    tmux_name.clone(),
+                )
             })
-        });
+        })
+    });
     if let Some((user, host, port, tmux_name)) = ssh_tmux_info {
         let resize_cols = cols;
         let resize_rows = rows;
@@ -2491,11 +2510,7 @@ pub async fn ssh_upload_file(
         .file_name()
         .ok_or("Invalid file name")?
         .to_string_lossy();
-    let remote_path = format!(
-        "{}/{}",
-        remote_dir.trim_end_matches('/'),
-        file_name
-    );
+    let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), file_name);
 
     // Pipe local file through ssh into cat on the remote side.
     // This reuses the ControlMaster socket from ssh_command() and avoids
@@ -2595,9 +2610,12 @@ pub fn ssh_add_port_forward(
 
     let spec = format!("{}:{}:{}", local_port, remote_host, remote_port);
     let output = std::process::Command::new("ssh")
-        .arg("-O").arg("forward")
-        .arg("-L").arg(&spec)
-        .arg("-S").arg(socket_path.to_string_lossy().as_ref())
+        .arg("-O")
+        .arg("forward")
+        .arg("-L")
+        .arg(&spec)
+        .arg("-S")
+        .arg(socket_path.to_string_lossy().as_ref())
         .arg(format!("{}@{}", info.user, info.host))
         .output()
         .map_err(|e| format!("Failed to add port forward: {}", e))?;
@@ -2610,7 +2628,10 @@ pub fn ssh_add_port_forward(
     }
 
     // Update session state
-    let mgr = state.pty_manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mgr = state
+        .pty_manager
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     if let Some(pty_session) = mgr.sessions.get(&session_id) {
         if let Ok(mut s) = pty_session.session.lock() {
             if let Some(ref mut ssh) = s.ssh_info {
@@ -2643,11 +2664,17 @@ pub fn ssh_remove_port_forward(
         .find(|f| f.local_port == local_port)
         .ok_or_else(|| format!("No forward on port {}", local_port))?;
 
-    let spec = format!("{}:{}:{}", forward.local_port, forward.remote_host, forward.remote_port);
+    let spec = format!(
+        "{}:{}:{}",
+        forward.local_port, forward.remote_host, forward.remote_port
+    );
     let output = std::process::Command::new("ssh")
-        .arg("-O").arg("cancel")
-        .arg("-L").arg(&spec)
-        .arg("-S").arg(socket_path.to_string_lossy().as_ref())
+        .arg("-O")
+        .arg("cancel")
+        .arg("-L")
+        .arg(&spec)
+        .arg("-S")
+        .arg(socket_path.to_string_lossy().as_ref())
         .arg(format!("{}@{}", info.user, info.host))
         .output()
         .map_err(|e| format!("Failed to remove port forward: {}", e))?;
@@ -2660,7 +2687,10 @@ pub fn ssh_remove_port_forward(
     }
 
     // Update session state
-    let mgr = state.pty_manager.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mgr = state
+        .pty_manager
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     if let Some(pty_session) = mgr.sessions.get(&session_id) {
         if let Ok(mut s) = pty_session.session.lock() {
             if let Some(ref mut ssh) = s.ssh_info {

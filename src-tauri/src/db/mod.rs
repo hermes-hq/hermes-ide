@@ -439,7 +439,8 @@ impl Database {
             .execute_batch("ALTER TABLE sessions ADD COLUMN ssh_info TEXT;");
 
         // SSH saved hosts table (idempotent)
-        let _ = self.conn.execute_batch("
+        let _ = self.conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS ssh_saved_hosts (
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
@@ -452,7 +453,8 @@ impl Database {
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-        ");
+        ",
+        );
 
         Ok(())
     }
@@ -1936,22 +1938,26 @@ impl Database {
             "SELECT id, label, host, port, user, identity_file, jump_host, port_forwards, created_at, updated_at FROM ssh_saved_hosts ORDER BY label"
         ).map_err(|e| e.to_string())?;
 
-        let hosts = stmt.query_map([], |row| {
-            Ok(SshSavedHost {
-                id: row.get(0)?,
-                label: row.get(1)?,
-                host: row.get(2)?,
-                port: row.get(3)?,
-                user: row.get(4)?,
-                identity_file: row.get(5)?,
-                jump_host: row.get(6)?,
-                port_forwards: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+        let hosts = stmt
+            .query_map([], |row| {
+                Ok(SshSavedHost {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    host: row.get(2)?,
+                    port: row.get(3)?,
+                    user: row.get(4)?,
+                    identity_file: row.get(5)?,
+                    jump_host: row.get(6)?,
+                    port_forwards: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
-        hosts.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        hosts
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 
     pub fn upsert_ssh_saved_host(&self, host: &SshSavedHost) -> Result<(), String> {
@@ -1964,10 +1970,9 @@ impl Database {
     }
 
     pub fn delete_ssh_saved_host(&self, id: &str) -> Result<(), String> {
-        self.conn.execute(
-            "DELETE FROM ssh_saved_hosts WHERE id = ?1",
-            params![id],
-        ).map_err(|e| e.to_string())?;
+        self.conn
+            .execute("DELETE FROM ssh_saved_hosts WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 }
