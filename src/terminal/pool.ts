@@ -643,6 +643,33 @@ export function setSessionCwd(sessionId: string, cwd: string): void {
   entry.cwd = cwd;
 }
 
+/**
+ * Detect if a session's new CWD is inside another session's worktree directory.
+ * Returns the owning session's id and branch name, or null if no mismatch.
+ */
+export function detectBranchMismatch(
+  currentSessionId: string,
+  newCwd: string,
+): { sessionId: string; branch: string } | null {
+  if (!newCwd.includes(".hermes/worktrees/")) return null;
+
+  for (const [sessionId, entry] of pool.entries()) {
+    if (sessionId === currentSessionId) continue;
+    if (
+      entry.cwd &&
+      newCwd.startsWith(entry.cwd) &&
+      entry.cwd.includes(".hermes/worktrees/")
+    ) {
+      const match = entry.cwd.match(
+        /\.hermes\/worktrees\/[^/]+_(.+?)(?:\/|$)/,
+      );
+      const branch = match?.[1] || "unknown";
+      return { sessionId, branch };
+    }
+  }
+  return null;
+}
+
 /** Get the history provider for a session (for external loading) */
 export function getHistoryProvider(sessionId: string): HistoryProvider | null {
   return pool.get(sessionId)?.historyProvider ?? null;

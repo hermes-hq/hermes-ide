@@ -147,6 +147,8 @@ export interface CreateSessionOpts {
   projectIds?: string[];
   branchName?: string;
   createNewBranch?: boolean;
+  /** Per-project branch selections: realmId -> { branch, createNew } */
+  branchSelections?: Record<string, { branch: string; createNew: boolean }>;
   sshHost?: string;
   sshPort?: number;
   sshUser?: string;

@@ -3,10 +3,13 @@ import { subscribeGitStatus, getGitStatusSnapshot, refreshGitStatus } from "../h
 import { useSession, useActiveSession } from "../state/SessionContext";
 import { GitProjectSection } from "./GitProjectSection";
 import { GitDiffView } from "./GitDiffView";
+import { WorktreeOverviewPanel } from "./WorktreeOverviewPanel";
 import { getSettings } from "../api/settings";
 import type { GitFile } from "../types/git";
 import type { GitSessionStatus } from "../types/git";
 import "../styles/components/GitPanel.css";
+
+type GitPanelView = "changes" | "worktrees";
 
 interface GitPanelProps {
   visible: boolean;
@@ -45,6 +48,7 @@ export function GitPanel({ visible }: GitPanelProps) {
   const error = null; // errors are silently ignored in the shared cache
   const [diffTarget, setDiffTarget] = useState<{ sessionId: string; realmId: string; file: GitFile } | null>(null);
   const [toast, setToast] = useState<GitToast | null>(null);
+  const [panelView, setPanelView] = useState<GitPanelView>("changes");
 
   // Load poll interval setting on mount
   useEffect(() => {
@@ -93,31 +97,55 @@ export function GitPanel({ visible }: GitPanelProps) {
         </button>
       </div>
 
-      <div className="git-panel-scroll">
-        {error && (
-          <div className="git-error">{error}</div>
-        )}
-
-        {status && status.projects.length === 0 && !error && (
-          <div className="git-empty-state">
-            No git repositories found.
-            <br />
-            Attach a project with a git repo to this session.
-          </div>
-        )}
-
-        {status && state.activeSessionId && status.projects.map((project) => (
-          <GitProjectSection
-            key={project.project_id}
-            sessionId={state.activeSessionId!}
-            realmId={project.project_id}
-            project={project}
-            onRefresh={refresh}
-            onDiffFile={handleDiffFile}
-            onToast={showToast}
-          />
-        ))}
+      {/* View Toggle: Changes | Worktrees */}
+      <div className="git-view-toggle">
+        <button
+          className={`git-view-toggle-btn ${panelView === "changes" ? "git-view-toggle-btn-active" : ""}`}
+          onClick={() => setPanelView("changes")}
+        >
+          Changes
+        </button>
+        <button
+          className={`git-view-toggle-btn ${panelView === "worktrees" ? "git-view-toggle-btn-active" : ""}`}
+          onClick={() => setPanelView("worktrees")}
+        >
+          Worktrees
+        </button>
       </div>
+
+      {panelView === "changes" && (
+        <div className="git-panel-scroll">
+          {error && (
+            <div className="git-error">{error}</div>
+          )}
+
+          {status && status.projects.length === 0 && !error && (
+            <div className="git-empty-state">
+              No git repositories found.
+              <br />
+              Attach a project with a git repo to this session.
+            </div>
+          )}
+
+          {status && state.activeSessionId && status.projects.map((project) => (
+            <GitProjectSection
+              key={project.project_id}
+              sessionId={state.activeSessionId!}
+              realmId={project.project_id}
+              project={project}
+              onRefresh={refresh}
+              onDiffFile={handleDiffFile}
+              onToast={showToast}
+            />
+          ))}
+        </div>
+      )}
+
+      {panelView === "worktrees" && (
+        <div className="git-panel-scroll">
+          <WorktreeOverviewPanel />
+        </div>
+      )}
 
       {/* Floating toast at bottom of panel */}
       {toast && (

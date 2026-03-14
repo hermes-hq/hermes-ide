@@ -5,6 +5,8 @@ import type {
   GitStashEntry, GitLogResult, GitCommitDetail, MergeStatus, ConflictContent, ConflictStrategy,
   SearchResponse,
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
+  WorktreeChanges,
+  WorktreeOverviewEntry, OrphanWorktree, CleanupResult,
 } from "../types/git";
 
 export function gitStatus(sessionId: string): Promise<GitSessionStatus> {
@@ -257,4 +259,49 @@ export async function getSessionWorktreeInfo(
   realmId: string,
 ): Promise<SessionWorktree | null> {
   return invoke<SessionWorktree | null>("git_session_worktree_info", { sessionId, realmId });
+}
+
+export async function listBranchesForRealms(
+  realmIds: string[],
+): Promise<Record<string, GitBranch[]>> {
+  return invoke<Record<string, GitBranch[]>>("git_list_branches_for_realms", { realmIds });
+}
+
+export async function isGitRepo(
+  realmId: string,
+): Promise<boolean> {
+  return invoke<boolean>("git_is_git_repo", { realmId });
+}
+
+export async function worktreeHasChanges(
+  sessionId: string,
+  realmId: string,
+): Promise<WorktreeChanges> {
+  return invoke<WorktreeChanges>("git_worktree_has_changes", { sessionId, realmId });
+}
+
+export async function stashWorktree(
+  sessionId: string,
+  realmId: string,
+  message?: string,
+): Promise<GitOperationResult> {
+  return invoke<GitOperationResult>("git_stash_worktree", { sessionId, realmId, message: message ?? null });
+}
+
+// ─── Worktree Overview & Cleanup API ─────────────────────────────────
+
+export async function listAllWorktrees(): Promise<WorktreeOverviewEntry[]> {
+  return invoke<WorktreeOverviewEntry[]>("git_list_all_worktrees");
+}
+
+export async function detectOrphanWorktrees(): Promise<OrphanWorktree[]> {
+  return invoke<OrphanWorktree[]>("git_detect_orphan_worktrees");
+}
+
+export async function worktreeDiskUsage(worktreePath: string): Promise<number> {
+  return invoke<number>("git_worktree_disk_usage", { worktreePath });
+}
+
+export async function cleanupOrphanWorktrees(paths: string[]): Promise<CleanupResult[]> {
+  return invoke<CleanupResult[]>("git_cleanup_orphan_worktrees", { paths });
 }
