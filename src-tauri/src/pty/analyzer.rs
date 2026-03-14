@@ -71,6 +71,7 @@ pub(crate) struct CommandPredictionEvent {
 
 // ─── Output Analyzer (uses Provider Registry) ───────────────────────
 
+#[allow(private_interfaces)]
 pub struct OutputAnalyzer {
     registry: ProviderRegistry,
     pub active_provider_idx: Option<usize>,
@@ -116,6 +117,12 @@ pub struct OutputAnalyzer {
     pub pending_context_inject: bool,
     pub context_injected: bool,
     prompt_count_after_agent: u32,
+}
+
+impl Default for OutputAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OutputAnalyzer {

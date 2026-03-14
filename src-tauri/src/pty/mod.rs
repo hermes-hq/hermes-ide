@@ -44,6 +44,12 @@ pub struct PtyManager {
     pub(crate) session_counter: usize,
 }
 
+impl Default for PtyManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PtyManager {
     pub fn new() -> Self {
         Self {
