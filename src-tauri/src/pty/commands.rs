@@ -1230,67 +1230,97 @@ pub fn create_session(
             let silence_threshold = std::time::Duration::from_millis(2000);
             loop {
                 thread::sleep(interval);
-                // Check if session is destroyed → stop
-                if let Ok(s) = session_silence.lock() {
-                    if matches!(s.phase, SessionPhase::Destroyed) {
-                        break;
-                    }
+                // Check if session is destroyed → stop.
+                // Acquire and release session lock quickly — never hold both locks.
+                let is_destroyed = session_silence
+                    .lock()
+                    .ok()
+                    .map(|s| matches!(s.phase, SessionPhase::Destroyed))
+                    .unwrap_or(false);
+                if is_destroyed {
+                    break;
                 }
-                if let Ok(mut a) = analyzer_silence.lock() {
+
+                // Phase 1: acquire ONLY the analyzer lock, compute state changes.
+                // Collect everything we need, then release the lock before touching session.
+                let silence_result = if let Ok(mut a) = analyzer_silence.lock() {
                     if let Some(last) = a.last_output_at {
                         if a.is_busy && last.elapsed() >= silence_threshold {
                             a.check_silence();
-                            if let Some(new_phase) = a.take_pending_phase() {
-                                if let Ok(mut s) = session_silence.lock() {
-                                    if s.phase != new_phase {
-                                        s.phase = new_phase.clone();
-                                        s.detected_agent = a.detected_agent.clone();
-                                        s.metrics = a.to_metrics();
-                                        s.last_activity_at = now();
-                                        let update = SessionUpdate::from(&*s);
-                                        let _ = app_silence.emit("session-updated", &update);
+                            let new_phase = a.take_pending_phase();
+                            let detected_agent = a.detected_agent.clone();
+                            let metrics = if new_phase.is_some() {
+                                Some(a.to_metrics())
+                            } else {
+                                None
+                            };
+
+                            // Check fallback auto-launch
+                            let launch_info = if a.pending_ai_launch {
+                                a.pending_ai_launch = false;
+                                Some(a.context_injected)
+                            } else {
+                                None
+                            };
+
+                            Some((new_phase, detected_agent, metrics, launch_info))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                // ← analyzer lock is RELEASED here
+
+                // Phase 2: apply state changes using ONLY the session lock.
+                if let Some((new_phase, detected_agent, metrics, launch_info)) = silence_result {
+                    if let Some(new_phase) = new_phase {
+                        if let (Some(metrics), Ok(mut s)) = (metrics, session_silence.lock()) {
+                            if s.phase != new_phase {
+                                s.phase = new_phase.clone();
+                                s.detected_agent = detected_agent;
+                                s.metrics = metrics;
+                                s.last_activity_at = now();
+                                let update = SessionUpdate::from(&*s);
+                                let _ = app_silence.emit("session-updated", &update);
+                            }
+                        }
+                    }
+
+                    // Fallback auto-launch
+                    if launch_info.is_some() {
+                        let launch_data = session_silence.lock().ok().map(|s| {
+                            (s.ai_provider.clone(), s.has_initial_context, s.auto_approve)
+                        });
+                        if let Some((Some(ref provider), has_context, auto_approve)) = launch_data {
+                            if let Some(launch_cmd) = ai_launch_command(provider, auto_approve) {
+                                let supports_cli_prompt =
+                                    provider == "claude" || provider == "gemini";
+                                let cmd = if has_context && supports_cli_prompt {
+                                    format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
+                                } else {
+                                    launch_cmd
+                                };
+                                if let Ok(mut w) = writer_for_silence.lock() {
+                                    let _ = w.write_all(format!("{}\r", cmd).as_bytes());
+                                    let _ = w.flush();
+                                }
+                                // Update session state — need analyzer lock for context_injected
+                                if has_context && supports_cli_prompt {
+                                    if let Ok(mut a) = analyzer_silence.lock() {
+                                        a.context_injected = true;
                                     }
                                 }
-                            }
-
-                            // Fallback auto-launch: check_silence may have set
-                            // pending_ai_launch when an unrecognized prompt went
-                            // silent.  The reader thread is blocked on read() and
-                            // won't see the flag, so we consume it here.
-                            if a.pending_ai_launch {
-                                a.pending_ai_launch = false;
-                                let launch_info = session_silence.lock().ok().map(|s| {
-                                    (s.ai_provider.clone(), s.has_initial_context, s.auto_approve)
-                                });
-                                if let Some((Some(ref provider), has_context, auto_approve)) =
-                                    launch_info
-                                {
-                                    if let Some(launch_cmd) =
-                                        ai_launch_command(provider, auto_approve)
-                                    {
-                                        let supports_cli_prompt =
-                                            provider == "claude" || provider == "gemini";
-                                        let cmd = if has_context && supports_cli_prompt {
-                                            format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
-                                        } else {
-                                            launch_cmd
-                                        };
-                                        if let Ok(mut w) = writer_for_silence.lock() {
-                                            let _ = w.write_all(format!("{}\r", cmd).as_bytes());
-                                            let _ = w.flush();
-                                        }
-                                        if has_context && supports_cli_prompt {
-                                            a.context_injected = true;
-                                        }
-                                        if let Ok(mut s) = session_silence.lock() {
-                                            if has_context && supports_cli_prompt {
-                                                s.context_injected = true;
-                                            }
-                                            s.phase = SessionPhase::LaunchingAgent;
-                                            let update = SessionUpdate::from(&*s);
-                                            let _ = app_silence.emit("session-updated", &update);
-                                        }
+                                if let Ok(mut s) = session_silence.lock() {
+                                    if has_context && supports_cli_prompt {
+                                        s.context_injected = true;
                                     }
+                                    s.phase = SessionPhase::LaunchingAgent;
+                                    let update = SessionUpdate::from(&*s);
+                                    let _ = app_silence.emit("session-updated", &update);
                                 }
                             }
                         }
@@ -1486,17 +1516,21 @@ pub fn write_to_session(
             let child_pids = enumerate_child_pids(shell_pid);
             if !child_pids.is_empty() {
                 for &cpid in &child_pids {
-                    unsafe {
-                        // Send to the child's process group (covers the child
-                        // and any of its own children)
-                        libc::kill(-(cpid as i32), libc::SIGINT);
+                    if cpid > 0 && cpid <= i32::MAX as u32 {
+                        unsafe {
+                            // Send to the child's process group (covers the child
+                            // and any of its own children)
+                            libc::kill(-(cpid as i32), libc::SIGINT);
+                        }
                     }
                 }
             } else {
                 // No children found — the shell is at the prompt.
                 // Send to the shell's own process group so it sees the interrupt.
-                unsafe {
-                    libc::kill(-(shell_pid as i32), libc::SIGINT);
+                if shell_pid > 0 && shell_pid <= i32::MAX as u32 {
+                    unsafe {
+                        libc::kill(-(shell_pid as i32), libc::SIGINT);
+                    }
                 }
             }
         }
@@ -1658,11 +1692,13 @@ pub fn resize_session(
     #[cfg(unix)]
     {
         if let Some(child_pid) = session.child.process_id() {
-            let pgid = child_pid as i32;
-            unsafe {
-                // Send to the process group (negative PID), not just the shell.
-                // This ensures child processes (e.g. Claude Code) also receive it.
-                libc::kill(-(pgid), libc::SIGWINCH);
+            if child_pid > 0 && child_pid <= i32::MAX as u32 {
+                let pgid = child_pid as i32;
+                unsafe {
+                    // Send to the process group (negative PID), not just the shell.
+                    // This ensures child processes (e.g. Claude Code) also receive it.
+                    libc::kill(-(pgid), libc::SIGWINCH);
+                }
             }
         }
     }
@@ -1679,12 +1715,13 @@ pub fn close_session(
     let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
-        // Clean up shell integration temp files (ZDOTDIR, bash rcfile, etc.)
+        // Kill the child shell process FIRST — it may still be using ZDOTDIR
+        // temp files. Don't block on wait() since the process may be hung.
+        pty_session.child.kill().ok();
+
+        // Clean up shell integration temp files after killing the child
         crate::pty::shell_integration::cleanup(&pty_session.shell_integration);
 
-        // Kill the child shell process — don't block on wait() since the
-        // process may be hung. Spawn a reaper thread instead.
-        pty_session.child.kill().ok();
         let mut child = pty_session.child;
         thread::spawn(move || {
             child.wait().ok();

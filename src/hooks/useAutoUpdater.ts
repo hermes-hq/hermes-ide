@@ -109,6 +109,10 @@ export function useAutoUpdater() {
     return () => {
       clearTimeout(timeout);
       clearInterval(interval);
+      if (stallTimerRef.current) {
+        clearInterval(stallTimerRef.current);
+        stallTimerRef.current = null;
+      }
     };
   }, [doCheck]);
 

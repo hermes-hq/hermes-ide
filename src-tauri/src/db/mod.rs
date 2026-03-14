@@ -453,8 +453,14 @@ impl Database {
             // Find a char boundary near the 50K mark from the end
             let target = snapshot.len() - 50000;
             let mut start = target;
-            while start < snapshot.len() && !snapshot.is_char_boundary(start) {
+            // UTF-8 chars are at most 4 bytes; limit iterations to prevent infinite loop on corrupted data
+            let max_advance = start + 4;
+            while start < snapshot.len() && start < max_advance && !snapshot.is_char_boundary(start)
+            {
                 start += 1;
+            }
+            if start >= snapshot.len() || !snapshot.is_char_boundary(start) {
+                start = snapshot.len(); // fallback: return empty string rather than hang
             }
             &snapshot[start..]
         } else {

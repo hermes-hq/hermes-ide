@@ -598,6 +598,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
   const busyTimestamps = useRef<Map<string, number>>(new Map());
   const closingSessionIds = useRef<Set<string>>(new Set());
+  const closeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // Long-running threshold: 30 seconds of busy before notification on idle
   const LONG_RUNNING_THRESHOLD_MS = 30_000;
@@ -684,7 +685,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // to avoid duplicate instructions when toggling multiple projects.
     };
 
-    setup();
+    setup().catch((err) => console.error("[SessionContext] Failed to setup event listeners:", err));
 
     // Load settings first, THEN sessions (so terminals use correct settings)
     getSettings()
@@ -751,10 +752,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           // Re-create each saved session
           const oldToNew = new Map<string, string>();
           for (const saved of workspace.sessions) {
+            const restoreId = crypto.randomUUID();
             try {
               // Pre-generate ID and set up listener before PTY starts
               // (same race-prevention as createSession above)
-              const restoreId = crypto.randomUUID();
               await createTerminal(restoreId, saved.color);
 
               const restoreDims = estimateInitialDimensions();
@@ -807,6 +808,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               oldToNew.set(saved.id, newSession.id);
             } catch (err) {
               console.warn("[SessionContext] Failed to restore session:", saved.label, err);
+              // Clean up the terminal that was pre-created for this failed session
+              destroyTerminal(restoreId);
             }
           }
 
@@ -846,7 +849,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       .then((entries) => dispatch({ type: "SET_RECENT", entries }))
       .catch(console.error);
 
-    return () => { unlisteners.forEach((u) => u()); };
+    return () => {
+      unlisteners.forEach((u) => u());
+      closeTimers.current.forEach((t) => clearTimeout(t));
+      closeTimers.current.clear();
+    };
   }, []);
 
   const createSession = useCallback(async (opts?: CreateSessionOpts) => {
@@ -946,11 +953,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       closingSessionIds.current.delete(id);
       // Give the backend event a moment to arrive, then force-remove only if
       // the session is still in state (avoids double-dispatch with session-removed event).
-      setTimeout(() => {
+      // Track the timer so it can be cancelled on unmount
+      const timer = setTimeout(() => {
+        closeTimers.current.delete(id);
         if (stateRef.current.sessions[id]) {
           dispatch({ type: "SESSION_REMOVED", id });
         }
       }, 500);
+      closeTimers.current.set(id, timer);
     }
   }, [dispatch]);
 
