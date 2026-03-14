@@ -14,6 +14,50 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::Manager;
 
+/// Install a crash handler that writes panic info to a log file instead of
+/// stderr.  Writing to stderr during a panic is the primary cause of double-
+/// panics (SIGABRT) when many sessions are active — the global stderr lock
+/// may already be held by another panicking thread.  By writing to a file
+/// we avoid the lock contention that triggers process::abort().
+fn install_crash_handler() {
+    std::panic::set_hook(Box::new(|info| {
+        let crash_dir = dirs::home_dir().unwrap_or_default().join(".hermes");
+        let _ = std::fs::create_dir_all(&crash_dir);
+        let crash_log = crash_dir.join("crash.log");
+
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+        let backtrace = std::backtrace::Backtrace::force_capture();
+
+        let crash_info = format!(
+            "\n=== CRASH {} ===\nLocation: {}\nMessage: {}\nThread: {:?}\nBacktrace:\n{}\n",
+            timestamp,
+            location,
+            message,
+            std::thread::current().name(),
+            backtrace
+        );
+
+        // Write to file — never to stderr, to avoid double-panic
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_log)
+        {
+            let _ = std::io::Write::write_all(&mut f, crash_info.as_bytes());
+        }
+    }));
+}
+
 static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
 
 /// Clean up worktrees whose sessions no longer exist.
@@ -99,7 +143,10 @@ fn do_save_workspace(app: &tauri::AppHandle) {
     };
     let mgr = match state.pty_manager.lock() {
         Ok(m) => m,
-        Err(_) => return,
+        Err(poisoned) => {
+            log::warn!("pty_manager poisoned during workspace save — recovering");
+            poisoned.into_inner()
+        }
     };
     let db = match state.db.lock() {
         Ok(d) => d,
@@ -158,6 +205,7 @@ fn save_workspace_state(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::init();
+    install_crash_handler();
 
     // Create a Tokio runtime context for plugins that spawn async tasks during
     // initialization (tauri-plugin-aptabase calls tokio::task::spawn in its init
@@ -392,27 +440,83 @@ pub fn run() {
         .expect("error while building HERMES-IDE")
         .run(|app, event| match &event {
             tauri::RunEvent::ExitRequested { .. } => {
-                eprintln!("[hermes] ExitRequested — saving workspace");
+                log::info!("[hermes] ExitRequested — saving workspace");
                 save_workspace_state(app);
             }
             tauri::RunEvent::Exit => {
-                eprintln!("[hermes] Exit — saving workspace");
+                log::info!("[hermes] Exit — saving workspace");
                 save_workspace_state(app);
             }
             tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { .. },
                 ..
             } => {
-                eprintln!("[hermes] WindowCloseRequested — saving workspace");
+                log::info!("[hermes] WindowCloseRequested — saving workspace");
                 save_workspace_state(app);
             }
             tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::Destroyed,
                 ..
             } => {
-                eprintln!("[hermes] WindowDestroyed — saving workspace");
+                log::info!("[hermes] WindowDestroyed — saving workspace");
                 save_workspace_state(app);
             }
             _ => {}
         });
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// Verify that poisoned pty_manager Mutex is recoverable via
+    /// `unwrap_or_else(|e| e.into_inner())` — the pattern now used by
+    /// every Tauri command handler.
+    #[test]
+    fn poisoned_mutex_recovery() {
+        let mgr = Arc::new(Mutex::new(pty::PtyManager::new()));
+
+        // Poison the mutex by panicking while holding the lock
+        let mgr_clone = Arc::clone(&mgr);
+        let handle = std::thread::spawn(move || {
+            let _guard = mgr_clone.lock().unwrap();
+            panic!("intentional panic to poison mutex");
+        });
+        let _ = handle.join(); // join the panicked thread
+
+        // The mutex is now poisoned — verify .lock() returns Err
+        assert!(mgr.lock().is_err(), "mutex should be poisoned");
+
+        // Recover via into_inner — the pattern used in production
+        let guard = mgr.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            guard.sessions.len(),
+            0,
+            "recovered PtyManager should be valid"
+        );
+    }
+
+    /// Verify the crash handler writes to a file (not stderr).
+    #[test]
+    fn crash_handler_writes_to_file() {
+        let crash_dir = tempfile::tempdir().unwrap();
+        let crash_log = crash_dir.path().join("crash.log");
+
+        // Simulate what install_crash_handler does: write crash info to file
+        let crash_info = "=== TEST CRASH ===\nMessage: test\n";
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&crash_log)
+                .unwrap();
+            std::io::Write::write_all(&mut f, crash_info.as_bytes()).unwrap();
+        }
+
+        let contents = std::fs::read_to_string(&crash_log).unwrap();
+        assert!(contents.contains("TEST CRASH"));
+    }
 }

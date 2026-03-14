@@ -579,7 +579,7 @@ pub fn create_session(
         original_cwd
     };
 
-    let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     mgr.session_counter += 1;
     let counter = mgr.session_counter;
 
@@ -859,162 +859,179 @@ pub fn create_session(
     let app_clone = app.clone();
 
     thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        let mut chunk_count: u64 = 0;
+        // Wrap the reader loop in catch_unwind so that a panic inside the
+        // reader (e.g. in portable_pty or output analysis) does NOT poison
+        // the shared session/analyzer Mutexes.  Without this, one crashed
+        // reader thread would make every subsequent Tauri command fail with
+        // PoisonError, eventually leading to a double-panic SIGABRT.
+        let session_for_cleanup = Arc::clone(&session_clone);
+        let app_for_cleanup = app_clone.clone();
+        let exit_id = event_session_id.clone();
 
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => {
-                    if let Ok(mut s) = session_clone.lock() {
-                        s.phase = SessionPhase::Destroyed;
-                        let update = SessionUpdate::from(&*s);
-                        let _ = app_clone.emit("session-updated", &update);
-                    }
-                    let _ = app_clone.emit(&format!("pty-exit-{}", event_session_id), ());
-                    break;
-                }
-                Ok(n) => {
-                    let data = &buf[..n];
-                    chunk_count += 1;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let mut buf = [0u8; 4096];
+            let mut chunk_count: u64 = 0;
 
-                    if let Ok(mut a) = analyzer_clone.lock() {
-                        a.process(data);
-
-                        // Check for CWD change
-                        if let Some(new_cwd) = a.take_pending_cwd() {
-                            if let Ok(mut s) = session_clone.lock() {
-                                s.working_directory = new_cwd.clone();
-                            }
-                            let _ = app_clone
-                                .emit(&format!("cwd-changed-{}", event_session_id), &new_cwd);
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        if let Ok(mut s) = session_clone.lock() {
+                            s.phase = SessionPhase::Destroyed;
+                            let update = SessionUpdate::from(&*s);
+                            let _ = app_clone.emit("session-updated", &update);
                         }
+                        let _ = app_clone.emit(&format!("pty-exit-{}", event_session_id), ());
+                        break;
+                    }
+                    Ok(n) => {
+                        let data = &buf[..n];
+                        chunk_count += 1;
 
-                        // Drain completed nodes → insert into DB + emit events
-                        let completed = a.drain_completed_nodes();
+                        if let Ok(mut a) = analyzer_clone.lock() {
+                            a.process(data);
 
-                        if !completed.is_empty() {
-                            if let Ok(db) = app_clone.state::<AppState>().db.lock() {
-                                for node in &completed {
-                                    let node_id = db
-                                        .insert_execution_node(
-                                            &event_session_id,
-                                            node.timestamp,
-                                            &node.kind,
-                                            node.input.as_deref(),
-                                            node.output_summary.as_deref(),
-                                            node.exit_code,
-                                            &node.working_dir,
-                                            node.duration_ms,
-                                            None,
-                                        )
-                                        .ok();
+                            // Check for CWD change
+                            if let Some(new_cwd) = a.take_pending_cwd() {
+                                if let Ok(mut s) = session_clone.lock() {
+                                    s.working_directory = new_cwd.clone();
+                                }
+                                let _ = app_clone
+                                    .emit(&format!("cwd-changed-{}", event_session_id), &new_cwd);
+                            }
 
-                                    // Emit execution-node event
-                                    if let Some(id) = node_id {
-                                        let exec_node = ExecutionNode {
-                                            id,
-                                            session_id: event_session_id.clone(),
-                                            timestamp: node.timestamp,
-                                            kind: node.kind.clone(),
-                                            input: node.input.clone(),
-                                            output_summary: node.output_summary.clone(),
-                                            exit_code: node.exit_code,
-                                            working_dir: node.working_dir.clone(),
-                                            duration_ms: node.duration_ms,
-                                            metadata: None,
-                                        };
-                                        let _ = app_clone.emit(
-                                            &format!("execution-node-{}", event_session_id),
-                                            &exec_node,
-                                        );
-                                    }
+                            // Drain completed nodes → insert into DB + emit events
+                            let completed = a.drain_completed_nodes();
 
-                                    let project_id: Option<String> = Some(node.working_dir.clone());
+                            if !completed.is_empty() {
+                                if let Ok(db) = app_clone.state::<AppState>().db.lock() {
+                                    for node in &completed {
+                                        let node_id = db
+                                            .insert_execution_node(
+                                                &event_session_id,
+                                                node.timestamp,
+                                                &node.kind,
+                                                node.input.as_deref(),
+                                                node.output_summary.as_deref(),
+                                                node.exit_code,
+                                                &node.working_dir,
+                                                node.duration_ms,
+                                                None,
+                                            )
+                                            .ok();
 
-                                    // Command sequence tracking — push FIRST then record
-                                    if node.kind == "command" {
-                                        if let Some(ref input) = node.input {
-                                            let normalized = input
-                                                .trim()
-                                                .trim_start_matches('$')
-                                                .trim()
-                                                .to_string();
-                                            if !normalized.is_empty() {
-                                                // Push to recent_commands first
-                                                a.recent_commands.push_back(normalized.clone());
-                                                if a.recent_commands.len() > 5 {
-                                                    a.recent_commands.pop_front();
-                                                }
+                                        // Emit execution-node event
+                                        if let Some(id) = node_id {
+                                            let exec_node = ExecutionNode {
+                                                id,
+                                                session_id: event_session_id.clone(),
+                                                timestamp: node.timestamp,
+                                                kind: node.kind.clone(),
+                                                input: node.input.clone(),
+                                                output_summary: node.output_summary.clone(),
+                                                exit_code: node.exit_code,
+                                                working_dir: node.working_dir.clone(),
+                                                duration_ms: node.duration_ms,
+                                                metadata: None,
+                                            };
+                                            let _ = app_clone.emit(
+                                                &format!("execution-node-{}", event_session_id),
+                                                &exec_node,
+                                            );
+                                        }
 
-                                                // Now record sequences using the updated list
-                                                let cmds: Vec<String> =
-                                                    a.recent_commands.iter().cloned().collect();
-                                                if cmds.len() >= 2 {
-                                                    let prev: Vec<&str> = cmds[..cmds.len() - 1]
+                                        let project_id: Option<String> =
+                                            Some(node.working_dir.clone());
+
+                                        // Command sequence tracking — push FIRST then record
+                                        if node.kind == "command" {
+                                            if let Some(ref input) = node.input {
+                                                let normalized = input
+                                                    .trim()
+                                                    .trim_start_matches('$')
+                                                    .trim()
+                                                    .to_string();
+                                                if !normalized.is_empty() {
+                                                    // Push to recent_commands first
+                                                    a.recent_commands.push_back(normalized.clone());
+                                                    if a.recent_commands.len() > 5 {
+                                                        a.recent_commands.pop_front();
+                                                    }
+
+                                                    // Now record sequences using the updated list
+                                                    let cmds: Vec<String> =
+                                                        a.recent_commands.iter().cloned().collect();
+                                                    if cmds.len() >= 2 {
+                                                        let prev: Vec<&str> = cmds
+                                                            [..cmds.len() - 1]
+                                                            .iter()
+                                                            .rev()
+                                                            .take(2)
+                                                            .map(|s| s.as_str())
+                                                            .collect::<Vec<_>>()
+                                                            .into_iter()
+                                                            .rev()
+                                                            .collect();
+                                                        let seq_json = serde_json::to_string(&prev)
+                                                            .unwrap_or_default();
+                                                        db.record_command_sequence(
+                                                            project_id.as_deref(),
+                                                            &seq_json,
+                                                            &normalized,
+                                                        )
+                                                        .ok();
+                                                    }
+                                                    if cmds.len() >= 3 {
+                                                        let prev: Vec<&str> = cmds
+                                                            [..cmds.len() - 1]
+                                                            .iter()
+                                                            .rev()
+                                                            .take(3)
+                                                            .map(|s| s.as_str())
+                                                            .collect::<Vec<_>>()
+                                                            .into_iter()
+                                                            .rev()
+                                                            .collect();
+                                                        let seq_json = serde_json::to_string(&prev)
+                                                            .unwrap_or_default();
+                                                        db.record_command_sequence(
+                                                            project_id.as_deref(),
+                                                            &seq_json,
+                                                            &normalized,
+                                                        )
+                                                        .ok();
+                                                    }
+
+                                                    // Query predictions and emit
+                                                    let seq: Vec<&str> = cmds
                                                         .iter()
                                                         .rev()
                                                         .take(2)
-                                                        .map(|s| s.as_str())
                                                         .collect::<Vec<_>>()
                                                         .into_iter()
                                                         .rev()
-                                                        .collect();
-                                                    let seq_json = serde_json::to_string(&prev)
-                                                        .unwrap_or_default();
-                                                    db.record_command_sequence(
-                                                        project_id.as_deref(),
-                                                        &seq_json,
-                                                        &normalized,
-                                                    )
-                                                    .ok();
-                                                }
-                                                if cmds.len() >= 3 {
-                                                    let prev: Vec<&str> = cmds[..cmds.len() - 1]
-                                                        .iter()
-                                                        .rev()
-                                                        .take(3)
                                                         .map(|s| s.as_str())
-                                                        .collect::<Vec<_>>()
-                                                        .into_iter()
-                                                        .rev()
                                                         .collect();
-                                                    let seq_json = serde_json::to_string(&prev)
+                                                    let seq_json = serde_json::to_string(&seq)
                                                         .unwrap_or_default();
-                                                    db.record_command_sequence(
-                                                        project_id.as_deref(),
-                                                        &seq_json,
-                                                        &normalized,
-                                                    )
-                                                    .ok();
-                                                }
-
-                                                // Query predictions and emit
-                                                let seq: Vec<&str> = cmds
-                                                    .iter()
-                                                    .rev()
-                                                    .take(2)
-                                                    .collect::<Vec<_>>()
-                                                    .into_iter()
-                                                    .rev()
-                                                    .map(|s| s.as_str())
-                                                    .collect();
-                                                let seq_json =
-                                                    serde_json::to_string(&seq).unwrap_or_default();
-                                                if let Ok(predictions) = db.predict_next_command(
-                                                    project_id.as_deref(),
-                                                    &seq_json,
-                                                    3,
-                                                ) {
-                                                    if !predictions.is_empty() {
-                                                        let evt =
-                                                            CommandPredictionEvent { predictions };
-                                                        let _ = app_clone.emit(
-                                                            &format!(
-                                                                "command-prediction-{}",
-                                                                event_session_id
-                                                            ),
-                                                            &evt,
-                                                        );
+                                                    if let Ok(predictions) = db
+                                                        .predict_next_command(
+                                                            project_id.as_deref(),
+                                                            &seq_json,
+                                                            3,
+                                                        )
+                                                    {
+                                                        if !predictions.is_empty() {
+                                                            let evt = CommandPredictionEvent {
+                                                                predictions,
+                                                            };
+                                                            let _ = app_clone.emit(
+                                                                &format!(
+                                                                    "command-prediction-{}",
+                                                                    event_session_id
+                                                                ),
+                                                                &evt,
+                                                            );
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1022,159 +1039,181 @@ pub fn create_session(
                                     }
                                 }
                             }
-                        }
 
-                        if let Some(new_phase) = a.take_pending_phase() {
-                            if let Ok(mut s) = session_clone.lock() {
-                                if s.phase != new_phase {
-                                    s.phase = new_phase.clone();
-                                    s.last_activity_at = now();
-                                    s.detected_agent = a.detected_agent.clone();
-                                    s.metrics = a.to_metrics();
-                                    let update = SessionUpdate::from(&*s);
-                                    let _ = app_clone.emit("session-updated", &update);
-
-                                    // Deliver any deferred context nudge now that the agent is idle
-                                    if new_phase == SessionPhase::NeedsInput {
-                                        super::PtyManager::deliver_pending_nudge_with_writer(
-                                            &writer_for_reader,
-                                            &mut s,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
-                        // Emit immediately when an agent is first detected,
-                        // even if no phase change occurred (e.g. session was
-                        // already Idle when the CLI startup + prompt arrived
-                        // in the same chunk). Also emit when a model name is
-                        // enriched (detected after the initial agent detection).
-                        if a.detected_agent.is_some() {
-                            if let Ok(mut s) = session_clone.lock() {
-                                if s.detected_agent.is_none() {
-                                    s.detected_agent = a.detected_agent.clone();
-                                    s.metrics = a.to_metrics();
-                                    s.last_activity_at = now();
-                                    let update = SessionUpdate::from(&*s);
-                                    let _ = app_clone.emit("session-updated", &update);
-                                } else if let (Some(ref sa), Some(ref aa)) =
-                                    (&s.detected_agent, &a.detected_agent)
-                                {
-                                    // Model enrichment: agent detected but model was unknown, now resolved
-                                    if sa.model.is_none() && aa.model.is_some() {
+                            if let Some(new_phase) = a.take_pending_phase() {
+                                if let Ok(mut s) = session_clone.lock() {
+                                    if s.phase != new_phase {
+                                        s.phase = new_phase.clone();
+                                        s.last_activity_at = now();
                                         s.detected_agent = a.detected_agent.clone();
                                         s.metrics = a.to_metrics();
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
-                                    }
-                                }
-                            }
-                        }
 
-                        // Auto-launch AI agent when shell is ready
-                        if a.pending_ai_launch {
-                            a.pending_ai_launch = false;
-                            let launch_info = session_clone.lock().ok().map(|s| {
-                                (s.ai_provider.clone(), s.has_initial_context, s.auto_approve)
-                            });
-                            if let Some((Some(ref provider), has_context, auto_approve)) =
-                                launch_info
-                            {
-                                // Only launch known/allowed AI providers (reject unknown values)
-                                if let Some(launch_cmd) = ai_launch_command(provider, auto_approve)
-                                {
-                                    // For Claude/Gemini: pass context instruction as CLI argument
-                                    // so it's processed immediately without PTY injection timing issues
-                                    let supports_cli_prompt =
-                                        provider == "claude" || provider == "gemini";
-                                    let cmd = if has_context && supports_cli_prompt {
-                                        format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
-                                    } else {
-                                        launch_cmd
-                                    };
-                                    if let Ok(mut w) = writer_for_reader.lock() {
-                                        let _ = w.write_all(format!("{}\r", cmd).as_bytes());
-                                        let _ = w.flush();
-                                    }
-                                    // Mark context as injected if it was baked into the launch command
-                                    if has_context && supports_cli_prompt {
-                                        a.context_injected = true;
-                                        if let Ok(mut s) = session_clone.lock() {
-                                            s.context_injected = true;
-                                            s.phase = SessionPhase::LaunchingAgent;
-                                            let update = SessionUpdate::from(&*s);
-                                            let _ = app_clone.emit("session-updated", &update);
-                                        }
-                                    } else {
-                                        if let Ok(mut s) = session_clone.lock() {
-                                            s.phase = SessionPhase::LaunchingAgent;
-                                            let update = SessionUpdate::from(&*s);
-                                            let _ = app_clone.emit("session-updated", &update);
+                                        // Deliver any deferred context nudge now that the agent is idle
+                                        if new_phase == SessionPhase::NeedsInput {
+                                            super::PtyManager::deliver_pending_nudge_with_writer(
+                                                &writer_for_reader,
+                                                &mut s,
+                                            );
                                         }
                                     }
-                                } else {
-                                    log::warn!("Unknown AI provider rejected: {}", provider);
                                 }
                             }
-                        }
 
-                        // Auto-inject context when agent prompt is first detected
-                        // (fallback for non-Claude agents that can't take CLI args).
-                        // Skip for SSH sessions — $HERMES_CONTEXT isn't set remotely.
-                        let is_ssh_session = session_clone
-                            .lock()
-                            .ok()
-                            .is_some_and(|s| s.ssh_info.is_some());
-                        if a.pending_context_inject && !a.context_injected && !is_ssh_session {
-                            a.pending_context_inject = false;
-                            let mut write_ok = false;
-                            if let Ok(mut w) = writer_for_reader.lock() {
-                                let msg = "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
-                                if w.write_all(msg.as_bytes()).is_ok() {
-                                    let _ = w.flush();
-                                    write_ok = true;
-                                }
-                            }
-                            if write_ok {
-                                a.context_injected = true;
+                            // Emit immediately when an agent is first detected,
+                            // even if no phase change occurred (e.g. session was
+                            // already Idle when the CLI startup + prompt arrived
+                            // in the same chunk). Also emit when a model name is
+                            // enriched (detected after the initial agent detection).
+                            if a.detected_agent.is_some() {
                                 if let Ok(mut s) = session_clone.lock() {
-                                    s.context_injected = true;
+                                    if s.detected_agent.is_none() {
+                                        s.detected_agent = a.detected_agent.clone();
+                                        s.metrics = a.to_metrics();
+                                        s.last_activity_at = now();
+                                        let update = SessionUpdate::from(&*s);
+                                        let _ = app_clone.emit("session-updated", &update);
+                                    } else if let (Some(ref sa), Some(ref aa)) =
+                                        (&s.detected_agent, &a.detected_agent)
+                                    {
+                                        // Model enrichment: agent detected but model was unknown, now resolved
+                                        if sa.model.is_none() && aa.model.is_some() {
+                                            s.detected_agent = a.detected_agent.clone();
+                                            s.metrics = a.to_metrics();
+                                            let update = SessionUpdate::from(&*s);
+                                            let _ = app_clone.emit("session-updated", &update);
+                                        }
+                                    }
                                 }
                             }
-                            // If write failed, pending_context_inject is cleared but
-                            // context_injected stays false — next prompt detection retries.
-                        } else if is_ssh_session && a.pending_context_inject {
-                            // Clear the flag so the analyzer doesn't keep retrying
-                            a.pending_context_inject = false;
-                            a.context_injected = true;
-                        }
 
-                        if chunk_count.is_multiple_of(30) {
-                            if let Ok(mut s) = session_clone.lock() {
-                                s.detected_agent = a.detected_agent.clone();
-                                s.metrics = a.to_metrics();
-                                s.last_activity_at = now();
-                                let update = SessionUpdate::from(&*s);
-                                let _ = app_clone.emit("session-updated", &update);
+                            // Auto-launch AI agent when shell is ready
+                            if a.pending_ai_launch {
+                                a.pending_ai_launch = false;
+                                let launch_info = session_clone.lock().ok().map(|s| {
+                                    (s.ai_provider.clone(), s.has_initial_context, s.auto_approve)
+                                });
+                                if let Some((Some(ref provider), has_context, auto_approve)) =
+                                    launch_info
+                                {
+                                    // Only launch known/allowed AI providers (reject unknown values)
+                                    if let Some(launch_cmd) =
+                                        ai_launch_command(provider, auto_approve)
+                                    {
+                                        // For Claude/Gemini: pass context instruction as CLI argument
+                                        // so it's processed immediately without PTY injection timing issues
+                                        let supports_cli_prompt =
+                                            provider == "claude" || provider == "gemini";
+                                        let cmd = if has_context && supports_cli_prompt {
+                                            format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
+                                        } else {
+                                            launch_cmd
+                                        };
+                                        if let Ok(mut w) = writer_for_reader.lock() {
+                                            let _ = w.write_all(format!("{}\r", cmd).as_bytes());
+                                            let _ = w.flush();
+                                        }
+                                        // Mark context as injected if it was baked into the launch command
+                                        if has_context && supports_cli_prompt {
+                                            a.context_injected = true;
+                                            if let Ok(mut s) = session_clone.lock() {
+                                                s.context_injected = true;
+                                                s.phase = SessionPhase::LaunchingAgent;
+                                                let update = SessionUpdate::from(&*s);
+                                                let _ = app_clone.emit("session-updated", &update);
+                                            }
+                                        } else {
+                                            if let Ok(mut s) = session_clone.lock() {
+                                                s.phase = SessionPhase::LaunchingAgent;
+                                                let update = SessionUpdate::from(&*s);
+                                                let _ = app_clone.emit("session-updated", &update);
+                                            }
+                                        }
+                                    } else {
+                                        log::warn!("Unknown AI provider rejected: {}", provider);
+                                    }
+                                }
+                            }
+
+                            // Auto-inject context when agent prompt is first detected
+                            // (fallback for non-Claude agents that can't take CLI args).
+                            // Skip for SSH sessions — $HERMES_CONTEXT isn't set remotely.
+                            let is_ssh_session = session_clone
+                                .lock()
+                                .ok()
+                                .is_some_and(|s| s.ssh_info.is_some());
+                            if a.pending_context_inject && !a.context_injected && !is_ssh_session {
+                                a.pending_context_inject = false;
+                                let mut write_ok = false;
+                                if let Ok(mut w) = writer_for_reader.lock() {
+                                    let msg = "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
+                                    if w.write_all(msg.as_bytes()).is_ok() {
+                                        let _ = w.flush();
+                                        write_ok = true;
+                                    }
+                                }
+                                if write_ok {
+                                    a.context_injected = true;
+                                    if let Ok(mut s) = session_clone.lock() {
+                                        s.context_injected = true;
+                                    }
+                                }
+                                // If write failed, pending_context_inject is cleared but
+                                // context_injected stays false — next prompt detection retries.
+                            } else if is_ssh_session && a.pending_context_inject {
+                                // Clear the flag so the analyzer doesn't keep retrying
+                                a.pending_context_inject = false;
+                                a.context_injected = true;
+                            }
+
+                            if chunk_count.is_multiple_of(30) {
+                                if let Ok(mut s) = session_clone.lock() {
+                                    s.detected_agent = a.detected_agent.clone();
+                                    s.metrics = a.to_metrics();
+                                    s.last_activity_at = now();
+                                    let update = SessionUpdate::from(&*s);
+                                    let _ = app_clone.emit("session-updated", &update);
+                                }
                             }
                         }
-                    }
 
-                    use base64::Engine;
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(data);
-                    let _ = app_clone.emit(&format!("pty-output-{}", event_session_id), encoded);
-                }
-                Err(_) => {
-                    if let Ok(mut s) = session_clone.lock() {
-                        s.phase = SessionPhase::Destroyed;
-                        let update = SessionUpdate::from(&*s);
-                        let _ = app_clone.emit("session-updated", &update);
+                        use base64::Engine;
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+                        let _ =
+                            app_clone.emit(&format!("pty-output-{}", event_session_id), encoded);
                     }
-                    let _ = app_clone.emit(&format!("pty-exit-{}", event_session_id), ());
-                    break;
+                    Err(_) => {
+                        if let Ok(mut s) = session_clone.lock() {
+                            s.phase = SessionPhase::Destroyed;
+                            let update = SessionUpdate::from(&*s);
+                            let _ = app_clone.emit("session-updated", &update);
+                        }
+                        let _ = app_clone.emit(&format!("pty-exit-{}", event_session_id), ());
+                        break;
+                    }
                 }
             }
+        })); // end catch_unwind
+
+        // If the reader panicked, ensure the session is marked destroyed so
+        // the frontend doesn't hang waiting for output that will never come.
+        if let Err(panic_info) = result {
+            log::error!(
+                "PTY reader thread panicked for session {}: {:?}",
+                exit_id,
+                panic_info.downcast_ref::<String>().or_else(|| panic_info
+                    .downcast_ref::<&str>()
+                    .map(|s| {
+                        // Cannot return &String from &&str, just log it
+                        let _ = s;
+                        &exit_id // dummy — the log::error above already captured it
+                    }))
+            );
+            if let Ok(mut s) = session_for_cleanup.lock() {
+                s.phase = SessionPhase::Destroyed;
+            }
+            let _ = app_for_cleanup.emit(&format!("pty-exit-{}", exit_id), ());
         }
     });
 
@@ -1374,7 +1413,7 @@ pub fn write_to_session(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get_mut(&session_id)
@@ -1479,7 +1518,7 @@ pub fn write_to_session(
 ///      shell is assumed to be at its prompt.
 #[tauri::command]
 pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1554,7 +1593,7 @@ pub fn nudge_realm_context(state: State<'_, AppState>, session_id: String) -> Re
         return Ok(false);
     }
 
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let pty = match mgr.sessions.get(&session_id) {
         Some(p) => p,
         None => return Ok(false),
@@ -1593,7 +1632,7 @@ pub fn resize_session(
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1637,7 +1676,7 @@ pub fn close_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<(), String> {
-    let mut mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
         // Clean up shell integration temp files (ZDOTDIR, bash rcfile, etc.)
@@ -1750,7 +1789,7 @@ pub fn close_session(
 
 #[tauri::command]
 pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<SessionUpdate>, String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     Ok(mgr
         .sessions
         .values()
@@ -1762,7 +1801,7 @@ pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<SessionUpdate>, St
 /// Used before app quit / update relaunch so sessions can be restored on next launch.
 #[tauri::command]
 pub fn save_all_snapshots(state: State<'_, AppState>) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
     for (session_id, pty_session) in &mgr.sessions {
@@ -1801,7 +1840,7 @@ pub fn get_session_detail(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<SessionUpdate, String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1817,7 +1856,7 @@ pub fn update_session_label(
     session_id: String,
     label: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1840,7 +1879,7 @@ pub fn update_session_description(
     session_id: String,
     description: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1863,7 +1902,7 @@ pub fn update_session_color(
     session_id: String,
     color: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1886,7 +1925,7 @@ pub fn add_workspace_path(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1907,7 +1946,7 @@ pub fn update_session_group(
     session_id: String,
     group: Option<String>,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let pty_session = mgr
         .sessions
         .get(&session_id)
@@ -1929,7 +1968,7 @@ pub fn get_session_output(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<String, String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -1943,7 +1982,7 @@ pub fn get_session_metadata(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<SessionMetrics, String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
@@ -2029,7 +2068,7 @@ pub fn detect_shell_environment(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<ShellEnvironment, String> {
-    let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
         .get(&session_id)
