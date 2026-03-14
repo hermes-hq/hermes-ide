@@ -3,10 +3,13 @@ import "../styles/components/FileExplorer.css";
 import { useSession } from "../state/SessionContext";
 import { getSessionProjects } from "../api/projects";
 import { openFileInEditor, sshListDirectory } from "../api/git";
+import { sshUploadFile, sshDownloadFile } from "../api/sessions";
 import { getSettings } from "../api/settings";
 import { useFileExplorer, filterEntries } from "../hooks/useFileTree";
 import type { FileEntry, SshFileEntry } from "../types/git";
 import { useContextMenu, buildFileExplorerMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { save } from "@tauri-apps/plugin-dialog";
 
 // ─── File Icons by Extension ────────────────────────────────────────
 
@@ -241,15 +244,26 @@ function FileTreeNode({ entry, depth, expandedDirs, loadingDirs, getEntries, sho
 
 // ─── SSH Remote File Tree ────────────────────────────────────────────
 
+/** Ref handle exposed by SshTree so the parent can trigger uploads. */
+interface SshTreeHandle {
+  rootPath: string | null;
+  refresh: () => void;
+}
+
 interface SshTreeProps {
   sessionId: string;
   hostLabel: string;
   showHidden: boolean;
   searchQuery: string;
   onFilePreview?: (filePath: string) => void;
+  onDownload?: (remotePath: string, fileName: string) => void;
+  /** Called when rootPath or refresh changes so parent can drive uploads. */
+  onHandleReady?: (handle: SshTreeHandle) => void;
+  uploadStatus?: string | null;
+  dropActive?: boolean;
 }
 
-function SshTree({ sessionId, hostLabel, showHidden, searchQuery, onFilePreview }: SshTreeProps) {
+function SshTree({ sessionId, hostLabel, showHidden, searchQuery, onFilePreview, onDownload, onHandleReady, uploadStatus, dropActive }: SshTreeProps) {
   const [entries, setEntries] = useState<Record<string, SshFileEntry[]>>({});
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
@@ -334,12 +348,19 @@ function SshTree({ sessionId, hostLabel, showHidden, searchQuery, onFilePreview 
       .finally(() => setLoadingDirs(new Set()));
   }, [sessionId]);
 
+  // Notify parent of rootPath/refresh so it can drive uploads
+  useEffect(() => {
+    onHandleReady?.({ rootPath, refresh });
+  }, [rootPath, refresh, onHandleReady]);
+
   return (
-    <div className="file-explorer-project">
+    <div className={`file-explorer-project${dropActive ? " file-explorer-drop-active" : ""}`}>
       <div className="file-explorer-project-header">
         <span className="file-explorer-project-name">{hostLabel}</span>
         <button className="file-explorer-refresh" onClick={refresh} title="Refresh">&#8635;</button>
       </div>
+      {uploadStatus && <div className="file-explorer-upload-status">{uploadStatus}</div>}
+      {dropActive && <div className="file-explorer-drop-overlay">Drop files to upload</div>}
       {error && <div className="file-explorer-error">{error}</div>}
       {!filteredRoot && !error && loadingDirs.size > 0 && <div className="file-explorer-empty">Loading...</div>}
       {filteredRoot && filteredRoot.length === 0 && <div className="file-explorer-empty">No files</div>}
@@ -354,6 +375,7 @@ function SshTree({ sessionId, hostLabel, showHidden, searchQuery, onFilePreview 
           showHidden={showHidden}
           searchQuery={searchQuery}
           onFileClick={handleFileClick}
+          onDownload={onDownload}
         />
       ))}
     </div>
@@ -369,9 +391,10 @@ interface SshFileTreeNodeProps {
   showHidden: boolean;
   searchQuery: string;
   onFileClick: (entry: SshFileEntry) => void;
+  onDownload?: (remotePath: string, fileName: string) => void;
 }
 
-function SshFileTreeNode({ entry, depth, expandedDirs, loadingDirs, entries, showHidden, searchQuery, onFileClick }: SshFileTreeNodeProps) {
+function SshFileTreeNode({ entry, depth, expandedDirs, loadingDirs, entries, showHidden, searchQuery, onFileClick, onDownload }: SshFileTreeNodeProps) {
   const isExpanded = expandedDirs.has(entry.path);
   const isLoading = loadingDirs.has(entry.path);
   const children = entry.is_dir && isExpanded ? entries[entry.path] : null;
@@ -397,6 +420,17 @@ function SshFileTreeNode({ entry, depth, expandedDirs, loadingDirs, entries, sho
           <span className="file-tree-icon">{icon.label}</span>
         )}
         <span className="file-tree-name">{entry.name}</span>
+        {!entry.is_dir && onDownload && (
+          <button
+            className="file-tree-download-btn"
+            onClick={(e) => { e.stopPropagation(); onDownload(entry.path, entry.name); }}
+            title="Download file"
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+              <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14ZM7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06Z" />
+            </svg>
+          </button>
+        )}
       </div>
       {entry.is_dir && isExpanded && (
         <>
@@ -412,6 +446,7 @@ function SshFileTreeNode({ entry, depth, expandedDirs, loadingDirs, entries, sho
               showHidden={showHidden}
               searchQuery={searchQuery}
               onFileClick={onFileClick}
+              onDownload={onDownload}
             />
           ))}
         </>
@@ -493,6 +528,107 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
     dispatch({ type: "SET_FILE_PREVIEW", realmId: "__ssh__", filePath });
   }, [dispatch]);
 
+  const handleSshDownload = useCallback(async (remotePath: string, fileName: string) => {
+    if (!state.activeSessionId) return;
+    const localPath = await save({
+      defaultPath: fileName,
+    });
+    if (!localPath) return;
+    try {
+      await sshDownloadFile(state.activeSessionId, remotePath, localPath);
+    } catch (err) {
+      console.error("[FileExplorer] Download failed:", err);
+    }
+  }, [state.activeSessionId]);
+
+  // ─── SSH drag-drop upload ──────────────────────────────────────────
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [dropActive, setDropActive] = useState(false);
+  const sshHandleRef = useRef<SshTreeHandle | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleSshHandleReady = useCallback((handle: SshTreeHandle) => {
+    sshHandleRef.current = handle;
+  }, []);
+
+  useEffect(() => {
+    if (!isSSH || !visible || !state.activeSessionId) return;
+
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    const sid = state.activeSessionId;
+
+    getCurrentWebview().onDragDropEvent(async (event) => {
+      if (cancelled) return;
+      const { type } = event.payload;
+
+      // Only handle actual file drops (paths > 0), not session drags
+      if (type === "enter" && event.payload.paths.length > 0) {
+        // Hit-test: only activate when over the file explorer panel
+        if (scrollRef.current) {
+          const dpr = window.devicePixelRatio || 1;
+          const x = event.payload.position.x / dpr;
+          const y = event.payload.position.y / dpr;
+          const rect = scrollRef.current.getBoundingClientRect();
+          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            setDropActive(true);
+          }
+        }
+      } else if (type === "leave") {
+        setDropActive(false);
+      } else if (type === "over") {
+        // Continuously hit-test during drag-over
+        if (scrollRef.current) {
+          const dpr = window.devicePixelRatio || 1;
+          const x = event.payload.position.x / dpr;
+          const y = event.payload.position.y / dpr;
+          const rect = scrollRef.current.getBoundingClientRect();
+          const inside = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+          setDropActive(inside);
+        }
+      } else if (type === "drop" && event.payload.paths.length > 0) {
+        setDropActive(false);
+
+        // Hit-test on drop
+        if (!scrollRef.current) return;
+        const dpr = window.devicePixelRatio || 1;
+        const x = event.payload.position.x / dpr;
+        const y = event.payload.position.y / dpr;
+        const rect = scrollRef.current.getBoundingClientRect();
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+
+        const targetDir = sshHandleRef.current?.rootPath || "/";
+        const paths = event.payload.paths;
+        setUploadStatus(`Uploading ${paths.length} file${paths.length > 1 ? "s" : ""}...`);
+
+        let succeeded = 0;
+        let lastError = "";
+        for (const localPath of paths) {
+          try {
+            await sshUploadFile(sid, localPath, targetDir);
+            succeeded++;
+          } catch (err) {
+            lastError = String(err);
+            console.error("[FileExplorer] Upload failed:", localPath, err);
+          }
+        }
+        setUploadStatus(
+          succeeded === paths.length
+            ? `Uploaded ${succeeded} file${succeeded > 1 ? "s" : ""}`
+            : `Failed ${paths.length - succeeded}/${paths.length}: ${lastError}`
+        );
+        sshHandleRef.current?.refresh();
+        setTimeout(() => setUploadStatus(null), 3000);
+      }
+    }).then((fn) => { if (!cancelled) unlisten = fn; });
+
+    return () => {
+      cancelled = true;
+      setDropActive(false);
+      unlisten?.();
+    };
+  }, [isSSH, visible, state.activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load projects for active session
   useEffect(() => {
     if (!state.activeSessionId || !visible) {
@@ -534,7 +670,7 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
         onChange={(e) => setSearchQuery(e.target.value)}
       />
 
-      <div className="file-explorer-scroll" onContextMenu={(e) => {
+      <div ref={scrollRef} className="file-explorer-scroll" onContextMenu={(e) => {
         if (e.target === e.currentTarget) {
           showEmptyMenu(e, buildEmptyAreaMenuItems("file-explorer"));
         }
@@ -546,6 +682,10 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
             showHidden={showHidden}
             searchQuery={searchQuery}
             onFilePreview={handleSshFilePreview}
+            onDownload={handleSshDownload}
+            onHandleReady={handleSshHandleReady}
+            uploadStatus={uploadStatus}
+            dropActive={dropActive}
           />
         ) : (
           <>

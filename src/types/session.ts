@@ -63,11 +63,20 @@ export interface SessionMetrics {
   token_history: [number, number][];
 }
 
+export interface PortForward {
+  local_port: number;
+  remote_host: string;
+  remote_port: number;
+  label?: string | null;
+}
+
 export interface SshConnectionInfo {
   host: string;
   port: number;
   user: string;
   tmux_session?: string | null;
+  identity_file?: string | null;
+  port_forwards: PortForward[];
 }
 
 export interface TmuxSessionEntry {
@@ -151,6 +160,7 @@ export interface CreateSessionOpts {
   sshPort?: number;
   sshUser?: string;
   tmuxSession?: string;
+  sshIdentityFile?: string;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────

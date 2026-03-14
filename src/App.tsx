@@ -242,6 +242,23 @@ function AppContent() {
     return () => window.removeEventListener("keydown", handler);
   }, [state.layout, sidebarSessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, ui.composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
 
+  const handleReconnect = useCallback(async (session: import("./types/session").SessionData) => {
+    if (!session.ssh_info) return;
+    const { host, port, user, tmux_session, identity_file } = session.ssh_info;
+    const oldLabel = session.label;
+    // Close the disconnected session first
+    await closeSession(session.id);
+    // Create a new session with the same SSH params
+    await createSession({
+      label: oldLabel,
+      sshHost: host,
+      sshPort: port,
+      sshUser: user,
+      tmuxSession: tmux_session ?? undefined,
+      sshIdentityFile: identity_file ?? undefined,
+    });
+  }, [closeSession, createSession]);
+
   const handleAutoExecute = useCallback(() => {
     if (!ui.autoToast) return;
     const { command, sessionId } = ui.autoToast;
@@ -539,6 +556,7 @@ function AppContent() {
               onSelect={setActive}
               onClose={requestCloseSession}
               onNewSession={(group) => setSessionCreatorOpen({ group })}
+              onReconnect={handleReconnect}
               activeView={
                 ui.searchPanelOpen ? "search" :
                 ui.fileExplorerOpen ? "files" :

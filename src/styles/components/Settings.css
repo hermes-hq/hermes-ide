@@ -225,6 +225,82 @@
 }
 .settings-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 
+/* ─── Small Button ──────────────────────────── */
+
+.settings-btn-sm {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.settings-btn-sm:hover { background: var(--accent-dim); color: var(--accent); }
+.settings-btn-danger:hover { background: var(--red-dim, rgba(244, 112, 103, 0.1)); color: var(--red, #f47067); border-color: var(--red, #f47067); }
+
+/* ─── SSH Saved Hosts ──────────────────────────── */
+
+.settings-ssh-hosts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.settings-ssh-host-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+}
+
+.settings-ssh-host-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-ssh-host-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.settings-ssh-host-detail {
+  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--font-mono, monospace);
+}
+
+.settings-ssh-host-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.settings-ssh-host-form {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-0);
+  margin-top: 8px;
+}
+
+.settings-ssh-host-form .settings-group {
+  margin-bottom: 8px;
+}
+
+.settings-ssh-host-form-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* ─── Shortcuts Tab ──────────────────────────── */
 
 .settings-shortcut-group { margin-bottom: 14px; }

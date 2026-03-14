@@ -354,6 +354,21 @@
 .session-item-destroyed { opacity: 0.5; }
 .session-phase-tag[data-phase="destroyed"] { color: var(--text-3); }
 
+.session-item-reconnect-btn {
+  background: var(--accent);
+  color: var(--bg-0);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  margin: 4px 0 2px;
+  width: 100%;
+}
+.session-item-reconnect-btn:hover { opacity: 0.9; }
+
+.session-phase-tag[data-phase="disconnected"] { color: var(--warning, #d29922); }
+
 .session-item-close {
   background: none;
   border: none;

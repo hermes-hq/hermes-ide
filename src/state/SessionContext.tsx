@@ -647,6 +647,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         // Intercept destroyed phase: never show it in the UI.
         // Trigger cleanup and wait for SESSION_REMOVED instead.
+        // Disconnected SSH sessions are kept in the UI for reconnection.
         if (session.phase === "destroyed") {
           if (!closingSessionIds.current.has(session.id)) {
             closingSessionIds.current.add(session.id);
@@ -801,6 +802,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshPort: saved.ssh_info?.port || null,
                 sshUser: saved.ssh_info?.user || null,
                 tmuxSession: saved.ssh_info?.tmux_session || null,
+                sshIdentityFile: saved.ssh_info?.identity_file || null,
                 initialRows: restoreDims.rows,
                 initialCols: restoreDims.cols,
               });
@@ -928,6 +930,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshPort: opts?.sshPort || null,
         sshUser: opts?.sshUser || null,
         tmuxSession: opts?.tmuxSession || null,
+        sshIdentityFile: opts?.sshIdentityFile || null,
         initialRows: initialDims.rows,
         initialCols: initialDims.cols,
       });

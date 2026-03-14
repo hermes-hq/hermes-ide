@@ -529,6 +529,36 @@
   flex-shrink: 0;
 }
 
+.session-creator-save-host-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.session-creator-save-host-label input[type="checkbox"] {
+  margin: 0;
+}
+
+.session-creator-save-host-name {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  padding: 3px 8px;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-creator-save-host-name:focus {
+  border-color: var(--accent);
+}
+
 .session-creator-ssh-history {
   display: flex;
   flex-direction: column;

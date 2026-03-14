@@ -6,6 +6,7 @@ import { CreateSessionOpts } from "../state/SessionContext";
 import { getProjects, createProject, deleteProject } from "../api/projects";
 import { getSessions, sshListTmuxSessions } from "../api/sessions";
 import { getSetting, setSetting } from "../api/settings";
+import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { TmuxSessionEntry } from "../types/session";
 import { gitListBranchesForRealm } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
@@ -98,6 +99,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [sshUser, setSshUser] = useState("");
   const [sshPort, setSshPort] = useState("22");
   const [sshHistory, setSshHistory] = useState<SshHistoryEntry[]>([]);
+  const [sshSavedHosts, setSshSavedHosts] = useState<SshSavedHost[]>([]);
+
+  // Identity file and jump host
+  const [sshIdentityFile, setSshIdentityFile] = useState("");
+  const [sshJumpHost, setSshJumpHost] = useState("");
+  const [saveAsHost, setSaveAsHost] = useState(false);
+  const [saveHostLabel, setSaveHostLabel] = useState("");
 
   // Tmux session discovery state
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSessionEntry[]>([]);
@@ -164,6 +172,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         setSshHistory(history);
       })
       .catch((err) => console.warn("[SessionCreator] Failed to load SSH history:", err));
+    listSshSavedHosts()
+      .then(setSshSavedHosts)
+      .catch((err) => console.warn("[SessionCreator] Failed to load saved SSH hosts:", err));
     getSessions()
       .then((sessions) => {
         const groups = [...new Set(sessions.map((s) => s.group).filter((g): g is string => !!g))].sort();
@@ -347,6 +358,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         sshPort: connectionType === "ssh" ? (parseInt(sshPort) || 22) : undefined,
         sshUser: connectionType === "ssh" ? (sshUser || undefined) : undefined,
         tmuxSession: connectionType === "ssh" ? (selectedTmuxSession || undefined) : undefined,
+        sshIdentityFile: connectionType === "ssh" ? (sshIdentityFile || undefined) : undefined,
       });
       // Save SSH connection to history
       if (connectionType === "ssh" && sshHost.trim()) {
@@ -360,6 +372,22 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         console.log("[SessionCreator] Saving SSH history:", updated.length, "entries");
         setSetting(SSH_HISTORY_KEY, JSON.stringify(updated))
           .catch((err) => console.warn("[SessionCreator] Failed to save SSH history:", err));
+
+        // Save as a saved host if requested
+        if (saveAsHost && saveHostLabel.trim()) {
+          upsertSshSavedHost({
+            id: crypto.randomUUID(),
+            label: saveHostLabel.trim(),
+            host: sshHost.trim(),
+            port: parseInt(sshPort) || 22,
+            user: sshUser.trim() || "",
+            identity_file: sshIdentityFile.trim() || null,
+            jump_host: sshJumpHost.trim() || null,
+            port_forwards: "[]",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).catch((err) => console.warn("[SessionCreator] Failed to save SSH host:", err));
+        }
       }
     } finally {
       setCreating(false);
@@ -465,6 +493,32 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
 
             {connectionType === "ssh" && (
               <div className="session-creator-ssh-fields">
+                {sshSavedHosts.length > 0 && !sshHost && (
+                  <div className="session-creator-ssh-history">
+                    <span className="session-creator-ssh-history-label">Saved</span>
+                    <div className="session-creator-ssh-history-list">
+                      {sshSavedHosts.map((h) => (
+                        <button
+                          key={h.id}
+                          className="session-creator-ssh-history-item"
+                          onClick={() => {
+                            setSshHost(h.host);
+                            setSshUser(h.user);
+                            setSshPort(String(h.port));
+                            setSshIdentityFile(h.identity_file || "");
+                          }}
+                        >
+                          <span className="session-creator-ssh-history-host">
+                            {h.label}
+                          </span>
+                          <span className="session-creator-ssh-history-port" style={{ opacity: 0.6 }}>
+                            {h.user}@{h.host}{h.port !== 22 ? `:${h.port}` : ""}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {sshHistory.length > 0 && !sshHost && (
                   <div className="session-creator-ssh-history">
                     <span className="session-creator-ssh-history-label">Recent</span>
@@ -515,7 +569,39 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                     autoComplete="off"
                   />
                 </div>
+                <input
+                  className="command-palette-input"
+                  placeholder="Identity file (optional, e.g. ~/.ssh/id_rsa)"
+                  value={sshIdentityFile}
+                  onChange={(e) => setSshIdentityFile(e.target.value)}
+                  autoComplete="off"
+                />
+                <input
+                  className="command-palette-input"
+                  placeholder="Jump host (optional, e.g. bastion.example.com)"
+                  value={sshJumpHost}
+                  onChange={(e) => setSshJumpHost(e.target.value)}
+                  autoComplete="off"
+                />
                 <span className="settings-hint-inline">Uses your system SSH config and agent for authentication</span>
+                <label className="session-creator-save-host-label">
+                  <input
+                    type="checkbox"
+                    checked={saveAsHost}
+                    onChange={(e) => setSaveAsHost(e.target.checked)}
+                  />
+                  Save this host
+                  {saveAsHost && (
+                    <input
+                      className="session-creator-save-host-name"
+                      placeholder="Label (e.g. My Server)"
+                      value={saveHostLabel}
+                      onChange={(e) => setSaveHostLabel(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      autoComplete="off"
+                    />
+                  )}
+                </label>
               </div>
             )}
 

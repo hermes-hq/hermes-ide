@@ -10,6 +10,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
+import { useRemoteSshInfo } from "../hooks/useRemoteSshInfo";
+import { PortForwardsPanel } from "./PortForwardsPanel";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -25,6 +27,7 @@ interface SessionListProps {
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onNewSession?: (group?: string) => void;
+  onReconnect?: (session: SessionData) => void;
   /** Currently active sub-view panel for the active session */
   activeView: SessionView;
   onViewChange: (view: SessionView) => void;
@@ -67,13 +70,17 @@ function sortSessions(sessions: SessionData[]): SessionData[] {
   });
 }
 
-/** Sub-component: git branch + change summary for a session item. */
-function SessionItemGitInfo({ sessionId, isDestroyed, workingDirectory }: { sessionId: string; isDestroyed: boolean; workingDirectory: string }) {
-  const { branch, changeCount, ahead, behind, hasConflicts, isLoading } = useSessionGitSummary(
-    sessionId,
-    !isDestroyed,
-    workingDirectory,
-  );
+/** Sub-component: git branch + change summary for a session item (remote SSH or local). */
+function SessionItemGitInfo({ sessionId, isDestroyed, workingDirectory, isSsh }: { sessionId: string; isDestroyed: boolean; workingDirectory: string; isSsh: boolean }) {
+  const localGit = useSessionGitSummary(sessionId, !isDestroyed && !isSsh, workingDirectory);
+  const remoteInfo = useRemoteSshInfo(isSsh ? sessionId : null, !isDestroyed && isSsh);
+
+  const branch = isSsh ? remoteInfo.branch : localGit.branch;
+  const changeCount = isSsh ? remoteInfo.changeCount : localGit.changeCount;
+  const ahead = isSsh ? 0 : localGit.ahead;
+  const behind = isSsh ? 0 : localGit.behind;
+  const hasConflicts = isSsh ? false : localGit.hasConflicts;
+  const isLoading = isSsh ? remoteInfo.isLoading : localGit.isLoading;
 
   if (isDestroyed || isLoading || !branch) return null;
 
@@ -492,7 +499,7 @@ function InlineProjectNameEditor({
   );
 }
 
-export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, activeView, onViewChange, gitBadge }: SessionListProps) {
+export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, onReconnect, activeView, onViewChange, gitBadge }: SessionListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
@@ -779,6 +786,8 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     };
   }, [handleMoveToProject]);
 
+  const [portsSessionId, setPortsSessionId] = useState<string | null>(null);
+
   const toggleView = useCallback((view: "git" | "files" | "search") => {
     onViewChange(activeView === view ? null : view);
   }, [activeView, onViewChange]);
@@ -826,11 +835,19 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-agent-tag">{session.detected_agent.name}</span>
               )}
               <span className="session-phase-tag" data-phase={session.phase}>
-                {session.phase === "busy" ? "working" : session.phase === "needs_input" ? "needs input" : session.phase === "shell_ready" ? "ready" : session.phase === "creating" ? "starting" : session.phase}
+                {session.phase === "busy" ? "working" : session.phase === "needs_input" ? "needs input" : session.phase === "shell_ready" ? "ready" : session.phase === "creating" ? "starting" : session.phase === "disconnected" ? "disconnected" : session.phase}
               </span>
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
-            <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed"} workingDirectory={session.working_directory} />
+            {session.phase === "disconnected" && session.ssh_info && onReconnect && (
+              <button
+                className="session-item-reconnect-btn"
+                onClick={(e) => { e.stopPropagation(); onReconnect(session); }}
+              >
+                Reconnect
+              </button>
+            )}
+            <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed" || session.phase === "disconnected"} workingDirectory={session.working_directory} isSsh={!!session.ssh_info} />
             {/* Inline project tag */}
             {session.phase !== "destroyed" && (
               <div className="session-item-project-row">
@@ -918,7 +935,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           </div>
         )}
         {/* Sub-view toolbar — only shown for the active session */}
-        {isActive && session.phase !== "destroyed" && (
+        {isActive && session.phase !== "destroyed" && session.phase !== "disconnected" && (
           <div className="session-subviews">
             {([
               { id: "git" as const, title: "Git", badge: gitBadge, icon: (
@@ -950,7 +967,22 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 )}
               </button>
             ))}
+            {session.ssh_info && (
+              <button
+                className={`session-subview-btn${portsSessionId === session.id ? " session-subview-active" : ""}`}
+                onClick={() => setPortsSessionId(portsSessionId === session.id ? null : session.id)}
+                title="Port Forwards"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+                  <path d="M1.5 2.75a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Zm0 5a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Zm0 5a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Z" />
+                </svg>
+              </button>
+            )}
           </div>
+        )}
+        {/* Port forwards panel for SSH sessions */}
+        {portsSessionId === session.id && session.ssh_info && (
+          <PortForwardsPanel sessionId={session.id} onClose={() => setPortsSessionId(null)} />
         )}
       </div>
     );

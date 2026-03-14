@@ -142,6 +142,22 @@ pub struct SessionWorktreeRow {
     pub created_at: String,
 }
 
+// ─── SSH Saved Hosts ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshSavedHost {
+    pub id: String,
+    pub label: String,
+    pub host: String,
+    pub port: i64,
+    pub user: String,
+    pub identity_file: Option<String>,
+    pub jump_host: Option<String>,
+    pub port_forwards: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 impl Database {
     pub fn new(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| format!("Failed to open database: {}", e))?;
@@ -421,6 +437,22 @@ impl Database {
         let _ = self
             .conn
             .execute_batch("ALTER TABLE sessions ADD COLUMN ssh_info TEXT;");
+
+        // SSH saved hosts table (idempotent)
+        let _ = self.conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS ssh_saved_hosts (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                user TEXT NOT NULL,
+                identity_file TEXT,
+                jump_host TEXT,
+                port_forwards TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+        ");
 
         Ok(())
     }
@@ -1896,6 +1928,48 @@ impl Database {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    // ─── SSH Saved Hosts ──────────────────────────────────────────
+
+    pub fn list_ssh_saved_hosts(&self) -> Result<Vec<SshSavedHost>, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, label, host, port, user, identity_file, jump_host, port_forwards, created_at, updated_at FROM ssh_saved_hosts ORDER BY label"
+        ).map_err(|e| e.to_string())?;
+
+        let hosts = stmt.query_map([], |row| {
+            Ok(SshSavedHost {
+                id: row.get(0)?,
+                label: row.get(1)?,
+                host: row.get(2)?,
+                port: row.get(3)?,
+                user: row.get(4)?,
+                identity_file: row.get(5)?,
+                jump_host: row.get(6)?,
+                port_forwards: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        hosts.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn upsert_ssh_saved_host(&self, host: &SshSavedHost) -> Result<(), String> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO ssh_saved_hosts (id, label, host, port, user, identity_file, jump_host, port_forwards, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
+            params![host.id, host.label, host.host, host.port, host.user, host.identity_file, host.jump_host, host.port_forwards, host.created_at],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn delete_ssh_saved_host(&self, id: &str) -> Result<(), String> {
+        self.conn.execute(
+            "DELETE FROM ssh_saved_hosts WHERE id = ?1",
+            params![id],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 // ─── Tauri Command Wrappers ─────────────────────────────────────────
@@ -2722,4 +2796,22 @@ pub fn get_disabled_plugin_ids(state: State<'_, AppState>) -> Result<Vec<String>
         .filter_map(|r| r.ok())
         .collect();
     Ok(ids)
+}
+
+#[tauri::command]
+pub fn list_ssh_saved_hosts(state: State<'_, AppState>) -> Result<Vec<SshSavedHost>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.list_ssh_saved_hosts()
+}
+
+#[tauri::command]
+pub fn upsert_ssh_saved_host(state: State<'_, AppState>, host: SshSavedHost) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.upsert_ssh_saved_host(&host)
+}
+
+#[tauri::command]
+pub fn delete_ssh_saved_host(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.delete_ssh_saved_host(&id)
 }
