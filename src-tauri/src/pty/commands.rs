@@ -870,7 +870,7 @@ pub fn create_session(
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             let mut buf = [0u8; 4096];
-            let mut chunk_count: u64 = 0;
+            let mut last_metrics_emit = std::time::Instant::now();
 
             loop {
                 match reader.read(&mut buf) {
@@ -885,7 +885,6 @@ pub fn create_session(
                     }
                     Ok(n) => {
                         let data = &buf[..n];
-                        chunk_count += 1;
 
                         if let Ok(mut a) = analyzer_clone.lock() {
                             a.process(data);
@@ -1046,7 +1045,9 @@ pub fn create_session(
                                         s.phase = new_phase.clone();
                                         s.last_activity_at = now();
                                         s.detected_agent = a.detected_agent.clone();
-                                        s.metrics = a.to_metrics();
+                                        // Skip expensive to_metrics() clone here — the periodic
+                                        // 5-second emit will pick up metrics. Phase changes only
+                                        // need phase + agent + activity timestamp.
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
 
@@ -1066,11 +1067,12 @@ pub fn create_session(
                             // already Idle when the CLI startup + prompt arrived
                             // in the same chunk). Also emit when a model name is
                             // enriched (detected after the initial agent detection).
+                            // Skip metrics clone here — only update agent info which
+                            // is the lightweight field that actually changed.
                             if a.detected_agent.is_some() {
                                 if let Ok(mut s) = session_clone.lock() {
                                     if s.detected_agent.is_none() {
                                         s.detected_agent = a.detected_agent.clone();
-                                        s.metrics = a.to_metrics();
                                         s.last_activity_at = now();
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
@@ -1080,7 +1082,6 @@ pub fn create_session(
                                         // Model enrichment: agent detected but model was unknown, now resolved
                                         if sa.model.is_none() && aa.model.is_some() {
                                             s.detected_agent = a.detected_agent.clone();
-                                            s.metrics = a.to_metrics();
                                             let update = SessionUpdate::from(&*s);
                                             let _ = app_clone.emit("session-updated", &update);
                                         }
@@ -1167,11 +1168,15 @@ pub fn create_session(
                                 a.context_injected = true;
                             }
 
-                            if chunk_count.is_multiple_of(30) {
+                            // Throttle periodic metrics emission to at most once per 5 seconds
+                            if last_metrics_emit.elapsed() >= std::time::Duration::from_secs(5) {
+                                last_metrics_emit = std::time::Instant::now();
                                 if let Ok(mut s) = session_clone.lock() {
                                     s.detected_agent = a.detected_agent.clone();
                                     s.metrics = a.to_metrics();
-                                    s.last_activity_at = now();
+                                    // Don't update last_activity_at here — periodic metrics
+                                    // syncs shouldn't be treated as user/output activity.
+                                    // Phase-change paths already set it on real activity.
                                     let update = SessionUpdate::from(&*s);
                                     let _ = app_clone.emit("session-updated", &update);
                                 }

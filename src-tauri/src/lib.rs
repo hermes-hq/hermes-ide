@@ -5,7 +5,9 @@ mod menu;
 mod platform;
 mod plugins;
 mod process;
-mod pty;
+/// Exposed for benchmarks — not part of the public API.
+#[doc(hidden)]
+pub mod pty;
 mod realm;
 mod workspace;
 
@@ -392,6 +394,7 @@ pub fn run() {
             // Git branch management
             git::git_list_branches,
             git::git_list_branches_for_realm,
+            git::git_branches_ahead_behind,
             git::git_create_branch,
             git::git_checkout_branch,
             git::git_delete_branch,

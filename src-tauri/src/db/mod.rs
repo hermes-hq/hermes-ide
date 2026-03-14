@@ -1041,25 +1041,52 @@ impl Database {
         Ok(entries)
     }
 
-    /// Get merged memory: project-scoped + global, with project taking precedence
+    /// Get merged memory: project-scoped + global, with project taking precedence.
+    /// Fetches all project-scoped entries in a single query instead of one per realm.
     pub fn get_merged_memory(&self, realm_ids: &[String]) -> Result<Vec<MemoryEntry>, String> {
-        // Start with global memory
-        let mut entries = self.get_all_memory_entries("global", "global")?;
         let mut seen_keys = std::collections::HashSet::new();
         let mut result = Vec::new();
 
-        // Project-scoped memory takes precedence
-        for realm_id in realm_ids {
-            let project_entries = self.get_all_memory_entries("project", realm_id)?;
-            for entry in project_entries {
+        // Batch-fetch all project-scoped entries in one query
+        if !realm_ids.is_empty() {
+            let placeholders: Vec<String> = realm_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+            let sql = format!(
+                "SELECT id, scope, scope_id, category, key, value, source, confidence, access_count, created_at, updated_at
+                 FROM memory WHERE scope = 'project' AND scope_id IN ({})
+                 AND (expires_at IS NULL OR expires_at > datetime('now'))
+                 ORDER BY access_count DESC, updated_at DESC",
+                placeholders.join(", ")
+            );
+            let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let params: Vec<&dyn rusqlite::types::ToSql> = realm_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let rows = stmt
+                .query_map(params.as_slice(), |row| {
+                    Ok(MemoryEntry {
+                        id: row.get(0)?,
+                        scope: row.get(1)?,
+                        scope_id: row.get(2)?,
+                        category: row.get(3)?,
+                        key: row.get(4)?,
+                        value: row.get(5)?,
+                        source: row.get(6)?,
+                        confidence: row.get(7)?,
+                        access_count: row.get(8)?,
+                        created_at: row.get(9)?,
+                        updated_at: row.get(10)?,
+                    })
+                })
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                let entry = row.map_err(|e| e.to_string())?;
                 if seen_keys.insert(entry.key.clone()) {
                     result.push(entry);
                 }
             }
         }
 
-        // Add global entries that aren't overridden
-        for entry in entries.drain(..) {
+        // Add global entries that aren't overridden by project-scoped ones
+        let global_entries = self.get_all_memory_entries("global", "global")?;
+        for entry in global_entries {
             if seen_keys.insert(entry.key.clone()) {
                 result.push(entry);
             }

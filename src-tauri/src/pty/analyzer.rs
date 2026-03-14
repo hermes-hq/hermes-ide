@@ -71,7 +71,7 @@ pub(crate) struct CommandPredictionEvent {
 
 // ─── Output Analyzer (uses Provider Registry) ───────────────────────
 
-pub(crate) struct OutputAnalyzer {
+pub struct OutputAnalyzer {
     registry: ProviderRegistry,
     pub active_provider_idx: Option<usize>,
     stripped_buffer: String,
@@ -87,12 +87,12 @@ pub(crate) struct OutputAnalyzer {
     tool_call_summary: HashMap<String, u32>,
     // File tracking
     files_touched: HashSet<String>,
-    files_ordered: Vec<String>,
+    files_ordered: VecDeque<String>,
     // Actions
     recent_actions: VecDeque<ActionEvent>,
     available_actions: Vec<ActionTemplate>,
     // Memory
-    memory_facts: Vec<MemoryFact>,
+    memory_facts: VecDeque<MemoryFact>,
     memory_keys_seen: HashSet<String>,
     // Latency
     last_input_at: Option<std::time::Instant>,
@@ -133,10 +133,10 @@ impl OutputAnalyzer {
             tool_calls: VecDeque::new(),
             tool_call_summary: HashMap::new(),
             files_touched: HashSet::new(),
-            files_ordered: Vec::new(),
+            files_ordered: VecDeque::new(),
             recent_actions: VecDeque::new(),
             available_actions: Vec::new(),
-            memory_facts: Vec::new(),
+            memory_facts: VecDeque::new(),
             memory_keys_seen: HashSet::new(),
             last_input_at: None,
             latency_samples: VecDeque::new(),
@@ -200,12 +200,14 @@ impl OutputAnalyzer {
             }
         }
 
+        // Strip ANSI escapes once — reused for busy detection, cost/token scanning,
+        // and line-by-line analysis below.
+        let stripped = strip_ansi_escapes::strip(raw);
+        let text = String::from_utf8_lossy(&stripped);
+
         // Only mark busy when there's meaningful text content (not just
         // control sequences, cursor movements, or terminal keepalives).
-        // Check if the stripped version has any visible characters.
-        let stripped_check = strip_ansi_escapes::strip(raw);
-        let text_check = String::from_utf8_lossy(&stripped_check);
-        let has_visible = text_check
+        let has_visible = text
             .chars()
             .any(|c| !c.is_control() && !c.is_whitespace());
         if has_visible {
@@ -237,15 +239,13 @@ impl OutputAnalyzer {
             }
         }
 
-        // Also scan raw text for cost/token patterns (TUI status bars use cursor
+        // Scan stripped text for cost/token patterns (TUI status bars use cursor
         // positioning, but the text content is still in the raw stream)
         if let Some(idx) = self.active_provider_idx {
-            let raw_stripped = strip_ansi_escapes::strip(raw);
-            let raw_clean = String::from_utf8_lossy(&raw_stripped);
             // Check the full chunk for cost patterns (status bars often render in one chunk)
             if let Some(caps) = SESSION_COST_RE
-                .captures(&raw_clean)
-                .or_else(|| CLAUDE_COST_RE.captures(&raw_clean))
+                .captures(&text)
+                .or_else(|| CLAUDE_COST_RE.captures(&text))
             {
                 if let Ok(cost) = caps[1].parse::<f64>() {
                     if cost > 0.0 {
@@ -271,7 +271,7 @@ impl OutputAnalyzer {
                 }
             }
             // Check for dollar amounts in short context (like "$0.0432" next to token info)
-            if let Some(caps) = CLAUDE_TOKEN_SHORT_RE.captures(&raw_clean) {
+            if let Some(caps) = CLAUDE_TOKEN_SHORT_RE.captures(&text) {
                 let input = parse_token_count(&caps[1]);
                 let output = parse_token_count(&caps[2]);
                 if input > 0 || output > 0 {
@@ -301,9 +301,6 @@ impl OutputAnalyzer {
                 }
             }
         }
-
-        let stripped = strip_ansi_escapes::strip(raw);
-        let text = String::from_utf8_lossy(&stripped);
 
         for line in text.lines() {
             let trimmed = line.trim();
@@ -356,11 +353,10 @@ impl OutputAnalyzer {
             for caps in FILE_PATH_RE.captures_iter(trimmed) {
                 let path = caps[1].to_string();
                 if self.files_touched.insert(path.clone()) {
-                    self.files_ordered.push(path);
+                    self.files_ordered.push_back(path);
                     if self.files_ordered.len() > 50 {
-                        if let Some(removed) = self.files_ordered.first().cloned() {
+                        if let Some(removed) = self.files_ordered.pop_front() {
                             self.files_touched.remove(&removed);
-                            self.files_ordered.remove(0);
                         }
                     }
                 }
@@ -406,7 +402,13 @@ impl OutputAnalyzer {
         if let Some(fact) = analysis.memory_fact {
             if !self.memory_keys_seen.contains(&fact.key) {
                 self.memory_keys_seen.insert(fact.key.clone());
-                self.memory_facts.push(fact);
+                self.memory_facts.push_back(fact);
+                // Cap memory facts to prevent unbounded growth across long sessions
+                if self.memory_facts.len() > 200 {
+                    if let Some(removed) = self.memory_facts.pop_front() {
+                        self.memory_keys_seen.remove(&removed.key);
+                    }
+                }
             }
         }
         if let Some(hint) = analysis.phase_hint {
@@ -595,7 +597,7 @@ impl OutputAnalyzer {
         self.pending_cwd.take()
     }
 
-    pub(crate) fn to_metrics(&self) -> SessionMetrics {
+    pub fn to_metrics(&self) -> SessionMetrics {
         let usage = self.token_usage.clone();
 
         SessionMetrics {
@@ -605,25 +607,14 @@ impl OutputAnalyzer {
             token_usage: usage,
             tool_calls: self.tool_calls.iter().rev().take(20).cloned().collect(),
             tool_call_summary: self.tool_call_summary.clone(),
-            files_touched: self.files_ordered.clone(),
+            files_touched: self.files_ordered.iter().cloned().collect(),
             recent_errors: vec![],
             recent_actions: self.recent_actions.iter().cloned().collect(),
             available_actions: self.available_actions.clone(),
-            memory_facts: self.memory_facts.clone(),
+            memory_facts: self.memory_facts.iter().cloned().collect(),
             latency_p50_ms: percentile(&self.latency_samples, 50.0),
             latency_p95_ms: percentile(&self.latency_samples, 95.0),
-            latency_samples: self
-                .latency_samples
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .take(50)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect(),
+            latency_samples: self.latency_samples.iter().copied().collect(),
             token_history: self.token_history.iter().cloned().collect(),
         }
     }

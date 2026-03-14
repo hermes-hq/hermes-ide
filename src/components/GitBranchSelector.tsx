@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { GitBranch } from "../types/git";
-import { gitListBranches, gitCreateBranch, gitCheckoutBranch, gitDeleteBranch } from "../api/git";
+import { gitListBranches, gitBranchesAheadBehind, gitCreateBranch, gitCheckoutBranch, gitDeleteBranch } from "../api/git";
 import type { GitToast } from "./GitPanel";
 import { useContextMenu, buildBranchMenuItems } from "../hooks/useContextMenu";
 
@@ -119,6 +119,17 @@ export function GitBranchSelector({ sessionId, realmId, currentBranch, onRefresh
       setLoading(true);
       const result = await gitListBranches(sessionId, realmId);
       setBranches(result);
+      // Lazily enrich ahead/behind counts in the background after initial render
+      gitBranchesAheadBehind(sessionId, realmId)
+        .then((aheadBehind) => {
+          setBranches((prev) =>
+            prev.map((b) => {
+              const ab = aheadBehind[b.name];
+              return ab ? { ...b, ahead: ab[0], behind: ab[1] } : b;
+            }),
+          );
+        })
+        .catch(() => { /* non-critical — branches still usable without ahead/behind */ });
     } catch (e) {
       setError(String(e));
     } finally {

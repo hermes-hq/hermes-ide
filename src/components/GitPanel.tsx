@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
-import { useGitStatus } from "../hooks/useGitStatus";
+import { subscribeGitStatus, getGitStatusSnapshot, refreshGitStatus } from "../hooks/useGitStatusCache";
 import { useSession, useActiveSession } from "../state/SessionContext";
 import { GitProjectSection } from "./GitProjectSection";
 import { GitDiffView } from "./GitDiffView";
 import { getSettings } from "../api/settings";
 import type { GitFile } from "../types/git";
+import type { GitSessionStatus } from "../types/git";
 import "../styles/components/GitPanel.css";
 
 interface GitPanelProps {
@@ -20,7 +21,28 @@ export function GitPanel({ visible }: GitPanelProps) {
   const { state } = useSession();
   const activeSession = useActiveSession();
   const [pollInterval, setPollInterval] = useState(3000);
-  const { status, error, refresh } = useGitStatus(state.activeSessionId, visible, pollInterval);
+  const [status, setStatus] = useState<GitSessionStatus | null>(null);
+  const workDir = activeSession?.working_directory;
+  const sessionId = state.activeSessionId;
+
+  // Subscribe to the shared git status cache
+  useEffect(() => {
+    if (!visible || !sessionId || !workDir) {
+      setStatus(null);
+      return;
+    }
+    const unsub = subscribeGitStatus(workDir, sessionId, () => {
+      setStatus(getGitStatusSnapshot(workDir));
+    }, pollInterval);
+    // Seed from cache immediately
+    setStatus(getGitStatusSnapshot(workDir));
+    return unsub;
+  }, [visible, sessionId, workDir, pollInterval]);
+
+  const refresh = useCallback(() => {
+    if (workDir) refreshGitStatus(workDir);
+  }, [workDir]);
+  const error = null; // errors are silently ignored in the shared cache
   const [diffTarget, setDiffTarget] = useState<{ sessionId: string; realmId: string; file: GitFile } | null>(null);
   const [toast, setToast] = useState<GitToast | null>(null);
 

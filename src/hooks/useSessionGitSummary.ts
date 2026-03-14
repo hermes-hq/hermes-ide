@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { gitStatus } from "../api/git";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { subscribeGitStatus, getGitStatusSnapshot } from "./useGitStatusCache";
 
 export interface SessionGitSummary {
   branch: string | null;
@@ -19,16 +19,16 @@ const EMPTY: SessionGitSummary = {
   isLoading: false,
 };
 
-const POLL_INTERVAL = 5000;
-
 /**
  * Lightweight hook that provides git summary data (branch + change count)
- * for a given session. Designed for session list display — polls slower
- * than the full Git panel (5s vs 3s).
+ * for a given session. Uses a shared polling cache so sessions with the
+ * same working directory share a single poller instead of each polling
+ * independently.
  */
 export function useSessionGitSummary(
   sessionId: string | null,
   enabled: boolean = true,
+  workingDirectory?: string,
 ): SessionGitSummary {
   const [summary, setSummary] = useState<SessionGitSummary>({ ...EMPTY, isLoading: true });
   const mountedRef = useRef(true);
@@ -38,48 +38,40 @@ export function useSessionGitSummary(
     return () => { mountedRef.current = false; };
   }, []);
 
-  useEffect(() => {
-    if (!sessionId || !enabled) {
+  const derive = useCallback((workDir: string) => {
+    const snapshot = getGitStatusSnapshot(workDir);
+    if (!snapshot) return;
+    if (!mountedRef.current) return;
+    const gitProject = snapshot.projects.find((p) => p.is_git_repo);
+    if (!gitProject) {
       setSummary(EMPTY);
       return;
     }
+    setSummary({
+      branch: gitProject.branch,
+      changeCount: gitProject.files.length,
+      ahead: gitProject.ahead,
+      behind: gitProject.behind,
+      hasConflicts: gitProject.has_conflicts,
+      isLoading: false,
+    });
+  }, []);
 
-    let cancelled = false;
+  useEffect(() => {
+    if (!sessionId || !enabled || !workingDirectory) {
+      setSummary(!sessionId || !enabled ? EMPTY : { ...EMPTY, isLoading: true });
+      return;
+    }
 
-    const fetch = () => {
-      gitStatus(sessionId)
-        .then((status) => {
-          if (cancelled || !mountedRef.current) return;
-          // Find the first project that is a git repo
-          const gitProject = status.projects.find((p) => p.is_git_repo);
-          if (!gitProject) {
-            setSummary(EMPTY);
-            return;
-          }
-          setSummary({
-            branch: gitProject.branch,
-            changeCount: gitProject.files.length,
-            ahead: gitProject.ahead,
-            behind: gitProject.behind,
-            hasConflicts: gitProject.has_conflicts,
-            isLoading: false,
-          });
-        })
-        .catch(() => {
-          if (!cancelled && mountedRef.current) {
-            setSummary((prev) => ({ ...prev, isLoading: false }));
-          }
-        });
-    };
+    const unsubscribe = subscribeGitStatus(workingDirectory, sessionId, () => {
+      derive(workingDirectory);
+    });
 
-    fetch();
-    const interval = setInterval(fetch, POLL_INTERVAL);
+    // Derive immediately in case cache already has data
+    derive(workingDirectory);
 
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [sessionId, enabled]);
+    return unsubscribe;
+  }, [sessionId, enabled, workingDirectory, derive]);
 
   return summary;
 }

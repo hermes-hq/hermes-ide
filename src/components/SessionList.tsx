@@ -68,10 +68,11 @@ function sortSessions(sessions: SessionData[]): SessionData[] {
 }
 
 /** Sub-component: git branch + change summary for a session item. */
-function SessionItemGitInfo({ sessionId, isDestroyed }: { sessionId: string; isDestroyed: boolean }) {
+function SessionItemGitInfo({ sessionId, isDestroyed, workingDirectory }: { sessionId: string; isDestroyed: boolean; workingDirectory: string }) {
   const { branch, changeCount, ahead, behind, hasConflicts, isLoading } = useSessionGitSummary(
     sessionId,
     !isDestroyed,
+    workingDirectory,
   );
 
   if (isDestroyed || isLoading || !branch) return null;
@@ -825,7 +826,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               </span>
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
-            <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed"} />
+            <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed"} workingDirectory={session.working_directory} />
             {/* Inline project tag */}
             {session.phase !== "destroyed" && (
               <div className="session-item-project-row">

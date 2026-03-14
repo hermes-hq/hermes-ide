@@ -377,14 +377,8 @@ export async function createTerminal(
   pool.set(sessionId, entry);
   creating.delete(sessionId);
 
-  // Start polling the OS-level foreground process check.
-  // This runs every 300ms and caches the result so computeSuggestions
-  // can check it synchronously (no async IPC in the hot path).
-  entry.shellFgPollTimer = setInterval(() => {
-    isShellForeground(sessionId)
-      .then((isFg) => { entry.shellIsForeground = isFg; })
-      .catch(() => { /* IPC failure — keep last known value */ });
-  }, 300);
+  // Shell foreground polling is started on-demand when a terminal is focused,
+  // not here. See focusShellFgPolling() / blurShellFgPolling().
 }
 
 // ─── Attach / Detach / Destroy ───────────────────────────────────────
@@ -430,7 +424,23 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
 
   entry.viewport = viewport;
   entry.attached = true;
+
+  // Stop polling for the previously focused terminal, start for this one.
+  if (_focusedSessionId && _focusedSessionId !== sessionId) {
+    const prev = pool.get(_focusedSessionId);
+    if (prev?.shellFgPollTimer) {
+      clearInterval(prev.shellFgPollTimer);
+      prev.shellFgPollTimer = null;
+    }
+  }
   _focusedSessionId = sessionId;
+  if (!entry.shellFgPollTimer) {
+    entry.shellFgPollTimer = setInterval(() => {
+      isShellForeground(sessionId)
+        .then((isFg) => { entry.shellIsForeground = isFg; })
+        .catch(() => { /* IPC failure — keep last known value */ });
+    }, 300);
+  }
 
   // Fit and focus after paint.
   // Double-rAF ensures CSS flex layout has distributed space to this pane
@@ -478,7 +488,14 @@ export function detach(sessionId: string): void {
   clearGhostText(sessionId);
   entry.container.style.display = "none";
   entry.attached = false;
-  if (_focusedSessionId === sessionId) _focusedSessionId = null;
+  if (_focusedSessionId === sessionId) {
+    _focusedSessionId = null;
+    // Stop polling shell foreground — no terminal is focused
+    if (entry.shellFgPollTimer) {
+      clearInterval(entry.shellFgPollTimer);
+      entry.shellFgPollTimer = null;
+    }
+  }
 }
 
 export function destroy(sessionId: string): void {

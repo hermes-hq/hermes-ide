@@ -59,6 +59,10 @@ export function gitListBranchesForRealm(realmId: string): Promise<GitBranch[]> {
   return invoke<GitBranch[]>("git_list_branches_for_realm", { realmId });
 }
 
+export function gitBranchesAheadBehind(sessionId: string, realmId: string): Promise<Record<string, [number, number]>> {
+  return invoke<Record<string, [number, number]>>("git_branches_ahead_behind", { sessionId, realmId });
+}
+
 export function gitCreateBranch(sessionId: string, realmId: string, name: string, checkout: boolean): Promise<GitOperationResult> {
   return invoke<GitOperationResult>("git_create_branch", { sessionId, realmId, name, checkout });
 }

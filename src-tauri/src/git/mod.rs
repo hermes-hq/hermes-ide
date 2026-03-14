@@ -5,6 +5,7 @@ use git2::{
     Repository, StatusOptions,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -1122,23 +1123,25 @@ pub fn git_list_branches(
 
         let is_current = current_branch.as_deref() == Some(&name);
 
-        // Compute ahead/behind vs upstream
+        // Only compute expensive ahead/behind graph walk for the current branch
         let mut ahead = 0u32;
         let mut behind = 0u32;
         let mut upstream_name = None;
 
         if let Ok(upstream) = branch.upstream() {
             upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
-            if let (Some(local_ref), Some(upstream_ref)) =
-                (branch.get().name(), upstream.get().name())
-            {
-                if let (Ok(local_oid), Ok(remote_oid)) = (
-                    repo.refname_to_id(local_ref),
-                    repo.refname_to_id(upstream_ref),
-                ) {
-                    if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
-                        ahead = a as u32;
-                        behind = b as u32;
+            if is_current {
+                if let (Some(local_ref), Some(upstream_ref)) =
+                    (branch.get().name(), upstream.get().name())
+                {
+                    if let (Ok(local_oid), Ok(remote_oid)) = (
+                        repo.refname_to_id(local_ref),
+                        repo.refname_to_id(upstream_ref),
+                    ) {
+                        if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                            ahead = a as u32;
+                            behind = b as u32;
+                        }
                     }
                 }
             }
@@ -1241,22 +1244,25 @@ pub fn git_list_branches_for_realm(
 
         let is_current = current_branch.as_deref() == Some(&name);
 
+        // Only compute expensive ahead/behind graph walk for the current branch
         let mut ahead = 0u32;
         let mut behind = 0u32;
         let mut upstream_name = None;
 
         if let Ok(upstream) = branch.upstream() {
             upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
-            if let (Some(local_ref), Some(upstream_ref)) =
-                (branch.get().name(), upstream.get().name())
-            {
-                if let (Ok(local_oid), Ok(remote_oid)) = (
-                    repo.refname_to_id(local_ref),
-                    repo.refname_to_id(upstream_ref),
-                ) {
-                    if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
-                        ahead = a as u32;
-                        behind = b as u32;
+            if is_current {
+                if let (Some(local_ref), Some(upstream_ref)) =
+                    (branch.get().name(), upstream.get().name())
+                {
+                    if let (Ok(local_oid), Ok(remote_oid)) = (
+                        repo.refname_to_id(local_ref),
+                        repo.refname_to_id(upstream_ref),
+                    ) {
+                        if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                            ahead = a as u32;
+                            behind = b as u32;
+                        }
                     }
                 }
             }
@@ -1314,6 +1320,55 @@ pub fn git_list_branches_for_realm(
     }
 
     Ok(branches)
+}
+
+/// Compute ahead/behind counts for all local branches that have an upstream.
+/// Designed to be called lazily after the fast `git_list_branches` returns,
+/// so the branch dropdown renders instantly and enriches in the background.
+#[tauri::command]
+pub fn git_branches_ahead_behind(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+) -> Result<HashMap<String, (u32, u32)>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let mut result = HashMap::new();
+
+    let local_branches = repo
+        .branches(Some(BranchType::Local))
+        .map_err(|e| e.to_string())?;
+
+    for branch_result in local_branches {
+        let (branch, _) = branch_result.map_err(|e| e.to_string())?;
+        let name = branch
+            .name()
+            .map_err(|e| e.to_string())?
+            .unwrap_or("")
+            .to_string();
+
+        if let Ok(upstream) = branch.upstream() {
+            if let (Some(local_ref), Some(upstream_ref)) =
+                (branch.get().name(), upstream.get().name())
+            {
+                if let (Ok(local_oid), Ok(remote_oid)) = (
+                    repo.refname_to_id(local_ref),
+                    repo.refname_to_id(upstream_ref),
+                ) {
+                    if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                        result.insert(name, (a as u32, b as u32));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]

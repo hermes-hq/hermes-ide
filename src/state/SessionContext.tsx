@@ -5,6 +5,9 @@ import { listen } from "@tauri-apps/api/event";
 let workspaceRestoreStarted = false;
 // Guard to prevent periodic save from writing during workspace restore
 let workspaceRestoreInProgress = false;
+// Dirty flag — set when layout/sessions change in ways worth persisting.
+// Cleared after each successful save. Prevents redundant saves every 10s.
+let workspaceDirty = false;
 import {
   createSession as apiCreateSession, closeSession as apiCloseSession,
   getSessions, getRecentSessions, getSessionSnapshot,
@@ -120,12 +123,35 @@ interface SessionState {
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case "SESSION_UPDATED": {
+      const existing = state.sessions[action.session.id];
+      // Skip update if the session data hasn't meaningfully changed —
+      // prevents cascading re-renders from high-frequency backend emissions.
+      if (existing
+        && existing.phase === action.session.phase
+        && existing.last_activity_at === action.session.last_activity_at
+        && existing.working_directory === action.session.working_directory
+        && existing.context_injected === action.session.context_injected
+        && existing.label === action.session.label
+        && existing.color === action.session.color
+        && existing.group === action.session.group
+        && existing.description === action.session.description
+        && existing.detected_agent?.name === action.session.detected_agent?.name
+        && existing.detected_agent?.model === action.session.detected_agent?.model
+        && existing.metrics.output_lines === action.session.metrics.output_lines
+        && existing.metrics.tool_calls.length === action.session.metrics.tool_calls.length
+        && existing.metrics.files_touched.length === action.session.metrics.files_touched.length
+        && existing.metrics.memory_facts.length === action.session.metrics.memory_facts.length
+      ) {
+        return state;
+      }
+      workspaceDirty = true;
       return {
         ...state,
         sessions: { ...state.sessions, [action.session.id]: action.session },
       };
     }
     case "SESSION_REMOVED": {
+      workspaceDirty = true;
       const { [action.id]: _, ...rest } = state.sessions;
       const ids = Object.keys(rest);
       // Remove panes displaying this session from layout
@@ -189,6 +215,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
     case "SET_ACTIVE": {
+      workspaceDirty = true;
       if (!action.id) {
         return { ...state, activeSessionId: null };
       }
@@ -301,6 +328,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
     case "SPLIT_PANE": {
+      workspaceDirty = true;
       if (!state.layout.root) return state;
       const newPaneId = nextPaneId();
       const newPane: PaneLeaf = { type: "pane", id: newPaneId, sessionId: action.newSessionId };
@@ -326,6 +354,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       };
     }
     case "CLOSE_PANE": {
+      workspaceDirty = true;
       if (!state.layout.root) return state;
       const newRoot = removePane(state.layout.root, action.paneId);
       if (!newRoot) {
@@ -1046,6 +1075,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   saveWorkspaceRef.current = saveWorkspace;
   useEffect(() => {
     const interval = setInterval(() => {
+      if (!workspaceDirty) return;
+      workspaceDirty = false;
       saveWorkspaceRef.current().catch(console.error);
     }, 10_000); // every 10 seconds
     return () => clearInterval(interval);

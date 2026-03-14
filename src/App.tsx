@@ -83,7 +83,7 @@ function AppContent() {
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
   const updater = useAutoUpdater();
-  const activeGitSummary = useSessionGitSummary(state.activeSessionId, !!activeSession);
+  const activeGitSummary = useSessionGitSummary(state.activeSessionId, !!activeSession, activeSession?.working_directory);
 
   // Load command palette shortcut setting (reload when settings panel closes)
   useEffect(() => {
