@@ -20,7 +20,15 @@ export interface PluginContributions {
 	commands?: PluginCommandContribution[];
 	panels?: PluginPanelContribution[];
 	statusBarItems?: PluginStatusBarItem[];
+	sessionActions?: PluginSessionActionContribution[];
 	settings?: PluginSettingsSchema;
+}
+
+export interface PluginSessionActionContribution {
+	id: string;        // unique action ID
+	panelId: string;   // references a panel in contributes.panels
+	name: string;      // tooltip label
+	icon: string;      // inline SVG string
 }
 
 export interface PluginCommandContribution {

@@ -17,6 +17,7 @@ export interface HermesPluginAPI {
 		togglePanel(panelId: string): void;
 		showToast(message: string, options?: { type?: "info" | "success" | "warning" | "error"; duration?: number }): void;
 		updateStatusBarItem(itemId: string, update: { text?: string; tooltip?: string; visible?: boolean }): void;
+		updateSessionActionBadge(actionId: string, badge: { text?: string; count?: number }): void;
 	};
 	commands: {
 		register(commandId: string, handler: () => void | Promise<void>): Disposable;
@@ -75,6 +76,7 @@ export interface PluginAPICallbacks {
 	onPanelHide: PanelToggleCallback;
 	onToast: ToastCallback;
 	onStatusBarUpdate: StatusBarUpdateCallback;
+	onSessionActionBadgeUpdate?: (actionId: string, badge: { text?: string; count?: number }) => void;
 	onSettingChanged?: (pluginId: string, key: string, value: string | number | boolean) => void;
 	onEventSubscribe?: (event: HermesEvent, callback: (...args: unknown[]) => void) => Disposable;
 	onNotification?: (options: { title: string; body?: string }) => Promise<void>;
@@ -129,6 +131,9 @@ export function createPluginAPI(
 			},
 			updateStatusBarItem(itemId: string, update: { text?: string; tooltip?: string; visible?: boolean }) {
 				callbacks.onStatusBarUpdate(itemId, update);
+			},
+			updateSessionActionBadge(actionId: string, badge: { text?: string; count?: number }) {
+				callbacks.onSessionActionBadgeUpdate?.(actionId, badge);
 			},
 		},
 		commands: {
