@@ -53,7 +53,8 @@ export type PluginPermission =
 	| "terminal.read"
 	| "terminal.write"
 	| "sessions.read"
-	| "notifications";
+	| "notifications"
+	| "network";
 
 // ─── Plugin Settings Schema ──────────────────────────────
 

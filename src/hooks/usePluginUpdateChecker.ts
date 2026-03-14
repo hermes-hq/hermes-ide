@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RegistryPlugin, ChangelogEntry } from "../plugins/types";
 import { REGISTRY_URL } from "../plugins/constants";
-import { hasUpdate } from "../plugins/semver";
+import { hasUpdate, meetsMinVersion } from "../plugins/semver";
 import { getSetting, setSetting } from "../api/settings";
 import { downloadAndInstallPlugin } from "../plugins/pluginInstaller";
 import { PluginLoader } from "../plugins/PluginLoader";
@@ -86,6 +86,8 @@ export function filterIgnored(
   return updates.filter((u) => ignored[u.id] !== u.newVersion);
 }
 
+declare const __APP_VERSION__: string;
+
 export function findUpdates(
   installedPlugins: { id: string; version: string; name: string }[],
   registryPlugins: RegistryPlugin[],
@@ -94,10 +96,16 @@ export function findUpdates(
     installedPlugins.map((p) => [p.id, p]),
   );
 
+  const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
+
   const updates: PluginUpdateInfo[] = [];
   for (const rp of registryPlugins) {
     const installed = installedMap.get(rp.id);
     if (installed && hasUpdate(installed.version, rp.version)) {
+      // Skip updates that require a newer app version
+      if (rp.minAppVersion && !meetsMinVersion(appVersion, rp.minAppVersion)) {
+        continue;
+      }
       updates.push({
         id: rp.id,
         name: rp.name,

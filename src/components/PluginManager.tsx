@@ -472,8 +472,9 @@ export function PluginManager({ runtime, onConfirmUpdate }: PluginManagerProps) 
 							</div>
 						)}
 						{!compatible && (
-							<div className="pm-detail-tag" style={{ color: "var(--yellow)" }}>
-								Requires app v{p.minAppVersion} or later
+							<div className="pm-compat-warning">
+								<strong>Incompatible with your app version</strong>
+								<span>This plugin requires Hermes IDE v{p.minAppVersion} or later. You are on v{appVersion}. Please update the app first.</span>
 							</div>
 						)}
 						<div className="pm-detail-actions">
@@ -619,6 +620,7 @@ export function PluginManager({ runtime, onConfirmUpdate }: PluginManagerProps) 
 				<span className="pm-footer-path">
 					{pluginsDir || "Loading..."}
 				</span>
+				<span className="pm-footer-version">v{appVersion}</span>
 			</div>
 		</div>
 	);

@@ -42,6 +42,9 @@ export interface HermesPluginAPI {
 	notifications: {
 		send(options: { title: string; body?: string }): Promise<void>;
 	};
+	network: {
+		fetch(url: string): Promise<string>;
+	};
 	sessions: {
 		getActive(): Promise<{ id: string; name: string } | null>;
 		list(): Promise<{ id: string; name: string }[]>;
@@ -295,6 +298,14 @@ export function createPluginAPI(
 				if (callbacks.onNotification) {
 					await callbacks.onNotification(options);
 				}
+			},
+		},
+		network: {
+			fetch(url: string): Promise<string> {
+				if (!permissions.has("network")) {
+					throw new PermissionDeniedError(pluginId, "network");
+				}
+				return invoke("plugin_fetch_url", { url });
 			},
 		},
 		sessions: {

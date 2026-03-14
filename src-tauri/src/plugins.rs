@@ -306,6 +306,24 @@ fn find_manifest_in_dir(dir: &std::path::Path) -> Result<(PathBuf, String), Stri
     Err("Archive does not contain hermes-plugin.json".to_string())
 }
 
+/// Fetch a URL and return the response body as a string.
+/// Used by plugins with the "network" permission.
+#[tauri::command]
+pub async fn plugin_fetch_url(url: String) -> Result<String, String> {
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Failed to fetch URL: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))
+}
+
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("mkdir failed: {}", e))?;
     for entry in fs::read_dir(src).map_err(|e| format!("readdir failed: {}", e))? {
