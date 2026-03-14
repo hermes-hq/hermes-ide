@@ -538,6 +538,7 @@ pub fn create_session(
     ssh_port: Option<u16>,
     ssh_user: Option<String>,
     tmux_session: Option<String>,
+    ssh_identity_file: Option<String>,
     initial_rows: Option<u16>,
     initial_cols: Option<u16>,
 ) -> Result<SessionUpdate, String> {
@@ -633,6 +634,8 @@ pub fn create_session(
                     .unwrap_or_else(|_| "root".to_string())
             }),
             tmux_session: tmux_session.clone(),
+            identity_file: ssh_identity_file.clone(),
+            port_forwards: Vec::new(),
         }),
     };
 
@@ -679,17 +682,35 @@ pub fn create_session(
     let mut cmd = if let Some(ref info) = ssh_info_clone {
         let mut c = CommandBuilder::new("ssh");
         c.arg("-t"); // Force TTY allocation
+        c.arg("-o");
+        c.arg("ServerAliveInterval=15");
+        c.arg("-o");
+        c.arg("ServerAliveCountMax=3");
+        let socket_path =
+            ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
+        c.arg("-o");
+        c.arg(format!("ControlPath={}", socket_path.display()));
+        c.arg("-o");
+        c.arg("ControlMaster=auto");
+        c.arg("-o");
+        c.arg("ControlPersist=300");
         if info.port != 22 {
             c.arg("-p");
             c.arg(info.port.to_string());
+        }
+        if let Some(ref id_file) = info.identity_file {
+            c.arg("-i");
+            c.arg(id_file);
         }
         c.arg(format!("{}@{}", info.user, info.host));
         // Attach to tmux session if specified.
         // `new-session -A` attaches if it exists, creates if it doesn't.
         if let Some(ref tmux_name) = info.tmux_session {
             c.arg(format!(
-                "tmux new-session -A -s '{}'",
-                tmux_name.replace('\'', "'\\''")
+                "tmux new-session -A -s '{}' -x {} -y {}",
+                tmux_name.replace('\'', "'\\''"),
+                pty_cols,
+                pty_rows
             ));
         }
         c
@@ -876,7 +897,11 @@ pub fn create_session(
                 match reader.read(&mut buf) {
                     Ok(0) => {
                         if let Ok(mut s) = session_clone.lock() {
-                            s.phase = SessionPhase::Destroyed;
+                            s.phase = if s.ssh_info.is_some() {
+                                SessionPhase::Disconnected
+                            } else {
+                                SessionPhase::Destroyed
+                            };
                             let update = SessionUpdate::from(&*s);
                             let _ = app_clone.emit("session-updated", &update);
                         }
@@ -1190,7 +1215,11 @@ pub fn create_session(
                     }
                     Err(_) => {
                         if let Ok(mut s) = session_clone.lock() {
-                            s.phase = SessionPhase::Destroyed;
+                            s.phase = if s.ssh_info.is_some() {
+                                SessionPhase::Disconnected
+                            } else {
+                                SessionPhase::Destroyed
+                            };
                             let update = SessionUpdate::from(&*s);
                             let _ = app_clone.emit("session-updated", &update);
                         }
@@ -1216,7 +1245,11 @@ pub fn create_session(
                     }))
             );
             if let Ok(mut s) = session_for_cleanup.lock() {
-                s.phase = SessionPhase::Destroyed;
+                s.phase = if s.ssh_info.is_some() {
+                    SessionPhase::Disconnected
+                } else {
+                    SessionPhase::Destroyed
+                };
             }
             let _ = app_for_cleanup.emit(&format!("pty-exit-{}", exit_id), ());
         }
@@ -1237,12 +1270,17 @@ pub fn create_session(
                 thread::sleep(interval);
                 // Check if session is destroyed → stop.
                 // Acquire and release session lock quickly — never hold both locks.
-                let is_destroyed = session_silence
+                let is_stopped = session_silence
                     .lock()
                     .ok()
-                    .map(|s| matches!(s.phase, SessionPhase::Destroyed))
+                    .map(|s| {
+                        matches!(
+                            s.phase,
+                            SessionPhase::Destroyed | SessionPhase::Disconnected
+                        )
+                    })
                     .unwrap_or(false);
-                if is_destroyed {
+                if is_stopped {
                     break;
                 }
 
@@ -1706,6 +1744,34 @@ pub fn resize_session(
                 }
             }
         }
+    }
+
+    // Sync remote tmux dimensions when resizing SSH+tmux sessions.
+    // Fire-and-forget on a background thread so resize doesn't block.
+    let ssh_tmux_info = session.session.lock().ok().and_then(|s| {
+        s.ssh_info.as_ref().and_then(|info| {
+            info.tmux_session.as_ref().map(|tmux_name| {
+                (
+                    info.user.clone(),
+                    info.host.clone(),
+                    info.port,
+                    tmux_name.clone(),
+                )
+            })
+        })
+    });
+    if let Some((user, host, port, tmux_name)) = ssh_tmux_info {
+        let resize_cols = cols;
+        let resize_rows = rows;
+        thread::spawn(move || {
+            let remote_cmd = format!(
+                "tmux resize-window -t '{}' -x {} -y {}",
+                tmux_name.replace('\'', "'\\''"),
+                resize_cols,
+                resize_rows
+            );
+            let _ = ssh_exec(&user, &host, port, &remote_cmd);
+        });
     }
 
     Ok(())
@@ -2422,5 +2488,287 @@ pub fn get_project_context(path: String) -> Result<ProjectContextInfo, String> {
         package_manager,
         languages,
         frameworks,
+    })
+}
+
+// ─── SSH File Transfer Commands ───────────────────────────────────────
+
+#[tauri::command]
+pub async fn ssh_upload_file(
+    state: State<'_, AppState>,
+    session_id: String,
+    local_path: String,
+    remote_dir: String,
+) -> Result<(), String> {
+    let info = get_ssh_params(&state, &session_id)?;
+
+    let local = std::path::Path::new(&local_path);
+    if !local.exists() {
+        return Err(format!("Local file not found: {}", local_path));
+    }
+    let file_name = local
+        .file_name()
+        .ok_or("Invalid file name")?
+        .to_string_lossy();
+    let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), file_name);
+
+    // Pipe local file through ssh into cat on the remote side.
+    // This reuses the ControlMaster socket from ssh_command() and avoids
+    // the scp quoting issues with remote paths.
+    let local_file = std::fs::File::open(&local_path)
+        .map_err(|e| format!("Failed to open local file: {}", e))?;
+
+    let mut cmd = ssh_command(&info.user, &info.host, info.port);
+    cmd.arg(format!("cat > {}", shell_escape(&remote_path)));
+    cmd.stdin(std::process::Stdio::from(local_file));
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run ssh upload: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Upload failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_download_file(
+    state: State<'_, AppState>,
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+) -> Result<(), String> {
+    let info = get_ssh_params(&state, &session_id)?;
+
+    // Pipe remote file through ssh cat to a local file.
+    // This reuses the ControlMaster socket from ssh_command().
+    let local_file = std::fs::File::create(&local_path)
+        .map_err(|e| format!("Failed to create local file: {}", e))?;
+
+    let mut cmd = ssh_command(&info.user, &info.host, info.port);
+    cmd.arg(format!("cat {}", shell_escape(&remote_path)));
+    cmd.stdout(local_file);
+    cmd.stderr(std::process::Stdio::piped());
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run ssh download: {}", e))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for ssh download: {}", e))?;
+
+    if !output.status.success() {
+        // Clean up the (possibly empty/partial) local file on failure
+        let _ = std::fs::remove_file(&local_path);
+        return Err(format!(
+            "Download failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(())
+}
+
+/// Helper: look up SSH connection params from a session by ID.
+fn get_ssh_params(state: &State<AppState>, session_id: &str) -> Result<SshConnectionInfo, String> {
+    let mgr = state
+        .pty_manager
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    let pty_session = mgr
+        .sessions
+        .get(session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+    let session = pty_session
+        .session
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    session
+        .ssh_info
+        .clone()
+        .ok_or_else(|| "Not an SSH session".to_string())
+}
+
+// ─── Port Forwarding Commands ────────────────────────────────────────
+
+#[tauri::command]
+pub fn ssh_add_port_forward(
+    state: State<'_, AppState>,
+    session_id: String,
+    local_port: u16,
+    remote_host: String,
+    remote_port: u16,
+    label: Option<String>,
+) -> Result<(), String> {
+    let info = get_ssh_params(&state, &session_id)?;
+    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
+
+    let spec = format!("{}:{}:{}", local_port, remote_host, remote_port);
+    let output = std::process::Command::new("ssh")
+        .arg("-O")
+        .arg("forward")
+        .arg("-L")
+        .arg(&spec)
+        .arg("-S")
+        .arg(socket_path.to_string_lossy().as_ref())
+        .arg(format!("{}@{}", info.user, info.host))
+        .output()
+        .map_err(|e| format!("Failed to add port forward: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Port forward failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    // Update session state
+    let mgr = state
+        .pty_manager
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    if let Some(pty_session) = mgr.sessions.get(&session_id) {
+        if let Ok(mut s) = pty_session.session.lock() {
+            if let Some(ref mut ssh) = s.ssh_info {
+                ssh.port_forwards.push(PortForward {
+                    local_port,
+                    remote_host,
+                    remote_port,
+                    label,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn ssh_remove_port_forward(
+    state: State<'_, AppState>,
+    session_id: String,
+    local_port: u16,
+) -> Result<(), String> {
+    let info = get_ssh_params(&state, &session_id)?;
+    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
+
+    // Find the forward to cancel
+    let forward = info
+        .port_forwards
+        .iter()
+        .find(|f| f.local_port == local_port)
+        .ok_or_else(|| format!("No forward on port {}", local_port))?;
+
+    let spec = format!(
+        "{}:{}:{}",
+        forward.local_port, forward.remote_host, forward.remote_port
+    );
+    let output = std::process::Command::new("ssh")
+        .arg("-O")
+        .arg("cancel")
+        .arg("-L")
+        .arg(&spec)
+        .arg("-S")
+        .arg(socket_path.to_string_lossy().as_ref())
+        .arg(format!("{}@{}", info.user, info.host))
+        .output()
+        .map_err(|e| format!("Failed to remove port forward: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Cancel forward failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    // Update session state
+    let mgr = state
+        .pty_manager
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    if let Some(pty_session) = mgr.sessions.get(&session_id) {
+        if let Ok(mut s) = pty_session.session.lock() {
+            if let Some(ref mut ssh) = s.ssh_info {
+                ssh.port_forwards.retain(|f| f.local_port != local_port);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn ssh_list_port_forwards(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<PortForward>, String> {
+    let info = get_ssh_params(&state, &session_id)?;
+    Ok(info.port_forwards)
+}
+
+// ─── Remote CWD & Git Info Commands ──────────────────────────────────
+
+#[tauri::command]
+pub fn ssh_get_remote_cwd(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<String, String> {
+    let info = get_ssh_params(&state, &session_id)?;
+
+    let remote_cmd = if let Some(ref tmux_name) = info.tmux_session {
+        format!(
+            "tmux display-message -t '{}' -p '#{{pane_current_path}}'",
+            tmux_name.replace('\'', "'\\''")
+        )
+    } else {
+        "pwd".to_string()
+    };
+
+    let (stdout, stderr, success) = ssh_exec(&info.user, &info.host, info.port, &remote_cmd)?;
+    if !success {
+        return Err(format!("Failed to get remote CWD: {}", stderr.trim()));
+    }
+    Ok(stdout.trim().to_string())
+}
+
+#[tauri::command]
+pub fn ssh_get_remote_git_info(
+    state: State<'_, AppState>,
+    session_id: String,
+    remote_path: String,
+) -> Result<RemoteGitInfo, String> {
+    let info = get_ssh_params(&state, &session_id)?;
+
+    let remote_cmd = format!(
+        "git -C '{}' rev-parse --abbrev-ref HEAD 2>/dev/null; git -C '{}' status --porcelain 2>/dev/null | wc -l",
+        remote_path.replace('\'', "'\\''"),
+        remote_path.replace('\'', "'\\''")
+    );
+
+    let (stdout, _stderr, _success) = ssh_exec(&info.user, &info.host, info.port, &remote_cmd)?;
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    let branch = lines.first().and_then(|l| {
+        let b = l.trim();
+        if b.is_empty() || b.contains("fatal") {
+            None
+        } else {
+            Some(b.to_string())
+        }
+    });
+
+    let change_count = lines
+        .get(1)
+        .and_then(|l| l.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+
+    Ok(RemoteGitInfo {
+        branch,
+        change_count,
     })
 }

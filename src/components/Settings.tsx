@@ -12,6 +12,7 @@ import {
   getSettings, setSetting, exportSettings, importSettings,
   type SettingsMap,
 } from "../api/settings";
+import { listSshSavedHosts, upsertSshSavedHost, deleteSshSavedHost, type SshSavedHost } from "../api/ssh";
 import { setAnalyticsEnabled } from "../utils/analytics";
 import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
 import { PluginManager } from "./PluginManager";
@@ -29,6 +30,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
   const [activeTab, setActiveTab] = useState(initialTab || "general");
+  const [sshHosts, setSshHosts] = useState<SshSavedHost[]>([]);
+  const [editingHost, setEditingHost] = useState<SshSavedHost | null>(null);
   const { dispatch } = useSession();
   const { onContextMenu: textContextMenu } = useTextContextMenu();
 
@@ -58,6 +61,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     invoke<{ name: string; path: string }[]>("get_available_shells")
       .then(setShells)
       .catch(console.error);
+
+    listSshSavedHosts().then(setSshHosts).catch(console.error);
 
     // Read live window size
     const win = getCurrentWindow();
@@ -159,6 +164,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   const tabs = [
     { id: "general", label: "General" },
     { id: "appearance", label: "Appearance" },
+    { id: "ssh", label: "SSH" },
     { id: "git", label: "Git" },
     { id: "autonomous", label: "Autonomous" },
     { id: "shortcuts", label: "Shortcuts" },
@@ -262,29 +268,6 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="emacs">Emacs</option>
                   </select>
                   <span className="settings-hint-inline">Editor used when opening files from the file browser</span>
-                </div>
-
-                <div className="settings-group">
-                  <label className="settings-label">SSH File Editor</label>
-                  <select
-                    className="settings-select"
-                    value={settings.preferred_ssh_editor || "vim"}
-                    onChange={(e) => updateSetting("preferred_ssh_editor", e.target.value)}
-                  >
-                    <optgroup label="Terminal editors (run in PTY)">
-                      <option value="vim">Vim</option>
-                      <option value="nvim">Neovim</option>
-                      <option value="nano">Nano</option>
-                      <option value="emacs">Emacs</option>
-                      <option value="vi">Vi</option>
-                    </optgroup>
-                    <optgroup label="GUI editors (open locally via SSH remote)">
-                      <option value="code">VS Code (Remote SSH)</option>
-                      <option value="cursor">Cursor (Remote SSH)</option>
-                      <option value="zed">Zed (Remote SSH)</option>
-                    </optgroup>
-                  </select>
-                  <span className="settings-hint-inline">Editor used when opening files on SSH sessions</span>
                 </div>
 
                 <div className="settings-group">
@@ -451,6 +434,160 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     ))}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {activeTab === "ssh" && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">SSH File Editor</label>
+                  <select
+                    className="settings-select"
+                    value={settings.preferred_ssh_editor || "vim"}
+                    onChange={(e) => updateSetting("preferred_ssh_editor", e.target.value)}
+                  >
+                    <optgroup label="Terminal editors (run in PTY)">
+                      <option value="vim">Vim</option>
+                      <option value="nvim">Neovim</option>
+                      <option value="nano">Nano</option>
+                      <option value="emacs">Emacs</option>
+                      <option value="vi">Vi</option>
+                    </optgroup>
+                    <optgroup label="GUI editors (open locally via SSH remote)">
+                      <option value="code">VS Code (Remote SSH)</option>
+                      <option value="cursor">Cursor (Remote SSH)</option>
+                      <option value="zed">Zed (Remote SSH)</option>
+                    </optgroup>
+                  </select>
+                  <span className="settings-hint-inline">Editor used when opening files on SSH sessions</span>
+                </div>
+
+                <h3 className="settings-section-title" style={{ marginTop: 16 }}>Saved Hosts</h3>
+
+                {sshHosts.length > 0 && (
+                  <div className="settings-ssh-hosts-list">
+                    {sshHosts.map((h) => (
+                      <div key={h.id} className="settings-ssh-host-item">
+                        <div className="settings-ssh-host-info">
+                          <span className="settings-ssh-host-label">{h.label}</span>
+                          <span className="settings-ssh-host-detail">{h.user}@{h.host}{h.port !== 22 ? `:${h.port}` : ""}</span>
+                        </div>
+                        <div className="settings-ssh-host-actions">
+                          <button
+                            className="settings-btn-sm"
+                            onClick={() => setEditingHost({ ...h })}
+                          >Edit</button>
+                          <button
+                            className="settings-btn-sm settings-btn-danger"
+                            onClick={async () => {
+                              await deleteSshSavedHost(h.id);
+                              setSshHosts((prev) => prev.filter((x) => x.id !== h.id));
+                            }}
+                          >Delete</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {sshHosts.length === 0 && !editingHost && (
+                  <p className="settings-hint">No saved SSH hosts yet.</p>
+                )}
+
+                {editingHost ? (
+                  <div className="settings-ssh-host-form">
+                    <div className="settings-group">
+                      <label className="settings-label">Label</label>
+                      <input
+                        className="settings-input"
+                        placeholder="My Server"
+                        value={editingHost.label}
+                        onChange={(e) => setEditingHost({ ...editingHost, label: e.target.value })}
+                        onContextMenu={textContextMenu}
+                      />
+                    </div>
+                    <div className="settings-group">
+                      <label className="settings-label">Host</label>
+                      <input
+                        className="settings-input"
+                        placeholder="example.com"
+                        value={editingHost.host}
+                        onChange={(e) => setEditingHost({ ...editingHost, host: e.target.value })}
+                        onContextMenu={textContextMenu}
+                      />
+                    </div>
+                    <div className="settings-group">
+                      <label className="settings-label">User</label>
+                      <input
+                        className="settings-input"
+                        placeholder="root"
+                        value={editingHost.user}
+                        onChange={(e) => setEditingHost({ ...editingHost, user: e.target.value })}
+                        onContextMenu={textContextMenu}
+                      />
+                    </div>
+                    <div className="settings-group">
+                      <label className="settings-label">Port</label>
+                      <input
+                        className="settings-input"
+                        type="number"
+                        placeholder="22"
+                        value={editingHost.port}
+                        onChange={(e) => setEditingHost({ ...editingHost, port: parseInt(e.target.value) || 22 })}
+                      />
+                    </div>
+                    <div className="settings-group">
+                      <label className="settings-label">Identity File (optional)</label>
+                      <input
+                        className="settings-input"
+                        placeholder="~/.ssh/id_rsa"
+                        value={editingHost.identity_file || ""}
+                        onChange={(e) => setEditingHost({ ...editingHost, identity_file: e.target.value || null })}
+                        onContextMenu={textContextMenu}
+                      />
+                    </div>
+                    <div className="settings-group">
+                      <label className="settings-label">Jump Host (optional)</label>
+                      <input
+                        className="settings-input"
+                        placeholder="bastion.example.com"
+                        value={editingHost.jump_host || ""}
+                        onChange={(e) => setEditingHost({ ...editingHost, jump_host: e.target.value || null })}
+                        onContextMenu={textContextMenu}
+                      />
+                    </div>
+                    <div className="settings-ssh-host-form-actions">
+                      <button
+                        className="settings-btn"
+                        onClick={async () => {
+                          if (!editingHost.label.trim() || !editingHost.host.trim() || !editingHost.user.trim()) return;
+                          await upsertSshSavedHost(editingHost);
+                          const hosts = await listSshSavedHosts();
+                          setSshHosts(hosts);
+                          setEditingHost(null);
+                        }}
+                      >Save</button>
+                      <button className="settings-btn" onClick={() => setEditingHost(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="settings-btn"
+                    style={{ marginTop: 8 }}
+                    onClick={() => setEditingHost({
+                      id: crypto.randomUUID(),
+                      label: "",
+                      host: "",
+                      port: 22,
+                      user: "",
+                      identity_file: null,
+                      jump_host: null,
+                      port_forwards: "[]",
+                      created_at: new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    })}
+                  >Add Host</button>
+                )}
               </div>
             )}
 

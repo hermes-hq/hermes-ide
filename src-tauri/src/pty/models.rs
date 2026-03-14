@@ -15,6 +15,7 @@ pub enum SessionPhase {
     NeedsInput,
     Error(String),
     Closing,
+    Disconnected,
     Destroyed,
 }
 
@@ -30,6 +31,7 @@ impl SessionPhase {
             SessionPhase::NeedsInput => "needs_input",
             SessionPhase::Error(_) => "error",
             SessionPhase::Closing => "closing",
+            SessionPhase::Disconnected => "disconnected",
             SessionPhase::Destroyed => "destroyed",
         }
     }
@@ -126,12 +128,25 @@ pub struct SessionMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortForward {
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshConnectionInfo {
     pub host: String,
     pub port: u16,
     pub user: String,
     #[serde(default)]
     pub tmux_session: Option<String>,
+    #[serde(default)]
+    pub identity_file: Option<String>,
+    #[serde(default)]
+    pub port_forwards: Vec<PortForward>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +244,14 @@ impl From<&Session> for SessionUpdate {
             ssh_info: s.ssh_info.clone(),
         }
     }
+}
+
+// ─── Remote Git Info ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteGitInfo {
+    pub branch: Option<String>,
+    pub change_count: i32,
 }
 
 // ─── Terminal Command Intelligence ───────────────────────────────────
