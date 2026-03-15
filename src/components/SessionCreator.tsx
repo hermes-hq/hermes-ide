@@ -778,6 +778,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               <span><kbd>Esc</kbd> close</span>
             </div>
             <div className="session-creator-actions">
+              <button className="session-creator-btn-secondary" onClick={goBack}>
+                Back
+              </button>
               <button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); goNext(); }}>
                 Skip
               </button>
