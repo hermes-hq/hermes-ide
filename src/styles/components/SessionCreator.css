@@ -69,6 +69,26 @@
   letter-spacing: 0.5px;
 }
 
+.session-creator-subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.4;
+  margin-top: -4px;
+}
+
+.session-creator-cwd-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 3px;
+  vertical-align: 1px;
+}
+
 .session-creator-list {
   max-height: 240px;
   overflow-y: auto;

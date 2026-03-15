@@ -71,7 +71,7 @@ interface SessionCreatorProps {
 }
 
 export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreatorProps) {
-  const [step, setStep] = useState<Step>("projects");
+  const [step, setStep] = useState<Step>("ai");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [label, setLabel] = useState("");
@@ -165,11 +165,28 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   // Compute ordered steps for display
   const orderedSteps = useMemo<Step[]>(() => {
     if (connectionType === "ssh") return ["projects", "tmux", "confirm"];
-    const steps: Step[] = ["projects"];
+    const steps: Step[] = ["ai", "projects"];
     if (showBranchStep) steps.push("branch");
-    steps.push("ai", "confirm");
+    steps.push("confirm");
     return steps;
   }, [showBranchStep, connectionType]);
+
+  // Navigate to first step when connection type changes
+  const prevConnectionRef = useRef(connectionType);
+  useEffect(() => {
+    if (prevConnectionRef.current !== connectionType) {
+      prevConnectionRef.current = connectionType;
+      setStep(connectionType === "ssh" ? "projects" : "ai");
+    }
+  }, [connectionType]);
+
+  // Truncate project selection when switching to Shell Only
+  const isShellOnly = aiProvider === null;
+  useEffect(() => {
+    if (isShellOnly && selectedProjectIds.length > 1) {
+      setSelectedProjectIds((prev) => prev.slice(0, 1));
+    }
+  }, [isShellOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalSteps = orderedSteps.length;
   const currentStepNumber = orderedSteps.indexOf(step) + 1;
@@ -332,9 +349,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   }, [selectedProjectIds, allProjects]);
 
   const toggleProject = (id: string) => {
-    setSelectedProjectIds((prev) =>
-      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
-    );
+    setSelectedProjectIds((prev) => {
+      if (prev.includes(id)) return prev.filter((r) => r !== id);
+      // Shell Only: single-select (replace)
+      if (isShellOnly) return [id];
+      // AI session: multi-select (append)
+      return [...prev, id];
+    });
   };
 
   const removeProject = async (id: string) => {
@@ -354,7 +375,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       const project = await createProject(path.trim(), null);
       setAllProjects((prev) => [project, ...prev.filter((r) => r.id !== project.id)]);
       setSelectedProjectIds((prev) =>
-        prev.includes(project.id) ? prev : [...prev, project.id]
+        prev.includes(project.id) ? prev : (isShellOnly ? [project.id] : [...prev, project.id])
       );
       setScanPath("");
     } catch (err) {
@@ -444,13 +465,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     const id = enabledProviders[idx] ?? null;
     setAiProvider(id as string | null);
     if (!id || !AUTO_APPROVE_FLAGS[id]) setAutoApprove(false);
-    setStep("confirm");
+    goNext();
   };
 
   const handleBranchSkipped = useCallback(() => {
     setBranchSelections({});
-    setStep("ai");
-  }, []);
+    goNext();
+  }, [goNext]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { onClose(); return; }
@@ -514,16 +535,18 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         {/* Step 1: Select Projects */}
         {step === "projects" && (
           <div className="session-creator-body">
-            <div className="session-creator-connection-type">
-              <button
-                className={`session-creator-type-btn ${connectionType === "local" ? "session-creator-type-active" : ""}`}
-                onClick={() => setConnectionType("local")}
-              >Local</button>
-              <button
-                className={`session-creator-type-btn ${connectionType === "ssh" ? "session-creator-type-active" : ""}`}
-                onClick={() => setConnectionType("ssh")}
-              >SSH Remote <span className="session-creator-alpha-tag">Alpha</span></button>
-            </div>
+            {connectionType === "ssh" && (
+              <div className="session-creator-connection-type">
+                <button
+                  className="session-creator-type-btn"
+                  onClick={() => setConnectionType("local")}
+                >Local</button>
+                <button
+                  className="session-creator-type-btn session-creator-type-active"
+                  onClick={() => setConnectionType("ssh")}
+                >SSH Remote <span className="session-creator-alpha-tag">Alpha</span></button>
+              </div>
+            )}
 
             {connectionType === "ssh" && (
               <div className="session-creator-ssh-fields">
@@ -640,7 +663,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
             )}
 
             {connectionType === "local" && <>
-            <div className="session-creator-section-title">Select Folders</div>
+            <div className="session-creator-section-title">
+              {isShellOnly ? "Working Directory" : "Select Folders"}
+            </div>
+            <div className="session-creator-subtitle">
+              {isShellOnly
+                ? "Your shell will open in this folder."
+                : "The AI can work across all selected folders. The first folder is the working directory."}
+            </div>
             <input
               ref={searchRef}
               className="command-palette-input"
@@ -670,10 +700,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                   onClick={() => toggleProject(project.id)}
                 >
                   <span className="project-picker-check">
-                    {selectedProjectIds.includes(project.id) ? "[x]" : "[ ]"}
+                    {isShellOnly
+                      ? (selectedProjectIds.includes(project.id) ? "(*)" : "( )")
+                      : (selectedProjectIds.includes(project.id) ? "[x]" : "[ ]")}
                   </span>
                   <div className="project-picker-info">
-                    <div className="project-picker-name">{project.name}</div>
+                    <div className="project-picker-name">
+                      {project.name}
+                      {!isShellOnly && selectedProjectIds[0] === project.id && selectedProjectIds.length > 0 && (
+                        <span className="session-creator-cwd-badge">CWD</span>
+                      )}
+                    </div>
                     <div className="project-picker-path">{shortPath(project.path)}</div>
                     {(project.languages.length > 0 || project.frameworks.length > 0) && (
                       <div className="project-picker-tags">
@@ -736,12 +773,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
             </div>
             <div className="session-creator-hints">
               <span><kbd>&uarr;&darr;</kbd> navigate</span>
-              <span><kbd>Space</kbd> toggle</span>
+              <span><kbd>Space</kbd> {isShellOnly ? "select" : "toggle"}</span>
               <span><kbd>Enter</kbd> next</span>
               <span><kbd>Esc</kbd> close</span>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); setStep("ai"); }}>
+              <button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); goNext(); }}>
                 Skip
               </button>
               <button
@@ -749,7 +786,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 onClick={goNext}
                 disabled={checkingGit}
               >
-                {checkingGit ? "Checking..." : `Next (${selectedProjectIds.length} selected)`}
+                {checkingGit ? "Checking..." : isShellOnly
+                  ? "Next"
+                  : `Next (${selectedProjectIds.length} selected)`}
               </button>
             </div>
             </>}
@@ -836,7 +875,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               </button>
               <button
                 className="session-creator-btn-primary"
-                onClick={() => setStep("ai")}
+                onClick={goNext}
               >
                 Continue
               </button>
@@ -952,7 +991,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         {/* Step 3: Pick AI Engine */}
         {step === "ai" && (
           <div className="session-creator-body" ref={aiStepRef} tabIndex={-1} style={{ outline: "none" }}>
-            <div className="session-creator-section-title">AI Engine</div>
+            <div className="session-creator-connection-type">
+              <button
+                className={`session-creator-type-btn ${connectionType === "local" ? "session-creator-type-active" : ""}`}
+                onClick={() => setConnectionType("local")}
+              >Local</button>
+              <button
+                className={`session-creator-type-btn ${connectionType === "ssh" ? "session-creator-type-active" : ""}`}
+                onClick={() => setConnectionType("ssh")}
+              >SSH Remote <span className="session-creator-alpha-tag">Alpha</span></button>
+            </div>
+            <div className="session-creator-section-title">Session Type</div>
             <div className="session-creator-provider-grid">
               {AI_PROVIDERS.map((p) => {
                 const providerIdx = enabledProviders.indexOf(p.id);
@@ -1002,10 +1051,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               <span><kbd>Esc</kbd> close</span>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
-              </button>
-              <button className="session-creator-btn-primary" onClick={() => setStep("confirm")}>
+              {orderedSteps.indexOf("ai") > 0 && (
+                <button className="session-creator-btn-secondary" onClick={goBack}>
+                  Back
+                </button>
+              )}
+              <button className="session-creator-btn-primary" onClick={goNext}>
                 Next
               </button>
             </div>
@@ -1035,7 +1086,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               ) : (
                 <>
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">Folders:</span>
+                    <span className="session-creator-summary-label">{isShellOnly ? "Folder:" : "Folders:"}</span>
                     <span className="session-creator-summary-value">
                       {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
                     </span>
@@ -1058,7 +1109,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                     </div>
                   )}
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">AI Engine:</span>
+                    <span className="session-creator-summary-label">{isShellOnly ? "Type:" : "AI Engine:"}</span>
                     <span className="session-creator-summary-value">
                       {aiProvider ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider : "Shell Only"}
                       {autoApprove && aiProvider && AUTO_APPROVE_FLAGS[aiProvider] && (
