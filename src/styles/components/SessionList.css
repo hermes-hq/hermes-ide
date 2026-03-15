@@ -444,6 +444,13 @@
   color: var(--text-0);
 }
 
+.session-item-git-project-name {
+  color: var(--text-2);
+  font-weight: 400;
+  margin-right: 3px;
+  font-size: 10px;
+}
+
 /* Worktree linked badge in session git info */
 .session-item-worktree-badge {
   display: inline-flex;

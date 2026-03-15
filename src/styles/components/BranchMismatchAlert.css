@@ -80,6 +80,12 @@
 	transition: color 0.1s;
 }
 
+.branch-mismatch-session-name {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: default;
+}
+
 .branch-mismatch-close:hover {
 	color: var(--text-0);
 }

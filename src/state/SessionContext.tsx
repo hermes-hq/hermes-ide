@@ -637,6 +637,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     sessionId: string;
     label: string;
     changes: DirtyWorktreeChange[];
+    stashErrors?: Array<{ realmName: string; error: string }>;
   } | null>(null);
 
   // Long-running threshold: 30 seconds of busy before notification on idle
@@ -908,12 +909,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
 
       // Create worktrees for each git project with a branch selection
+      const sharedBranches: string[] = [];
       if (opts?.branchSelections && opts?.projectIds?.length) {
         for (const realmId of opts.projectIds) {
           const sel = opts.branchSelections[realmId];
           if (!sel) continue; // Non-git project or user skipped branches for this project
           try {
-            await createWorktree(preSessionId, realmId, sel.branch, sel.createNew);
+            const wtResult = await createWorktree(preSessionId, realmId, sel.branch, sel.createNew);
+            if (wtResult.isShared) {
+              sharedBranches.push(sel.branch);
+            }
           } catch (wtErr) {
             console.warn(`[SessionContext] Failed to create worktree for realm ${realmId}:`, wtErr);
           }
@@ -983,6 +988,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         execution_mode: defaultModeRef.current,
         has_ai_provider: !!opts?.aiProvider,
       });
+
+      // Warn about shared worktrees via custom event (App.tsx listens for this)
+      if (sharedBranches.length > 0) {
+        window.dispatchEvent(new CustomEvent("hermes:shared-worktree", {
+          detail: { branches: sharedBranches, sessionLabel: session.label },
+        }));
+      }
+
       return session;
     } catch (err) {
       console.error("Failed to create session:", err);
@@ -1027,49 +1040,55 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   skipCloseConfirmRef.current = state.skipCloseConfirm;
 
   const requestCloseSession = useCallback(async (id: string) => {
-    // Check for dirty worktrees before proceeding with close flow
     try {
-      const projects = await getSessionProjects(id);
-      const dirtyChanges: DirtyWorktreeChange[] = [];
+      // Check for dirty worktrees before proceeding with close flow
+      try {
+        const projects = await getSessionProjects(id);
+        const dirtyChanges: DirtyWorktreeChange[] = [];
 
-      for (const project of projects) {
-        try {
-          const changes = await worktreeHasChanges(id, project.id);
-          if (changes.has_changes) {
-            let branchName: string | null = null;
-            try {
-              const wtInfo = await getSessionWorktreeInfo(id, project.id);
-              branchName = wtInfo?.branchName ?? null;
-            } catch {
-              // Worktree info not available — continue without branch name
+        for (const project of projects) {
+          try {
+            const changes = await worktreeHasChanges(id, project.id);
+            if (changes.has_changes) {
+              let branchName: string | null = null;
+              try {
+                const wtInfo = await getSessionWorktreeInfo(id, project.id);
+                branchName = wtInfo?.branchName ?? null;
+              } catch {
+                // Worktree info not available — continue without branch name
+              }
+              dirtyChanges.push({
+                realmId: project.id,
+                realmName: project.name,
+                branchName,
+                files: changes.files,
+              });
             }
-            dirtyChanges.push({
-              realmId: project.id,
-              realmName: project.name,
-              branchName,
-              files: changes.files,
-            });
+          } catch {
+            // IPC failure for this project — don't block close
           }
-        } catch {
-          // IPC failure for this project — don't block close
         }
+
+        if (dirtyChanges.length > 0) {
+          const session = stateRef.current.sessions[id];
+          const label = session?.label || id;
+          setPendingDirtyClose({ sessionId: id, label, changes: dirtyChanges });
+          return;
+        }
+      } catch {
+        // Failed to get projects — proceed with normal close flow
       }
 
-      if (dirtyChanges.length > 0) {
-        const session = stateRef.current.sessions[id];
-        const label = session?.label || id;
-        setPendingDirtyClose({ sessionId: id, label, changes: dirtyChanges });
-        return;
+      // No dirty worktrees — proceed with standard close flow
+      if (skipCloseConfirmRef.current) {
+        closeSession(id);
+      } else {
+        dispatch({ type: "REQUEST_CLOSE_SESSION", id });
       }
-    } catch {
-      // Failed to get projects — proceed with normal close flow
-    }
-
-    // No dirty worktrees — proceed with standard close flow
-    if (skipCloseConfirmRef.current) {
+    } catch (error) {
+      console.error('[requestCloseSession] Unhandled error:', error);
+      // Fall back to direct close if something unexpected happens
       closeSession(id);
-    } else {
-      dispatch({ type: "REQUEST_CLOSE_SESSION", id });
     }
   }, [closeSession, dispatch]);
 
@@ -1078,15 +1097,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const handleDirtyStashAndClose = useCallback(async () => {
     if (!pendingDirtyClose) return;
     const { sessionId, changes } = pendingDirtyClose;
+    const failures: Array<{ realmName: string; error: string }> = [];
     for (const change of changes) {
       try {
         await stashWorktree(sessionId, change.realmId, "Auto-stash before closing session");
       } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
         console.warn("[SessionContext] Failed to stash worktree:", e);
+        failures.push({ realmName: change.realmName, error: message });
       }
     }
+    if (failures.length > 0) {
+      // Do NOT close — show errors in the dialog so the user can decide
+      setPendingDirtyClose((prev) => prev ? { ...prev, stashErrors: failures } : null);
+      return;
+    }
     setPendingDirtyClose(null);
-    // Proceed with close (skip dirty check by calling closeSession directly)
+    // All stashes succeeded — proceed with close
     if (skipCloseConfirmRef.current) {
       closeSession(sessionId);
     } else {
@@ -1203,6 +1230,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           sessionId={pendingDirtyClose.sessionId}
           sessionLabel={pendingDirtyClose.label}
           changes={pendingDirtyClose.changes}
+          stashErrors={pendingDirtyClose.stashErrors}
           onStashAndClose={handleDirtyStashAndClose}
           onCloseAnyway={handleDirtyCloseAnyway}
           onCancel={handleDirtyCancelClose}

@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import "../styles/components/DirtyWorktreeDialog.css";
 
 export interface DirtyWorktreeChange {
@@ -8,10 +8,16 @@ export interface DirtyWorktreeChange {
   files: Array<{ path: string; status: string }>;
 }
 
+export interface StashError {
+  realmName: string;
+  error: string;
+}
+
 interface DirtyWorktreeDialogProps {
   sessionId: string;
   sessionLabel: string;
   changes: DirtyWorktreeChange[];
+  stashErrors?: StashError[];
   onStashAndClose: () => void;
   onCloseAnyway: () => void;
   onCancel: () => void;
@@ -39,16 +45,40 @@ function statusClass(status: string): string {
 export function DirtyWorktreeDialog({
   sessionLabel,
   changes,
+  stashErrors,
   onStashAndClose,
   onCloseAnyway,
   onCancel,
 }: DirtyWorktreeDialogProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
       onCancel();
+      return;
+    }
+
+    // Focus trapping within the dialog
+    if (e.key === "Tab" && modalRef.current) {
+      const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
   }, [onCancel]);
 
@@ -57,16 +87,31 @@ export function DirtyWorktreeDialog({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  // Focus the first button (Cancel) on mount
+  useEffect(() => {
+    if (modalRef.current) {
+      const firstBtn = modalRef.current.querySelector<HTMLElement>("button");
+      firstBtn?.focus();
+    }
+  }, []);
+
   const totalFiles = changes.reduce((sum, c) => sum + c.files.length, 0);
 
   return (
     <div className="dirty-wt-overlay" onClick={onCancel}>
-      <div className="dirty-wt-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="dirty-wt-modal"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dirty-wt-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="dirty-wt-header">
           <span className="dirty-wt-icon">&#9888;</span>
-          <span className="dirty-wt-title">Uncommitted Changes</span>
-          <button className="dirty-wt-close" onClick={onCancel}>&times;</button>
+          <span className="dirty-wt-title" id="dirty-wt-dialog-title">Uncommitted Changes</span>
+          <button className="dirty-wt-close" onClick={onCancel} aria-label="Close">&times;</button>
         </div>
 
         {/* Body */}
@@ -99,17 +144,43 @@ export function DirtyWorktreeDialog({
           ))}
         </div>
 
+        {/* Stash Errors */}
+        {stashErrors && stashErrors.length > 0 && (
+          <div className="dirty-wt-errors">
+            {stashErrors.map((err, i) => (
+              <div key={i} className="dirty-wt-error-item">
+                <span className="dirty-wt-error-label">Stash failed for {err.realmName}:</span>{" "}
+                <span className="dirty-wt-error-message">{err.error}</span>
+                <p className="dirty-wt-error-hint">Your changes are still in the working directory.</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Actions */}
         <div className="dirty-wt-actions">
           <button className="dirty-wt-btn" onClick={onCancel}>
             Cancel
           </button>
-          <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway}>
-            Close Anyway
-          </button>
-          <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={onStashAndClose}>
-            Stash &amp; Close
-          </button>
+          {stashErrors && stashErrors.length > 0 ? (
+            <>
+              <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway}>
+                Close Anyway (changes will be lost)
+              </button>
+              <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={onStashAndClose}>
+                Try Again
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway}>
+                Close Anyway
+              </button>
+              <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={onStashAndClose}>
+                Stash &amp; Close
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

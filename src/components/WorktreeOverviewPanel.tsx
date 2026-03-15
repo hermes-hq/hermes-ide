@@ -41,13 +41,24 @@ function isStale(createdAt: string, daysThreshold: number = 14): boolean {
 }
 
 function truncatePath(fullPath: string, maxLen = 50): string {
-  const home = fullPath.replace(/^\/Users\/[^/]+/, "~");
+  // Replace home directory with ~ (cross-platform)
+  const home = fullPath
+    .replace(/^\/Users\/[^/]+/, "~")       // macOS
+    .replace(/^\/home\/[^/]+/, "~")         // Linux
+    .replace(/^[A-Z]:\\Users\\[^\\]+/i, "~"); // Windows
   if (home.length <= maxLen) return home;
-  const parts = home.split("/");
+  const parts = home.split(/[/\\]/);
   if (parts.length > 4) {
     return parts[0] + "/\u2026/" + parts.slice(-2).join("/");
   }
   return "\u2026" + home.slice(home.length - maxLen);
+}
+
+function formatWorktreeError(raw: string): string {
+  if (raw.includes("Permission denied")) return "Permission denied \u2014 check file permissions.";
+  if (raw.includes("index.lock")) return "Git is busy \u2014 another operation is in progress. Try again.";
+  if (raw.includes("No such file")) return "Directory not found \u2014 it may have been already removed.";
+  return `Unexpected error: ${raw}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -81,10 +92,12 @@ export function WorktreeOverviewPanel() {
     loadData();
   }, []);
 
-  // Auto-dismiss cleanup results
+  // Auto-dismiss cleanup results (longer timeout if any failures)
   useEffect(() => {
     if (!cleanupResults) return;
-    const timer = setTimeout(() => setCleanupResults(null), 6000);
+    const hasFailures = cleanupResults.some((r) => !r.success);
+    const dismissTime = hasFailures ? 10000 : 6000;
+    const timer = setTimeout(() => setCleanupResults(null), dismissTime);
     return () => clearTimeout(timer);
   }, [cleanupResults]);
 
@@ -103,7 +116,7 @@ export function WorktreeOverviewPanel() {
       setExpandedRealms(realmIds);
     } catch (e) {
       console.error("Failed to load worktree overview:", e);
-      setError(String(e));
+      setError(formatWorktreeError(String(e)));
     } finally {
       setLoading(false);
     }
@@ -243,7 +256,7 @@ export function WorktreeOverviewPanel() {
       await loadData();
       setSelectedOrphans(new Set());
     } catch (e) {
-      setError(String(e));
+      setError(formatWorktreeError(String(e)));
     } finally {
       setCleaning(false);
     }
@@ -272,11 +285,13 @@ export function WorktreeOverviewPanel() {
           placeholder="Search worktrees..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search worktrees"
         />
         <button
           className="worktree-overview-refresh"
           onClick={loadData}
           title="Refresh"
+          aria-label="Refresh worktrees"
         >
           &#8635;
         </button>
@@ -421,6 +436,7 @@ export function WorktreeOverviewPanel() {
                         checked={selectedOrphans.has(orphan.worktree_path)}
                         onChange={() => toggleOrphanSelection(orphan.worktree_path)}
                         onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select orphan ${orphan.worktree_path}`}
                       />
                       <span className="worktree-overview-orphan-icon">
                         &#9888;
@@ -434,7 +450,7 @@ export function WorktreeOverviewPanel() {
                         </div>
                         <div className="worktree-overview-entry-meta">
                           <span className="worktree-overview-orphan-kind">
-                            {orphan.kind === "directory_only" ? "dir only" : "record only"}
+                            {orphan.kind === "directory_only" ? "Leftover directory" : "Missing directory"}
                           </span>
                           {diskUsage[orphan.worktree_path] !== undefined && (
                             <span className="worktree-overview-disk-size">
@@ -484,16 +500,16 @@ export function WorktreeOverviewPanel() {
             Clean up {selectedOrphans.size} orphan{selectedOrphans.size > 1 ? "s" : ""}?
           </span>
           <button
-            className="worktree-overview-confirm-yes"
+            className="worktree-overview-confirm-yes worktree-overview-confirm-destructive"
             onClick={handleCleanup}
           >
-            Yes
+            {`Delete ${selectedOrphans.size} worktree${selectedOrphans.size !== 1 ? "s" : ""}`}
           </button>
           <button
             className="worktree-overview-confirm-no"
             onClick={() => setConfirmCleanup(false)}
           >
-            No
+            Cancel
           </button>
         </div>
       )}
@@ -526,6 +542,7 @@ export function WorktreeOverviewPanel() {
             className="worktree-overview-cleanup-btn"
             onClick={() => setConfirmCleanup(true)}
             disabled={cleaning}
+            aria-label="Clean up selected orphans"
           >
             {cleaning
               ? "Cleaning..."

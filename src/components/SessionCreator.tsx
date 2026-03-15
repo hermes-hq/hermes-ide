@@ -139,6 +139,22 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     prevStepRef.current = step;
   }, [step, gitRealmIds, selectedProjectIds]);
 
+  // Auto-advance to the next unselected git project when branchSelections changes
+  useEffect(() => {
+    if (step !== 'branch') return;
+    const nextUnselected = selectedProjectIds.find(
+      (id) => gitRealmIds.includes(id) && !branchSelections[id]
+    );
+    if (nextUnselected) {
+      setExpandedRealmId(nextUnselected);
+    } else if (Object.keys(branchSelections).length > 0 && selectedProjectIds.every(
+      (id) => !gitRealmIds.includes(id) || branchSelections[id]
+    )) {
+      // All git projects have selections — collapse
+      setExpandedRealmId(null);
+    }
+  }, [branchSelections, step, selectedProjectIds, gitRealmIds]);
+
   // Determine whether to show the branch step
   const showBranchStep = gitRealmIds.length > 0 && selectedProjectIds.length > 0;
 
@@ -797,11 +813,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                             ...prev,
                             [realmId]: { branch: name, createNew: isNew },
                           }));
-                          // Auto-advance to next project without a selection
-                          const nextUnselected = selectedProjectIds.find(
-                            (id) => id !== realmId && gitRealmIds.includes(id) && !branchSelections[id],
-                          );
-                          setExpandedRealmId(nextUnselected || null);
                         }}
                         onSkip={() => {
                           setBranchSelections((prev) => {
@@ -809,10 +820,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                             delete next[realmId];
                             return next;
                           });
-                          const nextUnselected = selectedProjectIds.find(
-                            (id) => id !== realmId && gitRealmIds.includes(id) && !branchSelections[id],
-                          );
-                          setExpandedRealmId(nextUnselected || null);
                         }}
                       />
                     )}

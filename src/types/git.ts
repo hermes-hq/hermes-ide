@@ -192,6 +192,8 @@ export interface WorktreeCreateResult {
   worktreePath: string;
   branchName: string;
   isMainWorktree: boolean;
+  /** True when the worktree was reused from another session (branch already checked out). */
+  isShared?: boolean;
 }
 
 // ─── Worktree Changes Types ──────────────────────────────────────────

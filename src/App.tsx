@@ -138,6 +138,21 @@ function AppContent() {
     return () => { cancelled = true; unlisten?.(); };
   }, []);
 
+  // ── Shared worktree warning ──
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { branches } = (e as CustomEvent).detail as { branches: string[]; sessionLabel: string };
+      const branchList = branches.join(", ");
+      toastStoreRef.current.addToast({
+        message: `Sharing worktree for ${branchList} with another session. Changes to files will affect both sessions — avoid editing the same files.`,
+        type: "warning",
+        duration: 10000,
+      });
+    };
+    window.addEventListener("hermes:shared-worktree", handler);
+    return () => window.removeEventListener("hermes:shared-worktree", handler);
+  }, []);
+
   const pluginRuntimeRef = useRef<PluginRuntime | null>(null);
 
   const [pluginRuntime] = useState<PluginRuntime>(() => {

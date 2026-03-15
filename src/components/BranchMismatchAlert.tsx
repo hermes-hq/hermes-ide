@@ -24,7 +24,7 @@ export function BranchMismatchAlert({ branch, sessionLabel, onDismiss }: BranchM
 	}, [onDismiss]);
 
 	return (
-		<div className="branch-mismatch-alert">
+		<div className="branch-mismatch-alert" role="alert" aria-live="polite">
 			<span className="branch-mismatch-icon">
 				<WarnIcon />
 			</span>
@@ -33,10 +33,12 @@ export function BranchMismatchAlert({ branch, sessionLabel, onDismiss }: BranchM
 					You&apos;ve entered another session&apos;s worktree
 				</div>
 				<div className="branch-mismatch-detail">
-					Branch <span className="branch-mismatch-branch">{branch}</span> belongs to session <strong>{sessionLabel}</strong>
+					Branch <span className="branch-mismatch-branch">{branch}</span> belongs to session{" "}
+					{/* TODO: Add onFocusSession callback prop to make this navigate to the session */}
+					<strong className="branch-mismatch-session-name">{sessionLabel}</strong>
 				</div>
 			</div>
-			<button className="branch-mismatch-close" onClick={onDismiss}>&times;</button>
+			<button className="branch-mismatch-close" onClick={onDismiss} aria-label="Dismiss">&times;</button>
 		</div>
 	);
 }

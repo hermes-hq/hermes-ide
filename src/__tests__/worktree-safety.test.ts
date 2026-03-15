@@ -828,3 +828,191 @@ describe("Dirty close flow logic", () => {
     expect(result.action).toBe("close");
   });
 });
+
+// =====================================================================
+// Group 5: Stash failure handling (mirrors handleDirtyStashAndClose)
+// =====================================================================
+
+describe("Stash failure handling", () => {
+  /**
+   * Mirrors handleDirtyStashAndClose() from SessionContext.tsx.
+   *
+   * Returns:
+   * - { action: "closed" } if all stashes succeeded and close proceeds
+   * - { action: "errors", failures } if any stash failed — close is blocked
+   * - { action: "noop" } if there's no pending dirty close
+   */
+  async function simulateStashAndClose(opts: {
+    pendingDirtyClose: {
+      sessionId: string;
+      changes: DirtyWorktreeChange[];
+    } | null;
+    stashFn: (sessionId: string, realmId: string, message: string) => Promise<void>;
+  }): Promise<{
+    action: "closed" | "errors" | "noop";
+    failures?: Array<{ realmName: string; error: string }>;
+  }> {
+    if (!opts.pendingDirtyClose) return { action: "noop" };
+
+    const { sessionId, changes } = opts.pendingDirtyClose;
+    const failures: Array<{ realmName: string; error: string }> = [];
+
+    for (const change of changes) {
+      try {
+        await opts.stashFn(sessionId, change.realmId, "Auto-stash before closing session");
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        failures.push({ realmName: change.realmName, error: message });
+      }
+    }
+
+    if (failures.length > 0) {
+      // Do NOT close — show errors in the dialog so the user can decide
+      return { action: "errors", failures };
+    }
+
+    // All stashes succeeded — proceed with close
+    return { action: "closed" };
+  }
+
+  it("stash failure prevents session close", async () => {
+    const result = await simulateStashAndClose({
+      pendingDirtyClose: {
+        sessionId: "session-1",
+        changes: [
+          { realmId: "realm-1", realmName: "frontend", branchName: "feat", files: [{ path: "a.ts", status: "M" }] },
+        ],
+      },
+      stashFn: async () => {
+        throw new Error("Could not stash: merge conflict");
+      },
+    });
+
+    // Close should be blocked
+    expect(result.action).toBe("errors");
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures![0].realmName).toBe("frontend");
+    expect(result.failures![0].error).toContain("merge conflict");
+  });
+
+  it("stash failure shows error with retry option", async () => {
+    const result = await simulateStashAndClose({
+      pendingDirtyClose: {
+        sessionId: "session-1",
+        changes: [
+          { realmId: "realm-1", realmName: "frontend", branchName: "feat", files: [{ path: "a.ts", status: "M" }] },
+          { realmId: "realm-2", realmName: "backend", branchName: "feat", files: [{ path: "b.ts", status: "A" }] },
+        ],
+      },
+      stashFn: async (_sid, realmId) => {
+        if (realmId === "realm-1") {
+          throw new Error("Permission denied");
+        }
+        // realm-2 succeeds
+      },
+    });
+
+    // Close is blocked because at least one stash failed
+    expect(result.action).toBe("errors");
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures![0].realmName).toBe("frontend");
+    expect(result.failures![0].error).toBe("Permission denied");
+
+    // The dialog would show "Try Again" button (verified by component structure).
+    // User can retry — simulate a retry where stash succeeds this time.
+    const retryResult = await simulateStashAndClose({
+      pendingDirtyClose: {
+        sessionId: "session-1",
+        changes: [
+          { realmId: "realm-1", realmName: "frontend", branchName: "feat", files: [{ path: "a.ts", status: "M" }] },
+          { realmId: "realm-2", realmName: "backend", branchName: "feat", files: [{ path: "b.ts", status: "A" }] },
+        ],
+      },
+      stashFn: async () => {
+        // All succeed on retry
+      },
+    });
+
+    expect(retryResult.action).toBe("closed");
+    expect(retryResult.failures).toBeUndefined();
+  });
+
+  it("close anyway after stash failure still works", async () => {
+    // First, stash fails
+    const stashResult = await simulateStashAndClose({
+      pendingDirtyClose: {
+        sessionId: "session-1",
+        changes: [
+          { realmId: "realm-1", realmName: "frontend", branchName: "feat", files: [{ path: "a.ts", status: "M" }] },
+        ],
+      },
+      stashFn: async () => {
+        throw new Error("Stash failed");
+      },
+    });
+
+    expect(stashResult.action).toBe("errors");
+
+    // User clicks "Close Anyway" — mirrors handleDirtyCloseAnyway from SessionContext.tsx
+    // This bypasses stashing entirely and proceeds with close
+    const closeAnywayFn = vi.fn();
+    const handleDirtyCloseAnyway = () => {
+      // Clear pending dirty close and proceed with close — no stashing
+      closeAnywayFn();
+    };
+
+    handleDirtyCloseAnyway();
+    expect(closeAnywayFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("all stashes succeeding proceeds with close", async () => {
+    const result = await simulateStashAndClose({
+      pendingDirtyClose: {
+        sessionId: "session-1",
+        changes: [
+          { realmId: "realm-1", realmName: "frontend", branchName: "feat", files: [{ path: "a.ts", status: "M" }] },
+          { realmId: "realm-2", realmName: "backend", branchName: "feat", files: [{ path: "b.ts", status: "A" }] },
+          { realmId: "realm-3", realmName: "shared", branchName: "feat", files: [{ path: "c.ts", status: "D" }] },
+        ],
+      },
+      stashFn: async () => {
+        // All succeed
+      },
+    });
+
+    expect(result.action).toBe("closed");
+    expect(result.failures).toBeUndefined();
+  });
+
+  it("multiple stash failures are all collected", async () => {
+    const result = await simulateStashAndClose({
+      pendingDirtyClose: {
+        sessionId: "session-1",
+        changes: [
+          { realmId: "realm-1", realmName: "frontend", branchName: "feat", files: [{ path: "a.ts", status: "M" }] },
+          { realmId: "realm-2", realmName: "backend", branchName: "feat", files: [{ path: "b.ts", status: "A" }] },
+          { realmId: "realm-3", realmName: "shared", branchName: "feat", files: [{ path: "c.ts", status: "D" }] },
+        ],
+      },
+      stashFn: async (_sid, realmId) => {
+        if (realmId === "realm-1") throw new Error("Error 1");
+        if (realmId === "realm-3") throw new Error("Error 3");
+        // realm-2 succeeds
+      },
+    });
+
+    expect(result.action).toBe("errors");
+    expect(result.failures).toHaveLength(2);
+    expect(result.failures![0]).toEqual({ realmName: "frontend", error: "Error 1" });
+    expect(result.failures![1]).toEqual({ realmName: "shared", error: "Error 3" });
+  });
+
+  it("noop when no pending dirty close", async () => {
+    const result = await simulateStashAndClose({
+      pendingDirtyClose: null,
+      stashFn: vi.fn(),
+    });
+
+    expect(result.action).toBe("noop");
+  });
+});

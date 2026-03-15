@@ -488,3 +488,83 @@ describe("API bindings - isGitRepo", () => {
     expect(result).toBe(false);
   });
 });
+
+// =====================================================================
+// Group 7: Branch mismatch false-positive regression
+// =====================================================================
+
+describe("Branch mismatch false-positive regression", () => {
+  /**
+   * Mirrors detectBranchMismatch() from pool.ts — FIXED version with
+   * trailing-slash boundary check.
+   */
+  interface MismatchPoolEntry {
+    cwd: string | null;
+  }
+
+  function detectBranchMismatchFixed(
+    pool: Map<string, MismatchPoolEntry>,
+    currentSessionId: string,
+    newCwd: string,
+  ): { sessionId: string; branch: string } | null {
+    if (!newCwd.includes(".hermes/worktrees/")) return null;
+
+    for (const [sessionId, entry] of pool.entries()) {
+      if (sessionId === currentSessionId) continue;
+      if (
+        entry.cwd &&
+        (newCwd === entry.cwd || newCwd.startsWith(entry.cwd + '/')) &&
+        entry.cwd.includes(".hermes/worktrees/")
+      ) {
+        const match = entry.cwd.match(
+          /\.hermes\/worktrees\/[^/]+_(.+?)(?:\/|$)/,
+        );
+        const branch = match?.[1] || "unknown";
+        return { sessionId, branch };
+      }
+    }
+    return null;
+  }
+
+  it("branch mismatch does not false-match similar directory names", () => {
+    // Specifically test that /worktrees/abc_main does NOT match /worktrees/abc_main-feature
+    const pool = new Map<string, MismatchPoolEntry>();
+    pool.set("session-2", {
+      cwd: "/Users/dev/project/.hermes/worktrees/abc_main",
+    });
+
+    const result = detectBranchMismatchFixed(
+      pool,
+      "session-1",
+      "/Users/dev/project/.hermes/worktrees/abc_main-feature/src",
+    );
+
+    // This MUST be null — abc_main should not match abc_main-feature
+    expect(result).toBeNull();
+  });
+
+  it("still matches exact directory and subdirectories", () => {
+    const pool = new Map<string, MismatchPoolEntry>();
+    pool.set("session-2", {
+      cwd: "/Users/dev/project/.hermes/worktrees/abc_main",
+    });
+
+    // Exact match
+    const exactResult = detectBranchMismatchFixed(
+      pool,
+      "session-1",
+      "/Users/dev/project/.hermes/worktrees/abc_main",
+    );
+    expect(exactResult).not.toBeNull();
+    expect(exactResult!.sessionId).toBe("session-2");
+
+    // Subdirectory match
+    const subResult = detectBranchMismatchFixed(
+      pool,
+      "session-1",
+      "/Users/dev/project/.hermes/worktrees/abc_main/src/index.ts",
+    );
+    expect(subResult).not.toBeNull();
+    expect(subResult!.sessionId).toBe("session-2");
+  });
+});

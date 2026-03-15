@@ -15,6 +15,45 @@ use tauri::{AppHandle, Emitter, State};
 use crate::db::Database;
 use crate::AppState;
 
+/// Validates that a path is inside a .hermes/worktrees/ directory.
+/// Returns the canonical path if valid, or an error if the path is outside
+/// the expected worktree directory (prevents path traversal attacks).
+fn validate_worktree_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::Path::new(path);
+
+    // First check the raw path string before canonicalizing
+    // (canonicalize follows symlinks, which we want for the final check)
+    if !path.contains(".hermes/worktrees/") && !path.contains(".hermes\\worktrees\\") {
+        return Err(format!(
+            "Refusing to operate on '{}': not inside a .hermes/worktrees/ directory",
+            path
+        ));
+    }
+
+    // If the path exists, canonicalize and re-check
+    if p.exists() {
+        let canonical = p
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve path '{}': {}", path, e))?;
+        let canonical_str = canonical.to_string_lossy();
+        if !canonical_str.contains(".hermes/worktrees/")
+            && !canonical_str.contains(".hermes\\worktrees\\")
+        {
+            return Err(format!(
+                "Refusing to operate on '{}': canonical path '{}' is not inside a .hermes/worktrees/ directory",
+                path, canonical_str
+            ));
+        }
+        Ok(canonical)
+    } else {
+        // Path doesn't exist (e.g., record-only orphan) — just validate the string
+        if path.contains("..") {
+            return Err(format!("Refusing to operate on '{}': contains '..'", path));
+        }
+        Ok(p.to_path_buf())
+    }
+}
+
 /// Resolves the worktree path for a given session+realm from the database.
 /// Falls back to looking up the realm's path directly if no worktree entry exists.
 fn resolve_worktree_path(
@@ -2715,13 +2754,14 @@ pub fn git_create_worktree(
     drop(db);
 
     // Journal: log the CREATE operation before performing it
-    journal::log_operation(
+    let intended_path = worktree::worktree_path_for_session(&realm_path, &session_id, &branch_name);
+    let _ = journal::log_operation(
         &realm_path,
         "CREATE",
         &session_id,
         &realm_id,
         &branch_name,
-        "pending",
+        &intended_path.to_string_lossy(),
     );
 
     // 2. Create the worktree
@@ -2751,7 +2791,7 @@ pub fn git_create_worktree(
     drop(db);
 
     // Journal: mark CREATE as completed after successful creation + DB insert
-    journal::log_completed(&realm_path, "CREATE", &session_id, &realm_id);
+    let _ = journal::log_completed(&realm_path, "CREATE", &session_id, &realm_id);
 
     // 4. Emit event for frontend
     let _ = app.emit(&format!("worktree-created-{}", realm_id), &result);
@@ -2791,7 +2831,7 @@ pub fn git_remove_worktree(
     drop(db);
 
     // Journal: log the REMOVE operation before performing it
-    journal::log_operation(&realm_path, "REMOVE", &session_id, &realm_id, "", &wt_path);
+    let _ = journal::log_operation(&realm_path, "REMOVE", &session_id, &realm_id, "", &wt_path);
 
     // 2. Try to remove the worktree from the filesystem
     let remove_result = worktree::remove_worktree(&realm_path, &session_id, &wt_path);
@@ -2817,7 +2857,7 @@ pub fn git_remove_worktree(
     }
 
     // Journal: mark REMOVE as completed after successful removal + DB delete
-    journal::log_completed(&realm_path, "REMOVE", &session_id, &realm_id);
+    let _ = journal::log_completed(&realm_path, "REMOVE", &session_id, &realm_id);
 
     // 4. Emit event for frontend
     let _ = app.emit(&format!("worktree-removed-{}", realm_id), ());
@@ -3028,13 +3068,13 @@ pub fn git_is_git_repo(state: State<'_, AppState>, realm_id: String) -> Result<b
 
 // ─── Worktree Dirty Detection & Stash ───────────────────────────────
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorktreeChanges {
     pub has_changes: bool,
     pub files: Vec<WorktreeChangedFile>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorktreeChangedFile {
     pub path: String,
     pub status: String,
@@ -3126,7 +3166,7 @@ pub fn git_stash_worktree(
 
 // ─── Worktree Overview & Cleanup ─────────────────────────────────────
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorktreeOverviewEntry {
     pub worktree_path: String,
     pub branch_name: Option<String>,
@@ -3140,7 +3180,7 @@ pub struct WorktreeOverviewEntry {
     pub last_activity_at: Option<String>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct OrphanWorktree {
     pub worktree_path: String,
     pub branch_name: Option<String>,
@@ -3149,7 +3189,7 @@ pub struct OrphanWorktree {
     pub session_id: Option<String>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CleanupResult {
     pub path: String,
     pub success: bool,
@@ -3252,7 +3292,12 @@ pub fn git_detect_orphan_worktrees(
 
     let record_paths: HashSet<String> = all_records
         .iter()
-        .map(|r| r.worktree_path.clone())
+        .map(|r| {
+            r.worktree_path
+                .trim_end_matches('/')
+                .trim_end_matches('\\')
+                .to_string()
+        })
         .collect();
 
     let mut orphans = Vec::new();
@@ -3280,7 +3325,11 @@ pub fn git_detect_orphan_worktrees(
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        let path_str = path.to_string_lossy().to_string();
+                        let path_str = path
+                            .to_string_lossy()
+                            .trim_end_matches('/')
+                            .trim_end_matches('\\')
+                            .to_string();
                         if !record_paths.contains(&path_str) {
                             // Extract branch name from directory name: {session_prefix}_{branch}
                             let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -3304,6 +3353,9 @@ pub fn git_detect_orphan_worktrees(
 
 #[tauri::command]
 pub fn git_worktree_disk_usage(worktree_path: String) -> Result<u64, String> {
+    // Validate the path is inside a .hermes/worktrees/ directory
+    let validated = validate_worktree_path(&worktree_path)?;
+
     fn dir_size(path: &std::path::Path) -> u64 {
         let mut size = 0;
         if let Ok(entries) = std::fs::read_dir(path) {
@@ -3319,11 +3371,10 @@ pub fn git_worktree_disk_usage(worktree_path: String) -> Result<u64, String> {
         size
     }
 
-    let path = std::path::Path::new(&worktree_path);
-    if !path.is_dir() {
+    if !validated.is_dir() {
         return Err(format!("Directory does not exist: {}", worktree_path));
     }
-    Ok(dir_size(path))
+    Ok(dir_size(&validated))
 }
 
 #[tauri::command]
@@ -3334,15 +3385,27 @@ pub fn git_cleanup_orphan_worktrees(
     let mut results = Vec::new();
 
     for path in &paths {
-        let p = std::path::Path::new(path);
+        // Validate the path is inside a .hermes/worktrees/ directory
+        let validated = match validate_worktree_path(path) {
+            Ok(v) => v,
+            Err(e) => {
+                results.push(CleanupResult {
+                    path: path.clone(),
+                    success: false,
+                    error: Some(e),
+                });
+                continue;
+            }
+        };
 
-        if p.is_dir() {
+        if validated.is_dir() {
             // Try to remove the directory
-            match std::fs::remove_dir_all(p) {
+            match std::fs::remove_dir_all(&validated) {
                 Ok(()) => {
                     // Also try to clean up any git worktree metadata
                     // Find the parent repo (go up from .hermes/worktrees/xxx to repo root)
-                    if let Some(repo_root) = p.ancestors().find(|a| a.join(".git").exists()) {
+                    if let Some(repo_root) = validated.ancestors().find(|a| a.join(".git").exists())
+                    {
                         let _ = std::process::Command::new("git")
                             .arg("-C")
                             .arg(repo_root)

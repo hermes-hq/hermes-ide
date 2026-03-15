@@ -32,6 +32,7 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
   const { dispatch } = useSession();
   const [suggestionState, setSuggestionState] = useState<SuggestionState | null>(null);
   const [branchMismatch, setBranchMismatch] = useState<{ branch: string; sessionLabel: string } | null>(null);
+  const dismissBranchMismatch = useCallback(() => setBranchMismatch(null), []);
   const sessions = useSessionList();
 
   // Attach/detach terminal from pool
@@ -238,7 +239,7 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
         <BranchMismatchAlert
           branch={branchMismatch.branch}
           sessionLabel={branchMismatch.sessionLabel}
-          onDismiss={() => setBranchMismatch(null)}
+          onDismiss={dismissBranchMismatch}
         />
       )}
     </div>

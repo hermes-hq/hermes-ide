@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { isMac } from "../utils/platform";
+import { isHermesWorktreePath } from "../utils/worktree";
 import { resizeSession, isShellForeground } from "../api/sessions";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
 import { type SuggestionState } from "./intelligence/SuggestionOverlay";
@@ -651,14 +652,14 @@ export function detectBranchMismatch(
   currentSessionId: string,
   newCwd: string,
 ): { sessionId: string; branch: string } | null {
-  if (!newCwd.includes(".hermes/worktrees/")) return null;
+  if (!isHermesWorktreePath(newCwd)) return null;
 
   for (const [sessionId, entry] of pool.entries()) {
     if (sessionId === currentSessionId) continue;
     if (
       entry.cwd &&
-      newCwd.startsWith(entry.cwd) &&
-      entry.cwd.includes(".hermes/worktrees/")
+      (newCwd === entry.cwd || newCwd.startsWith(entry.cwd + '/')) &&
+      isHermesWorktreePath(entry.cwd)
     ) {
       const match = entry.cwd.match(
         /\.hermes\/worktrees\/[^/]+_(.+?)(?:\/|$)/,

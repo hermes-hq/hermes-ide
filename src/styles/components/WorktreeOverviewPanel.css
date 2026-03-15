@@ -392,9 +392,17 @@
 .worktree-overview-confirm-yes {
   color: var(--red);
 }
-.worktree-overview-confirm-yes:hover {
+.worktree-overview-confirm-destructive {
   background: var(--red-dim);
   border-color: var(--red);
+  color: var(--red);
+  font-weight: 600;
+}
+.worktree-overview-confirm-yes:hover,
+.worktree-overview-confirm-destructive:hover {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--bg-0);
 }
 .worktree-overview-confirm-no {
   color: var(--text-2);

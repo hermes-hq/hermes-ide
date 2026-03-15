@@ -178,6 +178,41 @@
   white-space: nowrap;
 }
 
+/* ─── Stash Errors ──────────────────────────────────────────────── */
+
+.dirty-wt-errors {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.dirty-wt-error-item {
+  background: var(--red-dim, rgba(255, 80, 80, 0.1));
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--red);
+}
+
+.dirty-wt-error-item:last-child {
+  margin-bottom: 0;
+}
+
+.dirty-wt-error-label {
+  font-weight: 600;
+}
+
+.dirty-wt-error-message {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.dirty-wt-error-hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
 /* ─── Actions ────────────────────────────────────────────────────── */
 
 .dirty-wt-actions {

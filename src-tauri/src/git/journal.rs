@@ -4,7 +4,7 @@ use std::path::Path;
 
 const JOURNAL_FILENAME: &str = ".hermes/worktree-journal.log";
 
-/// Log format: ACTION|session_id|realm_id|branch|worktree_path|timestamp
+/// Log format: ACTION\tsession_id\trealm_id\tbranch\tworktree_path\ttimestamp
 /// When ACTION completes, a COMPLETED line is appended.
 pub fn journal_path(repo_path: &str) -> std::path::PathBuf {
     Path::new(repo_path).join(JOURNAL_FILENAME)
@@ -17,22 +17,43 @@ pub fn log_operation(
     realm_id: &str,
     branch: &str,
     worktree_path: &str,
-) {
+) -> Result<(), String> {
     let path = journal_path(repo_path);
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(|e| {
+            let msg = format!("Failed to create journal directory {:?}: {}", parent, e);
+            eprintln!("[journal] {}", msg);
+            msg
+        })?;
     }
     let timestamp = chrono::Utc::now().to_rfc3339();
     let line = format!(
-        "{}|{}|{}|{}|{}|{}\n",
+        "{}\t{}\t{}\t{}\t{}\t{}\n",
         action, session_id, realm_id, branch, worktree_path, timestamp
     );
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = file.write_all(line.as_bytes());
-    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| {
+            let msg = format!("Failed to open journal file {:?}: {}", path, e);
+            eprintln!("[journal] {}", msg);
+            msg
+        })?;
+    file.write_all(line.as_bytes()).map_err(|e| {
+        let msg = format!("Failed to write journal entry: {}", e);
+        eprintln!("[journal] {}", msg);
+        msg
+    })?;
+    Ok(())
 }
 
-pub fn log_completed(repo_path: &str, action: &str, session_id: &str, realm_id: &str) {
+pub fn log_completed(
+    repo_path: &str,
+    action: &str,
+    session_id: &str,
+    realm_id: &str,
+) -> Result<(), String> {
     log_operation(
         repo_path,
         &format!("COMPLETED_{}", action),
@@ -40,7 +61,7 @@ pub fn log_completed(repo_path: &str, action: &str, session_id: &str, realm_id: 
         realm_id,
         "",
         "",
-    );
+    )
 }
 
 /// Check for incomplete operations on startup
@@ -59,7 +80,7 @@ pub fn get_incomplete_operations(repo_path: &str) -> Vec<JournalEntry> {
         std::collections::HashMap::new();
 
     for line in content.lines() {
-        let parts: Vec<&str> = line.splitn(6, '|').collect();
+        let parts: Vec<&str> = line.splitn(6, '\t').collect();
         if parts.len() < 5 {
             continue;
         }

@@ -172,8 +172,18 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                             .arg("worktree")
                             .arg("prune")
                             .output();
-                        let _ = std::fs::remove_dir_all(&path);
-                        cleanup_count += 1;
+                        match std::fs::remove_dir_all(&path) {
+                            Ok(_) => {
+                                cleanup_count += 1;
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[worktree-cleanup] Failed to remove orphan {}: {}",
+                                    path_str,
+                                    e
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -191,8 +201,18 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                                 "Replaying incomplete CREATE: removing orphan {}",
                                 entry.worktree_path
                             );
-                            let _ = std::fs::remove_dir_all(&entry.worktree_path);
-                            cleanup_count += 1;
+                            match std::fs::remove_dir_all(&entry.worktree_path) {
+                                Ok(_) => {
+                                    cleanup_count += 1;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "[worktree-cleanup] Failed to remove orphan {}: {}",
+                                        entry.worktree_path,
+                                        e
+                                    );
+                                }
+                            }
                         }
                     }
                     "REMOVE" => {
@@ -202,8 +222,18 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                                 "Replaying incomplete REMOVE: cleaning up {}",
                                 entry.worktree_path
                             );
-                            let _ = std::fs::remove_dir_all(&entry.worktree_path);
-                            cleanup_count += 1;
+                            match std::fs::remove_dir_all(&entry.worktree_path) {
+                                Ok(_) => {
+                                    cleanup_count += 1;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "[worktree-cleanup] Failed to remove {}: {}",
+                                        entry.worktree_path,
+                                        e
+                                    );
+                                }
+                            }
                         }
                     }
                     _ => {}
