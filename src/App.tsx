@@ -98,6 +98,9 @@ function AppContent() {
 
   // ── Plugin System ──
   const [activePluginPanel, setActivePluginPanel] = useState<string | null>(null);
+  const [activeBottomPanel, setActiveBottomPanel] = useState<string | null>(null);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(300);
+  const bottomPanelDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const toastStore = useToastStore();
   const toastStoreRef = useRef(toastStore);
   toastStoreRef.current = toastStore;
@@ -133,11 +136,31 @@ function AppContent() {
         const s = stateRef.current;
         const id = s.activeSessionId;
         if (!id || !s.sessions[id]) return null;
-        return { id, name: s.sessions[id].label };
+        const sess = s.sessions[id];
+        return {
+          id,
+          name: sess.label,
+          phase: sess.phase ?? "unknown",
+          detected_agent: sess.detected_agent?.name ?? "unknown",
+          working_directory: sess.working_directory ?? "",
+          ai_provider: sess.ai_provider ?? undefined,
+          created_at: sess.created_at ? new Date(sess.created_at).getTime() : undefined,
+        };
       },
       onSessionsList: async () => {
         const s = stateRef.current;
-        return Object.entries(s.sessions).map(([id, sess]) => ({ id, name: sess.label }));
+        return Object.entries(s.sessions).map(([id, sess]) => ({
+          id,
+          name: sess.label,
+          phase: sess.phase ?? "unknown",
+          detected_agent: sess.detected_agent?.name ?? "unknown",
+          working_directory: sess.working_directory ?? "",
+          ai_provider: sess.ai_provider ?? undefined,
+          created_at: sess.created_at ? new Date(sess.created_at).getTime() : undefined,
+        }));
+      },
+      onSessionFocus: (sessionId: string) => {
+        setActive(sessionId);
       },
     });
     pluginRuntimeRef.current = runtime;
@@ -175,6 +198,7 @@ function AppContent() {
 
   // ── Emit plugin events: session created/closed ──
   const prevSessionIds = useRef(new Set<string>());
+  const prevSessionPhases = useRef(new Map<string, string>());
   useEffect(() => {
     const currentIds = new Set(Object.keys(state.sessions));
     for (const id of currentIds) {
@@ -187,8 +211,37 @@ function AppContent() {
         pluginRuntime.emitEvent("session.closed", id);
       }
     }
+    // Emit phase_changed events
+    for (const [id, sess] of Object.entries(state.sessions)) {
+      const prevPhase = prevSessionPhases.current.get(id);
+      if (prevPhase !== undefined && prevPhase !== sess.phase) {
+        pluginRuntime.emitEvent("session.phase_changed", {
+          sessionId: id,
+          previousPhase: prevPhase,
+          newPhase: sess.phase,
+        });
+      }
+      prevSessionPhases.current.set(id, sess.phase);
+    }
+    // Clean up phases for removed sessions
+    for (const id of prevSessionIds.current) {
+      if (!currentIds.has(id)) {
+        prevSessionPhases.current.delete(id);
+      }
+    }
     prevSessionIds.current = currentIds;
   }, [state.sessions, pluginRuntime]);
+
+  // ── Emit plugin events: session focus changed ──
+  const prevActiveSessionId = useRef<string | null>(state.activeSessionId);
+  useEffect(() => {
+    if (prevActiveSessionId.current !== state.activeSessionId) {
+      pluginRuntime.emitEvent("session.focus_changed", {
+        sessionId: state.activeSessionId,
+      });
+      prevActiveSessionId.current = state.activeSessionId;
+    }
+  }, [state.activeSessionId, pluginRuntime]);
 
   // When a built-in panel opens, close plugin panels
   useEffect(() => {
@@ -524,25 +577,31 @@ function AppContent() {
             tabs={[
               { id: "sessions", label: `Sessions (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
               ...pluginPanels
-                .filter(p => p.side === "left" && !pluginSessionActions.some(a => a.panelId === p.id))
+                .filter(p => (p.side === "left" || p.side === "bottom") && !pluginSessionActions.some(a => a.panelId === p.id))
                 .map(p => ({
                   id: p.id,
                   label: p.name,
                   icon: <span dangerouslySetInnerHTML={{ __html: p.icon }} />,
                 })),
             ]}
-            activeTabId={activePluginPanel ?? (!ui.sessionListCollapsed ? "sessions" : null)}
+            activeTabId={activePluginPanel ?? activeBottomPanel ?? (!ui.sessionListCollapsed ? "sessions" : null)}
             onTabClick={(tabId) => {
               if (tabId === "sessions") {
                 setActivePluginPanel(null);
                 dispatch({ type: "TOGGLE_SIDEBAR" });
               } else {
-                // Plugin panel tab clicked
-                if (activePluginPanel === tabId) {
-                  setActivePluginPanel(null);
+                // Check if this is a bottom panel
+                const isBottom = pluginPanels.some(p => p.id === tabId && p.side === "bottom");
+                if (isBottom) {
+                  setActiveBottomPanel(activeBottomPanel === tabId ? null : tabId);
                 } else {
-                  setActivePluginPanel(tabId);
-                  dispatch({ type: "SET_LEFT_TAB", tab: "terminal" });
+                  // Left plugin panel
+                  if (activePluginPanel === tabId) {
+                    setActivePluginPanel(null);
+                  } else {
+                    setActivePluginPanel(tabId);
+                    dispatch({ type: "SET_LEFT_TAB", tab: "terminal" });
+                  }
                 }
               }
             }}
@@ -665,6 +724,48 @@ function AppContent() {
           />
         )}
       </div>
+
+      {/* Bottom plugin panels (e.g. Pixel Office) — independent of left sidebar */}
+      {activeBottomPanel && !ui.flowMode && (() => {
+        const panelMeta = pluginPanels.find(p => p.id === activeBottomPanel && p.side === "bottom");
+        if (!panelMeta) return null;
+        const PanelComponent = pluginRuntime.getPanelComponent(activeBottomPanel);
+        if (!PanelComponent) return null;
+        return (
+          <div style={{ height: bottomPanelHeight, minHeight: 120, maxHeight: "80vh", flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            {/* Drag handle */}
+            <div
+              style={{ height: 4, cursor: "row-resize", background: "var(--border)", flexShrink: 0 }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                bottomPanelDragRef.current = { startY: e.clientY, startHeight: bottomPanelHeight };
+                const onMouseMove = (ev: MouseEvent) => {
+                  if (!bottomPanelDragRef.current) return;
+                  const delta = bottomPanelDragRef.current.startY - ev.clientY;
+                  const newHeight = Math.max(120, Math.min(window.innerHeight * 0.8, bottomPanelDragRef.current.startHeight + delta));
+                  setBottomPanelHeight(newHeight);
+                };
+                const onMouseUp = () => {
+                  bottomPanelDragRef.current = null;
+                  document.removeEventListener("mousemove", onMouseMove);
+                  document.removeEventListener("mouseup", onMouseUp);
+                  document.body.style.cursor = "";
+                  document.body.style.userSelect = "";
+                };
+                document.body.style.cursor = "row-resize";
+                document.body.style.userSelect = "none";
+                document.addEventListener("mousemove", onMouseMove);
+                document.addEventListener("mouseup", onMouseUp);
+              }}
+            />
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <PluginPanelHost pluginId={panelMeta.pluginId} panelId={activeBottomPanel} panelName={panelMeta.name}>
+                <PanelComponent pluginId={panelMeta.pluginId} panelId={activeBottomPanel} />
+              </PluginPanelHost>
+            </div>
+          </div>
+        );
+      })()}
 
       <StatusBar
         onOpenShortcuts={() => setShortcutsOpen(true)}

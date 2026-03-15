@@ -41,7 +41,7 @@ export interface PluginCommandContribution {
 export interface PluginPanelContribution {
 	id: string;
 	name: string;
-	side: "left" | "right";
+	side: "left" | "right" | "bottom";
 	icon: string; // inline SVG string using currentColor
 }
 
@@ -134,9 +134,41 @@ export type HermesEvent =
 	| "theme.changed"
 	| "session.created"
 	| "session.closed"
+	| "session.phase_changed"
+	| "session.focus_changed"
 	| "window.focused"
 	| "window.blurred";
 
 export interface Disposable {
 	dispose(): void;
+}
+
+// ─── Plugin Session Info (rich session data for plugin API) ─────────
+
+export interface SessionInfo {
+	id: string;
+	name: string;
+	phase: string;
+	detected_agent: string;
+	working_directory: string;
+	ai_provider?: string;
+	branch?: string;
+	created_at?: number;
+}
+
+// ─── Transcript Watching (JSONL agent transcripts) ──────────────────
+
+export interface TranscriptEvent {
+	type: "tool_start" | "tool_end" | "text" | "thinking" | "turn_end";
+	tool_name?: string;
+	tool_input?: Record<string, unknown>;
+	timestamp: number;
+	session_id: string;
+}
+
+export interface AgentsAPI {
+	watchTranscript(
+		sessionId: string,
+		callback: (event: TranscriptEvent) => void,
+	): Promise<Disposable>;
 }

@@ -1,5 +1,6 @@
-import type { Disposable, PluginSettingsSchema, HermesEvent } from "./types";
+import type { Disposable, PluginSettingsSchema, HermesEvent, SessionInfo, TranscriptEvent, AgentsAPI } from "./types";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 
 // Props passed to plugin panel components via React context
@@ -51,9 +52,11 @@ export interface HermesPluginAPI {
 		openExternal(url: string): Promise<void>;
 	};
 	sessions: {
-		getActive(): Promise<{ id: string; name: string } | null>;
-		list(): Promise<{ id: string; name: string }[]>;
+		getActive(): Promise<SessionInfo | null>;
+		list(): Promise<SessionInfo[]>;
+		focus(sessionId: string): Promise<void>;
 	};
+	agents: AgentsAPI;
 	subscriptions: Disposable[];
 	/** @internal Used by PluginRuntime to forward UI settings changes to plugin listeners. */
 	_notifySettingChanged(key: string, value: string | number | boolean): void;
@@ -80,8 +83,9 @@ export interface PluginAPICallbacks {
 	onSettingChanged?: (pluginId: string, key: string, value: string | number | boolean) => void;
 	onEventSubscribe?: (event: HermesEvent, callback: (...args: unknown[]) => void) => Disposable;
 	onNotification?: (options: { title: string; body?: string }) => Promise<void>;
-	onSessionsGetActive?: () => Promise<{ id: string; name: string } | null>;
-	onSessionsList?: () => Promise<{ id: string; name: string }[]>;
+	onSessionsGetActive?: () => Promise<SessionInfo | null>;
+	onSessionsList?: () => Promise<SessionInfo[]>;
+	onSessionFocus?: (sessionId: string) => void;
 }
 
 export function createPluginAPI(
@@ -343,6 +347,38 @@ export function createPluginAPI(
 					return callbacks.onSessionsList();
 				}
 				return [];
+			},
+			async focus(sessionId: string) {
+				if (!permissions.has("sessions.read")) {
+					throw new PermissionDeniedError(pluginId, "sessions.read");
+				}
+				callbacks.onSessionFocus?.(sessionId);
+			},
+		},
+		agents: {
+			async watchTranscript(
+				sessionId: string,
+				callback: (event: TranscriptEvent) => void,
+			): Promise<Disposable> {
+				if (!permissions.has("sessions.read")) {
+					throw new PermissionDeniedError(pluginId, "sessions.read");
+				}
+				try {
+					const watcherId: string = await invoke("start_transcript_watcher", { sessionId });
+					const eventName = `transcript-event:${watcherId}`;
+					const unlisten = await listen<TranscriptEvent>(eventName, (event) => {
+						try { callback(event.payload); } catch { /* swallow plugin errors */ }
+					});
+					const dispose = () => {
+						unlisten();
+						invoke("stop_transcript_watcher", { watcherId }).catch(() => {});
+					};
+					subscriptions.push({ dispose });
+					return { dispose };
+				} catch (err) {
+					console.warn(`[Plugin:${pluginId}] Failed to watch transcript for session ${sessionId}:`, err);
+					return { dispose() {} };
+				}
 			},
 		},
 		subscriptions,

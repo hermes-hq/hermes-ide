@@ -53,7 +53,7 @@ export class PluginPanelHost extends Component<PluginPanelHostProps, PluginPanel
 			);
 		}
 		return (
-			<div className="plugin-panel-container" data-plugin-id={this.props.pluginId}>
+			<div className="plugin-panel-container" data-plugin-id={this.props.pluginId} style={{ width: "100%", height: "100%", position: "relative" }}>
 				{this.props.children}
 			</div>
 		);

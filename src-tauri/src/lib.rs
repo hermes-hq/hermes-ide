@@ -9,6 +9,7 @@ mod process;
 #[doc(hidden)]
 pub mod pty;
 mod realm;
+mod transcript;
 mod workspace;
 
 use std::collections::HashSet;
@@ -257,6 +258,7 @@ pub fn run() {
             };
 
             app.manage(state);
+            app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
 
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
@@ -449,6 +451,9 @@ pub fn run() {
             plugins::plugin_fetch_url,
             // Clipboard
             clipboard::copy_image_to_clipboard,
+            // Transcript watching
+            transcript::start_transcript_watcher,
+            transcript::stop_transcript_watcher,
         ])
         .build(tauri::generate_context!())
         .expect("error while building HERMES-IDE")
