@@ -124,7 +124,7 @@ function AppContent() {
       onPanelToggle: (panelId) => setActivePluginPanel(prev => prev === panelId ? null : panelId),
       onPanelShow: (panelId) => {
         setActivePluginPanel(panelId);
-        dispatch({ type: "SET_LEFT_TAB", tab: "terminal" });
+        dispatch({ type: "SET_SUBVIEW_PANEL", panel: null });
       },
       onPanelHide: () => setActivePluginPanel(null),
       onToast: (message, type, duration) => {
@@ -612,7 +612,7 @@ function AppContent() {
                     setActivePluginPanel(null);
                   } else {
                     setActivePluginPanel(tabId);
-                    dispatch({ type: "SET_LEFT_TAB", tab: "terminal" });
+                    dispatch({ type: "SET_SUBVIEW_PANEL", panel: null });
                   }
                 }
               }
@@ -622,7 +622,7 @@ function AppContent() {
           />
         )}
         {/* Session list sidebar — sub-view buttons are inline under the active session */}
-        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && (
+        {!ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !activePluginPanel && (
           <PanelErrorBoundary panelName="Session List">
             <SessionList
               sessions={sessions}
@@ -655,20 +655,20 @@ function AppContent() {
             />
           </PanelErrorBoundary>
         )}
-        {ui.gitPanelOpen && !ui.flowMode && state.activeSessionId && (
+        {ui.gitPanelOpen && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
           <PanelErrorBoundary panelName="Git Panel">
             <SessionGitPanel sessionId={state.activeSessionId} realmId="" />
           </PanelErrorBoundary>
         )}
-        {ui.processPanelOpen && !ui.flowMode && (
+        {ui.processPanelOpen && !ui.flowMode && !activePluginPanel && (
           <PanelErrorBoundary panelName="Process Panel">
             <ProcessPanel visible={ui.processPanelOpen} />
           </PanelErrorBoundary>
         )}
-        {ui.fileExplorerOpen && !ui.flowMode && (
+        {ui.fileExplorerOpen && !ui.flowMode && !activePluginPanel && (
           <FileExplorerPanel visible={ui.fileExplorerOpen} />
         )}
-        {ui.searchPanelOpen && !ui.flowMode && (
+        {ui.searchPanelOpen && !ui.flowMode && !activePluginPanel && (
           <SearchPanel visible={ui.searchPanelOpen} />
         )}
         {activePluginPanel && !ui.flowMode && (() => {
@@ -677,9 +677,11 @@ function AppContent() {
           const PanelComponent = pluginRuntime.getPanelComponent(activePluginPanel);
           if (!PanelComponent) return null;
           return (
-            <PluginPanelHost pluginId={panelMeta.pluginId} panelId={activePluginPanel} panelName={panelMeta.name}>
-              <PanelComponent pluginId={panelMeta.pluginId} panelId={activePluginPanel} />
-            </PluginPanelHost>
+            <div style={{ width: "var(--sidebar-w)", flexShrink: 0, borderRight: "1px solid var(--border)", background: "var(--bg-1)", overflow: "hidden" }}>
+              <PluginPanelHost pluginId={panelMeta.pluginId} panelId={activePluginPanel} panelName={panelMeta.name}>
+                <PanelComponent pluginId={panelMeta.pluginId} panelId={activePluginPanel} />
+              </PluginPanelHost>
+            </div>
           );
         })()}
         <PluginUpdateBanner

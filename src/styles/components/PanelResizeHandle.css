@@ -32,21 +32,23 @@
   position: absolute;
   border-radius: var(--radius-pill);
   background: var(--text-3);
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity 0.15s;
 }
 
 .panel-resize-handle:hover .panel-resize-pill {
-  opacity: 1;
+  opacity: 0.9;
 }
 
 /* Pill sizing per direction */
 .panel-resize-handle-horizontal .panel-resize-pill {
-  width: 4px;
-  height: 32px;
+  width: 6px;
+  height: 28px;
+  border-radius: 3px;
 }
 
 .panel-resize-handle-vertical .panel-resize-pill {
-  width: 32px;
-  height: 4px;
+  width: 28px;
+  height: 6px;
+  border-radius: 3px;
 }
