@@ -2,6 +2,7 @@ import "../styles/components/ScopeBar.css";
 import { useState } from "react";
 import { useSessionProjects, Project } from "../hooks/useSessionProjects";
 import { useSession } from "../state/SessionContext";
+import { nudgeProjectContext } from "../api/projects";
 import { ProjectPicker } from "./ProjectPicker";
 
 const LANGUAGE_COLORS: Record<string, string> = {
@@ -65,7 +66,7 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
             </span>
             <button
               className="scope-pill-close"
-              onClick={() => detach(project.id)}
+              onClick={() => detach(project.id).then(() => nudgeProjectContext(sessionId).catch(console.warn))}
               title="Remove project"
               aria-label="Remove project"
             >
