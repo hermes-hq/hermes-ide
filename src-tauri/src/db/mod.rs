@@ -393,6 +393,7 @@ impl Database {
             );
             CREATE INDEX IF NOT EXISTS idx_sw_session ON session_worktrees(session_id);
             CREATE INDEX IF NOT EXISTS idx_sw_realm ON session_worktrees(realm_id);
+            CREATE INDEX IF NOT EXISTS idx_sw_path ON session_worktrees(worktree_path);
 
             CREATE TABLE IF NOT EXISTS plugins (
                 id TEXT PRIMARY KEY,
@@ -455,6 +456,11 @@ impl Database {
             );
         ",
         );
+
+        // Add last_activity_at column to session_worktrees (idempotent)
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE session_worktrees ADD COLUMN last_activity_at TEXT;");
 
         Ok(())
     }
@@ -1972,6 +1978,20 @@ impl Database {
     pub fn delete_ssh_saved_host(&self, id: &str) -> Result<(), String> {
         self.conn
             .execute("DELETE FROM ssh_saved_hosts WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn update_worktree_last_activity(
+        &self,
+        session_id: &str,
+        realm_id: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE session_worktrees SET last_activity_at = datetime('now') WHERE session_id = ?1 AND realm_id = ?2",
+                params![session_id, realm_id],
+            )
             .map_err(|e| e.to_string())?;
         Ok(())
     }

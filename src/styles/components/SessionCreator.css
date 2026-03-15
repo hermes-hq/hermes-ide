@@ -2,7 +2,7 @@
 
 .session-creator {
   width: 480px;
-  max-height: 70vh;
+  max-height: 80vh;
   background: var(--bg-1);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -67,6 +67,26 @@
   color: var(--text-2);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.session-creator-subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.4;
+  margin-top: -4px;
+}
+
+.session-creator-cwd-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-radius: 3px;
+  vertical-align: 1px;
 }
 
 .session-creator-list {
@@ -605,5 +625,73 @@
 .session-creator-ssh-history-port {
   color: var(--text-3);
   font-size: 10px;
+}
+
+/* ─── Multi-Project Branch Selection ───────────────────── */
+
+.session-creator-branch-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.session-creator-branch-multi::-webkit-scrollbar { width: 4px; }
+.session-creator-branch-multi::-webkit-scrollbar-thumb { background: var(--bg-3); }
+
+.session-creator-branch-realm {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.session-creator-branch-realm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  transition: background 0.1s;
+}
+
+.session-creator-branch-realm.expanded > .session-creator-branch-realm-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.session-creator-branch-realm-header:hover {
+  background: var(--bg-hover);
+}
+
+.session-creator-branch-realm-chevron {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.session-creator-branch-realm-header:hover .session-creator-branch-realm-chevron {
+  color: var(--text-1);
+}
+
+.session-creator-branch-realm-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.session-creator-branch-nonGit {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-style: italic;
+  margin-left: auto;
+}
+
+.session-creator-branch-selected-label {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  margin-left: auto;
+  font-family: var(--font-mono);
 }
 

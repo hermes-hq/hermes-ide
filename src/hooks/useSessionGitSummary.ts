@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { subscribeGitStatus, getGitStatusSnapshot } from "./useGitStatusCache";
 
+export interface ProjectBranchSummary {
+  projectName: string;
+  branch: string;
+  changeCount: number;
+  ahead: number;
+  behind: number;
+  hasConflicts: boolean;
+}
+
 export interface SessionGitSummary {
   branch: string | null;
   changeCount: number;
@@ -8,6 +17,8 @@ export interface SessionGitSummary {
   behind: number;
   hasConflicts: boolean;
   isLoading: boolean;
+  /** All git project branches for multi-project sessions */
+  allBranches: ProjectBranchSummary[];
 }
 
 const EMPTY: SessionGitSummary = {
@@ -17,6 +28,7 @@ const EMPTY: SessionGitSummary = {
   behind: 0,
   hasConflicts: false,
   isLoading: false,
+  allBranches: [],
 };
 
 /**
@@ -42,18 +54,28 @@ export function useSessionGitSummary(
     const snapshot = getGitStatusSnapshot(workDir);
     if (!snapshot) return;
     if (!mountedRef.current) return;
-    const gitProject = snapshot.projects.find((p) => p.is_git_repo);
-    if (!gitProject) {
+    const gitProjects = snapshot.projects.filter((p) => p.is_git_repo && p.branch);
+    if (gitProjects.length === 0) {
       setSummary(EMPTY);
       return;
     }
+    const first = gitProjects[0];
+    const allBranches: ProjectBranchSummary[] = gitProjects.map((p) => ({
+      projectName: p.project_name,
+      branch: p.branch!,
+      changeCount: p.files.length,
+      ahead: p.ahead,
+      behind: p.behind,
+      hasConflicts: p.has_conflicts,
+    }));
     setSummary({
-      branch: gitProject.branch,
-      changeCount: gitProject.files.length,
-      ahead: gitProject.ahead,
-      behind: gitProject.behind,
-      hasConflicts: gitProject.has_conflicts,
+      branch: first.branch,
+      changeCount: first.files.length,
+      ahead: first.ahead,
+      behind: first.behind,
+      hasConflicts: first.has_conflicts,
       isLoading: false,
+      allBranches,
     });
   }, []);
 

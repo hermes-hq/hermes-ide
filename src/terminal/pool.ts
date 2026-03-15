@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { isMac } from "../utils/platform";
+import { isHermesWorktreePath } from "../utils/worktree";
 import { resizeSession, isShellForeground } from "../api/sessions";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
 import { type SuggestionState } from "./intelligence/SuggestionOverlay";
@@ -641,6 +642,33 @@ export function setSessionCwd(sessionId: string, cwd: string): void {
     invalidateContext(entry.cwd);
   }
   entry.cwd = cwd;
+}
+
+/**
+ * Detect if a session's new CWD is inside another session's worktree directory.
+ * Returns the owning session's id and branch name, or null if no mismatch.
+ */
+export function detectBranchMismatch(
+  currentSessionId: string,
+  newCwd: string,
+): { sessionId: string; branch: string } | null {
+  if (!isHermesWorktreePath(newCwd)) return null;
+
+  for (const [sessionId, entry] of pool.entries()) {
+    if (sessionId === currentSessionId) continue;
+    if (
+      entry.cwd &&
+      (newCwd === entry.cwd || newCwd.startsWith(entry.cwd + '/')) &&
+      isHermesWorktreePath(entry.cwd)
+    ) {
+      const match = entry.cwd.match(
+        /\.hermes\/worktrees\/[^/]+_(.+?)(?:\/|$)/,
+      );
+      const branch = match?.[1] || "unknown";
+      return { sessionId, branch };
+    }
+  }
+  return null;
 }
 
 /** Get the history provider for a session (for external loading) */

@@ -9,6 +9,7 @@ import { encodeSessionDrag, setDraggedSession, getDraggedSession } from "./Split
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
+import { isHermesWorktreePath } from "../utils/worktree";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 import { useRemoteSshInfo } from "../hooks/useRemoteSshInfo";
 import { PortForwardsPanel } from "./PortForwardsPanel";
@@ -64,6 +65,18 @@ function sessionCost(session: SessionData): number {
   return cost;
 }
 
+/** Deterministic color accent based on branch name (R1.3). */
+function branchColor(branchName: string): string {
+  let hash = 0;
+  for (let i = 0; i < branchName.length; i++) {
+    hash = ((hash << 5) - hash) + branchName.charCodeAt(i);
+    hash |= 0;
+  }
+  const hue = ((hash % 360) + 360) % 360;
+  // Use 45% saturation (less vivid) and 55% lightness for better contrast
+  return `hsl(${hue}, 45%, 55%)`;
+}
+
 // Sort: active sessions first (idle/busy/etc.), destroyed at bottom
 function sortSessions(sessions: SessionData[]): SessionData[] {
   return [...sessions].sort((a, b) => {
@@ -74,27 +87,25 @@ function sortSessions(sessions: SessionData[]): SessionData[] {
   });
 }
 
-/** Sub-component: git branch + change summary for a session item (remote SSH or local). */
-function SessionItemGitInfo({ sessionId, isDestroyed, workingDirectory, isSsh }: { sessionId: string; isDestroyed: boolean; workingDirectory: string; isSsh: boolean }) {
-  const localGit = useSessionGitSummary(sessionId, !isDestroyed && !isSsh, workingDirectory);
-  const remoteInfo = useRemoteSshInfo(isSsh ? sessionId : null, !isDestroyed && isSsh);
-
-  const branch = isSsh ? remoteInfo.branch : localGit.branch;
-  const changeCount = isSsh ? remoteInfo.changeCount : localGit.changeCount;
-  const ahead = isSsh ? 0 : localGit.ahead;
-  const behind = isSsh ? 0 : localGit.behind;
-  const hasConflicts = isSsh ? false : localGit.hasConflicts;
-  const isLoading = isSsh ? remoteInfo.isLoading : localGit.isLoading;
-
-  if (isDestroyed || isLoading || !branch) return null;
-
+/** Renders a single branch row with change/status info. */
+function BranchRow({ branch, changeCount, ahead, behind, hasConflicts, isLinkedWorktree, projectName }: {
+  branch: string; changeCount: number; ahead: number; behind: number; hasConflicts: boolean; isLinkedWorktree: boolean; projectName?: string;
+}) {
   return (
     <div className="session-item-git">
-      <span className="session-item-git-branch">
-        <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10" aria-hidden="true">
+      <span className="session-item-git-branch session-item-git-branch-prominent">
+        <svg viewBox="0 0 16 16" fill="currentColor" width="11" height="11" aria-hidden="true">
           <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
         </svg>
+        {projectName && <span className="session-item-git-project-name">{projectName}:</span>}
         {branch}
+        {isLinkedWorktree && (
+          <span className="session-item-worktree-badge" title="Linked worktree">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10" aria-hidden="true">
+              <path d="M4.75 3.5a3.25 3.25 0 0 0 0 6.5h1.5a.75.75 0 0 1 0 1.5h-1.5a4.75 4.75 0 0 1 0-9.5h1.5a.75.75 0 0 1 0 1.5ZM11.25 3.5a4.75 4.75 0 0 1 0 9.5h-1.5a.75.75 0 0 1 0-1.5h1.5a3.25 3.25 0 0 0 0-6.5h-1.5a.75.75 0 0 1 0-1.5Zm-6 4.25a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5Z" />
+            </svg>
+          </span>
+        )}
       </span>
       <span className="session-item-git-dot">&middot;</span>
       {hasConflicts ? (
@@ -111,6 +122,66 @@ function SessionItemGitInfo({ sessionId, isDestroyed, workingDirectory, isSsh }:
       )}
     </div>
   );
+}
+
+/** Sub-component: git branch + change summary for a session item (remote SSH or local). */
+function SessionItemGitInfo({ sessionId, isDestroyed, workingDirectory, isSsh }: { sessionId: string; isDestroyed: boolean; workingDirectory: string; isSsh: boolean }) {
+  const localGit = useSessionGitSummary(sessionId, !isDestroyed && !isSsh, workingDirectory);
+  const remoteInfo = useRemoteSshInfo(isSsh ? sessionId : null, !isDestroyed && isSsh);
+
+  const isLoading = isSsh ? remoteInfo.isLoading : localGit.isLoading;
+  if (isDestroyed || isLoading) return null;
+
+  // SSH: single branch from remote info
+  if (isSsh) {
+    if (!remoteInfo.branch) return null;
+    return <BranchRow branch={remoteInfo.branch} changeCount={remoteInfo.changeCount} ahead={0} behind={0} hasConflicts={false} isLinkedWorktree={false} />;
+  }
+
+  // Local: show all project branches if multiple, otherwise single
+  const { allBranches } = localGit;
+  if (allBranches.length === 0) return null;
+
+  const isLinkedWorktree = isHermesWorktreePath(workingDirectory);
+  const showProjectNames = allBranches.length > 1;
+
+  return (
+    <>
+      {allBranches.map((pb) => (
+        <BranchRow
+          key={pb.projectName}
+          branch={pb.branch}
+          changeCount={pb.changeCount}
+          ahead={pb.ahead}
+          behind={pb.behind}
+          hasConflicts={pb.hasConflicts}
+          isLinkedWorktree={isLinkedWorktree}
+          projectName={showProjectNames ? pb.projectName : undefined}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * Invisible helper that reads the branch for a session and applies a
+ * deterministic color accent as a CSS custom property on the closest
+ * `.session-item-wrapper` ancestor element.
+ */
+function SessionItemBranchAccent({ sessionId, isDestroyed, workingDirectory }: { sessionId: string; isDestroyed: boolean; workingDirectory: string }) {
+  const { branch } = useSessionGitSummary(sessionId, !isDestroyed, workingDirectory);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const wrapper = ref.current?.closest('.session-item-wrapper') as HTMLElement | null;
+    if (wrapper && branch) {
+      wrapper.style.borderLeft = `3px solid ${branchColor(branch)}`;
+    } else if (wrapper) {
+      wrapper.style.borderLeft = '';
+    }
+  }, [branch]);
+
+  return <span ref={ref} style={{ display: 'none' }} />;
 }
 
 /** Sub-component: tmux window tabs for SSH sessions with tmux attached. */
@@ -799,14 +870,17 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
   const renderSession = (session: SessionData) => {
     const isActive = session.id === activeSessionId;
     const shouldTriggerRename = renameSessionId === session.id;
+    const isLinkedWorktree = isHermesWorktreePath(session.working_directory);
     return (
       <div key={session.id} className={`session-item-wrapper${isActive ? " session-item-wrapper-active" : ""}`}>
+        <SessionItemBranchAccent sessionId={session.id} isDestroyed={session.phase === "destroyed"} workingDirectory={session.working_directory} />
         <div
           className={`session-item ${isActive ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
           draggable={session.phase !== "destroyed"}
           onDragStart={(e) => handleDragStart(e, session)}
           onClick={() => onSelect(session.id)}
           onContextMenu={(e) => handleContextMenu(e, session.id)}
+          title={`${session.label}${isLinkedWorktree ? `\nWorktree: ${session.working_directory}` : ""}${session.group ? `\nProject: ${session.group}` : ""}\nCreated: ${session.created_at}`}
         >
           <div
             className={`session-item-color-band ${!session.color ? "session-item-color-band-empty" : ""}`}

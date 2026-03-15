@@ -1,0 +1,91 @@
+/* ─── Branch Mismatch Alert (floating toast) ──────────────── */
+
+.branch-mismatch-alert {
+	position: fixed;
+	top: 48px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: var(--bg-2);
+	border: 1px solid color-mix(in srgb, var(--yellow, #f0ad4e) 40%, var(--border));
+	border-radius: var(--radius-sm);
+	padding: 10px 16px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	z-index: 1000;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	animation: branch-mismatch-slide-down 0.2s ease-out;
+	max-width: 500px;
+	pointer-events: auto;
+	font-size: var(--text-sm);
+	color: var(--text-1);
+}
+
+@keyframes branch-mismatch-slide-down {
+	from {
+		transform: translateX(-50%) translateY(-20px);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(-50%) translateY(0);
+		opacity: 1;
+	}
+}
+
+.branch-mismatch-icon {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	color: var(--yellow, #f0ad4e);
+}
+
+.branch-mismatch-icon svg {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.branch-mismatch-body {
+	flex: 1;
+	line-height: 1.4;
+}
+
+.branch-mismatch-title {
+	font-weight: 600;
+	color: var(--text-0);
+}
+
+.branch-mismatch-detail {
+	color: var(--text-2);
+	margin-top: 2px;
+}
+
+.branch-mismatch-branch {
+	color: var(--yellow, #f0ad4e);
+	font-family: var(--font-mono);
+	font-weight: 600;
+}
+
+.branch-mismatch-close {
+	background: none;
+	border: none;
+	color: var(--text-3);
+	cursor: pointer;
+	font-size: var(--text-lg);
+	padding: 0 2px;
+	line-height: 1;
+	flex-shrink: 0;
+	transition: color 0.1s;
+}
+
+.branch-mismatch-session-name {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: default;
+}
+
+.branch-mismatch-close:hover {
+	color: var(--text-0);
+}

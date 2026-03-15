@@ -24,6 +24,10 @@ pub struct WorktreeCreateResult {
     pub worktree_path: String,
     pub branch_name: String,
     pub is_main_worktree: bool,
+    /// True when the worktree was reused from another session (branch already checked out).
+    /// The frontend should warn the user about shared file changes.
+    #[serde(default)]
+    pub is_shared: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +115,37 @@ pub fn worktree_path_for_session(repo_path: &str, session_id: &str, branch_name:
     base.join(worktree_name(session_id, branch_name))
 }
 
+/// Find an existing worktree that has the given branch checked out.
+/// Uses `git worktree list --porcelain` to find it.
+fn find_existing_worktree_for_branch(repo_path: &str, branch_name: &str) -> Option<String> {
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut current_path: Option<String> = None;
+
+    for line in stdout.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            current_path = Some(path.to_string());
+        } else if let Some(branch_ref) = line.strip_prefix("branch ") {
+            // branch_ref looks like "refs/heads/feature/test1111"
+            let short_name = branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref);
+            if short_name == branch_name {
+                if let Some(ref path) = current_path {
+                    return Some(path.clone());
+                }
+            }
+        } else if line.is_empty() {
+            current_path = None;
+        }
+    }
+
+    None
+}
+
 /// Create a new git worktree for a session.
 ///
 /// If `create_branch` is true, a new branch is created from HEAD before
@@ -142,6 +177,7 @@ pub fn create_worktree(
             worktree_path: wt_path_str.to_string(),
             branch_name: branch_name.to_string(),
             is_main_worktree: false,
+            is_shared: false,
         });
     }
 
@@ -162,13 +198,7 @@ pub fn create_worktree(
     // Build the `git worktree add` command
     let mut cmd = Command::new("git");
     cmd.current_dir(repo_path);
-
-    if create_branch {
-        // Branch already created above — just check it out in the new worktree
-        cmd.args(["worktree", "add", wt_path_str, branch_name]);
-    } else {
-        cmd.args(["worktree", "add", wt_path_str, branch_name]);
-    }
+    cmd.args(["worktree", "add", wt_path_str, branch_name]);
 
     let output = cmd
         .output()
@@ -176,6 +206,22 @@ pub fn create_worktree(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // If the branch is already checked out in another worktree, find and reuse it.
+        // Git error: "'branch' is already used by worktree at '/path/to/worktree'"
+        if stderr.contains("is already used by worktree at")
+            || stderr.contains("is already checked out at")
+        {
+            if let Some(existing_path) = find_existing_worktree_for_branch(repo_path, branch_name) {
+                return Ok(WorktreeCreateResult {
+                    worktree_path: existing_path,
+                    branch_name: branch_name.to_string(),
+                    is_main_worktree: false,
+                    is_shared: true,
+                });
+            }
+        }
+
         return Err(format!("git worktree add failed: {}", stderr.trim()));
     }
 
@@ -183,6 +229,7 @@ pub fn create_worktree(
         worktree_path: wt_path_str.to_string(),
         branch_name: branch_name.to_string(),
         is_main_worktree: false,
+        is_shared: false,
     })
 }
 

@@ -1,0 +1,264 @@
+/* ─── Dirty Worktree Dialog ───────────────────────────────────────── */
+
+.dirty-wt-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.dirty-wt-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  width: min(90vw, 500px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: dirty-wt-in 0.15s ease-out;
+}
+
+@keyframes dirty-wt-in {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Header ─────────────────────────────────────────────────────── */
+
+.dirty-wt-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dirty-wt-icon {
+  color: var(--yellow);
+  font-size: var(--text-lg);
+}
+
+.dirty-wt-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-0);
+  flex: 1;
+}
+
+.dirty-wt-close {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dirty-wt-close:hover {
+  color: var(--text-0);
+}
+
+/* ─── Body ───────────────────────────────────────────────────────── */
+
+.dirty-wt-body {
+  padding: var(--space-3);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.dirty-wt-message {
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  margin: 0 0 var(--space-3) 0;
+  line-height: 1.5;
+}
+
+.dirty-wt-session-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ─── Project Section ────────────────────────────────────────────── */
+
+.dirty-wt-project {
+  margin-bottom: var(--space-3);
+}
+
+.dirty-wt-project:last-child {
+  margin-bottom: 0;
+}
+
+.dirty-wt-project-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.dirty-wt-project-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.dirty-wt-branch-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  background: var(--bg-2);
+  padding: 1px 6px;
+  border-radius: var(--radius);
+}
+
+/* ─── File List ──────────────────────────────────────────────────── */
+
+.dirty-wt-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.dirty-wt-file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.dirty-wt-file-item:last-child {
+  border-bottom: none;
+}
+
+.dirty-wt-file-status {
+  font-weight: 700;
+  font-size: var(--text-xs);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.dirty-wt-file-status--modified {
+  color: var(--yellow);
+}
+
+.dirty-wt-file-status--added {
+  color: var(--green);
+}
+
+.dirty-wt-file-status--deleted {
+  color: var(--red);
+}
+
+.dirty-wt-file-status--unknown {
+  color: var(--text-3);
+}
+
+.dirty-wt-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Stash Errors ──────────────────────────────────────────────── */
+
+.dirty-wt-errors {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.dirty-wt-error-item {
+  background: var(--red-dim, rgba(255, 80, 80, 0.1));
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--red);
+}
+
+.dirty-wt-error-item:last-child {
+  margin-bottom: 0;
+}
+
+.dirty-wt-error-label {
+  font-weight: 600;
+}
+
+.dirty-wt-error-message {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.dirty-wt-error-hint {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+/* ─── Actions ────────────────────────────────────────────────────── */
+
+.dirty-wt-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dirty-wt-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.dirty-wt-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-3);
+}
+
+.dirty-wt-btn--stash {
+  background: var(--accent-dim, var(--bg-3));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dirty-wt-btn--stash:hover {
+  background: var(--accent);
+  color: var(--bg-0);
+}
+
+.dirty-wt-btn--close-anyway {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.dirty-wt-btn--close-anyway:hover {
+  background: var(--red);
+  color: var(--bg-0);
+}

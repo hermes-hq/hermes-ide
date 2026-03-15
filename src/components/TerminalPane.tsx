@@ -5,10 +5,11 @@ import { detectProject } from "../api/projects";
 import {
   attach, detach, has, showGhostText, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,
-  getHistoryProvider, refitActive,
+  getHistoryProvider, refitActive, detectBranchMismatch,
   acceptSuggestionAtIndex, selectSuggestion,
 } from "../terminal/TerminalPool";
-import { useExecutionMode, useAutonomousSettings, useSession } from "../state/SessionContext";
+import { BranchMismatchAlert } from "./BranchMismatchAlert";
+import { useExecutionMode, useAutonomousSettings, useSession, useSessionList } from "../state/SessionContext";
 import { SuggestionOverlay, type SuggestionState } from "../terminal/intelligence/SuggestionOverlay";
 import { detectProjectContext, invalidateContext } from "../terminal/intelligence/contextAnalyzer";
 import { loadHistory } from "../terminal/intelligence/historyProvider";
@@ -30,6 +31,9 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
   const autoSettings = useAutonomousSettings();
   const { dispatch } = useSession();
   const [suggestionState, setSuggestionState] = useState<SuggestionState | null>(null);
+  const [branchMismatch, setBranchMismatch] = useState<{ branch: string; sessionLabel: string } | null>(null);
+  const dismissBranchMismatch = useCallback(() => setBranchMismatch(null), []);
+  const sessions = useSessionList();
 
   // Attach/detach terminal from pool
   useEffect(() => {
@@ -129,6 +133,10 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     });
   }, [sessionId]);
 
+  // Keep a ref to sessions so the CWD listener always reads fresh labels
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+
   // Listen for CWD changes and auto-detect project
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +148,14 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
       invalidateContext(newCwd);
       detectProject(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project:", err));
       detectProjectContext(newCwd).catch((err) => console.warn("[TerminalPane] Failed to detect project context:", err));
+
+      // Detect if user navigated into another session's worktree
+      const mismatch = detectBranchMismatch(sessionId, newCwd);
+      if (mismatch) {
+        const ownerSession = sessionsRef.current.find((s) => s.id === mismatch.sessionId);
+        const label = ownerSession?.label || mismatch.sessionId;
+        setBranchMismatch({ branch: mismatch.branch, sessionLabel: label });
+      }
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });
@@ -217,6 +233,13 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
           state={suggestionState}
           onSelect={handleSuggestionSelect}
           onAccept={handleSuggestionAccept}
+        />
+      )}
+      {branchMismatch && (
+        <BranchMismatchAlert
+          branch={branchMismatch.branch}
+          sessionLabel={branchMismatch.sessionLabel}
+          onDismiss={dismissBranchMismatch}
         />
       )}
     </div>

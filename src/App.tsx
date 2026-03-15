@@ -59,6 +59,7 @@ import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
+import { listen } from "@tauri-apps/api/event";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
 import { ToastContainer } from "./components/ToastContainer";
@@ -115,6 +116,41 @@ function AppContent() {
   }, []);
   const handleBottomResize = useCallback((delta: number) => {
     setBottomPanelHeight((h) => Math.max(120, Math.min(window.innerHeight * 0.8, h - delta)));
+  }, []);
+
+  // ── Worktree cleanup notification (R5.5) ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<number>("worktree-cleanup-summary", (event) => {
+      if (cancelled) return;
+      const count = event.payload;
+      if (count > 0) {
+        toastStoreRef.current.addToast({
+          message: `Cleaned up ${count} stale worktree${count !== 1 ? "s" : ""} on startup`,
+          type: "info",
+          duration: 5000,
+        });
+      }
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
+  // ── Shared worktree warning ──
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { branches } = (e as CustomEvent).detail as { branches: string[]; sessionLabel: string };
+      const branchList = branches.join(", ");
+      toastStoreRef.current.addToast({
+        message: `Sharing worktree for ${branchList} with another session. Changes to files will affect both sessions — avoid editing the same files.`,
+        type: "warning",
+        duration: 10000,
+      });
+    };
+    window.addEventListener("hermes:shared-worktree", handler);
+    return () => window.removeEventListener("hermes:shared-worktree", handler);
   }, []);
 
   const pluginRuntimeRef = useRef<PluginRuntime | null>(null);

@@ -13,9 +13,10 @@ mod transcript;
 mod workspace;
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Install a crash handler that writes panic info to a log file instead of
 /// stderr.  Writing to stderr during a panic is the primary cause of double-
@@ -63,13 +64,17 @@ fn install_crash_handler() {
 
 static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
 
-/// Clean up worktrees whose sessions no longer exist.
+/// Clean up worktrees whose sessions no longer exist, remove orphaned
+/// directories, and replay incomplete journal operations.
 ///
 /// Called once during app startup. For each `session_worktrees` record whose
 /// session is missing from the `sessions` table, we remove the git worktree
-/// from disk (if it is a linked worktree) and delete the DB record. Finally,
-/// we run `git worktree prune` on every repo that had stale entries.
-fn cleanup_stale_worktrees(database: &db::Database) {
+/// from disk (if it is a linked worktree) and delete the DB record. We also
+/// scan `.hermes/worktrees/` directories for orphans that have no DB record,
+/// and replay any incomplete journal operations from prior crashes. Finally,
+/// we run `git worktree prune` on every repo that had stale entries and emit
+/// a cleanup summary event to the frontend.
+fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
     let all_worktrees = match database.get_all_session_worktrees() {
         Ok(wts) => wts,
         Err(e) => {
@@ -79,6 +84,7 @@ fn cleanup_stale_worktrees(database: &db::Database) {
     };
 
     let mut repos_to_prune: HashSet<String> = HashSet::new();
+    let mut cleanup_count: u32 = 0;
 
     for wt in &all_worktrees {
         // Check whether the owning session still exists
@@ -117,6 +123,8 @@ fn cleanup_stale_worktrees(database: &db::Database) {
                 e
             );
         }
+
+        cleanup_count += 1;
     }
 
     // Run git worktree prune on each affected repo
@@ -128,6 +136,121 @@ fn cleanup_stale_worktrees(database: &db::Database) {
                 e
             );
         }
+    }
+
+    // Scan all realms for orphaned worktree directories with no DB record
+    if let Ok(realms) = database.get_all_realms() {
+        // Collect all known worktree paths from DB for efficient lookup
+        let known_paths: HashSet<String> = database
+            .get_all_session_worktrees()
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.worktree_path.clone())
+            .collect();
+
+        for realm in &realms {
+            let worktree_dir = Path::new(&realm.path).join(".hermes").join("worktrees");
+            if !worktree_dir.is_dir() {
+                continue;
+            }
+
+            if let Ok(entries) = std::fs::read_dir(&worktree_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let path_str = path.to_string_lossy().to_string();
+
+                    // Check if this directory has a DB record
+                    if !known_paths.contains(&path_str) {
+                        log::info!("Removing orphaned worktree directory: {}", path_str);
+                        // Try git worktree prune first, then remove directory
+                        let _ = std::process::Command::new("git")
+                            .arg("-C")
+                            .arg(&realm.path)
+                            .arg("worktree")
+                            .arg("prune")
+                            .output();
+                        match std::fs::remove_dir_all(&path) {
+                            Ok(_) => {
+                                cleanup_count += 1;
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[worktree-cleanup] Failed to remove orphan {}: {}",
+                                    path_str,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Replay incomplete journal operations for this realm
+            let incomplete = git::journal::get_incomplete_operations(&realm.path);
+            for entry in &incomplete {
+                match entry.action.as_str() {
+                    "CREATE" => {
+                        // Incomplete creation — worktree may exist but DB record is missing
+                        if entry.worktree_path != "pending"
+                            && Path::new(&entry.worktree_path).is_dir()
+                        {
+                            log::info!(
+                                "Replaying incomplete CREATE: removing orphan {}",
+                                entry.worktree_path
+                            );
+                            match std::fs::remove_dir_all(&entry.worktree_path) {
+                                Ok(_) => {
+                                    cleanup_count += 1;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "[worktree-cleanup] Failed to remove orphan {}: {}",
+                                        entry.worktree_path,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    "REMOVE" => {
+                        // Incomplete removal — worktree may still exist on disk
+                        if Path::new(&entry.worktree_path).is_dir() {
+                            log::info!(
+                                "Replaying incomplete REMOVE: cleaning up {}",
+                                entry.worktree_path
+                            );
+                            match std::fs::remove_dir_all(&entry.worktree_path) {
+                                Ok(_) => {
+                                    cleanup_count += 1;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "[worktree-cleanup] Failed to remove {}: {}",
+                                        entry.worktree_path,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Clear the journal after replay
+            git::journal::clear_journal(&realm.path);
+        }
+    }
+
+    // Emit cleanup summary event to frontend
+    if cleanup_count > 0 {
+        log::info!(
+            "Startup worktree cleanup: cleaned up {} stale/orphaned worktrees",
+            cleanup_count
+        );
+        let _ = app.emit("worktree-cleanup-summary", cleanup_count);
     }
 }
 
@@ -243,7 +366,7 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
             // Clean up stale worktrees from previous sessions that no longer exist
-            cleanup_stale_worktrees(&database);
+            cleanup_stale_worktrees(app.handle(), &database);
 
             // Clean up stale shell integration temp files from previous sessions
             pty::shell_integration::cleanup_stale();
@@ -438,6 +561,15 @@ pub fn run() {
             git::git_list_worktrees,
             git::git_check_branch_available,
             git::git_session_worktree_info,
+            git::git_list_branches_for_realms,
+            git::git_is_git_repo,
+            git::git_worktree_has_changes,
+            git::git_stash_worktree,
+            // Worktree overview & cleanup
+            git::git_list_all_worktrees,
+            git::git_detect_orphan_worktrees,
+            git::git_worktree_disk_usage,
+            git::git_cleanup_orphan_worktrees,
             // Menu
             menu::show_context_menu,
             menu::update_menu_state,

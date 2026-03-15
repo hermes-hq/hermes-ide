@@ -1,3 +1,4 @@
+pub mod journal;
 pub mod worktree;
 
 use git2::{
@@ -5,7 +6,7 @@ use git2::{
     Repository, StatusOptions,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -13,6 +14,45 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Database;
 use crate::AppState;
+
+/// Validates that a path is inside a .hermes/worktrees/ directory.
+/// Returns the canonical path if valid, or an error if the path is outside
+/// the expected worktree directory (prevents path traversal attacks).
+fn validate_worktree_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::Path::new(path);
+
+    // First check the raw path string before canonicalizing
+    // (canonicalize follows symlinks, which we want for the final check)
+    if !path.contains(".hermes/worktrees/") && !path.contains(".hermes\\worktrees\\") {
+        return Err(format!(
+            "Refusing to operate on '{}': not inside a .hermes/worktrees/ directory",
+            path
+        ));
+    }
+
+    // If the path exists, canonicalize and re-check
+    if p.exists() {
+        let canonical = p
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve path '{}': {}", path, e))?;
+        let canonical_str = canonical.to_string_lossy();
+        if !canonical_str.contains(".hermes/worktrees/")
+            && !canonical_str.contains(".hermes\\worktrees\\")
+        {
+            return Err(format!(
+                "Refusing to operate on '{}': canonical path '{}' is not inside a .hermes/worktrees/ directory",
+                path, canonical_str
+            ));
+        }
+        Ok(canonical)
+    } else {
+        // Path doesn't exist (e.g., record-only orphan) — just validate the string
+        if path.contains("..") {
+            return Err(format!("Refusing to operate on '{}': contains '..'", path));
+        }
+        Ok(p.to_path_buf())
+    }
+}
 
 /// Resolves the worktree path for a given session+realm from the database.
 /// Falls back to looking up the realm's path directly if no worktree entry exists.
@@ -2713,24 +2753,45 @@ pub fn git_create_worktree(
     let realm_path = realm.path.clone();
     drop(db);
 
+    // Journal: log the CREATE operation before performing it
+    let intended_path = worktree::worktree_path_for_session(&realm_path, &session_id, &branch_name);
+    let _ = journal::log_operation(
+        &realm_path,
+        "CREATE",
+        &session_id,
+        &realm_id,
+        &branch_name,
+        &intended_path.to_string_lossy(),
+    );
+
     // 2. Create the worktree
     let result = worktree::create_worktree(&realm_path, &session_id, &branch_name, create_branch)?;
 
-    // 3. Insert into session_worktrees table
+    // 3. Insert into session_worktrees table — if this fails, roll back the worktree
     let id = uuid::Uuid::new_v4().to_string();
     let db = state
         .db
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    db.insert_session_worktree(
+    if let Err(db_err) = db.insert_session_worktree(
         &id,
         &session_id,
         &realm_id,
         &result.worktree_path,
         Some(&result.branch_name),
         result.is_main_worktree,
-    )?;
+    ) {
+        // Rollback: remove the worktree we just created
+        log::warn!("DB insert failed for worktree, rolling back: {}", db_err);
+        if !result.is_main_worktree {
+            let _ = worktree::remove_worktree(&realm_path, &session_id, &result.worktree_path);
+        }
+        return Err(format!("Failed to record worktree: {}", db_err));
+    }
     drop(db);
+
+    // Journal: mark CREATE as completed after successful creation + DB insert
+    let _ = journal::log_completed(&realm_path, "CREATE", &session_id, &realm_id);
 
     // 4. Emit event for frontend
     let _ = app.emit(&format!("worktree-created-{}", realm_id), &result);
@@ -2769,16 +2830,34 @@ pub fn git_remove_worktree(
     let realm_path = realm.path.clone();
     drop(db);
 
-    // 2. Remove the worktree from the filesystem
-    worktree::remove_worktree(&realm_path, &session_id, &wt_path)?;
+    // Journal: log the REMOVE operation before performing it
+    let _ = journal::log_operation(&realm_path, "REMOVE", &session_id, &realm_id, "", &wt_path);
 
-    // 3. Delete from session_worktrees table
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    db.delete_session_worktree(&wt_id)?;
-    drop(db);
+    // 2. Try to remove the worktree from the filesystem
+    let remove_result = worktree::remove_worktree(&realm_path, &session_id, &wt_path);
+
+    // 3. Only delete DB record if git removal succeeded (or directory no longer exists)
+    let dir_gone = !std::path::Path::new(&wt_path).is_dir();
+    if remove_result.is_ok() || dir_gone {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        db.delete_session_worktree(&wt_id)?;
+        drop(db);
+    } else {
+        // Git removal failed and directory still exists — keep DB record for retry
+        log::warn!(
+            "Git worktree removal failed, keeping DB record for retry: {:?}",
+            remove_result.err()
+        );
+        return Err(
+            "Failed to remove worktree from disk; DB record preserved for retry".to_string(),
+        );
+    }
+
+    // Journal: mark REMOVE as completed after successful removal + DB delete
+    let _ = journal::log_completed(&realm_path, "REMOVE", &session_id, &realm_id);
 
     // 4. Emit event for frontend
     let _ = app.emit(&format!("worktree-removed-{}", realm_id), ());
@@ -2869,4 +2948,502 @@ pub fn git_session_worktree_info(
         .map_err(|e| format!("DB lock error: {}", e))?;
     db.get_worktree_by_session_and_realm(&session_id, &realm_id)
         .map_err(|e| format!("Failed to look up worktree: {}", e))
+}
+
+#[tauri::command]
+pub fn git_list_branches_for_realms(
+    state: State<'_, AppState>,
+    realm_ids: Vec<String>,
+) -> Result<HashMap<String, Vec<GitBranch>>, String> {
+    // Collect realm paths while holding the DB lock, then drop it before git I/O
+    let realm_paths: Vec<(String, Option<String>)> = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        realm_ids
+            .iter()
+            .map(|id| {
+                let path = db.get_realm(id).ok().flatten().map(|r| r.path);
+                (id.clone(), path)
+            })
+            .collect()
+    };
+
+    let mut result: HashMap<String, Vec<GitBranch>> = HashMap::new();
+
+    for (realm_id, realm_path) in &realm_paths {
+        let realm_path = match realm_path {
+            Some(p) => p,
+            None => {
+                result.insert(realm_id.clone(), Vec::new());
+                continue;
+            }
+        };
+
+        let repo = match Repository::open(realm_path) {
+            Ok(r) => r,
+            Err(_) => {
+                result.insert(realm_id.clone(), Vec::new());
+                continue;
+            }
+        };
+
+        let mut branches = Vec::new();
+
+        let current_branch = repo
+            .head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s.to_string()));
+
+        if let Ok(local_branches) = repo.branches(Some(BranchType::Local)) {
+            for branch_result in local_branches {
+                let (branch, _) = match branch_result {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let name = branch.name().ok().flatten().unwrap_or("").to_string();
+
+                let is_current = current_branch.as_deref() == Some(&name);
+
+                let mut ahead = 0u32;
+                let mut behind = 0u32;
+                let mut upstream_name = None;
+
+                if let Ok(upstream) = branch.upstream() {
+                    upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
+                    if let (Some(local_ref), Some(upstream_ref)) =
+                        (branch.get().name(), upstream.get().name())
+                    {
+                        if let (Ok(local_oid), Ok(remote_oid)) = (
+                            repo.refname_to_id(local_ref),
+                            repo.refname_to_id(upstream_ref),
+                        ) {
+                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                                ahead = a as u32;
+                                behind = b as u32;
+                            }
+                        }
+                    }
+                }
+
+                let last_commit_summary = branch
+                    .get()
+                    .peel_to_commit()
+                    .ok()
+                    .map(|c| c.summary().unwrap_or("").to_string());
+
+                branches.push(GitBranch {
+                    name,
+                    is_current,
+                    is_remote: false,
+                    upstream: upstream_name,
+                    ahead,
+                    behind,
+                    last_commit_summary,
+                });
+            }
+        }
+
+        result.insert(realm_id.clone(), branches);
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn git_is_git_repo(state: State<'_, AppState>, realm_id: String) -> Result<bool, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let realm = db
+        .get_realm(&realm_id)
+        .map_err(|e| format!("Failed to look up realm: {}", e))?
+        .ok_or_else(|| format!("Realm '{}' not found", realm_id))?;
+    drop(db);
+
+    Ok(Repository::open(&realm.path).is_ok())
+}
+
+// ─── Worktree Dirty Detection & Stash ───────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WorktreeChanges {
+    pub has_changes: bool,
+    pub files: Vec<WorktreeChangedFile>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WorktreeChangedFile {
+    pub path: String,
+    pub status: String,
+}
+
+fn map_status_flags(s: git2::Status) -> &'static str {
+    if s.intersects(git2::Status::WT_TYPECHANGE | git2::Status::INDEX_TYPECHANGE) {
+        "typechange"
+    } else if s.intersects(git2::Status::WT_RENAMED | git2::Status::INDEX_RENAMED) {
+        "renamed"
+    } else if s.intersects(git2::Status::WT_DELETED | git2::Status::INDEX_DELETED) {
+        "deleted"
+    } else if s.intersects(git2::Status::WT_NEW | git2::Status::INDEX_NEW) {
+        "added"
+    } else {
+        "modified"
+    }
+}
+
+#[tauri::command]
+pub fn git_worktree_has_changes(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+) -> Result<WorktreeChanges, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+
+    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true).recurse_untracked_dirs(true);
+
+    let statuses = repo
+        .statuses(Some(&mut opts))
+        .map_err(|e| format!("Failed to get statuses: {}", e))?;
+
+    let mut files = Vec::new();
+    for entry in statuses.iter() {
+        let s = entry.status();
+        if s.is_empty() {
+            continue;
+        }
+        let file_path = entry.path().unwrap_or("").to_string();
+        files.push(WorktreeChangedFile {
+            path: file_path,
+            status: map_status_flags(s).to_string(),
+        });
+    }
+
+    Ok(WorktreeChanges {
+        has_changes: !files.is_empty(),
+        files,
+    })
+}
+
+#[tauri::command]
+pub fn git_stash_worktree(
+    state: State<'_, AppState>,
+    session_id: String,
+    realm_id: String,
+    message: Option<String>,
+) -> Result<GitOperationResult, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &realm_id)?;
+    drop(db);
+
+    let mut repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let sig = repo.signature().map_err(|e| e.to_string())?;
+    let msg = message.as_deref().unwrap_or("WIP");
+    let flags = git2::StashFlags::DEFAULT | git2::StashFlags::INCLUDE_UNTRACKED;
+
+    repo.stash_save(&sig, msg, Some(flags))
+        .map_err(|e| format!("Stash failed: {}", e))?;
+
+    Ok(GitOperationResult {
+        success: true,
+        message: format!("Stashed: {}", msg),
+        error: None,
+    })
+}
+
+// ─── Worktree Overview & Cleanup ─────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WorktreeOverviewEntry {
+    pub worktree_path: String,
+    pub branch_name: Option<String>,
+    pub session_id: String,
+    pub session_label: String,
+    pub realm_id: String,
+    pub realm_name: String,
+    pub realm_path: String,
+    pub is_main_worktree: bool,
+    pub created_at: String,
+    pub last_activity_at: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OrphanWorktree {
+    pub worktree_path: String,
+    pub branch_name: Option<String>,
+    pub kind: String, // "directory_only" or "record_only"
+    pub realm_path: Option<String>,
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CleanupResult {
+    pub path: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub fn git_list_all_worktrees(
+    state: State<'_, AppState>,
+) -> Result<Vec<WorktreeOverviewEntry>, String> {
+    // 1. Collect all DB data while holding the lock
+    let (all_worktrees, realm_map) = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+
+        let worktrees = db.get_all_session_worktrees()?;
+
+        // Collect unique realm IDs and look up realm info
+        let realm_ids: HashSet<String> = worktrees.iter().map(|wt| wt.realm_id.clone()).collect();
+        let mut realms: HashMap<String, crate::realm::Realm> = HashMap::new();
+        for realm_id in &realm_ids {
+            if let Ok(Some(realm)) = db.get_realm(realm_id) {
+                realms.insert(realm_id.clone(), realm);
+            }
+        }
+
+        (worktrees, realms)
+    };
+    // DB lock is dropped here
+
+    // 2. Get session labels from pty_manager for live sessions
+    let session_labels: HashMap<String, String> = {
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("PTY manager lock error: {}", e))?;
+        mgr.sessions
+            .iter()
+            .filter_map(|(id, ps)| {
+                ps.session
+                    .lock()
+                    .ok()
+                    .map(|s| (id.clone(), s.label.clone()))
+            })
+            .collect()
+    };
+    // pty_manager lock is dropped here
+
+    // 3. Build overview entries
+    let entries: Vec<WorktreeOverviewEntry> = all_worktrees
+        .into_iter()
+        .map(|wt| {
+            let label_prefix_len = 8.min(wt.session_id.len());
+            let session_label = session_labels
+                .get(&wt.session_id)
+                .cloned()
+                .unwrap_or_else(|| format!("Session {}", &wt.session_id[..label_prefix_len]));
+
+            let (realm_name, realm_path) = realm_map
+                .get(&wt.realm_id)
+                .map(|r| (r.name.clone(), r.path.clone()))
+                .unwrap_or_else(|| ("Unknown".to_string(), String::new()));
+
+            WorktreeOverviewEntry {
+                worktree_path: wt.worktree_path,
+                branch_name: wt.branch_name,
+                session_id: wt.session_id,
+                session_label,
+                realm_id: wt.realm_id,
+                realm_name,
+                realm_path,
+                is_main_worktree: wt.is_main_worktree,
+                created_at: wt.created_at,
+                last_activity_at: None,
+            }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn git_detect_orphan_worktrees(
+    state: State<'_, AppState>,
+) -> Result<Vec<OrphanWorktree>, String> {
+    // 1. Collect all DB data while holding the lock
+    let (all_records, realms) = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+
+        let records = db.get_all_session_worktrees().unwrap_or_default();
+        let realms = db.get_all_realms().unwrap_or_default();
+        (records, realms)
+    };
+    // DB lock is dropped here
+
+    let record_paths: HashSet<String> = all_records
+        .iter()
+        .map(|r| {
+            r.worktree_path
+                .trim_end_matches('/')
+                .trim_end_matches('\\')
+                .to_string()
+        })
+        .collect();
+
+    let mut orphans = Vec::new();
+
+    // 2. Check for "record_only" — DB record exists but directory doesn't
+    for record in &all_records {
+        if !record.is_main_worktree && !std::path::Path::new(&record.worktree_path).is_dir() {
+            orphans.push(OrphanWorktree {
+                worktree_path: record.worktree_path.clone(),
+                branch_name: record.branch_name.clone(),
+                kind: "record_only".to_string(),
+                realm_path: None,
+                session_id: Some(record.session_id.clone()),
+            });
+        }
+    }
+
+    // 3. Check for "directory_only" — directory exists but no DB record
+    for realm in &realms {
+        let worktree_dir = std::path::Path::new(&realm.path)
+            .join(".hermes")
+            .join("worktrees");
+        if worktree_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&worktree_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let path_str = path
+                            .to_string_lossy()
+                            .trim_end_matches('/')
+                            .trim_end_matches('\\')
+                            .to_string();
+                        if !record_paths.contains(&path_str) {
+                            // Extract branch name from directory name: {session_prefix}_{branch}
+                            let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
+                            let branch = dir_name.split_once('_').map(|x| x.1.to_string());
+                            orphans.push(OrphanWorktree {
+                                worktree_path: path_str,
+                                branch_name: branch,
+                                kind: "directory_only".to_string(),
+                                realm_path: Some(realm.path.clone()),
+                                session_id: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(orphans)
+}
+
+#[tauri::command]
+pub fn git_worktree_disk_usage(worktree_path: String) -> Result<u64, String> {
+    // Validate the path is inside a .hermes/worktrees/ directory
+    let validated = validate_worktree_path(&worktree_path)?;
+
+    fn dir_size(path: &std::path::Path) -> u64 {
+        let mut size = 0;
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    size += dir_size(&path);
+                } else if let Ok(meta) = entry.metadata() {
+                    size += meta.len();
+                }
+            }
+        }
+        size
+    }
+
+    if !validated.is_dir() {
+        return Err(format!("Directory does not exist: {}", worktree_path));
+    }
+    Ok(dir_size(&validated))
+}
+
+#[tauri::command]
+pub fn git_cleanup_orphan_worktrees(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<CleanupResult>, String> {
+    let mut results = Vec::new();
+
+    for path in &paths {
+        // Validate the path is inside a .hermes/worktrees/ directory
+        let validated = match validate_worktree_path(path) {
+            Ok(v) => v,
+            Err(e) => {
+                results.push(CleanupResult {
+                    path: path.clone(),
+                    success: false,
+                    error: Some(e),
+                });
+                continue;
+            }
+        };
+
+        if validated.is_dir() {
+            // Try to remove the directory
+            match std::fs::remove_dir_all(&validated) {
+                Ok(()) => {
+                    // Also try to clean up any git worktree metadata
+                    // Find the parent repo (go up from .hermes/worktrees/xxx to repo root)
+                    if let Some(repo_root) = validated.ancestors().find(|a| a.join(".git").exists())
+                    {
+                        let _ = std::process::Command::new("git")
+                            .arg("-C")
+                            .arg(repo_root)
+                            .arg("worktree")
+                            .arg("prune")
+                            .output();
+                    }
+                    results.push(CleanupResult {
+                        path: path.clone(),
+                        success: true,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    results.push(CleanupResult {
+                        path: path.clone(),
+                        success: false,
+                        error: Some(e.to_string()),
+                    });
+                }
+            }
+        } else {
+            // Directory doesn't exist — clean up DB record if it exists
+            let db = state.db.lock().map_err(|e| format!("DB lock: {}", e))?;
+            let all = db.get_all_session_worktrees().unwrap_or_default();
+            for record in &all {
+                if record.worktree_path == *path {
+                    let _ = db.delete_session_worktree(&record.id);
+                }
+            }
+            drop(db);
+            results.push(CleanupResult {
+                path: path.clone(),
+                success: true,
+                error: None,
+            });
+        }
+    }
+
+    Ok(results)
 }

@@ -1,0 +1,457 @@
+/* ─── Worktree Overview Panel ──────────────────────────────────────── */
+
+.worktree-overview {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+/* ─── Search Row ──────────────────────────────────────────────────── */
+
+.worktree-overview-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.worktree-overview-search-input {
+  flex: 1;
+  background: var(--bg-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  outline: none;
+  box-sizing: border-box;
+}
+.worktree-overview-search-input:focus {
+  border-color: var(--accent);
+}
+.worktree-overview-search-input::placeholder {
+  color: var(--text-3);
+}
+
+.worktree-overview-refresh {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-md);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.worktree-overview-refresh:hover {
+  color: var(--text-0);
+  background: var(--bg-hover);
+}
+
+/* ─── Scrollable Content ──────────────────────────────────────────── */
+
+.worktree-overview-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ─── Realm (Project) Group ───────────────────────────────────────── */
+
+.worktree-overview-realm {
+  border-bottom: 1px solid var(--border);
+}
+
+.worktree-overview-realm-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+.worktree-overview-realm-header:hover {
+  background: var(--bg-hover);
+}
+
+.worktree-overview-realm-chevron {
+  color: var(--text-3);
+  font-size: 10px;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+}
+.worktree-overview-realm-chevron-open {
+  transform: rotate(90deg);
+}
+
+.worktree-overview-realm-icon {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.worktree-overview-realm-name {
+  color: var(--text-0);
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+.worktree-overview-realm-count {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+
+.worktree-overview-realm-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2) 4px calc(var(--space-2) + 14px);
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+}
+
+.worktree-overview-realm-path-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-overview-realm-body {
+  padding: 0 var(--space-1) var(--space-1);
+}
+
+/* ─── Individual Worktree Entry ───────────────────────────────────── */
+
+.worktree-overview-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-1);
+  border-radius: var(--radius-sm);
+  min-height: 28px;
+}
+.worktree-overview-entry:hover {
+  background: var(--bg-hover);
+}
+.worktree-overview-entry:hover .worktree-overview-actions {
+  opacity: 1;
+}
+
+.worktree-overview-entry-icon {
+  flex-shrink: 0;
+  color: var(--green);
+  font-size: var(--text-xs);
+  width: 14px;
+  text-align: center;
+}
+
+.worktree-overview-entry-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.worktree-overview-entry-branch {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-overview-entry-session {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+.worktree-overview-entry-meta {
+  font-size: 10px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.worktree-overview-main-badge {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.worktree-overview-disk-btn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.worktree-overview-disk-btn:hover {
+  color: var(--text-1);
+}
+
+.worktree-overview-disk-size {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+/* ─── Age & Stale Indicator ───────────────────────────────────────── */
+
+.worktree-overview-stale {
+  color: var(--yellow);
+  font-size: 0.75em;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.worktree-overview-age {
+  color: var(--text-3);
+  font-size: 0.8em;
+}
+
+.worktree-overview-activity {
+  color: var(--text-3);
+  font-size: 0.8em;
+}
+
+/* ─── Orphan Worktree ─────────────────────────────────────────────── */
+
+.worktree-overview-orphan {
+  border-left: 2px solid var(--yellow);
+  margin-left: var(--space-1);
+  padding-left: var(--space-1);
+}
+
+.worktree-overview-orphan-icon {
+  color: var(--yellow);
+  font-size: var(--text-xs);
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.worktree-overview-orphan-label {
+  color: var(--yellow);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.worktree-overview-orphan-kind {
+  color: var(--text-3);
+  font-size: 9px;
+  font-style: italic;
+}
+
+.worktree-overview-orphan-checkbox {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ─── Actions (hover-visible) ─────────────────────────────────────── */
+
+.worktree-overview-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+
+.worktree-overview-action-btn {
+  background: none;
+  border: 1px solid var(--border-light);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 5px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+.worktree-overview-action-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-0);
+}
+.worktree-overview-action-btn-open:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.worktree-overview-action-btn-remove:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+/* ─── Footer ──────────────────────────────────────────────────────── */
+
+.worktree-overview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.worktree-overview-footer-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ─── Cleanup Button ──────────────────────────────────────────────── */
+
+.worktree-overview-cleanup-btn {
+  background: var(--yellow-dim);
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius);
+  color: var(--yellow);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  text-align: center;
+  font-weight: 600;
+}
+.worktree-overview-cleanup-btn:hover:not(:disabled) {
+  background: var(--yellow);
+  color: var(--bg-0);
+}
+.worktree-overview-cleanup-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ─── Confirm Dialog (inline) ─────────────────────────────────────── */
+
+.worktree-overview-confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--yellow-dim);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-0);
+  margin: var(--space-1) var(--space-2);
+}
+
+.worktree-overview-confirm-text {
+  flex: 1;
+  color: var(--yellow);
+  font-weight: 600;
+}
+
+.worktree-overview-confirm-yes,
+.worktree-overview-confirm-no {
+  background: none;
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  line-height: 1.8;
+}
+.worktree-overview-confirm-yes {
+  color: var(--red);
+}
+.worktree-overview-confirm-destructive {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+  font-weight: 600;
+}
+.worktree-overview-confirm-yes:hover,
+.worktree-overview-confirm-destructive:hover {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--bg-0);
+}
+.worktree-overview-confirm-no {
+  color: var(--text-2);
+}
+.worktree-overview-confirm-no:hover {
+  background: var(--bg-hover);
+}
+
+/* ─── Cleanup Results ─────────────────────────────────────────────── */
+
+.worktree-overview-results {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.worktree-overview-result-success {
+  color: var(--green);
+  padding: 1px 0;
+}
+
+.worktree-overview-result-failure {
+  color: var(--red);
+  padding: 1px 0;
+  word-break: break-word;
+}
+
+/* ─── Loading / Empty States ──────────────────────────────────────── */
+
+.worktree-overview-loading {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.worktree-overview-empty {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.worktree-overview-error {
+  color: var(--red);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  background: var(--red-dim);
+  border-radius: var(--radius-sm);
+  margin: var(--space-1) var(--space-2);
+  word-break: break-word;
+}
