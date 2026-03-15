@@ -2048,6 +2048,25 @@ pub fn add_workspace_path(
 }
 
 #[tauri::command]
+pub fn remove_workspace_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    path: String,
+) -> Result<(), String> {
+    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+    let session = mgr
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    let mut s = session.session.lock().map_err(|e| e.to_string())?;
+    s.workspace_paths.retain(|p| p != &path);
+    let update = SessionUpdate::from(&*s);
+    let _ = app.emit("session-updated", &update);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn update_session_group(
     app: AppHandle,
     state: State<'_, AppState>,

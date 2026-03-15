@@ -342,6 +342,18 @@
   white-space: nowrap;
 }
 .ctx-workspace-extra { color: var(--accent); }
+.ctx-workspace-remove-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+.ctx-workspace-remove-btn:hover { color: var(--danger, #f87171); background: var(--bg-hover); }
 
 /* Compact workspace line */
 .ctx-workspace-compact {

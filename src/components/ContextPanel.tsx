@@ -4,7 +4,7 @@ import { fmt } from "../utils/platform";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SessionData, useExecutionMode, useSession } from "../state/SessionContext";
-import { addWorkspacePath as apiAddWorkspacePath } from "../api/sessions";
+import { addWorkspacePath as apiAddWorkspacePath, removeWorkspacePath as apiRemoveWorkspacePath } from "../api/sessions";
 import { getSessionProjects } from "../api/projects";
 import { addContextPin, removeContextPin } from "../api/context";
 import { getAllMemory, saveMemory, deleteMemory } from "../api/memory";
@@ -225,9 +225,9 @@ function DomainSection({ sessionId }: { sessionId: string }) {
   );
 }
 
-function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, onAddPath }: {
+function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, onAddPath, onRemovePath }: {
   cwd: string; extraPaths: string[];
-  workspaceInput: string; setWorkspaceInput: (v: string) => void; onAddPath: () => void;
+  workspaceInput: string; setWorkspaceInput: (v: string) => void; onAddPath: () => void; onRemovePath: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const basename = cwd.replace(/\\/g, "/").split("/").pop() || cwd;
@@ -245,7 +245,17 @@ function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, 
         <>
           <div className="ctx-workspace-path mono" style={{ fontSize: "var(--text-sm)", color: "var(--text-3)" }}>{cwd}</div>
           {extraPaths.map((p) => (
-            <div key={p} className="ctx-workspace-path ctx-workspace-extra mono">+ {p}</div>
+            <div key={p} className="ctx-workspace-path ctx-workspace-extra mono" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>+ {p}</span>
+              <button
+                className="ctx-workspace-remove-btn"
+                onClick={() => onRemovePath(p)}
+                title={`Remove ${p}`}
+                aria-label={`Remove workspace path ${p}`}
+              >
+                ×
+              </button>
+            </div>
           ))}
           <div className="ctx-workspace-add">
             <input
@@ -449,6 +459,14 @@ export function ContextPanel({ session }: ContextPanelProps) {
       console.warn("[ContextPanel] Failed to add workspace path:", err);
     }
   }, [session.id, workspaceInput]);
+
+  const removeWorkspacePath = useCallback(async (path: string) => {
+    try {
+      await apiRemoveWorkspacePath(session.id, path);
+    } catch (err) {
+      console.warn("[ContextPanel] Failed to remove workspace path:", err);
+    }
+  }, [session.id]);
 
   const { totalInput, totalOutput, totalCost, totalTokens } = useMemo(() => {
     let inp = 0, out = 0, cost = 0;
@@ -812,6 +830,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
           workspaceInput={workspaceInput}
           setWorkspaceInput={setWorkspaceInput}
           onAddPath={addWorkspacePath}
+          onRemovePath={removeWorkspacePath}
         />
 
         {/* Advanced — collapsible diagnostics */}

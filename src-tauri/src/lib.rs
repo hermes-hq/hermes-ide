@@ -321,6 +321,7 @@ pub fn run() {
             pty::update_session_description,
             pty::update_session_color,
             pty::add_workspace_path,
+            pty::remove_workspace_path,
             pty::update_session_group,
             pty::get_available_shells,
             pty::is_shell_foreground,

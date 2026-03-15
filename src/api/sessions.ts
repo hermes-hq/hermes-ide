@@ -114,6 +114,10 @@ export function addWorkspacePath(sessionId: string, path: string): Promise<void>
   return invoke("add_workspace_path", { sessionId, path });
 }
 
+export function removeWorkspacePath(sessionId: string, path: string): Promise<void> {
+  return invoke("remove_workspace_path", { sessionId, path });
+}
+
 export function writeToSession(sessionId: string, data: string): Promise<void> {
   return invoke("write_to_session", { sessionId, data });
 }
