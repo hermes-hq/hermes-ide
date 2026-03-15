@@ -626,6 +626,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
   const busyTimestamps = useRef<Map<string, number>>(new Map());
+  const lastAutoAttachCwd = useRef<Map<string, string>>(new Map());
   const closingSessionIds = useRef<Set<string>>(new Set());
   const closeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -663,7 +664,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // Auto-attach project on working_directory change
         // Uses exact path match with trailing separator to prevent
         // /home/user/app matching /home/user/app-legacy
-        if (session.working_directory) {
+        const prevCwd = lastAutoAttachCwd.current.get(session.id);
+        if (session.working_directory && session.working_directory !== prevCwd) {
+          lastAutoAttachCwd.current.set(session.id, session.working_directory);
           getProjects().then((projects) => {
             for (const project of projects) {
               const wd = session.working_directory;
