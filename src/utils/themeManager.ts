@@ -19,6 +19,7 @@ export const THEME_OPTIONS = [
   { id: "frosted-light", label: "Frosted Light" },
   { id: "frosted-dark", label: "Frosted Dark" },
   { id: "solarized", label: "Solarized Light" },
+  { id: "midnight", label: "Midnight Commander" },
 ] as const;
 
 export const UI_SCALE_OPTIONS = [

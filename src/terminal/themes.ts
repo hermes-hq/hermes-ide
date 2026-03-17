@@ -217,6 +217,18 @@ export const THEMES: Record<string, Record<string, string>> = {
     brightYellow: "#ffcc00", brightBlue: "#409cff", brightMagenta: "#da8fff",
     brightCyan: "#70d7ff", brightWhite: "#ffffff",
   },
+  midnight: {
+    background: "#000080",
+    foreground: "#d0d8e8",
+    selectionBackground: "#1a6caa66",
+    selectionForeground: "#ffffff",
+    cursor: "#ffdd44",
+    black: "#000060", red: "#ff4444", green: "#33cc33", yellow: "#ffdd44",
+    blue: "#5599ff", magenta: "#cc77ff", cyan: "#55cccc", white: "#d0d8e8",
+    brightBlack: "#3a3a8a", brightRed: "#ff6666", brightGreen: "#66ee66",
+    brightYellow: "#ffee77", brightBlue: "#77bbff", brightMagenta: "#dd99ff",
+    brightCyan: "#77dddd", brightWhite: "#f0f4ff",
+  },
   solarized: {
     background: "#fdf6e3",
     foreground: "#586e75",

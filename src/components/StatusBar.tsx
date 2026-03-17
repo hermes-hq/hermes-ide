@@ -255,6 +255,7 @@ const THEME_COLORS: Record<string, string> = {
   "frosted-light": "#007aff",
   "frosted-dark": "#0a84ff",
   solarized: "#268bd2",
+  midnight: "#1a6caa",
 };
 
 function ThemePicker() {

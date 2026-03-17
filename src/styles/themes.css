@@ -1499,6 +1499,88 @@ html[data-theme="frosted-dark"] .status-theme-popover {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
 }
 
+/* ─── Midnight Commander ──────────────────────────────────────── */
+html[data-theme="midnight"] {
+  --bg-0: #000080;
+  --bg-1: #00006a;
+  --bg-2: #000094;
+  --bg-3: #0000a8;
+  --bg-hover: #0000a8;
+  --bg-active: #0000c0;
+  --text-0: #f0f4ff;
+  --text-1: #d0d8e8;
+  --text-2: #8090b8;
+  --text-3: #506090;
+  --accent: #1a6caa;
+  --accent-dim: #1a6caa30;
+  --green: #33cc33;
+  --green-dim: #33cc3326;
+  --red: #ff4444;
+  --red-dim: #ff444426;
+  --yellow: #ffdd44;
+  --yellow-dim: #ffdd4426;
+  --violet: #cc77ff;
+  --violet-dim: #cc77ff26;
+  --error: #ff4444;
+  --border: #0000aa;
+  --border-light: #3333cc;
+  --scanline-opacity: 0;
+  --accent-glow: none;
+}
+
+/* ── Midnight: topbar — classic blue menu bar ────────────────── */
+html[data-theme="midnight"] .topbar {
+  background: #00006a;
+  border-bottom: 1px solid #3333cc;
+  box-shadow: 0 1px 4px #00004080;
+}
+
+/* ── Midnight: status bar — cyan info strip ──────────────────── */
+html[data-theme="midnight"] .status-bar {
+  background: #00006a;
+  border-top: 1px solid #3333cc;
+  box-shadow: 0 -1px 4px #00004080;
+}
+
+/* ── Midnight: activity bars ─────────────────────────────────── */
+html[data-theme="midnight"] .activity-bar-left {
+  border-right: 1px solid #3333cc;
+}
+
+html[data-theme="midnight"] .activity-bar-right {
+  border-left: 1px solid #3333cc;
+}
+
+/* ── Midnight: side panels ───────────────────────────────────── */
+html[data-theme="midnight"] .session-list,
+html[data-theme="midnight"] .process-panel,
+html[data-theme="midnight"] .git-panel-root,
+html[data-theme="midnight"] .file-explorer-panel,
+html[data-theme="midnight"] .search-panel {
+  border-right: 1px solid #3333cc;
+}
+
+/* ── Midnight: active items — yellow highlight ───────────────── */
+html[data-theme="midnight"] .session-item.active {
+  background: #1a6caa40;
+  border-left: 3px solid #ffdd44;
+  box-shadow: inset 0 0 10px #1a6caa20;
+}
+
+html[data-theme="midnight"] .activity-bar-tab.active {
+  box-shadow: 0 0 6px #1a6caa44;
+}
+
+/* ── Midnight: buttons ───────────────────────────────────────── */
+html[data-theme="midnight"] .topbar-btn {
+  border: 1px solid #3333cc;
+  background: #000094;
+}
+html[data-theme="midnight"] .topbar-btn:hover {
+  background: #0000c0;
+  border-color: #5555ee;
+}
+
 /* ─── Solarized Light ──────────────────────────────────────────── */
 html[data-theme="solarized"] {
   --bg-0: #fdf6e3;
