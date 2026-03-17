@@ -257,7 +257,9 @@ pub fn remove_worktree(
     // recursively destroy the entire project.
 
     // Guard 1: worktree_path must live under .hermes/worktrees/
-    if !worktree_path.contains(".hermes/worktrees/") {
+    // Normalize separators for cross-platform check (Windows uses backslashes)
+    let normalized = worktree_path.replace('\\', "/");
+    if !normalized.contains(".hermes/worktrees/") {
         return Err(format!(
             "SAFETY: refusing to remove path outside .hermes/worktrees/: '{}'",
             worktree_path
@@ -314,7 +316,7 @@ pub fn remove_worktree(
     let wt = Path::new(worktree_path);
     if wt.exists() {
         // Final safety re-check before the destructive operation
-        if !worktree_path.contains(".hermes/worktrees/") {
+        if !normalized.contains(".hermes/worktrees/") {
             return Err(format!(
                 "SAFETY: last-resort guard prevented remove_dir_all on: '{}'",
                 worktree_path
