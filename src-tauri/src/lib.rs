@@ -584,6 +584,7 @@ pub fn run() {
             plugins::plugin_fetch_url,
             // Clipboard
             clipboard::copy_image_to_clipboard,
+            clipboard::read_image_base64,
             // Transcript watching
             transcript::start_transcript_watcher,
             transcript::stop_transcript_watcher,

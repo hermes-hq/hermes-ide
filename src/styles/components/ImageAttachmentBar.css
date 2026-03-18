@@ -53,11 +53,15 @@
 
 /* ─── Thumbnail buttons ────────────────────────────────── */
 
+.image-attachment-loading {
+  background: var(--bg-3);
+}
+
 .image-attachment-remove,
 .image-attachment-expand {
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -75,20 +79,19 @@
 }
 
 .image-attachment-remove {
-  top: -4px;
-  right: -4px;
+  top: -3px;
+  right: -3px;
   background: var(--red);
   color: #fff;
 }
 
 .image-attachment-remove:hover {
-  background: var(--red);
   filter: brightness(1.2);
 }
 
 .image-attachment-expand {
-  top: -4px;
-  left: -4px;
+  top: -3px;
+  left: -3px;
   background: var(--bg-3);
   color: var(--text-1);
 }
