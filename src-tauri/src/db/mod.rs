@@ -2091,6 +2091,12 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "window_height",
     "window_x",
     "window_y",
+    // Settings panel geometry
+    "settings_panel_width",
+    "settings_panel_height",
+    // New session creator modal geometry
+    "session_creator_panel_width",
+    "session_creator_panel_height",
     // Appearance
     "theme",
     "ui_scale",

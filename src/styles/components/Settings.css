@@ -17,11 +17,43 @@
   border-radius: var(--radius-lg);
   width: 560px;
   max-height: 70vh;
+  position: relative;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   animation: paletteIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Settings Panel Resize Handles ───────────────────────────────── */
+.settings-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+  background: transparent;
+}
+
+.settings-resize-handle:hover {
+  background: var(--accent-dim);
+}
+
+.settings-resize-handle-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+  background: transparent;
+}
+
+.settings-resize-handle-bottom:hover {
+  background: var(--accent-dim);
 }
 
 .settings-header {

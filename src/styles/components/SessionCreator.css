@@ -9,6 +9,38 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+/* ─── Session Creator Resize Handles ───────────────────────────── */
+.session-creator-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+  background: transparent;
+}
+
+.session-creator-resize-handle:hover {
+  background: var(--accent-dim);
+}
+
+.session-creator-resize-handle-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+  background: transparent;
+}
+
+.session-creator-resize-handle-bottom:hover {
+  background: var(--accent-dim);
 }
 
 .session-creator-header {
