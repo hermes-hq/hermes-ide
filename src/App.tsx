@@ -24,7 +24,7 @@ import { SessionProvider, useSession, useActiveSession, useSessionList, useSideb
 import { getSetting } from "./api/settings";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
-import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, SettingsIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
 import type { SessionView } from "./components/SessionList";
 
 import { ProcessPanel } from "./components/ProcessPanel";
@@ -654,7 +654,10 @@ function AppContent() {
               }
             }}
             topAction={{ icon: PlusIcon, label: `New Session (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen({}) }}
-            bottomAction={{ icon: SettingsIcon, label: "Settings", onClick: () => setSettingsOpen("general") }}
+            bottomActions={[
+              { icon: PluginsIcon, label: "Plugins", onClick: () => setSettingsOpen("plugins") },
+              { icon: SettingsIcon, label: "Settings", onClick: () => setSettingsOpen("general") },
+            ]}
           />
         )}
         {/* Session list sidebar — sub-view buttons are inline under the active session */}
