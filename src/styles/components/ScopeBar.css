@@ -25,7 +25,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 1px 8px;
+  padding: 3px 8px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -40,6 +40,13 @@
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+  align-self: center;
+}
+
+.scope-pill-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
 }
 
 .scope-pill-name {
@@ -50,9 +57,10 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  max-width: 120px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -60,7 +68,6 @@
 
 .scope-pill-branch svg {
   flex-shrink: 0;
-  opacity: 0.7;
 }
 
 .scope-pill-status {
