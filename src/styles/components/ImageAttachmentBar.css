@@ -1,14 +1,20 @@
-/* ─── Image Attachment Bar ──────────────────────────────── */
+/* ─── Image Attachment Bar (floating overlay at bottom of terminal) ── */
 
 .image-attachment-bar {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--space-2);
-  padding: 6px 12px;
+  padding: 8px 10px;
   background: var(--bg-1);
-  border-top: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.3);
   overflow-x: auto;
-  flex-shrink: 0;
+  z-index: 10;
 }
 
 .image-attachment-bar::-webkit-scrollbar { height: 2px; }
@@ -19,47 +25,52 @@
 .image-attachment-thumb {
   position: relative;
   flex-shrink: 0;
-  width: 64px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.1s;
+}
+
+.image-attachment-thumb:hover {
+  border-color: var(--accent);
 }
 
 .image-attachment-img {
-  width: 64px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   object-fit: cover;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  transition: border-color 0.1s, opacity 0.1s;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
-.image-attachment-img:hover {
-  border-color: var(--accent);
-  opacity: 0.9;
+.image-attachment-loading {
+  width: 36px;
+  height: 36px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  flex-shrink: 0;
 }
 
 .image-attachment-name {
-  font-size: 9px;
-  color: var(--text-3);
-  max-width: 64px;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: center;
 }
 
 /* ─── Thumbnail buttons ────────────────────────────────── */
 
-.image-attachment-loading {
-  background: var(--bg-3);
-}
-
-.image-attachment-remove,
-.image-attachment-expand {
+.image-attachment-remove {
   position: absolute;
+  top: -5px;
+  right: -5px;
   width: 14px;
   height: 14px;
   display: flex;
@@ -70,19 +81,13 @@
   cursor: pointer;
   padding: 0;
   opacity: 0;
-  transition: opacity 0.1s, background 0.1s;
-}
-
-.image-attachment-thumb:hover .image-attachment-remove,
-.image-attachment-thumb:hover .image-attachment-expand {
-  opacity: 1;
-}
-
-.image-attachment-remove {
-  top: -3px;
-  right: -3px;
+  transition: opacity 0.1s;
   background: var(--red);
   color: #fff;
+}
+
+.image-attachment-thumb:hover .image-attachment-remove {
+  opacity: 1;
 }
 
 .image-attachment-remove:hover {
@@ -90,10 +95,26 @@
 }
 
 .image-attachment-expand {
-  top: -3px;
-  left: -3px;
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
   background: var(--bg-3);
   color: var(--text-1);
+}
+
+.image-attachment-thumb:hover .image-attachment-expand {
+  opacity: 1;
 }
 
 .image-attachment-expand:hover {

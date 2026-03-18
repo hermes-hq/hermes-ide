@@ -327,9 +327,6 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           />
         )}
       </div>
-      {isAiSession && attachedImages.length > 0 && (
-        <ImageAttachmentBar images={attachedImages} onRemove={handleRemoveImage} />
-      )}
       <div className="split-pane-content">
         <div
           className="split-pane-terminal"
@@ -337,6 +334,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
         >
           <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
         </div>
+        {isAiSession && attachedImages.length > 0 && (
+          <ImageAttachmentBar images={attachedImages} onRemove={handleRemoveImage} />
+        )}
       </div>
 
       {/* Drag capture overlay — sits above xterm canvas during drags */}
