@@ -7,8 +7,6 @@ import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
 import { THEME_OPTIONS, applyTheme } from "../utils/themeManager";
-import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
-import { isHermesWorktreePath } from "../utils/worktree";
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -43,8 +41,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   const { dispatch } = useSession();
   const mode = useExecutionMode(active?.id ?? null);
   const [, setTick] = useState(0);
-  const { branch: activeBranch, allBranches } = useSessionGitSummary(active?.id ?? null, !!active, active?.working_directory);
-  const isLinkedWorktree = active?.working_directory ? isHermesWorktreePath(active.working_directory) : false;
 
   const handleStatusBarAction = useCallback((actionId: string) => {
     switch (actionId) {
@@ -114,26 +110,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
               {active.detected_agent.model && <span className="status-bar-model"> ({active.detected_agent.model})</span>}
               {active.phase === "busy" && <span className="status-bar-busy">working</span>}
               {active.phase === "needs_input" && <span className="status-bar-needs-input">needs input</span>}
-            </span>
-          </>
-        )}
-        {activeBranch && (
-          <>
-            <span className="status-bar-divider" />
-            <span className="status-bar-branch" title={allBranches.length > 1
-              ? allBranches.map((b) => `${b.projectName}: ${b.branch}`).join('\n')
-              : isLinkedWorktree ? `${activeBranch} (linked worktree)\n${active?.working_directory}` : `${activeBranch} (main checkout)`}>
-              <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" aria-hidden="true">
-                <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
-              </svg>
-              {allBranches.length > 1
-                ? allBranches.map((b) => b.branch).join(' / ')
-                : activeBranch}
-              {isLinkedWorktree && (
-                <svg className="status-bar-branch-link" viewBox="0 0 16 16" fill="currentColor" width="10" height="10" aria-hidden="true">
-                  <path d="M4.75 3.5a3.25 3.25 0 0 0 0 6.5h1.5a.75.75 0 0 1 0 1.5h-1.5a4.75 4.75 0 0 1 0-9.5h1.5a.75.75 0 0 1 0 1.5ZM11.25 3.5a4.75 4.75 0 0 1 0 9.5h-1.5a.75.75 0 0 1 0-1.5h1.5a3.25 3.25 0 0 0 0-6.5h-1.5a.75.75 0 0 1 0-1.5Zm-6 4.25a.75.75 0 0 0 0 1.5h5.5a.75.75 0 0 0 0-1.5Z" />
-                </svg>
-              )}
             </span>
           </>
         )}

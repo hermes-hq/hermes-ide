@@ -4,6 +4,7 @@ import { useSessionProjects, Project } from "../hooks/useSessionProjects";
 import { useSession } from "../state/SessionContext";
 import { nudgeProjectContext } from "../api/projects";
 import { ProjectPicker } from "./ProjectPicker";
+import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",
@@ -33,6 +34,7 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
   const activeSession = state.sessions[sessionId];
   const { projects, detach } = useSessionProjects(sessionId);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const { allBranches } = useSessionGitSummary(sessionId, true, activeSession?.working_directory);
 
   if (projects.length === 0 && !pickerOpen) {
     return (
@@ -54,26 +56,37 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
   return (
     <>
       <div className="scope-bar">
-        {projects.map((project) => (
-          <div key={project.id} className="scope-pill" title={project.path}>
-            <span
-              className="scope-pill-dot"
-              style={{ background: getLangColor(project) }}
-            />
-            <span className="scope-pill-name">{project.name}</span>
-            <span className="scope-pill-status" data-status={project.scan_status}>
-              {project.scan_status === "pending" ? "..." : ""}
-            </span>
-            <button
-              className="scope-pill-close"
-              onClick={() => detach(project.id).then(() => nudgeProjectContext(sessionId).catch(console.warn))}
-              title="Remove project"
-              aria-label="Remove project"
-            >
-              &times;
-            </button>
-          </div>
-        ))}
+        {projects.map((project) => {
+          const branchInfo = allBranches.find(b => b.projectName === project.name);
+          return (
+            <div key={project.id} className="scope-pill" title={project.path}>
+              <span
+                className="scope-pill-dot"
+                style={{ background: getLangColor(project) }}
+              />
+              <span className="scope-pill-name">{project.name}</span>
+              {branchInfo && (
+                <span className="scope-pill-branch" title={branchInfo.branch}>
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10" aria-hidden="true">
+                    <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
+                  </svg>
+                  {branchInfo.branch}
+                </span>
+              )}
+              <span className="scope-pill-status" data-status={project.scan_status}>
+                {project.scan_status === "pending" ? "..." : ""}
+              </span>
+              <button
+                className="scope-pill-close"
+                onClick={() => detach(project.id).then(() => nudgeProjectContext(sessionId).catch(console.warn))}
+                title="Remove project"
+                aria-label="Remove project"
+              >
+                &times;
+              </button>
+            </div>
+          );
+        })}
         {activeSession?.ai_provider && (
           <span className="scope-bar-provider">{activeSession.ai_provider}</span>
         )}
