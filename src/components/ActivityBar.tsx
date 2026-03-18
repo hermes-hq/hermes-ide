@@ -8,16 +8,26 @@ export interface ActivityBarTab {
   badge?: number;
 }
 
+interface ActivityBarAction {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}
+
 interface ActivityBarProps {
   side: "left" | "right";
   tabs: ActivityBarTab[];
   activeTabId: string | null;
   onTabClick: (tabId: string) => void;
-  topAction?: { icon: ReactNode; label: string; onClick: () => void };
-  bottomAction?: { icon: ReactNode; label: string; onClick: () => void };
+  topAction?: ActivityBarAction;
+  bottomActions?: ActivityBarAction[];
+  /** @deprecated Use bottomActions instead */
+  bottomAction?: ActivityBarAction;
 }
 
-export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, bottomAction }: ActivityBarProps) {
+export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, bottomActions, bottomAction }: ActivityBarProps) {
+  const resolvedBottomActions = bottomActions ?? (bottomAction ? [bottomAction] : []);
+
   return (
     <div className={`activity-bar activity-bar-${side}`}>
       {topAction && (
@@ -45,16 +55,19 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, bo
           )}
         </button>
       ))}
-      {bottomAction && (
+      {resolvedBottomActions.length > 0 && (
         <>
           <div className="activity-bar-bottom-spacer" />
-          <button
-            className="activity-bar-action"
-            onClick={bottomAction.onClick}
-            title={bottomAction.label}
-          >
-            {bottomAction.icon}
-          </button>
+          {resolvedBottomActions.map((action, i) => (
+            <button
+              key={i}
+              className="activity-bar-action"
+              onClick={action.onClick}
+              title={action.label}
+            >
+              {action.icon}
+            </button>
+          ))}
         </>
       )}
     </div>
@@ -116,6 +129,14 @@ export const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
     <line x1="8" y1="3" x2="8" y2="13" />
     <line x1="3" y1="8" x2="13" y2="8" />
+  </svg>
+);
+
+export const PluginsIcon = (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="7" width="12" height="9" rx="2" />
+    <path d="M6.5 7V5a1.5 1.5 0 1 1 1.5 1.5" />
+    <path d="M11.5 7V5a1.5 1.5 0 1 0-1.5 1.5" />
   </svg>
 );
 
