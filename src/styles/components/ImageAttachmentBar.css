@@ -1,0 +1,151 @@
+/* ─── Image Attachment Bar ──────────────────────────────── */
+
+.image-attachment-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.image-attachment-bar::-webkit-scrollbar { height: 2px; }
+.image-attachment-bar::-webkit-scrollbar-thumb { background: var(--bg-3); }
+
+/* ─── Thumbnail ────────────────────────────────────────── */
+
+.image-attachment-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.image-attachment-img {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.1s, opacity 0.1s;
+}
+
+.image-attachment-img:hover {
+  border-color: var(--accent);
+  opacity: 0.9;
+}
+
+.image-attachment-name {
+  font-size: 9px;
+  color: var(--text-3);
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* ─── Thumbnail buttons ────────────────────────────────── */
+
+.image-attachment-remove,
+.image-attachment-expand {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.image-attachment-thumb:hover .image-attachment-remove,
+.image-attachment-thumb:hover .image-attachment-expand {
+  opacity: 1;
+}
+
+.image-attachment-remove {
+  top: -4px;
+  right: -4px;
+  background: var(--red);
+  color: #fff;
+}
+
+.image-attachment-remove:hover {
+  background: var(--red);
+  filter: brightness(1.2);
+}
+
+.image-attachment-expand {
+  top: -4px;
+  left: -4px;
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.image-attachment-expand:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ─── Expanded overlay ─────────────────────────────────── */
+
+.image-attachment-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.image-attachment-overlay-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  cursor: default;
+}
+
+.image-attachment-overlay-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.image-attachment-overlay-close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.1s;
+}
+
+.image-attachment-overlay-close:hover {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}

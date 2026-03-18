@@ -4,6 +4,7 @@ import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
+import { ImageAttachmentBar, ImageAttachment } from "./ImageAttachmentBar";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
@@ -82,6 +83,11 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
   const [dropZone, setDropZone] = useState<DropZone>(null);
   const [fileDragOver, setFileDragOver] = useState(false);
   const [imageDragOver, setImageDragOver] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<ImageAttachment[]>([]);
+
+  const handleRemoveImage = useCallback((path: string) => {
+    setAttachedImages((prev) => prev.filter((img) => img.path !== path));
+  }, []);
   // Keep refs for values used inside the Tauri handler to avoid re-registering
   const layoutRef = useRef(state.layout.root);
   layoutRef.current = state.layout.root;
@@ -169,6 +175,16 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
               // Write path directly to terminal — bypasses WebView paste confirmation
               const quoted = firstImage.includes(" ") ? `"${firstImage}"` : firstImage;
               writeTextToTerminal(sessionId, quoted + " ");
+
+              // Add all images to the attachment preview bar
+              const newAttachments: ImageAttachment[] = imagePaths.map((p) => ({
+                path: p,
+                name: p.split("/").pop() || p,
+              }));
+              setAttachedImages((prev) => {
+                const existing = new Set(prev.map((a) => a.path));
+                return [...prev, ...newAttachments.filter((a) => !existing.has(a.path))];
+              });
             }
 
             // Insert remaining image paths (if multiple images) and all non-image paths
@@ -278,6 +294,8 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
 
   const { showMenu: showPaneMenu } = useContextMenu(handlePaneHeaderAction);
 
+  const isAiSession = !!(session?.detected_agent || session?.ai_provider);
+
   if (!session) return null;
 
   return (
@@ -309,6 +327,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           />
         )}
       </div>
+      {isAiSession && attachedImages.length > 0 && (
+        <ImageAttachmentBar images={attachedImages} onRemove={handleRemoveImage} />
+      )}
       <div className="split-pane-content">
         <div
           className="split-pane-terminal"
