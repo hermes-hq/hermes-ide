@@ -1,4 +1,4 @@
-/* ─── Image Attachment Bar (floating overlay at bottom of terminal) ── */
+/* ─── Image Attachment Bar (floating confirmation at bottom of terminal) ── */
 
 .image-attachment-bar {
   position: absolute;
@@ -8,7 +8,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 8px 10px;
+  padding: 6px 10px;
   background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -20,15 +20,43 @@
 .image-attachment-bar::-webkit-scrollbar { height: 2px; }
 .image-attachment-bar::-webkit-scrollbar-thumb { background: var(--bg-3); }
 
+.image-attachment-label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.image-attachment-dismiss {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.image-attachment-dismiss:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
 /* ─── Thumbnail ────────────────────────────────────────── */
 
 .image-attachment-thumb {
-  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
+  padding: 3px 8px 3px 3px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -41,16 +69,16 @@
 }
 
 .image-attachment-img {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   object-fit: cover;
   border-radius: 3px;
   flex-shrink: 0;
 }
 
 .image-attachment-loading {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 3px;
   background: var(--bg-3);
   flex-shrink: 0;
@@ -59,67 +87,10 @@
 .image-attachment-name {
   font-size: var(--text-xs);
   color: var(--text-2);
-  max-width: 100px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ─── Thumbnail buttons ────────────────────────────────── */
-
-.image-attachment-remove {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 14px;
-  height: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  opacity: 0;
-  transition: opacity 0.1s;
-  background: var(--red);
-  color: #fff;
-}
-
-.image-attachment-thumb:hover .image-attachment-remove {
-  opacity: 1;
-}
-
-.image-attachment-remove:hover {
-  filter: brightness(1.2);
-}
-
-.image-attachment-expand {
-  position: absolute;
-  top: -5px;
-  left: -5px;
-  width: 14px;
-  height: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  opacity: 0;
-  transition: opacity 0.1s;
-  background: var(--bg-3);
-  color: var(--text-1);
-}
-
-.image-attachment-thumb:hover .image-attachment-expand {
-  opacity: 1;
-}
-
-.image-attachment-expand:hover {
-  background: var(--accent);
-  color: #fff;
 }
 
 /* ─── Expanded overlay ─────────────────────────────────── */

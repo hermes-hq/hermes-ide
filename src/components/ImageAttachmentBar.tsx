@@ -1,7 +1,7 @@
 import "../styles/components/ImageAttachmentBar.css";
 import { useState, useCallback, useEffect } from "react";
 import { readImageBase64 } from "../api/clipboard";
-import { X, Maximize2 } from "lucide-react";
+import { X } from "lucide-react";
 
 export interface ImageAttachment {
   path: string;
@@ -10,7 +10,7 @@ export interface ImageAttachment {
 
 interface ImageAttachmentBarProps {
   images: ImageAttachment[];
-  onRemove: (path: string) => void;
+  onDismiss: () => void;
 }
 
 /** Load image as base64 data URI via Rust backend. */
@@ -26,36 +26,16 @@ function useImageDataUri(path: string): string | null {
   return dataUri;
 }
 
-function Thumbnail({ img, onExpand, onRemove }: { img: ImageAttachment; onExpand: (path: string) => void; onRemove: (path: string) => void }) {
+function Thumbnail({ img, onExpand }: { img: ImageAttachment; onExpand: (path: string) => void }) {
   const dataUri = useImageDataUri(img.path);
 
   return (
-    <div className="image-attachment-thumb">
+    <div className="image-attachment-thumb" onClick={() => onExpand(img.path)} title={`${img.name} — Click to preview`}>
       {dataUri ? (
-        <img
-          src={dataUri}
-          alt={img.name}
-          className="image-attachment-img"
-          onClick={() => onExpand(img.path)}
-          title={`${img.name} — Click to preview`}
-        />
+        <img src={dataUri} alt={img.name} className="image-attachment-img" />
       ) : (
         <div className="image-attachment-img image-attachment-loading" />
       )}
-      <button
-        className="image-attachment-expand"
-        onClick={() => onExpand(img.path)}
-        title="Preview"
-      >
-        <Maximize2 size={8} strokeWidth={2.5} />
-      </button>
-      <button
-        className="image-attachment-remove"
-        onClick={() => onRemove(img.path)}
-        title="Remove"
-      >
-        <X size={8} strokeWidth={2.5} />
-      </button>
       <span className="image-attachment-name">{img.name}</span>
     </div>
   );
@@ -68,17 +48,9 @@ function ExpandedPreview({ path, onClose }: { path: string; onClose: () => void 
     <div className="image-attachment-overlay" onClick={onClose}>
       <div className="image-attachment-overlay-content" onClick={(e) => e.stopPropagation()}>
         {dataUri && (
-          <img
-            src={dataUri}
-            alt="Preview"
-            className="image-attachment-overlay-img"
-          />
+          <img src={dataUri} alt="Preview" className="image-attachment-overlay-img" />
         )}
-        <button
-          className="image-attachment-overlay-close"
-          onClick={onClose}
-          title="Close"
-        >
+        <button className="image-attachment-overlay-close" onClick={onClose} title="Close">
           <X size={14} strokeWidth={2} />
         </button>
       </div>
@@ -86,7 +58,7 @@ function ExpandedPreview({ path, onClose }: { path: string; onClose: () => void 
   );
 }
 
-export function ImageAttachmentBar({ images, onRemove }: ImageAttachmentBarProps) {
+export function ImageAttachmentBar({ images, onDismiss }: ImageAttachmentBarProps) {
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
   const handleExpand = useCallback((path: string) => {
@@ -102,9 +74,15 @@ export function ImageAttachmentBar({ images, onRemove }: ImageAttachmentBarProps
   return (
     <>
       <div className="image-attachment-bar">
+        <span className="image-attachment-label">
+          {images.length === 1 ? "Image attached" : `${images.length} images attached`}
+        </span>
         {images.map((img) => (
-          <Thumbnail key={img.path} img={img} onExpand={handleExpand} onRemove={onRemove} />
+          <Thumbnail key={img.path} img={img} onExpand={handleExpand} />
         ))}
+        <button className="image-attachment-dismiss" onClick={onDismiss} title="Dismiss">
+          <X size={12} strokeWidth={2} />
+        </button>
       </div>
 
       {expandedImage && (

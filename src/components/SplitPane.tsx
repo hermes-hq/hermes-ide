@@ -85,9 +85,18 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
   const [imageDragOver, setImageDragOver] = useState(false);
   const [attachedImages, setAttachedImages] = useState<ImageAttachment[]>([]);
 
-  const handleRemoveImage = useCallback((path: string) => {
-    setAttachedImages((prev) => prev.filter((img) => img.path !== path));
+  const handleDismissImages = useCallback(() => {
+    setAttachedImages([]);
   }, []);
+
+  // Auto-dismiss image preview when session becomes busy (message was sent)
+  const prevPhaseRef = useRef(session?.phase);
+  useEffect(() => {
+    if (prevPhaseRef.current === "needs_input" && session?.phase === "busy" && attachedImages.length > 0) {
+      setAttachedImages([]);
+    }
+    prevPhaseRef.current = session?.phase;
+  }, [session?.phase, attachedImages.length]);
   // Keep refs for values used inside the Tauri handler to avoid re-registering
   const layoutRef = useRef(state.layout.root);
   layoutRef.current = state.layout.root;
@@ -335,7 +344,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
         </div>
         {isAiSession && attachedImages.length > 0 && (
-          <ImageAttachmentBar images={attachedImages} onRemove={handleRemoveImage} />
+          <ImageAttachmentBar images={attachedImages} onDismiss={handleDismissImages} />
         )}
       </div>
 
