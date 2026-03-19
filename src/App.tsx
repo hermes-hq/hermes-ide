@@ -614,8 +614,10 @@ function AppContent() {
         {!ui.flowMode && (
           <ActivityBar
             side="left"
-            tabs={[
+            pinnedTabs={[
               { id: "sessions", label: `Sessions (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
+            ]}
+            tabs={[
               ...pluginPanels
                 .filter(p => (p.side === "left" || p.side === "bottom") && !pluginSessionActions.some(a => a.panelId === p.id))
                 .map(p => ({

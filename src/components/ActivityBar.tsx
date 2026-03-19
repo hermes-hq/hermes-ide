@@ -21,39 +21,57 @@ interface ActivityBarProps {
   activeTabId: string | null;
   onTabClick: (tabId: string) => void;
   topAction?: ActivityBarAction;
+  pinnedTabs?: ActivityBarTab[];
   bottomActions?: ActivityBarAction[];
   /** @deprecated Use bottomActions instead */
   bottomAction?: ActivityBarAction;
 }
 
-export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, bottomActions, bottomAction }: ActivityBarProps) {
+export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, pinnedTabs, bottomActions, bottomAction }: ActivityBarProps) {
   const resolvedBottomActions = bottomActions ?? (bottomAction ? [bottomAction] : []);
 
   return (
     <div className={`activity-bar activity-bar-${side}`}>
       {topAction && (
-        <>
-          <button
-            className="activity-bar-action"
-            onClick={topAction.onClick}
-            title={topAction.label}
-          >
-            {topAction.icon}
-          </button>
-          <div className="activity-bar-separator" />
-        </>
+        <button
+          className={`activity-bar-action activity-bar-expandable activity-bar-expand-${side}`}
+          onClick={topAction.onClick}
+        >
+          <span className="activity-bar-icon-wrap">{topAction.icon}</span>
+          <span className="activity-bar-label">{topAction.label}</span>
+        </button>
+      )}
+      {pinnedTabs && pinnedTabs.map((tab) => (
+        <button
+          key={tab.id}
+          className={`activity-bar-tab activity-bar-expandable activity-bar-expand-${side}${activeTabId === tab.id ? " activity-bar-tab-active" : ""}`}
+          onClick={() => onTabClick(tab.id)}
+        >
+          <span className="activity-bar-icon-wrap">
+            {tab.icon}
+            {tab.badge != null && tab.badge > 0 && (
+              <span className="activity-bar-badge">{tab.badge}</span>
+            )}
+          </span>
+          <span className="activity-bar-label">{tab.label}</span>
+        </button>
+      ))}
+      {(topAction || (pinnedTabs && pinnedTabs.length > 0)) && (
+        <div className="activity-bar-separator" />
       )}
       {tabs.map((tab) => (
         <button
           key={tab.id}
-          className={`activity-bar-tab${activeTabId === tab.id ? " activity-bar-tab-active" : ""}`}
+          className={`activity-bar-tab activity-bar-expandable activity-bar-expand-${side}${activeTabId === tab.id ? " activity-bar-tab-active" : ""}`}
           onClick={() => onTabClick(tab.id)}
-          title={tab.label}
         >
-          {tab.icon}
-          {tab.badge != null && tab.badge > 0 && (
-            <span className="activity-bar-badge">{tab.badge}</span>
-          )}
+          <span className="activity-bar-icon-wrap">
+            {tab.icon}
+            {tab.badge != null && tab.badge > 0 && (
+              <span className="activity-bar-badge">{tab.badge}</span>
+            )}
+          </span>
+          <span className="activity-bar-label">{tab.label}</span>
         </button>
       ))}
       {resolvedBottomActions.length > 0 && (
@@ -62,11 +80,11 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, topAction, bo
           {resolvedBottomActions.map((action, i) => (
             <button
               key={i}
-              className="activity-bar-action"
+              className={`activity-bar-action activity-bar-expandable activity-bar-expand-${side}`}
               onClick={action.onClick}
-              title={action.label}
             >
-              {action.icon}
+              <span className="activity-bar-icon-wrap">{action.icon}</span>
+              <span className="activity-bar-label">{action.label}</span>
             </button>
           ))}
         </>

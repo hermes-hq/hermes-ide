@@ -11,6 +11,8 @@
   flex-shrink: 0;
   user-select: none;
   -webkit-user-select: none;
+  z-index: 10;
+  overflow: visible;
 }
 
 .activity-bar-left {
@@ -25,33 +27,56 @@
 
 .activity-bar-tab {
   position: relative;
-  width: var(--btn-size);
   height: var(--btn-size);
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0;
   background: none;
   border: none;
   border-radius: var(--radius);
   color: var(--text-3);
   cursor: pointer;
-  padding: 0;
-  transition: background 0.1s, color 0.1s;
+  padding: 0 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: var(--btn-size);
+  transition: max-width 0.2s ease, background 0.15s, color 0.15s, padding 0.2s ease, gap 0.2s ease, height 0.2s ease, margin 0.2s ease;
 }
 
 .activity-bar-tab svg,
 .activity-bar-action svg {
   width: var(--icon-size);
   height: var(--icon-size);
+  flex-shrink: 0;
 }
 
 .activity-bar-tab:hover {
   background: var(--bg-hover);
   color: var(--text-1);
+  max-width: 180px;
+  gap: 7px;
+  padding: 0 8px;
+  height: calc(var(--btn-size) + 4px);
+  margin: 2px 0;
 }
 
 .activity-bar-tab-active {
   color: var(--text-0);
+}
+
+/* ─── Expand direction ───────────────────────────────────── */
+
+.activity-bar-left .activity-bar-tab,
+.activity-bar-left .activity-bar-action {
+  align-self: flex-start;
+  margin-left: 4px;
+}
+
+.activity-bar-right .activity-bar-tab,
+.activity-bar-right .activity-bar-action {
+  align-self: flex-end;
+  margin-right: 4px;
+  flex-direction: row-reverse;
 }
 
 /* Accent indicator bar on the outer edge */
@@ -77,12 +102,42 @@
   border-radius: 1px;
 }
 
+/* ─── Icon wrap ──────────────────────────────────────────── */
+
+.activity-bar-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  flex-shrink: 0;
+}
+
+/* ─── Label (hidden until hover) ─────────────────────────── */
+
+.activity-bar-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--text-1);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.activity-bar-tab:hover .activity-bar-label,
+.activity-bar-action:hover .activity-bar-label {
+  opacity: 1;
+}
+
 /* ─── Badge ──────────────────────────────────────────────── */
 
 .activity-bar-badge {
   position: absolute;
-  top: 1px;
-  right: 0;
+  top: -2px;
+  right: -4px;
   min-width: 14px;
   height: 14px;
   font-size: 8px;
@@ -97,26 +152,34 @@
   font-family: var(--font-ui);
 }
 
-/* ─── Top action button (+) ──────────────────────────────── */
+/* ─── Action button (+, Settings, Plugins) ───────────────── */
 
 .activity-bar-action {
-  width: var(--btn-size);
+  position: relative;
   height: var(--btn-size);
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0;
   background: none;
   border: none;
   border-radius: var(--radius);
   color: var(--text-2);
   cursor: pointer;
-  padding: 0;
-  transition: background 0.1s, color 0.1s;
+  padding: 0 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: var(--btn-size);
+  transition: max-width 0.2s ease, background 0.15s, color 0.15s, padding 0.2s ease, gap 0.2s ease, height 0.2s ease, margin 0.2s ease;
 }
 
 .activity-bar-action:hover {
   background: var(--bg-hover);
   color: var(--text-0);
+  max-width: 180px;
+  gap: 7px;
+  padding: 0 8px;
+  height: calc(var(--btn-size) + 4px);
+  margin: 2px 0;
 }
 
 /* ─── Separator ──────────────────────────────────────────── */
