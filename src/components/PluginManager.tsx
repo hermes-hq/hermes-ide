@@ -7,7 +7,8 @@ import { hasUpdate, meetsMinVersion } from "../plugins/semver";
 import { PluginLoader } from "../plugins/PluginLoader";
 import type { PluginRuntime } from "../plugins/PluginRuntime";
 import { PluginSettingsForm } from "./PluginSettingsForm";
-import { REGISTRY_URL } from "../plugins/constants";
+import { REGISTRY_URL, DEFAULT_PLUGINS } from "../plugins/constants";
+import { getSetting, setSetting } from "../api/settings";
 
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 	"storage": "Read and write persistent data on your device",
@@ -165,6 +166,19 @@ export function PluginManager({ runtime, onConfirmUpdate, refreshTrigger }: Plug
 			await invoke("cleanup_plugin_data", { pluginId });
 		} catch {
 			// DB cleanup is best-effort
+		}
+		// Track explicit uninstall so default plugins don't get reinstalled
+		if (DEFAULT_PLUGINS.includes(pluginId)) {
+			try {
+				const json = (await getSetting("plugin_explicitly_uninstalled")) || "[]";
+				const list: string[] = JSON.parse(json);
+				if (!list.includes(pluginId)) {
+					list.push(pluginId);
+					await setSetting("plugin_explicitly_uninstalled", JSON.stringify(list));
+				}
+			} catch {
+				// best-effort
+			}
 		}
 		setExpandedId(null);
 		await loadPlugins();

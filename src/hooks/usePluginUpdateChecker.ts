@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RegistryPlugin, ChangelogEntry } from "../plugins/types";
-import { REGISTRY_URL } from "../plugins/constants";
+import { REGISTRY_URL, DEFAULT_PLUGINS } from "../plugins/constants";
 import { hasUpdate, meetsMinVersion } from "../plugins/semver";
 import { getSetting, setSetting } from "../api/settings";
 import { downloadAndInstallPlugin } from "../plugins/pluginInstaller";
@@ -171,6 +171,37 @@ export function usePluginUpdateChecker(
           }
         })
         .filter((p): p is NonNullable<typeof p> => p !== null);
+
+      // Auto-install default plugins that are missing and not explicitly uninstalled
+      const installedIds = new Set(installedPlugins.map((p) => p.id));
+      let uninstalledJson = "";
+      try {
+        uninstalledJson = (await getSetting("plugin_explicitly_uninstalled")) || "[]";
+      } catch { /* ok */ }
+      let explicitlyUninstalled: string[] = [];
+      try {
+        explicitlyUninstalled = JSON.parse(uninstalledJson);
+      } catch { /* ok */ }
+      const uninstalledSet = new Set(explicitlyUninstalled);
+
+      let installedDefaults = false;
+      for (const defaultId of DEFAULT_PLUGINS) {
+        if (installedIds.has(defaultId) || uninstalledSet.has(defaultId)) continue;
+        const registryEntry = registryPlugins.find((rp) => rp.id === defaultId);
+        if (!registryEntry) continue;
+        // Check app version compatibility
+        const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
+        if (registryEntry.minAppVersion && !meetsMinVersion(appVersion, registryEntry.minAppVersion)) continue;
+        try {
+          await downloadAndInstallPlugin(registryEntry.downloadUrl);
+          installedDefaults = true;
+        } catch {
+          // Silent — network issue, etc.
+        }
+      }
+      if (installedDefaults) {
+        await hotLoadPlugins();
+      }
 
       // Find updates
       let updates = findUpdates(installedPlugins, registryPlugins);
