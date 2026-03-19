@@ -727,12 +727,19 @@ function AppContent() {
           <div className="terminal-and-timeline">
             {ui.filePreview && state.activeSessionId ? (
               <div className="file-preview-main-container">
-                <FilePreviewPanel
-                  sessionId={state.activeSessionId}
-                  realmId={ui.filePreview.realmId}
-                  filePath={ui.filePreview.filePath}
-                  onBack={() => dispatch({ type: "CLOSE_FILE_PREVIEW" })}
-                />
+                {(() => {
+                  const handler = pluginRuntime?.getFileHandler(ui.filePreview.filePath);
+                  return (
+                    <FilePreviewPanel
+                      sessionId={state.activeSessionId}
+                      realmId={ui.filePreview.realmId}
+                      filePath={ui.filePreview.filePath}
+                      onBack={() => dispatch({ type: "CLOSE_FILE_PREVIEW" })}
+                      fileHandler={handler?.component}
+                      fileHandlerPluginId={handler?.pluginId}
+                    />
+                  );
+                })()}
               </div>
             ) : (
             <div className="terminal-container">

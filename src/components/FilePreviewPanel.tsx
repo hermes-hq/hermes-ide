@@ -6,11 +6,15 @@ import { getSetting } from "../api/settings";
 import { useSession } from "../state/SessionContext";
 import type { FileContent } from "../types/git";
 
+import type { FileHandlerProps } from "../plugins/types";
+
 interface FilePreviewPanelProps {
   sessionId: string;
   realmId: string;
   filePath: string;
   onBack: () => void;
+  fileHandler?: React.ComponentType<FileHandlerProps>;
+  fileHandlerPluginId?: string;
 }
 
 // ─── Lightweight syntax highlighter ─────────────────────────────────
@@ -152,7 +156,7 @@ function utf8ToBase64(str: string): string {
 
 const MAX_DISPLAY_SIZE = 1_048_576;
 
-export function FilePreviewPanel({ sessionId, realmId, filePath, onBack }: FilePreviewPanelProps) {
+export function FilePreviewPanel({ sessionId, realmId, filePath, onBack, fileHandler: FileHandler, fileHandlerPluginId }: FilePreviewPanelProps) {
   const { state } = useSession();
   const isSSH = realmId === "__ssh__";
   const sshInfo = isSSH ? state.sessions[sessionId]?.ssh_info : null;
@@ -255,6 +259,19 @@ export function FilePreviewPanel({ sessionId, realmId, filePath, onBack }: FileP
   }
 
   if (!file) return null;
+
+  // Delegate to plugin file handler if registered
+  if (FileHandler && file.content != null && fileHandlerPluginId) {
+    return (
+      <FileHandler
+        pluginId={fileHandlerPluginId}
+        filePath={filePath}
+        content={file.content}
+        sessionId={sessionId}
+        onBack={onBack}
+      />
+    );
+  }
 
   const isTooLarge = file.size > MAX_DISPLAY_SIZE && !file.content;
 

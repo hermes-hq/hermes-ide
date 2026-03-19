@@ -1,4 +1,4 @@
-import type { PluginManifest, PluginCommandContribution, PluginPanelContribution, PluginStatusBarItem, PluginSessionActionContribution, HermesEvent } from "./types";
+import type { PluginManifest, PluginCommandContribution, PluginPanelContribution, PluginStatusBarItem, PluginSessionActionContribution, HermesEvent, FileHandlerProps } from "./types";
 import { createPluginAPI, type HermesPluginAPI, type PluginPanelProps, type PluginAPICallbacks } from "./PluginAPI";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -29,6 +29,7 @@ export class PluginRuntime {
 	private plugins = new Map<string, PluginEntry>();
 	private commandHandlers = new Map<string, () => void | Promise<void>>();
 	private panelComponents = new Map<string, React.ComponentType<PluginPanelProps>>();
+	private fileHandlers = new Map<string, { pluginId: string; component: React.ComponentType<FileHandlerProps> }>();
 	private statusBarOverrides = new Map<string, { text?: string; tooltip?: string; visible?: boolean }>();
 	private sessionActionBadges = new Map<string, { text?: string; count?: number }>();
 	private changeListeners = new Set<() => void>();
@@ -91,6 +92,9 @@ export class PluginRuntime {
 				onEventSubscribe: (event: HermesEvent, callback: (...args: unknown[]) => void) => {
 					return this.subscribeEvent(event, callback);
 				},
+				onFileHandlerRegistered: () => {
+					this.notify();
+				},
 			};
 			const api = createPluginAPI(
 				pluginId,
@@ -99,6 +103,7 @@ export class PluginRuntime {
 				fullCallbacks,
 				this.commandHandlers,
 				this.panelComponents,
+				this.fileHandlers,
 			);
 			entry.api = api;
 			await entry.module.activate(api);
@@ -255,6 +260,12 @@ export class PluginRuntime {
 
 	getPanelComponent(panelId: string): React.ComponentType<PluginPanelProps> | undefined {
 		return this.panelComponents.get(panelId);
+	}
+
+	getFileHandler(filePath: string): { pluginId: string; component: React.ComponentType<FileHandlerProps> } | undefined {
+		const ext = filePath.split(".").pop()?.toLowerCase();
+		if (!ext) return undefined;
+		return this.fileHandlers.get(ext);
 	}
 
 	getAllStatusBarItems(): RuntimeStatusBarItem[] {

@@ -45,6 +45,14 @@ export interface PluginPanelContribution {
 	icon: string; // inline SVG string using currentColor
 }
 
+export interface FileHandlerProps {
+	pluginId: string;
+	filePath: string;
+	content: string;
+	sessionId: string;
+	onBack: () => void;
+}
+
 export interface PluginStatusBarItem {
 	id: string;
 	text: string;

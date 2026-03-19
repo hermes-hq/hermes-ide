@@ -371,6 +371,7 @@ pub async fn plugin_exec_command(
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginExecResult {
     pub stdout: String,
     pub stderr: String,

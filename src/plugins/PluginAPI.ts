@@ -1,4 +1,4 @@
-import type { Disposable, PluginSettingsSchema, HermesEvent, SessionInfo, TranscriptEvent, AgentsAPI } from "./types";
+import type { Disposable, PluginSettingsSchema, HermesEvent, SessionInfo, TranscriptEvent, AgentsAPI, FileHandlerProps } from "./types";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
@@ -19,6 +19,7 @@ export interface HermesPluginAPI {
 		showToast(message: string, options?: { type?: "info" | "success" | "warning" | "error"; duration?: number }): void;
 		updateStatusBarItem(itemId: string, update: { text?: string; tooltip?: string; visible?: boolean }): void;
 		updateSessionActionBadge(actionId: string, badge: { text?: string; count?: number }): void;
+		registerFileHandler(extensions: string[], component: React.ComponentType<FileHandlerProps>): Disposable;
 	};
 	commands: {
 		register(commandId: string, handler: () => void | Promise<void>): Disposable;
@@ -87,6 +88,7 @@ export interface PluginAPICallbacks {
 	onSessionsGetActive?: () => Promise<SessionInfo | null>;
 	onSessionsList?: () => Promise<SessionInfo[]>;
 	onSessionFocus?: (sessionId: string) => void;
+	onFileHandlerRegistered?: () => void;
 }
 
 export function createPluginAPI(
@@ -96,6 +98,7 @@ export function createPluginAPI(
 	callbacks: PluginAPICallbacks,
 	commandHandlers: Map<string, () => void | Promise<void>>,
 	panelComponents: Map<string, React.ComponentType<PluginPanelProps>>,
+	fileHandlers?: Map<string, { pluginId: string; component: React.ComponentType<FileHandlerProps> }>,
 ): HermesPluginAPI {
 	const subscriptions: Disposable[] = [];
 	const schema = settingsSchema ?? {};
@@ -139,6 +142,21 @@ export function createPluginAPI(
 			},
 			updateSessionActionBadge(actionId: string, badge: { text?: string; count?: number }) {
 				callbacks.onSessionActionBadgeUpdate?.(actionId, badge);
+			},
+			registerFileHandler(extensions: string[], component: React.ComponentType<FileHandlerProps>): Disposable {
+				if (!fileHandlers) return { dispose() {} };
+				const normalized = extensions.map(e => e.toLowerCase().replace(/^\./, ""));
+				for (const ext of normalized) {
+					fileHandlers.set(ext, { pluginId, component });
+				}
+				callbacks.onFileHandlerRegistered?.();
+				return {
+					dispose() {
+						for (const ext of normalized) {
+							fileHandlers?.delete(ext);
+						}
+					},
+				};
 			},
 		},
 		commands: {
