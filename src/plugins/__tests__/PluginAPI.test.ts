@@ -273,7 +273,7 @@ describe("createPluginAPI", () => {
 			mockInvoke.mockResolvedValue("response body");
 			const api = createPluginAPI("my-plugin", new Set(["network"]), undefined, callbacks, commandHandlers, panelComponents);
 			await api.network.fetch("https://example.com");
-			expect(mockInvoke).toHaveBeenCalledWith("plugin_fetch_url", { url: "https://example.com", pluginId: "my-plugin" });
+			expect(mockInvoke).toHaveBeenCalledWith("plugin_fetch_url", { url: "https://example.com", headers: null, pluginId: "my-plugin" });
 		});
 
 		it("network.fetch should throw without network permission", () => {
