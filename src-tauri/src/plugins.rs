@@ -379,7 +379,7 @@ pub async fn plugin_post_json(
         }
     }
     // Default Accept to JSON if not set
-    if !headers.as_ref().map_or(false, |h| h.contains_key("Accept")) {
+    if !headers.as_ref().is_some_and(|h| h.contains_key("Accept")) {
         req = req.header("Accept", "application/json");
     }
 
