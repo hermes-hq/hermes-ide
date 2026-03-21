@@ -54,6 +54,7 @@ const BASE_TOKENS = {
   "--text-md": 12,
   "--text-lg": 13,
   "--text-xl": 15,
+  "--text-2xl": 18,
   "--space-1": 4,
   "--space-2": 8,
   "--space-3": 12,

@@ -101,8 +101,8 @@
 
 .pm-btn-update-all {
   margin-left: auto;
-  font-size: var(--text-xs);
-  padding: 3px 10px;
+  font-size: var(--text-sm);
+  padding: 4px 12px;
 }
 .pm-btn-update-all + .pm-check-updates {
   margin-left: 4px;
@@ -200,10 +200,10 @@
   opacity: 0.5;
 }
 
-/* Row icon — smaller for compact mode */
+/* Row icon — scales with UI tokens */
 .pm-row-icon {
-  width: 26px;
-  height: 26px;
+  width: var(--btn-size);
+  height: var(--btn-size);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -214,8 +214,8 @@
   overflow: hidden;
 }
 .pm-row-icon svg {
-  width: 15px;
-  height: 15px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   color: inherit;
   fill: none;
   stroke: currentColor;
@@ -235,7 +235,7 @@
 
 .pm-row-name {
   font-weight: 600;
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   color: var(--text-0);
   white-space: nowrap;
   overflow: hidden;
@@ -273,7 +273,7 @@
 }
 
 .pm-badge {
-  font-size: 8px;
+  font-size: var(--text-xs);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   font-weight: 600;
@@ -304,7 +304,7 @@
 .pm-detail {
   background: var(--bg-2);
   border-radius: 0 0 var(--radius) var(--radius);
-  padding: 0 8px 10px 42px; /* 42px = icon(26) + gap(8) + padding(8) */
+  padding: 0 8px 10px calc(var(--btn-size) + var(--space-2) + var(--space-2));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -364,7 +364,7 @@
 }
 
 .pm-detail-perm {
-  font-size: 8px;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.3px;
   padding: 1px 5px;
@@ -427,8 +427,8 @@
   border-radius: var(--radius-sm);
   color: var(--text-2);
   font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  padding: 3px 10px;
+  font-size: var(--text-sm);
+  padding: 4px 12px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
@@ -477,8 +477,8 @@
 
 /* Small inline button for compact rows */
 .pm-btn-sm {
-  font-size: 8px;
-  padding: 2px 7px;
+  font-size: var(--text-xs);
+  padding: 2px 8px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   font-weight: 600;
@@ -499,8 +499,8 @@
 }
 .pm-spinner {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: var(--text-sm);
+  height: var(--text-sm);
   border: 1.5px solid var(--border-light);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -664,7 +664,7 @@
 }
 
 .pm-confirm-title {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-0);
 }
@@ -712,7 +712,7 @@
 }
 
 .ps-label {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-1);
   font-weight: 500;
 }
@@ -735,8 +735,8 @@
   border-radius: var(--radius-sm);
   color: var(--text-0);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  padding: 4px 8px;
+  font-size: var(--text-base);
+  padding: 5px 8px;
   outline: none;
   box-sizing: border-box;
 }
@@ -754,8 +754,8 @@
   border-radius: var(--radius-sm);
   color: var(--text-0);
   font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  padding: 4px 8px;
+  font-size: var(--text-base);
+  padding: 5px 8px;
   outline: none;
   cursor: pointer;
   min-width: 120px;

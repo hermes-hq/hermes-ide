@@ -72,8 +72,8 @@
 }
 
 .puc-plugin-icon {
-  width: 20px;
-  height: 20px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   flex-shrink: 0;
   color: var(--text-2);
 }
@@ -87,7 +87,7 @@
 }
 
 .puc-plugin-name {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--text-0);
 }

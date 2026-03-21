@@ -51,7 +51,7 @@
 
 .pub-text {
   flex: 1;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -71,8 +71,8 @@
   border-radius: var(--radius-sm);
   color: var(--text-2);
   font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  padding: 2px 8px;
+  font-size: var(--text-sm);
+  padding: 3px 10px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
@@ -96,8 +96,8 @@
 }
 
 .pub-btn-sm {
-  font-size: 8px;
-  padding: 1px 6px;
+  font-size: var(--text-xs);
+  padding: 2px 7px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   font-weight: 600;
@@ -221,8 +221,8 @@
 
 .pub-spinner {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: var(--text-sm);
+  height: var(--text-sm);
   border: 1.5px solid var(--border-light);
   border-top-color: var(--accent);
   border-radius: 50%;
