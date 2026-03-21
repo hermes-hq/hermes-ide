@@ -879,6 +879,21 @@ function AppContent() {
               }]);
             }
           }}
+          onConfirmPluginUpdateAll={(plugins) => {
+            const infos = plugins.map((plugin) => {
+              const info = pluginUpdater.updatesAvailable.find((u) => u.id === plugin.id);
+              return info ?? {
+                id: plugin.id,
+                name: plugin.name,
+                currentVersion: "",
+                newVersion: plugin.version,
+                downloadUrl: plugin.downloadUrl,
+                changelog: plugin.changelog,
+                icon: plugin.icon,
+              };
+            });
+            setPendingUpdatePlugins(infos);
+          }}
         />
       )}
 
@@ -896,10 +911,8 @@ function AppContent() {
           onConfirm={() => {
             const plugins = pendingUpdatePlugins;
             setPendingUpdatePlugins(null);
-            if (plugins.length === 1) {
-              pluginUpdater.updatePlugin(plugins[0]);
-            } else {
-              pluginUpdater.updateAll();
+            for (const p of plugins) {
+              pluginUpdater.updatePlugin(p);
             }
           }}
           onCancel={() => setPendingUpdatePlugins(null)}

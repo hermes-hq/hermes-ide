@@ -23,10 +23,11 @@ interface SettingsProps {
   initialTab?: string;
   pluginRuntime?: import("../plugins/PluginRuntime").PluginRuntime;
   onConfirmPluginUpdate?: (plugin: import("../plugins/types").RegistryPlugin) => void;
+  onConfirmPluginUpdateAll?: (plugins: import("../plugins/types").RegistryPlugin[]) => void;
   pluginRefreshTrigger?: number;
 }
 
-export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, pluginRefreshTrigger }: SettingsProps) {
+export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, onConfirmPluginUpdateAll, pluginRefreshTrigger }: SettingsProps) {
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
   const [activeTab, setActiveTab] = useState(initialTab || "general");
@@ -761,7 +762,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     </p>
                   </div>
                 </div>
-                <PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} refreshTrigger={pluginRefreshTrigger} />
+                <PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} onConfirmUpdateAll={onConfirmPluginUpdateAll} refreshTrigger={pluginRefreshTrigger} />
               </>
             )}
 

@@ -97,6 +97,17 @@
   color: var(--green);
 }
 
+/* ─── Update All Button ─────────────────────────────────── */
+
+.pm-btn-update-all {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  padding: 3px 10px;
+}
+.pm-btn-update-all + .pm-check-updates {
+  margin-left: 4px;
+}
+
 /* ─── Check for Updates Button ──────────────────────────── */
 
 .pm-check-updates {

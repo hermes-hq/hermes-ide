@@ -62,10 +62,11 @@ const PackageIcon = () => (
 interface PluginManagerProps {
 	runtime?: PluginRuntime;
 	onConfirmUpdate?: (plugin: RegistryPlugin) => void;
+	onConfirmUpdateAll?: (plugins: RegistryPlugin[]) => void;
 	refreshTrigger?: number;
 }
 
-export function PluginManager({ runtime, onConfirmUpdate, refreshTrigger }: PluginManagerProps) {
+export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, refreshTrigger }: PluginManagerProps) {
 	const [installed, setInstalled] = useState<PluginEntry[]>([]);
 	const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
 	const [pluginsDir, setPluginsDir] = useState("");
@@ -632,6 +633,15 @@ export function PluginManager({ runtime, onConfirmUpdate, refreshTrigger }: Plug
 						<span className="pm-tab-badge">{availablePlugins.length}</span>
 					)}
 				</button>
+				{updatablePlugins.length > 0 && onConfirmUpdateAll && (
+					<button
+						className="pm-btn pm-btn-update pm-btn-update-all"
+						onClick={() => onConfirmUpdateAll(updatablePlugins)}
+						disabled={!!installingId}
+					>
+						Update All ({updatablePlugins.length})
+					</button>
+				)}
 				<button
 					className="pm-check-updates"
 					onClick={handleCheckForUpdates}
