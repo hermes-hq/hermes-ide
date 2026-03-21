@@ -1,12 +1,11 @@
-# v0.5.19
+# v0.5.20
 
 ## New
 
-- **Telegram channel support for Claude sessions** — Connect a Telegram channel when launching a Claude session so you can interact with your AI assistant directly from Telegram
+- **Update All plugins at once** — A single button in the Plugin Manager lets you update every outdated plugin in one click
+- **Reorder sidebar icons by dragging** — Drag plugin icons up and down in the activity bar to arrange them how you like; your order is saved across restarts
+- **Plugins can now make authenticated API requests** — Enables richer integrations like the new GitHub plugin that connects to your account via OAuth
 
-## Improved
+## Fixed
 
-- **Branch isolation is more reliable** — Closing a session no longer risks breaking other sessions sharing the same branch, and failed cleanup is retried on next launch
-- **Clearer prompts when closing with unsaved changes** — The confirmation dialog now explains what will happen, shows a breakdown of changed files, and suggests how to recover stashed work
-- **Polished branch isolation UI** — Buttons and labels use friendlier language, internal paths are no longer exposed, and all actions remain visible on short screens
-- **Worktree directories no longer appear as projects** — Internal working directories are filtered out of the project list
+- **Worktree paths now resolve correctly on Windows** — Branch isolation no longer fails when the project is on a drive other than C:
