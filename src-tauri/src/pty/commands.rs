@@ -10,7 +10,9 @@ use crate::db::ExecutionNode;
 use crate::pty::adapters::now;
 use crate::pty::analyzer::{CommandPredictionEvent, OutputAnalyzer};
 use crate::pty::models::*;
-use crate::pty::{ai_launch_command, channels_suffix, detect_shell, get_working_directory, PtySession};
+use crate::pty::{
+    ai_launch_command, channels_suffix, detect_shell, get_working_directory, PtySession,
+};
 use crate::AppState;
 
 // ─── SSH / tmux helpers ─────────────────────────────────────────────
@@ -996,10 +998,19 @@ pub fn create_session(
                             if a.pending_ai_launch {
                                 a.pending_ai_launch = false;
                                 let launch_info = session_clone.lock().ok().map(|s| {
-                                    (s.ai_provider.clone(), s.has_initial_context, s.auto_approve, s.channels.clone())
+                                    (
+                                        s.ai_provider.clone(),
+                                        s.has_initial_context,
+                                        s.auto_approve,
+                                        s.channels.clone(),
+                                    )
                                 });
-                                if let Some((Some(ref provider), has_context, auto_approve, ref channels)) =
-                                    launch_info
+                                if let Some((
+                                    Some(ref provider),
+                                    has_context,
+                                    auto_approve,
+                                    ref channels,
+                                )) = launch_info
                                 {
                                     // Only launch known/allowed AI providers (reject unknown values)
                                     if let Some(launch_cmd) =
@@ -1366,9 +1377,16 @@ pub fn create_session(
                     // Fallback auto-launch
                     if launch_info.is_some() {
                         let launch_data = session_silence.lock().ok().map(|s| {
-                            (s.ai_provider.clone(), s.has_initial_context, s.auto_approve, s.channels.clone())
+                            (
+                                s.ai_provider.clone(),
+                                s.has_initial_context,
+                                s.auto_approve,
+                                s.channels.clone(),
+                            )
                         });
-                        if let Some((Some(ref provider), has_context, auto_approve, ref channels)) = launch_data {
+                        if let Some((Some(ref provider), has_context, auto_approve, ref channels)) =
+                            launch_data
+                        {
                             if let Some(launch_cmd) = ai_launch_command(provider, auto_approve) {
                                 let supports_cli_prompt =
                                     provider == "claude" || provider == "gemini";
@@ -1946,11 +1964,7 @@ pub fn close_session(
                     // Only delete DB records for successfully handled worktrees
                     for id in &successfully_handled {
                         if let Err(e) = db.delete_session_worktree(id) {
-                            log::warn!(
-                                "Failed to delete worktree DB record '{}': {}",
-                                id,
-                                e
-                            );
+                            log::warn!("Failed to delete worktree DB record '{}': {}", id, e);
                         }
                     }
                 }

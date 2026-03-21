@@ -2714,7 +2714,10 @@ mod tests {
 
         // Verify both records exist
         let all = db.get_all_session_worktrees().unwrap();
-        let matching: Vec<_> = all.iter().filter(|w| w.worktree_path == "/same/path").collect();
+        let matching: Vec<_> = all
+            .iter()
+            .filter(|w| w.worktree_path == "/same/path")
+            .collect();
         assert_eq!(matching.len(), 2);
     }
 
@@ -2754,10 +2757,24 @@ mod tests {
     fn test_count_sessions_for_worktree_path_multiple() {
         let db = test_db();
         // Two sessions sharing the same worktree path (shared branch)
-        db.insert_session_worktree("wt1", "sess1", "project1", "/shared/path", Some("feat"), false)
-            .unwrap();
-        db.insert_session_worktree("wt2", "sess2", "project2", "/shared/path", Some("feat"), false)
-            .unwrap();
+        db.insert_session_worktree(
+            "wt1",
+            "sess1",
+            "project1",
+            "/shared/path",
+            Some("feat"),
+            false,
+        )
+        .unwrap();
+        db.insert_session_worktree(
+            "wt2",
+            "sess2",
+            "project2",
+            "/shared/path",
+            Some("feat"),
+            false,
+        )
+        .unwrap();
 
         let count = db.count_sessions_for_worktree_path("/shared/path").unwrap();
         assert_eq!(count, 2);
@@ -2766,18 +2783,41 @@ mod tests {
     #[test]
     fn test_count_sessions_decreases_after_delete() {
         let db = test_db();
-        db.insert_session_worktree("wt1", "sess1", "project1", "/shared/path", Some("feat"), false)
-            .unwrap();
-        db.insert_session_worktree("wt2", "sess2", "project2", "/shared/path", Some("feat"), false)
-            .unwrap();
+        db.insert_session_worktree(
+            "wt1",
+            "sess1",
+            "project1",
+            "/shared/path",
+            Some("feat"),
+            false,
+        )
+        .unwrap();
+        db.insert_session_worktree(
+            "wt2",
+            "sess2",
+            "project2",
+            "/shared/path",
+            Some("feat"),
+            false,
+        )
+        .unwrap();
 
-        assert_eq!(db.count_sessions_for_worktree_path("/shared/path").unwrap(), 2);
+        assert_eq!(
+            db.count_sessions_for_worktree_path("/shared/path").unwrap(),
+            2
+        );
 
         db.delete_session_worktree("wt1").unwrap();
-        assert_eq!(db.count_sessions_for_worktree_path("/shared/path").unwrap(), 1);
+        assert_eq!(
+            db.count_sessions_for_worktree_path("/shared/path").unwrap(),
+            1
+        );
 
         db.delete_session_worktree("wt2").unwrap();
-        assert_eq!(db.count_sessions_for_worktree_path("/shared/path").unwrap(), 0);
+        assert_eq!(
+            db.count_sessions_for_worktree_path("/shared/path").unwrap(),
+            0
+        );
     }
 
     #[test]

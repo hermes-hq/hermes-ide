@@ -676,8 +676,14 @@ mod tests {
     #[test]
     fn test_channels_suffix_multiple() {
         use super::channels_suffix;
-        let channels = vec!["plugin:telegram@foo".to_string(), "plugin:slack@bar".to_string()];
-        assert_eq!(channels_suffix(&channels), " --channels plugin:telegram@foo --channels plugin:slack@bar");
+        let channels = vec![
+            "plugin:telegram@foo".to_string(),
+            "plugin:slack@bar".to_string(),
+        ];
+        assert_eq!(
+            channels_suffix(&channels),
+            " --channels plugin:telegram@foo --channels plugin:slack@bar"
+        );
     }
 
     #[test]

@@ -770,8 +770,7 @@ mod tests {
         .unwrap();
 
         // Verify journal has incomplete operations
-        let incomplete =
-            git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let incomplete = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
         assert_eq!(incomplete.len(), 1);
 
         // Remove the orphan (simulating replay)
@@ -784,8 +783,7 @@ mod tests {
         git::journal::clear_journal(app_data_dir.path(), repo_path);
 
         // Journal should now be empty
-        let remaining =
-            git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
         assert!(remaining.is_empty());
     }
 
@@ -816,21 +814,17 @@ mod tests {
         assert!(orphan_dir.exists());
 
         // Verification check: orphan is still there, should NOT clear
-        let incomplete =
-            git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let incomplete = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
         let mut all_cleaned = true;
         for entry in &incomplete {
-            if entry.worktree_path != "pending"
-                && Path::new(&entry.worktree_path).is_dir()
-            {
+            if entry.worktree_path != "pending" && Path::new(&entry.worktree_path).is_dir() {
                 all_cleaned = false;
             }
         }
         assert!(!all_cleaned, "verification should detect remaining orphan");
 
         // Journal should still have entries
-        let remaining =
-            git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
         assert_eq!(remaining.len(), 1);
     }
 }
