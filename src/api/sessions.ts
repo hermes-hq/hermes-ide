@@ -75,6 +75,10 @@ export function sshTmuxNewWindow(
   return invoke("ssh_tmux_new_window", { host, port, user, tmuxSession, windowName });
 }
 
+export function checkAiProviders(): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("check_ai_providers");
+}
+
 export function closeSession(sessionId: string): Promise<void> {
   return invoke("close_session", { sessionId });
 }

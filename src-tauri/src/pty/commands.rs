@@ -522,6 +522,11 @@ pub async fn ssh_tmux_rename_window(
     Ok(())
 }
 
+#[tauri::command]
+pub fn check_ai_providers() -> std::collections::HashMap<String, bool> {
+    crate::platform::check_ai_cli_availability()
+}
+
 // Tauri command handler — params come from frontend invocation
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -1030,6 +1035,9 @@ pub fn create_session(
                                         if provider == "claude" && !channels.is_empty() {
                                             cmd.push_str(&channels_suffix(channels));
                                         }
+                                        // Set up "command not found" detection window
+                                        a.ai_launching_provider = Some(provider.clone());
+                                        a.ai_launch_check_remaining = 10; // scan next 10 lines
                                         if let Ok(mut w) = writer_for_reader.lock() {
                                             let _ = w.write_all(format!("{}\r", cmd).as_bytes());
                                             let _ = w.flush();
@@ -1054,6 +1062,11 @@ pub fn create_session(
                                         log::warn!("Unknown AI provider rejected: {}", provider);
                                     }
                                 }
+                            }
+
+                            // Emit event if AI CLI was not found
+                            if let Some(failed_provider) = a.ai_launch_failed.take() {
+                                let _ = app_clone.emit("ai-launch-failed", &failed_provider);
                             }
 
                             // Auto-inject context when agent prompt is first detected

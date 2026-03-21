@@ -121,3 +121,18 @@ pub fn command_exists(name: &str) -> bool {
             .unwrap_or(false)
     }
 }
+
+/// Check which AI CLI tools are available on the system.
+pub fn check_ai_cli_availability() -> std::collections::HashMap<String, bool> {
+    let providers = [
+        ("claude", "claude"),
+        ("aider", "aider"),
+        ("codex", "codex"),
+        ("gemini", "gemini"),
+        ("copilot", "gh"),
+    ];
+    providers
+        .iter()
+        .map(|(id, cmd)| (id.to_string(), command_exists(cmd)))
+        .collect()
+}

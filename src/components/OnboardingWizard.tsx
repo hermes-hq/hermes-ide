@@ -2,12 +2,14 @@ import "../styles/components/OnboardingWizard.css";
 import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { getSetting, setSetting, getSettings } from "../api/settings";
+import { checkAiProviders } from "../api/sessions";
 import { applyTheme, applyUiScale, THEME_OPTIONS, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { setAnalyticsEnabled } from "../utils/analytics";
+import { AI_PROVIDERS } from "../utils/aiProviders";
 
-type Step = "welcome" | "theme" | "privacy";
+type Step = "welcome" | "theme" | "ai_setup" | "privacy";
 
-const STEPS: Step[] = ["welcome", "theme", "privacy"];
+const STEPS: Step[] = ["welcome", "theme", "ai_setup", "privacy"];
 
 // Mini terminal preview colors per theme (bg, text, accent, green)
 const THEME_PREVIEW: Record<string, { bg: string; text: string; accent: string; green: string }> = {
@@ -39,6 +41,10 @@ export function OnboardingWizard() {
   const [selectedTheme, setSelectedTheme] = useState("frosted-dark");
   const [selectedScale, setSelectedScale] = useState("default");
 
+  // AI setup step
+  const [providerAvailability, setProviderAvailability] = useState<Record<string, boolean>>({});
+  const [detectionDone, setDetectionDone] = useState(false);
+
   // Privacy step
   const [analyticsOptIn, setAnalyticsOptIn] = useState(true);
   const [policyAccepted, setPolicyAccepted] = useState(false);
@@ -67,6 +73,14 @@ export function OnboardingWizard() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (step === "ai_setup" && !detectionDone) {
+      checkAiProviders()
+        .then((r) => { setProviderAvailability(r); setDetectionDone(true); })
+        .catch(() => setDetectionDone(true));
+    }
+  }, [step, detectionDone]);
 
   const currentStepIdx = STEPS.indexOf(step);
 
@@ -113,6 +127,7 @@ export function OnboardingWizard() {
     if (e.key === "Enter") {
       if (step === "welcome") goNext();
       else if (step === "theme") goNext();
+      else if (step === "ai_setup") goNext();
       else if (step === "privacy" && policyAccepted) handleFinish();
     }
   }, [step, goNext, policyAccepted, handleFinish]);
@@ -126,7 +141,7 @@ export function OnboardingWizard() {
         {step !== "welcome" && (
           <div className="onboarding-header">
             <span className="onboarding-header-title">
-              {step === "theme" ? "Personalize" : "Privacy & Data"}
+              {step === "theme" ? "Personalize" : step === "ai_setup" ? "AI Tools" : "Privacy & Data"}
             </span>
             <span className="onboarding-header-step">
               Step {currentStepIdx + 1} of {STEPS.length}
@@ -193,7 +208,43 @@ export function OnboardingWizard() {
             </>
           )}
 
-          {/* ── Step 3: Privacy ── */}
+          {/* ── Step 3: AI Setup ── */}
+          {step === "ai_setup" && (
+            <>
+              <div className="onboarding-section-label">Detected AI tools</div>
+              <div className="onboarding-ai-grid">
+                {AI_PROVIDERS.map((p) => {
+                  const available = providerAvailability[p.id];
+                  return (
+                    <div
+                      key={p.id}
+                      className={`onboarding-ai-card ${detectionDone && !available ? "missing" : ""}`}
+                    >
+                      <div className="onboarding-ai-card-header">
+                        <span className="onboarding-ai-card-name">{p.label}</span>
+                        {detectionDone ? (
+                          <span className={`onboarding-ai-status ${available ? "installed" : "missing"}`}>
+                            {available ? "Detected" : "Not found"}
+                          </span>
+                        ) : (
+                          <span className="onboarding-ai-status checking">Checking...</span>
+                        )}
+                      </div>
+                      <div className="onboarding-ai-card-desc">{p.description}</div>
+                      {detectionDone && !available && (
+                        <code className="onboarding-ai-install-cmd">{p.installCmd}</code>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="onboarding-ai-note">
+                You can use Hermes as a terminal without AI tools. Install them anytime.
+              </div>
+            </>
+          )}
+
+          {/* ── Step 4: Privacy ── */}
           {step === "privacy" && (
             <>
               <div className="onboarding-privacy-section">
@@ -279,6 +330,19 @@ export function OnboardingWizard() {
               </button>
             )}
             {step === "theme" && (
+              <>
+                <button className="onboarding-btn" onClick={goBack}>
+                  Back
+                </button>
+                <button
+                  className="onboarding-btn onboarding-btn-primary"
+                  onClick={goNext}
+                >
+                  Next
+                </button>
+              </>
+            )}
+            {step === "ai_setup" && (
               <>
                 <button className="onboarding-btn" onClick={goBack}>
                   Back

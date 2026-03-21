@@ -5,7 +5,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { CreateSessionOpts } from "../state/SessionContext";
 import { getProjectsOrdered, createProject, deleteProject } from "../api/projects";
 import type { ProjectOrdered } from "../types/project";
-import { getSessions, sshListTmuxSessions } from "../api/sessions";
+import { getSessions, sshListTmuxSessions, checkAiProviders } from "../api/sessions";
+import { AI_PROVIDERS, AUTO_APPROVE_FLAGS, getProviderInfo } from "../utils/aiProviders";
 import { getSetting, setSetting } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { TmuxSessionEntry } from "../types/session";
@@ -46,24 +47,9 @@ export function addToSshHistory(
   return [entry, ...filtered].slice(0, maxEntries);
 }
 
-const AI_PROVIDERS = [
-  { id: "claude", label: "Claude", description: "Claude Code CLI", enabled: true },
-  { id: "gemini", label: "Gemini", description: "Google Gemini CLI", enabled: true },
-  { id: "aider", label: "Aider", description: "Aider AI pair programming", enabled: true },
-  { id: "codex", label: "Codex", description: "OpenAI Codex CLI", enabled: true },
-  { id: "copilot", label: "Copilot", description: "GitHub Copilot CLI", enabled: true },
-] as const;
-
 export const CLAUDE_CHANNELS = [
   { id: "plugin:telegram@claude-plugins-official", label: "Telegram", icon: "\u{1F4F1}" },
 ] as const;
-
-const AUTO_APPROVE_FLAGS: Record<string, { flag: string; description: string }> = {
-  claude: { flag: "--dangerously-skip-permissions", description: "The AI agent can read, write, and execute without asking for confirmation." },
-  gemini: { flag: "--yolo", description: "The AI agent can execute shell commands and write files without permission prompts." },
-  aider: { flag: "--yes", description: "The AI agent will apply all suggested changes without asking for confirmation." },
-  codex: { flag: "--full-auto", description: "The AI agent runs in fully autonomous mode without confirmation prompts." },
-};
 
 // Internal step identifiers (not displayed to user)
 type Step = "projects" | "branch" | "ai" | "tmux" | "confirm";
@@ -88,6 +74,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [creating, setCreating] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [highlightedProviderIndex, setHighlightedProviderIndex] = useState(0);
+  const [providerAvailability, setProviderAvailability] = useState<Record<string, boolean>>({});
+  const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const aiStepRef = useRef<HTMLDivElement>(null);
@@ -228,6 +216,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     getProjectsOrdered()
       .then((r) => setAllProjects(r))
       .catch((err) => console.warn("[SessionCreator] Failed to load projects:", err));
+    checkAiProviders()
+      .then((r) => { setProviderAvailability(r); setAvailabilityLoaded(true); })
+      .catch((err) => { console.warn("[SessionCreator] Failed to check AI providers:", err); setAvailabilityLoaded(true); });
     getSetting(SSH_HISTORY_KEY)
       .then((json) => {
         const history = parseSshHistory(json);
@@ -292,7 +283,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     if (step === "projects") searchRef.current?.focus();
     if (step === "ai") {
       aiStepRef.current?.focus();
-      const allItems = [...AI_PROVIDERS.filter((p) => p.enabled), { id: null }] as const;
+      const allItems = [...AI_PROVIDERS, { id: null }] as const;
       const currentIdx = allItems.findIndex((p) => p.id === aiProvider);
       setHighlightedProviderIndex(currentIdx >= 0 ? currentIdx : allItems.length - 1);
     }
@@ -478,7 +469,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   };
 
   const enabledProviders = useMemo(
-    () => [...AI_PROVIDERS.filter((p) => p.enabled).map((p) => p.id), null] as const,
+    () => [...AI_PROVIDERS.map((p) => p.id), null] as const,
     []
   );
 
@@ -1051,17 +1042,20 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
             <div className="session-creator-provider-grid">
               {AI_PROVIDERS.map((p) => {
                 const providerIdx = enabledProviders.indexOf(p.id);
+                const isAvailable = !availabilityLoaded || providerAvailability[p.id];
                 return (
                   <button
                     key={p.id}
-                    className={`session-creator-provider-card ${aiProvider === p.id ? "selected" : ""} ${!p.enabled ? "disabled" : ""} ${p.enabled && highlightedProviderIndex === providerIdx ? "selected" : ""}`}
-                    onClick={() => { if (p.enabled) { setAiProvider(p.id); setHighlightedProviderIndex(providerIdx); if (p.id !== "claude") setSelectedChannels([]); } }}
-                    disabled={!p.enabled}
+                    className={`session-creator-provider-card ${aiProvider === p.id ? "selected" : ""} ${highlightedProviderIndex === providerIdx ? "selected" : ""} ${availabilityLoaded && !isAvailable ? "session-creator-provider-unavailable" : ""}`}
+                    onClick={() => { setAiProvider(p.id); setHighlightedProviderIndex(providerIdx); if (p.id !== "claude") setSelectedChannels([]); }}
                   >
-                    <span className="session-creator-provider-name">{p.label}</span>
-                    <span className="session-creator-provider-desc">
-                      {p.enabled ? p.description : "Coming soon"}
+                    <span className="session-creator-provider-name">
+                      {p.label}
+                      {availabilityLoaded && !isAvailable && (
+                        <span className="session-creator-provider-status-badge">Not detected</span>
+                      )}
                     </span>
+                    <span className="session-creator-provider-desc">{p.description}</span>
                   </button>
                 );
               })}
@@ -1073,6 +1067,15 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 <span className="session-creator-provider-desc">No AI agent</span>
               </button>
             </div>
+            {aiProvider && availabilityLoaded && !providerAvailability[aiProvider] && (
+              <div className="session-creator-install-hint">
+                <div className="session-creator-install-hint-title">
+                  {getProviderInfo(aiProvider)?.label} CLI was not detected on your system
+                </div>
+                <code className="session-creator-install-hint-cmd">{getProviderInfo(aiProvider)?.installCmd}</code>
+                <div className="session-creator-install-hint-auth">{getProviderInfo(aiProvider)?.authHint}</div>
+              </div>
+            )}
             {aiProvider && AUTO_APPROVE_FLAGS[aiProvider] && (
               <label className="session-creator-auto-approve">
                 <input

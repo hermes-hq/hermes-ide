@@ -116,6 +116,12 @@ pub struct OutputAnalyzer {
     pub pending_context_inject: bool,
     pub context_injected: bool,
     prompt_count_after_agent: u32,
+    /// Lines to scan after AI launch for "command not found" errors.
+    pub ai_launch_check_remaining: u32,
+    /// Provider name when "command not found" is detected after AI launch.
+    pub ai_launch_failed: Option<String>,
+    /// Provider being launched (set before launch, cleared after check window).
+    pub ai_launching_provider: Option<String>,
 }
 
 impl Default for OutputAnalyzer {
@@ -159,6 +165,9 @@ impl OutputAnalyzer {
             pending_context_inject: false,
             context_injected: false,
             prompt_count_after_agent: 0,
+            ai_launch_check_remaining: 0,
+            ai_launch_failed: None,
+            ai_launching_provider: None,
         }
     }
 
@@ -370,6 +379,25 @@ impl OutputAnalyzer {
             // Feed output to node builder
             if let Some(ref mut builder) = self.node_builder {
                 builder.push_output(trimmed);
+            }
+
+            // Check for "command not found" after AI launch attempt
+            if self.ai_launch_check_remaining > 0 {
+                self.ai_launch_check_remaining -= 1;
+                let lower = trimmed.to_lowercase();
+                if lower.contains("command not found")
+                    || lower.contains("not recognized")
+                    || lower.contains("unknown command")
+                {
+                    if let Some(ref provider) = self.ai_launching_provider {
+                        self.ai_launch_failed = Some(provider.clone());
+                    }
+                    self.ai_launch_check_remaining = 0;
+                    self.ai_launching_provider = None;
+                }
+                if self.ai_launch_check_remaining == 0 {
+                    self.ai_launching_provider = None;
+                }
             }
 
             // Keep stripped buffer (last ~16KB, char-boundary safe)

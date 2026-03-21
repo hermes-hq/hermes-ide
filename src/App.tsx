@@ -67,6 +67,11 @@ import { useToastStore } from "./hooks/useToastStore";
 import { WhatsNewDialog } from "./components/WhatsNewDialog";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
+import { AI_PROVIDERS as AI_PROVIDER_LIST } from "./utils/aiProviders";
+
+const AI_PROVIDER_INFO_MAP: Record<string, { label: string; installCmd: string }> = Object.fromEntries(
+  AI_PROVIDER_LIST.map((p) => [p.id, { label: p.label, installCmd: p.installCmd }])
+);
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 
 function AppContent() {
@@ -140,6 +145,25 @@ function AppContent() {
           duration: 5000,
         });
       }
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
+  // ── AI launch failure notification ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<string>("ai-launch-failed", (event) => {
+      if (cancelled) return;
+      const provider = event.payload;
+      const providerInfo = AI_PROVIDER_INFO_MAP[provider];
+      toastStoreRef.current.addToast({
+        message: `${providerInfo?.label ?? provider} CLI was not found. Install with: ${providerInfo?.installCmd ?? provider}`,
+        type: "warning",
+        duration: 15000,
+      });
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });

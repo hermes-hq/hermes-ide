@@ -486,6 +486,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // AI provider detection
+            pty::check_ai_providers,
             // Session management
             pty::create_session,
             pty::ssh_list_directory,
