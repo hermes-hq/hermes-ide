@@ -159,3 +159,144 @@
   text-align: center;
   line-height: 1.6;
 }
+
+/* ─── Editor Mode ─────────────────────────────────────────────────── */
+
+.file-editor-content {
+  position: relative;
+}
+
+.file-editor-code {
+  height: 100%;
+}
+
+.file-editor-line-numbers {
+  overflow: hidden;
+}
+
+.file-editor-textarea {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  tab-size: 4;
+  padding: var(--space-2) var(--space-3);
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow: auto;
+  caret-color: var(--accent);
+}
+
+.file-editor-textarea::selection {
+  background: var(--accent-dim);
+}
+
+.file-editor-dirty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yellow);
+  flex-shrink: 0;
+}
+
+.file-editor-saving {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.file-editor-error {
+  font-size: var(--text-xs);
+  color: var(--red);
+  flex-shrink: 0;
+}
+
+.file-preview-open-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ─── Close Confirmation Dialog ───────────────────────────────────── */
+
+.file-editor-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+.file-editor-confirm-dialog {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.file-editor-confirm-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.file-editor-confirm-desc {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.file-editor-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.file-editor-confirm-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.file-editor-confirm-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+}
+
+.file-editor-confirm-discard {
+  color: var(--red);
+}
+
+.file-editor-confirm-discard:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.file-editor-confirm-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-0);
+  font-weight: 600;
+}
+
+.file-editor-confirm-save:hover {
+  opacity: 0.85;
+}

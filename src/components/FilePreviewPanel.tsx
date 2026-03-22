@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "../styles/components/FilePreview.css";
 import { readFileContent, openFileInEditor, sshReadFile } from "../api/git";
 import { writeToSession } from "../api/sessions";
 import { getSetting } from "../api/settings";
 import { useSession } from "../state/SessionContext";
+import { useFileEditor } from "../hooks/useFileEditor";
+import { FindReplaceBar } from "./FindReplaceBar";
 import type { FileContent } from "../types/git";
 
 import type { FileHandlerProps } from "../plugins/types";
@@ -164,12 +166,17 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editorLabel, setEditorLabel] = useState(isSSH ? "Vim" : "System Default");
+  const [editMode, setEditMode] = useState(false);
+  const [showFindReplace, setShowFindReplace] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lineNumbersRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     const promise = isSSH
-      ? sshReadFile(sessionId, filePath)
+      ? sshReadFile(sessionId, filePath).then((r) => ({ ...r, mtime: 0 }))
       : readFileContent(sessionId, projectId, filePath);
     promise
       .then(setFile)
@@ -223,6 +230,74 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
         .catch(console.error);
     }
   }, [sessionId, projectId, filePath, isSSH, sshInfo, onBack]);
+
+  // Auto-enter edit mode for non-binary, non-large text files
+  useEffect(() => {
+    if (file && !file.is_binary && file.content && file.size <= MAX_DISPLAY_SIZE) {
+      setEditMode(true);
+    } else {
+      setEditMode(false);
+    }
+  }, [file]);
+
+  const editor = useFileEditor({
+    sessionId,
+    projectId,
+    filePath,
+    initialContent: file?.content ?? "",
+    initialMtime: (file as FileContent)?.mtime ?? 0,
+    isSSH,
+  });
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!editMode) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        editor.save();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        setShowFindReplace(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [editMode, editor]);
+
+  // Scroll sync: textarea ↔ line numbers
+  const handleTextareaScroll = useCallback(() => {
+    if (textareaRef.current && lineNumbersRef.current) {
+      lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  }, []);
+
+  // Tab key inserts tab character
+  const handleTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const newValue = editor.content.substring(0, start) + "\t" + editor.content.substring(end);
+      editor.setContent(newValue);
+      // Restore cursor position after React re-render
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 1;
+      });
+    }
+  }, [editor]);
+
+  const handleBack = useCallback(() => {
+    if (editor.isDirty) {
+      setShowCloseConfirm(true);
+    } else {
+      onBack();
+    }
+  }, [editor.isDirty, onBack]);
+
+  const editorLineCount = editMode ? (editor.content.split("\n").length) : 0;
 
   const lines = useMemo(() => {
     if (!file || !file.content) return [];
@@ -278,11 +353,19 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
   return (
     <div className="file-preview">
       <div className="file-preview-header">
-        <button className="file-preview-back" onClick={onBack} title="Back to files">&#9666;</button>
+        <button className="file-preview-back" onClick={handleBack} title="Back to files">&#9666;</button>
         <span className="file-preview-filename" title={filePath}>{file.file_name}</span>
+        {editMode && editor.isDirty && <span className="file-editor-dirty-dot" title="Unsaved changes" />}
+        {editMode && editor.isSaving && <span className="file-editor-saving">Saving...</span>}
+        {editMode && editor.saveError && <span className="file-editor-error" title={editor.saveError}>Save failed</span>}
         <span className="file-preview-lang">{file.language}</span>
+        {editMode && (
+          <button className="file-preview-open-btn" onClick={() => editor.save()} disabled={!editor.isDirty} title="Save (Cmd+S)">
+            Save
+          </button>
+        )}
         <button className="file-preview-open-btn" onClick={handleOpenInEditor} title={`Open in ${editorLabel}`}>
-          Open in {editorLabel}
+          {editorLabel}
         </button>
       </div>
 
@@ -297,6 +380,37 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
           File too large ({formatSize(file.size)})
           <br />
           Maximum preview size is 1 MB.
+        </div>
+      ) : editMode ? (
+        <div className="file-preview-content file-editor-content">
+          {showFindReplace && (
+            <FindReplaceBar
+              content={editor.content}
+              onReplace={editor.setContent}
+              textareaRef={textareaRef}
+              onClose={() => setShowFindReplace(false)}
+            />
+          )}
+          <pre className="file-preview-code file-editor-code">
+            <div className="file-preview-line-numbers file-editor-line-numbers" ref={lineNumbersRef}>
+              {Array.from({ length: editorLineCount }, (_, i) => (
+                <span key={i} className="file-preview-line-number">{i + 1}</span>
+              ))}
+            </div>
+            <textarea
+              ref={textareaRef}
+              className="file-editor-textarea"
+              value={editor.content}
+              onChange={(e) => editor.setContent(e.target.value)}
+              onScroll={handleTextareaScroll}
+              onKeyDown={handleTextareaKeyDown}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              wrap="off"
+            />
+          </pre>
         </div>
       ) : (
         <div className="file-preview-content">
@@ -316,6 +430,22 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
               ))}
             </div>
           </pre>
+        </div>
+      )}
+
+      {showCloseConfirm && (
+        <div className="file-editor-confirm-overlay">
+          <div className="file-editor-confirm-dialog">
+            <div className="file-editor-confirm-title">Unsaved Changes</div>
+            <div className="file-editor-confirm-desc">
+              You have unsaved changes in {file.file_name}. What would you like to do?
+            </div>
+            <div className="file-editor-confirm-actions">
+              <button className="file-editor-confirm-btn" onClick={() => setShowCloseConfirm(false)}>Cancel</button>
+              <button className="file-editor-confirm-btn file-editor-confirm-discard" onClick={() => { setShowCloseConfirm(false); onBack(); }}>Discard</button>
+              <button className="file-editor-confirm-btn file-editor-confirm-save" onClick={async () => { await editor.save(); setShowCloseConfirm(false); onBack(); }}>Save &amp; Close</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

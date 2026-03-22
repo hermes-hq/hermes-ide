@@ -490,6 +490,7 @@ pub fn run() {
             pty::create_session,
             pty::ssh_list_directory,
             pty::ssh_read_file,
+            pty::ssh_write_file,
             pty::ssh_list_tmux_sessions,
             pty::ssh_list_tmux_windows,
             pty::ssh_tmux_select_window,
@@ -601,6 +602,7 @@ pub fn run() {
             git::git_diff,
             git::git_open_file,
             git::read_file_content,
+            git::write_file_content,
             git::open_file_in_editor,
             // Git branch management
             git::git_list_branches,

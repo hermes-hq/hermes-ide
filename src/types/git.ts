@@ -71,6 +71,7 @@ export interface FileContent {
   language: string;
   is_binary: boolean;
   size: number;
+  mtime: number;
 }
 
 // ─── SSH File Types ──────────────────────────────────────────────────

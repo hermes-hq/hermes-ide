@@ -347,6 +347,62 @@ pub async fn ssh_read_file(
     })
 }
 
+#[tauri::command]
+pub async fn ssh_write_file(
+    state: State<'_, AppState>,
+    session_id: String,
+    file_path: String,
+    content: String,
+) -> Result<(), String> {
+    let (user, host, port) = {
+        let mgr = state
+            .pty_manager
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let pty_session = mgr
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?;
+        let session = pty_session
+            .session
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let ssh = session
+            .ssh_info
+            .as_ref()
+            .ok_or_else(|| "Not an SSH session".to_string())?;
+        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+    };
+
+    let escaped = shell_escape(&file_path);
+    let cmd = format!("cat > {}", escaped);
+    let mut child = ssh_command(&user, &host, port)
+        .arg(cmd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn SSH: {}", e))?;
+
+    if let Some(ref mut stdin) = child.stdin {
+        use std::io::Write;
+        stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("Failed to write to SSH stdin: {}", e))?;
+    }
+    // Drop stdin to close the pipe and let cat finish
+    child.stdin.take();
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("SSH command failed: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("SSH write failed: {}", stderr));
+    }
+    Ok(())
+}
+
 /// Escape a string for use in a remote shell command (single-quote wrapping).
 fn shell_escape(s: &str) -> String {
     // Replace single quotes with '\'' and wrap in single quotes

@@ -163,6 +163,7 @@ pub struct FileContent {
     pub language: String,
     pub is_binary: bool,
     pub size: u64,
+    pub mtime: u64,
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -976,6 +977,12 @@ pub fn read_file_content(
     let metadata = std::fs::metadata(&full_path)
         .map_err(|e| format!("Failed to read file metadata: {}", e))?;
     let size = metadata.len();
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
     // Cap at 1 MB to avoid loading huge files into the webview
     const MAX_SIZE: u64 = 1_048_576;
@@ -1029,6 +1036,7 @@ pub fn read_file_content(
             language,
             is_binary: false,
             size,
+            mtime,
         });
     }
 
@@ -1051,7 +1059,37 @@ pub fn read_file_content(
         language,
         is_binary,
         size,
+        mtime,
     })
+}
+
+#[tauri::command]
+pub fn write_file_content(
+    state: State<'_, AppState>,
+    session_id: String,
+    project_id: String,
+    file_path: String,
+    content: String,
+) -> Result<u64, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
+    drop(db);
+
+    let full_path = safe_join(&project_path, &file_path)?;
+    std::fs::write(&full_path, content.as_bytes())
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    // Return new mtime so the frontend can track it
+    let mtime = std::fs::metadata(&full_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(mtime)
 }
 
 #[tauri::command]
