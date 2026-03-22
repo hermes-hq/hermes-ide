@@ -2,6 +2,7 @@ import "../styles/components/SessionCreator.css";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useResizablePanel } from "../hooks/useResizablePanel";
 import { open } from "@tauri-apps/plugin-dialog";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { CreateSessionOpts } from "../state/SessionContext";
 import { getProjectsOrdered, createProject, deleteProject } from "../api/projects";
 import type { ProjectOrdered } from "../types/project";
@@ -1056,6 +1057,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                       )}
                     </span>
                     <span className="session-creator-provider-desc">{p.description}</span>
+                    {availabilityLoaded && !isAvailable && (
+                      <a
+                        className="session-creator-provider-install-link"
+                        onClick={(e) => { e.stopPropagation(); shellOpen(p.installUrl); }}
+                      >
+                        How to install
+                      </a>
+                    )}
                   </button>
                 );
               })}

@@ -217,6 +217,19 @@
   margin-left: 6px;
 }
 
+.session-creator-provider-install-link {
+  display: block;
+  color: var(--yellow);
+  cursor: pointer;
+  text-decoration: underline;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+}
+
+.session-creator-provider-install-link:hover {
+  color: var(--text-0);
+}
+
 .session-creator-install-hint {
   display: flex;
   flex-direction: column;
