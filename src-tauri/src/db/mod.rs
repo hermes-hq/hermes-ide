@@ -3057,10 +3057,7 @@ pub fn export_settings(state: State<'_, AppState>, path: String) -> Result<(), S
         .collect();
 
     // Add metadata so future versions can detect the format
-    export.insert(
-        "_hermes_export_version".to_string(),
-        "1".to_string(),
-    );
+    export.insert("_hermes_export_version".to_string(), "1".to_string());
     export.insert(
         "_hermes_app_version".to_string(),
         env!("CARGO_PKG_VERSION").to_string(),
@@ -3088,9 +3085,9 @@ pub fn import_settings(
         serde_json::from_str(&content).map_err(|e| format!("Invalid settings JSON: {}", e))?;
 
     // Validate this looks like a Hermes settings file (at least one valid key)
-    let has_valid_key = imported.keys().any(|k| {
-        k.starts_with("_hermes_") || VALID_SETTING_KEYS.contains(&k.as_str())
-    });
+    let has_valid_key = imported
+        .keys()
+        .any(|k| k.starts_with("_hermes_") || VALID_SETTING_KEYS.contains(&k.as_str()));
     if !has_valid_key {
         return Err("This file does not appear to be a Hermes settings export".to_string());
     }

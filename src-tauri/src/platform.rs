@@ -219,11 +219,7 @@ mod tests {
     fn check_ai_cli_availability_returns_all_provider_keys() {
         let result = check_ai_cli_availability();
         for (id, _) in AI_CLI_PROVIDERS {
-            assert!(
-                result.contains_key(*id),
-                "Missing provider key: {}",
-                id
-            );
+            assert!(result.contains_key(*id), "Missing provider key: {}", id);
         }
     }
 
@@ -261,8 +257,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&fake_bin, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&fake_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         // With the temp dir in PATH, `which` finds it.
@@ -273,7 +268,10 @@ mod tests {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-        assert!(found_with_full, "fake CLI should be found with extended PATH");
+        assert!(
+            found_with_full,
+            "fake CLI should be found with extended PATH"
+        );
 
         // With only the minimal PATH, `which` does NOT find it — this is
         // exactly the bug that affected the production GUI app.
@@ -300,15 +298,16 @@ mod tests {
     fn login_shell_detection_finds_commands() {
         // The login-shell approach should find `ls` (a basic sanity check).
         let results = check_ai_cli_via_login_shell();
-        assert!(
-            results.is_some(),
-            "login shell detection should succeed"
-        );
+        assert!(results.is_some(), "login shell detection should succeed");
         let map = results.unwrap();
         // We can't assert specific AI CLIs are installed, but all keys must
         // be present.
         for (id, _) in AI_CLI_PROVIDERS {
-            assert!(map.contains_key(*id), "Missing key from login shell results: {}", id);
+            assert!(
+                map.contains_key(*id),
+                "Missing key from login shell results: {}",
+                id
+            );
         }
     }
 
@@ -333,11 +332,13 @@ mod tests {
         for (id, cmd) in AI_CLI_PROVIDERS {
             assert!(
                 !id.contains('\'') && !id.contains(';') && !id.contains('|'),
-                "Provider ID contains unsafe chars: {}", id
+                "Provider ID contains unsafe chars: {}",
+                id
             );
             assert!(
                 !cmd.contains('\'') && !cmd.contains(';') && !cmd.contains('|'),
-                "Command name contains unsafe chars: {}", cmd
+                "Command name contains unsafe chars: {}",
+                cmd
             );
         }
 
