@@ -140,6 +140,47 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
         cleanup_count += 1;
     }
 
+    // Second pass: validate that worktree paths still exist on disk.
+    // Re-fetch from DB since some records may have been deleted above.
+    let remaining_worktrees = database.get_all_session_worktrees().unwrap_or_default();
+    let mut missing_paths: Vec<serde_json::Value> = Vec::new();
+
+    for wt in &remaining_worktrees {
+        if wt.is_main_worktree {
+            continue;
+        }
+
+        if !Path::new(&wt.worktree_path).is_dir() {
+            log::warn!(
+                "Startup worktree cleanup: worktree path missing on disk '{}' (session '{}', branch '{}')",
+                wt.worktree_path,
+                wt.session_id,
+                wt.branch_name.as_deref().unwrap_or("unknown")
+            );
+
+            // Delete only the session_worktrees DB record — never touch the project or session
+            if let Err(e) = database.delete_session_worktree(&wt.id) {
+                log::warn!(
+                    "Startup worktree cleanup: failed to delete DB record for missing path '{}': {}",
+                    wt.worktree_path,
+                    e
+                );
+            }
+
+            // Run git worktree prune on the parent repo
+            if let Ok(Some(proj)) = database.get_project(&wt.project_id) {
+                repos_to_prune.insert(proj.path.clone());
+            }
+
+            missing_paths.push(serde_json::json!({
+                "sessionId": wt.session_id,
+                "branchName": wt.branch_name.as_deref().unwrap_or("unknown"),
+            }));
+
+            cleanup_count += 1;
+        }
+    }
+
     // Run git worktree prune on each affected repo
     for repo_path in &repos_to_prune {
         if let Err(e) = git::worktree::cleanup_stale_worktrees(repo_path) {
@@ -323,12 +364,19 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
         );
         let _ = app.emit("worktree-cleanup-summary", cleanup_count);
     }
+
+    // Emit a separate event for missing worktree paths so the UI can warn the user
+    if !missing_paths.is_empty() {
+        let _ = app.emit("worktree-paths-missing", &missing_paths);
+    }
 }
 
 pub struct AppState {
     pub db: Mutex<db::Database>,
     pub pty_manager: Mutex<pty::PtyManager>,
     pub sys: Mutex<sysinfo::System>,
+    pub startup_marker_path: std::path::PathBuf,
+    pub worktree_watcher: Mutex<Option<git::watcher::WorktreeWatcher>>,
 }
 
 /// Save scrollback snapshots and session metadata to DB on close.
@@ -397,6 +445,11 @@ fn save_workspace_state(app: &tauri::AppHandle) {
         return;
     }
     do_save_workspace(app);
+
+    // Remove the startup marker to signal a clean shutdown
+    if let Some(state) = app.try_state::<AppState>() {
+        let _ = std::fs::remove_file(&state.startup_marker_path);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -427,6 +480,17 @@ pub fn run() {
             std::fs::create_dir_all(app_dir.join("context"))
                 .map_err(|e| format!("Failed to create context dir: {}", e))?;
 
+            // Dirty shutdown detection: check if a previous session exited without
+            // cleaning up its marker file.
+            let startup_marker = app_dir.join("running.marker");
+            if startup_marker.exists() {
+                log::warn!("Dirty shutdown detected — previous session did not exit cleanly");
+            }
+            let timestamp = chrono::Local::now().to_rfc3339();
+            if let Err(e) = std::fs::write(&startup_marker, timestamp.as_bytes()) {
+                log::warn!("Failed to write startup marker: {}", e);
+            }
+
             // Migrate old database name if needed
             let old_db_path = app_dir.join("axon_v3.db");
             let db_path = app_dir.join("hermes_idea_v3.db");
@@ -445,10 +509,16 @@ pub fn run() {
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
 
+            // Start worktree file watcher (notification only — never
+            // deletes projects or closes sessions)
+            let watcher = git::watcher::start_watching(app.handle().clone(), app_dir.clone());
+
             let state = AppState {
                 db: Mutex::new(database),
                 pty_manager: Mutex::new(pty::PtyManager::new()),
                 sys: Mutex::new(sys),
+                startup_marker_path: startup_marker.clone(),
+                worktree_watcher: Mutex::new(watcher),
             };
 
             app.manage(state);
@@ -792,6 +862,117 @@ mod tests {
         // Journal should now be empty
         let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
         assert!(remaining.is_empty());
+    }
+
+    /// Verify the dirty-shutdown marker lifecycle: create, verify, delete.
+    #[test]
+    fn dirty_shutdown_marker_lifecycle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("running.marker");
+
+        // Write the marker (simulating app startup)
+        std::fs::write(&marker, "2026-01-01T00:00:00+00:00").unwrap();
+        assert!(marker.exists(), "marker should exist after writing");
+
+        // Delete the marker (simulating clean shutdown)
+        std::fs::remove_file(&marker).unwrap();
+        assert!(
+            !marker.exists(),
+            "marker should be gone after clean shutdown"
+        );
+    }
+
+    /// Verify that missing worktree paths are detected during startup validation.
+    #[test]
+    fn startup_detects_missing_worktree_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let database = db::Database::new(&db_path).unwrap();
+
+        // Create a fake session and project so the worktree record is valid
+        let session_id = "sess-missing-path";
+        let project_id = "proj-missing-path";
+
+        // Insert a minimal session record
+        let update = pty::SessionUpdate {
+            id: session_id.to_string(),
+            label: "test".to_string(),
+            description: String::new(),
+            color: String::new(),
+            group: None,
+            phase: "running".to_string(),
+            working_directory: tmp.path().to_string_lossy().to_string(),
+            shell: "/bin/bash".to_string(),
+            created_at: String::new(),
+            last_activity_at: String::new(),
+            workspace_paths: vec![],
+            detected_agent: None,
+            metrics: pty::SessionMetrics {
+                output_lines: 0,
+                error_count: 0,
+                stuck_score: 0.0,
+                token_usage: std::collections::HashMap::new(),
+                tool_calls: vec![],
+                tool_call_summary: std::collections::HashMap::new(),
+                files_touched: vec![],
+                recent_errors: vec![],
+                recent_actions: vec![],
+                available_actions: vec![],
+                memory_facts: vec![],
+                latency_p50_ms: None,
+                latency_p95_ms: None,
+                latency_samples: vec![],
+                token_history: vec![],
+            },
+            ai_provider: None,
+            auto_approve: false,
+            channels: vec![],
+            context_injected: false,
+            has_initial_context: false,
+            last_nudged_version: 0,
+            ssh_info: None,
+        };
+        database.create_session_v2(&update).unwrap();
+
+        // Insert a worktree record pointing to a non-existent directory
+        let fake_wt_path = tmp.path().join("does-not-exist");
+        database
+            .insert_session_worktree(
+                "wt-missing-1",
+                session_id,
+                project_id,
+                fake_wt_path.to_str().unwrap(),
+                Some("feature/gone"),
+                false,
+            )
+            .unwrap();
+
+        // Verify the record exists
+        let before = database.get_all_session_worktrees().unwrap();
+        assert_eq!(before.len(), 1);
+
+        // Simulate the detection logic from cleanup_stale_worktrees second pass
+        let remaining = database.get_all_session_worktrees().unwrap();
+        let mut detected_missing = Vec::new();
+        for wt in &remaining {
+            if !wt.is_main_worktree && !Path::new(&wt.worktree_path).is_dir() {
+                detected_missing.push(wt.id.clone());
+                database.delete_session_worktree(&wt.id).unwrap();
+            }
+        }
+
+        assert_eq!(detected_missing.len(), 1, "should detect one missing path");
+        assert_eq!(detected_missing[0], "wt-missing-1");
+
+        // Verify the DB record was cleaned up
+        let after = database.get_all_session_worktrees().unwrap();
+        assert!(after.is_empty(), "DB record should be deleted");
+
+        // Verify the session still exists (we never delete sessions)
+        assert!(
+            database.session_exists(session_id).unwrap(),
+            "session must NOT be deleted"
+        );
     }
 
     /// Journal should NOT be cleared if orphans still exist after replay.

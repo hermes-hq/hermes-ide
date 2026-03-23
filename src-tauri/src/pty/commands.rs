@@ -2023,6 +2023,11 @@ pub fn close_session(
                                         session_id,
                                         e
                                     );
+                                    let _ = app.emit("worktree-cleanup-failed", serde_json::json!({
+                                        "sessionId": session_id,
+                                        "branchName": wt.branch_name.as_deref().unwrap_or("unknown"),
+                                        "error": e.to_string(),
+                                    }));
                                 }
                             }
                         } else {

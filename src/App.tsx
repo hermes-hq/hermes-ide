@@ -151,6 +151,63 @@ function AppContent() {
     return () => { cancelled = true; unlisten?.(); };
   }, []);
 
+  // ── Missing worktree paths notification ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ sessionId: string; branchName: string }[]>("worktree-paths-missing", (event) => {
+      if (cancelled) return;
+      const items = event.payload;
+      if (items.length > 0) {
+        const branches = items.map((i) => i.branchName).join(", ");
+        toastStoreRef.current.addToast({
+          message: `${items.length} worktree path${items.length !== 1 ? "s" : ""} missing on disk (${branches}). DB records cleaned up.`,
+          type: "warning",
+          duration: 8000,
+        });
+      }
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
+  // ── Worktree cleanup failure notification ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ sessionId: string; branchName: string; error: string }>("worktree-cleanup-failed", (event) => {
+      if (cancelled) return;
+      const { branchName } = event.payload;
+      toastStoreRef.current.addToast({
+        message: `Failed to clean up branch worktree '${branchName}'. It will be retried on next startup.`,
+        type: "warning",
+        duration: 8000,
+      });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
+  // ── Worktree path deleted externally (file watcher) ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ sessionId: string; projectId: string; worktreePath: string; branchName: string }>("worktree-path-deleted", (event) => {
+      if (cancelled) return;
+      const { branchName } = event.payload;
+      toastStoreRef.current.addToast({
+        message: `Working directory for branch '${branchName}' was deleted externally`,
+        type: "warning",
+        duration: 8000,
+      });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   // ── AI launch failure notification ──
   useEffect(() => {
     let cancelled = false;

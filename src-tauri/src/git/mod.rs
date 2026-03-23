@@ -1,4 +1,5 @@
 pub mod journal;
+pub mod watcher;
 pub mod worktree;
 
 use git2::{
