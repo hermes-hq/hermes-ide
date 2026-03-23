@@ -199,8 +199,7 @@ pub fn create_worktree(
     if let Some(remote_ref) = from_remote {
         let local_name = derive_local_branch_name(remote_ref);
 
-        let wt_path =
-            worktree_path_for_session(app_data_dir, repo_path, session_id, &local_name);
+        let wt_path = worktree_path_for_session(app_data_dir, repo_path, session_id, &local_name);
         let wt_path_str = wt_path
             .to_str()
             .ok_or_else(|| "Worktree path contains invalid UTF-8".to_string())?;
@@ -220,12 +219,7 @@ pub fn create_worktree(
             // Local branch exists — verify it points to the same commit as the remote
             let remote_branch = repo
                 .find_branch(remote_ref, BranchType::Remote)
-                .map_err(|e| {
-                    format!(
-                        "Remote branch '{}' not found: {}",
-                        remote_ref, e
-                    )
-                })?;
+                .map_err(|e| format!("Remote branch '{}' not found: {}", remote_ref, e))?;
 
             let local_oid = local_branch
                 .get()
@@ -821,13 +815,25 @@ mod tests {
         let repo_dir = create_test_repo();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        let wt1 =
-            create_worktree(app_data.path(), repo_path, "session1", "my-branch", true, None)
-                .unwrap();
+        let wt1 = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "my-branch",
+            true,
+            None,
+        )
+        .unwrap();
         // Calling again with the same session+branch should return the existing one
-        let wt2 =
-            create_worktree(app_data.path(), repo_path, "session1", "my-branch", true, None)
-                .unwrap();
+        let wt2 = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "my-branch",
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(wt1.worktree_path, wt2.worktree_path);
     }
@@ -853,12 +859,26 @@ mod tests {
         let repo_path = repo_dir.path().to_str().unwrap();
 
         // Create first worktree on a branch
-        create_worktree(app_data.path(), repo_path, "session1", "dup-branch", true, None).unwrap();
+        create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "dup-branch",
+            true,
+            None,
+        )
+        .unwrap();
 
         // Creating with a different session reuses the existing worktree (shared)
-        let wt2 =
-            create_worktree(app_data.path(), repo_path, "session2", "dup-branch", false, None)
-                .unwrap();
+        let wt2 = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session2",
+            "dup-branch",
+            false,
+            None,
+        )
+        .unwrap();
         assert!(wt2.is_shared);
         assert_eq!(wt2.branch_name, "dup-branch");
     }
@@ -871,9 +891,15 @@ mod tests {
         let repo_dir = create_test_repo();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        let wt =
-            create_worktree(app_data.path(), repo_path, "session1", "temp-branch", true, None)
-                .unwrap();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "temp-branch",
+            true,
+            None,
+        )
+        .unwrap();
         assert!(Path::new(&wt.worktree_path).exists());
 
         let result = remove_worktree(repo_path, "session1", &wt.worktree_path);
@@ -887,9 +913,15 @@ mod tests {
         let repo_dir = create_test_repo();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        let wt =
-            create_worktree(app_data.path(), repo_path, "session1", "gone-branch", true, None)
-                .unwrap();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "gone-branch",
+            true,
+            None,
+        )
+        .unwrap();
         // Manually delete the directory
         std::fs::remove_dir_all(&wt.worktree_path).unwrap();
 
@@ -944,9 +976,15 @@ mod tests {
         let repo_dir = create_test_repo();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        let wt =
-            create_worktree(app_data.path(), repo_path, "session1", "remove-me", true, None)
-                .unwrap();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "remove-me",
+            true,
+            None,
+        )
+        .unwrap();
         assert_eq!(list_worktrees(repo_path).unwrap().len(), 1);
 
         remove_worktree(repo_path, "session1", &wt.worktree_path).unwrap();
@@ -1030,7 +1068,15 @@ mod tests {
         let repo_dir = create_test_repo();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        create_worktree(app_data.path(), repo_path, "session1", "wt-branch", true, None).unwrap();
+        create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "wt-branch",
+            true,
+            None,
+        )
+        .unwrap();
 
         let available = is_branch_available(repo_path, "wt-branch", None).unwrap();
         assert!(!available);
@@ -1042,9 +1088,15 @@ mod tests {
         let repo_dir = create_test_repo();
         let repo_path = repo_dir.path().to_str().unwrap();
 
-        let wt =
-            create_worktree(app_data.path(), repo_path, "session1", "my-branch", true, None)
-                .unwrap();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "my-branch",
+            true,
+            None,
+        )
+        .unwrap();
 
         // Should be unavailable without exclude
         assert!(!is_branch_available(repo_path, "my-branch", None).unwrap());
@@ -1081,9 +1133,15 @@ mod tests {
         let repo_path = repo_dir.path().to_str().unwrap();
 
         // Create a worktree then manually delete its directory to make it stale
-        let wt =
-            create_worktree(app_data.path(), repo_path, "session1", "stale-branch", true, None)
-                .unwrap();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "stale-branch",
+            true,
+            None,
+        )
+        .unwrap();
         assert_eq!(list_worktrees(repo_path).unwrap().len(), 1);
 
         std::fs::remove_dir_all(&wt.worktree_path).unwrap();
@@ -1141,7 +1199,10 @@ mod tests {
 
     #[test]
     fn test_derive_local_branch_name_simple() {
-        assert_eq!(derive_local_branch_name("origin/feature-xyz"), "feature-xyz");
+        assert_eq!(
+            derive_local_branch_name("origin/feature-xyz"),
+            "feature-xyz"
+        );
     }
 
     #[test]
