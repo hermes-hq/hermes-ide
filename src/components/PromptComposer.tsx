@@ -3,7 +3,10 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt, isActionMod } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
+import { exportPromptBundle, importPromptBundle } from "../api/promptBundle";
 import { writeToSession } from "../api/sessions";
+import { save, open } from "@tauri-apps/plugin-dialog";
+import { createBundle, validateBundle, importBundle } from "../lib/promptBundle";
 import { dismissSuggestions, clearGhostText, getInputBufferLength, clearInputBuffer } from "../terminal/TerminalPool";
 import {
   ComposerFields,
@@ -23,6 +26,7 @@ import { TemplatePicker } from "./TemplatePicker";
 interface PromptComposerProps {
   sessionId: string;
   onClose: () => void;
+  addToast?: (toast: { message: string; type: "info" | "success" | "warning" | "error"; duration: number }) => void;
 }
 
 const FIELD_META: { key: "task" | "scope"; label: string; placeholder: string; rows: number }[] = [
@@ -70,7 +74,7 @@ function migrateTemplate(tpl: Record<string, unknown>): PromptTemplate {
   return result;
 }
 
-export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
+export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerProps) {
   const [fields, setFields] = useState<ComposerFields>({ ...EMPTY_FIELDS });
   const [userTemplates, setUserTemplates] = useState<PromptTemplate[]>([]);
   const [customRoles, setCustomRoles] = useState<RoleDefinition[]>([]);
@@ -261,6 +265,98 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
     });
   }, []);
 
+  // ── Bundle export/import handlers ────────────────────────────────────
+
+  const builtInRoleIds = useMemo(() => new Set(BUILT_IN_ROLES.map((r) => r.id)), []);
+  const builtInStyleIds = useMemo(() => new Set(BUILT_IN_STYLES.map((s) => s.id)), []);
+
+  const handleExportTemplate = useCallback(async (tpl: PromptTemplate) => {
+    try {
+      const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
+      const bundle = createBundle([tpl], customRoles, customStyles, builtInRoleIds, builtInStyleIds, appVersion);
+      const json = JSON.stringify(bundle, null, 2);
+      const safeName = tpl.name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+      const path = await save({
+        defaultPath: `${safeName}.hermes-prompts`,
+        filters: [{ name: "Hermes Prompts", extensions: ["hermes-prompts"] }],
+      });
+      if (!path) return;
+      await exportPromptBundle(path, json);
+      addToast?.({ message: `Exported "${tpl.name}"`, type: "success", duration: 3000 });
+    } catch (err) {
+      console.error("[PromptComposer] Export failed:", err);
+      addToast?.({ message: `Export failed: ${err}`, type: "error", duration: 5000 });
+    }
+  }, [customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast]);
+
+  const handleExportAll = useCallback(async () => {
+    if (userTemplates.length === 0) return;
+    try {
+      const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
+      const bundle = createBundle(userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, appVersion);
+      const json = JSON.stringify(bundle, null, 2);
+      const path = await save({
+        defaultPath: "my-prompts.hermes-prompts",
+        filters: [{ name: "Hermes Prompts", extensions: ["hermes-prompts"] }],
+      });
+      if (!path) return;
+      await exportPromptBundle(path, json);
+      addToast?.({ message: `Exported ${userTemplates.length} template${userTemplates.length === 1 ? "" : "s"}`, type: "success", duration: 3000 });
+    } catch (err) {
+      console.error("[PromptComposer] Export all failed:", err);
+      addToast?.({ message: `Export failed: ${err}`, type: "error", duration: 5000 });
+    }
+  }, [userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast]);
+
+  const handleImportBundle = useCallback(async () => {
+    try {
+      const path = await open({
+        filters: [{ name: "Hermes Prompts", extensions: ["hermes-prompts"] }],
+        multiple: false,
+        directory: false,
+      });
+      if (!path) return;
+      const raw = await importPromptBundle(path as string);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        addToast?.({ message: "Invalid bundle file: not valid JSON", type: "error", duration: 5000 });
+        return;
+      }
+      const validation = validateBundle(parsed);
+      if (!validation.valid) {
+        addToast?.({ message: validation.error, type: "error", duration: 5000 });
+        return;
+      }
+      const { templates: newTemplates, roles: newRoles, styles: newStyles, result } = importBundle(
+        validation.bundle, userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds,
+      );
+
+      // Persist
+      setUserTemplates(newTemplates);
+      setCustomRoles(newRoles);
+      setCustomStyles(newStyles);
+      await setSetting("prompt_templates", JSON.stringify(newTemplates));
+      await setSetting("custom_roles", JSON.stringify(newRoles));
+      await setSetting("custom_styles", JSON.stringify(newStyles));
+
+      // Summary toast
+      const parts: string[] = [];
+      if (result.templatesAdded > 0) parts.push(`${result.templatesAdded} template${result.templatesAdded === 1 ? "" : "s"}`);
+      if (result.rolesAdded > 0) parts.push(`${result.rolesAdded} role${result.rolesAdded === 1 ? "" : "s"}`);
+      if (result.stylesAdded > 0) parts.push(`${result.stylesAdded} style${result.stylesAdded === 1 ? "" : "s"}`);
+      const skipped = result.templatesSkipped > 0 ? ` (${result.templatesSkipped} skipped)` : "";
+      const msg = parts.length > 0
+        ? `Imported ${parts.join(", ")}${skipped}`
+        : `Nothing new to import${skipped}`;
+      addToast?.({ message: msg, type: parts.length > 0 ? "success" : "info", duration: 4000 });
+    } catch (err) {
+      console.error("[PromptComposer] Import failed:", err);
+      addToast?.({ message: `Import failed: ${err}`, type: "error", duration: 5000 });
+    }
+  }, [userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast]);
+
   const createCustomRole = useCallback((role: Omit<RoleDefinition, "id" | "builtIn">) => {
     const newRole: RoleDefinition = {
       ...role,
@@ -355,6 +451,9 @@ export function PromptComposer({ sessionId, onClose }: PromptComposerProps) {
               onToggle={toggleTemplatePicker}
               pinnedIds={pinnedIds}
               onTogglePin={togglePin}
+              onExportTemplate={handleExportTemplate}
+              onImportBundle={handleImportBundle}
+              onExportAll={handleExportAll}
             />
           </div>
           <button className="prompt-composer-close" onClick={onClose} title="Close (Esc)">&#10005;</button>

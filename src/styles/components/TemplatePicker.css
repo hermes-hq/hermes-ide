@@ -198,6 +198,24 @@
   filter: none;
 }
 
+.template-picker-item-export {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-family: monospace;
+  opacity: 0;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+.template-picker-item:hover .template-picker-item-export {
+  opacity: 1;
+}
+.template-picker-item-export:hover {
+  color: var(--accent);
+}
+
 .template-picker-item-delete {
   background: none;
   border: none;
@@ -255,4 +273,30 @@
   font-size: var(--text-md);
   color: var(--text-2);
   line-height: 1.4;
+}
+
+/* ─── Bundle Import/Export Actions ───────────────── */
+
+.template-picker-bundle-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.template-picker-bundle-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.template-picker-bundle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
 }

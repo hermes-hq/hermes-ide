@@ -1053,6 +1053,7 @@ function AppContent() {
         <PromptComposer
           sessionId={activeSession.id}
           onClose={() => dispatch({ type: "CLOSE_COMPOSER" })}
+          addToast={toastStore.addToast}
         />
       )}
 

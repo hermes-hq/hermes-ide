@@ -3109,6 +3109,61 @@ pub fn import_settings(
     db.get_all_settings()
 }
 
+// ── Prompt Bundle Export / Import ─────────────────────────────────────
+
+const MAX_BUNDLE_FILE_SIZE: u64 = 1_048_576; // 1 MB
+
+fn validate_bundle_path(path: &str, for_write: bool) -> Result<std::path::PathBuf, String> {
+    let p = std::path::PathBuf::from(path);
+
+    // Must have .hermes-prompts extension
+    match p.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("hermes-prompts") => {}
+        _ => return Err("Bundle file must have a .hermes-prompts extension".to_string()),
+    }
+
+    if for_write {
+        let parent = p
+            .parent()
+            .ok_or_else(|| "Invalid path: no parent directory".to_string())?;
+        if !parent.exists() {
+            return Err(format!("Directory does not exist: {}", parent.display()));
+        }
+    } else {
+        if !p.exists() {
+            return Err(format!("File does not exist: {}", p.display()));
+        }
+        let metadata =
+            std::fs::metadata(&p).map_err(|e| format!("Failed to read file metadata: {}", e))?;
+        if metadata.len() > MAX_BUNDLE_FILE_SIZE {
+            return Err(format!(
+                "Bundle file is too large ({} bytes, max {} bytes)",
+                metadata.len(),
+                MAX_BUNDLE_FILE_SIZE
+            ));
+        }
+    }
+
+    Ok(p)
+}
+
+#[tauri::command]
+pub fn export_prompt_bundle(path: String, data: String) -> Result<(), String> {
+    let validated = validate_bundle_path(&path, true)?;
+    std::fs::write(&validated, data).map_err(|e| format!("Failed to write bundle file: {}", e))?;
+    log::info!("Exported prompt bundle to {}", validated.display());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_prompt_bundle(path: String) -> Result<String, String> {
+    let validated = validate_bundle_path(&path, false)?;
+    let content = std::fs::read_to_string(&validated)
+        .map_err(|e| format!("Failed to read bundle file: {}", e))?;
+    log::info!("Imported prompt bundle from {}", validated.display());
+    Ok(content)
+}
+
 /// Check if a plugin has a specific permission granted in the DB.
 fn has_plugin_permission(db: &Database, plugin_id: &str, permission: &str) -> Result<bool, String> {
     let perms = db.get_plugin_permissions(plugin_id)?;

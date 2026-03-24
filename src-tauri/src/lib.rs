@@ -626,6 +626,9 @@ pub fn run() {
             // Settings Export / Import
             db::export_settings,
             db::import_settings,
+            // Prompt Bundle Export / Import
+            db::export_prompt_bundle,
+            db::import_prompt_bundle,
             // Plugin storage
             db::get_plugin_setting,
             db::set_plugin_setting,

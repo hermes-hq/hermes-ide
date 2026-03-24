@@ -1,0 +1,134 @@
+{
+  "_hermes_bundle_version": 1,
+  "_hermes_app_version": "0.6.4",
+  "_hermes_exported_at": "2026-03-24T00:00:00.000Z",
+  "templates": [
+    {
+      "id": "starter-1",
+      "name": "PR Review Checklist",
+      "description": "Structured code review with security, performance, and maintainability checks.",
+      "category": "git-review",
+      "builtIn": false,
+      "fields": {
+        "roleIds": ["custom-senior-reviewer"],
+        "task": "Review this pull request. Check for correctness, security vulnerabilities, performance issues, and code style.",
+        "scope": "Focus on the changed files only.",
+        "constraints": "Flag breaking changes. Verify error handling. Check for missing tests.",
+        "styleSelections": [
+          { "id": "custom-checklist", "level": 4 },
+          { "id": "concise", "level": 3 }
+        ],
+        "style": "Group findings by severity: critical, warning, suggestion."
+      },
+      "recommendedRoles": ["custom-senior-reviewer"],
+      "recommendedStyles": [{ "id": "custom-checklist", "level": 4 }]
+    },
+    {
+      "id": "starter-2",
+      "name": "Explain Like I'm New",
+      "description": "Get a clear, jargon-free explanation of unfamiliar code.",
+      "category": "documentation",
+      "builtIn": false,
+      "fields": {
+        "roleIds": [],
+        "task": "Explain this code to someone who hasn't seen this codebase before. Cover what it does, why it exists, and how it connects to the rest of the system.",
+        "scope": "",
+        "constraints": "Avoid jargon. Use analogies where helpful. Keep it under 500 words.",
+        "styleSelections": [
+          { "id": "eli5", "level": 3 },
+          { "id": "step-by-step", "level": 2 }
+        ],
+        "style": ""
+      },
+      "recommendedRoles": [],
+      "recommendedStyles": [
+        { "id": "eli5", "level": 3 },
+        { "id": "step-by-step", "level": 2 }
+      ]
+    },
+    {
+      "id": "starter-3",
+      "name": "Refactor for Testability",
+      "description": "Break dependencies and restructure code so it can be unit-tested.",
+      "category": "refactoring",
+      "builtIn": false,
+      "fields": {
+        "roleIds": ["custom-senior-reviewer"],
+        "task": "Refactor this code to make it easier to unit test. Extract dependencies, introduce interfaces where needed, and break apart large functions.",
+        "scope": "",
+        "constraints": "Preserve existing behavior. Don't change the public API. Keep changes minimal.",
+        "styleSelections": [
+          { "id": "diff-format", "level": 4 },
+          { "id": "step-by-step", "level": 3 }
+        ],
+        "style": "Show each refactoring step as a separate diff."
+      },
+      "recommendedRoles": ["custom-senior-reviewer"],
+      "recommendedStyles": [{ "id": "diff-format", "level": 4 }]
+    },
+    {
+      "id": "starter-4",
+      "name": "Security Audit",
+      "description": "Scan for OWASP Top 10 vulnerabilities, auth issues, and data exposure risks.",
+      "category": "security",
+      "builtIn": false,
+      "fields": {
+        "roleIds": ["security-specialist"],
+        "task": "Audit this code for security vulnerabilities. Check for injection flaws, broken auth, sensitive data exposure, and misconfigured access controls.",
+        "scope": "",
+        "constraints": "Prioritize findings by severity (critical/high/medium/low). Include CWE IDs where applicable.",
+        "styleSelections": [
+          { "id": "custom-checklist", "level": 5 },
+          { "id": "detailed", "level": 3 }
+        ],
+        "style": "For each finding: describe the vulnerability, show the affected code, and suggest a fix."
+      },
+      "recommendedRoles": ["security-specialist"],
+      "recommendedStyles": [{ "id": "custom-checklist", "level": 5 }]
+    },
+    {
+      "id": "starter-5",
+      "name": "Write Migration Plan",
+      "description": "Plan a safe, incremental migration from one approach to another.",
+      "category": "planning",
+      "builtIn": false,
+      "fields": {
+        "roleIds": ["custom-senior-reviewer"],
+        "task": "Create a migration plan to move from the current approach to the target approach. Break it into safe, incremental steps that can each be shipped and rolled back independently.",
+        "scope": "",
+        "constraints": "No big-bang migrations. Each step must leave the system in a working state. Include rollback strategy for each step.",
+        "styleSelections": [
+          { "id": "step-by-step", "level": 5 },
+          { "id": "detailed", "level": 3 }
+        ],
+        "style": "Number each step. Include estimated risk level and what to verify before proceeding."
+      },
+      "recommendedRoles": [],
+      "recommendedStyles": [{ "id": "step-by-step", "level": 5 }]
+    }
+  ],
+  "roles": [
+    {
+      "id": "custom-senior-reviewer",
+      "label": "Senior Code Reviewer",
+      "description": "Experienced reviewer focused on correctness, maintainability, and team standards",
+      "systemInstruction": "You are a senior code reviewer with 10+ years of experience. You focus on correctness, maintainability, security, and adherence to team conventions. You give constructive, actionable feedback and always explain why something should change, not just what.",
+      "builtIn": false
+    }
+  ],
+  "styles": [
+    {
+      "id": "custom-checklist",
+      "label": "Checklist Format",
+      "description": "Structures output as actionable checklists with pass/fail items",
+      "levels": [
+        "Include a brief checklist where helpful.",
+        "Format key findings as a checklist.",
+        "Structure your entire response as a checklist with pass/fail items.",
+        "Use a strict checklist format. Every point must be a checkable item with a clear verdict.",
+        "Output only a checklist. No prose. Every line is a pass/fail/warning item with one-line explanation."
+      ],
+      "builtIn": false
+    }
+  ]
+}

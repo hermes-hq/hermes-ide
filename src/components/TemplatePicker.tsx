@@ -12,6 +12,9 @@ interface TemplatePickerProps {
   onToggle: () => void;
   pinnedIds: Set<string>;
   onTogglePin: (id: string) => void;
+  onExportTemplate?: (template: PromptTemplate) => void;
+  onImportBundle?: () => void;
+  onExportAll?: () => void;
 }
 
 export function TemplatePicker({
@@ -23,6 +26,9 @@ export function TemplatePicker({
   onToggle,
   pinnedIds,
   onTogglePin,
+  onExportTemplate,
+  onImportBundle,
+  onExportAll,
 }: TemplatePickerProps) {
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -140,6 +146,15 @@ export function TemplatePicker({
         >
           📌
         </button>
+        {!tpl.builtIn && onExportTemplate && (
+          <button
+            className="template-picker-item-export"
+            onClick={(e) => { e.stopPropagation(); onExportTemplate(tpl); }}
+            title="Export template"
+          >
+            &#8599;
+          </button>
+        )}
         {!tpl.builtIn && (
           <button
             className="template-picker-item-delete"
@@ -198,6 +213,30 @@ export function TemplatePicker({
             )}
           </div>
 
+          {/* Import / Export All actions */}
+          {(onImportBundle || (onExportAll && userTemplates.length > 0)) && (
+            <div className="template-picker-bundle-actions">
+              {onImportBundle && (
+                <button
+                  className="template-picker-bundle-btn"
+                  onClick={(e) => { e.stopPropagation(); onImportBundle(); }}
+                  title="Import templates from a .hermes-prompts file"
+                >
+                  Import
+                </button>
+              )}
+              {onExportAll && userTemplates.length > 0 && (
+                <button
+                  className="template-picker-bundle-btn"
+                  onClick={(e) => { e.stopPropagation(); onExportAll(); }}
+                  title="Export all saved templates to a .hermes-prompts file"
+                >
+                  Export All
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="template-picker-list">
             {/* Search results mode */}
             {filteredTemplates !== null ? (
@@ -248,6 +287,7 @@ export function TemplatePicker({
                     {userTemplates.map((tpl) => renderItem(tpl))}
                   </>
                 )}
+
               </>
             )}
           </div>
