@@ -587,6 +587,101 @@ describe("importBundle", () => {
 		expect(templates[1].name).toBe("Template B"); // new added
 	});
 
+	it("skips templates that match built-in template names", () => {
+		const builtInTemplates = [
+			makeTemplate({ id: "builtin-1", name: "Code Review", builtIn: true }),
+			makeTemplate({ id: "builtin-2", name: "Bug Report", builtIn: true }),
+		];
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [
+				makeTemplate({ id: "t1", name: "Code Review" }), // matches built-in — skip
+				makeTemplate({ id: "t2", name: "New Template" }), // unique — add
+			],
+			roles: [],
+			styles: [],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS, builtInTemplates,
+		);
+
+		expect(result.templatesAdded).toBe(1);
+		expect(result.templatesSkipped).toBe(1);
+		expect(templates).toHaveLength(1);
+		expect(templates[0].name).toBe("New Template");
+	});
+
+	it("skips built-in name matches case-insensitively", () => {
+		const builtInTemplates = [
+			makeTemplate({ id: "builtin-1", name: "Code Review", builtIn: true }),
+		];
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [makeTemplate({ id: "t1", name: "code review" })],
+			roles: [],
+			styles: [],
+		};
+
+		const { result } = importBundle(
+			bundle, [], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS, builtInTemplates,
+		);
+
+		expect(result.templatesAdded).toBe(0);
+		expect(result.templatesSkipped).toBe(1);
+	});
+
+	it("deduplicates against both user and built-in templates", () => {
+		const builtInTemplates = [
+			makeTemplate({ id: "builtin-1", name: "Built-in Template", builtIn: true }),
+		];
+		const existingUser = makeTemplate({ id: "user-existing", name: "User Template" });
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [
+				makeTemplate({ id: "t1", name: "Built-in Template" }), // matches built-in
+				makeTemplate({ id: "t2", name: "User Template" }),     // matches user
+				makeTemplate({ id: "t3", name: "Brand New" }),         // unique
+			],
+			roles: [],
+			styles: [],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [existingUser], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS, builtInTemplates,
+		);
+
+		expect(result.templatesAdded).toBe(1);
+		expect(result.templatesSkipped).toBe(2);
+		expect(templates).toHaveLength(2); // existing user + brand new
+		expect(templates[0].name).toBe("User Template");
+		expect(templates[1].name).toBe("Brand New");
+	});
+
+	it("works without builtInTemplates param (backward compat)", () => {
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [makeTemplate({ id: "t1", name: "New One" })],
+			roles: [],
+			styles: [],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS,
+		);
+
+		expect(result.templatesAdded).toBe(1);
+		expect(templates).toHaveLength(1);
+	});
+
 	it("handles template with missing fields gracefully", () => {
 		const bundle: PromptBundle = {
 			_hermes_bundle_version: 1,

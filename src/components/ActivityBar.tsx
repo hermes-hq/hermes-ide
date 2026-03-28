@@ -28,6 +28,14 @@ interface ActivityBarProps {
   bottomAction?: ActivityBarAction;
 }
 
+/**
+ * Returns true when a mousedown on a reorderable tab should be treated as
+ * a plain click instead of starting a drag sequence.
+ */
+export function shouldDirectClick(hasReorder: boolean, tabCount: number): boolean {
+  return !hasReorder || tabCount < 2;
+}
+
 export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, topAction, pinnedTabs, bottomActions, bottomAction }: ActivityBarProps) {
   const resolvedBottomActions = bottomActions ?? (bottomAction ? [bottomAction] : []);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -45,7 +53,10 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
   }, []);
 
   const handleMouseDown = (e: React.MouseEvent, tabId: string) => {
-    if (!onReorder || tabs.length < 2) return;
+    if (!onReorder || tabs.length < 2) {
+      onTabClick(tabId);
+      return;
+    }
     e.preventDefault();
     mouseDownPos.current = { x: e.clientX, y: e.clientY };
     dragging.current = false;
