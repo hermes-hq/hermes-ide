@@ -91,7 +91,7 @@
   overflow-y: auto;
   flex: 1;
   min-height: 80px;
-  padding-bottom: 64px;
+  padding-bottom: 130px;
 }
 
 .template-picker-empty {
@@ -264,6 +264,8 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .template-picker-preview-name {
