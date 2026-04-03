@@ -26,7 +26,6 @@ import {
   buildProcessMenuItems,
   buildSearchResultMenuItems,
   buildContextEntryMenuItems,
-  buildTimelineMenuItems,
   buildPaneHeaderMenuItems,
   buildTextInputMenuItems,
   buildEmptyAreaMenuItems,
@@ -381,15 +380,6 @@ describe("buildContextEntryMenuItems", () => {
 });
 
 // ─── Timeline Menu ──────────────────────────────────────────────────
-
-describe("buildTimelineMenuItems", () => {
-  it("includes Copy Command, Re-run, Copy Output", () => {
-    const items = buildTimelineMenuItems({ command: "ls", output: "foo" });
-    expect(findItem(items, "timeline.copy-command")).toBeDefined();
-    expect(findItem(items, "timeline.rerun")).toBeDefined();
-    expect(findItem(items, "timeline.copy-output")).toBeDefined();
-  });
-});
 
 // ─── Pane Header Menu ───────────────────────────────────────────────
 

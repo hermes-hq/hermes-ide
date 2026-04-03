@@ -213,17 +213,6 @@ export function buildContextEntryMenuItems(
   ];
 }
 
-export function buildTimelineMenuItems(
-  node: { command?: string; output?: string },
-): ContextMenuItem[] {
-  return [
-    menuItem("timeline.copy-command", "Copy Command", { enabled: !!node.command }),
-    menuItem("timeline.rerun", "Re-run Command", { enabled: !!node.command }),
-    separator(),
-    menuItem("timeline.copy-output", "Copy Output", { enabled: !!node.output }),
-  ];
-}
-
 export function buildPaneHeaderMenuItems(
   _paneId: string,
   hasSiblings: boolean,

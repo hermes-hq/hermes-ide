@@ -479,8 +479,6 @@ describe("Bug 11: api/index.ts exports git module", () => {
     expect(typeof api.getSettings).toBe("function");
     // Intelligence
     expect(typeof api.detectShellEnvironment).toBe("function");
-    // Execution
-    expect(typeof api.getExecutionNodes).toBe("function");
     // Processes
     expect(typeof api.listProcesses).toBe("function");
   });

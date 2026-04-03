@@ -200,7 +200,6 @@ describe("clipboard writeText error handling", () => {
   const components = [
     { file: "components/FileExplorerPanel.tsx", name: "FileExplorerPanel" },
     { file: "components/SearchPanel.tsx", name: "SearchPanel" },
-    { file: "components/ExecutionTimeline.tsx", name: "ExecutionTimeline" },
     { file: "components/GitLogView.tsx", name: "GitLogView" },
     { file: "components/GitBranchSelector.tsx", name: "GitBranchSelector" },
     { file: "components/StatusBar.tsx", name: "StatusBar" },

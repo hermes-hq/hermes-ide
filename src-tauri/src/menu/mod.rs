@@ -171,9 +171,6 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let context_panel = CheckMenuItemBuilder::with_id("view.context-panel", "Context Panel")
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
-    let timeline = CheckMenuItemBuilder::with_id("view.timeline", "Execution Timeline")
-        .accelerator("CmdOrCtrl+Shift+T")
-        .build(app)?;
     let cost_dashboard = MenuItemBuilder::with_id("view.cost-dashboard", "Cost Dashboard")
         .accelerator("CmdOrCtrl+$")
         .build(app)?;
@@ -209,7 +206,6 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .item(&process_panel)
         .item(&git_panel)
         .item(&context_panel)
-        .item(&timeline)
         .item(&search_panel)
         .separator()
         .item(&split_submenu)

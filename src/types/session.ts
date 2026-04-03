@@ -125,21 +125,6 @@ export interface SessionHistoryEntry {
   scrollback_preview: string | null;
 }
 
-// ─── Execution Nodes (mirror Rust struct) ────────────────────────────
-
-export interface ExecutionNode {
-  id: number;
-  session_id: string;
-  timestamp: number;
-  kind: string;
-  input: string | null;
-  output_summary: string | null;
-  exit_code: number | null;
-  working_dir: string;
-  duration_ms: number;
-  metadata: string | null;
-}
-
 // ─── Execution Mode ──────────────────────────────────────────────────
 
 export type ExecutionMode = "manual" | "assisted" | "autonomous";
@@ -256,7 +241,6 @@ export type SessionAction =
   | { type: "SET_EXECUTION_MODE"; sessionId: string; mode: ExecutionMode }
   | { type: "SET_DEFAULT_MODE"; mode: ExecutionMode }
   | { type: "TOGGLE_FLOW_MODE" }
-  | { type: "TOGGLE_TIMELINE" }
   | { type: "SHOW_AUTO_TOAST"; command: string; reason: string; sessionId: string }
   | { type: "DISMISS_AUTO_TOAST" }
   | { type: "TOGGLE_AUTO_APPLY" }

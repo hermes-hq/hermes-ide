@@ -8,7 +8,6 @@ export type {
   SessionMetrics,
   SessionData,
   SessionHistoryEntry,
-  ExecutionNode,
   ExecutionMode,
   CreateSessionOpts,
   SessionAction,

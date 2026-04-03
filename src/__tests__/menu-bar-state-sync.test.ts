@@ -94,12 +94,6 @@ describe("useMenuStateSync", () => {
     expect(src).toContain("contextPanelOpen");
   });
 
-  it("syncs timeline state", () => {
-    const src = readSrc("hooks/useMenuStateSync.ts");
-    expect(src).toContain('"view.timeline"');
-    expect(src).toContain("timelineOpen");
-  });
-
   it("syncs flow mode state", () => {
     const src = readSrc("hooks/useMenuStateSync.ts");
     expect(src).toContain('"view.flow-mode"');

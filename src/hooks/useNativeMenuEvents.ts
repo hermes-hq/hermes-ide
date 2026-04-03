@@ -13,7 +13,6 @@ const TRACKED_ACTIONS: Record<string, string> = {
   "view.flow-mode": "flow_mode",
   "view.cost-dashboard": "cost_dashboard",
   "view.context-panel": "context_panel",
-  "view.timeline": "timeline",
   "view.search-panel": "search_panel",
   "view.split-horizontal": "split_pane",
   "view.split-vertical": "split_pane",
@@ -110,9 +109,6 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           break;
         case "view.context-panel":
           dispatch({ type: "TOGGLE_CONTEXT" });
-          break;
-        case "view.timeline":
-          dispatch({ type: "TOGGLE_TIMELINE" });
           break;
         case "view.search-panel":
           dispatch({ type: "TOGGLE_SEARCH_PANEL" });

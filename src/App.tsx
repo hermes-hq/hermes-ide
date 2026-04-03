@@ -40,7 +40,6 @@ import { ShortcutsPanel } from "./components/ShortcutsPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { CostDashboard } from "./components/CostDashboard";
 import { FlowToast } from "./components/FlowToast";
-import { ExecutionTimeline } from "./components/ExecutionTimeline";
 import { AutoToast } from "./components/AutoToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -675,7 +674,6 @@ function AppContent() {
     processPanelOpen: ui.processPanelOpen,
     gitPanelOpen: ui.gitPanelOpen,
     contextPanelOpen: ui.contextPanelOpen,
-    timelineOpen: ui.timelineOpen,
     searchPanelOpen: ui.searchPanelOpen,
     flowMode: ui.flowMode,
   });
@@ -857,13 +855,6 @@ function AppContent() {
                 />
               )}
             </div>
-            )}
-            {/* Execution Timeline (F1) */}
-            {ui.timelineOpen && activeSession && (
-              <ExecutionTimeline
-                sessionId={activeSession.id}
-                color={activeSession.color}
-              />
             )}
           </div>
           {ui.contextPanelOpen && !ui.flowMode && activeSession && (
