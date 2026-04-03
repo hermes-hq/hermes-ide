@@ -4,6 +4,7 @@ version = "0.6.8"
 description = "AI-native terminal"
 authors = ["Gabriel Anhaia"]
 edition = "2021"
+default-run = "hermes-ide"
 
 [lib]
 name = "hermes_ide_lib"
