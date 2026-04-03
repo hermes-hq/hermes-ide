@@ -141,6 +141,11 @@ jobs:
           packages: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: 1.0
 
+      - name: Build PTY helper (needed by tests on macOS)
+        if: matrix.enabled == 'true' && runner.os == 'macOS'
+        working-directory: src-tauri
+        run: cargo build --bin hermes-pty-setup
+
       - name: Run Rust tests
         if: matrix.enabled == 'true'
         working-directory: src-tauri
@@ -285,6 +290,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "${{ matrix.sign && secrets.APPLE_SIGNING_IDENTITY || '' }}"
         run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Bundle PTY helper into macOS app
+        if: steps.check.outputs.enabled == 'true' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          HELPER="src-tauri/target/${{ matrix.target }}/release/hermes-pty-setup"
+          APP_DIR=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -path "*/Contents/MacOS" -type d | head -1)
+          if [ -f "$HELPER" ] && [ -n "$APP_DIR" ]; then
+            cp "$HELPER" "$APP_DIR/hermes-pty-setup"
+            echo "Bundled hermes-pty-setup into $APP_DIR/"
+          fi
 
       - name: Notarize DMG
         if: steps.check.outputs.enabled == 'true' && matrix.notarize
