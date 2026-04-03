@@ -284,11 +284,12 @@ jobs:
       - name: Pre-sign PTY helper for macOS bundle
         if: steps.check.outputs.enabled == 'true' && runner.os == 'macOS'
         shell: bash
+        working-directory: src-tauri
         env:
           APPLE_SIGNING_IDENTITY: "${{ matrix.sign && secrets.APPLE_SIGNING_IDENTITY || '' }}"
         run: |
           cargo build --release --target ${{ matrix.target }} --bin hermes-pty-setup
-          HELPER="src-tauri/target/${{ matrix.target }}/release/hermes-pty-setup"
+          HELPER="target/${{ matrix.target }}/release/hermes-pty-setup"
           if [ -n "$APPLE_SIGNING_IDENTITY" ] && [ -f "$HELPER" ]; then
             codesign --force -s "$APPLE_SIGNING_IDENTITY" "$HELPER"
             echo "Pre-signed hermes-pty-setup"
