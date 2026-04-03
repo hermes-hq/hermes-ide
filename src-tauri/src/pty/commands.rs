@@ -914,7 +914,7 @@ pub fn create_session(
             .clone()
             .ok_or_else(|| "Failed to get PTY device path for posix_spawn".to_string())?;
         // Drop the slave end — the child opens the TTY by path via posix_spawn
-        // file actions, which also establishes it as the controlling terminal.
+        // file actions.  CTT assignment is handled by the --pty-setup trampoline.
         drop(pair.slave);
         crate::pty::spawn::posix_spawn_in_pty(&cmd, &tty_path)
             .map_err(|e| format!("Failed to spawn shell: {}", e))?

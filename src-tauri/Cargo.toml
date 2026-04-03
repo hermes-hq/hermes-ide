@@ -13,6 +13,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 name = "hermes-ide"
 path = "src/main.rs"
 
+[[bin]]
+name = "hermes-pty-setup"
+path = "src/bin/hermes_pty_setup.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

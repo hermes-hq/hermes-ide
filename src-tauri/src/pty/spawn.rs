@@ -11,6 +11,12 @@
 //! macOS-specific attributes (`POSIX_SPAWN_SETSID`, `POSIX_SPAWN_CLOEXEC_DEFAULT`)
 //! to atomically create the child process without the dangerous fork+exec
 //! intermediate state. See issue #31.
+//!
+//! **Controlling terminal (issue #214):** `posix_spawn` file actions do not trigger
+//! the kernel's automatic controlling terminal (CTT) assignment on macOS, which
+//! breaks `/dev/tty` access (needed by sudo, ssh, gpg, etc.). To work around this,
+//! `posix_spawn_in_pty` spawns the Hermes binary itself with `--pty-setup` as a
+//! trampoline that calls `ioctl(TIOCSCTTY)` before exec'ing the real command.
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -170,6 +176,38 @@ mod macos {
         }
     }
 
+    /// Locate the `hermes-pty-setup` helper binary.
+    ///
+    /// Checks two locations:
+    /// 1. Next to the current executable (production: `Contents/MacOS/`)
+    /// 2. Parent directory (tests: `target/debug/deps/` → `target/debug/`)
+    fn pty_setup_helper_path() -> anyhow::Result<std::path::PathBuf> {
+        let exe = std::env::current_exe()
+            .map_err(|e| anyhow::anyhow!("failed to resolve current executable: {}", e))?;
+        let dir = exe
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("current executable has no parent directory"))?;
+
+        // Production / dev: next to the main binary
+        let candidate = dir.join("hermes-pty-setup");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+
+        // Test runner: binary is in target/debug/deps/, helper in target/debug/
+        if let Some(parent) = dir.parent() {
+            let candidate = parent.join("hermes-pty-setup");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+
+        anyhow::bail!(
+            "hermes-pty-setup not found near {:?} — required for controlling terminal setup (issue #214)",
+            exe
+        );
+    }
+
     /// Spawn a child process in a PTY using posix_spawn (macOS-safe).
     ///
     /// `tty_path` is the path to the slave PTY device (e.g., `/dev/ttys042`),
@@ -177,8 +215,9 @@ mod macos {
     ///
     /// The child process:
     /// - Becomes a session leader (POSIX_SPAWN_SETSID)
-    /// - Has the PTY set as its controlling terminal (auto-assigned on macOS
-    ///   when a session leader opens a terminal device)
+    /// - Has the PTY set as its controlling terminal (via self-exec trampoline
+    ///   that calls ioctl(TIOCSCTTY) — posix_spawn file actions don't trigger
+    ///   auto-CTT assignment on macOS)
     /// - Has all inherited file descriptors closed (POSIX_SPAWN_CLOEXEC_DEFAULT)
     /// - Has all signal handlers reset to defaults
     /// - Has an empty signal mask
@@ -186,10 +225,18 @@ mod macos {
         cmd: &CommandBuilder,
         tty_path: &Path,
     ) -> anyhow::Result<Box<dyn Child + Send + Sync>> {
-        let argv = cmd.get_argv();
-        if argv.is_empty() {
+        let original_argv = cmd.get_argv();
+        if original_argv.is_empty() {
             anyhow::bail!("empty command");
         }
+
+        // Prepend the hermes-pty-setup trampoline that calls ioctl(TIOCSCTTY)
+        // before exec'ing the real command.  Without this, /dev/tty is
+        // inaccessible and sudo/ssh/gpg password prompts fail.  See issue #214.
+        let helper = pty_setup_helper_path()?;
+        let mut argv: Vec<std::ffi::OsString> = Vec::with_capacity(original_argv.len() + 1);
+        argv.push(helper.as_os_str().to_owned());
+        argv.extend(original_argv.iter().cloned());
 
         // Build argv as null-terminated CString array
         let argv_cstrs: Vec<CString> = argv
@@ -270,9 +317,9 @@ mod macos {
         )?;
 
         // File actions: open slave TTY as stdin, dup to stdout/stderr.
-        // Since the child is a session leader (POSIX_SPAWN_SETSID) with no
-        // controlling terminal, opening the TTY device automatically makes it
-        // the controlling terminal on macOS/BSD.
+        // Note: opening a TTY as a session leader does NOT auto-assign the
+        // controlling terminal during posix_spawn file actions on macOS.
+        // The --pty-setup trampoline handles CTT assignment via ioctl(TIOCSCTTY).
         let tty_cstr = CString::new(
             tty_path
                 .to_str()
@@ -891,5 +938,52 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
+    }
+
+    /// Verify that /dev/tty is accessible in spawned PTY (issue #214).
+    /// This is the core regression test for the TIOCSCTTY fix — without
+    /// the --pty-setup trampoline, this test fails with ENXIO.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn posix_spawn_dev_tty_accessible() {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+
+        let tty_path = pair.master.tty_name().expect("tty_name");
+
+        // Try to open /dev/tty — this fails with ENXIO if the controlling
+        // terminal wasn't assigned (the bug this fix addresses).
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.arg("-c");
+        cmd.arg("cat < /dev/tty & sleep 0.1; kill $! 2>/dev/null; echo DEV_TTY_OK");
+
+        let mut child = posix_spawn_in_pty(&cmd, &tty_path).expect("spawn");
+
+        let reader = pair.master.try_clone_reader().expect("reader");
+        let output_handle = read_pty_output(reader);
+
+        drop(pair.slave);
+
+        let status = child.wait().expect("wait");
+        let output = output_handle.join().expect("reader thread");
+
+        assert!(
+            status.success(),
+            "/dev/tty test command should succeed"
+        );
+        assert!(
+            output.contains("DEV_TTY_OK"),
+            "/dev/tty should be accessible in spawned PTY (got: {:?})",
+            output
+        );
     }
 }
