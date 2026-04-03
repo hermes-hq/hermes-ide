@@ -976,10 +976,7 @@ mod tests {
         let status = child.wait().expect("wait");
         let output = output_handle.join().expect("reader thread");
 
-        assert!(
-            status.success(),
-            "/dev/tty test command should succeed"
-        );
+        assert!(status.success(), "/dev/tty test command should succeed");
         assert!(
             output.contains("DEV_TTY_OK"),
             "/dev/tty should be accessible in spawned PTY (got: {:?})",

@@ -24,9 +24,7 @@ fn main() -> ! {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&args[0])
-            .args(&args[1..])
-            .exec();
+        let err = std::process::Command::new(&args[0]).args(&args[1..]).exec();
         eprintln!("hermes-pty-setup: exec failed: {}", err);
         std::process::exit(1);
     }
