@@ -131,7 +131,7 @@ export type ExecutionMode = "manual" | "assisted" | "autonomous";
 
 // ─── Permission Mode ────────────────────────────────────────────────
 
-export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions";
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
 
 // ─── Session Creation ────────────────────────────────────────────────
 

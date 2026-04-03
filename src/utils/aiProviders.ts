@@ -83,6 +83,11 @@ export const PERMISSION_MODES: Record<PermissionMode, PermissionModeInfo> = {
 		shortLabel: "Auto",
 		description: "Background classifier handles approvals automatically.",
 	},
+	dontAsk: {
+		label: "Don't Ask",
+		shortLabel: "Don't Ask",
+		description: "Execute all actions without asking. Still applies safety guardrails.",
+	},
 	bypassPermissions: {
 		label: "Bypass Permissions",
 		shortLabel: "Bypass",
@@ -103,15 +108,18 @@ export const PERMISSION_MODE_FLAGS: Record<string, Partial<Record<PermissionMode
 		acceptEdits:       { flag: "--permission-mode acceptEdits", description: "Auto-accept file edits, still ask for commands." },
 		plan:              { flag: "--permission-mode plan", description: "Read-only exploration, no edits." },
 		auto:              { flag: "--permission-mode auto", description: "Background classifier handles approvals." },
+		dontAsk:           { flag: "--permission-mode dontAsk", description: "Execute all actions without asking. Safety guardrails still apply." },
 		bypassPermissions: { flag: "--permission-mode bypassPermissions", description: "No permission checks (dangerous)." },
 	},
 	aider: {
-		default:           { flag: "", description: "Default behavior." },
-		bypassPermissions: { flag: "--yes", description: "Auto-apply all changes without confirmation." },
+		default:           { flag: "", description: "Default behavior — asks before applying changes." },
+		auto:              { flag: "--yes", description: "Auto-apply changes without confirmation." },
+		bypassPermissions: { flag: "--yes-always", description: "Always say yes to every confirmation." },
 	},
 	codex: {
-		default:           { flag: "", description: "Default behavior." },
-		bypassPermissions: { flag: "--full-auto", description: "Fully autonomous mode." },
+		default:           { flag: "", description: "Default behavior — asks for approval on each command." },
+		auto:              { flag: "--full-auto", description: "Workspace-write sandbox with on-request approvals." },
+		bypassPermissions: { flag: "--dangerously-bypass-approvals-and-sandbox", description: "No approvals or sandboxing (dangerous)." },
 	},
 	gemini: {
 		default:           { flag: "", description: "Default behavior." },
@@ -133,8 +141,8 @@ export function getAvailableModes(providerId: string): PermissionMode[] {
 export const AUTO_APPROVE_FLAGS: Record<string, { flag: string; description: string }> = {
 	claude: { flag: "--dangerously-skip-permissions", description: "The AI agent can read, write, and execute without asking for confirmation." },
 	gemini: { flag: "--yolo", description: "The AI agent can execute shell commands and write files without permission prompts." },
-	aider: { flag: "--yes", description: "The AI agent will apply all suggested changes without asking for confirmation." },
-	codex: { flag: "--full-auto", description: "The AI agent runs in fully autonomous mode without confirmation prompts." },
+	aider: { flag: "--yes-always", description: "The AI agent will apply all suggested changes without asking for confirmation." },
+	codex: { flag: "--dangerously-bypass-approvals-and-sandbox", description: "The AI agent runs without approvals or sandboxing." },
 };
 
 export function getProviderInfo(id: string): AiProviderInfo | undefined {
