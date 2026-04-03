@@ -35,7 +35,7 @@ import type { DirtyWorktreeChange } from "../components/DirtyWorktreeDialog";
 export type {
   AgentInfo, ToolCall, ProviderTokens, ActionEvent, ActionTemplate,
   MemoryFact, SessionMetrics, SessionData, SessionHistoryEntry,
-  ExecutionNode, ExecutionMode, CreateSessionOpts, SessionAction,
+  ExecutionMode, CreateSessionOpts, SessionAction,
 } from "../types/session";
 
 import type {
@@ -109,7 +109,6 @@ interface SessionState {
     sessionListCollapsed: boolean;
     commandPaletteOpen: boolean;
     flowMode: boolean;
-    timelineOpen: boolean;
     autoToast: { command: string; reason: string; sessionId: string } | null;
     processPanelOpen: boolean;
     gitPanelOpen: boolean;
@@ -211,7 +210,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
             gitPanelOpen: false,
             fileExplorerOpen: false,
             searchPanelOpen: false,
-            timelineOpen: false,
           }),
         },
       };
@@ -280,8 +278,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, defaultMode: action.mode };
     case "TOGGLE_FLOW_MODE":
       return { ...state, ui: { ...state.ui, flowMode: !state.ui.flowMode } };
-    case "TOGGLE_TIMELINE":
-      return { ...state, ui: { ...state.ui, timelineOpen: !state.ui.timelineOpen } };
     case "SHOW_AUTO_TOAST":
       return { ...state, ui: { ...state.ui, autoToast: { command: action.command, reason: action.reason, sessionId: action.sessionId } } };
     case "DISMISS_AUTO_TOAST":
@@ -599,7 +595,6 @@ export const initialState: SessionState = {
     sessionListCollapsed: false,
     commandPaletteOpen: false,
     flowMode: false,
-    timelineOpen: false,
     autoToast: null,
     processPanelOpen: false,
     gitPanelOpen: false,

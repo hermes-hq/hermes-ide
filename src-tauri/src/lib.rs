@@ -609,10 +609,6 @@ pub fn run() {
             db::set_setting,
             db::log_execution,
             db::get_execution_log,
-            // Execution Nodes
-            db::get_execution_nodes,
-            db::get_execution_node,
-            db::get_execution_nodes_count,
             // Context Pins
             db::add_context_pin,
             db::remove_context_pin,

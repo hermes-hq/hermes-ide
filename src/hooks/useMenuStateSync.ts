@@ -8,7 +8,6 @@ interface MenuSyncState {
   processPanelOpen: boolean;
   gitPanelOpen: boolean;
   contextPanelOpen: boolean;
-  timelineOpen: boolean;
   searchPanelOpen: boolean;
   flowMode: boolean;
 }
@@ -20,7 +19,6 @@ export function useMenuStateSync(uiState: MenuSyncState): void {
       { id: "view.process-panel", checked: uiState.processPanelOpen },
       { id: "view.git-panel", checked: uiState.gitPanelOpen },
       { id: "view.context-panel", checked: uiState.contextPanelOpen },
-      { id: "view.timeline", checked: uiState.timelineOpen },
       { id: "view.search-panel", checked: uiState.searchPanelOpen },
       { id: "view.flow-mode", checked: uiState.flowMode },
     ];
@@ -31,7 +29,6 @@ export function useMenuStateSync(uiState: MenuSyncState): void {
     uiState.processPanelOpen,
     uiState.gitPanelOpen,
     uiState.contextPanelOpen,
-    uiState.timelineOpen,
     uiState.searchPanelOpen,
     uiState.flowMode,
   ]);
