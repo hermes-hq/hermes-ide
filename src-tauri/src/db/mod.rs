@@ -2306,6 +2306,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     // Prompt composer
     "prompt_templates",
     "pinned_templates",
+    "template_groups",
     "custom_roles",
     "custom_styles",
     // Git

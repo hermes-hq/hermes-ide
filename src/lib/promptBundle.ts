@@ -14,6 +14,7 @@ export interface PromptBundle {
 	_hermes_bundle_version: number;
 	_hermes_app_version: string;
 	_hermes_exported_at: string;
+	_hermes_bundle_name?: string;
 	templates: PromptTemplate[];
 	roles: RoleDefinition[];
 	styles: StyleDefinition[];
@@ -44,6 +45,7 @@ export function createBundle(
 	builtInRoleIds: Set<string>,
 	builtInStyleIds: Set<string>,
 	appVersion: string,
+	bundleName?: string,
 ): PromptBundle {
 	// Collect all referenced role/style IDs from the templates
 	const referencedRoleIds = new Set<string>();
@@ -84,6 +86,7 @@ export function createBundle(
 		_hermes_bundle_version: BUNDLE_VERSION,
 		_hermes_app_version: appVersion,
 		_hermes_exported_at: new Date().toISOString(),
+		...(bundleName ? { _hermes_bundle_name: bundleName } : {}),
 		templates: bundledTemplates,
 		roles: bundledRoles,
 		styles: bundledStyles,
@@ -142,6 +145,7 @@ export function validateBundle(
 			_hermes_bundle_version: obj._hermes_bundle_version as number,
 			_hermes_app_version: (obj._hermes_app_version as string) ?? "",
 			_hermes_exported_at: (obj._hermes_exported_at as string) ?? "",
+			...(typeof obj._hermes_bundle_name === "string" ? { _hermes_bundle_name: obj._hermes_bundle_name } : {}),
 			templates: obj.templates as PromptTemplate[],
 			roles: (obj.roles as RoleDefinition[]) ?? [],
 			styles: (obj.styles as StyleDefinition[]) ?? [],
@@ -169,6 +173,7 @@ export function importBundle(
 	builtInRoleIds: Set<string>,
 	builtInStyleIds: Set<string>,
 	builtInTemplates: PromptTemplate[] = [],
+	defaultGroup?: string,
 ): {
 	templates: PromptTemplate[];
 	roles: RoleDefinition[];
@@ -241,6 +246,7 @@ export function importBundle(
 			...tpl,
 			id: newId,
 			builtIn: false,
+			group: tpl.group ?? defaultGroup,
 			fields: {
 				...tpl.fields,
 				roleIds: (tpl.fields?.roleIds ?? []).map((id) => remapId(id, roleIdMap, builtInRoleIds)),

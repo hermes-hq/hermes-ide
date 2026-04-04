@@ -150,6 +150,58 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
       .catch((err) => console.warn("[PromptComposer] Failed to load pinned templates:", err));
   }, []);
 
+  // Load template groups on mount
+  const [templateGroups, setTemplateGroups] = useState<string[]>([]);
+  useEffect(() => {
+    getSetting("template_groups")
+      .then((val) => {
+        if (typeof val === "string" && val) {
+          try { setTemplateGroups(JSON.parse(val)); } catch { /* ignore malformed JSON */ }
+        }
+      })
+      .catch((err) => console.warn("[PromptComposer] Failed to load template groups:", err));
+  }, []);
+
+  const createGroup = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || templateGroups.includes(trimmed)) return;
+    const updated = [...templateGroups, trimmed];
+    setTemplateGroups(updated);
+    setSetting("template_groups", JSON.stringify(updated)).catch(console.error);
+  }, [templateGroups]);
+
+  const renameGroup = useCallback((oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || (trimmed !== oldName && templateGroups.includes(trimmed))) return;
+    const updatedGroups = templateGroups.map(g => g === oldName ? trimmed : g);
+    setTemplateGroups(updatedGroups);
+    setSetting("template_groups", JSON.stringify(updatedGroups)).catch(console.error);
+    const updatedTemplates = userTemplates.map(t =>
+      t.group === oldName ? { ...t, group: trimmed } : t
+    );
+    setUserTemplates(updatedTemplates);
+    setSetting("prompt_templates", JSON.stringify(updatedTemplates)).catch(console.error);
+  }, [templateGroups, userTemplates]);
+
+  const deleteGroup = useCallback((name: string) => {
+    const updatedGroups = templateGroups.filter(g => g !== name);
+    setTemplateGroups(updatedGroups);
+    setSetting("template_groups", JSON.stringify(updatedGroups)).catch(console.error);
+    const updatedTemplates = userTemplates.map(t =>
+      t.group === name ? { ...t, group: undefined } : t
+    );
+    setUserTemplates(updatedTemplates);
+    setSetting("prompt_templates", JSON.stringify(updatedTemplates)).catch(console.error);
+  }, [templateGroups, userTemplates]);
+
+  const moveToGroup = useCallback((templateId: string, group: string | null) => {
+    const updatedTemplates = userTemplates.map(t =>
+      t.id === templateId ? { ...t, group: group ?? undefined } : t
+    );
+    setUserTemplates(updatedTemplates);
+    setSetting("prompt_templates", JSON.stringify(updatedTemplates)).catch(console.error);
+  }, [userTemplates]);
+
   // Focus task field on mount
   useEffect(() => { taskRef.current?.focus(); }, []);
 
@@ -329,9 +381,15 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
         addToast?.({ message: validation.error, type: "error", duration: 5000 });
         return;
       }
+      // Derive a default group name from the bundle
+      const bundleName = validation.bundle._hermes_bundle_name
+        ?? (path as string).split("/").pop()?.replace(/\.hermes-prompts$/i, "")
+        ?? undefined;
+
       const { templates: newTemplates, roles: newRoles, styles: newStyles, result } = importBundle(
         validation.bundle, userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds,
         BUILT_IN_TEMPLATES,
+        bundleName,
       );
 
       // Persist
@@ -341,6 +399,13 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
       await setSetting("prompt_templates", JSON.stringify(newTemplates));
       await setSetting("custom_roles", JSON.stringify(newRoles));
       await setSetting("custom_styles", JSON.stringify(newStyles));
+
+      // Auto-create group if templates were imported with a group name
+      if (bundleName && !templateGroups.includes(bundleName) && result.templatesAdded > 0) {
+        const updatedGroups = [...templateGroups, bundleName];
+        setTemplateGroups(updatedGroups);
+        await setSetting("template_groups", JSON.stringify(updatedGroups));
+      }
 
       // Summary toast
       const parts: string[] = [];
@@ -455,6 +520,11 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
               onExportTemplate={handleExportTemplate}
               onImportBundle={handleImportBundle}
               onExportAll={handleExportAll}
+              templateGroups={templateGroups}
+              onCreateGroup={createGroup}
+              onRenameGroup={renameGroup}
+              onDeleteGroup={deleteGroup}
+              onMoveToGroup={moveToGroup}
             />
           </div>
           <button className="prompt-composer-close" onClick={onClose} title="Close (Esc)">&#10005;</button>
