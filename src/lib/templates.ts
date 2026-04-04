@@ -29,6 +29,7 @@ export interface PromptTemplate {
   recommendedRoles: string[];
   recommendedStyles: SelectedStyle[];
   builtIn: boolean;
+  group?: string;
 }
 
 export const TEMPLATE_CATEGORIES: Record<TemplateCategory, { label: string; icon: string }> = {
