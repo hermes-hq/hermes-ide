@@ -317,16 +317,6 @@ export function TemplatePicker({
             )}
           </div>
 
-          {/* Pinned — always visible above tabs */}
-          {pinnedTemplates.length > 0 && !search && (
-            <div className="template-picker-pinned-section">
-              <div className="template-picker-section-label template-picker-section-pinned">📌 Pinned</div>
-              <div className="template-picker-items">
-                {pinnedTemplates.map((tpl) => renderItem(tpl))}
-              </div>
-            </div>
-          )}
-
           {/* Tabs */}
           <div className="template-picker-tabs">
             <button
@@ -347,6 +337,16 @@ export function TemplatePicker({
           </div>
 
           <div className="template-picker-list">
+            {/* Pinned — always visible at top of list */}
+            {pinnedTemplates.length > 0 && !search && (
+              <>
+                <div className="template-picker-section-label template-picker-section-pinned">📌 Pinned</div>
+                <div className="template-picker-items">
+                  {pinnedTemplates.map((tpl) => renderItem(tpl))}
+                </div>
+              </>
+            )}
+
             {/* Search results mode */}
             {filteredTemplates !== null ? (
               filteredTemplates.length > 0 ? (
