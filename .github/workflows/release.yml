@@ -129,10 +129,10 @@ jobs:
         if: matrix.enabled == 'true'
 
       - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        if: matrix.enabled == 'true' && runner.os != 'Windows'
+        if: matrix.enabled == 'true'
         with:
           workspaces: src-tauri
-          shared-key: release-${{ matrix.os }}-v2
+          shared-key: release-${{ matrix.os }}-v3
 
       - name: Cache apt packages
         if: matrix.enabled == 'true' && runner.os == 'Linux'
