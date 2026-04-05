@@ -132,7 +132,7 @@ jobs:
         if: matrix.enabled == 'true'
         with:
           workspaces: src-tauri
-          shared-key: release-${{ matrix.os }}
+          shared-key: release-${{ matrix.os }}-v2
 
       - name: Cache apt packages
         if: matrix.enabled == 'true' && runner.os == 'Linux'
