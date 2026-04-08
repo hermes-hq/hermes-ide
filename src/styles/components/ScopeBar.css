@@ -10,16 +10,22 @@
   flex-shrink: 0;
   min-height: 24px;
   overflow-x: auto;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
-  mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
+  overflow-y: hidden;
 }
 
 .scope-bar-empty {
   padding: 1px 12px;
 }
 
-.scope-bar::-webkit-scrollbar { height: 2px; }
-.scope-bar::-webkit-scrollbar-thumb { background: var(--bg-3); }
+.scope-bar::-webkit-scrollbar { height: 4px; }
+.scope-bar::-webkit-scrollbar-track { background: transparent; }
+.scope-bar::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 2px;
+}
+.scope-bar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
 
 .scope-pill {
   display: flex;
