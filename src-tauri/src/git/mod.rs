@@ -571,34 +571,50 @@ fn get_project_git_status(
 // ─── Tauri Commands ─────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn git_status(
+pub async fn git_status(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<GitSessionStatus, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let session_projects = db.get_session_projects(&session_id)?;
+    // Collect project info while holding the DB lock (fast, no I/O).
+    // We must release State before .await since it is not Send.
+    let project_inputs: Vec<(String, String, String)> = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let session_projects = db.get_session_projects(&session_id)?;
+        session_projects
+            .iter()
+            .map(|r| {
+                let path = resolve_worktree_path(&db, &session_id, &r.id)
+                    .unwrap_or_else(|_| r.path.clone());
+                (r.id.clone(), r.name.clone(), path)
+            })
+            .collect()
+    };
 
-    // Resolve worktree paths for each project
-    let projects: Vec<GitProjectStatus> = session_projects
-        .iter()
-        .map(|r| {
-            let path =
-                resolve_worktree_path(&db, &session_id, &r.id).unwrap_or_else(|_| r.path.clone());
-            get_project_git_status(&r.id, &r.name, &path)
+    // Move the expensive filesystem walk (libgit2 status) off the main thread
+    // so the UI event loop stays responsive. Apply a timeout so a runaway
+    // filesystem scan on a huge repo can't consume CPU forever.
+    let task = tokio::task::spawn_blocking(move || {
+        let projects: Vec<GitProjectStatus> = project_inputs
+            .iter()
+            .map(|(id, name, path)| get_project_git_status(id, name, path))
+            .filter(|p| p.is_git_repo)
+            .collect();
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        Ok(GitSessionStatus {
+            projects,
+            timestamp,
         })
-        .filter(|p| p.is_git_repo)
-        .collect();
-    drop(db);
+    });
 
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    Ok(GitSessionStatus {
-        projects,
-        timestamp,
-    })
+    match tokio::time::timeout(std::time::Duration::from_secs(30), task).await {
+        Ok(join_result) => join_result.map_err(|e| format!("git_status task panicked: {}", e))?,
+        Err(_) => Err("git_status timed out after 30s — the repository may be very large or the filesystem is slow".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -804,148 +820,154 @@ pub fn git_push(
 }
 
 #[tauri::command]
-pub fn git_pull(
+pub async fn git_pull(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
     remote: Option<String>,
 ) -> Result<GitOperationResult, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
-    drop(db);
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let project_path = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        resolve_worktree_path(&db, &session_id, &project_id)?
+    };
 
-    // Reject pull if repo is already in a merge/rebase state
-    let repo_state = repo.state();
-    if repo_state != git2::RepositoryState::Clean {
-        return Err(format!(
-            "Cannot pull: repository is in {:?} state. Complete or abort the current operation first.",
-            repo_state
-        ));
-    }
+    tokio::task::spawn_blocking(move || {
+        let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
 
-    let remote_name = remote.as_deref().unwrap_or("origin");
+        // Reject pull if repo is already in a merge/rebase state
+        let repo_state = repo.state();
+        if repo_state != git2::RepositoryState::Clean {
+            return Err(format!(
+                "Cannot pull: repository is in {:?} state. Complete or abort the current operation first.",
+                repo_state
+            ));
+        }
 
-    let mut remote_obj = repo
-        .find_remote(remote_name)
-        .map_err(|e| format!("Remote '{}' not found: {}", remote_name, e))?;
+        let remote_name = remote.as_deref().unwrap_or("origin");
 
-    // Fetch
-    let callbacks = make_callbacks();
-    let mut fetch_opts = FetchOptions::new();
-    fetch_opts.remote_callbacks(callbacks);
+        let mut remote_obj = repo
+            .find_remote(remote_name)
+            .map_err(|e| format!("Remote '{}' not found: {}", remote_name, e))?;
 
-    let head = repo.head().map_err(|e| e.to_string())?;
-    let branch_name = head
-        .shorthand()
-        .ok_or_else(|| "Cannot determine current branch".to_string())?
-        .to_string();
+        // Fetch
+        let callbacks = make_callbacks();
+        let mut fetch_opts = FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
 
-    remote_obj
-        .fetch(&[&branch_name], Some(&mut fetch_opts), None)
-        .map_err(|e| format!("Fetch failed: {}", e))?;
+        let head = repo.head().map_err(|e| e.to_string())?;
+        let branch_name = head
+            .shorthand()
+            .ok_or_else(|| "Cannot determine current branch".to_string())?
+            .to_string();
 
-    // Fast-forward merge
-    let fetch_head = repo
-        .find_reference("FETCH_HEAD")
-        .map_err(|e| e.to_string())?;
-    let fetch_commit = repo
-        .reference_to_annotated_commit(&fetch_head)
-        .map_err(|e| e.to_string())?;
+        remote_obj
+            .fetch(&[&branch_name], Some(&mut fetch_opts), None)
+            .map_err(|e| format!("Fetch failed: {}", e))?;
 
-    let (merge_analysis, _) = repo
-        .merge_analysis(&[&fetch_commit])
-        .map_err(|e| e.to_string())?;
-
-    if merge_analysis.is_up_to_date() {
-        return Ok(GitOperationResult {
-            success: true,
-            message: "Already up to date".to_string(),
-            error: None,
-        });
-    }
-
-    if merge_analysis.is_fast_forward() {
-        let refname = format!("refs/heads/{}", branch_name);
-        let mut reference = repo.find_reference(&refname).map_err(|e| e.to_string())?;
-        reference
-            .set_target(fetch_commit.id(), "fast-forward pull")
+        // Fast-forward merge
+        let fetch_head = repo
+            .find_reference("FETCH_HEAD")
             .map_err(|e| e.to_string())?;
-        repo.set_head(&refname).map_err(|e| e.to_string())?;
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+        let fetch_commit = repo
+            .reference_to_annotated_commit(&fetch_head)
             .map_err(|e| e.to_string())?;
 
-        return Ok(GitOperationResult {
-            success: true,
-            message: "Fast-forward pull complete".to_string(),
-            error: None,
-        });
-    }
-
-    // Perform actual merge
-    if merge_analysis.is_normal() {
-        let fetch_commit_obj = repo
-            .find_commit(fetch_commit.id())
+        let (merge_analysis, _) = repo
+            .merge_analysis(&[&fetch_commit])
             .map_err(|e| e.to_string())?;
 
-        // Merge the fetched commit
-        let mut merge_opts = git2::MergeOptions::new();
-        let mut checkout_builder = git2::build::CheckoutBuilder::new();
-        checkout_builder.allow_conflicts(true);
-
-        repo.merge(
-            &[&fetch_commit],
-            Some(&mut merge_opts),
-            Some(&mut checkout_builder),
-        )
-        .map_err(|e| format!("Merge failed: {}", e))?;
-
-        // Check for conflicts
-        let index = repo.index().map_err(|e| e.to_string())?;
-        if index.has_conflicts() {
+        if merge_analysis.is_up_to_date() {
             return Ok(GitOperationResult {
-                success: false,
-                message: "Pull complete but merge has conflicts. Resolve them to finish the merge."
-                    .to_string(),
-                error: Some("Merge conflicts detected".to_string()),
+                success: true,
+                message: "Already up to date".to_string(),
+                error: None,
             });
         }
 
-        // Auto-commit if no conflicts
-        let sig = repo.signature().map_err(|e| e.to_string())?;
-        let mut index = repo.index().map_err(|e| e.to_string())?;
-        let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
-        let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+        if merge_analysis.is_fast_forward() {
+            let refname = format!("refs/heads/{}", branch_name);
+            let mut reference = repo.find_reference(&refname).map_err(|e| e.to_string())?;
+            reference
+                .set_target(fetch_commit.id(), "fast-forward pull")
+                .map_err(|e| e.to_string())?;
+            repo.set_head(&refname).map_err(|e| e.to_string())?;
+            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+                .map_err(|e| e.to_string())?;
 
-        let head_commit = repo
-            .head()
-            .and_then(|h| h.peel_to_commit())
-            .map_err(|e| e.to_string())?;
+            return Ok(GitOperationResult {
+                success: true,
+                message: "Fast-forward pull complete".to_string(),
+                error: None,
+            });
+        }
 
-        let msg = format!("Merge branch '{}' of {}", branch_name, remote_name);
-        repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            &msg,
-            &tree,
-            &[&head_commit, &fetch_commit_obj],
-        )
-        .map_err(|e| format!("Merge commit failed: {}", e))?;
+        // Perform actual merge
+        if merge_analysis.is_normal() {
+            let fetch_commit_obj = repo
+                .find_commit(fetch_commit.id())
+                .map_err(|e| e.to_string())?;
 
-        repo.cleanup_state().map_err(|e| e.to_string())?;
+            // Merge the fetched commit
+            let mut merge_opts = git2::MergeOptions::new();
+            let mut checkout_builder = git2::build::CheckoutBuilder::new();
+            checkout_builder.allow_conflicts(true);
 
-        return Ok(GitOperationResult {
-            success: true,
-            message: "Pull with merge complete".to_string(),
-            error: None,
-        });
-    }
+            repo.merge(
+                &[&fetch_commit],
+                Some(&mut merge_opts),
+                Some(&mut checkout_builder),
+            )
+            .map_err(|e| format!("Merge failed: {}", e))?;
 
-    Err("Pull failed: unexpected merge analysis result".to_string())
+            // Check for conflicts
+            let index = repo.index().map_err(|e| e.to_string())?;
+            if index.has_conflicts() {
+                return Ok(GitOperationResult {
+                    success: false,
+                    message: "Pull complete but merge has conflicts. Resolve them to finish the merge."
+                        .to_string(),
+                    error: Some("Merge conflicts detected".to_string()),
+                });
+            }
+
+            // Auto-commit if no conflicts
+            let sig = repo.signature().map_err(|e| e.to_string())?;
+            let mut index = repo.index().map_err(|e| e.to_string())?;
+            let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
+            let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+
+            let head_commit = repo
+                .head()
+                .and_then(|h| h.peel_to_commit())
+                .map_err(|e| e.to_string())?;
+
+            let msg = format!("Merge branch '{}' of {}", branch_name, remote_name);
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                &msg,
+                &tree,
+                &[&head_commit, &fetch_commit_obj],
+            )
+            .map_err(|e| format!("Merge commit failed: {}", e))?;
+
+            repo.cleanup_state().map_err(|e| e.to_string())?;
+
+            return Ok(GitOperationResult {
+                success: true,
+                message: "Pull with merge complete".to_string(),
+                error: None,
+            });
+        }
+
+        Err("Pull failed: unexpected merge analysis result".to_string())
+    })
+    .await
+    .map_err(|e| format!("git_pull task panicked: {}", e))?
 }
 
 #[tauri::command]
@@ -1253,217 +1275,229 @@ pub fn open_file_in_editor(
 // ─── Branch Management Commands ─────────────────────────────────────
 
 #[tauri::command]
-pub fn git_list_branches(
+pub async fn git_list_branches(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
 ) -> Result<Vec<GitBranch>, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
-    drop(db);
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
-    let mut branches = Vec::new();
+    let project_path = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        resolve_worktree_path(&db, &session_id, &project_id)?
+    };
 
-    // Get current branch name
-    let current_branch = repo
-        .head()
-        .ok()
-        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+    tokio::task::spawn_blocking(move || {
+        let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+        let mut branches = Vec::new();
 
-    // Local branches
-    let local_branches = repo
-        .branches(Some(BranchType::Local))
-        .map_err(|e| e.to_string())?;
+        let current_branch = repo
+            .head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s.to_string()));
 
-    for branch_result in local_branches {
-        let (branch, _) = branch_result.map_err(|e| e.to_string())?;
-        let name = branch
-            .name()
-            .map_err(|e| e.to_string())?
-            .unwrap_or("")
-            .to_string();
+        let local_branches = repo
+            .branches(Some(BranchType::Local))
+            .map_err(|e| e.to_string())?;
 
-        let is_current = current_branch.as_deref() == Some(&name);
+        for branch_result in local_branches {
+            let (branch, _) = branch_result.map_err(|e| e.to_string())?;
+            let name = branch
+                .name()
+                .map_err(|e| e.to_string())?
+                .unwrap_or("")
+                .to_string();
 
-        // Only compute expensive ahead/behind graph walk for the current branch
-        let mut ahead = 0u32;
-        let mut behind = 0u32;
-        let mut upstream_name = None;
+            let is_current = current_branch.as_deref() == Some(&name);
 
-        if let Ok(upstream) = branch.upstream() {
-            upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
-            if is_current {
-                if let (Some(local_ref), Some(upstream_ref)) =
-                    (branch.get().name(), upstream.get().name())
-                {
-                    if let (Ok(local_oid), Ok(remote_oid)) = (
-                        repo.refname_to_id(local_ref),
-                        repo.refname_to_id(upstream_ref),
-                    ) {
-                        if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
-                            ahead = a as u32;
-                            behind = b as u32;
+            let mut ahead = 0u32;
+            let mut behind = 0u32;
+            let mut upstream_name = None;
+
+            if let Ok(upstream) = branch.upstream() {
+                upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
+                if is_current {
+                    if let (Some(local_ref), Some(upstream_ref)) =
+                        (branch.get().name(), upstream.get().name())
+                    {
+                        if let (Ok(local_oid), Ok(remote_oid)) = (
+                            repo.refname_to_id(local_ref),
+                            repo.refname_to_id(upstream_ref),
+                        ) {
+                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                                ahead = a as u32;
+                                behind = b as u32;
+                            }
                         }
                     }
                 }
             }
+
+            let last_commit_summary = branch
+                .get()
+                .peel_to_commit()
+                .ok()
+                .map(|c| c.summary().unwrap_or("").to_string());
+
+            branches.push(GitBranch {
+                name,
+                is_current,
+                is_remote: false,
+                upstream: upstream_name,
+                ahead,
+                behind,
+                last_commit_summary,
+            });
         }
 
-        // Last commit summary
-        let last_commit_summary = branch
-            .get()
-            .peel_to_commit()
-            .ok()
-            .map(|c| c.summary().unwrap_or("").to_string());
-
-        branches.push(GitBranch {
-            name,
-            is_current,
-            is_remote: false,
-            upstream: upstream_name,
-            ahead,
-            behind,
-            last_commit_summary,
-        });
-    }
-
-    Ok(branches)
+        Ok(branches)
+    })
+    .await
+    .map_err(|e| format!("git_list_branches task panicked: {}", e))?
 }
 
 /// List branches for a project without requiring a session.
 /// Uses the project's root path directly (not a worktree path).
 #[tauri::command]
-pub fn git_list_branches_for_project(
+pub async fn git_list_branches_for_project(
     state: State<'_, AppState>,
     project_id: String,
 ) -> Result<Vec<GitBranch>, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project = db
-        .get_project(&project_id)
-        .map_err(|e| format!("Failed to look up project: {}", e))?
-        .ok_or_else(|| format!("Project '{}' not found", project_id))?;
-    let project_path = project.path.clone();
-    drop(db);
+    let project_path = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        let project = db
+            .get_project(&project_id)
+            .map_err(|e| format!("Failed to look up project: {}", e))?
+            .ok_or_else(|| format!("Project '{}' not found", project_id))?;
+        project.path.clone()
+    };
 
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
-    let mut branches = Vec::new();
+    tokio::task::spawn_blocking(move || {
+        let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+        let mut branches = Vec::new();
 
-    let current_branch = repo
-        .head()
-        .ok()
-        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+        let current_branch = repo
+            .head()
+            .ok()
+            .and_then(|h| h.shorthand().map(|s| s.to_string()));
 
-    let local_branches = repo
-        .branches(Some(BranchType::Local))
-        .map_err(|e| e.to_string())?;
+        let local_branches = repo
+            .branches(Some(BranchType::Local))
+            .map_err(|e| e.to_string())?;
 
-    for branch_result in local_branches {
-        let (branch, _) = branch_result.map_err(|e| e.to_string())?;
-        let name = branch
-            .name()
-            .map_err(|e| e.to_string())?
-            .unwrap_or("")
-            .to_string();
+        for branch_result in local_branches {
+            let (branch, _) = branch_result.map_err(|e| e.to_string())?;
+            let name = branch
+                .name()
+                .map_err(|e| e.to_string())?
+                .unwrap_or("")
+                .to_string();
 
-        let is_current = current_branch.as_deref() == Some(&name);
+            let is_current = current_branch.as_deref() == Some(&name);
 
-        // Only compute expensive ahead/behind graph walk for the current branch
-        let mut ahead = 0u32;
-        let mut behind = 0u32;
-        let mut upstream_name = None;
+            let mut ahead = 0u32;
+            let mut behind = 0u32;
+            let mut upstream_name = None;
 
-        if let Ok(upstream) = branch.upstream() {
-            upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
-            if is_current {
-                if let (Some(local_ref), Some(upstream_ref)) =
-                    (branch.get().name(), upstream.get().name())
-                {
-                    if let (Ok(local_oid), Ok(remote_oid)) = (
-                        repo.refname_to_id(local_ref),
-                        repo.refname_to_id(upstream_ref),
-                    ) {
-                        if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
-                            ahead = a as u32;
-                            behind = b as u32;
+            if let Ok(upstream) = branch.upstream() {
+                upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
+                if is_current {
+                    if let (Some(local_ref), Some(upstream_ref)) =
+                        (branch.get().name(), upstream.get().name())
+                    {
+                        if let (Ok(local_oid), Ok(remote_oid)) = (
+                            repo.refname_to_id(local_ref),
+                            repo.refname_to_id(upstream_ref),
+                        ) {
+                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                                ahead = a as u32;
+                                behind = b as u32;
+                            }
                         }
                     }
                 }
             }
+
+            let last_commit_summary = branch
+                .get()
+                .peel_to_commit()
+                .ok()
+                .map(|c| c.summary().unwrap_or("").to_string());
+
+            branches.push(GitBranch {
+                name,
+                is_current,
+                is_remote: false,
+                upstream: upstream_name,
+                ahead,
+                behind,
+                last_commit_summary,
+            });
         }
 
-        let last_commit_summary = branch
-            .get()
-            .peel_to_commit()
-            .ok()
-            .map(|c| c.summary().unwrap_or("").to_string());
-
-        branches.push(GitBranch {
-            name,
-            is_current,
-            is_remote: false,
-            upstream: upstream_name,
-            ahead,
-            behind,
-            last_commit_summary,
-        });
-    }
-
-    Ok(branches)
+        Ok(branches)
+    })
+    .await
+    .map_err(|e| format!("git_list_branches_for_project task panicked: {}", e))?
 }
 
 /// Compute ahead/behind counts for all local branches that have an upstream.
 /// Designed to be called lazily after the fast `git_list_branches` returns,
 /// so the branch dropdown renders instantly and enriches in the background.
 #[tauri::command]
-pub fn git_branches_ahead_behind(
+pub async fn git_branches_ahead_behind(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
 ) -> Result<HashMap<String, (u32, u32)>, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
-    drop(db);
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
-    let mut result = HashMap::new();
+    let project_path = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        resolve_worktree_path(&db, &session_id, &project_id)?
+    };
 
-    let local_branches = repo
-        .branches(Some(BranchType::Local))
-        .map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+        let mut result = HashMap::new();
 
-    for branch_result in local_branches {
-        let (branch, _) = branch_result.map_err(|e| e.to_string())?;
-        let name = branch
-            .name()
-            .map_err(|e| e.to_string())?
-            .unwrap_or("")
-            .to_string();
+        let local_branches = repo
+            .branches(Some(BranchType::Local))
+            .map_err(|e| e.to_string())?;
 
-        if let Ok(upstream) = branch.upstream() {
-            if let (Some(local_ref), Some(upstream_ref)) =
-                (branch.get().name(), upstream.get().name())
-            {
-                if let (Ok(local_oid), Ok(remote_oid)) = (
-                    repo.refname_to_id(local_ref),
-                    repo.refname_to_id(upstream_ref),
-                ) {
-                    if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
-                        result.insert(name, (a as u32, b as u32));
+        for branch_result in local_branches {
+            let (branch, _) = branch_result.map_err(|e| e.to_string())?;
+            let name = branch
+                .name()
+                .map_err(|e| e.to_string())?
+                .unwrap_or("")
+                .to_string();
+
+            if let Ok(upstream) = branch.upstream() {
+                if let (Some(local_ref), Some(upstream_ref)) =
+                    (branch.get().name(), upstream.get().name())
+                {
+                    if let (Ok(local_oid), Ok(remote_oid)) = (
+                        repo.refname_to_id(local_ref),
+                        repo.refname_to_id(upstream_ref),
+                    ) {
+                        if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, remote_oid) {
+                            result.insert(name, (a as u32, b as u32));
+                        }
                     }
                 }
             }
         }
-    }
 
-    Ok(result)
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("git_branches_ahead_behind task panicked: {}", e))?
 }
 
 #[tauri::command]
@@ -1509,107 +1543,107 @@ pub fn git_create_branch(
 }
 
 #[tauri::command]
-pub fn git_checkout_branch(
+pub async fn git_checkout_branch(
     app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
     name: String,
 ) -> Result<GitOperationResult, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
-    drop(db);
-
-    // Validate that the branch isn't in use by another worktree
-    let root_path = {
+    let (project_path, root_path) = {
         let db = state
             .db
             .lock()
             .map_err(|e| format!("DB lock error: {}", e))?;
-        db.get_project(&project_id)
+        let pp = resolve_worktree_path(&db, &session_id, &project_id)?;
+        let rp = db
+            .get_project(&project_id)
             .map_err(|e| format!("Failed to look up project: {}", e))?
             .map(|r| r.path)
-            .unwrap_or_else(|| project_path.clone())
+            .unwrap_or_else(|| pp.clone());
+        (pp, rp)
     };
-    if !worktree::is_branch_available(&root_path, &name, Some(&project_path)).unwrap_or(true) {
-        return Err(format!(
-            "Branch '{}' is already checked out in another worktree. Cannot switch to it.",
-            name
-        ));
-    }
 
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+    let app_handle = app.clone();
+    let session_id_clone = session_id.clone();
 
-    // Check for dirty working tree
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(false);
-    let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
-    let has_changes = statuses.iter().any(|e| {
-        let s = e.status();
-        s.contains(git2::Status::INDEX_NEW)
-            || s.contains(git2::Status::INDEX_MODIFIED)
-            || s.contains(git2::Status::INDEX_DELETED)
-            || s.contains(git2::Status::WT_MODIFIED)
-            || s.contains(git2::Status::WT_DELETED)
-    });
-    if has_changes {
-        return Err(
-            "Cannot checkout: you have uncommitted changes. Commit or stash them first."
-                .to_string(),
-        );
-    }
+    tokio::task::spawn_blocking(move || {
+        if !worktree::is_branch_available(&root_path, &name, Some(&project_path)).unwrap_or(true) {
+            return Err(format!(
+                "Branch '{}' is already checked out in another worktree. Cannot switch to it.",
+                name
+            ));
+        }
 
-    // Try local branch first
-    let refname = format!("refs/heads/{}", name);
-    if repo.find_reference(&refname).is_ok() {
-        repo.set_head(&refname).map_err(|e| e.to_string())?;
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().safe()))
-            .map_err(|e| e.to_string())?;
-        let _ = app.emit(&format!("branch-changed-{}", session_id), &name);
-        return Ok(GitOperationResult {
-            success: true,
-            message: format!("Switched to branch '{}'", name),
-            error: None,
+        let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+
+        // Check for dirty working tree
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(false);
+        let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
+        let has_changes = statuses.iter().any(|e| {
+            let s = e.status();
+            s.contains(git2::Status::INDEX_NEW)
+                || s.contains(git2::Status::INDEX_MODIFIED)
+                || s.contains(git2::Status::INDEX_DELETED)
+                || s.contains(git2::Status::WT_MODIFIED)
+                || s.contains(git2::Status::WT_DELETED)
         });
-    }
+        if has_changes {
+            return Err(
+                "Cannot checkout: you have uncommitted changes. Commit or stash them first."
+                    .to_string(),
+            );
+        }
 
-    // Try creating a local tracking branch from a remote branch
-    // e.g. name = "origin/feature" → local branch "feature" tracking "origin/feature"
-    let remote_refname = format!("refs/remotes/{}", name);
-    if let Ok(remote_ref) = repo.find_reference(&remote_refname) {
-        let commit = remote_ref.peel_to_commit().map_err(|e| e.to_string())?;
-        // Extract local name (strip "origin/" prefix)
-        let local_name = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
+        // Try local branch first
+        let refname = format!("refs/heads/{}", name);
+        if repo.find_reference(&refname).is_ok() {
+            repo.set_head(&refname).map_err(|e| e.to_string())?;
+            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().safe()))
+                .map_err(|e| e.to_string())?;
+            let _ = app_handle.emit(&format!("branch-changed-{}", session_id_clone), &name);
+            return Ok(GitOperationResult {
+                success: true,
+                message: format!("Switched to branch '{}'", name),
+                error: None,
+            });
+        }
 
-        let mut local_branch = repo
-            .branch(local_name, &commit, false)
-            .map_err(|e| format!("Failed to create tracking branch: {}", e))?;
+        // Try creating a local tracking branch from a remote branch
+        let remote_refname = format!("refs/remotes/{}", name);
+        if let Ok(remote_ref) = repo.find_reference(&remote_refname) {
+            let commit = remote_ref.peel_to_commit().map_err(|e| e.to_string())?;
+            let local_name = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
 
-        // Set upstream
-        local_branch
-            .set_upstream(Some(&name))
-            .map_err(|e| format!("Failed to set upstream: {}", e))?;
+            let mut local_branch = repo
+                .branch(local_name, &commit, false)
+                .map_err(|e| format!("Failed to create tracking branch: {}", e))?;
 
-        let local_refname = format!("refs/heads/{}", local_name);
-        repo.set_head(&local_refname).map_err(|e| e.to_string())?;
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().safe()))
-            .map_err(|e| e.to_string())?;
+            local_branch
+                .set_upstream(Some(&name))
+                .map_err(|e| format!("Failed to set upstream: {}", e))?;
 
-        let _ = app.emit(&format!("branch-changed-{}", session_id), local_name);
-        return Ok(GitOperationResult {
-            success: true,
-            message: format!(
-                "Created and switched to branch '{}' tracking '{}'",
-                local_name, name
-            ),
-            error: None,
-        });
-    }
+            let local_refname = format!("refs/heads/{}", local_name);
+            repo.set_head(&local_refname).map_err(|e| e.to_string())?;
+            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().safe()))
+                .map_err(|e| e.to_string())?;
 
-    Err(format!("Branch '{}' not found", name))
+            let _ = app_handle.emit(&format!("branch-changed-{}", session_id_clone), local_name);
+            return Ok(GitOperationResult {
+                success: true,
+                message: format!(
+                    "Created and switched to branch '{}' tracking '{}'",
+                    local_name, name
+                ),
+                error: None,
+            });
+        }
+
+        Err(format!("Branch '{}' not found", name))
+    })
+    .await
+    .map_err(|e| format!("git_checkout_branch task panicked: {}", e))?
 }
 
 #[tauri::command]
@@ -1667,144 +1701,149 @@ pub fn git_delete_branch(
 // ─── File Explorer Command ──────────────────────────────────────────
 
 #[tauri::command]
-pub fn list_directory(
+pub async fn list_directory(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
     relative_path: Option<String>,
 ) -> Result<Vec<FileEntry>, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
-    drop(db);
-    let base =
-        std::fs::canonicalize(&project_path).map_err(|e| format!("Invalid project path: {}", e))?;
-
-    let target_dir = match &relative_path {
-        Some(rel) if !rel.is_empty() => safe_join(&project_path, rel)?,
-        _ => base.clone(),
+    let project_path = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        resolve_worktree_path(&db, &session_id, &project_id)?
     };
 
-    if !target_dir.is_dir() {
-        return Err(format!("Not a directory: {}", target_dir.display()));
-    }
+    let task = tokio::task::spawn_blocking(move || {
+        let base = std::fs::canonicalize(&project_path)
+            .map_err(|e| format!("Invalid project path: {}", e))?;
 
-    // Build git status map — exclude ignored files (.gitignore)
-    let mut git_status_map = std::collections::HashMap::new();
-    if let Ok(repo) = Repository::open(&project_path) {
-        let mut opts = StatusOptions::new();
-        opts.include_untracked(true)
-            .recurse_untracked_dirs(true)
-            .include_ignored(false);
-        if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
-            for entry in statuses.iter() {
-                if git_status_map.len() >= VCS_STATUS_FILE_CAP {
-                    log::warn!(
-                        "list_directory status for '{}' exceeded {} entries — truncating.",
-                        project_path,
-                        VCS_STATUS_FILE_CAP
-                    );
-                    break;
-                }
-                let s = entry.status();
-                if s.is_empty() {
-                    continue;
-                }
-                if let Some(path) = entry.path() {
-                    let status_str = if s.contains(git2::Status::CONFLICTED) {
-                        "conflicted"
-                    } else if s.contains(git2::Status::WT_NEW)
-                        || s.contains(git2::Status::INDEX_NEW)
-                    {
-                        "added"
-                    } else if s.contains(git2::Status::WT_DELETED)
-                        || s.contains(git2::Status::INDEX_DELETED)
-                    {
-                        "deleted"
-                    } else if s.contains(git2::Status::WT_RENAMED)
-                        || s.contains(git2::Status::INDEX_RENAMED)
-                    {
-                        "renamed"
-                    } else if s.contains(git2::Status::WT_MODIFIED)
-                        || s.contains(git2::Status::INDEX_MODIFIED)
-                    {
-                        "modified"
-                    } else {
-                        "untracked"
-                    };
-                    git_status_map.insert(path.to_string(), status_str.to_string());
-                }
-            }
-        }
-    }
-
-    let mut entries = Vec::new();
-    let dir_entries =
-        std::fs::read_dir(&target_dir).map_err(|e| format!("Failed to read directory: {}", e))?;
-
-    for entry in dir_entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
-        let file_name = entry.file_name().to_string_lossy().to_string();
-
-        // Skip .git directory
-        if file_name == ".git" {
-            continue;
-        }
-
-        let metadata = entry
-            .metadata()
-            .map_err(|e| format!("Failed to get metadata: {}", e))?;
-        let is_dir = metadata.is_dir();
-        let is_hidden = file_name.starts_with('.');
-
-        // Compute relative path from project root
-        let full_path = entry.path();
-        let rel_path = full_path
-            .strip_prefix(&base)
-            .unwrap_or(&full_path)
-            .to_string_lossy()
-            .to_string()
-            .replace('\\', "/");
-
-        let size = if is_dir { None } else { Some(metadata.len()) };
-
-        // Look up git status — for files check exact path, for dirs check if any child has status
-        let git_status = if is_dir {
-            let prefix = if rel_path.ends_with('/') {
-                rel_path.clone()
-            } else {
-                format!("{}/", rel_path)
-            };
-            let has_status = git_status_map.keys().any(|k| k.starts_with(&prefix));
-            if has_status {
-                Some("modified".to_string())
-            } else {
-                None
-            }
-        } else {
-            git_status_map.get(&rel_path).cloned()
+        let target_dir = match &relative_path {
+            Some(rel) if !rel.is_empty() => safe_join(&project_path, rel)?,
+            _ => base.clone(),
         };
 
-        entries.push(FileEntry {
-            name: file_name,
-            path: rel_path,
-            is_dir,
-            is_hidden,
-            size,
-            git_status,
-        });
-    }
+        if !target_dir.is_dir() {
+            return Err(format!("Not a directory: {}", target_dir.display()));
+        }
 
-    // Sort: directories first, then alphabetical (case-insensitive)
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        // Build git status map — exclude ignored files (.gitignore)
+        let mut git_status_map = std::collections::HashMap::new();
+        if let Ok(repo) = Repository::open(&project_path) {
+            let mut opts = StatusOptions::new();
+            opts.include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .include_ignored(false);
+            if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+                for entry in statuses.iter() {
+                    if git_status_map.len() >= VCS_STATUS_FILE_CAP {
+                        log::warn!(
+                            "list_directory status for '{}' exceeded {} entries — truncating.",
+                            project_path,
+                            VCS_STATUS_FILE_CAP
+                        );
+                        break;
+                    }
+                    let s = entry.status();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    if let Some(path) = entry.path() {
+                        let status_str = if s.contains(git2::Status::CONFLICTED) {
+                            "conflicted"
+                        } else if s.contains(git2::Status::WT_NEW)
+                            || s.contains(git2::Status::INDEX_NEW)
+                        {
+                            "added"
+                        } else if s.contains(git2::Status::WT_DELETED)
+                            || s.contains(git2::Status::INDEX_DELETED)
+                        {
+                            "deleted"
+                        } else if s.contains(git2::Status::WT_RENAMED)
+                            || s.contains(git2::Status::INDEX_RENAMED)
+                        {
+                            "renamed"
+                        } else if s.contains(git2::Status::WT_MODIFIED)
+                            || s.contains(git2::Status::INDEX_MODIFIED)
+                        {
+                            "modified"
+                        } else {
+                            "untracked"
+                        };
+                        git_status_map.insert(path.to_string(), status_str.to_string());
+                    }
+                }
+            }
+        }
+
+        let mut entries = Vec::new();
+        let dir_entries = std::fs::read_dir(&target_dir)
+            .map_err(|e| format!("Failed to read directory: {}", e))?;
+
+        for entry in dir_entries {
+            let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+            let file_name = entry.file_name().to_string_lossy().to_string();
+
+            if file_name == ".git" {
+                continue;
+            }
+
+            let metadata = entry
+                .metadata()
+                .map_err(|e| format!("Failed to get metadata: {}", e))?;
+            let is_dir = metadata.is_dir();
+            let is_hidden = file_name.starts_with('.');
+
+            let full_path = entry.path();
+            let rel_path = full_path
+                .strip_prefix(&base)
+                .unwrap_or(&full_path)
+                .to_string_lossy()
+                .to_string()
+                .replace('\\', "/");
+
+            let size = if is_dir { None } else { Some(metadata.len()) };
+
+            let git_status = if is_dir {
+                let prefix = if rel_path.ends_with('/') {
+                    rel_path.clone()
+                } else {
+                    format!("{}/", rel_path)
+                };
+                let has_status = git_status_map.keys().any(|k| k.starts_with(&prefix));
+                if has_status {
+                    Some("modified".to_string())
+                } else {
+                    None
+                }
+            } else {
+                git_status_map.get(&rel_path).cloned()
+            };
+
+            entries.push(FileEntry {
+                name: file_name,
+                path: rel_path,
+                is_dir,
+                is_hidden,
+                size,
+                git_status,
+            });
+        }
+
+        entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        Ok(entries)
     });
 
-    Ok(entries)
+    match tokio::time::timeout(std::time::Duration::from_secs(30), task).await {
+        Ok(join_result) => join_result.map_err(|e| format!("list_directory task panicked: {}", e))?,
+        Err(_) => Err("list_directory timed out after 30s — the repository may be very large or the filesystem is slow".to_string()),
+    }
 }
 
 // ─── Stash Data Models ──────────────────────────────────────────────
@@ -2067,69 +2106,75 @@ pub struct GitCommitDetail {
 // ─── Log / History Commands ─────────────────────────────────────────
 
 #[tauri::command]
-pub fn git_log(
+pub async fn git_log(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<GitLogResult, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|e| format!("DB lock error: {}", e))?;
-    let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
-    drop(db);
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
-    let limit = limit.unwrap_or(50);
-    let offset = offset.unwrap_or(0);
+    let project_path = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        resolve_worktree_path(&db, &session_id, &project_id)?
+    };
 
-    let mut revwalk = repo.revwalk().map_err(|e| e.to_string())?;
-    revwalk
-        .push_head()
-        .map_err(|_| "No commits in repository".to_string())?;
-    revwalk
-        .set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)
-        .map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
+        let limit = limit.unwrap_or(50);
+        let offset = offset.unwrap_or(0);
 
-    let mut entries = Vec::new();
-    let mut total_traversed = 0usize;
-    let mut has_more = false;
+        let mut revwalk = repo.revwalk().map_err(|e| e.to_string())?;
+        revwalk
+            .push_head()
+            .map_err(|_| "No commits in repository".to_string())?;
+        revwalk
+            .set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)
+            .map_err(|e| e.to_string())?;
 
-    for oid_result in revwalk {
-        let oid = oid_result.map_err(|e| e.to_string())?;
-        total_traversed += 1;
+        let mut entries = Vec::new();
+        let mut total_traversed = 0usize;
+        let mut has_more = false;
 
-        if total_traversed <= offset {
-            continue;
+        for oid_result in revwalk {
+            let oid = oid_result.map_err(|e| e.to_string())?;
+            total_traversed += 1;
+
+            if total_traversed <= offset {
+                continue;
+            }
+
+            if entries.len() >= limit {
+                has_more = true;
+                break;
+            }
+
+            let commit = repo.find_commit(oid).map_err(|e| e.to_string())?;
+            let hash = oid.to_string();
+            let short_hash = hash[..8.min(hash.len())].to_string();
+
+            entries.push(GitLogEntry {
+                hash,
+                short_hash,
+                author_name: commit.author().name().unwrap_or("").to_string(),
+                author_email: commit.author().email().unwrap_or("").to_string(),
+                timestamp: commit.time().seconds().max(0) as u64,
+                message: commit.message().unwrap_or("").to_string(),
+                summary: commit.summary().unwrap_or("").to_string(),
+                parent_count: commit.parent_count(),
+            });
         }
 
-        if entries.len() >= limit {
-            has_more = true;
-            break;
-        }
-
-        let commit = repo.find_commit(oid).map_err(|e| e.to_string())?;
-        let hash = oid.to_string();
-        let short_hash = hash[..8.min(hash.len())].to_string();
-
-        entries.push(GitLogEntry {
-            hash,
-            short_hash,
-            author_name: commit.author().name().unwrap_or("").to_string(),
-            author_email: commit.author().email().unwrap_or("").to_string(),
-            timestamp: commit.time().seconds().max(0) as u64,
-            message: commit.message().unwrap_or("").to_string(),
-            summary: commit.summary().unwrap_or("").to_string(),
-            parent_count: commit.parent_count(),
-        });
-    }
-
-    Ok(GitLogResult {
-        entries,
-        has_more,
-        total_traversed,
+        Ok(GitLogResult {
+            entries,
+            has_more,
+            total_traversed,
+        })
     })
+    .await
+    .map_err(|e| format!("git_log task panicked: {}", e))?
 }
 
 #[tauri::command]

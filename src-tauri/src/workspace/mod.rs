@@ -265,7 +265,7 @@ fn detect_project_at_path(dir: &Path) -> Option<ProjectInfo> {
 }
 
 #[tauri::command]
-pub fn scan_directory(
+pub async fn scan_directory(
     state: State<'_, AppState>,
     path: String,
     max_depth: Option<usize>,
@@ -275,46 +275,59 @@ pub fn scan_directory(
         return Err(format!("Path {} is not a directory", path));
     }
 
-    // Check denylist
     if let Some(dir_name) = root.file_name().and_then(|n| n.to_str()) {
         if DENY_DIRS.contains(&dir_name) {
             return Err("Cannot scan denied directory".to_string());
         }
     }
 
-    let depth = max_depth.unwrap_or(3);
-    let mut projects = Vec::new();
+    let path_owned = path.clone();
 
-    for entry in WalkDir::new(root)
-        .max_depth(depth)
-        .into_iter()
-        .filter_entry(|e| {
-            e.file_name()
-                .to_str()
-                .map(|s| !SKIP_DIRS.contains(&s) && !DENY_DIRS.contains(&s))
-                .unwrap_or(true)
-        })
-        .filter_map(|e| e.ok())
-    {
-        if entry.file_type().is_dir() {
-            if let Some(project) = detect_project_at_path(entry.path()) {
-                // Save to database
-                let db = state.db.lock().map_err(|e| e.to_string())?;
-                let languages_json = serde_json::to_string(&project.languages).unwrap_or_default();
-                let frameworks_json =
-                    serde_json::to_string(&project.frameworks).unwrap_or_default();
-                db.upsert_project(
-                    &project.id,
-                    &project.path,
-                    &project.name,
-                    &languages_json,
-                    &frameworks_json,
-                )
-                .ok();
-                projects.push(project);
+    // Move the expensive directory walk off the main thread.
+    // Collect detected projects first, then persist to DB after.
+    let projects: Vec<ProjectInfo> = tokio::task::spawn_blocking(move || {
+        let root = Path::new(&path_owned);
+        let depth = max_depth.unwrap_or(3);
+        let mut projects = Vec::new();
+
+        for entry in WalkDir::new(root)
+            .max_depth(depth)
+            .into_iter()
+            .filter_entry(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|s| !SKIP_DIRS.contains(&s) && !DENY_DIRS.contains(&s))
+                    .unwrap_or(true)
+            })
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_dir() {
+                if let Some(project) = detect_project_at_path(entry.path()) {
+                    projects.push(project);
+                }
             }
         }
+
+        projects
+    })
+    .await
+    .map_err(|e| format!("scan_directory task panicked: {}", e))?;
+
+    // Persist discovered projects to DB (fast, no filesystem I/O)
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    for project in &projects {
+        let languages_json = serde_json::to_string(&project.languages).unwrap_or_default();
+        let frameworks_json = serde_json::to_string(&project.frameworks).unwrap_or_default();
+        db.upsert_project(
+            &project.id,
+            &project.path,
+            &project.name,
+            &languages_json,
+            &frameworks_json,
+        )
+        .ok();
     }
+    drop(db);
 
     Ok(projects)
 }
