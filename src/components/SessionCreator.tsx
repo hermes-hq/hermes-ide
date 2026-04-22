@@ -1167,6 +1167,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                   className="session-creator-custom-suffix-input"
                   value={customPrefix}
                   onChange={(e) => setCustomPrefix(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder={getPrefixPlaceholder(PLATFORM)}
                   spellCheck={false}
                   autoCapitalize="off"
@@ -1204,6 +1205,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                   className="session-creator-custom-suffix-input"
                   value={customSuffix}
                   onChange={(e) => setCustomSuffix(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder="e.g. --model opus --max-tokens 4096"
                 />
                 <span className="session-creator-custom-suffix-hint">
