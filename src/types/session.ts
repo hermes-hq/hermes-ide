@@ -108,6 +108,9 @@ export interface SessionData {
   ai_provider: string | null;
   auto_approve: boolean;
   permission_mode: string;
+  /** Command prepended to the AI-agent launch string (e.g. "caffeinate -i",
+   *  "wsl", "nice -n 10"). Trimmed. Ignored for SSH sessions. */
+  custom_prefix: string;
   custom_suffix: string;
   channels: string[];
   context_injected: boolean;
@@ -146,6 +149,7 @@ export interface CreateSessionOpts {
   aiProvider?: string;
   autoApprove?: boolean;
   permissionMode?: string;
+  customPrefix?: string;
   customSuffix?: string;
   projectIds?: string[];
   branchName?: string;
@@ -172,6 +176,7 @@ export interface SavedSessionInfo {
   ai_provider: string | null;
   auto_approve: boolean;
   permission_mode: string;
+  custom_prefix: string;
   custom_suffix: string;
   project_ids: string[];
   ssh_info?: SshConnectionInfo | null;
@@ -212,6 +217,7 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     if (typeof si.permission_mode !== "string") {
       si.permission_mode = si.auto_approve ? "bypassPermissions" : "default";
     }
+    if (typeof si.custom_prefix !== "string") si.custom_prefix = "";
     if (typeof si.custom_suffix !== "string") si.custom_suffix = "";
     if (!Array.isArray(si.project_ids)) si.project_ids = [];
   }

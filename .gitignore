@@ -38,3 +38,4 @@ npm-debug.log*
 release-artifacts/
 scripts/release-local.env
 .hermes/
+.claude/

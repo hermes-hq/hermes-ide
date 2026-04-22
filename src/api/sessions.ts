@@ -16,6 +16,7 @@ export function createSession(opts: {
   projectIds: string[] | null;
   autoApprove?: boolean;
   permissionMode?: string | null;
+  customPrefix?: string | null;
   customSuffix?: string | null;
   channels?: string[] | null;
   sshHost?: string | null;

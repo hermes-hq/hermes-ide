@@ -7,7 +7,19 @@ import { CreateSessionOpts } from "../state/SessionContext";
 import { getProjectsOrdered, createProject, deleteProject } from "../api/projects";
 import type { ProjectOrdered } from "../types/project";
 import { getSessions, sshListTmuxSessions, checkAiProviders } from "../api/sessions";
-import { AI_PROVIDERS, getProviderInfo, PERMISSION_MODES, PERMISSION_MODE_FLAGS, getAvailableModes } from "../utils/aiProviders";
+import {
+  AI_PROVIDERS,
+  getProviderInfo,
+  PERMISSION_MODES,
+  PERMISSION_MODE_FLAGS,
+  getAvailableModes,
+  AI_AGENT_PREFIXES_KEY,
+  PREFIX_EXAMPLES,
+  parseAgentPrefixes,
+  getPrefixPlaceholder,
+  buildLaunchPreview,
+} from "../utils/aiProviders";
+import { PLATFORM } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { PermissionMode, TmuxSessionEntry } from "../types/session";
@@ -128,6 +140,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [autoApprove, setAutoApprove] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [customSuffix, setCustomSuffix] = useState("");
+  /** Per-provider prefix defaults loaded from the `ai_agent_prefixes` setting.
+   *  Switching providers mid-form rehydrates the prefix input from this map. */
+  const [agentPrefixDefaults, setAgentPrefixDefaults] = useState<Record<string, string>>({});
+  const [customPrefix, setCustomPrefix] = useState("");
 
   // Channel plugins state (Claude only)
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
@@ -198,6 +214,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     }
   }, [isShellOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Rehydrate the prefix input from the per-agent default when the selected
+  // provider changes. Shell-only sessions clear the prefix since it has no
+  // binary to wrap.
+  useEffect(() => {
+    if (aiProvider) {
+      setCustomPrefix(agentPrefixDefaults[aiProvider] ?? "");
+    } else {
+      setCustomPrefix("");
+    }
+  }, [aiProvider, agentPrefixDefaults]);
+
   const totalSteps = orderedSteps.length;
   const currentStepNumber = orderedSteps.indexOf(step) + 1;
 
@@ -227,6 +254,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       .catch(() => {});
     getSetting("custom_command_suffix")
       .then((val) => { if (val) setCustomSuffix(val); })
+      .catch(() => {});
+    getSetting(AI_AGENT_PREFIXES_KEY)
+      .then((val) => {
+        const map = parseAgentPrefixes(val);
+        setAgentPrefixDefaults(map);
+      })
       .catch(() => {});
     getSetting(SSH_HISTORY_KEY)
       .then((json) => {
@@ -434,6 +467,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         aiProvider: connectionType === "local" ? (aiProvider || undefined) : undefined,
         autoApprove: connectionType === "local" ? (autoApprove || undefined) : undefined,
         permissionMode: connectionType === "local" && aiProvider ? permissionMode : undefined,
+        customPrefix: connectionType === "local" && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
         customSuffix: connectionType === "local" && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
         channels: connectionType === "local" && aiProvider === "claude" && selectedChannels.length > 0 ? selectedChannels : undefined,
         projectIds: connectionType === "local" && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
@@ -1125,6 +1159,44 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 </div>
               </div>
             )}
+            {aiProvider && connectionType === "local" && (
+              <div className="session-creator-custom-suffix">
+                <div className="session-creator-custom-suffix-label">Prefix command</div>
+                <input
+                  type="text"
+                  className="session-creator-custom-suffix-input"
+                  value={customPrefix}
+                  onChange={(e) => setCustomPrefix(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder={getPrefixPlaceholder(PLATFORM)}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
+                <span className="session-creator-custom-suffix-hint">
+                  Prepended to the launch command (e.g. <code>caffeinate -i</code>, <code>wsl</code>, <code>nice -n 10</code>).
+                </span>
+                {PREFIX_EXAMPLES[PLATFORM].length > 0 && (
+                  <div
+                    className="session-creator-prefix-chips"
+                    role="group"
+                    aria-label="Prefix examples"
+                  >
+                    {PREFIX_EXAMPLES[PLATFORM].map((ex) => (
+                      <button
+                        key={ex.value}
+                        type="button"
+                        className="session-creator-prefix-chip"
+                        title={ex.hint}
+                        onClick={() => setCustomPrefix(ex.value)}
+                      >
+                        {ex.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {aiProvider && (
               <div className="session-creator-custom-suffix">
                 <div className="session-creator-custom-suffix-label">Custom flags</div>
@@ -1133,11 +1205,23 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                   className="session-creator-custom-suffix-input"
                   value={customSuffix}
                   onChange={(e) => setCustomSuffix(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
                   placeholder="e.g. --model opus --max-tokens 4096"
                 />
                 <span className="session-creator-custom-suffix-hint">
                   Appended to the AI agent launch command
                 </span>
+              </div>
+            )}
+            {aiProvider && connectionType === "local" && (
+              <div
+                className="session-creator-launch-preview"
+                aria-live="polite"
+              >
+                <span className="session-creator-launch-preview-label">Preview</span>
+                <code className="session-creator-launch-preview-cmd">
+                  {buildLaunchPreview(aiProvider, permissionMode, customPrefix, customSuffix)}
+                </code>
               </div>
             )}
             {aiProvider === "claude" && (

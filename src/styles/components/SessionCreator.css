@@ -646,6 +646,73 @@
   display: block;
 }
 
+.session-creator-custom-suffix-hint code {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  color: var(--text-2);
+  background: var(--bg-2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Prefix example chips (click-to-insert) */
+
+.session-creator-prefix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.session-creator-prefix-chip {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
+}
+
+.session-creator-prefix-chip:hover,
+.session-creator-prefix-chip:focus-visible {
+  border-color: var(--accent);
+  color: var(--text-0);
+  background: var(--bg-1);
+  outline: none;
+}
+
+/* Assembled-command preview */
+
+.session-creator-launch-preview {
+  margin-top: var(--space-2);
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.session-creator-launch-preview-label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.session-creator-launch-preview-cmd {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-0);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
 .session-creator-summary-flag {
   color: var(--text-3);
   font-size: var(--text-xs);
