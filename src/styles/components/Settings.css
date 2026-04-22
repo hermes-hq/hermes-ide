@@ -429,3 +429,90 @@
   min-width: 32px;
   text-align: center;
 }
+
+/* ─── AI Agent: Per-agent prefix grid ────────────────────── */
+
+.settings-agent-prefix-grid {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px 12px;
+  margin: 0 0 var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-agent-prefix-legend {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+}
+
+.settings-agent-prefix-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-agent-prefix-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.settings-agent-prefix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.settings-agent-prefix-chip {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
+}
+
+.settings-agent-prefix-chip:hover,
+.settings-agent-prefix-chip:focus-visible {
+  border-color: var(--accent);
+  color: var(--text-0);
+  background: var(--bg-1);
+  outline: none;
+}
+
+.settings-agent-prefix-preview {
+  margin-top: 3px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.settings-agent-prefix-preview-label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.settings-agent-prefix-preview-cmd {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-0);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+

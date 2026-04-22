@@ -6,7 +6,17 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { applyTheme, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS } from "../utils/themeManager";
-import { fmt } from "../utils/platform";
+import { fmt, PLATFORM } from "../utils/platform";
+import {
+  AI_PROVIDERS,
+  AI_AGENT_PREFIXES_KEY,
+  PREFIX_EXAMPLES,
+  parseAgentPrefixes,
+  serializeAgentPrefixes,
+  getPrefixPlaceholder,
+  buildLaunchPreview,
+  type AgentPrefixMap,
+} from "../utils/aiProviders";
 import { useSession } from "../state/SessionContext";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -761,39 +771,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             )}
 
             {activeTab === "ai-agent" && (
-              <div className="settings-section">
-                <p className="settings-hint">
-                  Default permission mode and custom flags for new AI agent sessions.
-                  These can be overridden per session in the session creator.
-                </p>
-                <div className="settings-group">
-                  <label className="settings-label">Default permission mode</label>
-                  <select
-                    className="settings-select"
-                    value={settings.default_permission_mode || "default"}
-                    onChange={(e) => updateSetting("default_permission_mode", e.target.value)}
-                  >
-                    <option value="default">Ask Permissions</option>
-                    <option value="acceptEdits">Accept Edits</option>
-                    <option value="plan">Plan Mode</option>
-                    <option value="auto">Auto Mode</option>
-                    <option value="bypassPermissions">Bypass Permissions</option>
-                  </select>
-                </div>
-                <div className="settings-group">
-                  <label className="settings-label">Custom command suffix</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={settings.custom_command_suffix || ""}
-                    onChange={(e) => updateSetting("custom_command_suffix", e.target.value)}
-                    placeholder="e.g. --model opus --max-tokens 4096"
-                  />
-                  <p className="settings-hint">
-                    Text appended to AI agent launch commands in every new session.
-                  </p>
-                </div>
-              </div>
+              <AiAgentSettingsTab
+                settings={settings}
+                updateSetting={updateSetting}
+              />
             )}
 
             {activeTab === "plugins" && (
@@ -913,6 +894,129 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
           {footerStatus && <span className="settings-footer-status">{footerStatus}</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── AI Agent Settings Tab ──────────────────────────────────────────
+//
+// Displays per-agent prefix + suffix configuration. The prefix is stored as a
+// single JSON blob under `ai_agent_prefixes`, so adding a new provider to
+// AI_PROVIDERS never requires a DB schema or settings-whitelist change.
+
+interface AiAgentSettingsTabProps {
+  settings: SettingsMap;
+  updateSetting: (key: string, value: string) => void;
+}
+
+function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps) {
+  const prefixes = parseAgentPrefixes(settings[AI_AGENT_PREFIXES_KEY]);
+  const examples = PREFIX_EXAMPLES[PLATFORM];
+  const placeholder = getPrefixPlaceholder(PLATFORM);
+  const globalSuffix = settings.custom_command_suffix || "";
+  const defaultMode = (settings.default_permission_mode || "default") as import("../types/session").PermissionMode;
+
+  const setPrefix = (providerId: string, value: string) => {
+    const next: AgentPrefixMap = { ...prefixes, [providerId]: value };
+    // Drop empty entries so serialized blob stays compact.
+    if (!value.trim()) delete next[providerId];
+    updateSetting(AI_AGENT_PREFIXES_KEY, serializeAgentPrefixes(next));
+  };
+
+  return (
+    <div className="settings-section">
+      <p className="settings-hint">
+        Default permission mode and launch-command customization for new AI agent sessions.
+        All values can be overridden per session in the session creator.
+      </p>
+
+      <div className="settings-group">
+        <label className="settings-label">Default permission mode</label>
+        <select
+          className="settings-select"
+          value={settings.default_permission_mode || "default"}
+          onChange={(e) => updateSetting("default_permission_mode", e.target.value)}
+        >
+          <option value="default">Ask Permissions</option>
+          <option value="acceptEdits">Accept Edits</option>
+          <option value="plan">Plan Mode</option>
+          <option value="auto">Auto Mode</option>
+          <option value="bypassPermissions">Bypass Permissions</option>
+        </select>
+      </div>
+
+      <div className="settings-group">
+        <label className="settings-label">Custom command suffix (applies to every agent)</label>
+        <input
+          type="text"
+          className="settings-input"
+          value={settings.custom_command_suffix || ""}
+          onChange={(e) => updateSetting("custom_command_suffix", e.target.value)}
+          placeholder="e.g. --model opus --max-tokens 4096"
+        />
+        <p className="settings-hint">
+          Text appended to AI agent launch commands in every new session.
+        </p>
+      </div>
+
+      <h3 className="settings-section-title" style={{ marginTop: 16 }}>Per-agent launch prefix</h3>
+      <p className="settings-hint">
+        Prepended to the launch command for the matching agent — e.g. {" "}
+        <code>caffeinate -i claude</code> on macOS or <code>wsl claude</code> on Windows.
+        Runs on your local machine. Ignored for SSH sessions.
+      </p>
+
+      <fieldset className="settings-agent-prefix-grid">
+        <legend className="settings-agent-prefix-legend">Agents</legend>
+        {AI_PROVIDERS.map((p) => {
+          const value = prefixes[p.id] ?? "";
+          const inputId = `agent-prefix-${p.id}`;
+          const hintId = `agent-prefix-hint-${p.id}`;
+          const preview = buildLaunchPreview(p.id, defaultMode, value, globalSuffix);
+          return (
+            <div key={p.id} className="settings-agent-prefix-row">
+              <label htmlFor={inputId} className="settings-agent-prefix-label">
+                {p.label}
+              </label>
+              <input
+                id={inputId}
+                type="text"
+                className="settings-input"
+                value={value}
+                onChange={(e) => setPrefix(p.id, e.target.value)}
+                placeholder={placeholder}
+                aria-describedby={hintId}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+              {examples.length > 0 && (
+                <div className="settings-agent-prefix-chips" role="group" aria-label={`${p.label} prefix examples`}>
+                  {examples.map((ex) => (
+                    <button
+                      key={ex.value}
+                      type="button"
+                      className="settings-agent-prefix-chip"
+                      title={ex.hint}
+                      onClick={() => setPrefix(p.id, ex.value)}
+                    >
+                      {ex.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div
+                id={hintId}
+                className="settings-agent-prefix-preview"
+                aria-live="polite"
+              >
+                <span className="settings-agent-prefix-preview-label">Preview</span>
+                <code className="settings-agent-prefix-preview-cmd">{preview || p.label}</code>
+              </div>
+            </div>
+          );
+        })}
+      </fieldset>
     </div>
   );
 }

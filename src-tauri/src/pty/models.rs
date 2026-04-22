@@ -181,6 +181,11 @@ pub struct Session {
     pub ai_provider: Option<String>,
     pub auto_approve: bool,
     pub permission_mode: String,
+    /// Command prepended to the AI-agent launch string (e.g. `caffeinate -i`,
+    /// `wsl`, `nice -n 10`). Trimmed and ignored when empty. Ignored for SSH
+    /// sessions (would run on the wrong machine).
+    #[serde(default)]
+    pub custom_prefix: String,
     pub custom_suffix: String,
     pub channels: Vec<String>,
     pub context_injected: bool,
@@ -218,6 +223,8 @@ pub struct SessionUpdate {
     pub ai_provider: Option<String>,
     pub auto_approve: bool,
     pub permission_mode: String,
+    #[serde(default)]
+    pub custom_prefix: String,
     pub custom_suffix: String,
     pub channels: Vec<String>,
     pub context_injected: bool,
@@ -245,6 +252,7 @@ impl From<&Session> for SessionUpdate {
             ai_provider: s.ai_provider.clone(),
             auto_approve: s.auto_approve,
             permission_mode: s.permission_mode.clone(),
+            custom_prefix: s.custom_prefix.clone(),
             custom_suffix: s.custom_suffix.clone(),
             channels: s.channels.clone(),
             context_injected: s.context_injected,

@@ -927,6 +927,7 @@ mod tests {
             ai_provider: None,
             auto_approve: false,
             permission_mode: "default".to_string(),
+            custom_prefix: String::new(),
             custom_suffix: String::new(),
             channels: vec![],
             context_injected: false,
