@@ -3952,18 +3952,17 @@ mod tests {
 
     // ── BUG 4 Tests: circuit breaker ──────────────────────────────────
 
-    #[test]
-    fn test_vcs_status_file_cap_constant_is_reasonable() {
-        // Ensure the cap is set to a reasonable value
-        assert!(
-            VCS_STATUS_FILE_CAP >= 1000,
-            "Cap should be at least 1000 to avoid false triggers"
-        );
-        assert!(
-            VCS_STATUS_FILE_CAP <= 50_000,
-            "Cap should be at most 50k to prevent UI freeze"
-        );
-    }
+    // Compile-time assertions: fail the build (not a test run) if the cap
+    // ever leaves the sane range. Keeps the check but satisfies clippy's
+    // `assertions_on_constants` lint.
+    const _: () = assert!(
+        VCS_STATUS_FILE_CAP >= 1000,
+        "Cap should be at least 1000 to avoid false triggers"
+    );
+    const _: () = assert!(
+        VCS_STATUS_FILE_CAP <= 50_000,
+        "Cap should be at most 50k to prevent UI freeze"
+    );
 
     #[test]
     fn test_git_status_normal_project_no_cap_error() {

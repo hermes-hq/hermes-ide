@@ -1090,9 +1090,12 @@ pub fn create_session(
                                 )) = launch_info
                                 {
                                     // Only launch known/allowed AI providers (reject unknown values)
-                                    if let Some(launch_cmd) =
-                                        ai_launch_command(provider, perm_mode, custom_prefix, custom_suffix)
-                                    {
+                                    if let Some(launch_cmd) = ai_launch_command(
+                                        provider,
+                                        perm_mode,
+                                        custom_prefix,
+                                        custom_suffix,
+                                    ) {
                                         // For Claude/Gemini: pass context instruction as CLI argument
                                         // so it's processed immediately without PTY injection timing issues
                                         let supports_cli_prompt =

@@ -212,9 +212,7 @@ mod tests {
         // the OS watcher can start and stop.
         let mut watcher =
             notify::recommended_watcher(move |_result: Result<notify::Event, notify::Error>| {
-                if stopped_clone.load(Ordering::SeqCst) {
-                    return;
-                }
+                let _ = stopped_clone.load(Ordering::SeqCst);
             })
             .expect("should create watcher");
 

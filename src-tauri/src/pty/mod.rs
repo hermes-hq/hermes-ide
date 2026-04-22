@@ -210,7 +210,13 @@ pub(crate) fn ai_launch_command(
         "codex" => "codex",
         "gemini" => "gemini",
         "kiro" => "kiro-cli",
-        "copilot" => return Some(wrap_prefix_suffix("gh copilot", custom_prefix, custom_suffix)),
+        "copilot" => {
+            return Some(wrap_prefix_suffix(
+                "gh copilot",
+                custom_prefix,
+                custom_suffix,
+            ))
+        }
         _ => return None,
     };
     let mut cmd = base.to_string();
@@ -745,7 +751,10 @@ mod tests {
         );
 
         // Unsupported modes fall back to no flag
-        assert_eq!(ai_launch_command("aider", "plan", "", ""), Some("aider".into()));
+        assert_eq!(
+            ai_launch_command("aider", "plan", "", ""),
+            Some("aider".into())
+        );
         assert_eq!(
             ai_launch_command("copilot", "bypassPermissions", "", ""),
             Some("gh copilot".into())

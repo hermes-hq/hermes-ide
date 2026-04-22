@@ -454,7 +454,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_runs_simple_command() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -498,7 +498,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_sets_environment() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -538,7 +538,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_sets_working_directory() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -577,7 +577,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_child_kill() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -612,7 +612,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_clone_killer() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     #[ignore]
     fn posix_spawn_ctrl_c_interrupts_sleep() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
         use std::io::Write;
 
         let pty_system = native_pty_system();
@@ -710,7 +710,7 @@ mod tests {
     #[test]
     #[ignore]
     fn posix_spawn_ctrl_c_interrupts_shell_child() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
         use std::io::Write;
 
         let pty_system = native_pty_system();
@@ -774,7 +774,7 @@ mod tests {
     #[test]
     #[ignore]
     fn posix_spawn_direct_sigint_via_tcgetpgrp() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
         use std::io::Write;
 
         let pty_system = native_pty_system();
@@ -851,7 +851,7 @@ mod tests {
         writer.write_all(b"exit\n").expect("write exit");
         writer.flush().expect("flush exit");
 
-        let status = child.wait().expect("wait");
+        let _status = child.wait().expect("wait");
         let output = output_handle.join().expect("reader thread");
 
         assert!(
@@ -864,7 +864,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_rejects_empty_command() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -886,7 +886,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_in_multithreaded_context() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
         use std::sync::{Arc, Mutex};
 
         // Simulate the multi-threaded environment that causes the fork crash.
@@ -952,7 +952,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn posix_spawn_dev_tty_accessible() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize, PtySystem};
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
         let pty_system = native_pty_system();
         let pair = pty_system
