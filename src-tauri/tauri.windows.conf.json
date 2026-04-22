@@ -2,6 +2,7 @@
   "app": {
     "windows": [
       {
+        "title": "HERMES-IDE",
         "titleBarStyle": "Visible",
         "hiddenTitle": false
       }
