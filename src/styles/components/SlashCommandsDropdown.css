@@ -1,0 +1,99 @@
+/* ─── Slash commands autocomplete dropdown ────────────────── */
+
+.slash-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  font-family: var(--font-mono);
+  padding: var(--space-1);
+}
+
+.slash-dropdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+}
+
+.slash-dropdown-item:hover,
+.slash-dropdown-item-active {
+  background: var(--bg-active);
+}
+
+.slash-dropdown-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.slash-dropdown-cmd {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: var(--text-lg);
+}
+
+.slash-dropdown-label {
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+}
+
+.slash-dropdown-source {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+}
+
+.slash-dropdown-source-user {
+  color: var(--violet);
+  background: var(--violet-dim);
+  border-color: transparent;
+}
+
+.slash-dropdown-source-project {
+  color: var(--green);
+  background: var(--green-dim);
+  border-color: transparent;
+}
+
+.slash-dropdown-desc {
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-dropdown-empty {
+  padding: var(--space-3);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  text-align: center;
+}
+
+.slash-dropdown::-webkit-scrollbar {
+  width: 8px;
+}
+
+.slash-dropdown::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: var(--radius-pill);
+}

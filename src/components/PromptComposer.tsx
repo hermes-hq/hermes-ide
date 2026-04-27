@@ -4,10 +4,10 @@ import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt, isActionMod } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { exportPromptBundle, importPromptBundle } from "../api/promptBundle";
-import { writeToSession } from "../api/sessions";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { createBundle, validateBundle, importBundle } from "../lib/promptBundle";
-import { dismissSuggestions, clearGhostText, getInputBufferLength, clearInputBuffer } from "../terminal/TerminalPool";
+import { useSession } from "../state/SessionContext";
+import { getComposerTextarea } from "./SessionComposer";
 import {
   ComposerFields,
   EMPTY_FIELDS,
@@ -75,6 +75,7 @@ function migrateTemplate(tpl: Record<string, unknown>): PromptTemplate {
 }
 
 export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerProps) {
+  const { dispatch } = useSession();
   const [fields, setFields] = useState<ComposerFields>({ ...EMPTY_FIELDS });
   const [userTemplates, setUserTemplates] = useState<PromptTemplate[]>([]);
   const [customRoles, setCustomRoles] = useState<RoleDefinition[]>([]);
@@ -247,34 +248,22 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
     }
   }, []);
 
-  const sendPrompt = useCallback(async () => {
+  const sendPrompt = useCallback(() => {
     if (!compiled.trim()) return;
-    // Clear any active terminal intelligence state so it doesn't interfere
-    // with the submitted prompt (e.g. ghost text or suggestion overlay executing on focus)
-    dismissSuggestions(sessionId);
-    clearGhostText(sessionId);
-    // Erase any existing terminal input (same pattern as sendShortcutCommand) so
-    // the CLI's current line and ghost text are cleared before the composed prompt.
-    const eraseLen = getInputBufferLength(sessionId);
-    clearInputBuffer(sessionId);
-    const backspaces = eraseLen > 0 ? "\x7f".repeat(eraseLen) : "";
-    // Wrap in bracketed paste so CLIs treat multi-line content as a single paste,
-    // then append \r to submit. Use TextEncoder for proper UTF-8 base64 encoding.
-    const payload = backspaces + "\x1b[200~" + compiled + "\x1b[201~" + "\r";
-    const bytes = new TextEncoder().encode(payload);
-    const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
-    const data = btoa(binary);
-    // IMPORTANT: await the write so the composed prompt reaches the PTY BEFORE
-    // the Prompt Composer closes. Closing first can cause focus to shift to xterm,
-    // producing a spurious Enter that races the composed prompt through the PTY mutex.
-    try {
-      await writeToSession(sessionId, data);
-      onClose();
-    } catch (err) {
-      console.error("[PromptComposer] Failed to send prompt:", err);
-      // Don't close — let user retry or copy their prompt
-    }
-  }, [compiled, sessionId, onClose]);
+    // Hand the compiled prompt to the docked composer so the user can review,
+    // tweak, and submit on their own. We no longer write directly to the PTY
+    // from here — the composer is now the single point that talks to the shell.
+    dispatch({ type: "SET_COMPOSER_DRAFT", sessionId, draft: compiled });
+    onClose();
+    requestAnimationFrame(() => {
+      const ta = getComposerTextarea();
+      if (ta) {
+        ta.focus();
+        const len = ta.value.length;
+        ta.selectionStart = ta.selectionEnd = len;
+      }
+    });
+  }, [compiled, sessionId, onClose, dispatch]);
 
   const copyPrompt = useCallback(() => {
     if (!compiled.trim()) return;
@@ -663,7 +652,7 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
           <div className="prompt-composer-actions-right">
             <button className="prompt-composer-btn" onClick={copyPrompt} disabled={!compiled.trim()}>Copy</button>
             <button className="prompt-composer-btn prompt-composer-btn-send" onClick={sendPrompt} disabled={!compiled.trim()}>
-              Send <kbd>{fmt("{mod}")}&#8629;</kbd>
+              Add to message <kbd>{fmt("{mod}")}&#8629;</kbd>
             </button>
           </div>
         </div>

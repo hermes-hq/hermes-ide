@@ -1,0 +1,735 @@
+/* ─── Session Composer — modern "smart box" ──────────────────
+ *
+ * Outer wrapper: full-width background that bleeds into the surrounding
+ * terminal-and-timeline area. The actual chat surface is an inner "card"
+ * with its own rounded border and subtle elevation.
+ *  ────────────────────────────────────────────────────────── */
+
+.session-composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3) var(--space-3);
+  background:
+    linear-gradient(to bottom, transparent 0, rgba(0, 0, 0, 0.18) 100%),
+    var(--bg-0);
+  font-family: var(--font-mono);
+  min-height: 84px;
+  isolation: isolate;
+}
+
+/* Top resize handle — sits at the very edge of the wrapper, above the card. */
+.session-composer-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 2;
+}
+
+.session-composer-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border);
+  transition: background 160ms ease, height 160ms ease;
+}
+
+.session-composer-resize-handle:hover::after {
+  background: var(--accent);
+  height: 2px;
+}
+
+.session-composer:focus-within .session-composer-resize-handle::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    var(--accent) 30%,
+    var(--accent) 70%,
+    transparent 100%
+  );
+  height: 2px;
+}
+
+/* ─── Window controls (min/max) ──────────────────────────── */
+
+.session-composer-window-controls {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.session-composer-window-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+  opacity: 0.7;
+}
+
+.session-composer-window-btn:hover {
+  color: var(--text-0);
+  background: var(--bg-active);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+/* ─── The card — the actual smart-box ─────────────────────── */
+
+.session-composer-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background 200ms ease;
+}
+
+.session-composer:focus-within .session-composer-card {
+  border-color: var(--accent);
+  background: var(--bg-1);
+  box-shadow:
+    0 0 0 1px var(--accent-dim),
+    0 0 28px -8px var(--accent-dim),
+    0 6px 18px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* Subtle gradient accent strip at the very top of the card on focus. */
+.session-composer-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    var(--accent) 35%,
+    var(--violet) 50%,
+    var(--accent) 65%,
+    transparent 100%
+  );
+  opacity: 0;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+}
+
+.session-composer:focus-within .session-composer-card::before {
+  opacity: 0.55;
+}
+
+/* Claude-detected sessions get a softer violet hint in the resting state. */
+.session-composer-claude .session-composer-card {
+  border-color: var(--border-light);
+}
+
+.session-composer-claude:focus-within .session-composer-card {
+  border-color: var(--violet);
+  box-shadow:
+    0 0 0 1px var(--violet-dim),
+    0 0 28px -8px var(--violet-dim),
+    0 6px 18px -10px rgba(0, 0, 0, 0.6);
+}
+
+.session-composer-claude:focus-within .session-composer-card::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    var(--violet) 35%,
+    var(--accent) 50%,
+    var(--violet) 65%,
+    transparent 100%
+  );
+}
+
+/* ─── Textarea ────────────────────────────────────────────── */
+
+.session-composer-input {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  line-height: 1.55;
+  padding: var(--space-3) 60px var(--space-2) var(--space-3);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  box-sizing: border-box;
+  caret-color: var(--accent);
+}
+
+.session-composer-input::placeholder {
+  color: var(--text-3);
+}
+
+.session-composer-input::-webkit-scrollbar { width: 8px; }
+.session-composer-input::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: var(--radius-pill);
+}
+.session-composer-input::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+/* ─── Pasted-image thumbnails above the textarea ────────── */
+
+.session-composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3) 0 var(--space-3);
+}
+
+.session-composer-attachment {
+  position: relative;
+  min-width: 56px;
+  height: 56px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  background: var(--bg-2);
+}
+
+.session-composer-attachment img {
+  width: 56px;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.session-composer-attachment-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 10px;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+}
+
+.session-composer-attachment-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-composer-attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease;
+}
+
+.session-composer-attachment-remove:hover {
+  background: var(--red);
+}
+
+/* ─── Effort preview line above the textarea ─────────────── */
+
+.session-composer-effort-preview {
+  padding: 4px var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--text-3);
+  border-bottom: 1px dashed var(--border);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.session-composer-effort-preview code {
+  font-family: var(--font-mono);
+  color: var(--violet);
+  background: var(--violet-dim);
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  font-size: var(--text-base);
+}
+
+/* ─── Footer ──────────────────────────────────────────────── */
+
+.session-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--text-3);
+  user-select: none;
+}
+
+.session-composer-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-2);
+  pointer-events: auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.session-composer-target {
+  color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+/* ─── Builder button ─────────────────────────────────────── */
+
+.session-composer-builder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--text-1);
+  background:
+    linear-gradient(135deg, var(--accent-dim) 0%, var(--violet-dim) 100%);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: filter 160ms ease, transform 80ms ease, border-color 160ms ease;
+  white-space: nowrap;
+}
+
+.session-composer-builder-btn:hover {
+  color: var(--text-0);
+  border-color: var(--accent);
+  filter: brightness(1.15);
+}
+
+.session-composer-builder-btn:active {
+  transform: translateY(1px);
+}
+
+/* ─── Detected agent chip ────────────────────────────────── */
+
+.session-composer-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  border: 1px solid var(--border-light);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.session-composer-claude .session-composer-agent {
+  background: linear-gradient(135deg, var(--violet-dim) 0%, var(--accent-dim) 100%);
+  border-color: var(--violet);
+  color: var(--text-0);
+}
+
+.session-composer-agent-name {
+  font-weight: 600;
+}
+
+.session-composer-agent-model {
+  color: var(--text-2);
+  font-size: var(--text-base);
+  text-transform: lowercase;
+}
+
+.session-composer-claude .session-composer-agent-model {
+  color: var(--text-1);
+}
+
+/* ─── Clickable agent chip + ModelPicker positioning ─────── */
+
+.session-composer-agent-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.session-composer-agent-clickable {
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 120ms ease, border-color 120ms ease;
+}
+
+.session-composer-agent-clickable:hover {
+  filter: brightness(1.15);
+  border-color: var(--accent);
+}
+
+.session-composer-agent-chevron {
+  color: var(--text-2);
+  font-size: 9px;
+  margin-left: 2px;
+}
+
+.session-composer-claude .session-composer-agent-chevron {
+  color: var(--text-1);
+}
+
+.session-composer-agent-pending {
+  animation: agent-pending-pulse 1.5s ease-in-out infinite;
+}
+
+.session-composer-agent-pending-dot {
+  margin-left: 4px;
+  color: var(--yellow);
+  font-size: 12px;
+  line-height: 1;
+}
+
+@keyframes agent-pending-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--yellow-dim); }
+  50%      { box-shadow: 0 0 0 3px var(--yellow-dim); }
+}
+
+/* ─── Thinking effort chip — wifi-style signal bars ─────── */
+
+.session-composer-effort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  cursor: pointer;
+  transition: filter 120ms ease, border-color 120ms ease, color 120ms ease, background 200ms ease;
+  white-space: nowrap;
+  text-transform: lowercase;
+}
+
+.session-composer-effort-btn:hover {
+  filter: brightness(1.15);
+  border-color: var(--accent);
+}
+
+.session-composer-effort-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+
+.session-composer-effort-bars span {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--text-3);
+  transition: background 200ms ease, box-shadow 200ms ease, opacity 200ms ease;
+  opacity: 0.45;
+}
+
+.session-composer-effort-bars span:nth-child(1) { height: 5px; }
+.session-composer-effort-bars span:nth-child(2) { height: 9px; }
+.session-composer-effort-bars span:nth-child(3) { height: 13px; }
+
+/* ─── Generic, level-name-agnostic effort fills ───────────
+ *
+ * The button reads a `--effort-fill` CSS custom property (integer 0..3) set
+ * inline by the composer based on the current effort level's index in
+ * the discovered list. We use that to:
+ *   - light up bars 1..N via attribute-equal selectors on the parent
+ *   - tint the chip itself based on the fill class
+ *
+ * This avoids encoding any specific level names ("low", "high", etc.) here.
+ * The parent assigns one of `.session-composer-effort-fill-{0..3}` based on
+ * the fill count, plus a `--effort-fill` value for direct child styling.
+ *  ─────────────────────────────────────────────────────── */
+
+.session-composer-effort-fill-0 .session-composer-effort-bars span {
+  background: var(--text-3);
+  opacity: 0.35;
+}
+
+.session-composer-effort-fill-1 {
+  color: var(--yellow);
+  border-color: var(--yellow-dim);
+}
+.session-composer-effort-fill-1 .session-composer-effort-bars span:nth-child(1) {
+  background: var(--yellow);
+  opacity: 1;
+}
+
+.session-composer-effort-fill-2 {
+  color: var(--violet);
+  border-color: var(--violet-dim);
+  background: color-mix(in srgb, var(--violet-dim) 55%, var(--bg-3));
+}
+.session-composer-effort-fill-2 .session-composer-effort-bars span:nth-child(-n+2) {
+  background: var(--violet);
+  opacity: 1;
+}
+
+.session-composer-effort-fill-3 {
+  color: #fff;
+  border-color: var(--violet);
+  background: linear-gradient(135deg, var(--violet-dim) 0%, var(--accent-dim) 100%);
+  font-weight: 600;
+}
+.session-composer-effort-fill-3 .session-composer-effort-bars span {
+  background: var(--violet);
+  opacity: 1;
+  box-shadow: 0 0 6px var(--violet);
+}
+
+/* ─── Permission mode chip (view-only) ───────────────────── */
+
+.session-composer-perm-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.session-composer-perm-chip-danger {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* ─── Send button ────────────────────────────────────────── */
+
+.session-composer-send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 12px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--violet) 100%);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 80ms ease, opacity 120ms ease;
+  white-space: nowrap;
+}
+
+.session-composer-send-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.session-composer-send-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.session-composer-send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.4);
+}
+
+.session-composer-send-label {
+  letter-spacing: 0.3px;
+}
+
+.session-composer-send-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.session-composer-send-kbd kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+
+/* ─── OS file drag-over highlight ────────────────────────── */
+
+.session-composer.session-composer-drag-over .session-composer-card {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow:
+    0 0 0 2px var(--accent-dim),
+    0 0 32px -4px var(--accent-dim);
+}
+
+.session-composer.session-composer-drag-over .session-composer-input::placeholder {
+  color: var(--text-1);
+}
+
+/* ─── Connecting status indicator ────────────────────────── */
+
+.session-composer-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: 0 0 8px var(--yellow);
+  animation: composer-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes composer-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.0); }
+}
+
+/* ─── Send shortcut chips ────────────────────────────────── */
+
+.session-composer-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.session-composer-shortcut kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--text-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border-light);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+.session-composer-shortcut span {
+  margin-left: 4px;
+}
+
+.session-composer:focus-within .session-composer-shortcut kbd {
+  color: var(--text-0);
+  border-color: var(--accent);
+}
+
+.session-composer-claude:focus-within .session-composer-shortcut kbd {
+  border-color: var(--violet);
+}
+
+/* ─── Collapsed composer FAB ──────────────────────────────────
+ *
+ * When the composer is in its collapsed state, the entire <SessionComposer />
+ * collapses to a single small chat-icon button anchored to the bottom-right
+ * of the terminal-and-timeline area.  Click expands the full composer.
+ *  ────────────────────────────────────────────────────────────── */
+
+.session-composer-fab {
+  position: absolute;
+  bottom: var(--space-3, 12px);
+  right: var(--space-3, 12px);
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  cursor: pointer;
+  z-index: 10;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.12);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.session-composer-fab:hover {
+  background: var(--bg-2);
+  border-color: var(--accent);
+  color: var(--text-0);
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.22),
+    0 6px 16px rgba(0, 0, 0, 0.16);
+}
+
+.session-composer-fab:active {
+  transform: translateY(0);
+}
+
+.session-composer-fab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

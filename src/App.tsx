@@ -45,6 +45,7 @@ import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { SessionCreator } from "./components/SessionCreator";
 import { PromptComposer } from "./components/PromptComposer";
+import { SessionComposer, getComposerTextarea } from "./components/SessionComposer";
 import { SplitLayout } from "./components/SplitLayout";
 import { SessionGitPanel } from "./components/SessionGitPanel";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
@@ -404,6 +405,26 @@ function AppContent() {
       // Suppress session-switch shortcuts while any modal/overlay is open
       const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
       if (anyOverlayOpen) return;
+
+      // Cmd+Shift+J — toggle focus between active session's terminal and
+      // the composer.  When the composer is currently collapsed (its icon
+      // is showing), this expands it AND focuses it; SessionComposer listens
+      // for `hermes:expand-composer` and handles both steps.
+      if (e.shiftKey && (e.key === "J" || e.key === "j")) {
+        const sid = state.activeSessionId;
+        if (!sid) return;
+        e.preventDefault();
+        const ta = getComposerTextarea();
+        if (ta && document.activeElement === ta) {
+          focusTerminal(sid);
+        } else if (ta) {
+          ta.focus();
+        } else {
+          // Composer is collapsed (no textarea mounted) — ask it to expand.
+          window.dispatchEvent(new CustomEvent("hermes:expand-composer", { detail: { sessionId: sid } }));
+        }
+        return;
+      }
 
       // Alt combos — pane navigation
       if (e.altKey && state.layout.root) {
@@ -856,6 +877,7 @@ function AppContent() {
               )}
             </div>
             )}
+            <SessionComposer />
           </div>
           {ui.contextPanelOpen && !ui.flowMode && activeSession && (
             <>

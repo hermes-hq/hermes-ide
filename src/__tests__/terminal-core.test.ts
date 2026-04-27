@@ -37,11 +37,6 @@ const TERMINAL_PANE_CSS: string = readFileSync(
   "utf-8",
 );
 
-const PROVIDER_ACTIONS: string = readFileSync(
-  new URL("../components/ProviderActionsBar.tsx", import.meta.url),
-  "utf-8",
-);
-
 const CONTEXT_PANEL: string = readFileSync(
   new URL("../components/ContextPanel.tsx", import.meta.url),
   "utf-8",
@@ -232,11 +227,6 @@ describe("Invariant 3: Shortcut command uses triggerDataEvent with backspace cle
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Invariant 4: All UI shortcut callers use sendShortcutCommand", () => {
-  it("ProviderActionsBar uses sendShortcutCommand, not writeToSession", () => {
-    expect(PROVIDER_ACTIONS).toContain("sendShortcutCommand");
-    expect(PROVIDER_ACTIONS).not.toContain("writeToSession");
-  });
-
   it("App auto-execute uses sendShortcutCommand", () => {
     expect(APP).toContain("sendShortcutCommand");
   });

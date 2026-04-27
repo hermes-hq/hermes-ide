@@ -1,0 +1,23 @@
+{
+  "_comment": "Bundled fallback list of Claude Code built-in slash commands. Used by src-tauri/src/claude/discovery.rs ONLY when live discovery fails (claude --print returns no JSON AND --help yields no /command tokens). Live discovery always wins when it works, so this file does not need to track every Claude release perfectly. Update on each h-ide release if Claude adds notable new commands.",
+  "commands": [
+    { "command": "/help",            "description": "Show Claude Code's built-in command help" },
+    { "command": "/clear",           "description": "Clear the current conversation" },
+    { "command": "/compact",         "description": "Compact the conversation transcript" },
+    { "command": "/cost",            "description": "Show token usage and estimated cost" },
+    { "command": "/memory",          "description": "Open the project memory editor" },
+    { "command": "/model",           "description": "Switch the active model" },
+    { "command": "/effort",          "description": "Adjust thinking effort level" },
+    { "command": "/config",          "description": "Open Claude's settings UI" },
+    { "command": "/init",            "description": "Initialize a CLAUDE.md for this project" },
+    { "command": "/permissions",     "description": "Manage tool permissions" },
+    { "command": "/allowed-tools",   "description": "Edit the allow-list of tools" },
+    { "command": "/login",           "description": "Sign in to Claude Code" },
+    { "command": "/logout",          "description": "Sign out of Claude Code" },
+    { "command": "/doctor",          "description": "Run diagnostics on your Claude install" },
+    { "command": "/bug",             "description": "Report a bug to Anthropic" },
+    { "command": "/review",          "description": "Ask Claude to review the current diff" },
+    { "command": "/vim",             "description": "Toggle Vim editing mode for the prompt" },
+    { "command": "/terminal-setup",  "description": "Configure terminal integration" }
+  ]
+}

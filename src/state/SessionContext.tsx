@@ -98,6 +98,7 @@ interface SessionState {
   };
   autoApplyEnabled: boolean;
   injectionLocks: Record<string, boolean>;
+  composers: Record<string, { draft: string; height: number; expanded: boolean }>;
   layout: {
     root: LayoutNode | null;
     focusedPaneId: string | null;
@@ -182,6 +183,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       // Clean per-session execution mode and injection lock
       const { [action.id]: _mode, ...restModes } = state.executionModes;
       const { [action.id]: _lock, ...restLocks } = state.injectionLocks;
+      const { [action.id]: _composer, ...restComposers } = state.composers;
       // Clear autoToast if it references the removed session
       const newAutoToast = state.ui.autoToast?.sessionId === action.id
         ? null
@@ -198,6 +200,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         activeSessionId: newActive,
         executionModes: restModes,
         injectionLocks: restLocks,
+        composers: restComposers,
         pendingCloseSessionId: newPendingClose,
         layout: { root: newRoot, focusedPaneId: newFocused },
         ui: {
@@ -293,6 +296,49 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "RELEASE_INJECTION_LOCK": {
       const { [action.sessionId]: _, ...rest } = state.injectionLocks;
       return { ...state, injectionLocks: rest };
+    }
+    case "SET_COMPOSER_DRAFT": {
+      const prev = state.composers[action.sessionId] ?? { draft: "", height: 120, expanded: false };
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, draft: action.draft },
+        },
+      };
+    }
+    case "SET_COMPOSER_HEIGHT": {
+      const prev = state.composers[action.sessionId] ?? { draft: "", height: 120, expanded: false };
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, height: action.height },
+        },
+      };
+    }
+    case "TOGGLE_COMPOSER_EXPANDED": {
+      const prev = state.composers[action.sessionId] ?? { draft: "", height: 120, expanded: false };
+      workspaceDirty = true;
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, expanded: !prev.expanded },
+        },
+      };
+    }
+    case "SET_COMPOSER_EXPANDED": {
+      const prev = state.composers[action.sessionId] ?? { draft: "", height: 120, expanded: false };
+      if (prev.expanded === action.expanded) return state;
+      workspaceDirty = true;
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, expanded: action.expanded },
+        },
+      };
     }
 
     // ─── Layout Actions ───────────────────────────────────────────────
@@ -584,6 +630,7 @@ export const initialState: SessionState = {
   },
   autoApplyEnabled: true,
   injectionLocks: {},
+  composers: {},
   pendingCloseSessionId: null,
   skipCloseConfirm: false,
   layout: {
@@ -591,7 +638,7 @@ export const initialState: SessionState = {
     focusedPaneId: null,
   },
   ui: {
-    contextPanelOpen: true,
+    contextPanelOpen: false,
     sessionListCollapsed: false,
     commandPaletteOpen: false,
     flowMode: false,
@@ -1345,6 +1392,19 @@ export function useExecutionMode(sessionId: string | null): ExecutionMode {
   const { state } = useSession();
   if (!sessionId) return state.defaultMode;
   return state.executionModes[sessionId] || state.defaultMode;
+}
+
+/**
+ * Read this session's composer draft + height + expanded flag. Returns
+ * sensible defaults (empty draft, 120px height, collapsed) when the session
+ * has no entry yet, so callers don't need to dispatch on mount.
+ *
+ * `expanded` defaults to `false` — the composer renders as a small chat
+ * icon in the corner of the terminal pane until the user opens it.
+ */
+export function useComposer(sessionId: string): { draft: string; height: number; expanded: boolean } {
+  const { state } = useSession();
+  return state.composers[sessionId] ?? { draft: "", height: 120, expanded: false };
 }
 
 export function useAutonomousSettings() {
