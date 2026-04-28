@@ -739,6 +739,7 @@ pub fn run() {
             plugins::plugin_exec_command,
             // Clipboard
             clipboard::copy_image_to_clipboard,
+            clipboard::copy_image_only_to_clipboard,
             // Composer (mentions + image paste)
             composer::list_session_files,
             composer::save_pasted_image,

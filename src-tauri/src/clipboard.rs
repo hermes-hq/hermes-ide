@@ -48,3 +48,32 @@ fn set_clipboard_image_and_text(
 
     Ok(())
 }
+
+/// Copy an image to the clipboard WITHOUT also setting the file-path text.
+/// Required when sending the image to a TUI that pastes from clipboard
+/// (e.g. Claude Code) — setting text after image replaces the image with
+/// the path on macOS, which would defeat the whole purpose.
+#[tauri::command]
+pub fn copy_image_only_to_clipboard(path: String) -> Result<(), String> {
+    let img = image::open(&path).map_err(|e| format!("Failed to open image '{}': {}", path, e))?;
+    let rgba = img.to_rgba8();
+    let (width, height) = img.dimensions();
+
+    use arboard::{Clipboard, ImageData};
+    use std::borrow::Cow;
+
+    let img_data = ImageData {
+        width: width as usize,
+        height: height as usize,
+        bytes: Cow::from(rgba.to_vec()),
+    };
+
+    let mut clipboard =
+        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+
+    clipboard
+        .set_image(img_data)
+        .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
+
+    Ok(())
+}

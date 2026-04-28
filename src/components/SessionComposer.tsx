@@ -5,7 +5,7 @@ import { submitToPty } from "../utils/submitToPty";
 import { focusTerminal } from "../terminal/TerminalPool";
 import { isActionMod, isMac } from "../utils/platform";
 import { listSessionFiles, savePastedImage, readImageBytes, invalidateClaudeCapabilitiesCache, writeToSession } from "../api/sessions";
-import { copyImageToClipboard } from "../api/clipboard";
+import { copyImageOnlyToClipboard } from "../api/clipboard";
 import { effortFillForLevel } from "../utils/effortFill";
 import { getActiveMention, replaceMention } from "../utils/mentions";
 import { getActiveSlashCommand, replaceSlashCommand } from "../utils/slashCommands";
@@ -245,26 +245,42 @@ export function SessionComposer() {
       // 1. Attach images first by writing each to the OS clipboard and
       //    issuing a Ctrl+V (\x16) to the PTY. Claude Code's prompt handler
       //    grabs the image from the clipboard on each Ctrl+V.
-      for (const img of pendingImages) {
-        await copyImageToClipboard(img.path);
+      // We use copyImageOnlyToClipboard because the regular variant ALSO
+      //    sets the path as text — and on macOS, set_text after set_image
+      //    REPLACES the image with text, defeating the whole flow.
+      console.info(`[Composer] submit start: ${pendingImages.length} image(s), draft=${draft.length} chars`);
+      for (let i = 0; i < pendingImages.length; i++) {
+        const img = pendingImages[i];
+        console.info(`[Composer] image ${i + 1}/${pendingImages.length}: copying ${img.path} to clipboard…`);
+        try {
+          await copyImageOnlyToClipboard(img.path);
+          console.info(`[Composer] image ${i + 1}: clipboard OK; sending Ctrl+V to PTY`);
+        } catch (err) {
+          console.error(`[Composer] image ${i + 1}: clipboard write FAILED`, err);
+          throw err;
+        }
         // Tiny pause so the OS clipboard write commits before Ctrl+V reads it.
-        await new Promise((r) => setTimeout(r, 50));
+        await new Promise((r) => setTimeout(r, 80));
         await sendRaw("\x16");
-        // Settle so Claude can render the attachment before the next paste
-        // (or before the trailing text + \r).
-        await new Promise((r) => setTimeout(r, 120));
+        console.info(`[Composer] image ${i + 1}: Ctrl+V sent, waiting 200ms for Claude to render attachment`);
+        // Longer settle (200 ms) — the previous 120 ms wasn't always enough
+        // for Claude's TUI to register the paste before the next byte arrives.
+        await new Promise((r) => setTimeout(r, 200));
       }
 
       // 2. Send the text body (if any) inside bracketed paste so Claude
       //    treats multi-line content as one paste. NO trailing \r yet —
       //    we want the images and the text in the same prompt, then commit.
       if (draft.trim()) {
+        console.info(`[Composer] sending text via bracketed paste (${draft.length} chars)`);
         await sendRaw("\x1b[200~" + draft + "\x1b[201~");
-        await new Promise((r) => setTimeout(r, 30));
+        await new Promise((r) => setTimeout(r, 50));
       }
 
       // 3. Commit the turn.
+      console.info(`[Composer] committing turn with \\r`);
       await sendRaw("\r");
+      console.info(`[Composer] submit complete`);
 
       dispatch({ type: "SET_COMPOSER_DRAFT", sessionId, draft: "" });
       setPendingImages([]);
