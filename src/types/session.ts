@@ -279,6 +279,10 @@ export type SessionAction =
   // Composer actions
   | { type: "OPEN_COMPOSER" }
   | { type: "CLOSE_COMPOSER" }
+  | { type: "SET_COMPOSER_DRAFT"; sessionId: string; draft: string }
+  | { type: "SET_COMPOSER_HEIGHT"; sessionId: string; height: number }
+  | { type: "TOGGLE_COMPOSER_EXPANDED"; sessionId: string }
+  | { type: "SET_COMPOSER_EXPANDED"; sessionId: string; expanded: boolean }
   // File preview
   | { type: "SET_FILE_PREVIEW"; projectId: string; filePath: string }
   | { type: "CLOSE_FILE_PREVIEW" }

@@ -79,6 +79,8 @@
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  min-height: 80px;
+  min-width: 0;
 }
 
 .split-pane-terminal {

@@ -30,6 +30,8 @@
   flex-direction: column;
   flex: 1;
   overflow: hidden;
+  /* Anchor for the collapsed-composer FAB (positioned absolute bottom-right). */
+  position: relative;
 }
 
 /* ─── Panel Error Boundary ─────────────────────────────── */

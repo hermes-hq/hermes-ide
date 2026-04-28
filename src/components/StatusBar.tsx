@@ -2,7 +2,7 @@ import "../styles/components/StatusBar.css";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { setSetting, getSetting, getSettings } from "../api/settings";
-import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
+import { useActiveSession, useSessionList, useTotalCost, useTotalTokens } from "../state/SessionContext";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
@@ -38,8 +38,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   const totalCost = useTotalCost();
   const totalTokens = useTotalTokens();
   const hasTokens = totalTokens.input + totalTokens.output > 0;
-  const { dispatch } = useSession();
-  const mode = useExecutionMode(active?.id ?? null);
   const [, setTick] = useState(0);
 
   const handleStatusBarAction = useCallback((actionId: string) => {
@@ -68,14 +66,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
     return () => clearInterval(interval);
   }, [active?.id]);
 
-  const cycleMode = () => {
-    if (!active) return;
-    const next: ExecutionMode = mode === "manual" ? "assisted" : mode === "assisted" ? "autonomous" : "manual";
-    dispatch({ type: "SET_EXECUTION_MODE", sessionId: active.id, mode: next });
-    dispatch({ type: "SET_DEFAULT_MODE", mode: next });
-    setSetting("execution_mode", next).catch(console.error);
-  };
-
   const cwdBasename = active && active.working_directory ? active.working_directory.replace(/\\/g, "/").split("/").pop() || active.working_directory : "";
 
   return (
@@ -85,37 +75,10 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           <span className={`status-dot ${sessions.length > 0 ? "status-dot-on" : ""}`} />
           {sessions.length} active
         </span>
-        {active && (
-          <>
-            <span className="status-bar-divider" />
-            <button
-              className={`status-mode-btn status-mode-${mode}`}
-              onClick={cycleMode}
-              title={mode === "manual"
-                ? "Manual: No automatic suggestions or execution. Click to switch."
-                : mode === "assisted"
-                ? "Assisted: Shows suggestions and lets you manually apply fixes. Click to switch."
-                : "Autonomous: Automatically applies frequent commands and repeated fixes after countdown. Click to switch."}
-            >
-              <span className="status-mode-dot" />
-              {mode === "manual" ? "Manual" : mode === "assisted" ? "Assisted" : "Auto"}
-            </button>
-          </>
-        )}
-        {active?.detected_agent && (
+        {active && (active.phase === "busy" || active.phase === "needs_input") && (
           <>
             <span className="status-bar-divider" />
             <span className="status-bar-item">
-              {active.detected_agent.name}
-              {active.detected_agent.model && <span className="status-bar-model"> ({active.detected_agent.model})</span>}
-              {active.permission_mode && active.permission_mode !== "default" && (
-                <span className={`status-bar-perm-mode${active.permission_mode === "bypassPermissions" ? " status-bar-perm-mode-danger" : ""}`}>
-                  {active.permission_mode === "acceptEdits" ? "Accept Edits" :
-                   active.permission_mode === "plan" ? "Plan" :
-                   active.permission_mode === "auto" ? "Auto" :
-                   active.permission_mode === "bypassPermissions" ? "Bypass" : ""}
-                </span>
-              )}
               {active.phase === "busy" && <span className="status-bar-busy">working</span>}
               {active.phase === "needs_input" && <span className="status-bar-needs-input">needs input</span>}
             </span>

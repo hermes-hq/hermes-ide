@@ -41,7 +41,7 @@ sysinfo = { version = "0.38", features = ["system", "user"] }
 git2 = { version = "0.20", features = ["vendored-openssl"] }
 ignore = "0.4"
 dirs = "6"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "process", "fs", "sync", "macros", "io-util"] }
 arboard = { version = "3", features = ["image-data"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 flate2 = "1"

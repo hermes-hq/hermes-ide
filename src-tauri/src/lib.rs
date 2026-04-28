@@ -1,4 +1,6 @@
+mod claude;
 mod clipboard;
+mod composer;
 mod db;
 mod git;
 mod menu;
@@ -523,6 +525,8 @@ pub fn run() {
 
             app.manage(state);
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
+            app.manage(Mutex::new(claude::ClaudeCommandsWatcherState::default()));
+            app.manage(claude::new_discovery_cache());
 
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
@@ -735,9 +739,22 @@ pub fn run() {
             plugins::plugin_exec_command,
             // Clipboard
             clipboard::copy_image_to_clipboard,
+            clipboard::copy_image_only_to_clipboard,
+            // Composer (mentions + image paste)
+            composer::list_session_files,
+            composer::save_pasted_image,
             // Transcript watching
             transcript::start_transcript_watcher,
             transcript::stop_transcript_watcher,
+            // Claude slash commands (custom commands from disk + built-ins)
+            claude::list_claude_commands,
+            claude::start_claude_commands_watcher,
+            claude::stop_claude_commands_watcher,
+            claude::start_claude_watcher,
+            claude::stop_claude_watcher,
+            // Claude capability discovery (effort levels, models, slash commands)
+            claude::discovery::discover_claude_capabilities,
+            claude::discovery::invalidate_claude_capabilities_cache,
         ])
         .build(tauri::generate_context!())
         .expect("error while building HERMES-IDE")

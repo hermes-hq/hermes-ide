@@ -2,7 +2,6 @@ import "../styles/components/SplitPane.css";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
-import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
@@ -298,16 +297,6 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           >&times;</button>
         </div>
         <ScopeBar sessionId={sessionId} />
-        {(session.detected_agent || session.ai_provider) && (
-          <ProviderActionsBar
-            sessionId={sessionId}
-            agentName={session.detected_agent?.name || session.ai_provider || ""}
-            actions={session.metrics.available_actions}
-            recentActions={session.metrics.recent_actions}
-            phase={session.phase}
-            aiProvider={session.ai_provider}
-          />
-        )}
       </div>
       <div className="split-pane-content">
         <div
