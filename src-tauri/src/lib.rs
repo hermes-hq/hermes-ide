@@ -506,6 +506,11 @@ pub fn run() {
             // Clean up stale worktrees from previous sessions that no longer exist
             cleanup_stale_worktrees(app.handle(), &database);
 
+            // Prune execution_nodes for all sessions to cap per-session history
+            if let Err(e) = database.prune_all_execution_nodes(db::EXECUTION_NODES_MAX_PER_SESSION) {
+                log::warn!("Startup execution_nodes cleanup failed: {}", e);
+            }
+
             // Clean up stale shell integration temp files from previous sessions
             pty::shell_integration::cleanup_stale();
 
