@@ -3255,6 +3255,82 @@ mod tests {
             plan
         );
     }
+
+    // ── execution_nodes pruning ────────────────────────────────────────
+
+    /// Helper: insert `count` execution nodes for `session_id` with sequential
+    /// timestamps 0..count so ordering is deterministic.
+    fn insert_exec_nodes(db: &Database, session_id: &str, count: i64) {
+        for i in 0..count {
+            // Bypass the auto-prune inside insert_execution_node by calling the
+            // SQL directly — we need predictable row counts for the prune tests.
+            db.conn.execute(
+                "INSERT INTO execution_nodes
+                 (session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata)
+                 VALUES (?1, ?2, 'command', NULL, NULL, NULL, '/tmp', 0, NULL)",
+                params![session_id, i],
+            ).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_prune_execution_nodes_keeps_most_recent() {
+        let db = test_db();
+        let sid = "sess-prune-1";
+        insert_exec_nodes(&db, sid, 10);
+        db.prune_execution_nodes(sid, 3).unwrap();
+        assert_eq!(db.get_execution_nodes_count(sid).unwrap(), 3);
+        // The three kept rows must be the most recent (timestamps 7, 8, 9)
+        let kept = db.get_execution_nodes(sid, 10, 0).unwrap();
+        let timestamps: Vec<i64> = kept.iter().map(|n| n.timestamp).collect();
+        assert!(
+            timestamps.iter().all(|&t| t >= 7),
+            "kept rows should be most recent: {:?}",
+            timestamps
+        );
+    }
+
+    #[test]
+    fn test_prune_execution_nodes_noop_when_under_limit() {
+        let db = test_db();
+        let sid = "sess-prune-2";
+        insert_exec_nodes(&db, sid, 5);
+        db.prune_execution_nodes(sid, 10).unwrap();
+        assert_eq!(db.get_execution_nodes_count(sid).unwrap(), 5);
+    }
+
+    #[test]
+    fn test_insert_execution_node_auto_prunes() {
+        let db = test_db();
+        let sid = "sess-auto-prune";
+        // Insert more than the cap using the public API (which auto-prunes)
+        for i in 0..(EXECUTION_NODES_MAX_PER_SESSION + 10) {
+            db.insert_execution_node(sid, i, "ai_interaction", None, None, None, "/tmp", 0, None)
+                .unwrap();
+        }
+        let count = db.get_execution_nodes_count(sid).unwrap();
+        assert_eq!(
+            count,
+            EXECUTION_NODES_MAX_PER_SESSION,
+            "table should be capped at {}",
+            EXECUTION_NODES_MAX_PER_SESSION
+        );
+    }
+
+    #[test]
+    fn test_prune_all_execution_nodes() {
+        let db = test_db();
+        // Two sessions, each with 10 rows inserted directly (bypass auto-prune)
+        for sid in &["sess-all-a", "sess-all-b"] {
+            insert_exec_nodes(&db, sid, 10);
+        }
+        assert_eq!(db.get_execution_nodes_count("sess-all-a").unwrap(), 10);
+        assert_eq!(db.get_execution_nodes_count("sess-all-b").unwrap(), 10);
+        // Prune both down to 3
+        db.prune_all_execution_nodes(3).unwrap();
+        assert_eq!(db.get_execution_nodes_count("sess-all-a").unwrap(), 3);
+        assert_eq!(db.get_execution_nodes_count("sess-all-b").unwrap(), 3);
+    }
 }
 
 // ─── Settings Export / Import Commands ───────────────────────────────
