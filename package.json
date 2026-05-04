@@ -34,12 +34,12 @@
     "@codemirror/lang-sql": "^6.10.0",
     "@codemirror/lang-yaml": "^6.1.3",
     "@codemirror/language": "^6.12.3",
-    "@codemirror/search": "^6.6.0",
+    "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.41.1",
     "@lezer/highlight": "^1.2.3",
-    "@tauri-apps/api": "^2.2.0",
-    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
@@ -48,20 +48,20 @@
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "6.0.0",
-    "lucide-react": "^1.8.0",
+    "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "^2.11.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@xterm/headless": "^6.0.0",
     "patch-package": "^8.0.1",
     "typescript": "^6.0.3",
-    "vite": "^8.0.9",
-    "vitest": "^4.1.4"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }
