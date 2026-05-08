@@ -198,6 +198,11 @@ pub fn update_hermes_state_file(session_id: &str, state: &serde_json::Value) -> 
 /// `permission_mode` accepts Claude's published values: `default`,
 /// `acceptEdits`, `plan`, `bypassPermissions`.  Any other value (or `None`)
 /// means we omit the flag and let Claude pick its own default.
+///
+/// The argument count is intentionally large — every flag Claude accepts is
+/// exposed here.  Reducing it would force callers to construct intermediate
+/// option structs that wouldn't add clarity.
+#[allow(clippy::too_many_arguments)]
 pub fn build_spawn_args(
     session_id: &str,
     working_dir: &str,
@@ -281,7 +286,11 @@ pub fn build_spawn_args(
 
 /// Spawn a Claude agent subprocess for `session_id`.  Returns the Claude session
 /// UUID we passed via `--session-id` so the frontend can track it for resume.
+///
+/// The argument list mirrors `build_spawn_args` plus the Tauri `State` and
+/// `AppHandle` — same justification: each is a real Claude flag.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_agent_session(
     state: State<'_, AgentState>,
     app: AppHandle,

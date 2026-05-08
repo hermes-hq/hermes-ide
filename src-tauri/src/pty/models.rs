@@ -5,20 +5,15 @@ use std::collections::HashMap;
 
 /// How a session is run and rendered on the frontend.
 ///
-///  - `Terminal`: existing PTY/xterm flow.  All non-Claude sessions use this.
-///  - `Agent`:    `claude --print` stream-json subprocess driving an
-///                `<AgentSessionView>` chat surface.  Claude-only in 1.0.0.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// - `Terminal`: existing PTY/xterm flow.  All non-Claude sessions use this.
+/// - `Agent`: `claude --print` stream-json subprocess driving an
+///   `<AgentSessionView>` chat surface.  Claude-only in 1.0.0.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMode {
+    #[default]
     Terminal,
     Agent,
-}
-
-impl Default for SessionMode {
-    fn default() -> Self {
-        SessionMode::Terminal
-    }
 }
 
 // ─── Session Phase State Machine ────────────────────────────────────
