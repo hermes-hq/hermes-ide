@@ -446,16 +446,23 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
 
   const cwdLabel = cwd ? cwd.split("/").pop() ?? cwd : null;
 
+  // Three-zone grid: [status] [title] [meta].  Title is the only
+  // flexible cell; it truncates with ellipsis on narrow panes so the
+  // meta zone (cost · STOP) never gets pushed off-screen.  STOP lives
+  // in the meta zone — far from the title's growth axis.
+  const showCwdFull = cwd && workspacePathCount <= 1;
   return (
     <div className="agent-session-header">
-      <div className="agent-session-header-left">
+      <div className="agent-session-header-status">
         <span
           className="agent-session-status-dot"
           data-state={dotState}
           aria-hidden="true"
         />
         <span className="agent-session-flag">AGENT</span>
-        <span className="agent-session-flag-sep" aria-hidden="true">·</span>
+      </div>
+
+      <div className="agent-session-header-title">
         {isWorking ? (
           <>
             <span className="agent-session-ticker">{tickerLabel}</span>
@@ -465,23 +472,6 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
                 <ElapsedCounter since={activity.since} />
               </>
             ) : null}
-            {/* Stop button — sends a soft interrupt via the bridge's
-                control protocol.  Bridge stays alive; just cancels the
-                current turn.  Available whenever Claude is doing something
-                we'd want to be able to cancel. */}
-            <button
-              type="button"
-              className="agent-session-stop"
-              onClick={() => {
-                softInterruptAgent(sessionId).catch((err) =>
-                  console.warn("[agent] soft-interrupt failed:", err),
-                );
-              }}
-              title="Stop this turn (Esc)"
-              aria-label="Stop the current turn"
-            >
-              ◼ STOP
-            </button>
           </>
         ) : (
           <>
@@ -500,24 +490,40 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
             )}
           </>
         )}
+        {showCwdFull ? (
+          <span className="agent-session-cwd" title={cwd}>{cwd}</span>
+        ) : null}
       </div>
-      <div className="agent-session-header-right">
+
+      <div className="agent-session-header-meta">
         {state.cumulativeCostUsd > 0 || state.cumulativeOutputTokens > 0 ? (
           <span
             className="agent-session-cost"
             title={`Session cost: $${state.cumulativeCostUsd.toFixed(4)}\nOutput tokens: ${state.cumulativeOutputTokens.toLocaleString()}`}
             aria-label={`session cost ${state.cumulativeCostUsd.toFixed(2)} dollars`}
           >
-            {`$${formatCost(state.cumulativeCostUsd)}`}
+            <span className="agent-session-cost-amount">{`$${formatCost(state.cumulativeCostUsd)}`}</span>
             <span className="agent-session-cost-sep" aria-hidden="true"> · </span>
-            {`${formatTokens(state.cumulativeOutputTokens)} out`}
+            <span className="agent-session-cost-tokens">{`${formatTokens(state.cumulativeOutputTokens)} out`}</span>
           </span>
         ) : null}
         {showRateNotice ? (
           <span className="agent-rate-notice">Rate limit · {rate!.status}</span>
         ) : null}
-        {cwd && workspacePathCount <= 1 ? (
-          <span className="agent-session-cwd" title={cwd}>{cwd}</span>
+        {isWorking ? (
+          <button
+            type="button"
+            className="agent-session-stop"
+            onClick={() => {
+              softInterruptAgent(sessionId).catch((err) =>
+                console.warn("[agent] soft-interrupt failed:", err),
+              );
+            }}
+            title="Stop this turn (Esc)"
+            aria-label="Stop the current turn"
+          >
+            ◼ STOP
+          </button>
         ) : null}
       </div>
     </div>

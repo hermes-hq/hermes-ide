@@ -38,9 +38,18 @@
  * on a piece of equipment.  Faint inner top-shadow gives it the slight
  * recess of a metal plate sunk into the surface. */
 .agent-session-header {
-  display: flex;
+  /* 3-zone grid:
+   *   [status] fixed-width LED + AGENT flag.  Never shrinks.
+   *   [title]  flexible — model / ticker / cwd-leaf.  Truncates with
+   *            ellipsis when the pane gets narrow.
+   *   [meta]   fixed-width cost + rate notice + STOP button.  Always
+   *            visible because title is the only zone that gives way.
+   * This replaces a brittle flex-wrap layout where the cost lozenge
+   * would jump to a second row and overlap STOP. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "status title meta";
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 11px 20px;
   border-top: 1px solid var(--rule);
@@ -55,12 +64,58 @@
   color: var(--ink-secondary);
 }
 
-.agent-session-header-left,
-.agent-session-header-right {
+.agent-session-header-status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.agent-session-header-title {
+  grid-area: title;
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  overflow: hidden;
+  /* Items inside the title can themselves shrink (cwd path is the
+   * usual culprit); ellipsis happens at the leaf level. */
+}
+
+.agent-session-header-title > * {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.agent-session-header-meta {
+  grid-area: meta;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+/* Narrow panes — under ~480px the cost lozenge sheds its tokens
+ * count and shows only the dollar amount, freeing horizontal room
+ * for the title and STOP button.  STOP itself never disappears. */
+@container (max-width: 480px) {
+  .agent-session-cost-tokens,
+  .agent-session-cost-sep {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .agent-session-cost-tokens,
+  .agent-session-cost-sep {
+    display: none;
+  }
+  .agent-session-header {
+    gap: 8px;
+    padding: 11px 14px;
+  }
 }
 
 .agent-session-flag {
@@ -103,7 +158,7 @@
   background: var(--green);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.5) inset,
-    0 0 6px rgba(52, 211, 153, 0.35);
+    0 0 6px color-mix(in srgb, var(--green) 35%, transparent);
 }
 
 .agent-session-status-dot[data-state="idle"] {
@@ -114,7 +169,7 @@
   background: var(--yellow);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.5) inset,
-    0 0 6px rgba(234, 179, 8, 0.35);
+    0 0 6px color-mix(in srgb, var(--yellow) 35%, transparent);
 }
 
 /* "Thinking" — Claude is mid-stream writing a reply.  BRASS pulse — the
@@ -258,14 +313,14 @@
 }
 
 .agent-session-scroll::-webkit-scrollbar-thumb {
-  background: rgba(212, 168, 106, 0.22);
+  background: color-mix(in srgb, var(--brass, var(--accent-paper)) 22%, transparent);
   border-radius: 3px;
   border: 1px solid transparent;
   background-clip: padding-box;
 }
 
 .agent-session-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 168, 106, 0.5);
+  background: color-mix(in srgb, var(--brass, var(--accent-paper)) 50%, transparent);
   background-clip: padding-box;
 }
 
@@ -1080,9 +1135,12 @@
 /* ─── File family (Read / Write / Edit / NotebookEdit) ─── */
 
 .agent-tool-file {
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius);
-  background: var(--bg-1);
+  border: var(--tool-card-border);
+  border-radius: var(--tool-card-radius);
+  background: var(--tool-card-bg);
+  box-shadow: var(--tool-card-shadow);
+  backdrop-filter: var(--tool-card-backdrop);
+  -webkit-backdrop-filter: var(--tool-card-backdrop);
   overflow: hidden;
 }
 
@@ -1542,24 +1600,60 @@
   color: var(--ink-secondary);
 }
 
-/* ─── Generic fallback (bare-bones on purpose) ─── */
+/* ─── Generic fallback ───────────────────────────────────────────
+ *
+ * Composition:
+ *   tool-name   summary-chip                              [hide/input]
+ *   ┌─ disclosed CodeFence (highlighted JSON, max-height capped) ─┐
+ *   short result text inline, OR
+ *   <details> with `result · N lines` summary that expands a fence.
+ *
+ * Designed so a deeply-nested input never renders as a wall of raw
+ * JSON.  The summary tells you what's in there at a glance; the
+ * fence is one click away. */
 
 .agent-tool-generic {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Promote the generic fallback into a real tool card so all tool
+   * blocks share the same chrome under any archetype.  When the
+   * archetype is `hairline-rules` (e.g. minimal-dark theme), the
+   * card tokens collapse to transparent and the generic block stays
+   * visually quiet, just as before. */
+  padding: 8px 12px;
+  background: var(--tool-card-bg);
+  border: var(--tool-card-border);
+  border-radius: var(--tool-card-radius);
+  box-shadow: var(--tool-card-shadow);
+  backdrop-filter: var(--tool-card-backdrop);
+  -webkit-backdrop-filter: var(--tool-card-backdrop);
 }
 
 .agent-tool-generic-row {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .agent-tool-generic-name {
   font: italic 11px/1 var(--font-mono);
   color: var(--ink-tertiary);
   text-transform: lowercase;
+}
+
+/* Inline one-liner — what the tool was called with, in plain words.
+ * Truncates with ellipsis on narrow rows so the disclosure button
+ * stays visible.  The full summary is in the `title` for hover. */
+.agent-tool-generic-summary {
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-secondary);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-tool-generic-input-toggle {
@@ -1569,22 +1663,24 @@
   border: 0;
   padding: 0;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .agent-tool-generic-input-toggle:hover {
   color: var(--ink-secondary);
 }
 
-.agent-tool-generic-input-pre {
-  margin: 6px 0;
-  padding: 8px;
-  background: var(--bg-1);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  font: 11px/1.4 var(--font-mono);
-  color: var(--ink-secondary);
-  white-space: pre-wrap;
-  overflow-x: auto;
+/* Disclosed input body — nested CodeFence inherits all syntax-color
+ * tokens and brings its own max-height, so the input never bleeds
+ * past one screen. */
+.agent-tool-generic-input-body {
+  margin: 0;
+}
+
+.agent-tool-generic-input-body .agent-code-fence {
+  max-height: 320px;
+  overflow: auto;
 }
 
 .agent-tool-generic-result {
@@ -1595,12 +1691,57 @@
   word-break: break-word;
 }
 
+.agent-tool-generic-result-details {
+  margin: 0;
+}
+
+.agent-tool-generic-result-summary {
+  font: 11px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  padding: 2px 0;
+}
+
+.agent-tool-generic-result-summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-tool-generic-result-summary:hover {
+  color: var(--ink-secondary);
+}
+
+.agent-tool-generic-result-body {
+  margin-top: 4px;
+}
+
+.agent-tool-generic-result-body .agent-code-fence {
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* Fallback ToolResult structured tail — when a result block carries
+ * non-text content (rare; reconnect-time orphans), we render it as
+ * highlighted JSON instead of dumping raw <pre>. */
+.agent-tool-result-structured {
+  margin-top: 4px;
+}
+
+.agent-tool-result-structured .agent-code-fence {
+  max-height: 240px;
+  overflow: auto;
+}
+
 /* ─── Tool result (standalone + compact inline variants) ─── */
 
 .agent-tool-result {
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--bg-1);
+  border: var(--tool-card-border);
+  border-radius: var(--tool-card-radius);
+  background: var(--tool-card-bg);
+  box-shadow: var(--tool-card-shadow);
+  backdrop-filter: var(--tool-card-backdrop);
+  -webkit-backdrop-filter: var(--tool-card-backdrop);
   max-height: 200px;
   overflow: auto;
 }

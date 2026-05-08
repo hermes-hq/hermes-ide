@@ -1,4 +1,6 @@
 import type { ContentBlock, ToolResultBlockData } from "../types";
+import { CodeFence } from "./CodeFence";
+import { prettyJson } from "../../utils/jsonSummary";
 
 interface ToolResultBlockProps {
   block: ToolResultBlockData;
@@ -14,39 +16,47 @@ interface ToolResultBlockProps {
 }
 
 /**
- * Standalone-or-inline renderer for `tool_result` blocks. See playbook §5
- * ToolResultBlock.
- *
- * Quiet inline appearance: text in `--ink-secondary`, no card. If the result
- * is an error, a `--tool-error` left bar marks it. Standalone uses a
- * hairline-bordered panel, family-neutral.
+ * Standalone-or-inline renderer for `tool_result` blocks.  Plain-text
+ * content renders inline.  Structured (non-text) content falls through
+ * a syntax-highlighted JSON code fence rather than dumping as raw
+ * `<pre>` JSON, so reconnect-time orphan results don't blow out the
+ * column width with a wall of stringified blocks.
  */
 export function ToolResultBlock({ block, compact = false }: ToolResultBlockProps) {
-  const text = stringifyContent(block.content);
+  const { plain, structured } = partitionContent(block.content);
   const cls =
     "agent-tool-result" +
     (block.is_error ? " is-error" : "") +
     (compact ? " compact" : "");
+
   return (
     <div className={cls}>
-      <pre className="agent-tool-result-body">{text}</pre>
+      {plain && <pre className="agent-tool-result-body">{plain}</pre>}
+      {structured.length > 0 && (
+        <div className="agent-tool-result-structured">
+          <CodeFence code={prettyJson(structured)} language="json" />
+        </div>
+      )}
     </div>
   );
 }
 
-function stringifyContent(content: string | ContentBlock[]): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((b) => {
-      if (b.type === "text" && typeof (b as { text?: unknown }).text === "string") {
-        return (b as { text: string }).text;
-      }
-      try {
-        return JSON.stringify(b, null, 2);
-      } catch {
-        return String(b);
-      }
-    })
-    .join("\n");
+/** Split a tool-result content array into the readable text portion
+ *  and the structured (non-text) tail.  The text portion concatenates
+ *  cleanly; the structured tail renders as JSON. */
+function partitionContent(
+  content: string | ContentBlock[],
+): { plain: string; structured: ContentBlock[] } {
+  if (typeof content === "string") return { plain: content, structured: [] };
+  if (!Array.isArray(content)) return { plain: "", structured: [] };
+  const textParts: string[] = [];
+  const structured: ContentBlock[] = [];
+  for (const b of content) {
+    if (b.type === "text" && typeof (b as { text?: unknown }).text === "string") {
+      textParts.push((b as { text: string }).text);
+    } else {
+      structured.push(b);
+    }
+  }
+  return { plain: textParts.join("\n"), structured };
 }

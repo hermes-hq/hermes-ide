@@ -1939,3 +1939,284 @@ html[data-theme="transilvania"] {
   --scanline-opacity: 0;
   --accent-glow: 0 0 10px #bd93f922;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * Agent Timeline · Archetype Paint
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * The agent session timeline reads its visual chrome from a small
+ * vocabulary of archetype tokens (defined in tokens.css).  Each
+ * theme below overrides the defaults to express ONE of the six
+ * rendering archetypes — so the same timeline component repaints
+ * itself in every theme without any per-theme branching in the React
+ * code or the agent-side CSS.
+ *
+ * Six archetypes, one paint per theme:
+ *
+ *   glass-cards       translucent panels + backdrop-blur
+ *   paper-cards       solid card with subtle shadow (default)
+ *   hairline-rules    no enclosure — just thin separators
+ *   crt-blocks        sharp box, phosphor glow + scanlines
+ *   ribbon-rails      left-side accent rail per turn (no card)
+ *   editorial-margin  warm paper, low chrome, generous gutter
+ *
+ * Per-theme bespoke touches (paper grain, scanline overlay, animated
+ * rail pulses) live further down — see "Bespoke per-theme touches".
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ─── Glass-cards family ─────────────────────────────────────────
+ * nightowl · frosted-light · frosted-dark · cobalt · macchiato · shibuya
+ * Translucent panels with backdrop-blur for depth — rounded, slightly
+ * shadowed, accent-tinted hairline.  Reads as macOS glass / web3 UI. */
+html[data-theme="nightowl"],
+html[data-theme="frosted-light"],
+html[data-theme="frosted-dark"],
+html[data-theme="cobalt"],
+html[data-theme="macchiato"],
+html[data-theme="shibuya"] {
+  --tool-card-bg: color-mix(in srgb, var(--bg-1) 72%, transparent);
+  --tool-card-backdrop: blur(14px) saturate(140%);
+  --tool-card-border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  --tool-card-radius: 8px;
+  --tool-card-shadow: 0 8px 24px color-mix(in srgb, #000 22%, transparent);
+  --turn-separator: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ─── Hairline-rules family ──────────────────────────────────────
+ * minimal-dark · corporate · reactor
+ * No enclosing card.  The timeline is a stack of generously-spaced
+ * messages with thin rules between turns.  Maximum readability for
+ * GitHub-Dark / professional workflows. */
+html[data-theme="minimal-dark"],
+html[data-theme="corporate"],
+html[data-theme="reactor"] {
+  --tool-card-bg: transparent;
+  --tool-card-border: 0;
+  --tool-card-radius: 0;
+  --tool-card-shadow: none;
+  --turn-separator: 1px solid var(--rule);
+}
+
+/* ─── CRT-blocks family ──────────────────────────────────────────
+ * hacker · 80s · midnight
+ * Sharp boxes with phosphor glow.  Thicker accent-tinted border.
+ * No backdrop-blur (would soften the CRT feel).  Surface scanlines
+ * and vignette come from the per-theme bespoke touches below. */
+html[data-theme="hacker"],
+html[data-theme="80s"],
+html[data-theme="midnight"] {
+  --tool-card-bg: color-mix(in srgb, var(--bg-1) 78%, var(--bg-0) 22%);
+  --tool-card-border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  --tool-card-radius: 0;
+  --tool-card-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 22%, transparent);
+  --turn-separator: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* ─── Ribbon-rails family ────────────────────────────────────────
+ * tron · duel · rainbow
+ * No enclosing card.  Each tool block gets a 3px accent rail on the
+ * LEFT — pulsing on tron, opposing-color on duel, gradient on
+ * rainbow.  Composed via the bespoke section below; these tokens
+ * just suppress the box. */
+html[data-theme="tron"],
+html[data-theme="duel"],
+html[data-theme="rainbow"] {
+  --tool-card-bg: transparent;
+  --tool-card-border: 0;
+  --tool-card-radius: 0;
+  --tool-card-shadow: none;
+  --turn-separator: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ─── Editorial-margin family ────────────────────────────────────
+ * designer · sand · rose · evergreen · solarized · light
+ * Warm paper feel.  Soft drop shadow, slightly rounded, low chrome.
+ * Reads as printed page rather than terminal box.  Per-theme grain
+ * texture lives in the bespoke section. */
+html[data-theme="designer"],
+html[data-theme="sand"],
+html[data-theme="rose"],
+html[data-theme="evergreen"],
+html[data-theme="solarized"],
+html[data-theme="light"] {
+  --tool-card-bg: var(--bg-1);
+  --tool-card-border: 1px solid var(--rule);
+  --tool-card-radius: 4px;
+  --tool-card-shadow: 0 1px 2px color-mix(in srgb, #000 8%, transparent);
+  --turn-separator: 1px solid var(--rule);
+}
+
+/* The remaining themes (data, neon-sunset, polar, amber, lavender,
+ * mint, solarized-dark, transilvania) inherit the default
+ * paper-cards archetype defined in tokens.css — solid card with
+ * --rule-strong border, no shadow.  Override here only if a future
+ * tweak makes one of them stand out from the pack. */
+
+/* ════════════════════════════════════════════════════════════════════
+ * Bespoke per-theme touches
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * These rules add the *personality* on top of each theme's archetype:
+ *   - CRT scanlines on `hacker` and `80s` tool cards
+ *   - DOS-style double border on `midnight`
+ *   - Subtle paper grain on `designer`
+ *   - Pulsing cyan rail on `tron`
+ *   - Animated gradient rail on `rainbow`
+ *   - Glow on accent text in glass themes
+ *
+ * Anything not listed here stays clean within its archetype paint.
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ─── hacker — green phosphor + scanlines ────────────────────── */
+html[data-theme="hacker"] .agent-tool-file,
+html[data-theme="hacker"] .agent-tool-result,
+html[data-theme="hacker"] .agent-tool-generic {
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      color-mix(in srgb, var(--green) 6%, transparent) 2px,
+      color-mix(in srgb, var(--green) 6%, transparent) 3px
+    );
+}
+
+html[data-theme="hacker"] .agent-tool-file-header,
+html[data-theme="hacker"] .agent-tool-generic-name {
+  text-shadow: 0 0 6px color-mix(in srgb, var(--green) 50%, transparent);
+}
+
+/* ─── 80s — heavy amber scanlines + vignette ─────────────────── */
+html[data-theme="80s"] .agent-tool-file,
+html[data-theme="80s"] .agent-tool-result,
+html[data-theme="80s"] .agent-tool-generic {
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      color-mix(in srgb, var(--accent) 9%, transparent) 2px,
+      color-mix(in srgb, var(--accent) 9%, transparent) 3px
+    );
+}
+
+html[data-theme="80s"] .agent-session-scroll {
+  /* CRT vignette — soft inset shadow that darkens the corners. */
+  box-shadow: inset 0 0 80px color-mix(in srgb, #000 50%, transparent);
+}
+
+/* ─── midnight — DOS double border ───────────────────────────── */
+html[data-theme="midnight"] .agent-tool-file,
+html[data-theme="midnight"] .agent-tool-result,
+html[data-theme="midnight"] .agent-tool-generic {
+  /* Outer border via the archetype tokens already; the inner line
+   * comes from a 1px inset box-shadow that creates the classic
+   * DOS double-line effect. */
+  box-shadow:
+    var(--tool-card-shadow),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* ─── designer — paper grain texture ─────────────────────────── */
+html[data-theme="designer"] .agent-tool-file,
+html[data-theme="designer"] .agent-tool-result,
+html[data-theme="designer"] .agent-tool-generic {
+  /* Subtle SVG noise overlay — encoded inline so no extra fetch.
+   * Opacity is held low so the texture reads as paper, not static. */
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-blend-mode: multiply;
+}
+
+/* ─── tron — pulsing cyan rail ───────────────────────────────── */
+html[data-theme="tron"] .agent-tool-file,
+html[data-theme="tron"] .agent-tool-generic {
+  position: relative;
+  padding-left: 14px;
+}
+
+html[data-theme="tron"] .agent-tool-file::after,
+html[data-theme="tron"] .agent-tool-generic::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: tron-rail-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes tron-rail-pulse {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 8px var(--accent); }
+  50%      { opacity: 1; box-shadow: 0 0 18px var(--accent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="tron"] .agent-tool-file::after,
+  html[data-theme="tron"] .agent-tool-generic::after {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+/* ─── rainbow — animated gradient rail ───────────────────────── */
+html[data-theme="rainbow"] .agent-tool-file,
+html[data-theme="rainbow"] .agent-tool-generic {
+  position: relative;
+  padding-left: 14px;
+}
+
+html[data-theme="rainbow"] .agent-tool-file::after,
+html[data-theme="rainbow"] .agent-tool-generic::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(
+    180deg,
+    var(--accent) 0%,
+    var(--violet) 33%,
+    var(--green) 66%,
+    var(--yellow) 100%
+  );
+  background-size: 100% 200%;
+  animation: rainbow-rail-shift 6s linear infinite;
+}
+
+@keyframes rainbow-rail-shift {
+  0%   { background-position: 0% 0%; }
+  100% { background-position: 0% 200%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="rainbow"] .agent-tool-file::after,
+  html[data-theme="rainbow"] .agent-tool-generic::after {
+    animation: none;
+  }
+}
+
+/* ─── duel — opposing red/green rail ─────────────────────────── */
+html[data-theme="duel"] .agent-tool-file,
+html[data-theme="duel"] .agent-tool-generic {
+  position: relative;
+  padding-left: 14px;
+}
+
+html[data-theme="duel"] .agent-tool-file::after,
+html[data-theme="duel"] .agent-tool-generic::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--red), var(--green));
+}
+
+/* ─── glass family — accent text glow ────────────────────────── */
+html[data-theme="nightowl"] .agent-tool-file-header,
+html[data-theme="shibuya"] .agent-tool-file-header,
+html[data-theme="macchiato"] .agent-tool-file-header,
+html[data-theme="transilvania"] .agent-tool-file-header {
+  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+}
