@@ -47,11 +47,49 @@ describe("buildPermResponse (pm-4, pm-5)", () => {
       decision: { behavior: "allow", updatedInput: edited },
     });
   });
-  it("pm-5: deny → behavior=deny + message", () => {
+  it("pm-5: deny → behavior=deny + default message", () => {
     expect(buildPermResponse("req_1", { kind: "deny" })).toEqual({
       type: "_hermes_perm_response",
       id: "req_1",
       decision: { behavior: "deny", message: "user declined" },
+    });
+  });
+
+  it("pm-5-b: deny with custom message (ExitPlanMode rejection feedback flow)", () => {
+    expect(
+      buildPermResponse("req_1", { kind: "deny", message: "rethink the migration step" }),
+    ).toEqual({
+      type: "_hermes_perm_response",
+      id: "req_1",
+      decision: { behavior: "deny", message: "rethink the migration step" },
+    });
+  });
+
+  it("pm-5-c: deny with empty/whitespace message falls back to 'user declined'", () => {
+    expect(
+      buildPermResponse("req_1", { kind: "deny", message: "   " }),
+    ).toEqual({
+      type: "_hermes_perm_response",
+      id: "req_1",
+      decision: { behavior: "deny", message: "user declined" },
+    });
+  });
+
+  it("pm-4-c: REGRESSION (zod-error fix) — allow ALWAYS includes updatedInput when supplied", () => {
+    // The bridge's canUseTool callback fails Zod validation if it
+    // returns `{behavior: "allow"}` without an `updatedInput` record.
+    // The host echoes the original input when not editing.  This
+    // builder must support both shapes losslessly.
+    const noEdit = buildPermResponse("req_2", { kind: "allow" });
+    expect(noEdit.decision).toEqual({ behavior: "allow" });
+
+    const edited = buildPermResponse("req_3", {
+      kind: "allow",
+      updatedInput: { questions: [], answers: { "q?": "yes" } },
+    });
+    expect(edited.decision).toEqual({
+      behavior: "allow",
+      updatedInput: { questions: [], answers: { "q?": "yes" } },
     });
   });
 });

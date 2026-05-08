@@ -64,6 +64,7 @@ import { argv, exit, stdin, stdout, stderr } from "node:process";
 import { createInterface } from "node:readline";
 import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod";
+import { normalizeBridgeAllowDecision } from "./canUseToolHelpers.mjs";
 
 // ─── 1. Parse CLI args ──────────────────────────────────────────────
 
@@ -414,9 +415,19 @@ const sdkOptions = {
   // unconditionally; tools no-op gracefully when no `--hermes-state-path`
   // was passed (back-compat with tests / external callers).
   mcpServers: { hermes: buildHermesMcpServer() },
-  // Always allow Claude to call our Hermes tools without per-call permission
-  // prompts.  Other tools still go through `canUseTool` / settings allowlist.
-  allowedTools: ["mcp__hermes__*"],
+  // Auto-allow only tools that have NO interactive UI to render —
+  //   * mcp__hermes__*  : our IDE-context MCP tools, never destructive
+  //   * TodoWrite       : produces a side-panel UI, no permission UX
+  //
+  // AskUserQuestion / ExitPlanMode / EnterPlanMode are intentionally
+  // routed through `canUseTool` so the bridge fires a perm-request the
+  // host turns into a native card.  The host's allow/deny response IS
+  // the user's answer/decision.  Auto-allowing these would cause Claude
+  // to execute the tool with empty `answers` (the previous bug).
+  allowedTools: [
+    "mcp__hermes__*",
+    "TodoWrite",
+  ],
   // Inject IDE state on session start, resume, and after compactions.
   // Invisible to the transcript; the user never sees this in the chat.
   // UserPromptSubmit re-injects the runtime line on every turn so the
@@ -449,18 +460,7 @@ const sdkOptions = {
       input,
     }) + "\n");
     const decision = await promise;
-    if (!decision || typeof decision !== "object") {
-      return { behavior: "deny", message: "host returned invalid decision" };
-    }
-    if (decision.behavior === "allow") {
-      return decision.updatedInput
-        ? { behavior: "allow", updatedInput: decision.updatedInput }
-        : { behavior: "allow" };
-    }
-    return {
-      behavior: "deny",
-      message: typeof decision.message === "string" ? decision.message : "user declined",
-    };
+    return normalizeBridgeAllowDecision(decision, input);
   },
   // Forward bridge stderr-by-line so SDK panics surface to Rust.
   stderr: (data) => stderr.write(data),
@@ -498,11 +498,37 @@ async function main() {
         && (message.subtype === "init" || message.subtype === "session_started")
       ) {
         if (message.session_id) canonicalSessionId = message.session_id;
+        // Detect drift in the runtime values vs. what the host UI is
+        // currently showing.  When Claude flips permission_mode via
+        // EnterPlanMode/ExitPlanMode, or when the user runs `/model`,
+        // the SDK reports the new value here — we fan it out to the
+        // host so the picker chips update.  Skip the emit when nothing
+        // actually changed (avoids respawn ping-pong).
+        const before = {
+          model: liveRuntime.reportedModel,
+          permissionMode: liveRuntime.reportedPermissionMode,
+        };
         if (typeof message.model === "string") {
           liveRuntime.reportedModel = message.model;
         }
         if (typeof message.permissionMode === "string") {
           liveRuntime.reportedPermissionMode = message.permissionMode;
+        }
+        const changed =
+          liveRuntime.reportedModel !== before.model
+          || liveRuntime.reportedPermissionMode !== before.permissionMode;
+        if (changed) {
+          stdout.write(JSON.stringify({
+            type: "_hermes_state_changed",
+            session_id: canonicalSessionId,
+            ...(liveRuntime.reportedModel
+              ? { model: liveRuntime.reportedModel }
+              : {}),
+            ...(liveRuntime.reportedPermissionMode
+              ? { permissionMode: liveRuntime.reportedPermissionMode }
+              : {}),
+            uuid: globalThis.crypto?.randomUUID?.() ?? `evt-${Date.now()}`,
+          }) + "\n");
         }
         // Unblock any UserPromptSubmit hook waiting for the first init.
         initSeen.resolve();

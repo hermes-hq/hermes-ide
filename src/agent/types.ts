@@ -172,6 +172,21 @@ export interface UnknownAgentEvent {
   [key: string]: unknown;
 }
 
+/** Hermes-internal envelope: the bridge fires this when the live SDK
+ *  runtime values it tracks (model, permissionMode) diverge from the
+ *  last reported state — for example, after EnterPlanMode flips the
+ *  session into plan mode without a respawn.  The composer's chip
+ *  pickers and SessionContext both subscribe so the UI matches reality
+ *  without waiting for a fresh init event (the SDK only emits init at
+ *  spawn time). */
+export interface StateChangedEvent {
+  type: "_hermes_state_changed";
+  session_id?: string;
+  uuid?: string;
+  model?: string;
+  permissionMode?: string;
+}
+
 export type AgentEvent =
   | InitEvent
   | SystemEvent
@@ -180,12 +195,17 @@ export type AgentEvent =
   | ResultEvent
   | RateLimitEvent
   | ParseErrorEvent
+  | StateChangedEvent
   | UnknownAgentEvent;
 
 // === Helpers ===
 
 export function isInitEvent(e: AgentEvent): e is InitEvent {
   return e.type === "system" && (e as { subtype?: string }).subtype === "init";
+}
+
+export function isStateChangedEvent(e: AgentEvent): e is StateChangedEvent {
+  return e.type === "_hermes_state_changed";
 }
 
 export function isSystemEvent(e: AgentEvent): e is SystemEvent {

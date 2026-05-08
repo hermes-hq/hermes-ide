@@ -27,16 +27,8 @@ import { ExitPlanModeCard } from "../components/ExitPlanModeCard";
 import { PermissionRequestModal } from "../components/PermissionRequestModal";
 import { PlanModeBanner } from "../components/PlanModeBanner";
 import { TodoPanel } from "../components/TodoPanel";
-import {
-  isAskUserQuestionToolUse,
-  buildAskAnswerEnvelope,
-  type AskUserQuestionInput,
-} from "../utils/askUserQuestion";
-import {
-  isExitPlanModeToolUse,
-  buildExitPlanResult,
-  type ExitPlanModeInput,
-} from "../utils/exitPlanMode";
+import type { AskUserQuestionInput } from "../utils/askUserQuestion";
+import type { ExitPlanModeInput } from "../utils/exitPlanMode";
 import {
   isPermRequest,
   buildPermResponse,
@@ -179,13 +171,12 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
           ),
         ));
 
-  // ─── Interactive tool detection ─────────────────────────────────
-  // Walk all assistant messages, find the latest unanswered tool_use of
-  // a known interactive type (AskUserQuestion, ExitPlanMode).  An
-  // unanswered tool_use is one whose `id` is not present in
-  // `state.toolResults`.  Render the corresponding card; suppress the
-  // composer (the user must answer before continuing).
-  const interactivePending = findPendingInteractive(state);
+  // ─── Interactive tools ───────────────────────────────────────────
+  // AskUserQuestion / ExitPlanMode are dispatched via the
+  // `_hermes_perm_request` stream from the bridge's canUseTool —
+  // see <InteractivePermissionDispatcher /> below.  That's the SDK's
+  // contract: the host injects answers as `updatedInput` rather than
+  // writing a tool_result envelope.  No tool_use scanning needed here.
   const todos = extractTodos(
     state.messages.flatMap((m) => (m.role === "assistant" ? m.blocks : [])),
   );
@@ -251,46 +242,15 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
           {/* Plan-mode banner — visible whenever Claude reports plan mode. */}
           <PlanModeBanner permissionMode={permissionMode} />
 
-          {/* Interactive cards — ExitPlanMode / AskUserQuestion.
-              `sendAgentEnvelope` retries-after-respawn so the user's
-              reply isn't dropped when the bridge has exited between
-              turns (M10). */}
-          {interactivePending?.kind === "ExitPlanMode" && (
-            <ExitPlanModeCard
-              toolUseId={interactivePending.toolUseId}
-              input={interactivePending.input}
-              permissionMode={permissionMode}
-              onSubmit={(decision) => {
-                sendAgentEnvelope(
-                  sessionId,
-                  buildExitPlanResult(interactivePending.toolUseId, decision),
-                ).catch((err) => console.warn("[ep] send failed:", err));
-              }}
-            />
-          )}
-          {interactivePending?.kind === "AskUserQuestion" && (
-            <AskUserQuestionCard
-              toolUseId={interactivePending.toolUseId}
-              input={interactivePending.input}
-              onSubmit={(answers) => {
-                sendAgentEnvelope(
-                  sessionId,
-                  buildAskAnswerEnvelope(interactivePending.toolUseId, answers),
-                ).catch((err) => console.warn("[aq] send failed:", err));
-              }}
-              onCancel={() => {
-                sendAgentEnvelope(
-                  sessionId,
-                  buildAskAnswerEnvelope(interactivePending.toolUseId, [], { cancelled: true }),
-                ).catch((err) => console.warn("[aq] cancel send failed:", err));
-              }}
-            />
-          )}
-
-          {/* Permission request modal — driven by NDJSON envelopes from
-              the bridge's canUseTool.  The hook listens on the agent
-              event stream for `_hermes_perm_request` types. */}
-          <PermissionRequestGate sessionId={sessionId} permissionMode={permissionMode} sendAgentEnvelope={sendAgentEnvelope} />
+          {/* All interactive tooling — AskUserQuestion, ExitPlanMode,
+              and the generic permission modal — is driven by
+              `_hermes_perm_request` envelopes from the bridge's
+              canUseTool.  The dispatcher routes by toolName. */}
+          <InteractivePermissionDispatcher
+            sessionId={sessionId}
+            permissionMode={permissionMode}
+            sendAgentEnvelope={sendAgentEnvelope}
+          />
         </div>
       </div>
     </div>
@@ -298,12 +258,25 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
 }
 
 /**
- * Bridge ⇄ frontend canUseTool gate.  Listens for `_hermes_perm_request`
- * envelopes on the agent stream, renders the modal, sends the user's
- * decision back via `sendAgentEnvelope` (retry-on-not-found, M10) as a
- * `_hermes_perm_response`.
+ * Bridge ⇄ frontend canUseTool dispatcher.
+ *
+ * Listens for `_hermes_perm_request` envelopes on the agent stream and
+ * routes each by tool name:
+ *
+ *   AskUserQuestion → <AskUserQuestionCard />     allow → updatedInput
+ *                                                  with answers record;
+ *                                                  deny → user declined
+ *   ExitPlanMode    → <ExitPlanModeCard />        allow → SDK runs the
+ *                                                  tool, mode flips;
+ *                                                  deny → SDK ends turn
+ *                                                  with feedback message
+ *   else            → <PermissionRequestModal />  generic allow/deny
+ *
+ * The user's decision goes back as `_hermes_perm_response` via
+ * `sendAgentEnvelope` (retry-on-not-found, M10) so we don't drop a
+ * decision when the bridge has exited between turns.
  */
-function PermissionRequestGate({
+function InteractivePermissionDispatcher({
   sessionId,
   permissionMode,
   sendAgentEnvelope,
@@ -351,6 +324,36 @@ function PermissionRequestGate({
     setRequest(null);
   }
 
+  if (request.toolName === "AskUserQuestion") {
+    const input = request.input as unknown as AskUserQuestionInput;
+    return (
+      <AskUserQuestionCard
+        dialogId={request.id}
+        input={input}
+        onAllow={(updatedInput) => decide({ kind: "allow", updatedInput })}
+        onDeny={() => decide({ kind: "deny", message: "User cancelled the question" })}
+      />
+    );
+  }
+
+  if (request.toolName === "ExitPlanMode") {
+    const input = request.input as unknown as ExitPlanModeInput;
+    return (
+      <ExitPlanModeCard
+        dialogId={request.id}
+        input={input}
+        permissionMode={permissionMode}
+        onAllow={() => decide({ kind: "allow" })}
+        onDeny={(feedback) =>
+          decide({
+            kind: "deny",
+            message: feedback === "" ? "User rejected the plan" : feedback,
+          })
+        }
+      />
+    );
+  }
+
   return (
     <PermissionRequestModal
       request={request}
@@ -358,36 +361,6 @@ function PermissionRequestGate({
       onDecision={decide}
     />
   );
-}
-
-/** Returns the latest unanswered AskUserQuestion or ExitPlanMode tool_use,
- *  or null if none is pending.  An "unanswered" tool_use is one whose id
- *  is missing from the state's toolResults map. */
-type PendingInteractive =
-  | { kind: "AskUserQuestion"; toolUseId: string; input: AskUserQuestionInput }
-  | { kind: "ExitPlanMode"; toolUseId: string; input: ExitPlanModeInput };
-
-function findPendingInteractive(state: AgentSessionState): PendingInteractive | null {
-  for (let i = state.messages.length - 1; i >= 0; i--) {
-    const m = state.messages[i];
-    if (m.role !== "assistant") continue;
-    for (let j = m.blocks.length - 1; j >= 0; j--) {
-      const block = m.blocks[j];
-      if (block.type !== "tool_use") continue;
-      // Narrow: ContentBlock union may include UnknownBlockData where
-      // `id` is `unknown`; once we know `type === "tool_use"`, treat
-      // it as ToolUseBlockData with a string id.
-      const tu = block as { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
-      if (state.toolResults.has(tu.id)) continue;
-      if (isAskUserQuestionToolUse(tu)) {
-        return { kind: "AskUserQuestion", toolUseId: tu.id, input: tu.input as AskUserQuestionInput };
-      }
-      if (isExitPlanModeToolUse(tu)) {
-        return { kind: "ExitPlanMode", toolUseId: tu.id, input: tu.input as ExitPlanModeInput };
-      }
-    }
-  }
-  return null;
 }
 
 interface NumberedMessage {

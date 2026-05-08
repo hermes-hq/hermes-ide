@@ -42,34 +42,54 @@ export function isAskUserQuestionToolUse(
   return !!block && block.type === "tool_use" && block.name === "AskUserQuestion";
 }
 
-/** Compose the `tool_result` envelope Claude expects in response.
- *  `answers` carries the user's selections; `cancelled: true` signals
- *  the user dismissed the prompt with Esc. */
-export function buildAskAnswerEnvelope(
-  toolUseId: string,
+/** Project the user's answers into the SDK-shaped `updatedInput` record
+ *  the AskUserQuestion tool expects to receive via `canUseTool`.
+ *
+ *  Confirmed against the bundled Claude Code binary
+ *  (`@anthropic-ai/claude-agent-sdk-darwin-arm64/claude` strings):
+ *
+ *    answers     :  Record<questionText, answerString>
+ *                   - single-select  → the chosen option label
+ *                   - multi-select   → comma-joined option labels
+ *                   - "Other"        → the freeform notes text
+ *    annotations :  Record<questionText, { notes?: string }>
+ *                   - present when the user supplied freeform notes
+ *                     (e.g. typed text in the auto "Other" textarea)
+ *
+ *  The SDK then formats its own `tool_result` block via
+ *  `mapToolResultToToolResultBlockParam`; we never write a `tool_result`
+ *  envelope ourselves for AskUserQuestion.  Doing so was the cause of
+ *  the silent "submit does nothing" bug — the SDK was waiting on
+ *  canUseTool's promise, not on a user message. */
+export function buildAskAnswersUpdatedInput(
+  input: AskUserQuestionInput,
   answers: AskAnswer[],
-  opts: { cancelled?: boolean } = {},
-): {
-  type: "user";
-  message: {
-    role: "user";
-    content: Array<{ type: "tool_result"; tool_use_id: string; content: string }>;
+): Record<string, unknown> {
+  const answersByQuestion: Record<string, string> = {};
+  const annotations: Record<string, { notes?: string }> = {};
+
+  for (const ans of answers) {
+    const isOther = ans.selected.length === 1 && ans.selected[0] === "Other";
+    if (isOther) {
+      // "Other" is the auto-injected freeform option — the user's
+      // actual answer lives in `notes`.  Surface it as the answer
+      // string so Claude sees the typed text, not the literal word
+      // "Other".
+      answersByQuestion[ans.question] = ans.notes?.trim() || "Other";
+    } else {
+      answersByQuestion[ans.question] = ans.selected.join(", ");
+    }
+    if (ans.notes && ans.notes.trim() !== "" && !isOther) {
+      annotations[ans.question] = { notes: ans.notes.trim() };
+    }
+  }
+
+  const updated: Record<string, unknown> = {
+    ...input,
+    answers: answersByQuestion,
   };
-} {
-  const payload = opts.cancelled
-    ? { cancelled: true, answers }
-    : { answers };
-  return {
-    type: "user",
-    message: {
-      role: "user",
-      content: [
-        {
-          type: "tool_result",
-          tool_use_id: toolUseId,
-          content: JSON.stringify(payload),
-        },
-      ],
-    },
-  };
+  if (Object.keys(annotations).length > 0) {
+    updated.annotations = annotations;
+  }
+  return updated;
 }

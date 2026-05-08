@@ -199,6 +199,28 @@
   color: var(--ink-tertiary, var(--text-3));
   cursor: pointer;
   transition: color 120ms ease;
+  /* The button text is "Esc cancel" with a literal space.  An
+   * inherited `word-spacing: 0` from a parent flexbox + zero-width
+   * fonts can collapse the space visually.  Force a real word gap. */
+  word-spacing: normal;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.aq-cancel-kbd {
+  /* The "Esc" hint as its own visually-distinct chip — guarantees
+   * it doesn't smush against the word "cancel". */
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+  border: 1px solid var(--rule, var(--border));
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: 1px;
 }
 
 .aq-cancel:hover {

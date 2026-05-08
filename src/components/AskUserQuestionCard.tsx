@@ -5,27 +5,38 @@
  *
  * Renders Claude's structured question as a native UI: radio (single)
  * or checkbox (multi) with auto "Other" textarea for freeform answers.
- * Submit composes a `tool_result` envelope that the parent writes to
- * the bridge's stdin via `sendAgentInput`.
  *
- * Composer suppression while this card is mounted is the parent's job
- * (AgentSessionView) — this card just renders + reports.
+ * The card responds via the `canUseTool` permission channel — `onAllow`
+ * receives an `updatedInput` shaped exactly the way the SDK's
+ * AskUserQuestion tool expects (per the bundled binary's Zod schema).
+ * `onDeny` cancels the tool call and Claude reads "user declined" as
+ * the deny message.  Composer suppression while this card is mounted
+ * is the parent's job (the dispatcher) — this card just renders +
+ * reports its decision.
  */
 import "../styles/components/AskUserQuestionCard.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AskAnswer,
-  AskUserQuestionInput,
-  AskUserQuestionOption,
+import {
+  buildAskAnswersUpdatedInput,
+  type AskAnswer,
+  type AskUserQuestionInput,
+  type AskUserQuestionOption,
 } from "../utils/askUserQuestion";
 
 const OTHER_LABEL = "Other";
 
 interface Props {
-  toolUseId: string;
+  /** The original AskUserQuestion tool input — questions + options. */
   input: AskUserQuestionInput;
-  onSubmit: (answers: AskAnswer[]) => void;
-  onCancel: () => void;
+  /** Caller will turn this into a `_hermes_perm_response` with
+   *  decision `{ behavior: "allow", updatedInput }`.  The SDK then
+   *  formats the user-facing tool_result message itself. */
+  onAllow: (updatedInput: Record<string, unknown>) => void;
+  /** Caller will turn this into `{ behavior: "deny", message }`. */
+  onDeny: () => void;
+  /** Optional id for aria-labeling / tests; not part of the protocol
+   *  anymore.  Defaults to the perm-request id at the call site. */
+  dialogId?: string;
 }
 
 interface PerQuestionState {
@@ -33,23 +44,23 @@ interface PerQuestionState {
   otherText: string;
 }
 
-export function AskUserQuestionCard({ toolUseId, input, onSubmit, onCancel }: Props) {
+export function AskUserQuestionCard({ input, onAllow, onDeny, dialogId }: Props) {
   const questions = input.questions;
   const [state, setState] = useState<PerQuestionState[]>(() =>
     questions.map(() => ({ selected: [], otherText: "" })),
   );
-  const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
+  const onDenyRef = useRef(onDeny);
+  onDenyRef.current = onDeny;
 
-  // Degenerate input: empty questions array → nothing to ask, auto-cancel.
+  // Degenerate input: empty questions array → nothing to ask, auto-deny.
   useEffect(() => {
-    if (questions.length === 0) onCancelRef.current();
+    if (questions.length === 0) onDenyRef.current();
   }, [questions.length]);
 
   // Esc cancels.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancelRef.current();
+      if (e.key === "Escape") onDenyRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -104,11 +115,17 @@ export function AskUserQuestionCard({ toolUseId, input, onSubmit, onCancel }: Pr
       }
       return ans;
     });
-    onSubmit(answers);
+    const updatedInput = buildAskAnswersUpdatedInput(input, answers);
+    onAllow(updatedInput);
   }
 
   return (
-    <div className="aq-card" data-tool-use-id={toolUseId} role="dialog" aria-label="Hermes is waiting for your answer">
+    <div
+      className="aq-card"
+      data-dialog-id={dialogId}
+      role="dialog"
+      aria-label="Hermes is waiting for your answer"
+    >
       <div className="aq-card-bar" aria-hidden="true" />
       <div className="aq-card-body">
         <div className="aq-card-header">HERMES IS WAITING FOR YOU</div>
@@ -128,7 +145,6 @@ export function AskUserQuestionCard({ toolUseId, input, onSubmit, onCancel }: Pr
                     onSelect={() => handleSelect(qi, opt.label, q.multiSelect)}
                   />
                 ))}
-                {/* Auto "Other" option */}
                 <OtherRow
                   qIndex={qi}
                   multi={q.multiSelect}
@@ -154,9 +170,10 @@ export function AskUserQuestionCard({ toolUseId, input, onSubmit, onCancel }: Pr
           <button
             type="button"
             className="aq-cancel"
-            onClick={() => onCancel()}
+            onClick={() => onDeny()}
           >
-            Esc cancel
+            <span className="aq-cancel-kbd" aria-hidden="true">Esc</span>
+            cancel
           </button>
           <button
             type="button"

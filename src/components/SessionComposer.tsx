@@ -231,7 +231,7 @@ export function SessionComposer() {
     } finally {
       inFlightRef.current = false;
     }
-  }, [draft, composerSessionId, pendingImages, dispatch, closeOverlay]);
+  }, [draft, composerSessionId, pendingImages, dispatch, closeOverlay, submitAgentMessage]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (slash && rankedCommands && rankedCommands.length > 0) {

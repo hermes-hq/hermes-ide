@@ -29,7 +29,7 @@ export interface PermResponse {
 
 export type PermissionDecision =
   | { kind: "allow"; updatedInput?: Record<string, unknown>; persist?: string }
-  | { kind: "deny" };
+  | { kind: "deny"; message?: string };
 
 export function isPermRequest(v: unknown): v is PermRequest {
   if (!v || typeof v !== "object") return false;
@@ -56,7 +56,12 @@ export function buildPermResponse(id: string, decision: PermissionDecision): Per
   return {
     type: "_hermes_perm_response",
     id,
-    decision: { behavior: "deny", message: "user declined" },
+    decision: {
+      behavior: "deny",
+      message: decision.message && decision.message.trim() !== ""
+        ? decision.message
+        : "user declined",
+    },
   };
 }
 

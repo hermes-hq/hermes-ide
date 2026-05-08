@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, ReactNode } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentEvent } from "../agent/types";
-import { isInitEvent } from "../agent/types";
+import { isInitEvent, isStateChangedEvent } from "../agent/types";
 
 // Module-level guard to prevent React StrictMode from double-restoring sessions
 let workspaceRestoreStarted = false;
@@ -843,9 +843,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    *  persisted under, so `--resume` finds the conversation. */
   const initListeners = useRef<Map<string, UnlistenFn>>(new Map());
 
-  /** Subscribe to agent-event-{sessionId} and keep `claudeUuids` synced with
-   *  Claude's reported session id.  Idempotent — calling twice for the same
-   *  session is a no-op. */
+  /** Subscribe to agent-event-{sessionId} and keep `claudeUuids` /
+   *  `claudeModels` / `claudePermissionModes` synced with whatever the
+   *  bridge reports.  Two event kinds matter:
+   *
+   *    - `system/init` — emitted on spawn/resume.  Latches the canonical
+   *      Claude-side session id so `--resume` works after exits.
+   *    - `_hermes_state_changed` — emitted by the bridge whenever the
+   *      live runtime model or permissionMode drifts (EnterPlanMode /
+   *      ExitPlanMode / `/model`).  We mirror those into the per-session
+   *      refs so the *next* respawn re-applies the new value rather than
+   *      reverting to a stale UI selection.
+   *
+   *  Idempotent — calling twice for the same session is a no-op. */
   const attachInitListener = useCallback(async (sessionId: string) => {
     if (initListeners.current.has(sessionId)) return;
     try {
@@ -855,14 +865,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const event = msg.payload;
           if (isInitEvent(event) && typeof event.session_id === "string") {
             const prior = claudeUuids.current.get(sessionId);
-            // Print key fields as a string so DevTools doesn't truncate
-            // them as `Object` — easier for production debugging.
             console.log(
               `[init] model=${event.model ?? "?"} session=${event.session_id}` +
               ` prior=${prior ?? "<none>"} changed=${prior !== event.session_id}` +
               ` perm=${(event as { permissionMode?: string }).permissionMode ?? "?"}`,
             );
             claudeUuids.current.set(sessionId, event.session_id);
+            // Init also reports the current model/perm — seed the refs
+            // so the picker's chip reflects spawn-time values immediately
+            // (before any state-changed event has fired).
+            if (typeof event.model === "string") {
+              claudeModels.current.set(sessionId, event.model);
+            }
+            if (typeof event.permissionMode === "string") {
+              claudePermissionModes.current.set(sessionId, event.permissionMode);
+            }
+          } else if (isStateChangedEvent(event)) {
+            console.log(
+              `[state-changed] sid=${sessionId} model=${event.model ?? "?"}` +
+              ` perm=${event.permissionMode ?? "?"}`,
+            );
+            if (typeof event.model === "string") {
+              claudeModels.current.set(sessionId, event.model);
+            }
+            if (typeof event.permissionMode === "string") {
+              claudePermissionModes.current.set(sessionId, event.permissionMode);
+            }
           }
         },
       );
