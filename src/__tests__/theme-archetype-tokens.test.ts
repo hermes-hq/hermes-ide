@@ -103,6 +103,53 @@ describe("themes.css — bespoke per-theme touches", () => {
   });
 });
 
+describe("themes.css — round 2 whole-timeline distinction", () => {
+  it("brass remap selectors target every non-warm theme", () => {
+    // The user-message left bar tracks each theme's accent so every
+    // theme reads as its identity, not the same warm sandstone.
+    // Themes that keep the warm sandstone (designer / sand / rose)
+    // are NOT in this remap.
+    const block = themesCss.match(
+      /Brass remap[\s\S]*?--brass:\s*var\(--accent\)/,
+    );
+    expect(block).not.toBeNull();
+  });
+
+  it("every CRT theme paints scanlines on the conversation surface, not just tool cards", () => {
+    // The repeating-linear-gradient for CRT scanlines must appear
+    // on .agent-session-scroll (the whole conversation surface),
+    // proving the round-2 widening landed.
+    const scope = themesCss.match(
+      /\.agent-session-scroll[\s\S]{0,400}repeating-linear-gradient/,
+    );
+    expect(scope).not.toBeNull();
+  });
+
+  it("editorial-margin family paints paper grain on the conversation surface", () => {
+    const scope = themesCss.match(
+      /\.agent-session-scroll[\s\S]{0,1000}feTurbulence/,
+    );
+    expect(scope).not.toBeNull();
+  });
+
+  it("masthead sweep animation has a reduced-motion guard", () => {
+    expect(themesCss).toMatch(/@keyframes\s+masthead-sweep/);
+    // Reduced-motion guard exists somewhere after the keyframe.
+    const idx = themesCss.indexOf("@keyframes masthead-sweep");
+    expect(idx).toBeGreaterThan(0);
+    const tail = themesCss.slice(idx);
+    expect(tail).toMatch(/prefers-reduced-motion: reduce/);
+  });
+
+  it("turn separators vary per family (CRT thickens, glass fades, editorial softens)", () => {
+    // Each family's turn-rule override targets the .agent-message +
+    // .agent-message[data-role="user"] selector.
+    expect(themesCss).toMatch(/hacker[\s\S]*?\.agent-message \+ \.agent-message\[data-role="user"\]/);
+    expect(themesCss).toMatch(/designer[\s\S]*?\.agent-message \+ \.agent-message\[data-role="user"\]/);
+    expect(themesCss).toMatch(/nightowl[\s\S]*?\.agent-message \+ \.agent-message\[data-role="user"\]/);
+  });
+});
+
 describe("themes.css — defensive token usage", () => {
   it("no archetype rule references an undefined custom property", () => {
     // Pull every var(--…) reference inside the archetype block and
