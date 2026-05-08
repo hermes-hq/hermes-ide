@@ -1,25 +1,28 @@
 // @vitest-environment jsdom
 /**
- * M1a — AskUserQuestion native modal.
+ * M1a — AskUserQuestion native card.
  *
  * Spec: docs/internal/v1-tui-parity-plan.md §2 (M1a) + §7.3.
  * Visual: §8.2.
  *
  * AskUserQuestion is the SDK's interactive-prompt tool.  Claude calls it
  * with a `questions` array; the host (Hermes) renders UI, captures the
- * user's selection, and writes back a `tool_result` envelope on stdin.
- * Without our card, the question shows as a plain tool block and the
- * conversation stalls.
+ * user's selection, and answers the SDK's `canUseTool` callback with an
+ * `updatedInput` that carries the user's `answers` (and optional
+ * `annotations`).  The SDK then formats its own `tool_result` block.
+ *
+ * The card MUST NOT write a `tool_result` envelope itself — that was
+ * the v1 bug: the SDK was waiting on canUseTool's promise, not on a
+ * user message, so the answers were silently dropped.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import {
   isAskUserQuestionToolUse,
-  buildAskAnswerEnvelope,
+  buildAskAnswersUpdatedInput,
   type AskUserQuestionInput,
-  type AskAnswer,
 } from "../utils/askUserQuestion";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard";
 
@@ -65,51 +68,120 @@ describe("isAskUserQuestionToolUse", () => {
   it("aq-1-c: returns false for non-tool_use blocks", () => {
     expect(isAskUserQuestionToolUse({ type: "text", text: "hi" } as never)).toBe(false);
   });
+
+  it("aq-1-d: returns false for null/undefined", () => {
+    expect(isAskUserQuestionToolUse(null)).toBe(false);
+    expect(isAskUserQuestionToolUse(undefined)).toBe(false);
+  });
 });
 
-describe("buildAskAnswerEnvelope (aq-6, aq-10)", () => {
-  it("aq-6: composes tool_result envelope with correct shape", () => {
-    const env = buildAskAnswerEnvelope("tu_1", [
-      { question: "Q1", selected: ["Option A"] },
+// ─── buildAskAnswersUpdatedInput — SDK Zod schema parity ────────────
+
+describe("buildAskAnswersUpdatedInput (aq-6, aq-10) — SDK shape", () => {
+  it("aq-6: single-select answer keyed by question text → option label", () => {
+    const updated = buildAskAnswersUpdatedInput(SAMPLE_INPUT, [
+      { question: "Which approach should we take?", selected: ["Option A"] },
     ]);
-    expect(env).toMatchObject({
-      type: "user",
-      message: {
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: "tu_1",
-            content: expect.any(String),
-          },
-        ],
+    expect(updated).toMatchObject({
+      questions: SAMPLE_INPUT.questions,
+      answers: {
+        "Which approach should we take?": "Option A",
       },
     });
-    // The content is the JSON-stringified answers — Claude reads it back.
-    const parsed = JSON.parse(
-      (env.message.content[0] as { content: string }).content,
-    );
-    expect(parsed.answers[0].selected).toEqual(["Option A"]);
   });
 
-  it("aq-10: serializes answers as [{question, selected, notes?}]", () => {
-    const env = buildAskAnswerEnvelope("tu_1", [
-      { question: "Q1", selected: ["A"], notes: "freeform" },
+  it("aq-6-b: multi-select answers comma-joined per the SDK contract", () => {
+    const input: AskUserQuestionInput = {
+      questions: [
+        {
+          ...SAMPLE_INPUT.questions[0],
+          multiSelect: true,
+        },
+      ],
+    };
+    const updated = buildAskAnswersUpdatedInput(input, [
+      {
+        question: "Which approach should we take?",
+        selected: ["Option A", "Option B"],
+      },
     ]);
-    const parsed = JSON.parse(
-      (env.message.content[0] as { content: string }).content,
-    );
-    expect(parsed.answers).toEqual([
-      { question: "Q1", selected: ["A"], notes: "freeform" },
-    ]);
+    expect(updated.answers).toEqual({
+      "Which approach should we take?": "Option A, Option B",
+    });
   });
 
-  it("aq-9: cancel envelope sets cancelled flag", () => {
-    const env = buildAskAnswerEnvelope("tu_1", [], { cancelled: true });
-    const parsed = JSON.parse(
-      (env.message.content[0] as { content: string }).content,
-    );
-    expect(parsed.cancelled).toBe(true);
+  it("aq-10-a: 'Other' answer surfaces typed notes text, not the literal 'Other'", () => {
+    const updated = buildAskAnswersUpdatedInput(SAMPLE_INPUT, [
+      {
+        question: "Which approach should we take?",
+        selected: ["Other"],
+        notes: "use a different framework",
+      },
+    ]);
+    expect(updated.answers).toEqual({
+      "Which approach should we take?": "use a different framework",
+    });
+    // Whitespace-only notes are NOT used as the answer — fall back to "Other".
+    expect((updated as { annotations?: unknown }).annotations).toBeUndefined();
+  });
+
+  it("aq-10-b: 'Other' with empty notes falls back to literal 'Other'", () => {
+    const updated = buildAskAnswersUpdatedInput(SAMPLE_INPUT, [
+      { question: "Q?", selected: ["Other"], notes: "   " },
+    ]);
+    expect((updated.answers as Record<string, string>)["Q?"]).toBe("Other");
+  });
+
+  it("aq-10-c: notes alongside a selection are emitted as annotations[q].notes", () => {
+    const updated = buildAskAnswersUpdatedInput(SAMPLE_INPUT, [
+      {
+        question: "Q?",
+        selected: ["Option A"],
+        notes: "I'd also accept Option C",
+      },
+    ]);
+    expect((updated as { annotations?: Record<string, { notes: string }> }).annotations).toEqual({
+      "Q?": { notes: "I'd also accept Option C" },
+    });
+  });
+
+  it("aq-14-b: multi-question input keys answers by each question text", () => {
+    const input: AskUserQuestionInput = {
+      questions: [
+        { question: "first?", header: "Q1", multiSelect: false, options: [{ label: "A", description: "" }] },
+        { question: "second?", header: "Q2", multiSelect: true, options: [
+          { label: "X", description: "" },
+          { label: "Y", description: "" },
+        ] },
+      ],
+    };
+    const updated = buildAskAnswersUpdatedInput(input, [
+      { question: "first?", selected: ["A"] },
+      { question: "second?", selected: ["X", "Y"] },
+    ]);
+    expect(updated.answers).toEqual({
+      "first?": "A",
+      "second?": "X, Y",
+    });
+  });
+
+  it("aq-21-a: result has no `cancelled` key — denial goes through perm-response, not updatedInput", () => {
+    const updated = buildAskAnswersUpdatedInput(SAMPLE_INPUT, [
+      { question: "Q?", selected: ["Option A"] },
+    ]);
+    expect(updated).not.toHaveProperty("cancelled");
+  });
+
+  it("aq-21-b: original input keys are preserved (questions array passes through)", () => {
+    const input: AskUserQuestionInput = {
+      ...SAMPLE_INPUT,
+      // @ts-expect-error allow extra keys on input pass-through
+      metadata: { source: "remember" },
+    };
+    const updated = buildAskAnswersUpdatedInput(input, [
+      { question: "Which approach should we take?", selected: ["Option A"] },
+    ]);
+    expect((updated as { metadata?: { source: string } }).metadata).toEqual({ source: "remember" });
   });
 });
 
@@ -121,10 +193,9 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
   it("aq-2: single-select renders as radios with auto Other option", () => {
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={SAMPLE_INPUT}
-        onSubmit={() => {}}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     expect(screen.getByRole("radio", { name: /Option A/i })).toBeInTheDocument();
@@ -135,7 +206,6 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
   it("aq-3: multi-select renders as checkboxes", () => {
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={{
           questions: [
             {
@@ -144,8 +214,8 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
             },
           ],
         }}
-        onSubmit={() => {}}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     expect(screen.getByRole("checkbox", { name: /Option A/i })).toBeInTheDocument();
@@ -153,13 +223,11 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
   });
 
   it("aq-4: 'Other' reveals textarea on selection; submit blocked when empty", () => {
-    const onSubmit = vi.fn();
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={SAMPLE_INPUT}
-        onSubmit={onSubmit}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     const otherRadio = screen.getByRole("radio", { name: /Other/i });
@@ -167,7 +235,6 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
     const textarea = screen.getByRole("textbox");
     expect(textarea).toBeInTheDocument();
 
-    // Submit should be disabled until textarea has content.
     const submit = screen.getByRole("button", { name: /send/i });
     expect(submit).toBeDisabled();
 
@@ -178,7 +245,6 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
   it("aq-5: option with preview renders preview pane when focused", () => {
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={{
           questions: [
             {
@@ -192,41 +258,57 @@ describe("AskUserQuestionCard — render (aq-2, aq-3, aq-4, aq-5)", () => {
             },
           ],
         }}
-        onSubmit={() => {}}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     fireEvent.click(screen.getByRole("radio", { name: /L1/i }));
     expect(screen.getByTestId("aq-preview-pane")).toHaveTextContent("A");
   });
+
+  it("renders dialogId as data-dialog-id for tracing", () => {
+    const { container } = render(
+      <AskUserQuestionCard
+        dialogId="perm-42"
+        input={SAMPLE_INPUT}
+        onAllow={() => {}}
+        onDeny={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-dialog-id="perm-42"]')).not.toBeNull();
+  });
 });
 
-describe("AskUserQuestionCard — submit (aq-6, aq-7, aq-9)", () => {
+// ─── Submit / cancel ─────────────────────────────────────────────────
+
+describe("AskUserQuestionCard — submit invokes onAllow with SDK-shaped updatedInput", () => {
   afterEach(() => cleanup());
 
-  it("aq-6: submit fires onSubmit with composed answers (single-select)", () => {
-    const onSubmit = vi.fn();
+  it("aq-6: single-select calls onAllow with answers Record keyed by question text", () => {
+    const onAllow = vi.fn();
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={SAMPLE_INPUT}
-        onSubmit={onSubmit}
-        onCancel={() => {}}
+        onAllow={onAllow}
+        onDeny={() => {}}
       />,
     );
     fireEvent.click(screen.getByRole("radio", { name: /Option A/i }));
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0]).toEqual([
-      { question: "Which approach should we take?", selected: ["Option A"] },
-    ]);
+
+    expect(onAllow).toHaveBeenCalledTimes(1);
+    const updatedInput = onAllow.mock.calls[0][0] as Record<string, unknown>;
+    expect(updatedInput.answers).toEqual({
+      "Which approach should we take?": "Option A",
+    });
+    // Original input keys are preserved.
+    expect(updatedInput.questions).toEqual(SAMPLE_INPUT.questions);
   });
 
-  it("aq-6-b: submit collects multi-select answers", () => {
-    const onSubmit = vi.fn();
+  it("aq-6-b: multi-select submits comma-joined labels", () => {
+    const onAllow = vi.fn();
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={{
           questions: [
             {
@@ -235,38 +317,69 @@ describe("AskUserQuestionCard — submit (aq-6, aq-7, aq-9)", () => {
             },
           ],
         }}
-        onSubmit={onSubmit}
-        onCancel={() => {}}
+        onAllow={onAllow}
+        onDeny={() => {}}
       />,
     );
     fireEvent.click(screen.getByRole("checkbox", { name: /Option A/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Option B/i }));
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    const answers = onSubmit.mock.calls[0][0] as AskAnswer[];
-    expect(answers[0].selected).toEqual(["Option A", "Option B"]);
+
+    const updated = onAllow.mock.calls[0][0] as { answers: Record<string, string> };
+    expect(updated.answers["Which approach should we take?"]).toBe("Option A, Option B");
   });
 
-  it("aq-9: Esc fires onCancel", () => {
-    const onCancel = vi.fn();
+  it("aq-7: 'Other' with typed text submits the typed text as the answer", () => {
+    const onAllow = vi.fn();
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={SAMPLE_INPUT}
-        onSubmit={() => {}}
-        onCancel={onCancel}
+        onAllow={onAllow}
+        onDeny={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /Other/i }));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "freeform answer" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    const updated = onAllow.mock.calls[0][0] as { answers: Record<string, string> };
+    expect(updated.answers["Which approach should we take?"]).toBe("freeform answer");
+  });
+
+  it("aq-9: Esc fires onDeny", () => {
+    const onDeny = vi.fn();
+    render(
+      <AskUserQuestionCard
+        input={SAMPLE_INPUT}
+        onAllow={() => {}}
+        onDeny={onDeny}
       />,
     );
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onDeny).toHaveBeenCalledTimes(1);
+  });
+
+  it("aq-9-b: cancel button fires onDeny", () => {
+    const onDeny = vi.fn();
+    render(
+      <AskUserQuestionCard
+        input={SAMPLE_INPUT}
+        onAllow={() => {}}
+        onDeny={onDeny}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
   });
 
   it("submit disabled when no selection made (validation guard)", () => {
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={SAMPLE_INPUT}
-        onSubmit={() => {}}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     expect(screen.getByRole("button", { name: /send/i })).toBeDisabled();
@@ -278,23 +391,21 @@ describe("AskUserQuestionCard — submit (aq-6, aq-7, aq-9)", () => {
 describe("AskUserQuestionCard — failure modes (aq-13..aq-21)", () => {
   afterEach(() => cleanup());
 
-  it("aq-13: empty questions array → onCancel auto-fires (degenerate input)", () => {
-    const onCancel = vi.fn();
+  it("aq-13: empty questions array → onDeny auto-fires (degenerate input)", () => {
+    const onDeny = vi.fn();
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={{ questions: [] }}
-        onSubmit={() => {}}
-        onCancel={onCancel}
+        onAllow={() => {}}
+        onDeny={onDeny}
       />,
     );
-    expect(onCancel).toHaveBeenCalled();
+    expect(onDeny).toHaveBeenCalled();
   });
 
   it("aq-14: 3-question input renders all three (legend + question text per question)", () => {
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={{
           questions: [
             { question: "first?", header: "Q1", multiSelect: false, options: [{ label: "A", description: "" }] },
@@ -302,8 +413,8 @@ describe("AskUserQuestionCard — failure modes (aq-13..aq-21)", () => {
             { question: "third?", header: "Q3", multiSelect: false, options: [{ label: "A", description: "" }] },
           ],
         }}
-        onSubmit={() => {}}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     expect(screen.getByText("Q1")).toBeInTheDocument();
@@ -317,7 +428,6 @@ describe("AskUserQuestionCard — failure modes (aq-13..aq-21)", () => {
   it("aq-17: empty multi-select submit blocked (no selection, no Other content)", () => {
     render(
       <AskUserQuestionCard
-        toolUseId="tu_1"
         input={{
           questions: [
             {
@@ -326,35 +436,30 @@ describe("AskUserQuestionCard — failure modes (aq-13..aq-21)", () => {
             },
           ],
         }}
-        onSubmit={() => {}}
-        onCancel={() => {}}
+        onAllow={() => {}}
+        onDeny={() => {}}
       />,
     );
     expect(screen.getByRole("button", { name: /send/i })).toBeDisabled();
   });
 
-  it("aq-21: tool_result envelope round-trips (snapshot-pinned shape)", () => {
-    const env = buildAskAnswerEnvelope("tu_42", [
-      { question: "Q1", selected: ["A"] },
-      { question: "Q2", selected: ["X", "Y"], notes: "freeform" },
+  it("aq-21: full multi-question round-trip produces SDK-canonical Record<string,string>", () => {
+    const input: AskUserQuestionInput = {
+      questions: [
+        { question: "a?", header: "A", multiSelect: false, options: [{ label: "x", description: "" }] },
+        { question: "b?", header: "B", multiSelect: true, options: [
+          { label: "y", description: "" },
+          { label: "z", description: "" },
+        ] },
+      ],
+    };
+    const updated = buildAskAnswersUpdatedInput(input, [
+      { question: "a?", selected: ["x"] },
+      { question: "b?", selected: ["y", "z"] },
     ]);
-    expect(env).toEqual({
-      type: "user",
-      message: {
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: "tu_42",
-            content: JSON.stringify({
-              answers: [
-                { question: "Q1", selected: ["A"] },
-                { question: "Q2", selected: ["X", "Y"], notes: "freeform" },
-              ],
-            }),
-          },
-        ],
-      },
+    expect(updated.answers).toEqual({
+      "a?": "x",
+      "b?": "y, z",
     });
   });
 });

@@ -20,11 +20,32 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentEvent, InitEvent } from "./types";
-import { isInitEvent } from "./types";
+import { isInitEvent, isStateChangedEvent } from "./types";
 
-/** Pure reducer step — exported for unit testing. */
+/** Pure reducer step — exported for unit testing.
+ *
+ *  Two events feed this reducer:
+ *
+ *    1. `system/init` (fresh from the SDK on spawn / resume) — wholly
+ *       replaces the cached init.
+ *    2. `_hermes_state_changed` (bridge-internal) — patches the cached
+ *       init's `model` / `permissionMode` fields when Claude's runtime
+ *       values drift mid-session (e.g. EnterPlanMode flips the mode
+ *       without a respawn).  Ignored when no init has been seen yet —
+ *       we don't want to fabricate an init from a partial state.
+ */
 export function reduceInit(prev: InitEvent | null, event: AgentEvent): InitEvent | null {
-  return isInitEvent(event) ? event : prev;
+  if (isInitEvent(event)) return event;
+  if (isStateChangedEvent(event)) {
+    if (!prev) return prev;
+    const next = { ...prev };
+    if (typeof event.model === "string") next.model = event.model;
+    if (typeof event.permissionMode === "string") {
+      next.permissionMode = event.permissionMode;
+    }
+    return next;
+  }
+  return prev;
 }
 
 export function useAgentInit(sessionId: string | null | undefined): InitEvent | null {
@@ -38,18 +59,9 @@ export function useAgentInit(sessionId: string | null | undefined): InitEvent | 
 
     listen<AgentEvent>(`agent-event-${sessionId}`, (msg) => {
       const ev = msg.payload;
-      if (isInitEvent(ev)) {
-        // Each agent turn re-emits an init event with the current model /
-        // permission mode / slash commands — keep replacing so the composer
-        // chips track Claude's reality.
-        // Visible debug: prints model/permission as plain strings so
-        // DevTools doesn't truncate as `Object`.
-        console.log(
-          `[useAgentInit] sid=${sessionId} model=${ev.model ?? "?"}` +
-          ` perm=${(ev as { permissionMode?: string }).permissionMode ?? "?"}`,
-        );
-        setInit(ev);
-      }
+      // Funnel both event kinds through the pure reducer so the
+      // patch-on-state-changed semantics are testable.
+      setInit((prev) => reduceInit(prev, ev));
     }).then((u) => {
       if (cancelled) {
         u();

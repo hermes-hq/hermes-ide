@@ -34,9 +34,7 @@ export async function sendAgentEnvelopeWithRevive(
     return;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (!/not found/i.test(message)) {
-      throw err;
-    }
+    if (!/not found/i.test(message)) throw err;
     const ok = await deps.respawn(sessionId);
     if (!ok) {
       throw new Error("Could not revive Claude subprocess to deliver tool response");

@@ -179,4 +179,42 @@
 
   /* Font features for mono — ligatures + tabular numerics */
   --font-mono-features: "calt", "liga", "ss01", "tnum";
+
+  /* ─── Archetype paint tokens ──────────────────────────────────
+   * The agent timeline reads these to render its tool cards, turn
+   * separators, and surface texture.  Each theme picks an
+   * archetype by overriding these tokens — see themes.css.
+   *
+   * Six rendering archetypes, each expressed entirely in tokens:
+   *   - paper-cards     solid card with optional shadow (default).
+   *   - glass-cards     translucent card + backdrop-blur.
+   *   - hairline-rules  no card; just thin separators.
+   *   - crt-blocks      sharp box with phosphor glow / scanlines.
+   *   - ribbon-rails    no card; left-side accent rail per turn.
+   *   - editorial-margin  paper card, generous white space, low
+   *                       chrome (warm light themes).
+   *
+   * Defaults below are paper-cards on the dark `:root` theme.  The
+   * agent CSS does NOT branch on theme — it just reads the tokens.
+   * ──────────────────────────────────────────────────────────── */
+
+  /* Tool / turn card chrome */
+  --tool-card-bg: var(--bg-1);
+  --tool-card-border: 1px solid var(--rule-strong, var(--rule));
+  --tool-card-radius: var(--radius);
+  --tool-card-shadow: none;
+  --tool-card-backdrop: none;
+  --tool-card-pad: 0; /* extra inner padding above the per-block padding */
+
+  /* Conversation surface effects (per theme) */
+  --surface-scanlines-opacity: 0;
+  --surface-grain-opacity: 0;
+  --surface-vignette: none;
+
+  /* Turn separator — the rule between turns.  Themes can replace
+   * with a thicker, bevelled, or color-shifted line. */
+  --turn-separator: 1px solid var(--rule);
+
+  /* Composer / footer chrome (used by the result footer + exit notice) */
+  --result-footer-border: 1px dashed var(--rule);
 }
