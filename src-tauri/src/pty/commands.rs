@@ -2275,7 +2275,11 @@ pub fn update_session_label(
     db.update_session_label(&session_id, &label)?;
     let _ = app.emit(
         "session-metadata-updated",
-        SessionMetadataUpdate { session_id, label: Some(label), ..Default::default() },
+        SessionMetadataUpdate {
+            session_id,
+            label: Some(label),
+            ..Default::default()
+        },
     );
     Ok(())
 }
@@ -2305,7 +2309,11 @@ pub fn update_session_description(
     db.update_session_description(&session_id, &description)?;
     let _ = app.emit(
         "session-metadata-updated",
-        SessionMetadataUpdate { session_id, description: Some(description), ..Default::default() },
+        SessionMetadataUpdate {
+            session_id,
+            description: Some(description),
+            ..Default::default()
+        },
     );
     Ok(())
 }
@@ -2335,7 +2343,11 @@ pub fn update_session_color(
     db.update_session_color(&session_id, &color)?;
     let _ = app.emit(
         "session-metadata-updated",
-        SessionMetadataUpdate { session_id, color: Some(color), ..Default::default() },
+        SessionMetadataUpdate {
+            session_id,
+            color: Some(color),
+            ..Default::default()
+        },
     );
     Ok(())
 }

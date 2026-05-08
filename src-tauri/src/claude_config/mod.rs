@@ -16,11 +16,11 @@
 //! `safe_memory_write`, which canonicalises the path against an
 //! allowlist to refuse traversal exploits.
 
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use tauri::AppHandle;
 
 // ─── Atomic JSON writer ────────────────────────────────────────────
@@ -64,7 +64,8 @@ where
         .map_err(|e| format!("open tmp: {e}"))?;
     f.write_all(pretty.as_bytes())
         .map_err(|e| format!("write tmp: {e}"))?;
-    f.write_all(b"\n").map_err(|e| format!("write tmp newline: {e}"))?;
+    f.write_all(b"\n")
+        .map_err(|e| format!("write tmp newline: {e}"))?;
     f.sync_all().map_err(|e| format!("fsync tmp: {e}"))?;
     drop(f);
 
@@ -119,9 +120,9 @@ pub fn write_mcp_server(name: String, spec: Value) -> Result<(), String> {
         let entry = root
             .entry("mcpServers")
             .or_insert_with(|| Value::Object(Map::new()));
-        let map = entry.as_object_mut().ok_or_else(|| {
-            "mcpServers is not an object — refusing to overwrite".to_string()
-        })?;
+        let map = entry
+            .as_object_mut()
+            .ok_or_else(|| "mcpServers is not an object — refusing to overwrite".to_string())?;
         map.insert(validated_name.to_string(), spec.clone());
         Ok(())
     })
@@ -147,7 +148,10 @@ fn validate_server_name(name: &str) -> Result<&str, String> {
     if trimmed.is_empty() {
         return Err("name is required".into());
     }
-    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ') {
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ')
+    {
         return Err("name contains invalid characters".into());
     }
     Ok(trimmed)
@@ -177,7 +181,8 @@ pub fn write_memory_file(path: String, content: String) -> Result<(), String> {
     f.write_all(content.as_bytes())
         .map_err(|e| format!("write tmp: {e}"))?;
     if !content.ends_with('\n') {
-        f.write_all(b"\n").map_err(|e| format!("trailing newline: {e}"))?;
+        f.write_all(b"\n")
+            .map_err(|e| format!("trailing newline: {e}"))?;
     }
     f.sync_all().map_err(|e| format!("fsync: {e}"))?;
     drop(f);
@@ -219,8 +224,8 @@ fn canonicalise_memory_path(path: &str) -> Result<PathBuf, String> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PermissionRule {
     pub pattern: String,
-    pub source: String,  // "user" | "project"
-    pub kind: String,    // "allow" | "deny"
+    pub source: String, // "user" | "project"
+    pub kind: String,   // "allow" | "deny"
 }
 
 /// Read both user and project settings, return merged rule list.
@@ -241,8 +246,8 @@ fn read_rules_at(path: &Path, source: &str) -> Result<Vec<PermissionRule>, Strin
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let json: Value = serde_json::from_slice(&bytes)
-        .map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let json: Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
     let perms = json
         .get("permissions")
         .and_then(|v| v.as_object())
@@ -329,7 +334,8 @@ mod tests {
         atomic_json_write(&p, |root| {
             root.insert("key".into(), Value::String("v".into()));
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
         let content = fs::read_to_string(&p).unwrap();
         assert!(content.contains("\"key\": \"v\""));
     }
@@ -342,7 +348,8 @@ mod tests {
         atomic_json_write(&p, |root| {
             root.insert("c".into(), Value::Bool(true));
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(v["a"], Value::Number(1.into()));
         assert_eq!(v["b"], Value::String("keep".into()));
@@ -602,7 +609,9 @@ mod prewarm_tests {
         let got = read_static_memory_paths(Some(proj.path().to_string_lossy().into_owned()));
         assert_eq!(got.len(), 2);
         assert!(got.iter().any(|p| p.ends_with("/.claude/CLAUDE.md")));
-        assert!(got.iter().any(|p| p.ends_with("/CLAUDE.md") && !p.contains(".claude")));
+        assert!(got
+            .iter()
+            .any(|p| p.ends_with("/CLAUDE.md") && !p.contains(".claude")));
     }
 
     #[test]

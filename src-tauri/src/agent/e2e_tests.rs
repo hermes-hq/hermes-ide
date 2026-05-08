@@ -46,11 +46,7 @@ fn isolated_workdir(prefix: &str) -> (String, tempfile::TempDir) {
         .prefix(&format!("h-ide-e2e-{prefix}-"))
         .tempdir()
         .expect("create tempdir");
-    let path = td
-        .path()
-        .to_str()
-        .expect("tempdir path to_str")
-        .to_string();
+    let path = td.path().to_str().expect("tempdir path to_str").to_string();
     (path, td)
 }
 
@@ -67,10 +63,10 @@ struct E2eOutcome {
 
 impl E2eOutcome {
     fn init(&self) -> Option<&serde_json::Value> {
-        self.events
-            .iter()
-            .find(|e| e.get("type").and_then(|v| v.as_str()) == Some("system")
-                && e.get("subtype").and_then(|v| v.as_str()) == Some("init"))
+        self.events.iter().find(|e| {
+            e.get("type").and_then(|v| v.as_str()) == Some("system")
+                && e.get("subtype").and_then(|v| v.as_str()) == Some("init")
+        })
     }
 
     fn last_assistant_text(&self) -> Option<String> {
@@ -89,7 +85,11 @@ impl E2eOutcome {
                 }
             }
         }
-        if out.is_empty() { None } else { Some(out) }
+        if out.is_empty() {
+            None
+        } else {
+            Some(out)
+        }
     }
 
     fn result(&self) -> Option<&serde_json::Value> {
@@ -148,8 +148,7 @@ async fn run_one_turn_inner(
             return Err(format!("bridge not found at {}", bridge.display()));
         }
         let mut c = Command::new("node");
-        c.arg(&bridge)
-            .args(["--working-dir", working_dir]);
+        c.arg(&bridge).args(["--working-dir", working_dir]);
         if let Some(state_path) = hermes_state_path {
             c.args(["--hermes-state-path", state_path]);
         }
@@ -187,8 +186,8 @@ async fn run_one_turn_inner(
             "content": [{ "type": "text", "text": user_prompt }]
         }
     });
-    let mut line = serde_json::to_vec(&envelope)
-        .map_err(|e| format!("serialize user envelope: {}", e))?;
+    let mut line =
+        serde_json::to_vec(&envelope).map_err(|e| format!("serialize user envelope: {}", e))?;
     line.push(b'\n');
     stdin
         .write_all(&line)
@@ -227,8 +226,12 @@ async fn run_one_turn_inner(
         .map_err(|_| "claude turn timed out after 120s".to_string())?
         .map_err(|e| format!("wait failed: {}", e))?;
 
-    let events = stdout_handle.await.map_err(|e| format!("stdout join: {}", e))?;
-    let stderr_text = stderr_handle.await.map_err(|e| format!("stderr join: {}", e))?;
+    let events = stdout_handle
+        .await
+        .map_err(|e| format!("stdout join: {}", e))?;
+    let stderr_text = stderr_handle
+        .await
+        .map_err(|e| format!("stderr join: {}", e))?;
 
     Ok(E2eOutcome {
         events,
@@ -310,8 +313,8 @@ async fn run_multi_turn(
                 "content": [{ "type": "text", "text": prompt }]
             }
         });
-        let mut line = serde_json::to_vec(&envelope)
-            .map_err(|e| format!("serialize user envelope: {}", e))?;
+        let mut line =
+            serde_json::to_vec(&envelope).map_err(|e| format!("serialize user envelope: {}", e))?;
         line.push(b'\n');
         stdin
             .write_all(&line)
@@ -332,7 +335,11 @@ async fn run_multi_turn(
                 break;
             }
         }
-        outcomes.push(E2eOutcome { events, stderr: String::new(), exit_code: None });
+        outcomes.push(E2eOutcome {
+            events,
+            stderr: String::new(),
+            exit_code: None,
+        });
     }
 
     // Close stdin to signal EOF; bridge should exit cleanly.
@@ -377,7 +384,10 @@ fn assert_clean_turn(out: &E2eOutcome, ctx: &str) {
             ctx, out.stderr, out.events
         )
     });
-    let is_error = result.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+    let is_error = result
+        .get("is_error")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     assert!(
         !is_error,
         "[{}] result.is_error=true; result={:#?}; stderr={:?}",
@@ -439,7 +449,7 @@ async fn e2e_resume_continues_conversation() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let t2 = run_one_turn(
         &plan2.args,
@@ -490,7 +500,7 @@ async fn e2e_fork_with_model_swap_takes_effect() {
         None,
         None,
         &[],
- true, // <- fork
+        true, // <- fork
     );
     let t2 = run_one_turn(
         &plan2.args,
@@ -543,7 +553,7 @@ async fn e2e_fork_with_permission_mode_swap_takes_effect() {
         Some("plan"),
         None,
         &[],
-    true,
+        true,
     );
     let t2 = run_one_turn(&plan2.args, &plan2.working_dir, "Reply 'ok'.")
         .await
@@ -582,10 +592,23 @@ async fn e2e_fork_with_user_message_persists_for_later_resume() {
 
     // Step 1: real conversation, gets persisted.
     let sid_initial = uuid::Uuid::new_v4().to_string();
-    let plan = build_spawn_args(&sid_initial, &project_dir, None, None, None, None, &[], false);
-    let t1 = run_one_turn(&plan.args, &plan.working_dir, "remember: ammeter. reply 'ok'.")
-        .await
-        .expect("step 1");
+    let plan = build_spawn_args(
+        &sid_initial,
+        &project_dir,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        false,
+    );
+    let t1 = run_one_turn(
+        &plan.args,
+        &plan.working_dir,
+        "remember: ammeter. reply 'ok'.",
+    )
+    .await
+    .expect("step 1");
     assert_clean_turn(&t1, "fix-step-1");
     let prior_session = t1
         .init()
@@ -607,7 +630,7 @@ async fn e2e_fork_with_user_message_persists_for_later_resume() {
         None,
         None,
         &[],
-    true,
+        true,
     );
     let t2 = run_one_turn(
         &plan_fork.args,
@@ -634,16 +657,17 @@ async fn e2e_fork_with_user_message_persists_for_later_resume() {
         None,
         None,
         &[],
-    false,
+        false,
     );
-    let t3 = run_one_turn(&plan_resume.args, &plan_resume.working_dir, "still know it?")
-        .await
-        .expect("step 3");
+    let t3 = run_one_turn(
+        &plan_resume.args,
+        &plan_resume.working_dir,
+        "still know it?",
+    )
+    .await
+    .expect("step 3");
     assert_clean_turn(&t3, "fix-step-3-resume-after-real-fork");
-    let answer = t3
-        .last_assistant_text()
-        .unwrap_or_default()
-        .to_lowercase();
+    let answer = t3.last_assistant_text().unwrap_or_default().to_lowercase();
     assert!(
         answer.contains("ammeter"),
         "post-fork resume must remember; got {:?}; stderr={:?}",
@@ -672,10 +696,23 @@ async fn e2e_fork_without_user_message_breaks_subsequent_resume() {
 
     // Step 1: real conversation, gets persisted.
     let sid_initial = uuid::Uuid::new_v4().to_string();
-    let plan = build_spawn_args(&sid_initial, &project_dir, None, None, None, None, &[], false);
-    let t1 = run_one_turn(&plan.args, &plan.working_dir, "remember: galvanometer. reply 'ok'.")
-        .await
-        .expect("step 1");
+    let plan = build_spawn_args(
+        &sid_initial,
+        &project_dir,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        false,
+    );
+    let t1 = run_one_turn(
+        &plan.args,
+        &plan.working_dir,
+        "remember: galvanometer. reply 'ok'.",
+    )
+    .await
+    .expect("step 1");
     assert_clean_turn(&t1, "fork-empty-step-1");
     let prior_session = t1
         .init()
@@ -696,7 +733,7 @@ async fn e2e_fork_without_user_message_breaks_subsequent_resume() {
         None,
         None,
         &[],
-    true,
+        true,
     );
     let mut cmd = tokio::process::Command::new("claude");
     cmd.args(&plan_fork.args)
@@ -707,13 +744,10 @@ async fn e2e_fork_without_user_message_breaks_subsequent_resume() {
         .kill_on_drop(true);
     let mut child = cmd.spawn().expect("spawn fork");
     drop(child.stdin.take()); // EOF immediately — no user message
-    let status = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        child.wait(),
-    )
-    .await
-    .expect("fork exit timeout")
-    .expect("fork wait");
+    let status = tokio::time::timeout(std::time::Duration::from_secs(60), child.wait())
+        .await
+        .expect("fork exit timeout")
+        .expect("fork wait");
     eprintln!("[fork-empty] empty fork exited with: {:?}", status);
 
     // Step 3: try to --resume the fork uuid.  This is where production
@@ -727,7 +761,7 @@ async fn e2e_fork_without_user_message_breaks_subsequent_resume() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let resume = run_one_turn(
         &plan_resume.args,
@@ -744,7 +778,10 @@ async fn e2e_fork_without_user_message_breaks_subsequent_resume() {
             .to_lowercase()
             .contains("no conversation found");
 
-    eprintln!("[fork-empty] resume exit={:?} stderr={:?}", resume.exit_code, resume.stderr);
+    eprintln!(
+        "[fork-empty] resume exit={:?} stderr={:?}",
+        resume.exit_code, resume.stderr
+    );
 
     // We expect this to currently fail (the bug); the assertion proves it.
     // After the fix, this test will need to be flipped to expect SUCCESS.
@@ -767,10 +804,23 @@ async fn e2e_full_production_lifecycle() {
 
     // ── Step 1: initial spawn + first user msg ───────────────────────
     let sid_initial = uuid::Uuid::new_v4().to_string();
-    let plan = build_spawn_args(&sid_initial, &project_dir, None, None, None, None, &[], false);
-    let t1 = run_one_turn(&plan.args, &plan.working_dir, "remember: voltmeter. reply 'ok'.")
-        .await
-        .expect("step 1");
+    let plan = build_spawn_args(
+        &sid_initial,
+        &project_dir,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        false,
+    );
+    let t1 = run_one_turn(
+        &plan.args,
+        &plan.working_dir,
+        "remember: voltmeter. reply 'ok'.",
+    )
+    .await
+    .expect("step 1");
     assert_clean_turn(&t1, "lifecycle-step-1-initial");
     let mut canonical = t1
         .init()
@@ -789,7 +839,7 @@ async fn e2e_full_production_lifecycle() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let t2 = run_one_turn(&plan.args, &plan.working_dir, "what was it? one word.")
         .await
@@ -813,7 +863,7 @@ async fn e2e_full_production_lifecycle() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let t3 = run_one_turn(&plan.args, &plan.working_dir, "thanks. reply 'ok'.")
         .await
@@ -830,7 +880,7 @@ async fn e2e_full_production_lifecycle() {
         None,
         None,
         &[],
-    true,
+        true,
     );
     let t4 = run_one_turn(&plan.args, &plan.working_dir, "still know the codeword?")
         .await
@@ -860,11 +910,15 @@ async fn e2e_full_production_lifecycle() {
         None,
         None,
         &[],
-    false,
+        false,
     );
-    let t5 = run_one_turn(&plan.args, &plan.working_dir, "what was the codeword? one word.")
-        .await
-        .expect("step 5");
+    let t5 = run_one_turn(
+        &plan.args,
+        &plan.working_dir,
+        "what was the codeword? one word.",
+    )
+    .await
+    .expect("step 5");
     assert_clean_turn(&t5, "lifecycle-step-5-resume-after-fork");
     assert!(
         t5.last_assistant_text()
@@ -884,7 +938,7 @@ async fn e2e_full_production_lifecycle() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let t6 = run_one_turn(&plan.args, &plan.working_dir, "still ok?")
         .await
@@ -906,10 +960,23 @@ async fn e2e_fork_then_resume_the_fork() {
 
     // Turn 1 — initial spawn.
     let sid_initial = uuid::Uuid::new_v4().to_string();
-    let plan1 = build_spawn_args(&sid_initial, &project_dir, None, None, None, None, &[], false);
-    let t1 = run_one_turn(&plan1.args, &plan1.working_dir, "remember: telegraph. reply 'ok'.")
-        .await
-        .expect("turn 1");
+    let plan1 = build_spawn_args(
+        &sid_initial,
+        &project_dir,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        false,
+    );
+    let t1 = run_one_turn(
+        &plan1.args,
+        &plan1.working_dir,
+        "remember: telegraph. reply 'ok'.",
+    )
+    .await
+    .expect("turn 1");
     assert_clean_turn(&t1, "fork-resume-turn-1");
     let prior_session = t1
         .init()
@@ -928,11 +995,15 @@ async fn e2e_fork_then_resume_the_fork() {
         None,
         None,
         &[],
- true, // fork
+        true, // fork
     );
-    let t2 = run_one_turn(&plan2.args, &plan2.working_dir, "what was the codeword? one word.")
-        .await
-        .expect("turn 2 fork");
+    let t2 = run_one_turn(
+        &plan2.args,
+        &plan2.working_dir,
+        "what was the codeword? one word.",
+    )
+    .await
+    .expect("turn 2 fork");
     assert_clean_turn(&t2, "fork-resume-turn-2");
 
     // What did Claude actually persist this fork under?
@@ -960,16 +1031,13 @@ async fn e2e_fork_then_resume_the_fork() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let t3 = run_one_turn(&plan3.args, &plan3.working_dir, "still remember? one word.")
         .await
         .unwrap_or_else(|e| panic!("turn 3 run: {e}"));
     assert_clean_turn(&t3, "fork-resume-turn-3");
-    let answer = t3
-        .last_assistant_text()
-        .unwrap_or_default()
-        .to_lowercase();
+    let answer = t3.last_assistant_text().unwrap_or_default().to_lowercase();
     assert!(
         answer.contains("telegraph"),
         "post-fork resume forgot the codeword; got {:?}; stderr={:?}",
@@ -1000,7 +1068,16 @@ async fn e2e_plain_resume_after_fork_reports_correct_model_in_init() {
 
     // Step 1: initial spawn (account default model).
     let sid_initial = uuid::Uuid::new_v4().to_string();
-    let plan = build_spawn_args(&sid_initial, &project_dir, None, None, None, None, &[], false);
+    let plan = build_spawn_args(
+        &sid_initial,
+        &project_dir,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        false,
+    );
     let t1 = run_one_turn(&plan.args, &plan.working_dir, "say 'ok'.")
         .await
         .expect("step 1");
@@ -1030,7 +1107,7 @@ async fn e2e_plain_resume_after_fork_reports_correct_model_in_init() {
         None,
         None,
         &[],
-    true,
+        true,
     );
     let t2 = run_one_turn(&plan.args, &plan.working_dir, "now reply 'fine'.")
         .await
@@ -1066,7 +1143,7 @@ async fn e2e_plain_resume_after_fork_reports_correct_model_in_init() {
         None,
         None,
         &[],
-    false,
+        false,
     );
     let t3 = run_one_turn(&plan.args, &plan.working_dir, "still ok? reply 'ok'.")
         .await
@@ -1106,20 +1183,10 @@ async fn e2e_add_dir_grants_extra_project_access() {
 
     // Plant a sentinel file in the extra dir.
     let sentinel_path = format!("{extra}/sentinel.txt");
-    std::fs::write(&sentinel_path, "the secret password is rheostat\n")
-        .expect("write sentinel");
+    std::fs::write(&sentinel_path, "the secret password is rheostat\n").expect("write sentinel");
 
     let sid = uuid::Uuid::new_v4().to_string();
-    let plan = build_spawn_args(
-        &sid,
-        &cwd,
-        None,
-        None,
-        None,
-        None,
-        &[extra.clone()],
-        false,
-    );
+    let plan = build_spawn_args(&sid, &cwd, None, None, None, None, &[extra.clone()], false);
 
     // Quick sanity: argv should carry --add-dir <extra>.
     let argv = plan.args.join(" ");
@@ -1138,10 +1205,7 @@ async fn e2e_add_dir_grants_extra_project_access() {
         .expect("add-dir turn");
     assert_clean_turn(&out, "add-dir");
 
-    let answer = out
-        .last_assistant_text()
-        .unwrap_or_default()
-        .to_lowercase();
+    let answer = out.last_assistant_text().unwrap_or_default().to_lowercase();
     assert!(
         answer.contains("rheostat"),
         "Claude with --add-dir should be able to read the sentinel; got {:?}; stderr={:?}",
@@ -1164,15 +1228,7 @@ async fn e2e_add_dir_grants_extra_project_access() {
 async fn e2e_effort_flag_accepted() {
     for level in ["low", "medium", "high", "xhigh", "max"] {
         let sid = uuid::Uuid::new_v4().to_string();
-        let plan = build_spawn_args(
-            &sid,
-            "/tmp",
-            None,
-            None,
-            None,
-            Some(level), &[],
-            false,
-        );
+        let plan = build_spawn_args(&sid, "/tmp", None, None, None, Some(level), &[], false);
         let out = run_one_turn(&plan.args, &plan.working_dir, "Reply 'ok'.")
             .await
             .unwrap_or_else(|e| panic!("effort={} run failed: {}", level, e));
@@ -1181,9 +1237,7 @@ async fn e2e_effort_flag_accepted() {
         // only fail on hard errors like "unknown value" or "invalid".
         let lc = out.stderr.to_lowercase();
         assert!(
-            !lc.contains("invalid")
-                && !lc.contains("unknown")
-                && !lc.contains("not allowed"),
+            !lc.contains("invalid") && !lc.contains("unknown") && !lc.contains("not allowed"),
             "effort={} produced an error: {:?}",
             level,
             out.stderr,
@@ -1262,7 +1316,9 @@ async fn e2e_hermes_mcp_reads_ide_state() {
         let mut events: Vec<serde_json::Value> = Vec::new();
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(l)) = lines.next_line().await {
-            if l.trim().is_empty() { continue; }
+            if l.trim().is_empty() {
+                continue;
+            }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&l) {
                 events.push(v);
             }
@@ -1285,7 +1341,11 @@ async fn e2e_hermes_mcp_reads_ide_state() {
         .expect("bridge wait");
     let events = stdout_h.await.expect("stdout join");
     let stderr_text = stderr_h.await.unwrap_or_default();
-    let outcome = E2eOutcome { events, stderr: stderr_text, exit_code: Some(0) };
+    let outcome = E2eOutcome {
+        events,
+        stderr: stderr_text,
+        exit_code: Some(0),
+    };
     assert_clean_turn(&outcome, "mcp-state");
 
     // Init must list our `hermes` server as connected.
@@ -1295,13 +1355,14 @@ async fn e2e_hermes_mcp_reads_ide_state() {
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-    let hermes_server = mcp_servers.iter().find(|s| {
-        s.get("name").and_then(|v| v.as_str()) == Some("hermes")
-    });
+    let hermes_server = mcp_servers
+        .iter()
+        .find(|s| s.get("name").and_then(|v| v.as_str()) == Some("hermes"));
     assert!(
         hermes_server.is_some(),
         "init.mcp_servers should include hermes; got {:?}; stderr={:?}",
-        mcp_servers, outcome.stderr,
+        mcp_servers,
+        outcome.stderr,
     );
 
     // Claude's reply must include the sentinel from the state file.
@@ -1309,7 +1370,9 @@ async fn e2e_hermes_mcp_reads_ide_state() {
     assert!(
         answer.contains(sentinel),
         "expected MCP-tool-driven answer to mention {:?}; got {:?}; stderr={:?}",
-        sentinel, answer, outcome.stderr,
+        sentinel,
+        answer,
+        outcome.stderr,
     );
 }
 
@@ -1345,7 +1408,8 @@ async fn e2e_self_reports_runtime() {
     assert!(
         answer.contains("haiku"),
         "Claude should report the user-picked model; got {:?}; stderr={:?}",
-        answer, outcomes[0].stderr,
+        answer,
+        outcomes[0].stderr,
     );
 }
 
@@ -1387,15 +1451,32 @@ async fn e2e_long_lived_bridge_multi_turn() {
         // Init only fires on turn 1 (the bridge stays alive — no re-init
         // after that).  But every turn must have a result.
         let ctx = format!("multi-turn-{}", i + 1);
-        assert!(out.exit_code == Some(0) || out.exit_code.is_none(),
-            "[{}] unexpected exit {:?}; stderr={:?}", ctx, out.exit_code, out.stderr);
+        assert!(
+            out.exit_code == Some(0) || out.exit_code.is_none(),
+            "[{}] unexpected exit {:?}; stderr={:?}",
+            ctx,
+            out.exit_code,
+            out.stderr
+        );
         let result = out.result().unwrap_or_else(|| {
-            panic!("[{}] no result event; events={:?}; stderr={:?}",
-                ctx, out.events, out.stderr)
+            panic!(
+                "[{}] no result event; events={:?}; stderr={:?}",
+                ctx, out.events, out.stderr
+            )
         });
-        let is_error = result.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
-        assert!(!is_error, "[{}] result.is_error=true; result={}", ctx, result);
-        let result_sid = result.get("session_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let is_error = result
+            .get("is_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        assert!(
+            !is_error,
+            "[{}] result.is_error=true; result={}",
+            ctx, result
+        );
+        let result_sid = result
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         assert_eq!(
             result_sid, canonical,
             "[{}] all turns must share the canonical session id (bridge stayed alive)",
@@ -1431,9 +1512,13 @@ async fn e2e_six_turn_resume_chain() {
     // Turn 1 — initial spawn, captures Claude's canonical session id.
     let sid = uuid::Uuid::new_v4().to_string();
     let plan1 = build_spawn_args(&sid, &project_dir, None, None, None, None, &[], false);
-    let t1 = run_one_turn(&plan1.args, &plan1.working_dir, "remember the codeword: oscilloscope. reply 'ok'.")
-        .await
-        .expect("turn 1");
+    let t1 = run_one_turn(
+        &plan1.args,
+        &plan1.working_dir,
+        "remember the codeword: oscilloscope. reply 'ok'.",
+    )
+    .await
+    .expect("turn 1");
     assert_clean_turn(&t1, "chain-turn-1");
     let canonical = t1
         .init()
@@ -1456,17 +1541,14 @@ async fn e2e_six_turn_resume_chain() {
             None,
             None,
             &[],
-        false,
+            false,
         );
         let prompt = format!("turn {n}: what was the codeword? one word.");
         let out = run_one_turn(&plan.args, &plan.working_dir, &prompt)
             .await
             .unwrap_or_else(|e| panic!("turn {n} run: {e}"));
         assert_clean_turn(&out, &format!("chain-turn-{n}"));
-        let answer = out
-            .last_assistant_text()
-            .unwrap_or_default()
-            .to_lowercase();
+        let answer = out.last_assistant_text().unwrap_or_default().to_lowercase();
         assert!(
             answer.contains("oscilloscope"),
             "turn {n} forgot the codeword; got {:?}; stderr={:?}",
@@ -1508,7 +1590,16 @@ async fn e2e_resume_in_project_directory() {
         .to_string();
     eprintln!("[e2e] project turn-1 session_id = {}", prior);
 
-    let plan2 = build_spawn_args("ignored", &project_dir, Some(&prior), None, None, None, &[], false);
+    let plan2 = build_spawn_args(
+        "ignored",
+        &project_dir,
+        Some(&prior),
+        None,
+        None,
+        None,
+        &[],
+        false,
+    );
     let t2 = run_one_turn(
         &plan2.args,
         &plan2.working_dir,
@@ -1547,22 +1638,12 @@ async fn e2e_attach_then_resume_grants_access() {
     let (dir_b, _td_b) = isolated_workdir("attach-b");
 
     let sentinel_b = format!("{dir_b}/secret.txt");
-    std::fs::write(&sentinel_b, "the secret password is voltmeter\n")
-        .expect("write sentinel B");
+    std::fs::write(&sentinel_b, "the secret password is voltmeter\n").expect("write sentinel B");
 
     // Turn 1 — initial spawn with only A in --add-dir.  Establishes a
     // resumable session so turn 2 can come back via --resume.
     let sid1 = uuid::Uuid::new_v4().to_string();
-    let plan1 = build_spawn_args(
-        &sid1,
-        &cwd,
-        None,
-        None,
-        None,
-        None,
-        &[dir_a.clone()],
-        false,
-    );
+    let plan1 = build_spawn_args(&sid1, &cwd, None, None, None, None, &[dir_a.clone()], false);
     let t1 = run_one_turn(&plan1.args, &plan1.working_dir, "Reply 'ok'.")
         .await
         .expect("attach turn 1");
@@ -1603,10 +1684,7 @@ async fn e2e_attach_then_resume_grants_access() {
         .expect("attach turn 2");
     assert_clean_turn(&t2, "attach-turn-2");
 
-    let answer = t2
-        .last_assistant_text()
-        .unwrap_or_default()
-        .to_lowercase();
+    let answer = t2.last_assistant_text().unwrap_or_default().to_lowercase();
     assert!(
         answer.contains("voltmeter"),
         "after attach mid-session, claude should read sentinel in B; \
@@ -1635,10 +1713,8 @@ async fn e2e_detach_then_resume_revokes_access() {
 
     let sentinel_a = format!("{dir_a}/keep.txt");
     let sentinel_b = format!("{dir_b}/gone.txt");
-    std::fs::write(&sentinel_a, "the kept word is ammeter\n")
-        .expect("write sentinel A");
-    std::fs::write(&sentinel_b, "the dropped word is galvanometer\n")
-        .expect("write sentinel B");
+    std::fs::write(&sentinel_a, "the kept word is ammeter\n").expect("write sentinel A");
+    std::fs::write(&sentinel_b, "the dropped word is galvanometer\n").expect("write sentinel B");
 
     // Turn 1 — spawn with both A and B granted.
     let sid1 = uuid::Uuid::new_v4().to_string();
@@ -1695,10 +1771,7 @@ async fn e2e_detach_then_resume_revokes_access() {
         .expect("detach turn 2");
     assert_clean_turn(&t2, "detach-turn-2");
 
-    let answer = t2
-        .last_assistant_text()
-        .unwrap_or_default()
-        .to_lowercase();
+    let answer = t2.last_assistant_text().unwrap_or_default().to_lowercase();
 
     // Positive: A is still readable.
     assert!(

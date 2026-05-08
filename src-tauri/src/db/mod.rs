@@ -2596,14 +2596,18 @@ mod tests {
         let db = test_db();
         insert_test_session(&db, "sess-agent");
         db.update_session_label("sess-agent", "renamed").unwrap();
-        assert_eq!(read_field(&db, "sess-agent", "label"), Some("renamed".into()));
+        assert_eq!(
+            read_field(&db, "sess-agent", "label"),
+            Some("renamed".into())
+        );
     }
 
     #[test]
     fn sm_3_update_session_description_persists_for_agent_session() {
         let db = test_db();
         insert_test_session(&db, "sess-agent");
-        db.update_session_description("sess-agent", "new desc").unwrap();
+        db.update_session_description("sess-agent", "new desc")
+            .unwrap();
         assert_eq!(
             read_field(&db, "sess-agent", "description"),
             Some("new desc".into()),
@@ -2625,7 +2629,8 @@ mod tests {
     fn sm_5_update_session_group_persists_for_agent_session() {
         let db = test_db();
         insert_test_session(&db, "sess-agent");
-        db.update_session_group("sess-agent", Some("workshop")).unwrap();
+        db.update_session_group("sess-agent", Some("workshop"))
+            .unwrap();
         assert_eq!(
             read_field(&db, "sess-agent", "group_name"),
             Some("workshop".into()),
@@ -2641,8 +2646,14 @@ mod tests {
         insert_test_session(&db, "sess-agent");
         db.update_session_label("sess-agent", "new-label").unwrap();
         db.update_session_color("sess-agent", "#abcdef").unwrap();
-        assert_eq!(read_field(&db, "sess-agent", "label"), Some("new-label".into()));
-        assert_eq!(read_field(&db, "sess-agent", "color"), Some("#abcdef".into()));
+        assert_eq!(
+            read_field(&db, "sess-agent", "label"),
+            Some("new-label".into())
+        );
+        assert_eq!(
+            read_field(&db, "sess-agent", "color"),
+            Some("#abcdef".into())
+        );
     }
 
     #[test]

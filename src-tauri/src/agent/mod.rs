@@ -129,14 +129,12 @@ pub fn ensure_hermes_state_file(
     add_dirs: &[String],
 ) -> Result<String, String> {
     use std::fs;
-    let home =
-        std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
+    let home = std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
     let dir = std::path::PathBuf::from(home)
         .join(".hermes-ide")
         .join("sessions")
         .join(session_id);
-    fs::create_dir_all(&dir)
-        .map_err(|e| format!("create state dir: {}", e))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create state dir: {}", e))?;
     let path = dir.join("state.json");
 
     let payload = serde_json::json!({
@@ -145,8 +143,11 @@ pub fn ensure_hermes_state_file(
         "memory": [],
         "pinnedFiles": [],
     });
-    fs::write(&path, serde_json::to_vec_pretty(&payload).unwrap_or_default())
-        .map_err(|e| format!("write state file: {}", e))?;
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&payload).unwrap_or_default(),
+    )
+    .map_err(|e| format!("write state file: {}", e))?;
     path.to_str()
         .map(String::from)
         .ok_or_else(|| "non-utf8 state path".to_string())
@@ -157,13 +158,9 @@ pub fn ensure_hermes_state_file(
 /// active file, etc.  The file is the single source of truth the bridge's
 /// MCP tools query, so writing here makes the change visible to Claude on
 /// its next tool call (no respawn required).
-pub fn update_hermes_state_file(
-    session_id: &str,
-    state: &serde_json::Value,
-) -> Result<(), String> {
+pub fn update_hermes_state_file(session_id: &str, state: &serde_json::Value) -> Result<(), String> {
     use std::fs;
-    let home =
-        std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
+    let home = std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
     let path = std::path::PathBuf::from(home)
         .join(".hermes-ide")
         .join("sessions")
@@ -353,8 +350,8 @@ pub async fn spawn_agent_session(
     // `~/.hermes-ide/sessions/<sid>/state.json`.  Initial content is the
     // attached project paths + cwd; future updates (active file, git
     // status, memory pins) write to the same path.
-    let state_path = ensure_hermes_state_file(&session_id, &working_dir, &dirs)
-        .unwrap_or_else(|err| {
+    let state_path =
+        ensure_hermes_state_file(&session_id, &working_dir, &dirs).unwrap_or_else(|err| {
             log::warn!("[agent spawn] could not init hermes state file: {}", err);
             String::new()
         });
@@ -498,8 +495,8 @@ pub async fn send_agent_input(
         .as_mut()
         .ok_or_else(|| format!("Agent session '{}' has no stdin (closed?)", session_id))?;
 
-    let mut line = serde_json::to_vec(&payload)
-        .map_err(|e| format!("Failed to serialize payload: {}", e))?;
+    let mut line =
+        serde_json::to_vec(&payload).map_err(|e| format!("Failed to serialize payload: {}", e))?;
     line.push(b'\n');
 
     stdin
@@ -663,9 +660,7 @@ pub const MAX_IMAGE_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
 /// case-insensitively against the file's extension.  Anything else is
 /// refused so this command can't be repurposed to slurp arbitrary files
 /// off disk.
-const ALLOWED_IMAGE_EXTENSIONS: &[&str] = &[
-    "png", "jpg", "jpeg", "gif", "webp", "bmp",
-];
+const ALLOWED_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 
 /// Read an image file from disk so the composer can build a base64 data URL
 /// for the thumbnail preview AND embed it in the JSON-RPC message sent to
@@ -685,7 +680,10 @@ pub async fn read_image_for_attachment(path: String) -> Result<Vec<u8>, String> 
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
-    if !ALLOWED_IMAGE_EXTENSIONS.iter().any(|allowed| *allowed == ext) {
+    if !ALLOWED_IMAGE_EXTENSIONS
+        .iter()
+        .any(|allowed| *allowed == ext)
+    {
         return Err(format!(
             "Refusing to read non-image file (extension '{}'): {}",
             ext, path
@@ -805,7 +803,11 @@ fn truncate_for_log(s: &str, max: usize) -> String {
 /// Cross-platform `which`-style lookup for the `claude` binary.  Returns
 /// `None` if not found on PATH.
 fn which_claude() -> Option<std::path::PathBuf> {
-    let exe_name = if cfg!(windows) { "claude.exe" } else { "claude" };
+    let exe_name = if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    };
     let path_var = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path_var) {
         let candidate = dir.join(exe_name);
@@ -821,11 +823,7 @@ fn which_claude() -> Option<std::path::PathBuf> {
 fn parse_claude_version(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     let first_token = trimmed.split_whitespace().next()?;
-    if first_token
-        .chars()
-        .all(|c| c.is_ascii_digit() || c == '.')
-        && first_token.contains('.')
-    {
+    if first_token.chars().all(|c| c.is_ascii_digit() || c == '.') && first_token.contains('.') {
         Some(first_token.to_string())
     } else {
         None
@@ -942,7 +940,16 @@ mod tests {
 
     #[test]
     fn build_spawn_args_minimal() {
-        let plan = build_spawn_args("session-uuid", "/tmp/wd", None, None, None, None, &[], false);
+        let plan = build_spawn_args(
+            "session-uuid",
+            "/tmp/wd",
+            None,
+            None,
+            None,
+            None,
+            &[],
+            false,
+        );
         assert_eq!(plan.working_dir, "/tmp/wd");
         assert_eq!(
             plan.args,
@@ -964,10 +971,23 @@ mod tests {
     fn build_spawn_args_resume_omits_session_id() {
         // Plain resume (no fork): claude rejects `--session-id` alongside
         // `--resume`, and we want to keep the same session id anyway.
-        let plan = build_spawn_args("ignored", "/work", Some("prior-uuid"), None, None, None, &[], false);
+        let plan = build_spawn_args(
+            "ignored",
+            "/work",
+            Some("prior-uuid"),
+            None,
+            None,
+            None,
+            &[],
+            false,
+        );
         let s = plan.args.join(" ");
         assert!(!s.contains("--session-id"), "args were: {:?}", plan.args);
-        assert!(s.contains("--resume prior-uuid"), "args were: {:?}", plan.args);
+        assert!(
+            s.contains("--resume prior-uuid"),
+            "args were: {:?}",
+            plan.args
+        );
         assert!(!s.contains("--fork-session"), "args were: {:?}", plan.args);
     }
 
@@ -996,11 +1016,23 @@ mod tests {
             true,
         );
         let s = plan.args.join(" ");
-        assert!(s.contains("--session-id new-id"), "args were: {:?}", plan.args);
-        assert!(s.contains("--resume prior-uuid"), "args were: {:?}", plan.args);
+        assert!(
+            s.contains("--session-id new-id"),
+            "args were: {:?}",
+            plan.args
+        );
+        assert!(
+            s.contains("--resume prior-uuid"),
+            "args were: {:?}",
+            plan.args
+        );
         assert!(s.contains("--fork-session"), "args were: {:?}", plan.args);
         assert!(s.contains("--model opus"), "args were: {:?}", plan.args);
-        assert!(s.contains("--permission-mode plan"), "args were: {:?}", plan.args);
+        assert!(
+            s.contains("--permission-mode plan"),
+            "args were: {:?}",
+            plan.args
+        );
     }
 
     #[test]
@@ -1026,7 +1058,16 @@ mod tests {
 
     #[test]
     fn build_spawn_args_resume_and_model_order() {
-        let plan = build_spawn_args("sid", "/w", Some("prior"), Some("sonnet"), None, None, &[], false);
+        let plan = build_spawn_args(
+            "sid",
+            "/w",
+            Some("prior"),
+            Some("sonnet"),
+            None,
+            None,
+            &[],
+            false,
+        );
         let pos_resume = plan.args.iter().position(|a| a == "--resume").unwrap();
         let pos_model = plan.args.iter().position(|a| a == "--model").unwrap();
         assert!(pos_resume < pos_model);
@@ -1101,7 +1142,16 @@ mod tests {
             "/Users/dev/proj-a".to_string(),
             "/Users/dev/proj-b".to_string(),
         ];
-        let plan = build_spawn_args("sid", "/w", Some("prior-uuid"), None, None, None, &dirs, false);
+        let plan = build_spawn_args(
+            "sid",
+            "/w",
+            Some("prior-uuid"),
+            None,
+            None,
+            None,
+            &dirs,
+            false,
+        );
 
         let pos_resume = plan.args.iter().position(|a| a == "--resume").unwrap();
         let add_dir_positions: Vec<usize> = plan
@@ -1144,7 +1194,11 @@ mod tests {
             true,
         );
         let count = plan.args.iter().filter(|a| *a == "--add-dir").count();
-        assert_eq!(count, 2, "fork respawn must carry every --add-dir; got: {:?}", plan.args);
+        assert_eq!(
+            count, 2,
+            "fork respawn must carry every --add-dir; got: {:?}",
+            plan.args
+        );
     }
 
     #[test]
