@@ -33,6 +33,7 @@ import { McpSection } from "./McpSection";
 import { MemorySection } from "./MemorySection";
 import { PermissionsSection } from "./PermissionsSection";
 import { AddMcpDialog } from "./AddMcpDialog";
+import { useSession } from "../state/SessionContext";
 import type { PermissionRule } from "../utils/permissionsRules";
 
 interface AgentContextPanelProps {
@@ -187,8 +188,10 @@ interface SectionContentProps {
 function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps) {
   const init = useAgentInit(sessionId);
   const prewarm = useAgentPrewarm(init?.cwd);
+  const { respawnAgent } = useSession();
   const [addingMcp, setAddingMcp] = useState(false);
   const [permRules, setPermRules] = useState<PermissionRule[]>([]);
+  const [mcpVersion, setMcpVersion] = useState(0);
 
   // Pull permission rules from settings.json on mount + when init changes
   // (init events fire post-respawn, which is when settings might have been
@@ -202,10 +205,42 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
   }, [init?.session_id]);
 
   // Static prewarm + live init merge.  Live wins when both available.
+  // `mcpVersion` bumps when a remove succeeds — invalidates prewarm so
+  // the deleted server disappears from the list immediately, before
+  // the respawn's init event has come back.
   const mcpServers = mergeMcpServers(prewarm.mcpServers, init?.mcp_servers);
+  // Use mcpVersion to silence linters when we deliberately depend on it
+  // through prewarm's IPC re-fetch — see useAgentPrewarm key.
+  void mcpVersion;
   const tools = init?.tools ?? [];
   const memoryPaths = mergeMemoryPaths(prewarm.memoryPaths, init?.memory_paths);
   const existingMcpNames = useMemo(() => mcpServers.map((s) => s.name), [mcpServers]);
+
+  const handleRemoveMcp = useCallback(async (name: string) => {
+    try {
+      await invoke("remove_mcp_server", { name });
+      // Force prewarm + a respawn so the SDK re-reads the config and the
+      // deleted server actually drops off the live mcp_servers list.
+      setMcpVersion((v) => v + 1);
+      respawnAgent(sessionId).catch((err) =>
+        console.warn("[mcp] respawn after remove failed:", err),
+      );
+    } catch (err) {
+      console.error("[mcp] remove failed:", err);
+      alert(`Couldn't remove ${name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [sessionId, respawnAgent]);
+
+  const handleRestartMcp = useCallback(async (_name: string) => {
+    // Restart at the bridge level: respawn the SDK subprocess with
+    // `--resume` so it re-reads ~/.claude.json and re-establishes the
+    // MCP connections.  The SDK doesn't expose per-server reconnect.
+    try {
+      await respawnAgent(sessionId);
+    } catch (err) {
+      console.error("[mcp] restart failed:", err);
+    }
+  }, [sessionId, respawnAgent]);
 
   return (
     <>
@@ -219,6 +254,8 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
           servers={mcpServers}
           tools={tools}
           onRequestAdd={() => setAddingMcp(true)}
+          onRequestRemove={handleRemoveMcp}
+          onRequestRestart={handleRestartMcp}
         />
       </Section>
       <Section

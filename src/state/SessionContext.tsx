@@ -784,6 +784,12 @@ interface SessionContextValue {
    *  retry so interactive tool replies aren't dropped between turns
    *  when the bridge subprocess has exited.  See M10. */
   sendAgentEnvelope: (sessionId: string, envelope: unknown) => Promise<void>;
+  /** Tear down the live bridge subprocess and respawn it with the same
+   *  flags + `--resume <prior-uuid>`.  Used when the on-disk config
+   *  the bridge consumed (MCP servers, permission rules) has changed
+   *  out from under it and we need the SDK to re-read it.  Returns
+   *  true on a successful respawn. */
+  respawnAgent: (sessionId: string) => Promise<boolean>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -2007,7 +2013,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope }}>
+    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}) }}>
       {children}
       {pendingDirtyClose && (
         <DirtyWorktreeDialog

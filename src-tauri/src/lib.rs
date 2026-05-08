@@ -753,6 +753,7 @@ pub fn run() {
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
             claude_config::remove_mcp_server,
+            claude_config::read_mcp_server_spec,
             claude_config::read_memory_file,
             claude_config::write_memory_file,
             claude_config::read_permission_rules,

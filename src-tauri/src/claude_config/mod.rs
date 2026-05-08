@@ -143,15 +143,123 @@ pub fn remove_mcp_server(name: String) -> Result<(), String> {
     })
 }
 
+/// Inspectable view of an MCP server entry — what the user can see in
+/// the panel without leaking secrets.  `command` / `url` are surfaced
+/// as-is; `env_keys` / `header_keys` list the names only (values are
+/// stripped because they may carry tokens / credentials).
+///
+/// Returns `Ok(None)` when the named server isn't in `~/.claude.json`
+/// (idempotent caller experience).  Errors only on filesystem / JSON
+/// failure.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct McpServerSpecView {
+    pub name: String,
+    /// "stdio" | "sse" | "http" | "unknown".
+    pub transport: String,
+    /// stdio: the executable path / argv\[0\].  Remote: empty.
+    pub command: String,
+    /// stdio: positional args after the command.  Remote: empty.
+    pub args: Vec<String>,
+    /// Remote (sse/http): the endpoint URL.  stdio: empty.
+    pub url: String,
+    /// Names of environment variables defined on the spec.  VALUES
+    /// are NEVER returned — they may carry tokens / credentials.
+    pub env_keys: Vec<String>,
+    /// Names of HTTP headers (sse/http only).  Same redaction rule
+    /// as `env_keys`.
+    pub header_keys: Vec<String>,
+}
+
+#[tauri::command]
+pub fn read_mcp_server_spec(name: String) -> Result<Option<McpServerSpecView>, String> {
+    let path = home_config_path()?;
+    let validated_name = validate_server_name(&name)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("read: {e}"))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let root: Value = serde_json::from_slice(&bytes).map_err(|e| format!("parse: {e}"))?;
+    let entry = match root
+        .get("mcpServers")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get(validated_name))
+    {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let transport = entry
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let command = entry
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let args = entry
+        .get("args")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let url = entry
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let env_keys = entry
+        .get("env")
+        .and_then(|v| v.as_object())
+        .map(|m| m.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let header_keys = entry
+        .get("headers")
+        .and_then(|v| v.as_object())
+        .map(|m| m.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    Ok(Some(McpServerSpecView {
+        name: validated_name.to_string(),
+        transport,
+        command,
+        args,
+        url,
+        env_keys,
+        header_keys,
+    }))
+}
+
 fn validate_server_name(name: &str) -> Result<&str, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("name is required".into());
     }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ')
-    {
+    // Real MCP server names from the Claude Code ecosystem include
+    // dots and colons — e.g. "claude.ai Gmail", "plugin:telegram:telegram",
+    // "hermes-hq.kanban-board".  The previous tighter whitelist rejected
+    // those, breaking remove / read-spec on legitimate entries.
+    //
+    // Names are stored as JSON object keys and used only for HashMap
+    // lookups — never interpolated into shell or filesystem paths — so
+    // path-traversal isn't a risk.  We still block shell metacharacters
+    // (`;` `|` `&` `$` `<` `>` `` ` `` `'` `"` `\` `/`) as defense in
+    // depth + to keep accidental copy-paste honest.
+    if !trimmed.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || c == '_'
+            || c == '-'
+            || c == ' '
+            || c == '.'
+            || c == ':'
+    }) {
         return Err("name contains invalid characters".into());
     }
     Ok(trimmed)
@@ -380,6 +488,31 @@ mod tests {
         assert!(validate_server_name("$(whoami)").is_err());
         assert!(validate_server_name("").is_err());
         assert!(validate_server_name("   ").is_err());
+        // Path-traversal-shaped strings should still be rejected
+        // because they contain `/` (not in our whitelist).
+        assert!(validate_server_name("../etc/passwd").is_err());
+        assert!(validate_server_name("a|b").is_err());
+        assert!(validate_server_name("a>b").is_err());
+        assert!(validate_server_name("a\"b").is_err());
+        assert!(validate_server_name("a`b").is_err());
+        assert!(validate_server_name("a\\b").is_err());
+    }
+
+    /// Real-world MCP server names from Claude's ecosystem.  These all
+    /// MUST validate, otherwise remove / read-spec breaks for users.
+    /// (Bug repro from the screenshot — "claude.ai Gmail" was rejected.)
+    #[test]
+    fn validate_server_name_accepts_real_world_names() {
+        assert!(validate_server_name("claude.ai Gmail").is_ok());
+        assert!(validate_server_name("claude.ai Google Drive").is_ok());
+        assert!(validate_server_name("claude.ai Google Calendar").is_ok());
+        assert!(validate_server_name("plugin:telegram:telegram").is_ok());
+        assert!(validate_server_name("hermes-hq.kanban-board").is_ok());
+        assert!(validate_server_name("context7").is_ok());
+        assert!(validate_server_name("Sanity").is_ok());
+        assert!(validate_server_name("mcp_server.v2").is_ok());
+        assert!(validate_server_name("name.with.many.dots").is_ok());
+        assert!(validate_server_name("plugin:multi:colon:nesting").is_ok());
     }
 
     #[test]
@@ -570,6 +703,205 @@ mod prewarm_tests {
         assert!(names.contains(&"context7".to_string()));
         assert!(names.contains(&"Sanity".to_string()));
         assert!(got.iter().all(|s| s.status == "unknown"));
+    }
+
+    // ─── read_mcp_server_spec ───────────────────────────────────
+    //
+    // Surfaces the on-disk spec for a single named server so the
+    // frontend can show transport / command / url / env-key details
+    // when the MCP row is expanded.  Critical contract: env / header
+    // VALUES must NEVER appear in the response — only the keys.
+
+    #[test]
+    fn mcp_spec_returns_none_when_config_missing() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        let got = read_mcp_server_spec("anything".into()).unwrap();
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn mcp_spec_returns_none_when_server_absent() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"other":{"type":"stdio","command":"x"}}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("missing".into()).unwrap();
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn mcp_spec_stdio_returns_command_args_and_env_keys() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"ctx":{
+                "type":"stdio",
+                "command":"npx",
+                "args":["-y","@upstash/context7-mcp"],
+                "env":{"CONTEXT7_API_KEY":"secret-token","DEBUG":"1"}
+            }}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("ctx".into()).unwrap().unwrap();
+        assert_eq!(got.name, "ctx");
+        assert_eq!(got.transport, "stdio");
+        assert_eq!(got.command, "npx");
+        assert_eq!(got.args, vec!["-y", "@upstash/context7-mcp"]);
+        assert_eq!(got.url, "");
+        assert_eq!(got.header_keys.len(), 0);
+        // Env keys returned, sorted in insertion order; values stripped.
+        let mut keys = got.env_keys.clone();
+        keys.sort();
+        assert_eq!(keys, vec!["CONTEXT7_API_KEY".to_string(), "DEBUG".to_string()]);
+    }
+
+    #[test]
+    fn mcp_spec_NEVER_returns_env_values() {
+        // Strict redaction contract — env values may carry tokens.
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"s":{"type":"stdio","command":"x","env":{"SECRET":"DO_NOT_LEAK"}}}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("s".into()).unwrap().unwrap();
+        let serialized = serde_json::to_string(&got).unwrap();
+        assert!(!serialized.contains("DO_NOT_LEAK"));
+        assert!(serialized.contains("SECRET"));
+    }
+
+    #[test]
+    fn mcp_spec_remote_returns_url_and_header_keys() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"sanity":{
+                "type":"sse",
+                "url":"https://mcp.sanity.io/sse",
+                "headers":{"Authorization":"Bearer secret-here"}
+            }}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("sanity".into()).unwrap().unwrap();
+        assert_eq!(got.transport, "sse");
+        assert_eq!(got.url, "https://mcp.sanity.io/sse");
+        assert_eq!(got.header_keys, vec!["Authorization".to_string()]);
+        assert_eq!(got.command, "");
+        assert_eq!(got.args.len(), 0);
+        // Header VALUES are never returned.
+        let serialized = serde_json::to_string(&got).unwrap();
+        assert!(!serialized.contains("secret-here"));
+    }
+
+    #[test]
+    fn mcp_spec_empty_args_env_default_to_empty_arrays() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"s":{"type":"stdio","command":"echo"}}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("s".into()).unwrap().unwrap();
+        assert_eq!(got.args.len(), 0);
+        assert_eq!(got.env_keys.len(), 0);
+        assert_eq!(got.header_keys.len(), 0);
+    }
+
+    #[test]
+    fn mcp_spec_unknown_transport_falls_back_to_string() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"s":{"command":"x"}}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("s".into()).unwrap().unwrap();
+        assert_eq!(got.transport, "unknown");
+    }
+
+    #[test]
+    fn mcp_spec_rejects_bad_name_chars() {
+        // Defense in depth — same name validator the writer uses.
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        let err = read_mcp_server_spec("../etc/passwd".into()).unwrap_err();
+        assert!(err.contains("invalid characters"));
+    }
+
+    #[test]
+    fn mcp_spec_rejects_empty_name() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        let err = read_mcp_server_spec("   ".into()).unwrap_err();
+        assert!(err.contains("required"));
+    }
+
+    /// Bug repro: "claude.ai Gmail" was being rejected by the
+    /// validator, surfacing in the UI as "couldn't read ~/.claude.json"
+    /// even though the file was fine.  Pin the contract that real-
+    /// world MCP names with dots, colons, and spaces work.
+    #[test]
+    fn mcp_spec_handles_dotted_and_colon_names() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{
+                "claude.ai Gmail": {"type":"http","url":"https://x"},
+                "plugin:telegram:telegram": {"type":"stdio","command":"node"}
+            }}"#,
+        )
+        .unwrap();
+        let gmail = read_mcp_server_spec("claude.ai Gmail".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(gmail.name, "claude.ai Gmail");
+        assert_eq!(gmail.transport, "http");
+        assert_eq!(gmail.url, "https://x");
+
+        let tg = read_mcp_server_spec("plugin:telegram:telegram".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(tg.name, "plugin:telegram:telegram");
+        assert_eq!(tg.transport, "stdio");
+        assert_eq!(tg.command, "node");
+    }
+
+    /// Servers managed elsewhere (e.g. Claude.ai cloud-managed
+    /// connectors that surface in init.mcp_servers but aren't in
+    /// `~/.claude.json`) must return Ok(None), so the UI can render
+    /// the "managed elsewhere" hint instead of a red error.
+    #[test]
+    fn mcp_spec_orphan_for_dotted_name_returns_none_not_error() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let td = tempdir().unwrap();
+        std::env::set_var("HOME", td.path());
+        std::fs::write(
+            td.path().join(".claude.json"),
+            br#"{"mcpServers":{"context7":{"type":"stdio","command":"npx"}}}"#,
+        )
+        .unwrap();
+        let got = read_mcp_server_spec("claude.ai Gmail".into()).unwrap();
+        assert!(got.is_none());
     }
 
     #[test]
