@@ -11,6 +11,69 @@ export interface McpServerSummary {
   status: string;
 }
 
+/** Mirrors `claude_config::McpServerSpecView` (Rust).  Returned by the
+ *  `read_mcp_server_spec` IPC.  Env / header VALUES are NEVER included
+ *  — the keys are surfaced so the user knows what the server expects,
+ *  but the values are stripped because they may carry tokens. */
+export interface McpServerSpecView {
+  name: string;
+  /** "stdio" | "sse" | "http" | "unknown". */
+  transport: string;
+  command: string;
+  args: string[];
+  url: string;
+  /** Names of env vars defined on the spec — values redacted. */
+  env_keys: string[];
+  /** Names of HTTP headers (sse/http only) — values redacted. */
+  header_keys: string[];
+}
+
+/** Map an SDK status string into a stable category the UI can switch
+ *  on for color + label.  The SDK reports values like "connected" /
+ *  "failed" / "needs_auth" / "unknown"; we normalize so a future SDK
+ *  rename doesn't quietly break the legend. */
+export type McpStatusKind = "connected" | "failed" | "needs-auth" | "unknown";
+
+export function classifyMcpStatus(raw: string | undefined | null): McpStatusKind {
+  if (!raw) return "unknown";
+  const s = raw.toLowerCase();
+  if (s === "connected" || s === "ok" || s === "ready") return "connected";
+  if (
+    s === "needs_auth"
+    || s === "needs-auth"
+    || s === "auth_required"
+    || s === "requires_auth"
+  ) return "needs-auth";
+  if (s === "failed" || s === "error" || s === "disconnected") return "failed";
+  return "unknown";
+}
+
+export function describeMcpStatus(kind: McpStatusKind): { label: string; tone: string } {
+  switch (kind) {
+    case "connected":
+      return {
+        label: "Connected — server is responding to tool calls.",
+        tone: "good",
+      };
+    case "needs-auth":
+      return {
+        label: "Needs authentication — the server is reachable but rejected the connection. Check the env vars / API key.",
+        tone: "warn",
+      };
+    case "failed":
+      return {
+        label: "Failed to connect — the bridge couldn't reach this server. Check the command / URL and inspect stderr.",
+        tone: "bad",
+      };
+    case "unknown":
+    default:
+      return {
+        label: "Unknown — status hasn't been reported yet (live init pending) or the SDK didn't include it.",
+        tone: "muted",
+      };
+  }
+}
+
 export interface McpStdioSpec {
   type: "stdio";
   command: string;
@@ -45,7 +108,10 @@ export function filterToolsForServer(tools: readonly string[], serverName: strin
     .map((t) => t.slice(prefix.length));
 }
 
-const NAME_PATTERN = /^[A-Za-z0-9_\- ]+$/;
+// Mirrors the Rust validator: alphanumeric, underscore, hyphen, space,
+// dot, colon.  Real MCP names from Claude's ecosystem use dots and
+// colons (e.g. "claude.ai Gmail", "plugin:telegram:telegram").
+const NAME_PATTERN = /^[A-Za-z0-9_\- .:]+$/;
 
 export function validateAddMcpForm(form: AddMcpForm, existingNames: readonly string[]): string[] {
   const errors: string[] = [];

@@ -29,6 +29,13 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
+// SessionContext mock — the panel now reads `respawnAgent` from the
+// session context to support MCP restart / remove flows.  Shell tests
+// don't drive that context, so a stub is sufficient.
+vi.mock("../state/SessionContext", () => ({
+  useSession: () => ({ respawnAgent: vi.fn(async () => true) }),
+}));
+
 // Pure helpers (under test alongside the component)
 import {
   clampPanelWidth,
