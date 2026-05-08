@@ -1,0 +1,46 @@
+/* PlanModeBanner.  Visual §8.5: sandwiched hairline rules with
+ * uppercase-tracked PLAN MODE pill and italic mono detail line. */
+
+.plan-mode-banner {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border-top: 1px solid var(--rule, var(--border));
+  border-bottom: 1px solid var(--rule, var(--border));
+  border-left: none;
+  border-right: none;
+  padding: 6px 16px;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.plan-mode-banner:hover {
+  background: var(--brass-dim, rgba(212, 168, 106, 0.08));
+}
+
+.plan-mode-tag {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brass, var(--accent));
+  flex: 0 0 auto;
+}
+
+.plan-mode-sep {
+  color: var(--ink-tertiary, var(--text-3));
+  flex: 0 0 auto;
+}
+
+.plan-mode-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-secondary, var(--text-2));
+  flex: 1 1 auto;
+}

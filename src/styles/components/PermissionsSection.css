@@ -1,0 +1,172 @@
+/* PermissionsSection.  Visual §8.9. */
+
+.perms-section { display: flex; flex-direction: column; gap: 8px; }
+
+.perms-column { display: flex; flex-direction: column; gap: 2px; }
+
+.perms-column-label {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.perms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.perms-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.perms-pattern { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.perms-source {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.perms-empty { padding: 4px 0; }
+.perms-empty-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.perms-test {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.perms-test-input {
+  flex: 1 1 auto;
+  background: var(--bg-paper, var(--bg-0));
+  border: 1px solid var(--rule, var(--border));
+  padding: 3px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-primary, var(--text-0));
+  outline: none;
+}
+
+.perms-test-input:focus { border-color: var(--brass, var(--accent)); }
+
+.perms-test-arrow { color: var(--ink-tertiary, var(--text-3)); }
+
+.perms-verdict {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.perms-verdict-allow { color: var(--green, #34d399); }
+.perms-verdict-deny { color: var(--red, var(--error)); }
+.perms-verdict-none { color: var(--ink-tertiary, var(--text-3)); font-style: italic; }
+
+.perms-add-cta {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--brass, var(--accent));
+  cursor: pointer;
+  align-self: flex-start;
+  transition: color 120ms ease;
+}
+
+.perms-add-cta:hover { color: var(--brass-bright, var(--accent)); }
+
+.perms-add-dialog {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule, var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-paper, var(--bg-0));
+}
+
+.perms-add-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+
+.perms-add-label {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.perms-add-input {
+  background: var(--bg-paper, var(--bg-0));
+  border: 1px solid var(--rule, var(--border));
+  padding: 3px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-primary, var(--text-0));
+  outline: none;
+}
+
+.perms-add-input:focus { border-color: var(--brass, var(--accent)); }
+
+.perms-add-radio-row { display: flex; gap: 12px; }
+
+.perms-add-radio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.perms-add-error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--red, var(--error));
+}
+
+.perms-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  padding-top: 4px;
+  border-top: 1px solid var(--rule, var(--border));
+}
+
+.perms-link {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-tertiary, var(--text-3));
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.perms-link:hover:not(:disabled) { color: var(--ink-secondary, var(--text-2)); }
+.perms-link-primary { color: var(--brass, var(--accent)); }
+.perms-link-primary:hover:not(:disabled) { color: var(--brass-bright, var(--accent)); }
+.perms-link:disabled { opacity: 0.4; cursor: not-allowed; }

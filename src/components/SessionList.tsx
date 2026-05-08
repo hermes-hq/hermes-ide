@@ -21,6 +21,12 @@ export const SESSION_COLORS = [
   "#e06c75", "#e5c07b", "#56b6c2", "#c678dd",
 ];
 
+/** Returns the close-button tooltip text, mode-conditional.
+ *  Exported as a tiny pure function so unit tests can cover both branches. */
+export function sessionCloseTitle(mode: "agent" | "terminal" | undefined): string {
+  return mode === "agent" ? "End conversation" : "Close session";
+}
+
 export type SessionView = "git" | "files" | "search" | null;
 
 interface SessionListProps {
@@ -933,7 +939,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <button
             className="session-item-close"
             onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
-            title="End session"
+            title={sessionCloseTitle(session.mode)}
           >&times;</button>
         </div>
         {/* Tmux window tabs for SSH+tmux sessions */}

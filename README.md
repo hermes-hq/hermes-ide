@@ -21,11 +21,18 @@ Hermes IDE is a desktop terminal emulator that deeply integrates AI assistance i
 
 ## Features
 
+### Agent mode for Claude (new in 1.0.0)
+- **Real chat for Claude** — Claude sessions open in a rich chat interface by default, with thinking blocks, tool-call cards, and diff previews instead of a TUI in a terminal
+- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels
+- **Persistent conversations** — Claude sessions resume across app restarts
+- **Bring your own auth** — uses your existing `claude` CLI auth (Pro, Max, or API key); Hermes never asks for tokens
+
 ### Terminal
 - **Multi-session management** — create, switch, and organize parallel terminal sessions
 - **Split panes** — horizontal and vertical splits with drag-and-drop reordering
 - **WebGL-accelerated rendering** — fast terminal with web links and auto-fit
 - **Execution timeline** — visual history of every command with exit codes and durations
+- **Still excellent for everything else** — Aider, Codex, Gemini, Copilot, Kiro, plain shells all run in classic Terminal mode, unchanged
 
 ### Git Integration
 - **Built-in git panel** — view staged, unstaged, and untracked files per project

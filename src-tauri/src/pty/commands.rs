@@ -608,7 +608,13 @@ pub fn create_session(
     ssh_identity_file: Option<String>,
     initial_rows: Option<u16>,
     initial_cols: Option<u16>,
+    // `mode` is the frontend-chosen runtime mode.  `"terminal"` (default)
+    // spawns a PTY; `"agent"` skips PTY spawn and lets the frontend drive
+    // the Claude subprocess via `agent::spawn_agent_session` after this
+    // command returns.
+    mode: Option<SessionMode>,
 ) -> Result<SessionUpdate, String> {
+    let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let shell = state
         .db
@@ -714,7 +720,85 @@ pub fn create_session(
             identity_file: ssh_identity_file.clone(),
             port_forwards: Vec::new(),
         }),
+        mode: session_mode,
     };
+
+    // ─── Agent-mode short-circuit ───────────────────────────────────────
+    //
+    // For agent-mode sessions (Claude-only in 1.0.0) we skip PTY spawn
+    // entirely.  The frontend is responsible for calling
+    // `spawn_agent_session` after this returns to bring up the Claude
+    // subprocess; here we only need to:
+    //
+    //   1. Persist the session row so subsequent get_session_* calls work.
+    //   2. Attach project_ids exactly like the terminal path does.
+    //   3. Emit `session-updated` so the UI can render `<AgentSessionView>`
+    //      immediately, even before the agent has fully booted.
+    //
+    // Note: `mgr` (the PtyManager guard) is held above; we don't insert a
+    // PtySession into it for agent-mode sessions because there is no PTY.
+    // That's fine — code that iterates `mgr.sessions` will simply skip
+    // agent sessions, and writes via `write_to_session` will return a
+    // "not found" error, which is the right behaviour (composer should
+    // route through `send_agent_input` instead).
+    if session.mode == SessionMode::Agent {
+        // Mark the session as ready for input — there's no shell prompt to
+        // wait for in agent mode, the agent subprocess takes over input
+        // handling immediately.
+        let mut s = session;
+        s.phase = SessionPhase::ShellReady;
+
+        // Resolve project_ids → paths and fold them into workspace_paths
+        // BEFORE emitting `session-updated`.  The frontend reads
+        // `session.workspace_paths` to build the SDK's `--add-dir` list when
+        // it calls `spawn_agent_session`, so if we don't populate it here
+        // the agent boots with a single-directory sandbox even when the
+        // user attached multiple repos in the creator.
+        //
+        // Include EVERY attached project path, even one that equals
+        // `working_directory` — that path is still a "project" from the
+        // user's perspective, and the Hermes MCP `list_projects` tool
+        // reads the same list to tell Claude what's attached.  Dropping
+        // the cwd-equal entry made `list_projects` reply with N-1
+        // projects ("the user attached two but Claude only sees one"
+        // bug).  The SDK is fine with the cwd appearing in
+        // additionalDirectories — it's redundant, not harmful.
+        if let Some(ref ids) = project_ids {
+            if let Ok(db) = state.db.lock() {
+                for proj_id in ids {
+                    if let Ok(Some(proj)) = db.get_project(proj_id) {
+                        let p = proj.path;
+                        if !p.is_empty() && !s.workspace_paths.iter().any(|w| w == &p) {
+                            s.workspace_paths.push(p);
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = SessionUpdate::from(&s);
+        let _ = app.emit("session-updated", &result);
+
+        // Drop the PTY-manager lock before touching the DB so we don't hold
+        // two locks at once.
+        drop(mgr);
+
+        if let Ok(db) = state.db.lock() {
+            db.create_session_v2(&result).ok();
+            if let Some(ref ids) = project_ids {
+                for proj_id in ids {
+                    db.attach_session_project(&session_id, proj_id, "primary")
+                        .ok();
+                    db.upsert_project_usage(proj_id).ok();
+                }
+                if !ids.is_empty() {
+                    crate::project::attunement::write_session_context_file(&app, &db, &session_id)
+                        .ok();
+                }
+            }
+        }
+        return Ok(result);
+    }
 
     let update = SessionUpdate::from(&session);
     let _ = app.emit("session-updated", &update);
@@ -2172,19 +2256,27 @@ pub fn update_session_label(
     session_id: String,
     label: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
-        let mut s = session.session.lock().map_err(|e| e.to_string())?;
-        s.label = label.clone();
-        let update = SessionUpdate::from(&*s);
-        let _ = app.emit("session-updated", &update);
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(session) = mgr.sessions.get(&session_id) {
+            let mut s = session.session.lock().map_err(|e| e.to_string())?;
+            s.label = label.clone();
+            let update = SessionUpdate::from(&*s);
+            let _ = app.emit("session-updated", &update);
+            drop(s);
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.update_session_label(&session_id, &label)?;
+            return Ok(());
+        }
     }
+    // Agent-mode (no PtySession): write to DB and emit the focused
+    // metadata-update event so the frontend can merge into state.
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.update_session_label(&session_id, &label)?;
+    let _ = app.emit(
+        "session-metadata-updated",
+        SessionMetadataUpdate { session_id, label: Some(label), ..Default::default() },
+    );
     Ok(())
 }
 
@@ -2195,19 +2287,26 @@ pub fn update_session_description(
     session_id: String,
     description: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
-        let mut s = session.session.lock().map_err(|e| e.to_string())?;
-        s.description = description.clone();
-        let update = SessionUpdate::from(&*s);
-        let _ = app.emit("session-updated", &update);
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(session) = mgr.sessions.get(&session_id) {
+            let mut s = session.session.lock().map_err(|e| e.to_string())?;
+            s.description = description.clone();
+            let update = SessionUpdate::from(&*s);
+            let _ = app.emit("session-updated", &update);
+            drop(s);
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.update_session_description(&session_id, &description)?;
+            return Ok(());
+        }
     }
+    // Agent-mode fallback.
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.update_session_description(&session_id, &description)?;
+    let _ = app.emit(
+        "session-metadata-updated",
+        SessionMetadataUpdate { session_id, description: Some(description), ..Default::default() },
+    );
     Ok(())
 }
 
@@ -2218,22 +2317,43 @@ pub fn update_session_color(
     session_id: String,
     color: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
-        let mut s = session.session.lock().map_err(|e| e.to_string())?;
-        s.color = color.clone();
-        let update = SessionUpdate::from(&*s);
-        let _ = app.emit("session-updated", &update);
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(session) = mgr.sessions.get(&session_id) {
+            let mut s = session.session.lock().map_err(|e| e.to_string())?;
+            s.color = color.clone();
+            let update = SessionUpdate::from(&*s);
+            let _ = app.emit("session-updated", &update);
+            drop(s);
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.update_session_color(&session_id, &color)?;
+            return Ok(());
+        }
     }
+    // Agent-mode fallback.
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.update_session_color(&session_id, &color)?;
+    let _ = app.emit(
+        "session-metadata-updated",
+        SessionMetadataUpdate { session_id, color: Some(color), ..Default::default() },
+    );
     Ok(())
 }
 
+/// Add `path` to the session's `workspace_paths`.
+///
+/// Two storage layers depending on runtime mode:
+///   - **Terminal sessions**: a PtySession lives in `pty_manager.sessions`;
+///     mutate the in-memory `Session` struct so subsequent reads see the
+///     new path immediately, and emit `session-updated` from there.
+///   - **Agent sessions**: no PtySession entry exists.  Persist directly
+///     to the `sessions` table so the next agent respawn picks the path
+///     up via `--add-dir`, then read the row back to build the
+///     `session-updated` payload (the source of truth for the frontend).
+///
+/// The earlier implementation only handled the terminal branch; agent
+/// sessions silently no-op'd, which is the bug behind "I attached a
+/// folder but Claude never saw it".
 #[tauri::command]
 pub fn add_workspace_path(
     app: AppHandle,
@@ -2241,17 +2361,33 @@ pub fn add_workspace_path(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
-    let mut s = session.session.lock().map_err(|e| e.to_string())?;
-    if !s.workspace_paths.contains(&path) {
-        s.workspace_paths.push(path);
+    {
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(session) = mgr.sessions.get(&session_id) {
+            let mut s = session.session.lock().map_err(|e| e.to_string())?;
+            if !s.workspace_paths.contains(&path) {
+                s.workspace_paths.push(path);
+            }
+            let update = SessionUpdate::from(&*s);
+            let _ = app.emit("session-updated", &update);
+            return Ok(());
+        }
     }
-    let update = SessionUpdate::from(&*s);
-    let _ = app.emit("session-updated", &update);
+
+    // Agent-mode (or restored) session: no PTY entry — go through the DB.
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut paths = db.get_session_workspace_paths(&session_id)?;
+    if !paths.contains(&path) {
+        paths.push(path);
+    }
+    db.update_session_workspace_paths(&session_id, &paths)?;
+    let _ = app.emit(
+        "session-workspace-paths-updated",
+        WorkspacePathsUpdate {
+            session_id: session_id.clone(),
+            workspace_paths: paths,
+        },
+    );
     Ok(())
 }
 
@@ -2262,16 +2398,64 @@ pub fn remove_workspace_path(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
-    let mut s = session.session.lock().map_err(|e| e.to_string())?;
-    s.workspace_paths.retain(|p| p != &path);
-    let update = SessionUpdate::from(&*s);
-    let _ = app.emit("session-updated", &update);
+    {
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(session) = mgr.sessions.get(&session_id) {
+            let mut s = session.session.lock().map_err(|e| e.to_string())?;
+            s.workspace_paths.retain(|p| p != &path);
+            let update = SessionUpdate::from(&*s);
+            let _ = app.emit("session-updated", &update);
+            return Ok(());
+        }
+    }
+
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut paths = db.get_session_workspace_paths(&session_id)?;
+    paths.retain(|p| p != &path);
+    db.update_session_workspace_paths(&session_id, &paths)?;
+    let _ = app.emit(
+        "session-workspace-paths-updated",
+        WorkspacePathsUpdate {
+            session_id: session_id.clone(),
+            workspace_paths: paths,
+        },
+    );
     Ok(())
+}
+
+/// Lightweight payload for `session-workspace-paths-updated`.  Used by
+/// the agent-mode branches of `add_workspace_path` / `remove_workspace_path`
+/// because rebuilding a full `SessionUpdate` from the DB row is a lot of
+/// plumbing for a single-field change.  The frontend merges this into the
+/// React-side `workspace_paths` of the matching session.
+#[derive(serde::Serialize, Clone)]
+struct WorkspacePathsUpdate {
+    session_id: String,
+    workspace_paths: Vec<String>,
+}
+
+/// Lightweight payload for `session-metadata-updated`.  Sibling of
+/// WorkspacePathsUpdate above, but for the four metadata fields (label,
+/// description, color, group).  Each field is `Option<...>`; only the
+/// fields the IPC actually mutated are `Some`, the rest stay `None`
+/// (and are skipped when serialized via `skip_serializing_if`).
+///
+/// Used by the agent-mode fallback in `update_session_label/description/
+/// color/group` — terminal-mode keeps emitting the full `session-updated`
+/// shape from in-memory state.
+#[derive(serde::Serialize, Clone, Default)]
+struct SessionMetadataUpdate {
+    session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
+    /// Outer Option = "this field was set"; inner Option = "the new
+    /// value is None" (group cleared).  `None` outer ⇒ field unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<Option<String>>,
 }
 
 #[tauri::command]
@@ -2281,20 +2465,30 @@ pub fn update_session_group(
     session_id: String,
     group: Option<String>,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let pty_session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
     {
-        let mut s = pty_session.session.lock().map_err(|e| e.to_string())?;
-        s.group = group.clone();
-        let update = SessionUpdate::from(&*s);
-        let _ = app.emit("session-updated", &update);
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(pty_session) = mgr.sessions.get(&session_id) {
+            let mut s = pty_session.session.lock().map_err(|e| e.to_string())?;
+            s.group = group.clone();
+            let update = SessionUpdate::from(&*s);
+            let _ = app.emit("session-updated", &update);
+            drop(s);
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.update_session_group(&session_id, group.as_deref())?;
+            return Ok(());
+        }
     }
-    // Persist
+    // Agent-mode fallback.  group=None clears the group.
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.update_session_group(&session_id, group.as_deref())?;
+    let _ = app.emit(
+        "session-metadata-updated",
+        SessionMetadataUpdate {
+            session_id,
+            group: Some(group),
+            ..Default::default()
+        },
+    );
     Ok(())
 }
 

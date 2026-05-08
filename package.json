@@ -1,7 +1,7 @@
 {
   "name": "hermes-ide",
   "private": true,
-  "version": "0.6.16",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,12 +11,16 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
+    "test:agent-e2e": "cd src-tauri && cargo test --lib agent::e2e_tests:: -- --ignored --nocapture --test-threads 1",
+    "preflight": "npm run lint:tsc && npm test -- --run && cd src-tauri && cargo test --lib && cd .. && npm run test:agent-e2e",
+    "lint:tsc": "tsc --noEmit",
     "postinstall": "patch-package",
     "bump": "node scripts/bump-version.mjs",
     "changelog": "bash scripts/generate-changelog.sh",
     "changelog:update": "UPDATE_CHANGELOG=true bash scripts/generate-changelog.sh"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.132",
     "@aptabase/tauri": "^0.4.1",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.3",
@@ -48,17 +52,25 @@
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "6.0.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^1.8.0",
+    "mermaid": "^11.14.0",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tauri-apps/cli": "^2.10.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@xterm/headless": "^6.0.0",
+    "jsdom": "^29.1.1",
     "patch-package": "^8.0.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.9",

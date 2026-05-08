@@ -4,6 +4,7 @@ import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
+import { AgentSessionView } from "../agent/AgentSessionView";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
@@ -75,13 +76,17 @@ function hasImageFiles(paths: string[]): boolean {
 }
 
 export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
-  const { state, dispatch } = useSession();
+  const { state, dispatch, convertSessionMode } = useSession();
   const session = state.sessions[sessionId];
   const isFocused = state.layout.focusedPaneId === paneId;
   const paneRef = useRef<HTMLDivElement>(null);
   const [dropZone, setDropZone] = useState<DropZone>(null);
   const [fileDragOver, setFileDragOver] = useState(false);
   const [imageDragOver, setImageDragOver] = useState(false);
+  /** When set, render an inline "are you sure?" overlay for mode conversion.
+   *  null = no confirmation pending. */
+  const [pendingModeConvert, setPendingModeConvert] = useState<"terminal" | "agent" | null>(null);
+  const [converting, setConverting] = useState(false);
   // Keep refs for values used inside the Tauri handler to avoid re-registering
   const layoutRef = useRef(state.layout.root);
   layoutRef.current = state.layout.root;
@@ -273,6 +278,12 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           }
         }
         break;
+      case "pane.convert-to-terminal":
+        setPendingModeConvert("terminal");
+        break;
+      case "pane.convert-to-agent":
+        setPendingModeConvert("agent");
+        break;
     }
   }, [dispatch, paneId, sessionId, state.layout.root]);
 
@@ -287,7 +298,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       style={session.color ? { borderLeftColor: session.color, borderLeftWidth: 3, borderLeftStyle: "solid" } : undefined}
       onMouseDown={handleMouseDown}
     >
-      <div className="split-pane-header" onContextMenu={(e) => showPaneMenu(e, buildPaneHeaderMenuItems(paneId, hasSiblings))}>
+      <div className="split-pane-header" onContextMenu={(e) => showPaneMenu(e, buildPaneHeaderMenuItems(paneId, hasSiblings, { mode: session.mode, ai_provider: session.ai_provider }))}>
         <div className="split-pane-label">
           <span>{session.label}</span>
           <span className="split-pane-phase">{session.phase}</span>
@@ -298,7 +309,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           >&times;</button>
         </div>
         <ScopeBar sessionId={sessionId} />
-        {(session.detected_agent || session.ai_provider) && (
+        {/* ProviderActionsBar is the legacy TUI quick-actions row. Hide it
+            in agent mode — the new chat composer is the input surface. */}
+        {session.mode !== "agent" && (session.detected_agent || session.ai_provider) && (
           <ProviderActionsBar
             sessionId={sessionId}
             agentName={session.detected_agent?.name || session.ai_provider || ""}
@@ -314,7 +327,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           className="split-pane-terminal"
           onContextMenu={(e) => showTerminalMenu(e, buildTerminalMenuItems(terminalHasSelection(sessionId)))}
         >
-          <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
+          {session.mode === "agent"
+            ? <AgentSessionView sessionId={sessionId} workspacePathCount={session.workspace_paths.length} />
+            : <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />}
         </div>
       </div>
 
@@ -329,6 +344,52 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           </div>
         )}
       </div>
+
+      {/* Mode-conversion confirm dialog — destructive, no undo */}
+      {pendingModeConvert && (
+        <div
+          className="split-pane-mode-confirm"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="split-pane-mode-confirm-card">
+            <div className="split-pane-mode-confirm-title">
+              Convert to {pendingModeConvert}?
+            </div>
+            <div className="split-pane-mode-confirm-body">
+              Converting will close this session's current process and start a new one.
+              The current conversation history will not carry over.
+              This cannot be undone.
+            </div>
+            <div className="split-pane-mode-confirm-actions">
+              <button
+                className="session-creator-btn-secondary"
+                onClick={() => setPendingModeConvert(null)}
+                disabled={converting}
+              >
+                Cancel
+              </button>
+              <button
+                className="session-creator-btn-primary"
+                onClick={async () => {
+                  if (converting || !pendingModeConvert) return;
+                  setConverting(true);
+                  try {
+                    await convertSessionMode(sessionId, pendingModeConvert);
+                  } finally {
+                    setConverting(false);
+                    setPendingModeConvert(null);
+                  }
+                }}
+                disabled={converting}
+              >
+                {converting ? "Converting..." : "Convert"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

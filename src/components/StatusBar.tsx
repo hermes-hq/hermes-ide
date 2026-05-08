@@ -77,6 +77,9 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   };
 
   const cwdBasename = active && active.working_directory ? active.working_directory.replace(/\\/g, "/").split("/").pop() || active.working_directory : "";
+  const cwdTooltip = active?.mode === "agent"
+    ? `Project context: ${active.working_directory}`
+    : `Working directory: ${active?.working_directory ?? ""}`;
 
   return (
     <div className="status-bar">
@@ -85,7 +88,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           <span className={`status-dot ${sessions.length > 0 ? "status-dot-on" : ""}`} />
           {sessions.length} active
         </span>
-        {active && (
+        {active && active.mode !== "agent" && (
           <>
             <span className="status-bar-divider" />
             <button
@@ -146,7 +149,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           <>
             <span className="status-bar-item status-bar-elapsed">{formatElapsed(active.created_at)}</span>
             <span className="status-bar-divider" />
-            <span className="status-bar-item mono" title={active.working_directory} onContextMenu={(e) => {
+            <span className="status-bar-item mono" title={cwdTooltip} onContextMenu={(e) => {
               showStatusMenu(e, [
                 menuItem("status.copy-branch", "Copy Working Directory"),
               ]);

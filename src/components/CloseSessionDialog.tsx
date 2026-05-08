@@ -1,15 +1,39 @@
 import { useState, useEffect, useCallback } from "react";
 import "../styles/components/CloseSessionDialog.css";
+import type { SessionMode } from "../types/session";
 
 interface CloseSessionDialogProps {
   sessionId: string;
+  /** Mode of the session being closed.  Drives the title + body copy.
+   *  Defaults to `terminal` if undefined for backwards compat. */
+  sessionMode?: SessionMode;
   onConfirm: (sessionId: string) => void;
   onCancel: () => void;
   onDontAskAgain: () => void;
 }
 
-export function CloseSessionDialog({ sessionId, onConfirm, onCancel, onDontAskAgain }: CloseSessionDialogProps) {
+/** Returns the body-text shown in the dialog, mode-conditional.
+ *  Exported as a tiny pure function so unit tests can cover both branches
+ *  without rendering the full React component. */
+export function closeSessionDialogCopy(mode: "agent" | "terminal"): string {
+  return mode === "agent"
+    ? "This will end the conversation with Claude."
+    : "This will terminate the running terminal session.";
+}
+
+/** Returns the dialog title, mode-conditional. */
+export function closeSessionDialogTitle(mode: "agent" | "terminal"): string {
+  return mode === "agent" ? "End conversation?" : "Close session?";
+}
+
+/** Returns the confirm-button label, mode-conditional. */
+export function closeSessionDialogConfirmLabel(mode: "agent" | "terminal"): string {
+  return mode === "agent" ? "End conversation" : "Close session";
+}
+
+export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel, onDontAskAgain }: CloseSessionDialogProps) {
   const [dontAsk, setDontAsk] = useState(false);
+  const mode: "agent" | "terminal" = sessionMode === "agent" ? "agent" : "terminal";
 
   const handleConfirm = useCallback(() => {
     if (dontAsk) {
@@ -35,9 +59,9 @@ export function CloseSessionDialog({ sessionId, onConfirm, onCancel, onDontAskAg
   return (
     <div className="close-dialog-backdrop" onClick={onCancel}>
       <div className="close-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="close-dialog-title">Close Session?</div>
+        <div className="close-dialog-title">{closeSessionDialogTitle(mode)}</div>
         <div className="close-dialog-body">
-          This will terminate the running terminal process.
+          {closeSessionDialogCopy(mode)}
         </div>
         <label className="close-dialog-checkbox">
           <input
@@ -50,7 +74,7 @@ export function CloseSessionDialog({ sessionId, onConfirm, onCancel, onDontAskAg
         <div className="close-dialog-actions">
           <button className="close-dialog-btn" onClick={onCancel}>Cancel</button>
           <button className="close-dialog-btn close-dialog-btn-confirm" onClick={handleConfirm}>
-            Close Session
+            {closeSessionDialogConfirmLabel(mode)}
           </button>
         </div>
       </div>

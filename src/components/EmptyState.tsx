@@ -36,7 +36,7 @@ export function EmptyState({ recentSessions, onNew, onRestore }: EmptyStateProps
   return (
     <div className="empty-state">
       <div className="empty-state-logo">HERMES-IDE</div>
-      <p className="empty-state-subtitle">AI-native terminal & IDE</p>
+      <p className="empty-state-subtitle">AI-native development environment</p>
       <p className="empty-state-hint">Drop a session here or press <kbd>{fmt("{mod}N")}</kbd> to start</p>
 
       <div className="empty-state-actions">

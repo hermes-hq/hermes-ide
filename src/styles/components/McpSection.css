@@ -1,0 +1,144 @@
+/* MCP section.  Visual §8.1 (sidebar section) + §8.7 (rows + dialog). */
+
+.mcp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mcp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-row-header {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+  transition: color 120ms ease;
+}
+
+.mcp-row-header:hover { color: var(--ink-primary, var(--text-0)); }
+
+.mcp-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-tertiary, var(--text-3));
+}
+.mcp-status-dot[data-status="connected"] { background: var(--green, #34d399); }
+.mcp-status-dot[data-status="failed"] { background: var(--red, #ff4444); }
+.mcp-status-dot[data-status="connecting"] {
+  background: var(--brass, #d4a86a);
+  animation: mcp-dot-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes mcp-dot-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.mcp-name { flex: 1 1 auto; }
+
+.mcp-status-text {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.mcp-row-body {
+  padding: 2px 0 6px 16px;
+  border-left: 1px solid var(--rule, var(--border));
+  margin-left: 4px;
+}
+
+.mcp-tool-list {
+  list-style: none;
+  margin: 0 0 6px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mcp-tool {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.mcp-tool-empty {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: italic;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.mcp-row-actions {
+  display: flex;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.mcp-action {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-secondary, var(--text-2));
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.mcp-action:hover { color: var(--brass, var(--accent)); }
+.mcp-action-deny:hover { color: var(--red, var(--error)); }
+
+.mcp-empty {
+  padding: 4px 0;
+}
+
+.mcp-empty-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.mcp-add-cta {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--brass, var(--accent));
+  cursor: pointer;
+  transition: color 120ms ease;
+  align-self: flex-start;
+}
+
+.mcp-add-cta:hover { color: var(--brass-bright, var(--accent)); }

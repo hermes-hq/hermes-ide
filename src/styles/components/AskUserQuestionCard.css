@@ -1,0 +1,229 @@
+/* AskUserQuestionCard — slide-up card for Claude's interactive prompts.
+ *
+ * Visual: docs/internal/v1-tui-parity-plan.md §8.2.
+ * Aesthetic: Editorial Engineering — brass left bar (yours-here),
+ * hairline rules, JetBrains Mono italic question, Inter Tight ↑↑ chrome.
+ */
+
+.aq-card {
+  position: relative;
+  display: flex;
+  width: 100%;
+  background: var(--bg-paper, var(--bg-0));
+  border-top: 1px solid var(--rule-strong, var(--border-light));
+  border-bottom: 1px solid var(--rule, var(--border));
+  margin: 12px 0;
+}
+
+.aq-card-bar {
+  flex: 0 0 2px;
+  background: var(--brass, var(--accent));
+  animation: aq-bar-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes aq-bar-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.aq-card-body {
+  flex: 1 1 auto;
+  padding: 12px 16px 14px 16px;
+}
+
+.aq-card-header {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass, var(--accent));
+  margin-bottom: 10px;
+}
+
+.aq-question {
+  border: none;
+  margin: 0 0 14px 0;
+  padding: 0;
+}
+
+.aq-question-legend {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.aq-question-text {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink-primary, var(--text-0));
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.aq-question-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.aq-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aq-option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.aq-option-row[data-selected="true"] .aq-option-label {
+  color: var(--ink-primary, var(--text-0));
+}
+
+.aq-option-input {
+  /* Hide native radio/checkbox; we render the glyph instead.
+   * Keep accessible via screen reader. */
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.aq-option-glyph {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-tertiary, var(--text-3));
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  margin-top: 1px;
+}
+
+.aq-option-row[data-selected="true"] .aq-option-glyph {
+  color: var(--brass, var(--accent));
+}
+
+.aq-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.aq-option-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.aq-option-description {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-tertiary, var(--text-3));
+  line-height: 1.4;
+}
+
+.aq-other-textarea {
+  margin-top: 6px;
+  width: 100%;
+  background: var(--bg-paper, var(--bg-0));
+  border: 1px solid var(--rule, var(--border));
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-primary, var(--text-0));
+  resize: vertical;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.aq-other-textarea:focus {
+  border-color: var(--brass, var(--accent));
+}
+
+.aq-preview-pane {
+  background: var(--bg-paper, var(--bg-0));
+  border: 1px solid var(--rule, var(--border));
+  padding: 8px 10px;
+  min-height: 64px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.aq-preview-content {
+  margin: 0;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.aq-preview-empty {
+  font-style: italic;
+  color: var(--ink-tertiary, var(--text-3));
+  font-size: 11px;
+}
+
+.aq-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule, var(--border));
+}
+
+.aq-cancel {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-tertiary, var(--text-3));
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.aq-cancel:hover {
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.aq-send {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--brass, var(--accent));
+  padding: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--brass, var(--accent));
+  cursor: pointer;
+  transition: all 120ms ease;
+  letter-spacing: 0.02em;
+}
+
+.aq-send:hover:not(:disabled) {
+  background: var(--brass-dim, rgba(212, 168, 106, 0.18));
+  color: var(--brass-bright, var(--accent));
+}
+
+.aq-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

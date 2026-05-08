@@ -1,3 +1,4 @@
+export * from "./agent";
 export * from "./sessions";
 export * from "./projects";
 export * from "./context";

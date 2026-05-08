@@ -7,6 +7,29 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 
 ---
 
+# 1.0.0 (2026-04-27)
+
+## New
+- Agent mode for Claude — Claude sessions now open in a real chat interface by default, with rich tool calls, thinking blocks, diff cards, and image input
+- File edits made by Claude render as syntax-highlighted diff cards instead of plain text
+- Tool calls (Bash, Read, Write, Edit, web search, and more) render as collapsible cards with arguments and results visible at a glance
+- Each turn ends with a summary showing token usage and timing
+- Paste or drop images directly into the Claude composer and Claude sees the actual pixels
+- Per-session mode picker in the new-session modal — choose Agent mode (chat experience) or Terminal mode (classic TUI)
+- Right-click any session and choose Convert to switch between Agent and Terminal mode
+- Conversations with Claude in Agent mode persist across app restarts — reopen the session and continue where you left off
+
+## Improved
+- Slash command suggestions for Claude are now sourced from Claude itself, so new commands appear automatically as Claude updates
+- The model picker reflects Claude's actual current model and effort options instead of a hardcoded list
+- Composer mentions and image attachments are now first-class in the chat input, with previews before you send
+
+## Removed
+- The bracketed-paste workaround used to fake a chat experience inside the Claude TUI is gone — Agent mode replaces it with a real chat surface
+- The bundled fallback list of slash commands has been removed; commands now come live from Claude
+
+---
+
 # 0.5.8 (2026-03-14)
 
 ## Fixed

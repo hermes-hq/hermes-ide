@@ -1,0 +1,139 @@
+/* TodoPanel.  Visual §8.6: pinned-bottom checklist with workshop palette. */
+
+.todo-panel {
+  margin: 14px 0 0 0;
+  background: var(--bg-paper, var(--bg-0));
+  border-top: 1px solid var(--rule-strong, var(--border-light));
+  border-bottom: 1px solid var(--rule, var(--border));
+}
+
+.todo-panel-header {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 8px 14px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+  text-align: left;
+}
+
+.todo-panel-header:hover {
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.todo-panel-title { flex: 0 0 auto; }
+.todo-panel-sep { color: var(--ink-tertiary, var(--text-3)); }
+.todo-panel-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+.todo-panel-running {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-secondary, var(--text-2));
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-panel-disclosure {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.todo-rows {
+  list-style: none;
+  margin: 0;
+  padding: 4px 14px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 2px solid var(--rule-strong, var(--border-light));
+  margin-left: 0;
+}
+
+.todo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-secondary, var(--text-2));
+  padding-left: 6px;
+}
+
+.todo-row[data-status="completed"] .todo-content {
+  color: var(--ink-tertiary, var(--text-3));
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--ink-tertiary, var(--text-3));
+}
+
+.todo-row[data-status="in_progress"] .todo-content {
+  color: var(--ink-primary, var(--text-0));
+}
+
+.todo-glyph {
+  width: 12px;
+  text-align: center;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+}
+
+.todo-row[data-status="completed"] .todo-glyph {
+  color: var(--green, var(--accent));
+}
+
+.todo-row[data-status="in_progress"] .todo-glyph {
+  color: var(--brass, var(--accent));
+  animation: todo-glyph-breathe 1.6s ease-in-out infinite;
+}
+
+.todo-row[data-status="pending"] .todo-glyph {
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.todo-row[data-status="unknown"] .todo-glyph {
+  color: var(--yellow, var(--accent));
+}
+
+@keyframes todo-glyph-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.todo-content {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.todo-empty {
+  color: var(--ink-tertiary, var(--text-3));
+  font-style: italic;
+}
+
+.todo-active-marker {
+  color: var(--brass, var(--accent));
+  font-family: var(--font-mono);
+  flex: 0 0 auto;
+}
