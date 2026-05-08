@@ -435,14 +435,14 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
 
   const isWorking = state.initialized && activity.status !== "idle";
   const tickerLabel = !state.initialized
-    ? "READY"
+    ? "Ready"
     : activity.status === "running"
-      ? `RUNNING ${(activity.toolName ?? "TOOL").toUpperCase()}`
+      ? `Running ${activity.toolName ?? "tool"}`
       : activity.status === "thinking"
-        ? "THINKING"
+        ? "Thinking"
         : activity.status === "awaiting"
-          ? "AWAITING CLAUDE"
-          : "READY";
+          ? "Awaiting Claude"
+          : "Ready";
 
   const cwdLabel = cwd ? cwd.split("/").pop() ?? cwd : null;
 
@@ -459,7 +459,7 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
           data-state={dotState}
           aria-hidden="true"
         />
-        <span className="agent-session-flag">AGENT</span>
+        <span className="agent-session-flag">Agent</span>
       </div>
 
       <div className="agent-session-header-title">
@@ -522,7 +522,7 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
             title="Stop this turn (Esc)"
             aria-label="Stop the current turn"
           >
-            ◼ STOP
+            ◼ Stop
           </button>
         ) : null}
       </div>
@@ -632,13 +632,13 @@ interface MessageRowProps {
   streamingMessageId?: string | null;
   thinkingStartedAt?: Map<string, number>;
   thinkingElapsed?: Map<string, number>;
-  /** Unused since the №-numbered gutter was removed.  Kept on the prop
-   *  surface so callers (tests, the messages map) don't need to refactor;
-   *  may come back for a different left-gutter treatment later. */
+  /** No longer used by the speaker-chip layout but kept on the prop
+   *  surface so existing callers / tests don't break. */
   turnNumber?: number;
-  /** When true, this message renders the turn's timestamp in the left
-   *  gutter.  False on continuation messages (the assistant response
-   *  that follows the user prompt within the same turn). */
+  /** When true, this is the first message of its turn — the speaker
+   *  chip carries the timestamp.  Continuation messages (assistant
+   *  replies after a user prompt within the same turn) suppress the
+   *  timestamp so the eye groups the turn as one unit. */
   isFirstOfTurn?: boolean;
 }
 
@@ -670,6 +670,7 @@ export function MessageRow({
   // source.  User messages don't need this — what you typed is what you see.
   const [showRaw, setShowRaw] = useState(false);
   const rawText = message.role === "assistant" ? collectRawText(message) : "";
+  const speakerName = message.role === "user" ? "You" : "Hermes";
 
   return (
     <div
@@ -677,7 +678,13 @@ export function MessageRow({
       data-role={message.role}
       data-first-of-turn={isFirstOfTurn ? "true" : "false"}
     >
-      <div className="agent-message-gutter" aria-hidden="true">
+      <div className="agent-message-speaker">
+        <span
+          className="agent-message-avatar"
+          data-role={message.role}
+          aria-hidden="true"
+        />
+        <span className="agent-message-name">{speakerName}</span>
         {isFirstOfTurn ? (
           <span className="agent-message-time">{formatHHMMSS(message.timestamp)}</span>
         ) : null}

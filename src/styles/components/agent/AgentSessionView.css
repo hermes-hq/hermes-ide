@@ -38,29 +38,21 @@
  * on a piece of equipment.  Faint inner top-shadow gives it the slight
  * recess of a metal plate sunk into the surface. */
 .agent-session-header {
-  /* 3-zone grid:
-   *   [status] fixed-width LED + AGENT flag.  Never shrinks.
-   *   [title]  flexible — model / ticker / cwd-leaf.  Truncates with
-   *            ellipsis when the pane gets narrow.
-   *   [meta]   fixed-width cost + rate notice + STOP button.  Always
-   *            visible because title is the only zone that gives way.
-   * This replaces a brittle flex-wrap layout where the cost lozenge
-   * would jump to a second row and overlap STOP. */
+  /* 3-zone grid: [status] [title] [meta]. */
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-areas: "status title meta";
   align-items: center;
-  gap: 12px;
-  padding: 11px 20px;
-  border-top: 1px solid var(--rule);
+  gap: 14px;
+  padding: 14px 22px;
   border-bottom: 1px solid var(--rule);
   background: var(--bg-paper);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.012);
   flex: 0 0 auto;
-  font: 11px/1 var(--font-mono);
-  font-feature-settings: var(--font-mono-features);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  /* Calmer typography — display sans, normal case, light tracking.
+   * The old all-caps tracked mono read as "instrument panel"; this
+   * reads as "app title bar". */
+  font: 13px/1 var(--font-display, var(--font-ui));
+  letter-spacing: -0.005em;
   color: var(--ink-secondary);
 }
 
@@ -120,8 +112,10 @@
 
 .agent-session-flag {
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: -0.01em;
   color: var(--ink-primary);
+  font-size: 13px;
+  text-transform: none;
 }
 
 .agent-session-flag-sep {
@@ -131,16 +125,16 @@
 }
 
 .agent-session-ticker {
-  /* Active running label glows in brass — same color family as the LED
-   * pulse so the eye reads them as one unit. */
   color: var(--brass);
-  letter-spacing: 0.1em;
+  letter-spacing: -0.005em;
   text-shadow: 0 0 8px var(--brass-dim);
+  font-size: 13px;
 }
 
 .agent-session-cwd-name {
   color: var(--ink-secondary);
-  letter-spacing: 0.04em;
+  letter-spacing: -0.005em;
+  font-size: 12px;
 }
 
 /* LED.  Tiny filled disc; active states get a faint matching glow so it
@@ -227,8 +221,8 @@
   color: var(--ink-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
+  letter-spacing: 0.01em;
+  text-transform: none;
   padding: 0;
   background: transparent;
   border-radius: 0;
@@ -238,28 +232,35 @@
   color: var(--ink-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.02em;
-  text-transform: lowercase;
+  letter-spacing: 0.01em;
+  text-transform: none;
   max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Stop button — visible only while Claude is actively working.  Brass
- * outline; reads as instrument-panel hardware, not a chat-app button. */
+/* Stop button — visible only while Claude is actively working. */
 .agent-session-stop {
   margin-left: 8px;
-  padding: 1px 8px;
+  padding: 5px 12px;
   background: transparent;
   border: 1px solid var(--brass, var(--accent-paper));
-  border-radius: 3px;
+  border-radius: 6px;
   color: var(--brass, var(--accent-paper));
-  font: 11px/1 var(--font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font: 12px/1 var(--font-display, var(--font-ui));
+  font-weight: 500;
+  letter-spacing: -0.005em;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background 150ms ease, color 150ms ease, transform 80ms ease;
+}
+
+.agent-session-stop:hover {
+  transform: translateY(-0.5px);
+}
+
+.agent-session-stop:active {
+  transform: translateY(0);
 }
 
 .agent-session-stop:hover {
@@ -267,17 +268,16 @@
   color: var(--ink-primary);
 }
 
-/* Cost lozenge — running total of session spend.  Right-aligned in the
- * masthead, brass-tinted so it reads as "live counter" not "warning". */
+/* Cost lozenge — running total of session spend. */
 .agent-session-cost {
   font: 11px/1 var(--font-mono);
   font-feature-settings: var(--font-mono-features), 'tnum';
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   color: var(--brass, var(--accent-paper));
-  padding: 2px 8px;
+  padding: 5px 10px;
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--brass, var(--accent-paper)) 28%, transparent);
-  border-radius: 3px;
   background: color-mix(in srgb, var(--brass, var(--accent-paper)) 8%, transparent);
 }
 
@@ -287,12 +287,12 @@
 
 .agent-rate-notice {
   color: var(--yellow);
-  font-size: 10px;
+  font-size: 11px;
   background: transparent;
   border: 1px solid var(--yellow);
-  padding: 2px 8px;
-  border-radius: 0;
-  letter-spacing: 0.06em;
+  padding: 5px 10px;
+  border-radius: 6px;
+  letter-spacing: -0.005em;
 }
 
 .agent-session-scroll {
@@ -345,11 +345,12 @@
     padding: 16px 12px;
     gap: 12px;
   }
-  .agent-message {
-    grid-template-columns: 56px 1fr;
+  .agent-message-body {
+    padding-left: 0;
   }
-  .agent-message-gutter {
-    padding-right: 10px;
+  .agent-message[data-role="user"] .agent-message-body {
+    margin-left: 0;
+    padding: 12px 14px;
   }
 }
 
@@ -420,91 +421,132 @@
   font-size: var(--text-md);
 }
 
-/* ─── Message rows (engineering logbook layout) ──────────────
+/* ─── Message rows (modern chat layout) ───────────────────────
  *
- * Two columns: a 78px numbered gutter on the left and the body.  The
- * gutter carries `№ 01` + a HH:MM:SS timestamp, but ONLY for the first
- * message of each turn — assistant continuations leave the gutter empty
- * so the eye groups the user prompt and its assistant reply as one unit.
+ * Each turn renders as a vertical stack of speaker rows.  A speaker
+ * row is:
  *
- * Inter-turn separation uses a hairline rule + larger top padding on the
- * second-and-later user message.  Intra-turn separation rides the parent
- * `.agent-session-messages` `gap`. */
+ *   [avatar]  Name · 14:27
+ *             body content (sans-serif prose, mono for code only)
+ *
+ * No left gutter, no numbered marginalia, no brass margin bar.  User
+ * messages get a faintly accent-tinted card so the prompt visually
+ * anchors as "yours"; assistant messages render on the surface.
+ * Tool calls and code keep mono — only prose moves to sans.
+ *
+ * Inter-turn rhythm comes from generous vertical gap (32px between
+ * turns), not a hairline rule.  Hairlines reappear per-theme as a
+ * family-specific touch, not as the default chrome. */
 
 .agent-message {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  column-gap: 0;
-  padding: 0;
-  position: relative;
-}
-
-.agent-message + .agent-message[data-role="user"] {
-  border-top: 1px solid var(--rule);
-  padding-top: 18px;
-  margin-top: 6px;
-}
-
-/* The gutter carries the turn number + timestamp.  Right-aligned so the
- * numerals ride the inner edge of the column, like marginalia in a
- * printed reference book. */
-.agent-message-gutter {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  padding: 2px 16px 0 0;
-  gap: 2px;
+  gap: 8px;
+  padding: 0;
+  position: relative;
+  /* Cap conversation column width on wide monitors so prose lines
+   * don't blow past comfortable reading length.  68ch is the sweet
+   * spot for sans-serif body at 14–15px. */
+  max-width: 68ch;
+}
+
+/* Generous space between turns — the modern app feel.  No hairline
+ * rule: whitespace IS the separator. */
+.agent-message + .agent-message[data-role="user"] {
+  margin-top: 28px;
+}
+
+.agent-message + .agent-message[data-role="assistant"] {
+  margin-top: 16px;
+}
+
+/* Speaker row — the small chip identifying who's speaking. */
+.agent-message-speaker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 12px/1 var(--font-display, var(--font-ui));
+  color: var(--ink-secondary);
   user-select: none;
 }
 
-.agent-message-num {
-  font: 10px/1 var(--font-mono);
-  font-feature-settings: var(--font-mono-features), 'tnum';
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.12em;
-  color: var(--ink-secondary);
-  text-transform: uppercase;
+.agent-message-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ink-tertiary);
+  position: relative;
 }
 
-.agent-message[data-role="user"] .agent-message-num {
-  /* User-prompt turns get a slightly punchier color in the number — that
-   * single hue draws the eye down the gutter as you scan turns. */
-  color: var(--accent-paper);
+.agent-message-avatar[data-role="user"] {
+  background: var(--brass, var(--accent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #000 24%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--brass, var(--accent)) 14%, transparent);
+}
+
+.agent-message-avatar[data-role="assistant"] {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 90%, transparent),
+    color-mix(in srgb, var(--accent) 50%, transparent) 80%
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #000 24%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.agent-message-name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-primary);
+  font-size: 13px;
 }
 
 .agent-message-time {
-  font: 10px/1 var(--font-mono);
+  font: 11px/1 var(--font-mono);
   color: var(--ink-tertiary);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+  margin-left: 2px;
   opacity: 0.7;
 }
 
+/* Body — sans-serif prose at a comfortable reading rhythm.  Mono is
+ * reserved for code fences, tool calls, file paths, timestamps — set
+ * by the individual block renderers, not inherited from here. */
 .agent-message-body {
-  font: 13px/1.6 var(--font-mono);
+  font: 14px/1.6 var(--font-display, var(--font-ui));
   color: var(--ink-primary);
-  font-feature-settings: var(--font-mono-features);
+  letter-spacing: -0.005em;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Indent the body so it lines up under the speaker name, not under
+   * the avatar.  32px = avatar (22px) + speaker gap (10px). */
+  padding-left: 32px;
 }
 
-/* User messages — the QUESTION.  Italic mono, slightly larger than the
- * answer body, with a BRASS left rule so the prompt visually anchors as
- * "the active note from the operator".  The brass bar is the strongest
- * recurring signal of the workshop palette — every user message is a
- * little glow on the page. */
+/* User messages get a soft accent-tinted card on the body — the
+ * "this is yours" signal that replaces the old brass left bar.
+ * Padding INSIDE the card so the speaker chip sits flush above it. */
 .agent-message[data-role="user"] .agent-message-body {
-  font-style: italic;
-  font-size: 14px;
+  background: color-mix(in srgb, var(--brass, var(--accent)) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brass, var(--accent)) 12%, transparent);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-left: 32px;
+  padding-left: 18px;
   color: var(--ink-primary);
-  border-left: 2px solid var(--brass);
-  padding-left: 14px;
-  margin-left: -14px;
-  box-shadow: -8px 0 16px -10px var(--brass-dim);
+  font-size: 14.5px;
+  line-height: 1.55;
 }
 
+/* Assistant body has no card chrome — sits flat on the surface so
+ * prose reads as continuous, not stamped onto a panel.  Tool blocks
+ * inside get their own chrome via the archetype tokens. */
 .agent-message[data-role="assistant"] .agent-message-body {
   color: var(--ink-primary);
 }
@@ -605,8 +647,10 @@
 
 .agent-text-block {
   color: var(--ink-primary);
-  line-height: 1.6;
-  font-size: 13px;
+  line-height: 1.65;
+  font-size: 14.5px;
+  font-family: var(--font-display, var(--font-ui));
+  letter-spacing: -0.005em;
 }
 
 .agent-markdown {

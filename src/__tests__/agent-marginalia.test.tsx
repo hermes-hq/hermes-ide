@@ -1,14 +1,20 @@
 /**
- * Engineering-logbook layout (post-frontend-design rethink) — replaces the
- * earlier marginalia + 2px-bar treatment with a numbered turn gutter
- * (`№ 01 · 17:15:23`).  Each user message starts a new turn; assistant
- * continuations leave the gutter empty so the eye groups them together.
+ * Modern speaker-chip layout — replaces the earlier engineering-logbook
+ * gutter (`№ 01 · 17:15:23`) with an inline speaker row above each
+ * message body:
  *
- * These tests pin:
- *   - No ASSISTANT/USER caps headers anywhere.
- *   - Each role uses `data-role=…` for styling hooks.
- *   - The gutter element is rendered for every message.
- *   - The number + timestamp render only when `isFirstOfTurn` is true.
+ *   [avatar]  You · 14:27
+ *             body content (sans-serif)
+ *
+ * No left gutter, no marginalia numbering, no brass margin bar.  These
+ * tests pin the new contract:
+ *
+ *   - data-role="user" / data-role="assistant" still drive styling
+ *   - Speaker chip carries the avatar + name + (optional) timestamp
+ *   - Timestamp shows on the first-of-turn message only — assistant
+ *     continuations within a turn drop it so the eye groups the turn
+ *   - Old logbook artefacts (gutter, № sigil, role-label headers) are
+ *     gone and stay gone.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,7 +48,7 @@ function assistantMessage(text: string, id = "msg_1"): RenderedMessage {
 
 const emptyToolResults = new Map<string, ToolResultBlockData>();
 
-describe("engineering-logbook message rows", () => {
+describe("modern speaker-chip message rows", () => {
   it("renders no ASSISTANT or USER caps headers anywhere", () => {
     const html = [
       renderToString(
@@ -62,17 +68,19 @@ describe("engineering-logbook message rows", () => {
     expect(html).not.toContain("agent-message-role");
   });
 
-  it("user message has data-role=user and the body wrapper", () => {
+  it("user message has data-role=user, the body wrapper, and a 'You' speaker", () => {
     const html = renderToString(
       <MessageRow message={userMessage("hi")} toolResults={emptyToolResults} />,
     );
     expect(html).toContain('data-role="user"');
     expect(html).toContain("agent-message-user");
     expect(html).toContain("agent-message-body");
-    expect(html).toContain("agent-message-gutter");
+    expect(html).toContain("agent-message-speaker");
+    expect(html).toContain("agent-message-avatar");
+    expect(html).toMatch(/agent-message-name[^>]*>You</);
   });
 
-  it("assistant message has data-role=assistant and the same DOM shape", () => {
+  it("assistant message has data-role=assistant and a 'Hermes' speaker", () => {
     const html = renderToString(
       <MessageRow
         message={assistantMessage("ok")}
@@ -82,10 +90,12 @@ describe("engineering-logbook message rows", () => {
     expect(html).toContain('data-role="assistant"');
     expect(html).toContain("agent-message-assistant");
     expect(html).toContain("agent-message-body");
-    expect(html).toContain("agent-message-gutter");
+    expect(html).toContain("agent-message-speaker");
+    expect(html).toContain("agent-message-avatar");
+    expect(html).toMatch(/agent-message-name[^>]*>Hermes</);
   });
 
-  it("renders the timestamp in the gutter on the first message of a turn", () => {
+  it("renders the timestamp inline in the speaker chip on the first message of a turn", () => {
     const html = renderToString(
       <MessageRow
         message={userMessage("hi")}
@@ -95,15 +105,15 @@ describe("engineering-logbook message rows", () => {
       />,
     );
     expect(html).toContain("agent-message-time");
-    // The "№ NN" turn-number lockup was rejected by the user — assert it's
-    // gone and stays gone.  Only the timestamp lives in the gutter now.
+    // Old gutter / marginalia artefacts must stay gone.
     expect(html).not.toContain("agent-message-num");
+    expect(html).not.toContain("agent-message-gutter");
     expect(html).not.toContain("№");
   });
 
-  it("leaves the gutter empty on assistant continuations within a turn", () => {
-    // The assistant reply that follows a user prompt should not duplicate
-    // the timestamp — the eye should pair it with the prompt above.
+  it("drops the timestamp on continuation messages within a turn", () => {
+    // Assistant continuations within the same turn should not duplicate
+    // the timestamp — the eye groups the user prompt with its reply.
     const html = renderToString(
       <MessageRow
         message={assistantMessage("ok")}
@@ -112,10 +122,30 @@ describe("engineering-logbook message rows", () => {
         isFirstOfTurn={false}
       />,
     );
-    expect(html).toContain("agent-message-gutter");
+    expect(html).toContain("agent-message-speaker");
+    expect(html).toContain("agent-message-avatar");
     expect(html).not.toContain("agent-message-time");
     expect(html).not.toContain("agent-message-num");
+    expect(html).not.toContain("agent-message-gutter");
     expect(html).not.toContain("№");
+  });
+
+  it("user avatar has data-role=user (theme accent paints the disc)", () => {
+    const html = renderToString(
+      <MessageRow message={userMessage("hi")} toolResults={emptyToolResults} />,
+    );
+    // The disc inherits its color from theme-scoped CSS via [data-role].
+    expect(html).toMatch(/agent-message-avatar[^>]*data-role="user"/);
+  });
+
+  it("assistant avatar has data-role=assistant", () => {
+    const html = renderToString(
+      <MessageRow
+        message={assistantMessage("ok")}
+        toolResults={emptyToolResults}
+      />,
+    );
+    expect(html).toMatch(/agent-message-avatar[^>]*data-role="assistant"/);
   });
 });
 
@@ -125,7 +155,6 @@ describe("formatHHMMSS", () => {
   });
 
   it("zero-pads hours, minutes, seconds", () => {
-    // 2024-01-01 03:04:05 in local time.
     const d = new Date(2024, 0, 1, 3, 4, 5);
     expect(formatHHMMSS(d.getTime())).toBe("03:04:05");
   });

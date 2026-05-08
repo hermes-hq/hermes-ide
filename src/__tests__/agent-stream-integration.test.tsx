@@ -182,11 +182,15 @@ describe("rendered DOM matches redesign spec — text-response", () => {
     expect(html).not.toContain("agent-message-role");
   });
 
-  it("renders an assistant message row with data-role=assistant + the gutter", () => {
+  it("renders an assistant message row with data-role=assistant + speaker chip + body", () => {
     expect(html).toContain('data-role="assistant"');
-    expect(html).toContain("agent-message-gutter");
+    expect(html).toContain("agent-message-speaker");
+    expect(html).toContain("agent-message-avatar");
     expect(html).toContain("agent-message-assistant");
     expect(html).toContain("agent-message-body");
+    // Old logbook gutter artefacts must stay gone.
+    expect(html).not.toContain("agent-message-gutter");
+    expect(html).not.toContain("№");
   });
 
   it("renders the colophon summary, not the old CAPS CI dump", () => {
