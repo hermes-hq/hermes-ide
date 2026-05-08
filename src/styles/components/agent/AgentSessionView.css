@@ -470,31 +470,41 @@
   user-select: none;
 }
 
+/* Speaker chip — a small rounded square holding the bot/person icon.
+ * No more solid disc.  The chip background is a tinted accent at low
+ * alpha; the border is the same accent at higher alpha; the icon
+ * itself takes the FULL accent via currentColor.  Each theme's accent
+ * (brass-remapped per theme via #254) lights the chip its own way. */
 .agent-message-avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   flex-shrink: 0;
-  background: var(--ink-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
+  transition: transform 120ms ease, background 120ms ease;
 }
 
 .agent-message-avatar[data-role="user"] {
-  background: var(--brass, var(--accent));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #000 24%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--brass, var(--accent)) 14%, transparent);
+  background: color-mix(in srgb, var(--brass, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brass, var(--accent)) 28%, transparent);
+  color: var(--brass, var(--accent));
 }
 
 .agent-message-avatar[data-role="assistant"] {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 90%, transparent),
-    color-mix(in srgb, var(--accent) 50%, transparent) 80%
-  );
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #000 24%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
+}
+
+.agent-message:hover .agent-message-avatar {
+  transform: translateY(-0.5px);
+}
+
+.agent-message-avatar svg {
+  display: block;
 }
 
 .agent-message-name {

@@ -683,7 +683,9 @@ export function MessageRow({
           className="agent-message-avatar"
           data-role={message.role}
           aria-hidden="true"
-        />
+        >
+          {message.role === "user" ? <UserIcon /> : <BotIcon />}
+        </span>
         <span className="agent-message-name">{speakerName}</span>
         {isFirstOfTurn ? (
           <span className="agent-message-time">{formatHHMMSS(message.timestamp)}</span>
@@ -711,6 +713,56 @@ export function MessageRow({
         )}
       </div>
     </div>
+  );
+}
+
+/** Speaker-chip icons.  Drawn inline with `currentColor` so each
+ *  theme's accent (via the brass-remap landed in #254) paints the
+ *  glyph — green-phosphor on hacker, cyan on tron, terracotta on
+ *  designer, etc.  Sized to fit the 24px avatar chip. */
+function BotIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Antenna */}
+      <line x1="8" y1="2.5" x2="8" y2="4.5" />
+      <circle cx="8" cy="2" r="0.7" fill="currentColor" stroke="none" />
+      {/* Head */}
+      <rect x="3" y="4.5" width="10" height="8" rx="2" />
+      {/* Eyes */}
+      <circle cx="6" cy="8.5" r="0.85" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="8.5" r="0.85" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Head */}
+      <circle cx="8" cy="5.5" r="2.6" />
+      {/* Shoulders */}
+      <path d="M3 13.5c0-2.6 2.2-4.3 5-4.3s5 1.7 5 4.3" />
+    </svg>
   );
 }
 
