@@ -24,7 +24,10 @@ import { SessionProvider, useSession, useActiveSession, useSessionList, useSideb
 import { getSetting } from "./api/settings";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
-import { ActivityBar, SessionsIcon, ContextIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
+import { AgentContextPanel } from "./components/AgentContextPanel";
+import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
+import { UsagePanel } from "./components/UsagePanel";
+import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
 import type { SessionView } from "./components/SessionList";
 
 import { ProcessPanel } from "./components/ProcessPanel";
@@ -45,6 +48,7 @@ import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { SessionCreator } from "./components/SessionCreator";
 import { PromptComposer } from "./components/PromptComposer";
+import { SessionComposer, getComposerTextarea } from "./components/SessionComposer";
 import { SplitLayout } from "./components/SplitLayout";
 import { SessionGitPanel } from "./components/SessionGitPanel";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
@@ -84,7 +88,40 @@ function AppContent() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [costDashboardOpen, setCostDashboardOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [sessionCreatorOpen, setSessionCreatorOpen] = useState<false | { group?: string }>(false);
+  const [sessionCreatorOpen, setSessionCreatorOpenInner] = useState<false | { group?: string }>(false);
+
+  /** Wraps setSessionCreatorOpenInner so every entry point that opens
+   *  the modal also synchronously injects the imperative "opening…"
+   *  overlay into document.body BEFORE any React work happens (M11.2).
+   *  React-based overlays raced strict-mode double-mount and lost the
+   *  paint window; the imperative DOM call cannot be batched away. */
+  const setSessionCreatorOpen = useCallback(
+    (next: false | { group?: string }) => {
+      if (next === false) {
+        console.log("[opening-overlay] wrapper: close");
+        void hideOpeningOverlay();
+        setSessionCreatorOpenInner(false);
+      } else {
+        console.log(`[opening-overlay] wrapper: open at ${performance.now().toFixed(0)}ms — calling showOpeningOverlay()`);
+        // 1. Inject overlay synchronously into document.body.
+        showOpeningOverlay();
+        // 2. Defer the modal mount until after the browser has had at
+        //    least two animation-frame ticks, so the overlay actually
+        //    paints alone before SessionCreator's heavy first mount
+        //    pre-empts the next frame.  This is what makes Cmd+N work
+        //    (OS menu provides natural paint interruptions) and the
+        //    button NOT work — both paths now get the same explicit
+        //    paint window.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            console.log(`[opening-overlay] rAF×2 tick at ${performance.now().toFixed(0)}ms — setting state to mount modal`);
+            setSessionCreatorOpenInner(next);
+          });
+        });
+      }
+    },
+    [],
+  );
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
@@ -404,6 +441,29 @@ function AppContent() {
       // Suppress session-switch shortcuts while any modal/overlay is open
       const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
       if (anyOverlayOpen) return;
+
+      // Cmd+Shift+J — toggle focus between the active session's pane and
+      // the agent composer.  Only meaningful for agent-mode sessions; in
+      // terminal mode the composer is not mounted and this is a no-op.
+      if (e.shiftKey && (e.key === "J" || e.key === "j")) {
+        const sid = state.activeSessionId;
+        if (!sid) return;
+        const sess = state.sessions[sid];
+        if (sess?.mode !== "agent") return;
+        e.preventDefault();
+        const ta = getComposerTextarea();
+        if (ta && document.activeElement === ta) {
+          // Already focused → blur to give the pane focus back.  Simple
+          // blur is enough; the agent view doesn't have its own input.
+          ta.blur();
+        } else if (ta) {
+          ta.focus();
+        } else {
+          // Composer is collapsed (no textarea mounted) — ask it to expand.
+          window.dispatchEvent(new CustomEvent("hermes:expand-composer", { detail: { sessionId: sid } }));
+        }
+        return;
+      }
 
       // Alt combos — pane navigation
       if (e.altKey && state.layout.root) {
@@ -850,18 +910,45 @@ function AppContent() {
               ) : (
                 <EmptyState
                   recentSessions={state.recentSessions}
-                  onNew={() => setSessionCreatorOpen({})}
+                  onNew={() => {
+                    console.log("[opening-overlay] EmptyState 'New Session' clicked");
+                    setSessionCreatorOpen({});
+                  }}
                   onRestore={(entry, restoreScrollback) => createSession({ label: entry.label, workingDirectory: entry.working_directory, restoreFromId: restoreScrollback ? entry.id : undefined })}
                 />
               )}
             </div>
             )}
+            <SessionComposer />
           </div>
-          {ui.contextPanelOpen && !ui.flowMode && activeSession && (
+          {/* Right rail.
+           *
+           *  Agent-mode sessions get the always-on AgentContextPanel
+           *  (M0 of the v1.0 TUI-parity plan).  No toggle — the panel
+           *  is part of the agent surface itself.
+           *
+           *  Terminal-mode (and any other) sessions keep the legacy
+           *  toggleable ContextPanel + UsagePanel pair.  Both can be
+           *  cycled from the activity bar.
+           */}
+          {!ui.flowMode && activeSession?.mode === "agent" && (
+            <PanelErrorBoundary panelName="Agent Context Panel">
+              <AgentContextPanel session={activeSession} />
+            </PanelErrorBoundary>
+          )}
+          {ui.contextPanelOpen && !ui.flowMode && activeSession && activeSession.mode !== "agent" && (
             <>
               <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
               <PanelErrorBoundary panelName="Context Panel">
                 <ContextPanel session={activeSession} />
+              </PanelErrorBoundary>
+            </>
+          )}
+          {ui.usagePanelOpen && !ui.contextPanelOpen && !ui.flowMode && activeSession && (
+            <>
+              <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
+              <PanelErrorBoundary panelName="Usage Panel">
+                <UsagePanel session={activeSession} />
               </PanelErrorBoundary>
             </>
           )}
@@ -871,9 +958,15 @@ function AppContent() {
             side="right"
             tabs={[
               { id: "context", label: `Context (${fmt("{mod}E")})`, icon: ContextIcon },
+              { id: "usage", label: "Usage · plan & limits", icon: UsageIcon },
             ]}
-            activeTabId={ui.contextPanelOpen ? "context" : null}
-            onTabClick={() => dispatch({ type: "TOGGLE_CONTEXT" })}
+            activeTabId={
+              ui.contextPanelOpen ? "context" : ui.usagePanelOpen ? "usage" : null
+            }
+            onTabClick={(tabId) => {
+              if (tabId === "context") dispatch({ type: "TOGGLE_CONTEXT" });
+              else if (tabId === "usage") dispatch({ type: "TOGGLE_USAGE" });
+            }}
           />
         )}
       </div>
@@ -1015,6 +1108,13 @@ function AppContent() {
       {sessionCreatorOpen && (
         <SessionCreator
           defaultGroup={sessionCreatorOpen.group}
+          onReady={() => {
+            // SessionCreator finished its first useEffect — the modal
+            // is mounted and visible.  Tear down the imperative
+            // overlay (waits for the minimum-visible duration first
+            // so the user actually sees it on instant-mount machines).
+            void hideOpeningOverlay();
+          }}
           onClose={() => {
             setSessionCreatorOpen(false);
             pendingSplit.current = null;
@@ -1080,6 +1180,7 @@ function AppContent() {
       {state.pendingCloseSessionId && (
         <CloseSessionDialog
           sessionId={state.pendingCloseSessionId}
+          sessionMode={state.sessions[state.pendingCloseSessionId]?.mode}
           onConfirm={(id) => {
             dispatch({ type: "CANCEL_CLOSE_SESSION" });
             closeSession(id);

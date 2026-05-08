@@ -1,0 +1,48 @@
+/* M9 + M11 — instant feedback overlay for Cmd+N / new-session button.
+ *
+ * Self-contained (own CSS file) so the bundle includes these rules
+ * even when SessionCreator hasn't rendered yet.  An earlier attempt
+ * inlined the rules in SessionCreator.css and they only loaded once
+ * the modal mounted — i.e., never visible on the first frame.
+ *
+ * z-index sits *above* the modal's command-palette-overlay (z=100)
+ * so the loader covers the modal during the minimum-visible window.
+ *
+ * Editorial Engineering: brass uppercase tracked, hairline rules,
+ * slow-pulse animation, no spinner glyph. */
+
+.session-creator-opening-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 15, 20, 0.72);
+  pointer-events: none;
+  animation: session-creator-opening-in 100ms ease-out;
+}
+
+.session-creator-opening-text {
+  font-family: var(--font-display, "Inter Tight", system-ui, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--brass, #d4a86a);
+  padding: 8px 18px;
+  border-top: 1px solid rgba(212, 168, 106, 0.4);
+  border-bottom: 1px solid rgba(212, 168, 106, 0.4);
+  background: var(--bg-paper, #0d1218);
+  animation: session-creator-opening-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes session-creator-opening-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes session-creator-opening-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}

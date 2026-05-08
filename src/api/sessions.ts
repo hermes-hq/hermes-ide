@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SessionData, SessionHistoryEntry, TmuxSessionEntry, TmuxWindowEntry, PortForward } from "../types/session";
+import type { SessionData, SessionHistoryEntry, SessionMode, TmuxSessionEntry, TmuxWindowEntry, PortForward } from "../types/session";
 
 export interface RemoteGitInfo {
   branch: string | null;
@@ -26,6 +26,9 @@ export function createSession(opts: {
   sshIdentityFile?: string | null;
   initialRows?: number | null;
   initialCols?: number | null;
+  /** "terminal" (default) spawns a PTY; "agent" spawns the Claude subprocess
+   *  via `agent::spawn_agent_session` instead. */
+  mode?: SessionMode | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

@@ -216,14 +216,33 @@ export function buildContextEntryMenuItems(
 export function buildPaneHeaderMenuItems(
   _paneId: string,
   hasSiblings: boolean,
+  /** Optional session info — if present, enables "Convert to terminal/agent". */
+  session?: { mode: "terminal" | "agent"; ai_provider: string | null },
 ): ContextMenuItem[] {
-  return [
+  const items: ContextMenuItem[] = [
     menuItem("pane.split-right", "Split Right", { accelerator: "CmdOrCtrl+D" }),
     menuItem("pane.split-down", "Split Down", { accelerator: "CmdOrCtrl+Shift+D" }),
-    separator(),
-    menuItem("pane.close", "Close Pane", { enabled: hasSiblings, accelerator: "CmdOrCtrl+W" }),
-    menuItem("pane.close-others", "Close Other Panes", { enabled: hasSiblings }),
   ];
+
+  // Mode conversion is offered when:
+  //   - session is in agent mode (always allow converting back to terminal), OR
+  //   - session is terminal + ai_provider === "claude"
+  // The action label uses (!) to flag that the conversion is destructive
+  // (current process is killed; conversation/scrollback is dropped).
+  if (session) {
+    if (session.mode === "agent") {
+      items.push(separator());
+      items.push(menuItem("pane.convert-to-terminal", "Convert to terminal (!)"));
+    } else if (session.mode === "terminal" && session.ai_provider === "claude") {
+      items.push(separator());
+      items.push(menuItem("pane.convert-to-agent", "Convert to agent (!)"));
+    }
+  }
+
+  items.push(separator());
+  items.push(menuItem("pane.close", "Close Pane", { enabled: hasSiblings, accelerator: "CmdOrCtrl+W" }));
+  items.push(menuItem("pane.close-others", "Close Other Panes", { enabled: hasSiblings }));
+  return items;
 }
 
 export function buildTextInputMenuItems(hasSelection: boolean): ContextMenuItem[] {

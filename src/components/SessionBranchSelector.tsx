@@ -47,6 +47,42 @@ export function groupAugmentedBranches(
   return { local, remote };
 }
 
+/** Display priority for the unified branch list:
+ *    0 — `main`         (always at the top when it exists)
+ *    1 — `master`       (next priority for legacy repos)
+ *    2 — current branch (when it isn't main/master)
+ *    3 — everything else, alphabetical
+ *
+ *  This is a *display* priority — the input list is unchanged.  Pulling
+ *  main/master to the top is the single most common destination from
+ *  any feature branch; surfacing them by default cuts the time-to-pick
+ *  on every session create. */
+export function branchDisplayPriority(args: {
+  displayName: string;
+  isCurrent: boolean;
+}): number {
+  if (args.displayName === "main") return 0;
+  if (args.displayName === "master") return 1;
+  if (args.isCurrent) return 2;
+  return 3;
+}
+
+/** Pure sort that surfaces main/master/current at the top of a unified
+ *  branch list, with the rest alphabetical by display name.  Returns a
+ *  new array; does not mutate the input.  Exported for unit tests. */
+export function sortBranchesMainFirst<T extends { name: string; is_remote: boolean; is_current: boolean }>(
+  list: T[],
+): T[] {
+  return [...list].sort((a, b) => {
+    const aName = a.is_remote ? stripRemotePrefix(a.name) : a.name;
+    const bName = b.is_remote ? stripRemotePrefix(b.name) : b.name;
+    const aPrio = branchDisplayPriority({ displayName: aName, isCurrent: a.is_current });
+    const bPrio = branchDisplayPriority({ displayName: bName, isCurrent: b.is_current });
+    if (aPrio !== bPrio) return aPrio - bPrio;
+    return aName.localeCompare(bName);
+  });
+}
+
 export function SessionBranchSelector({ projectId, onBranchSelected, onSkip }: SessionBranchSelectorProps) {
   const [tab, setTab] = useState<Tab>("existing");
   const [branches, setBranches] = useState<GitBranch[]>([]);
@@ -204,16 +240,10 @@ export function SessionBranchSelector({ projectId, onBranchSelected, onSkip }: S
       }
     }
 
-    // Sort: current branch first, then alphabetical by display name
-    result.sort((a, b) => {
-      if (a.is_current && !b.is_current) return -1;
-      if (!a.is_current && b.is_current) return 1;
-      const aName = a.is_remote ? stripRemotePrefix(a.name) : a.name;
-      const bName = b.is_remote ? stripRemotePrefix(b.name) : b.name;
-      return aName.localeCompare(bName);
-    });
-
-    return result;
+    // Surface main → master → current → alphabetical.  Pure sort lives
+    // alongside the helpers above so the ordering is unit-tested without
+    // having to render the picker.
+    return sortBranchesMainFirst(result);
   }, [augmentedBranches]);
 
   // Filter by search

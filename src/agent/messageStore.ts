@@ -1,0 +1,619 @@
+/**
+ * Pure-logic reducer that folds Claude Agent stream-json events into
+ * a normalized list of "turns" for rendering.
+ *
+ * NOT a React hook — keep it pure so it's vitest-testable against the fixtures.
+ *
+ * Folding rules:
+ * - `stream_event` partials are DROPPED (we use full `assistant` events instead).
+ * - `system/init` is captured once into `initEvent` and flips `initialized = true`.
+ * - Other `system/*` events are ignored (they're flow markers like "requesting").
+ * - `assistant` events with the same `message.id` are MERGED — content arrays are
+ *   concatenated in arrival order. Claude commonly emits one assistant event per
+ *   content block (thinking, then tool_use, then text), all sharing the same id.
+ * - `user` events with `tool_result` blocks update the `toolResults` map keyed by
+ *   `tool_use_id`. They are NOT appended as user messages (they're rendered inline
+ *   by the paired `tool_use` block).
+ * - `user` events with text content are appended as user messages.
+ * - `result` updates `resultEvent`.
+ * - `rate_limit_event` updates `rateLimitInfo`.
+ * - `parse_error` events are appended to `unknownEvents` for diagnostics.
+ * - Unknown event types are appended to `unknownEvents` (don't crash).
+ */
+
+import type {
+  AgentEvent,
+  AssistantEvent,
+  ContentBlock,
+  InitEvent,
+  RateLimitInfo,
+  ResultEvent,
+  ToolResultBlockData,
+  UserEvent,
+} from "./types";
+import {
+  isAssistantEvent,
+  isInitEvent,
+  isParseErrorEvent,
+  isRateLimitEvent,
+  isResultEvent,
+  isStreamPartial,
+  isSystemEvent,
+  isThinkingBlock,
+  isToolResultBlock,
+  isToolUseBlock,
+  isUserEvent,
+} from "./types";
+
+export interface RenderedMessage {
+  /** `message.id` for assistant; `user-{uuid}` for user. */
+  id: string;
+  role: "user" | "assistant";
+  blocks: ContentBlock[];
+  usage?: AssistantEvent["message"]["usage"];
+  parentToolUseId?: string | null;
+  /**
+   * Unix ms timestamp captured when the message was first observed by the
+   * reducer (i.e., on the first assistant/user event with this id).
+   * Rendered as a hover-only marginalia annotation in the right gutter.
+   */
+  timestamp?: number;
+}
+
+export interface AgentSessionState {
+  initialized: boolean;
+  initEvent: InitEvent | null;
+  messages: RenderedMessage[];
+  /** tool_use_id → tool_result block (for pairing with tool_use). */
+  toolResults: Map<string, ToolResultBlockData>;
+  resultEvent: ResultEvent | null;
+  rateLimitInfo: RateLimitInfo | null;
+  lastError: string | null;
+  /** Diagnostic catch-all — anything we couldn't classify. */
+  unknownEvents: AgentEvent[];
+  /**
+   * Phase 5 streaming state — three precious "alive" cues.
+   *
+   * `streamingMessageId`: id of the assistant message currently being streamed
+   * (`stop_reason === null`). Cleared on the closing assistant event
+   * (`stop_reason !== null`) or on the `result` event. Drives the heartbeat
+   * cursor at the end of the latest text block.
+   *
+   * `runningToolUseIds`: set of `tool_use.id`s observed in an assistant event
+   * that have not yet been paired with a `tool_result` user event. Drives the
+   * tool-respiration animation on the matching tool block. Reconstructed (new
+   * `Set`) on every change for React identity-based memoization.
+   *
+   * `thinkingStartedAt`: map keyed by `messageId + ":" + blockIndex` to an
+   * epoch-ms timestamp. Set on first observation of a thinking block; deleted
+   * once the block has ended (a non-thinking block follows in the same message,
+   * or the `result` event arrives, or a closing assistant event arrives).
+   *
+   * `thinkingElapsed`: map keyed identically, holding the frozen `Date.now() -
+   * startedAt` value once the thinking block ends. Read by `<ThinkingBlock>` to
+   * render a stable elapsed counter on subsequent renders.
+   */
+  streamingMessageId: string | null;
+  runningToolUseIds: Set<string>;
+  thinkingStartedAt: Map<string, number>;
+  thinkingElapsed: Map<string, number>;
+  /** Running total of `total_cost_usd` across every `result` event seen
+   *  this session.  Drives the masthead cost lozenge.  Note this is the
+   *  *bridge process's* lifetime, which with the long-lived bridge equals
+   *  the user's session.  Reset on workspace restore. */
+  cumulativeCostUsd: number;
+  /** Same idea for output tokens — quick "how much have I gotten back?" */
+  cumulativeOutputTokens: number;
+  /** Account info from the SDK's `query.accountInfo()`.  Captured once
+   *  per session via the bridge's `_hermes_event/account_info` envelope.
+   *  Populates the Usage panel's "Account" section. */
+  accountInfo: {
+    email?: string;
+    organization?: string;
+    subscriptionType?: string;
+    apiKeySource?: string;
+    tokenSource?: string;
+    apiProvider?: string;
+  } | null;
+  /** Latest rate-limit snapshot per `rateLimitType` ("five_hour" /
+   *  "weekly" / etc.).  rate_limit_events arrive on every turn; we keep
+   *  the most recent of each kind so the Usage panel can show all the
+   *  active windows at once. */
+  rateLimits: Record<string, RateLimitInfo>;
+}
+
+export function emptyState(): AgentSessionState {
+  return {
+    cumulativeCostUsd: 0,
+    cumulativeOutputTokens: 0,
+    accountInfo: null,
+    rateLimits: {},
+    initialized: false,
+    initEvent: null,
+    messages: [],
+    toolResults: new Map(),
+    resultEvent: null,
+    rateLimitInfo: null,
+    lastError: null,
+    unknownEvents: [],
+    streamingMessageId: null,
+    runningToolUseIds: new Set(),
+    thinkingStartedAt: new Map(),
+    thinkingElapsed: new Map(),
+  };
+}
+
+function upsertAssistant(
+  messages: RenderedMessage[],
+  event: AssistantEvent,
+): RenderedMessage[] {
+  const id = event.message.id;
+  const existingIdx = messages.findIndex((m) => m.role === "assistant" && m.id === id);
+  const incomingBlocks = Array.isArray(event.message.content) ? event.message.content : [];
+
+  if (existingIdx === -1) {
+    const next: RenderedMessage = {
+      id,
+      role: "assistant",
+      blocks: [...incomingBlocks],
+      usage: event.message.usage,
+      parentToolUseId: event.parent_tool_use_id ?? null,
+      timestamp: Date.now(),
+    };
+    return [...messages, next];
+  }
+
+  const existing = messages[existingIdx];
+  const merged: RenderedMessage = {
+    ...existing,
+    // Preserve arrival order; multiple events with the same id append blocks.
+    blocks: [...existing.blocks, ...incomingBlocks],
+    // Latest usage wins (Claude reports cumulative usage on the latest event).
+    usage: event.message.usage ?? existing.usage,
+  };
+  const out = messages.slice();
+  out[existingIdx] = merged;
+  return out;
+}
+
+function appendUserMessage(
+  messages: RenderedMessage[],
+  event: UserEvent,
+): RenderedMessage[] {
+  const blocks = Array.isArray(event.message.content) ? event.message.content : [];
+  const id = `user-${event.uuid ?? `${messages.length}`}`;
+  return [
+    ...messages,
+    {
+      id,
+      role: "user",
+      blocks,
+      parentToolUseId: event.parent_tool_use_id ?? null,
+      timestamp: Date.now(),
+    },
+  ];
+}
+
+function recordToolResults(
+  toolResults: Map<string, ToolResultBlockData>,
+  blocks: ContentBlock[],
+): Map<string, ToolResultBlockData> {
+  let mutated: Map<string, ToolResultBlockData> | null = null;
+  for (const block of blocks) {
+    if (isToolResultBlock(block)) {
+      if (!mutated) mutated = new Map(toolResults);
+      mutated.set(block.tool_use_id, block);
+    }
+  }
+  return mutated ?? toolResults;
+}
+
+/**
+ * Build a stable lookup key for the streaming-state thinking maps.
+ * The block index is the position inside the *merged* content array of an
+ * assistant message, so a key uniquely identifies a single thinking block in
+ * a conversation across reducer calls.
+ */
+function thinkingBlockKey(messageId: string, blockIndex: number): string {
+  return `${messageId}:${blockIndex}`;
+}
+
+/**
+ * Find the assistant message in `messages` by id and return its merged blocks,
+ * or `null` if not found. Used for thinking-elapsed bookkeeping which depends
+ * on the *post-merge* block layout.
+ */
+function findAssistantBlocks(
+  messages: RenderedMessage[],
+  messageId: string,
+): ContentBlock[] | null {
+  const m = messages.find((msg) => msg.role === "assistant" && msg.id === messageId);
+  return m ? m.blocks : null;
+}
+
+/**
+ * After an assistant event has been merged into the messages list, reconcile
+ * the thinking-state maps:
+ *
+ * 1. For every thinking block in this message, ensure `thinkingStartedAt` has
+ *    an entry (preserving the original first-seen timestamp).
+ * 2. For every thinking block that is *no longer* the trailing block (i.e.,
+ *    a non-thinking block exists at a higher index), capture elapsed and
+ *    delete the started entry.
+ *
+ * Returns new Map instances only if a change happened, otherwise returns the
+ * input maps unchanged so React reference-equality memoization stays cheap.
+ */
+function reconcileThinkingForMessage(
+  messageId: string,
+  blocks: ContentBlock[],
+  thinkingStartedAt: Map<string, number>,
+  thinkingElapsed: Map<string, number>,
+  now: number,
+): {
+  thinkingStartedAt: Map<string, number>;
+  thinkingElapsed: Map<string, number>;
+} {
+  let nextStarted: Map<string, number> | null = null;
+  let nextElapsed: Map<string, number> | null = null;
+
+  // Index of the last non-thinking block (-1 if none). A thinking block at
+  // position `i` is considered "ended" iff `lastNonThinkingIdx > i`.
+  let lastNonThinkingIdx = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    if (!isThinkingBlock(blocks[i])) {
+      lastNonThinkingIdx = i;
+    }
+  }
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (!isThinkingBlock(block)) continue;
+    const key = thinkingBlockKey(messageId, i);
+
+    // 1. First-seen → start timer (only if no elapsed already captured).
+    if (!thinkingStartedAt.has(key) && !thinkingElapsed.has(key)) {
+      if (!nextStarted) nextStarted = new Map(thinkingStartedAt);
+      nextStarted.set(key, now);
+    }
+
+    // 2. Has another non-thinking block come in *after* this thinking block?
+    // If so, the thinking step has ended — capture elapsed and clear started.
+    const ended = lastNonThinkingIdx > i;
+    if (ended) {
+      const startedAt =
+        (nextStarted ?? thinkingStartedAt).get(key) ?? thinkingStartedAt.get(key);
+      if (startedAt !== undefined && !thinkingElapsed.has(key)) {
+        if (!nextElapsed) nextElapsed = new Map(thinkingElapsed);
+        nextElapsed.set(key, Math.max(0, now - startedAt));
+      }
+      if ((nextStarted ?? thinkingStartedAt).has(key)) {
+        if (!nextStarted) nextStarted = new Map(thinkingStartedAt);
+        nextStarted.delete(key);
+      }
+    }
+  }
+
+  return {
+    thinkingStartedAt: nextStarted ?? thinkingStartedAt,
+    thinkingElapsed: nextElapsed ?? thinkingElapsed,
+  };
+}
+
+/**
+ * Freeze every still-pending thinking timer. Used when the turn ends (closing
+ * assistant event with a `stop_reason`, or the final `result` event).
+ */
+function freezePendingThinking(
+  thinkingStartedAt: Map<string, number>,
+  thinkingElapsed: Map<string, number>,
+  now: number,
+): {
+  thinkingStartedAt: Map<string, number>;
+  thinkingElapsed: Map<string, number>;
+} {
+  if (thinkingStartedAt.size === 0) {
+    return { thinkingStartedAt, thinkingElapsed };
+  }
+  const nextElapsed = new Map(thinkingElapsed);
+  for (const [key, startedAt] of thinkingStartedAt) {
+    if (!nextElapsed.has(key)) {
+      nextElapsed.set(key, Math.max(0, now - startedAt));
+    }
+  }
+  return {
+    thinkingStartedAt: new Map(),
+    thinkingElapsed: nextElapsed,
+  };
+}
+
+/**
+ * For an assistant event, walk the new (this-event-only) content blocks and
+ * mark any tool_use ids as running. Note: matching tool_results may arrive in
+ * a *later* user event, which is where we remove ids — see `clearToolResults`.
+ */
+function addRunningToolUses(
+  running: Set<string>,
+  blocks: ContentBlock[],
+): Set<string> {
+  let next: Set<string> | null = null;
+  for (const b of blocks) {
+    if (isToolUseBlock(b)) {
+      if (!next) next = new Set(running);
+      next.add(b.id);
+    }
+  }
+  return next ?? running;
+}
+
+function clearToolResults(
+  running: Set<string>,
+  blocks: ContentBlock[],
+): Set<string> {
+  let next: Set<string> | null = null;
+  for (const b of blocks) {
+    if (isToolResultBlock(b)) {
+      if (running.has(b.tool_use_id)) {
+        if (!next) next = new Set(running);
+        next.delete(b.tool_use_id);
+      }
+    }
+  }
+  return next ?? running;
+}
+
+/**
+ * Pure reducer — given the previous state and an incoming event,
+ * return the next state. Never mutates the input.
+ */
+export function reduceEvent(
+  state: AgentSessionState,
+  event: AgentEvent,
+): AgentSessionState {
+  // 1. Drop stream_event partials by spec.
+  if (isStreamPartial(event)) {
+    return state;
+  }
+
+  // 2. system/* events.
+  if (isSystemEvent(event)) {
+    if (isInitEvent(event)) {
+      return {
+        ...state,
+        initialized: true,
+        initEvent: event,
+      };
+    }
+    // Other system events (status, etc.) are flow markers — ignore quietly.
+    return state;
+  }
+
+  // 3. Assistant events: merge by message.id.
+  if (isAssistantEvent(event)) {
+    const nextMessages = upsertAssistant(state.messages, event);
+    const messageId = event.message.id;
+    const incomingBlocks = Array.isArray(event.message.content)
+      ? event.message.content
+      : [];
+    const mergedBlocks = findAssistantBlocks(nextMessages, messageId) ?? [];
+    const now = Date.now();
+
+    // streamingMessageId reflects whether *this* turn is mid-stream.
+    // Claude's stream-json emits `stop_reason: null` on partial assistant
+    // events and a non-null stop_reason on the closing event of the turn.
+    const stopReason = event.message.stop_reason;
+    const isClosing = stopReason !== undefined && stopReason !== null;
+    const streamingMessageId = isClosing ? null : messageId;
+
+    // Run-set: add any new tool_use ids from this event's incoming blocks.
+    const runningToolUseIds = addRunningToolUses(
+      state.runningToolUseIds,
+      incomingBlocks,
+    );
+
+    // Thinking state: reconcile against the *merged* block layout.
+    let { thinkingStartedAt, thinkingElapsed } = reconcileThinkingForMessage(
+      messageId,
+      mergedBlocks,
+      state.thinkingStartedAt,
+      state.thinkingElapsed,
+      now,
+    );
+
+    // Closing event also freezes any thinking timers that are still alive
+    // (e.g., a turn that ended with a final thinking block).
+    if (isClosing) {
+      const frozen = freezePendingThinking(
+        thinkingStartedAt,
+        thinkingElapsed,
+        now,
+      );
+      thinkingStartedAt = frozen.thinkingStartedAt;
+      thinkingElapsed = frozen.thinkingElapsed;
+    }
+
+    return {
+      ...state,
+      messages: nextMessages,
+      streamingMessageId,
+      runningToolUseIds,
+      thinkingStartedAt,
+      thinkingElapsed,
+    };
+  }
+
+  // 4. User events.
+  if (isUserEvent(event)) {
+    const blocks = Array.isArray(event.message.content) ? event.message.content : [];
+    const hasToolResults = blocks.some((b) => isToolResultBlock(b));
+    const hasNonToolResult = blocks.some((b) => !isToolResultBlock(b));
+
+    let nextToolResults = state.toolResults;
+    let nextMessages = state.messages;
+    let nextRunning = state.runningToolUseIds;
+
+    if (hasToolResults) {
+      nextToolResults = recordToolResults(state.toolResults, blocks);
+      nextRunning = clearToolResults(state.runningToolUseIds, blocks);
+    }
+    if (hasNonToolResult) {
+      // Echoed user prompt or other non-tool-result content — render as a user message.
+      nextMessages = appendUserMessage(state.messages, event);
+    }
+
+    if (
+      nextToolResults === state.toolResults &&
+      nextMessages === state.messages &&
+      nextRunning === state.runningToolUseIds
+    ) {
+      return state;
+    }
+    return {
+      ...state,
+      toolResults: nextToolResults,
+      messages: nextMessages,
+      runningToolUseIds: nextRunning,
+    };
+  }
+
+  // 5. Result event — captured for end-of-turn footer.
+  if (isResultEvent(event)) {
+    const now = Date.now();
+    const { thinkingStartedAt, thinkingElapsed } = freezePendingThinking(
+      state.thinkingStartedAt,
+      state.thinkingElapsed,
+      now,
+    );
+    // Accumulate cost + tokens for the masthead lozenge.  result events
+    // carry per-turn totals; we sum across the session.
+    const turnCost = typeof event.total_cost_usd === "number" ? event.total_cost_usd : 0;
+    const turnOut = (() => {
+      const u = (event as { usage?: { output_tokens?: unknown } }).usage;
+      const v = u?.output_tokens;
+      return typeof v === "number" ? v : 0;
+    })();
+    return {
+      ...state,
+      resultEvent: event,
+      cumulativeCostUsd: state.cumulativeCostUsd + turnCost,
+      cumulativeOutputTokens: state.cumulativeOutputTokens + turnOut,
+      lastError: event.is_error
+        ? event.result ?? `Agent returned ${event.subtype}`
+        : state.lastError,
+      streamingMessageId: null,
+      thinkingStartedAt,
+      thinkingElapsed,
+    };
+  }
+
+  // 6. Rate-limit events — non-blocking notice.  Also indexed per
+  // rateLimitType in `rateLimits` so the Usage panel can show every
+  // active window (5-hour, weekly, etc.) at once.
+  if (isRateLimitEvent(event)) {
+    const info = event.rate_limit_info;
+    const kind =
+      info && typeof (info as { rateLimitType?: string }).rateLimitType === "string"
+        ? (info as { rateLimitType: string }).rateLimitType
+        : "default";
+    return {
+      ...state,
+      rateLimitInfo: info,
+      rateLimits: { ...state.rateLimits, [kind]: info },
+    };
+  }
+
+  // 6b. Hermes side-channel event — `account_info` from the bridge's
+  // SDK accountInfo() probe.  Not a Claude-protocol event, but it
+  // arrives on the same stdout stream so we handle it inline here.
+  const ev = event as { type?: string; subtype?: string; info?: unknown };
+  if (ev.type === "_hermes_event" && ev.subtype === "account_info") {
+    const info = ev.info as AgentSessionState["accountInfo"];
+    if (info && typeof info === "object") {
+      return { ...state, accountInfo: info };
+    }
+  }
+
+  // 7. Parse errors and unknown events — diagnostic bucket.
+  if (isParseErrorEvent(event)) {
+    return {
+      ...state,
+      unknownEvents: [...state.unknownEvents, event],
+      lastError: event.error,
+    };
+  }
+
+  // 8. Catch-all — never crash on unfamiliar event types.
+  return {
+    ...state,
+    unknownEvents: [...state.unknownEvents, event],
+  };
+}
+
+/** Convenience: fold an array of events into a final state. */
+export function reduceAll(events: AgentEvent[]): AgentSessionState {
+  return events.reduce(reduceEvent, emptyState());
+}
+
+/**
+ * Derive a coarse "what is the agent doing right now?" status from the live
+ * reducer state.  Used by the session header to show one of:
+ *
+ *   - `awaiting`  — user has sent a message but no assistant event has come
+ *                   back yet.  We're waiting on Claude's first byte.
+ *   - `running`   — a tool_use is in flight (no matching tool_result yet).
+ *                   `toolName` carries the tool's name (e.g. "Bash") and
+ *                   `since` carries the wall-clock when it started.
+ *   - `thinking`  — assistant is mid-stream but no tool is running.  This is
+ *                   the model writing a reply or computing internal thinking.
+ *   - `idle`      — nothing in flight.
+ *
+ * Pure function — exported for testability and so the header can call it on
+ * every render cheaply.  The traversal is bounded by the message list size,
+ * so even on long conversations it's negligible.
+ */
+export interface AgentActivity {
+  status: "idle" | "awaiting" | "thinking" | "running";
+  /** Tool name when `status === "running"`. */
+  toolName?: string;
+  /** Wall-clock ms when this activity started.  Used by the header for an
+   *  elapsed counter — null when no meaningful start time is known. */
+  since: number | null;
+}
+
+export function deriveActivity(state: AgentSessionState): AgentActivity {
+  // 1. Tool in flight always wins — that's what's actually consuming time.
+  if (state.runningToolUseIds.size > 0) {
+    let toolName: string | undefined;
+    let since: number | null = null;
+    // Walk newest-first so we report the most recently issued tool.
+    for (let i = state.messages.length - 1; i >= 0 && !toolName; i--) {
+      const msg = state.messages[i];
+      if (msg.role !== "assistant") continue;
+      for (let j = msg.blocks.length - 1; j >= 0; j--) {
+        const block = msg.blocks[j];
+        if (isToolUseBlock(block) && state.runningToolUseIds.has(block.id)) {
+          toolName = block.name;
+          since = msg.timestamp ?? null;
+          break;
+        }
+      }
+    }
+    return { status: "running", toolName, since };
+  }
+
+  // 2. Streaming assistant message → "thinking" (writing a reply).
+  if (state.streamingMessageId) {
+    const msg = state.messages.find(
+      (m) => m.role === "assistant" && m.id === state.streamingMessageId,
+    );
+    return { status: "thinking", since: msg?.timestamp ?? null };
+  }
+
+  // 3. Tail of conversation is a user message with no assistant reply yet.
+  const last = state.messages[state.messages.length - 1];
+  if (last && last.role === "user") {
+    return { status: "awaiting", since: last.timestamp ?? null };
+  }
+
+  return { status: "idle", since: null };
+}

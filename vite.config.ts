@@ -11,6 +11,10 @@ export default defineConfig(async () => ({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   test: {
+    // node by default — many existing tests read fixture files via
+    // `import.meta.url`, which jsdom rewrites away from `file:`.
+    // New interactive tests (Context Panel, M1+ surfaces) opt in to
+    // jsdom per-file with `// @vitest-environment jsdom`.
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["src/__tests__/setup.ts"],

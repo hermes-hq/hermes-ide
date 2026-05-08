@@ -91,6 +91,14 @@ export interface TmuxWindowEntry {
   active: boolean;
 }
 
+/**
+ * How the session is run and rendered.
+ *  - `terminal`: existing PTY/xterm flow.  All non-Claude sessions use this.
+ *  - `agent`:    `claude --print` stream-json subprocess driving an
+ *                `<AgentSessionView>` chat surface.  Claude-only in 1.0.0.
+ */
+export type SessionMode = "terminal" | "agent";
+
 export interface SessionData {
   id: string;
   label: string;
@@ -115,6 +123,9 @@ export interface SessionData {
   channels: string[];
   context_injected: boolean;
   ssh_info: SshConnectionInfo | null;
+  /** "terminal" → existing PTY/xterm flow.  "agent" → `claude --print`
+   *  stream-json subprocess + AgentSessionView render.  Claude-only in 1.0.0. */
+  mode: SessionMode;
 }
 
 export interface SessionHistoryEntry {
@@ -162,6 +173,8 @@ export interface CreateSessionOpts {
   sshUser?: string;
   tmuxSession?: string;
   sshIdentityFile?: string;
+  /** Frontend-chosen session mode.  Defaults to `agent` for Claude, `terminal` otherwise. */
+  mode?: SessionMode;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────
@@ -180,6 +193,24 @@ export interface SavedSessionInfo {
   custom_suffix: string;
   project_ids: string[];
   ssh_info?: SshConnectionInfo | null;
+  /** Optional for backward compat with 0.6.16 saved workspaces.
+   *  When missing, the migration defaults to "terminal" so existing
+   *  sessions never silently auto-convert to agent mode on restore. */
+  mode?: SessionMode;
+  // ─── Agent-mode persistence (v2) ─────────────────────────────────
+  /** Canonical Claude session UUID captured from the SDK's init event.
+   *  Used to `--resume <uuid>` on workspace restore so a multi-turn
+   *  conversation survives across app restarts.  Optional because old
+   *  saved workspaces predate this field. */
+  claude_session_uuid?: string;
+  /** Last-active model (e.g., "haiku") so a respawn picks the same one. */
+  agent_model?: string;
+  /** Last-active --permission-mode value. */
+  agent_permission_mode?: string;
+  /** Last-active --effort value. */
+  agent_effort?: string;
+  /** Currently-attached additional directories (Hermes' projects). */
+  agent_add_dirs?: string[];
 }
 
 export interface SavedWorkspace {
@@ -191,8 +222,11 @@ export interface SavedWorkspace {
   active_session_id: string | null;
 }
 
-/** Current schema version for SavedWorkspace serialisation. */
-export const SAVED_WORKSPACE_VERSION = 1;
+/** Current schema version for SavedWorkspace serialisation.
+ *  v2 adds agent-mode persistence fields (claude_session_uuid + the
+ *  active model / permission_mode / effort / add_dirs) so an agent
+ *  session can be resumed mid-conversation across app restarts. */
+export const SAVED_WORKSPACE_VERSION = 2;
 
 /**
  * Validate a parsed JSON blob against the SavedWorkspace shape.
@@ -220,6 +254,25 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     if (typeof si.custom_prefix !== "string") si.custom_prefix = "";
     if (typeof si.custom_suffix !== "string") si.custom_suffix = "";
     if (!Array.isArray(si.project_ids)) si.project_ids = [];
+    // Default missing `mode` to "terminal" so existing 0.6.16 workspaces
+    // never silently auto-convert sessions to agent mode on restore.
+    if (si.mode !== "agent" && si.mode !== "terminal") {
+      si.mode = "terminal";
+    }
+    // Agent-state fields (v2): pass through if present, normalize to
+    // undefined otherwise so `saved.agent_model` reads as undefined for
+    // older saves and the restore code uses Claude's default model.
+    if (si.claude_session_uuid !== undefined && typeof si.claude_session_uuid !== "string") {
+      delete si.claude_session_uuid;
+    }
+    for (const f of ["agent_model", "agent_permission_mode", "agent_effort"] as const) {
+      if (si[f] !== undefined && typeof si[f] !== "string") {
+        delete si[f];
+      }
+    }
+    if (si.agent_add_dirs !== undefined && !Array.isArray(si.agent_add_dirs)) {
+      delete si.agent_add_dirs;
+    }
   }
 
   return {
@@ -241,11 +294,16 @@ export type SessionAction =
   | { type: "SET_ACTIVE"; id: string | null }
   | { type: "SET_RECENT"; entries: SessionHistoryEntry[] }
   | { type: "TOGGLE_CONTEXT" }
+  | { type: "TOGGLE_USAGE" }
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "TOGGLE_PALETTE" }
   | { type: "CLOSE_PALETTE" }
   | { type: "SET_EXECUTION_MODE"; sessionId: string; mode: ExecutionMode }
   | { type: "SET_DEFAULT_MODE"; mode: ExecutionMode }
+  /** Convert an existing session to a different runtime mode (terminal ↔ agent).
+   *  The caller is responsible for tearing down the previous-mode subprocess
+   *  and spawning the new one before/after dispatching this action. */
+  | { type: "SET_SESSION_MODE"; sessionId: string; mode: SessionMode }
   | { type: "TOGGLE_FLOW_MODE" }
   | { type: "SHOW_AUTO_TOAST"; command: string; reason: string; sessionId: string }
   | { type: "DISMISS_AUTO_TOAST" }
@@ -279,6 +337,10 @@ export type SessionAction =
   // Composer actions
   | { type: "OPEN_COMPOSER" }
   | { type: "CLOSE_COMPOSER" }
+  | { type: "SET_COMPOSER_DRAFT"; sessionId: string; draft: string }
+  | { type: "SET_COMPOSER_HEIGHT"; sessionId: string; height: number }
+  | { type: "TOGGLE_COMPOSER_EXPANDED"; sessionId: string }
+  | { type: "SET_COMPOSER_EXPANDED"; sessionId: string; expanded: boolean }
   // File preview
   | { type: "SET_FILE_PREVIEW"; projectId: string; filePath: string }
   | { type: "CLOSE_FILE_PREVIEW" }

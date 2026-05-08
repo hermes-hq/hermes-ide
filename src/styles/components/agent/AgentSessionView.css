@@ -1,0 +1,1793 @@
+/* ─── Agent Session View — "Workshop" surface ──────────────────
+ *
+ * The conversation lives on a navy paper backed by a faint SVG noise
+ * grain.  The grain is drawn at very low opacity so it reads as texture,
+ * not as decoration — the same way a quality engineering notebook has a
+ * subtle tooth to its page.  Tooling for engineers who love their tools. */
+
+.agent-session-view {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background-color: var(--bg-paper);
+  background-image:
+    /* fine paper-grain noise — generated once, cached as data-URI so
+     * the layout doesn't pay a fetch on first paint.  Opacity is in
+     * the SVG itself so we don't fight CSS background-blend. */
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.025 0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  background-repeat: repeat;
+  background-size: 160px 160px;
+  color: var(--ink-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-feature-settings: var(--font-mono-features);
+}
+
+/* ─── Masthead ──────────────────────────────────────────────
+ *
+ * The header reads like a publication flag, not a chat-app header.  All
+ * caps, tracked, mono.  Quiescent state: AGENT · model · cwd-leaf.  Active
+ * state: AGENT · THINKING · 12s.  Right side carries the absolute cwd path
+ * and rate-limit notices when applicable. */
+
+/* Nameplate.  The hairline above + below frames the masthead like a placard
+ * on a piece of equipment.  Faint inner top-shadow gives it the slight
+ * recess of a metal plate sunk into the surface. */
+.agent-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 20px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-paper);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.012);
+  flex: 0 0 auto;
+  font: 11px/1 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+}
+
+.agent-session-header-left,
+.agent-session-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-session-flag {
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ink-primary);
+}
+
+.agent-session-flag-sep {
+  color: var(--ink-tertiary);
+  letter-spacing: 0;
+  opacity: 0.6;
+}
+
+.agent-session-ticker {
+  /* Active running label glows in brass — same color family as the LED
+   * pulse so the eye reads them as one unit. */
+  color: var(--brass);
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 8px var(--brass-dim);
+}
+
+.agent-session-cwd-name {
+  color: var(--ink-secondary);
+  letter-spacing: 0.04em;
+}
+
+/* LED.  Tiny filled disc; active states get a faint matching glow so it
+ * reads as a real indicator on an instrument panel, not just a CSS dot. */
+.agent-session-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5) inset;
+  transition: background-color 200ms ease, box-shadow 200ms ease;
+}
+
+.agent-session-status-dot[data-state="ready"] {
+  background: var(--green);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5) inset,
+    0 0 6px rgba(52, 211, 153, 0.35);
+}
+
+.agent-session-status-dot[data-state="idle"] {
+  background: var(--ink-tertiary);
+}
+
+.agent-session-status-dot[data-state="waiting"] {
+  background: var(--yellow);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5) inset,
+    0 0 6px rgba(234, 179, 8, 0.35);
+}
+
+/* "Thinking" — Claude is mid-stream writing a reply.  BRASS pulse — the
+ * warm working-light of the workshop palette.  Replaces the cooler
+ * accent-paper because thinking is "this is alive, this is yours". */
+.agent-session-status-dot[data-state="thinking"] {
+  background: var(--brass);
+  animation: agent-status-pulse 1.4s ease-in-out infinite;
+}
+
+/* "Running <tool>" — a tool is in flight.  Yellow respiration matches the
+ * exec-block left-bar so the cues read as the same family. */
+.agent-session-status-dot[data-state="running"] {
+  background: var(--yellow);
+  animation: agent-status-pulse 1.4s ease-in-out infinite;
+}
+
+/* Glow becomes visible during the pulse keyframe trough so the LED has
+ * the dim-then-bright rhythm of a working indicator. */
+.agent-session-status-dot[data-state="thinking"],
+.agent-session-status-dot[data-state="running"] {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.5) inset,
+    0 0 8px var(--brass-dim);
+}
+
+@keyframes agent-status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-session-status-dot[data-state="thinking"],
+  .agent-session-status-dot[data-state="running"] {
+    animation: none;
+  }
+}
+
+/* Live elapsed counter — small mono whisper next to the status text.
+ * Reassures the user that work is happening when long tool calls run. */
+.agent-session-elapsed {
+  font: 11px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+  letter-spacing: 0.02em;
+}
+
+.agent-session-status-text {
+  color: var(--text-1);
+  font-size: var(--text-sm);
+}
+
+.agent-session-model {
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.agent-session-cwd {
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stop button — visible only while Claude is actively working.  Brass
+ * outline; reads as instrument-panel hardware, not a chat-app button. */
+.agent-session-stop {
+  margin-left: 8px;
+  padding: 1px 8px;
+  background: transparent;
+  border: 1px solid var(--brass, var(--accent-paper));
+  border-radius: 3px;
+  color: var(--brass, var(--accent-paper));
+  font: 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.agent-session-stop:hover {
+  background: var(--brass-dim, color-mix(in srgb, var(--accent-paper) 16%, transparent));
+  color: var(--ink-primary);
+}
+
+/* Cost lozenge — running total of session spend.  Right-aligned in the
+ * masthead, brass-tinted so it reads as "live counter" not "warning". */
+.agent-session-cost {
+  font: 11px/1 var(--font-mono);
+  font-feature-settings: var(--font-mono-features), 'tnum';
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--brass, var(--accent-paper));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--brass, var(--accent-paper)) 28%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--brass, var(--accent-paper)) 8%, transparent);
+}
+
+.agent-session-cost-sep {
+  color: color-mix(in srgb, var(--brass, var(--accent-paper)) 50%, transparent);
+}
+
+.agent-rate-notice {
+  color: var(--yellow);
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid var(--yellow);
+  padding: 2px 8px;
+  border-radius: 0;
+  letter-spacing: 0.06em;
+}
+
+.agent-session-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Brass thin-line scrollbar.  No rail, no chrome — the line itself is the
+ * indicator, like a sliding cursor on an instrument scale. */
+.agent-session-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.agent-session-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agent-session-scroll::-webkit-scrollbar-thumb {
+  background: rgba(212, 168, 106, 0.22);
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+.agent-session-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 168, 106, 0.5);
+  background-clip: padding-box;
+}
+
+/* The conversation column.  Left-aligned, not centered — wide monitors
+ * use their real estate instead of leaving acres of dark gutter to the
+ * left.  The `max-width` still keeps prose lines from blowing out to
+ * unreadable widths.  Intra-turn `gap` is tight; inter-turn separation
+ * is handled by a hairline rule + extra top padding on user messages. */
+.agent-session-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 26px 32px 24px 40px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+  .agent-session-messages {
+    padding: 16px 12px;
+    gap: 12px;
+  }
+  .agent-message {
+    grid-template-columns: 56px 1fr;
+  }
+  .agent-message-gutter {
+    padding-right: 10px;
+  }
+}
+
+/* Empty state — instrument-panel language.  A slow-blinking brass LED
+ * + a bracketed status line + a faint hint.  Reads like "the equipment
+ * is on, awaiting the operator". */
+.agent-session-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px;
+}
+
+.agent-empty-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brass);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45) inset,
+    0 0 10px var(--brass-dim);
+  animation: agent-empty-led 2.4s ease-in-out infinite;
+}
+
+@keyframes agent-empty-led {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-empty-led { animation: none; opacity: 0.85; }
+}
+
+.agent-empty-title {
+  font: 12px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+}
+
+.agent-empty-hint {
+  font: 11px/1.4 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--ink-tertiary);
+}
+
+.agent-empty-stderr {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  max-width: 720px;
+  max-height: 240px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  color: var(--red);
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+}
+
+/* Legacy class kept for any leftover references */
+.agent-warming-up {
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+/* ─── Message rows (engineering logbook layout) ──────────────
+ *
+ * Two columns: a 78px numbered gutter on the left and the body.  The
+ * gutter carries `№ 01` + a HH:MM:SS timestamp, but ONLY for the first
+ * message of each turn — assistant continuations leave the gutter empty
+ * so the eye groups the user prompt and its assistant reply as one unit.
+ *
+ * Inter-turn separation uses a hairline rule + larger top padding on the
+ * second-and-later user message.  Intra-turn separation rides the parent
+ * `.agent-session-messages` `gap`. */
+
+.agent-message {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  column-gap: 0;
+  padding: 0;
+  position: relative;
+}
+
+.agent-message + .agent-message[data-role="user"] {
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+  margin-top: 6px;
+}
+
+/* The gutter carries the turn number + timestamp.  Right-aligned so the
+ * numerals ride the inner edge of the column, like marginalia in a
+ * printed reference book. */
+.agent-message-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 2px 16px 0 0;
+  gap: 2px;
+  user-select: none;
+}
+
+.agent-message-num {
+  font: 10px/1 var(--font-mono);
+  font-feature-settings: var(--font-mono-features), 'tnum';
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  color: var(--ink-secondary);
+  text-transform: uppercase;
+}
+
+.agent-message[data-role="user"] .agent-message-num {
+  /* User-prompt turns get a slightly punchier color in the number — that
+   * single hue draws the eye down the gutter as you scan turns. */
+  color: var(--accent-paper);
+}
+
+.agent-message-time {
+  font: 10px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.agent-message-body {
+  font: 13px/1.6 var(--font-mono);
+  color: var(--ink-primary);
+  font-feature-settings: var(--font-mono-features);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* User messages — the QUESTION.  Italic mono, slightly larger than the
+ * answer body, with a BRASS left rule so the prompt visually anchors as
+ * "the active note from the operator".  The brass bar is the strongest
+ * recurring signal of the workshop palette — every user message is a
+ * little glow on the page. */
+.agent-message[data-role="user"] .agent-message-body {
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-primary);
+  border-left: 2px solid var(--brass);
+  padding-left: 14px;
+  margin-left: -14px;
+  box-shadow: -8px 0 16px -10px var(--brass-dim);
+}
+
+.agent-message[data-role="assistant"] .agent-message-body {
+  color: var(--ink-primary);
+}
+
+/* Horizon — three tracked dots at the foot of a short conversation, in
+ * place of an empty void.  Replaced by content as the convo grows. */
+.agent-session-horizon {
+  align-self: center;
+  margin: 24px auto 8px;
+  font: 14px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  letter-spacing: 0.4em;
+  user-select: none;
+  opacity: 0.6;
+}
+
+/* "raw" toggle — hover-only chrome at the top-right of an assistant message
+ * body.  Clicking flips the body between rendered markdown and the literal
+ * text source.  Hidden until hover so it doesn't compete with the content. */
+.agent-message-raw-toggle {
+  align-self: flex-end;
+  margin: -2px 0 -8px 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.agent-message:hover .agent-message-raw-toggle,
+.agent-message-raw-toggle.is-active {
+  opacity: 1;
+}
+
+.agent-message-raw-toggle:hover,
+.agent-message-raw-toggle.is-active {
+  color: var(--ink-secondary);
+  border-color: var(--rule);
+}
+
+.agent-message-raw {
+  position: relative;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-1);
+  font-style: normal;
+}
+
+.agent-message-raw-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, color 150ms ease;
+}
+
+.agent-message-raw:hover .agent-message-raw-copy {
+  opacity: 1;
+}
+
+.agent-message-raw-copy:hover {
+  color: var(--ink-primary);
+}
+
+.agent-message-raw-body {
+  margin: 0;
+  padding: 12px 14px;
+  font: 12px/1.55 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-style: normal;
+}
+
+/* ─── Text blocks (assistant markdown) ─────────────────────────────
+ *
+ * The assistant body is rendered as full GFM markdown via <MarkdownBody>.
+ * The styles below sit under `.agent-markdown` (the top-level wrapper) so
+ * they don't leak into other components if these classes are reused.
+ *
+ * Editorial-engineering rules apply: hairline rules, no rounded cards,
+ * monospace inline code, tabular numerics, restraint over flash. */
+
+.agent-text-block {
+  color: var(--ink-primary);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.agent-markdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-markdown > * {
+  margin: 0;
+}
+
+/* Headings — slightly larger than body, distinct weight, tight tracking.
+ * Display font (Inter Tight) for headings; mono everywhere else.  This
+ * single tonal swap is the only display-font moment in the conversation
+ * and gives sections a typographic anchor. */
+.agent-md-h1,
+.agent-md-h2,
+.agent-md-h3,
+.agent-md-h4 {
+  font-family: var(--font-ui, var(--font-mono));
+  color: var(--ink-primary);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin-top: 8px;
+}
+
+.agent-md-h1 { font-size: 19px; }
+.agent-md-h2 { font-size: 16px; }
+.agent-md-h3 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+.agent-md-h4 {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+
+.agent-md-p {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Lists — custom marker in --ink-tertiary so the bullet/number doesn't
+ * compete with the body text. */
+.agent-md-ul,
+.agent-md-ol {
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-md-ul {
+  list-style: none;
+}
+
+.agent-md-ul > .agent-md-li::before {
+  content: "·";
+  display: inline-block;
+  width: 14px;
+  margin-left: -14px;
+  color: var(--ink-tertiary);
+}
+
+.agent-md-ol {
+  list-style: decimal;
+}
+
+.agent-md-ol > .agent-md-li::marker {
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* GFM task lists — checkbox before the text. */
+.agent-md-li input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--accent);
+}
+
+/* Blockquote — left bar in --rule-strong, slightly muted ink. */
+.agent-md-blockquote {
+  border-left: 2px solid var(--rule-strong);
+  padding: 2px 0 2px 12px;
+  color: var(--ink-secondary);
+  font-style: italic;
+}
+
+.agent-md-blockquote .agent-md-p {
+  font-style: italic;
+}
+
+/* Hairline horizontal rule. */
+.agent-md-hr {
+  border: 0;
+  height: 1px;
+  background: var(--rule);
+  margin: 8px 0;
+}
+
+/* Links — dotted underline that solidifies on hover.  Always opens in a new
+ * window via target="_blank" + rel="noreferrer noopener" (set in JSX). */
+.agent-md-link {
+  color: var(--accent-paper);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent-paper) 50%, transparent);
+}
+
+.agent-md-link:hover {
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent-paper);
+}
+
+/* Inline code — subtle bg, mono, no border.  About 0.92em so it sits flush
+ * with surrounding italic prose without inflating line-height. */
+.agent-md-code-inline {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  font-size: 0.92em;
+  padding: 1px 5px;
+  background: var(--bg-1);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink-primary);
+  font-style: normal;
+}
+
+/* Tables — hairline rules, sticky header, tabular numerics, horizontal
+ * scroll on overflow.  Wrapper takes the overflow so the table itself can
+ * keep its sticky-header stickiness. */
+.agent-md-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-1);
+}
+
+.agent-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features), 'tnum';
+  font-variant-numeric: tabular-nums;
+  font-style: normal;
+}
+
+.agent-md-table th,
+.agent-md-table td {
+  text-align: left;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.agent-md-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+  color: var(--ink-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.agent-md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.agent-md-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--accent-paper) 6%, transparent);
+}
+
+/* Strikethrough (GFM `~text~`). */
+.agent-markdown del {
+  color: var(--ink-tertiary);
+}
+
+/* ─── Code fences (CodeFence component) ────────────────────────────
+ *
+ * Fenced blocks get a quiet header strip with the language pill (left)
+ * and a hover-only "copy" button (right).  highlight.js classes are
+ * styled below using the existing semantic palette so the highlighting
+ * speaks the same color language as the rest of the agent UI. */
+
+.agent-code-fence {
+  margin: 4px 0;
+  background: var(--bg-1);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow: hidden;
+  font-style: normal;
+}
+
+.agent-code-fence-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--rule);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.agent-code-fence-lang {
+  font-weight: 500;
+}
+
+.agent-code-fence-error {
+  color: var(--tool-error);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.agent-code-fence-copy {
+  background: transparent;
+  border: 0;
+  color: var(--ink-tertiary);
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity 150ms ease, color 150ms ease;
+}
+
+.agent-code-fence:hover .agent-code-fence-copy {
+  opacity: 1;
+}
+
+.agent-code-fence-copy:hover {
+  color: var(--ink-primary);
+}
+
+.agent-code-fence-body {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  color: var(--ink-primary);
+  white-space: pre;
+}
+
+.agent-code-fence-mermaid-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-code-fence-mermaid-toggle {
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  transition: color 150ms ease;
+  opacity: 0;
+}
+
+.agent-code-fence:hover .agent-code-fence-mermaid-toggle,
+.agent-code-fence-mermaid-toggle[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.agent-code-fence-mermaid-toggle:hover,
+.agent-code-fence-mermaid-toggle[aria-pressed="true"] {
+  color: var(--ink-secondary);
+}
+
+.agent-code-fence-mermaid-body {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  background: var(--bg-1);
+}
+
+.agent-code-fence-mermaid-body svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ─── highlight.js token palette (mapped to our semantic tokens) ───
+ *
+ * No third-party theme imported.  We pick the hljs token classes that
+ * `common.js` actually emits and map them to our --green/--yellow/
+ * --accent/--violet/--red/--ink-* tokens so highlighting reads the same
+ * color language as tool families and the rest of the agent UI. */
+
+.hljs { color: var(--ink-primary); background: transparent; }
+.hljs-comment,
+.hljs-quote { color: var(--ink-tertiary); font-style: italic; }
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-name,
+.hljs-tag { color: var(--violet); }
+.hljs-string,
+.hljs-title,
+.hljs-section,
+.hljs-attribute,
+.hljs-literal,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-addition { color: var(--green); }
+.hljs-deletion,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-meta { color: var(--red); }
+.hljs-doctag,
+.hljs-attr { color: var(--accent-paper); }
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link { color: var(--accent); }
+.hljs-number { color: var(--yellow); }
+.hljs-regexp,
+.hljs-variable { color: var(--ink-secondary); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* ─── Heartbeat cursor (playbook §6 streaming patterns) ───
+ * 1px vertical bar appended to the latest streaming text block.
+ * 1.06s `step-end` ≈ 57 BPM resting heart rhythm — instant on, instant off.
+ * Disappears the instant streaming completes (component prop flips). */
+
+/* Block heartbeat cursor — vintage CRT terminal soul.  Solid amber block
+ * (~half-em wide) instead of the thin line.  Pulses on the same 1.06s
+ * step-end heartbeat (~57 BPM) and casts a faint matching glow.  This
+ * is the single most memorable streaming cue in the agent UI. */
+.agent-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.1em;
+  background: var(--brass);
+  border-radius: 1px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  box-shadow: 0 0 8px var(--brass-dim);
+  animation: agent-cursor-heartbeat 1.06s step-end infinite;
+}
+
+@keyframes agent-cursor-heartbeat {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* ─── Vintage thinking indicator ──────────────────────────────────
+ *
+ * Renders in the conversation column while Claude is working but no
+ * streaming text has arrived yet.  Three motions in a single row:
+ * Braille spinner (left), brass wave through a hairline track (middle),
+ * status word + elapsed counter (right).  All in monospace; the wave
+ * track is a fixed character width so it doesn't visually breathe.
+ *
+ * The colors are workshop-palette: brass on paper, no shadows, no
+ * gradient bling.  Reads as instrument-panel hardware. */
+
+.agent-thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 6px 14px;
+  margin: 4px 0;
+  border-left: 2px solid var(--brass, var(--accent-paper));
+  font: 12px/1 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  color: var(--ink-secondary);
+  letter-spacing: 0.04em;
+  background: linear-gradient(
+    to right,
+    var(--brass-dim, color-mix(in srgb, var(--accent-paper) 8%, transparent)) 0%,
+    transparent 60%
+  );
+  /* Edge fade so the wave doesn't read as "stuck at right edge". */
+  box-shadow: inset 0 0 0 0 transparent;
+}
+
+.agent-thinking-spinner {
+  display: inline-block;
+  font-family: var(--font-mono);
+  color: var(--brass, var(--accent-paper));
+  text-shadow: 0 0 6px var(--brass-dim, color-mix(in srgb, var(--accent-paper) 20%, transparent));
+  /* Fixed width so the spinner doesn't shift the row as frames change.
+   * Braille glyphs are all the same em-width but belt-and-suspenders. */
+  min-width: 1ch;
+  text-align: center;
+}
+
+.agent-thinking-wave {
+  display: inline-block;
+  font-family: var(--font-mono);
+  /* Each frame is 13 chars; pin the width so the wave doesn't stutter. */
+  min-width: 13ch;
+  letter-spacing: 0;
+  white-space: pre;
+  color: var(--brass, var(--accent-paper));
+  /* The hairline dashes (`─`) inherit this color but the bright head
+   * chars (▆▇█) carry the brightness via the brass tone above. */
+}
+
+.agent-thinking-label {
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-secondary);
+}
+
+.agent-thinking-indicator[data-variant="running"] .agent-thinking-label {
+  color: var(--yellow);
+}
+
+.agent-thinking-indicator[data-variant="running"] .agent-thinking-spinner,
+.agent-thinking-indicator[data-variant="running"] .agent-thinking-wave {
+  color: var(--yellow);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--yellow) 24%, transparent);
+}
+
+.agent-thinking-indicator[data-variant="running"] {
+  border-left-color: var(--yellow);
+}
+
+.agent-thinking-sep {
+  color: var(--ink-tertiary);
+  opacity: 0.6;
+}
+
+.agent-thinking-elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-tertiary);
+  letter-spacing: 0.02em;
+  min-width: 5ch;
+  text-align: left;
+}
+
+/* ─── Thinking ─── */
+
+.agent-thinking-block {
+  border: 1px dashed var(--border-light);
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+.agent-thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-thinking-toggle:hover {
+  color: var(--text-1);
+}
+
+.agent-thinking-caret {
+  width: 12px;
+  display: inline-block;
+}
+
+.agent-thinking-label {
+  font-style: italic;
+}
+
+/* Elapsed counter — small mono whisper at the end of the toggle row.
+   Frozen on completion; ticks at 10Hz while streaming. */
+.agent-thinking-elapsed {
+  font: 10px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.agent-thinking-body {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px dashed var(--border-light);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── Tool families (v1 redesign — playbook §5) ─────────────
+ * Five visual languages, one per family:
+ *   .agent-tool-file   — Read / Write / Edit / NotebookEdit (violet stripe)
+ *   .agent-tool-exec   — Bash / Run                         (left bar, no card)
+ *   .agent-tool-search — Grep / Glob                        (no card, hairlines)
+ *   .agent-tool-web    — WebFetch / WebSearch               (only serif moment)
+ *   .agent-tool-generic — fallback                          (bare-bones)
+ * ──────────────────────────────────────────────────────── */
+
+/* ─── File family (Read / Write / Edit / NotebookEdit) ─── */
+
+.agent-tool-file {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+.agent-tool-file::before {
+  content: "";
+  display: block;
+  height: 3px;
+  background: var(--tool-file);
+}
+
+.agent-tool-file[data-status="running"]::before {
+  /* Same 2.5s respiration as the exec family, but in violet for file ops. */
+  background: var(--violet-dim);
+  animation: agent-tool-file-respiration 2.5s ease-in-out infinite;
+}
+
+@keyframes agent-tool-file-respiration {
+  0%,
+  100% {
+    background: var(--violet-dim);
+  }
+  50% {
+    background: var(--violet);
+  }
+}
+
+.agent-tool-file[data-status="error"]::before {
+  background: var(--tool-error);
+  animation: none;
+}
+
+.agent-tool-file-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 8px 12px;
+  font: 11px/1 var(--font-mono);
+  letter-spacing: 0.05em;
+  color: var(--ink-secondary);
+}
+
+.agent-tool-file-glyph {
+  color: var(--tool-file);
+}
+
+.agent-tool-file[data-status="error"] .agent-tool-file-glyph {
+  color: var(--tool-error);
+}
+
+.agent-tool-file-path {
+  color: var(--ink-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-file-summary {
+  color: var(--ink-tertiary);
+  margin-left: auto;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tool-file-body {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  border-top: 1px solid var(--rule);
+}
+
+.agent-tool-file-gutter {
+  padding: 8px 6px;
+  text-align: right;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  border-right: 1px solid var(--rule);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tool-file-content {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ink-primary);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.agent-tool-file-disclosure {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  padding: 8px 12px;
+  font: 11px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-tool-file-disclosure:hover {
+  color: var(--ink-secondary);
+}
+
+/* When the body slot hosts a UnifiedDiff, drop the gutter grid — the diff
+ * brings its own line-number columns. */
+.agent-tool-file-body-diff {
+  display: block;
+}
+
+/* Read variant: content comes from SmartOutput (which prepends its own
+ * line markers via Claude's `  N→` format).  The two-column grid above
+ * would otherwise squeeze the content into the 28px gutter column, which
+ * is what produced the "tall thin sliver of line numbers, no content"
+ * bug.  Switch to a plain block so SmartOutput can use the full width. */
+.agent-tool-file-body-read {
+  display: block;
+  padding: 0;
+  overflow-x: auto;
+}
+
+.agent-tool-file-body-read pre,
+.agent-tool-file-body-read code {
+  margin: 0;
+  padding: 8px 12px;
+  white-space: pre;
+}
+
+/* ─── Unified diff (playbook §5 UnifiedDiffBlock) ─── */
+
+.agent-diff {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  background: var(--bg-1);
+  overflow-x: auto;
+}
+
+.agent-diff-row {
+  display: grid;
+  grid-template-columns: 36px 36px 12px 12px 1fr;
+  column-gap: 4px;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.agent-diff-num-old,
+.agent-diff-num-new {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  text-align: right;
+  padding-top: 2px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.agent-diff-marker {
+  color: var(--ink-tertiary);
+  text-align: center;
+  user-select: none;
+}
+
+.agent-diff-bar {
+  text-align: center;
+  user-select: none;
+}
+
+.agent-diff-text {
+  font-family: inherit;
+  white-space: pre;
+}
+
+.agent-diff-row.agent-diff-context {
+  color: var(--ink-secondary);
+}
+
+.agent-diff-row.agent-diff-remove {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.agent-diff-row.agent-diff-remove .agent-diff-marker,
+.agent-diff-row.agent-diff-remove .agent-diff-bar {
+  color: var(--red);
+}
+
+.agent-diff-row.agent-diff-add {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.agent-diff-row.agent-diff-add .agent-diff-marker,
+.agent-diff-row.agent-diff-add .agent-diff-bar {
+  color: var(--green);
+}
+
+.agent-diff-skip {
+  text-align: center;
+  color: var(--ink-tertiary);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.agent-diff-truncated {
+  padding: 8px 12px;
+  color: var(--yellow);
+  background: var(--yellow-dim);
+  font-size: 11px;
+}
+
+/* ─── Exec family (Bash / Run) ─── */
+
+.agent-tool-exec {
+  display: grid;
+  grid-template-columns: 2px 1fr;
+  column-gap: 12px;
+  padding: 4px 0;
+}
+
+.agent-tool-exec-bar {
+  background: var(--ink-tertiary);
+}
+
+.agent-tool-exec[data-status="running"] .agent-tool-exec-bar {
+  /* Tool respiration — slow 2.5s breathing while the tool is in flight.
+     Solidifies to --tool-exec / --tool-error on completion via the
+     [data-status="success" | "error"] selectors below. */
+  background: var(--yellow-dim);
+  animation: agent-tool-respiration 2.5s ease-in-out infinite;
+}
+
+@keyframes agent-tool-respiration {
+  0%,
+  100% {
+    background: var(--yellow-dim);
+  }
+  50% {
+    background: var(--yellow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-tool-exec[data-status="running"] .agent-tool-exec-bar,
+  .agent-tool-file[data-status="running"]::before {
+    animation: none;
+  }
+}
+
+.agent-tool-exec[data-status="success"] .agent-tool-exec-bar {
+  background: var(--tool-exec);
+}
+
+.agent-tool-exec[data-status="error"] .agent-tool-exec-bar {
+  background: var(--tool-error);
+}
+
+.agent-tool-exec-body {
+  min-width: 0;
+}
+
+.agent-tool-exec-command {
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  color: var(--ink-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-tool-exec-command code {
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-tool-exec-glyph {
+  color: var(--tool-exec);
+  font-weight: 600;
+}
+
+.agent-tool-exec-exit {
+  color: var(--tool-error);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tool-exec-output {
+  margin: 4px 0 0 0;
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-tool-exec-disclosure {
+  display: block;
+  margin: 4px 0 0 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-tool-exec-disclosure:hover {
+  color: var(--ink-secondary);
+}
+
+/* ─── Search family (Grep / Glob) ─── */
+
+.agent-tool-search {
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+}
+
+.agent-tool-search-query {
+  color: var(--ink-secondary);
+  margin-bottom: 4px;
+}
+
+.agent-tool-search-glyph {
+  color: var(--tool-search);
+  margin-right: 6px;
+}
+
+.agent-tool-search-query em {
+  font-style: italic;
+}
+
+.agent-tool-search-scope {
+  color: var(--ink-tertiary);
+}
+
+.agent-tool-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-tool-search-row {
+  padding: 4px 0;
+  border-top: 1px solid var(--rule);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-tool-search-row:first-child {
+  border-top: 0;
+}
+
+.agent-tool-search-path {
+  color: var(--ink-secondary);
+}
+
+.agent-tool-search-sep {
+  color: var(--ink-tertiary);
+}
+
+.agent-tool-search-line {
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-tool-search-dot {
+  color: var(--ink-tertiary);
+}
+
+.agent-tool-search-snippet {
+  color: var(--ink-primary);
+}
+
+.agent-tool-search-snippet mark {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  padding: 0 2px;
+  border-radius: 1px;
+}
+
+.agent-tool-search-more {
+  padding-top: 4px;
+  border-top: 1px solid var(--rule);
+}
+
+.agent-tool-search-disclosure {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-tertiary);
+  cursor: pointer;
+}
+
+.agent-tool-search-disclosure:hover {
+  color: var(--ink-secondary);
+}
+
+.agent-tool-search-raw {
+  margin: 4px 0 0 0;
+  font: 12px/1.5 var(--font-mono);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── Web family (WebFetch / WebSearch) — the serif moment ─── */
+
+.agent-tool-web {
+  /* No card. Layout is the citation header + serif excerpt. */
+}
+
+.agent-tool-web-citation {
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-tertiary);
+  margin-bottom: 6px;
+}
+
+.agent-tool-web-glyph {
+  color: var(--tool-web);
+  margin-right: 4px;
+  font-size: 10px;
+  vertical-align: super;
+}
+
+.agent-tool-web-url {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  color: var(--ink-secondary);
+  word-break: break-all;
+}
+
+.agent-tool-web-excerpt {
+  font: 13px/1.6 var(--font-serif);
+  font-optical-sizing: auto;
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-tool-web-disclosure {
+  margin-top: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-tertiary);
+  cursor: pointer;
+}
+
+.agent-tool-web-disclosure:hover {
+  color: var(--ink-secondary);
+}
+
+/* ─── Generic fallback (bare-bones on purpose) ─── */
+
+.agent-tool-generic {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-tool-generic-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.agent-tool-generic-name {
+  font: italic 11px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  text-transform: lowercase;
+}
+
+.agent-tool-generic-input-toggle {
+  font: 11px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.agent-tool-generic-input-toggle:hover {
+  color: var(--ink-secondary);
+}
+
+.agent-tool-generic-input-pre {
+  margin: 6px 0;
+  padding: 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.agent-tool-generic-result {
+  margin: 0;
+  font: 12px/1.5 var(--font-mono);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── Tool result (standalone + compact inline variants) ─── */
+
+.agent-tool-result {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  max-height: 200px;
+  overflow: auto;
+}
+
+.agent-tool-result.compact {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+.agent-tool-result.is-error {
+  border-left: 2px solid var(--tool-error);
+}
+
+.agent-tool-result.compact.is-error {
+  border-left: 2px solid var(--tool-error);
+  padding-left: 8px;
+}
+
+.agent-tool-result-body {
+  margin: 0;
+  padding: 8px;
+  font: 12px/1.5 var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-tool-result.compact .agent-tool-result-body {
+  padding: 0;
+}
+
+.agent-tool-result.is-error .agent-tool-result-body {
+  color: var(--tool-error);
+}
+
+/* ─── Colophon footer (end-of-turn whisper) ─── */
+
+.agent-colophon {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 0;
+  padding-top: 8px;
+  /* Faint hairline above gives the end-of-turn a breath of closure
+   * without shouting like the old full-bleed footer rule. */
+  border-top: 1px dashed var(--rule);
+}
+
+.agent-colophon-summary {
+  align-self: flex-end;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font: 10px/1 var(--font-mono);
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: color 200ms ease;
+  opacity: 0.7;
+}
+
+.agent-colophon-summary:hover {
+  color: var(--ink-secondary);
+}
+
+.agent-colophon-details {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+  font: 11px/1.4 var(--font-mono);
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-colophon-details dt {
+  color: var(--ink-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  align-self: center;
+  margin: 0;
+}
+
+.agent-colophon-details dd {
+  margin: 0;
+  color: var(--ink-secondary);
+}
+
+/* ─── Exit + stderr (editorial whisper, not alert boxes) ──────────
+ *
+ * Shown only on real errors (non-zero exit, signal-killed, or exit before
+ * any conversation — see shouldShowExitNotice).  Treated as quiet
+ * marginalia: no card, no border-radius, no loud color block — a single
+ * dim line with a left rule, in keeping with the rest of the agent UI. */
+
+.agent-exit-notice {
+  padding: 8px 0 8px 14px;
+  border-left: 2px solid var(--tool-error);
+  font: 12px/1.5 var(--font-mono);
+  color: var(--ink-secondary);
+  background: transparent;
+}
+
+/* Inline action on the exit notice (e.g. "Start fresh from here").  Quiet
+ * brass-tinted button — never the dominant element on the surface. */
+.agent-exit-action {
+  display: inline-block;
+  margin-left: 14px;
+  padding: 2px 10px;
+  background: transparent;
+  border: 1px solid var(--brass, var(--accent-paper));
+  border-radius: 4px;
+  color: var(--brass, var(--accent-paper));
+  font: 11px/1.4 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.agent-exit-action:hover {
+  background: var(--brass-dim, color-mix(in srgb, var(--accent-paper) 14%, transparent));
+  color: var(--ink-primary);
+}
+
+.agent-stderr-details {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font: 11px/1.4 var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.agent-stderr-details summary {
+  cursor: pointer;
+  padding: 4px 0;
+  list-style: none;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-tertiary);
+  transition: color 150ms ease;
+}
+
+.agent-stderr-details summary:hover {
+  color: var(--ink-secondary);
+}
+
+.agent-stderr-details summary::before {
+  content: "▸ ";
+  color: var(--ink-tertiary);
+}
+
+.agent-stderr-details[open] summary::before {
+  content: "▾ ";
+}
+
+.agent-stderr-body {
+  margin: 4px 0 0 0;
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border-left: 2px solid var(--tool-error);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--tool-error);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.agent-unknown-block {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--bg-1);
+  border: 1px dashed var(--border-light);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

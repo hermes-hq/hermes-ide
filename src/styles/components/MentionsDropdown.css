@@ -1,0 +1,59 @@
+/* ─── Mentions / file autocomplete dropdown ────────────────── */
+
+.mentions-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  padding: var(--space-1);
+}
+
+.mentions-dropdown-item {
+  display: block;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.mentions-dropdown-item:hover,
+.mentions-dropdown-item-active {
+  background: var(--bg-active);
+  color: var(--text-0);
+}
+
+.mentions-dropdown-item mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mentions-dropdown-empty {
+  padding: var(--space-3);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  text-align: center;
+}
+
+.mentions-dropdown::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mentions-dropdown::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: var(--radius-pill);
+}

@@ -234,6 +234,15 @@ export const ContextIcon = (
   </svg>
 );
 
+export const UsageIcon = (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.5 14.5 L2.5 9.5 L5.5 9.5 L5.5 14.5 Z" />
+    <path d="M7.5 14.5 L7.5 6.5 L10.5 6.5 L10.5 14.5 Z" />
+    <path d="M12.5 14.5 L12.5 3.5 L15.5 3.5 L15.5 14.5 Z" />
+    <line x1="2" y1="14.5" x2="16" y2="14.5" />
+  </svg>
+);
+
 export const ProcessesIcon = (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="2" width="6" height="6" rx="1" />

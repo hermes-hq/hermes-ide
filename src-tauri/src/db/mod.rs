@@ -607,6 +607,46 @@ impl Database {
         Ok(())
     }
 
+    /// Read the persisted `workspace_paths` for a session, regardless of
+    /// runtime mode.  Agent-mode sessions don't have a PtySession in
+    /// memory, so this is the only source of truth for their attached
+    /// directory list.  Returns an empty Vec when the session row is
+    /// missing or the JSON blob is malformed.
+    pub fn get_session_workspace_paths(&self, session_id: &str) -> Result<Vec<String>, String> {
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT workspace_paths FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .ok();
+        let parsed = raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .unwrap_or_default();
+        Ok(parsed)
+    }
+
+    /// Persist `workspace_paths` for a session.  Used by `add_workspace_path`
+    /// and `remove_workspace_path` when the session is agent-mode (no PTY
+    /// entry to mutate in-memory) so the next agent respawn picks up the
+    /// new directory set as `--add-dir` flags.
+    pub fn update_session_workspace_paths(
+        &self,
+        session_id: &str,
+        paths: &[String],
+    ) -> Result<(), String> {
+        let json = serde_json::to_string(paths).map_err(|e| e.to_string())?;
+        self.conn
+            .execute(
+                "UPDATE sessions SET workspace_paths = ?1 WHERE id = ?2",
+                params![json, session_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn save_session_snapshot(&self, session_id: &str, snapshot: &str) -> Result<(), String> {
         let trimmed = if snapshot.len() > 50000 {
             // Find a char boundary near the 50K mark from the end
@@ -2520,6 +2560,124 @@ mod tests {
         let db = test_db();
         let rows = db.get_session_worktrees("nonexistent").unwrap();
         assert!(rows.is_empty());
+    }
+
+    // ── Session metadata updates (sm-1..sm-9) ─────────────────────
+    //
+    // The agent-mode session metadata bug surfaced because the IPC
+    // commands bailed with `"Session not found"` when no PtySession
+    // existed.  The DB layer is the fallback path; these tests prove
+    // it works for any row regardless of runtime mode.
+
+    fn insert_test_session(db: &Database, id: &str) {
+        // For these tests we only need the metadata columns; insert a
+        // bare row directly via SQL rather than constructing a full
+        // SessionUpdate (which has many fields irrelevant to the test).
+        db.conn.execute(
+            "INSERT INTO sessions (id, label, description, color, group_name, phase, working_directory, shell, workspace_paths, created_at, ssh_info)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, NULL)",
+            params![id, "initial", "", "#000000", "idle", "/tmp", "/bin/sh", "[]", "2026-05-08"],
+        ).unwrap();
+    }
+
+    fn read_field(db: &Database, id: &str, column: &str) -> Option<String> {
+        db.conn
+            .query_row(
+                &format!("SELECT {} FROM sessions WHERE id = ?1", column),
+                params![id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+    }
+
+    #[test]
+    fn sm_1_update_session_label_persists_for_agent_session() {
+        let db = test_db();
+        insert_test_session(&db, "sess-agent");
+        db.update_session_label("sess-agent", "renamed").unwrap();
+        assert_eq!(
+            read_field(&db, "sess-agent", "label"),
+            Some("renamed".into())
+        );
+    }
+
+    #[test]
+    fn sm_3_update_session_description_persists_for_agent_session() {
+        let db = test_db();
+        insert_test_session(&db, "sess-agent");
+        db.update_session_description("sess-agent", "new desc")
+            .unwrap();
+        assert_eq!(
+            read_field(&db, "sess-agent", "description"),
+            Some("new desc".into()),
+        );
+    }
+
+    #[test]
+    fn sm_4_update_session_color_persists_for_agent_session() {
+        let db = test_db();
+        insert_test_session(&db, "sess-agent");
+        db.update_session_color("sess-agent", "#ff8800").unwrap();
+        assert_eq!(
+            read_field(&db, "sess-agent", "color"),
+            Some("#ff8800".into()),
+        );
+    }
+
+    #[test]
+    fn sm_5_update_session_group_persists_for_agent_session() {
+        let db = test_db();
+        insert_test_session(&db, "sess-agent");
+        db.update_session_group("sess-agent", Some("workshop"))
+            .unwrap();
+        assert_eq!(
+            read_field(&db, "sess-agent", "group_name"),
+            Some("workshop".into()),
+        );
+        // Clearing.
+        db.update_session_group("sess-agent", None).unwrap();
+        assert_eq!(read_field(&db, "sess-agent", "group_name"), None);
+    }
+
+    #[test]
+    fn sm_6_round_trip_after_update() {
+        let db = test_db();
+        insert_test_session(&db, "sess-agent");
+        db.update_session_label("sess-agent", "new-label").unwrap();
+        db.update_session_color("sess-agent", "#abcdef").unwrap();
+        assert_eq!(
+            read_field(&db, "sess-agent", "label"),
+            Some("new-label".into())
+        );
+        assert_eq!(
+            read_field(&db, "sess-agent", "color"),
+            Some("#abcdef".into())
+        );
+    }
+
+    #[test]
+    fn sm_7_update_on_missing_row_is_no_op() {
+        // SQL `UPDATE ... WHERE id=...` on a missing row is a no-op,
+        // not an error.  IPC layer is responsible for the
+        // "session not found" surface; the DB layer accepts the call.
+        let db = test_db();
+        let r = db.update_session_label("missing", "x");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn sm_8_concurrent_updates_last_write_wins() {
+        // Two writes back-to-back: the second one's value is what the
+        // row reflects.  rusqlite's connection is serialised, so this
+        // is a smoke-test for the no-corruption invariant rather than
+        // a true concurrency check.
+        let db = test_db();
+        insert_test_session(&db, "sess-agent");
+        for label in &["a", "b", "c", "d", "final"] {
+            db.update_session_label("sess-agent", label).unwrap();
+        }
+        assert_eq!(read_field(&db, "sess-agent", "label"), Some("final".into()));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+mod agent;
+mod claude_config;
 mod clipboard;
 mod db;
 mod git;
@@ -523,6 +525,7 @@ pub fn run() {
 
             app.manage(state);
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
+            app.manage(agent::AgentState::default());
 
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
@@ -738,6 +741,27 @@ pub fn run() {
             // Transcript watching
             transcript::start_transcript_watcher,
             transcript::stop_transcript_watcher,
+            // Agent mode (Claude SDK bridge — see agent/mod.rs)
+            agent::spawn_agent_session,
+            agent::send_agent_input,
+            agent::interrupt_agent,
+            agent::close_agent_session,
+            agent::check_claude_cli,
+            agent::read_image_for_attachment,
+            agent::update_hermes_state,
+            // Claude config (~/.claude.json + ~/.claude/settings.json)
+            // — see claude_config/mod.rs for the v1.0 TUI parity surface.
+            claude_config::write_mcp_server,
+            claude_config::remove_mcp_server,
+            claude_config::read_memory_file,
+            claude_config::write_memory_file,
+            claude_config::read_permission_rules,
+            claude_config::write_permission_rule,
+            claude_config::remove_permission_rule,
+            // Prewarm: static reads from disk before SDK init lands.
+            claude_config::read_static_mcp_servers,
+            claude_config::read_static_slash_commands,
+            claude_config::read_static_memory_paths,
         ])
         .build(tauri::generate_context!())
         .expect("error while building HERMES-IDE")
@@ -906,6 +930,7 @@ mod tests {
             created_at: String::new(),
             last_activity_at: String::new(),
             workspace_paths: vec![],
+            mode: pty::SessionMode::default(),
             detected_agent: None,
             metrics: pty::SessionMetrics {
                 output_lines: 0,

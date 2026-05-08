@@ -1006,3 +1006,149 @@
   font-weight: 500;
 }
 
+
+/* Mode toggle (Agent ↔ Terminal) — Claude-only inline link */
+.session-creator-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 4px;
+  font-size: var(--text-sm);
+}
+.session-creator-mode-toggle-label {
+  color: var(--text-2);
+}
+.session-creator-mode-toggle-label strong {
+  color: var(--text-0);
+  font-weight: 600;
+}
+.session-creator-mode-toggle-link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+.session-creator-mode-toggle-link:hover {
+  text-decoration: underline;
+}
+
+/* ─── Step 1: "How do you want to work?" mode picker ──────────────── */
+/* Phase 6 redesign — replaces the old "pick a CLI tool" first impression. */
+.session-creator-mode-step {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 0;
+}
+.session-creator-mode-title {
+  font: 13px/1 var(--font-display, system-ui, sans-serif);
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+  margin: 0 0 8px 0;
+  font-weight: 500;
+}
+
+/* ─── Category groups ───────────────────────────────────────── */
+
+.session-creator-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-creator-mode-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 2px 2px 2px;
+  border-bottom: 1px solid var(--rule, var(--border));
+}
+
+.session-creator-mode-group-label {
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.session-creator-mode-group-hint {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-style: italic;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+/* The native group's header is highlighted brass to signal it's
+ * the v1.0 first-class experience, not just another option. */
+.session-creator-mode-group:has([data-category="native"]) .session-creator-mode-group-label {
+  color: var(--brass, var(--accent));
+}
+
+/* ─── Mode cards ────────────────────────────────────────────── */
+
+.session-creator-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.session-creator-mode-card:hover {
+  background: var(--bg-2);
+}
+.session-creator-mode-card-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+}
+.session-creator-mode-card[data-category="native"].session-creator-mode-card-selected {
+  border-color: var(--brass, var(--accent));
+  background: color-mix(in srgb, var(--brass, var(--accent)) 8%, var(--bg-1));
+}
+
+.session-creator-mode-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.session-creator-mode-label {
+  font: 14px/1.2 var(--font-display, system-ui, sans-serif);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.session-creator-mode-badge {
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brass, var(--accent));
+  border: 1px solid var(--brass, var(--accent));
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.session-creator-mode-description {
+  font: 12px/1.4 var(--font-display, system-ui, sans-serif);
+  color: var(--text-2);
+}
+.session-creator-ssh-deferred-note {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-style: italic;
+  margin-top: -4px;
+}
+
+/* M9 + M11 overlay rules moved to
+ * `src/styles/components/SessionCreatorOpeningOverlay.css` so the
+ * bundle loads them even when SessionCreator hasn't mounted yet.
+ * The earlier inline-here version was the cause of "no loader at all"
+ * — the rules were in this file but the file only loaded with the
+ * modal, i.e. always after the overlay. */

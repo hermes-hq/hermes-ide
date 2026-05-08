@@ -1,0 +1,187 @@
+/* AgentContextPanel — always-on right sidebar for agent-mode sessions.
+ *
+ * Visual spec: docs/internal/v1-tui-parity-plan.md §8.1
+ * Aesthetic anchors: docs/internal/v1-redesign-playbook.md
+ *   - Editorial Engineering: hairline rules > card borders, no shadows
+ *   - Workshop palette: --brass for waiting/active; --rule for separators
+ *   - Inter Tight 9px ↑↑ tracked uppercase for chrome; JetBrains Mono for content
+ */
+
+.agent-context-panel {
+  position: relative;
+  flex: 0 0 auto;
+  background: var(--bg-paper, var(--bg-0));
+  border-left: 1px solid var(--rule, var(--border));
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-width: 480px;
+  overflow: hidden;
+  user-select: none;
+}
+
+.agent-context-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  cursor: col-resize;
+  z-index: 2;
+  /* Invisible 4px hit area; the visual hairline is the panel's border-left
+   * which is in --rule.  Hover thickens it via the pseudo below. */
+}
+
+.agent-context-panel-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--rule, var(--border));
+  transition: background 120ms ease;
+}
+
+.agent-context-panel-resize-handle:hover::before,
+.agent-context-panel-resize-handle:active::before {
+  background: var(--brass, var(--accent));
+}
+
+/* ─── Top label ─────────────────────────────────────────────── */
+
+.agent-context-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--rule, var(--border));
+  flex: 0 0 auto;
+}
+
+.agent-context-panel-title {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+/* ─── Body — vertical stack of sections ─────────────────────── */
+
+.agent-context-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* Custom scrollbar: thin, --rule color, brass on hover.
+   * Webkit + Firefox both supported. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule, var(--border)) transparent;
+}
+
+.agent-context-panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.agent-context-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agent-context-panel-body::-webkit-scrollbar-thumb {
+  background: var(--rule, var(--border));
+  border-radius: 0;
+}
+
+.agent-context-panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--brass, var(--accent));
+}
+
+/* ─── Section ───────────────────────────────────────────────── */
+
+.agent-context-section {
+  border-bottom: 1px solid var(--rule, var(--border));
+}
+
+.agent-context-section:last-child {
+  border-bottom: none;
+}
+
+.agent-context-section-header {
+  /* Reset button styling */
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 8px 12px;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+  transition: color 120ms ease;
+}
+
+.agent-context-section-header:hover {
+  color: var(--ink-secondary, var(--text-2));
+}
+
+.agent-context-section-disclosure {
+  display: inline-block;
+  width: 12px;
+  font-family: var(--font-mono);
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.agent-context-section-header-label {
+  flex: 1;
+}
+
+.agent-context-section-body {
+  padding: 0 12px 10px 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+  line-height: 1.5;
+}
+
+/* ─── Empty-state CTAs ─────────────────────────────────────── */
+
+.agent-context-section-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-context-empty-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-tertiary, var(--text-3));
+}
+
+.agent-context-empty-cta {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  align-self: flex-start;
+
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--brass, var(--accent));
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: color 120ms ease;
+}
+
+.agent-context-empty-cta:hover {
+  color: var(--brass-bright, var(--accent));
+}

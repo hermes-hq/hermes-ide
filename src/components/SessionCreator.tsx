@@ -22,11 +22,15 @@ import {
 import { PLATFORM } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
-import type { PermissionMode, TmuxSessionEntry } from "../types/session";
+import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
 import { isGitRepo as checkIsGitRepo } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector } from "./SessionBranchSelector";
 import { SESSION_COLORS } from "./SessionList";
+import {
+  SessionCreatorModeStep,
+  type SessionCreatorMode,
+} from "./SessionCreatorModeStep";
 
 // ─── SSH Connection History ──────────────────────────────────────────
 
@@ -64,20 +68,44 @@ export const CLAUDE_CHANNELS = [
   { id: "plugin:telegram@claude-plugins-official", label: "Telegram", icon: "\u{1F4F1}" },
 ] as const;
 
-// Internal step identifiers (not displayed to user)
-type Step = "projects" | "branch" | "ai" | "tmux" | "confirm";
+// Internal step identifiers (not displayed to user).
+//
+// Phase 6 (v1.0.0) inserts a `mode` step as the cardinal Step 1 — every flow
+// starts there. After that:
+//  - mode="agent"    → projects → branch (if any) → confirm
+//  - mode="terminal" → ai → projects → branch (if any) → confirm
+//  - mode="ssh"      → ssh → tmux → confirm
+type Step = "mode" | "projects" | "branch" | "ai" | "tmux" | "ssh" | "confirm";
 
 interface SessionCreatorProps {
   onClose: () => void;
   onCreate: (opts: CreateSessionOpts) => Promise<void>;
   /** Pre-select a project group when creating from a project's "+" button */
   defaultGroup?: string;
+  /** Test/integration hook — start the modal already on a chosen mode and
+   *  skip Step 1.  Tests use this to render the "agent path" or "terminal
+   *  path" of Step 2+ directly without simulating a click. */
+  initialMode?: SessionCreatorMode;
+  /** Called once on first paint so the parent can dismiss its
+   *  "opening…" placeholder.  Without this, a heavy first-mount makes
+   *  the modal feel stuck after Cmd+N / button click. */
+  onReady?: () => void;
 }
 
-export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreatorProps) {
-  const [step, setStep] = useState<Step>("ai");
+export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, onReady }: SessionCreatorProps) {
+  // Diagnostic — logs every time React calls the function component
+  // body.  Combined with the App.tsx click timestamp, lets us see
+  // how long elapses between click and first-render-start.
+  console.log(`[opening-overlay] SessionCreator render() at ${performance.now().toFixed(0)}ms`);
+  // Cardinal mode (Phase 6).  Drives every conditional below.  Defaults to
+  // "agent" so v1.0.0 leads with "Chat with Claude" (the headline experience).
+  const [mode, setMode] = useState<SessionCreatorMode>(initialMode ?? "agent");
+  const [step, setStep] = useState<Step>(initialMode ? (initialMode === "ssh" ? "ssh" : initialMode === "terminal" ? "ai" : "projects") : "mode");
+
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
-  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  // For terminal mode the user picks an AI provider; for agent mode it's
+  // forced to "claude"; for ssh mode it's irrelevant (mode is "terminal").
+  const [aiProvider, setAiProvider] = useState<string | null>(initialMode === "agent" ? "claude" : null);
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [allProjects, setAllProjects] = useState<ProjectOrdered[]>([]);
@@ -110,15 +138,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [newProjectName, setNewProjectName] = useState("");
   const [showNewProjectInput, setShowNewProjectInput] = useState(false);
 
-  // Connection type state (local or SSH remote)
-  const [connectionType, setConnectionType] = useState<"local" | "ssh">("local");
+  // SSH-specific state
   const [sshHost, setSshHost] = useState("");
   const [sshUser, setSshUser] = useState("");
   const [sshPort, setSshPort] = useState("22");
   const [sshHistory, setSshHistory] = useState<SshHistoryEntry[]>([]);
   const [sshSavedHosts, setSshSavedHosts] = useState<SshSavedHost[]>([]);
-
-  // Identity file and jump host
   const [sshIdentityFile, setSshIdentityFile] = useState("");
   const [sshJumpHost, setSshJumpHost] = useState("");
   const [saveAsHost, setSaveAsHost] = useState(false);
@@ -133,27 +158,40 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const [newTmuxSessionName, setNewTmuxSessionName] = useState("");
   const [showNewTmuxInput, setShowNewTmuxInput] = useState(false);
 
-  // Color selection state — no color by default
+  // Color selection — no color by default
   const [selectedColor, setSelectedColor] = useState<string>("");
 
-  // Auto-approve (skip permissions) state
+  // Permission/agent-launch knobs (terminal mode only).
   const [autoApprove, setAutoApprove] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [customSuffix, setCustomSuffix] = useState("");
-  /** Per-provider prefix defaults loaded from the `ai_agent_prefixes` setting.
-   *  Switching providers mid-form rehydrates the prefix input from this map. */
   const [agentPrefixDefaults, setAgentPrefixDefaults] = useState<Record<string, string>>({});
   const [customPrefix, setCustomPrefix] = useState("");
 
-  // Channel plugins state (Claude only)
+  // Channel plugins state (Claude only — visible in both agent & terminal-claude paths)
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
 
-  // Branch selection state — per-project
+  // Branch isolation — per-project
   type BranchSelection = { branch: string; createNew: boolean; fromRemote?: string };
   const [gitProjectIds, setGitProjectIds] = useState<string[]>([]);
   const [checkingGit, setCheckingGit] = useState(false);
   const [branchSelections, setBranchSelections] = useState<Record<string, BranchSelection>>({});
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+
+  // Resolve session-mode that gets persisted to the session.  Agent mode is
+  // Claude-only; ssh always = terminal (per v1.0.0 — see playbook §8).
+  const resolvedSessionMode: SessionMode = mode === "agent" ? "agent" : "terminal";
+
+  const isShellOnly = mode === "terminal" && aiProvider === null;
+
+  // Notify parent of first paint so its "opening…" placeholder
+  // dismisses (M9 — Cmd+N / new-session-button immediate feedback).
+  useEffect(() => {
+    console.log(`[opening-overlay] SessionCreator first useEffect (mounted) at ${performance.now().toFixed(0)}ms`);
+    onReady?.();
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-expand first git project only when first entering the branch step
   const prevStepRef = useRef(step);
@@ -176,57 +214,75 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     } else if (Object.keys(branchSelections).length > 0 && selectedProjectIds.every(
       (id) => !gitProjectIds.includes(id) || branchSelections[id]
     )) {
-      // All git projects have selections — collapse
       setExpandedProjectId(null);
     }
   }, [branchSelections, step, selectedProjectIds, gitProjectIds]);
 
-  // Determine whether to show the branch step
   const showBranchStep = gitProjectIds.length > 0 && selectedProjectIds.length > 0;
 
   // Existing project groups (from current sessions) with their colors
   const [existingGroups, setExistingGroups] = useState<string[]>([]);
   const [groupColors, setGroupColors] = useState<Record<string, string>>({});
 
-  // Compute ordered steps for display
+  // Compute ordered steps for the progress dots & footer nav.
   const orderedSteps = useMemo<Step[]>(() => {
-    if (connectionType === "ssh") return ["projects", "tmux", "confirm"];
-    const steps: Step[] = ["ai", "projects"];
+    if (mode === "ssh") {
+      // SSH path is unchanged from v0.6 — host → tmux → confirm.  We add the
+      // mode step in front so the user can revisit Step 1.
+      return ["mode", "ssh", "tmux", "confirm"];
+    }
+    if (mode === "agent") {
+      // Agent path: mode → folder picker → (branch) → confirm.  No provider
+      // step (forced to claude), no permission pills, no shell prefix.
+      const steps: Step[] = ["mode", "projects"];
+      if (showBranchStep) steps.push("branch");
+      steps.push("confirm");
+      return steps;
+    }
+    // Terminal path: mode → provider picker → folder picker → (branch) → confirm.
+    const steps: Step[] = ["mode", "ai", "projects"];
     if (showBranchStep) steps.push("branch");
     steps.push("confirm");
     return steps;
-  }, [showBranchStep, connectionType]);
+  }, [mode, showBranchStep]);
 
-  // Navigate to first step when connection type changes
-  const prevConnectionRef = useRef(connectionType);
-  useEffect(() => {
-    if (prevConnectionRef.current !== connectionType) {
-      prevConnectionRef.current = connectionType;
-      setStep(connectionType === "ssh" ? "projects" : "ai");
-    }
-  }, [connectionType]);
-
-  // Truncate project selection when switching to Shell Only
-  const isShellOnly = aiProvider === null;
+  // Truncate project selection when switching to Shell Only (terminal mode)
   useEffect(() => {
     if (isShellOnly && selectedProjectIds.length > 1) {
       setSelectedProjectIds((prev) => prev.slice(0, 1));
     }
   }, [isShellOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rehydrate the prefix input from the per-agent default when the selected
-  // provider changes. Shell-only sessions clear the prefix since it has no
-  // binary to wrap.
+  // When mode changes, force aiProvider to "claude" for agent mode and clear
+  // out terminal-only state.  When switching back to terminal, leave the
+  // aiProvider null so the user reopens the picker explicitly.
   useEffect(() => {
+    if (mode === "agent") {
+      setAiProvider("claude");
+      setAutoApprove(false);
+      setPermissionMode("default");
+      setCustomPrefix("");
+      setCustomSuffix("");
+    }
+    if (mode === "ssh") {
+      setAiProvider(null);
+      setSelectedChannels([]);
+    }
+  }, [mode]);
+
+  // Rehydrate the prefix input from per-agent default when the provider
+  // changes.  Only relevant in terminal mode.
+  useEffect(() => {
+    if (mode !== "terminal") return;
     if (aiProvider) {
       setCustomPrefix(agentPrefixDefaults[aiProvider] ?? "");
     } else {
       setCustomPrefix("");
     }
-  }, [aiProvider, agentPrefixDefaults]);
+  }, [aiProvider, agentPrefixDefaults, mode]);
 
   const totalSteps = orderedSteps.length;
-  const currentStepNumber = orderedSteps.indexOf(step) + 1;
+  const currentStepNumber = Math.max(orderedSteps.indexOf(step) + 1, 1);
 
   const goNext = useCallback(() => {
     const idx = orderedSteps.indexOf(step);
@@ -264,7 +320,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     getSetting(SSH_HISTORY_KEY)
       .then((json) => {
         const history = parseSshHistory(json);
-        console.log("[SessionCreator] Loaded SSH history:", history.length, "entries");
         setSshHistory(history);
       })
       .catch((err) => console.warn("[SessionCreator] Failed to load SSH history:", err));
@@ -275,7 +330,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       .then((sessions) => {
         const groups = [...new Set(sessions.map((s) => s.group).filter((g): g is string => !!g))].sort();
         setExistingGroups(groups);
-        // Build group→color map (use first non-destroyed session's color)
         const colors: Record<string, string> = {};
         for (const g of groups) {
           const groupSession = sessions.find((s) => s.group === g && s.phase !== "destroyed")
@@ -283,7 +337,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           if (groupSession) colors[g] = groupSession.color;
         }
         setGroupColors(colors);
-        // Pre-select color for defaultGroup
         if (defaultGroup && colors[defaultGroup]) {
           setSelectedColor(colors[defaultGroup]);
         }
@@ -291,8 +344,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       .catch((err) => console.warn("[SessionCreator] Failed to load sessions:", err));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Discover tmux sessions when entering the tmux step.
-  // If tmux is not installed, skip straight to confirm.
+  // Discover tmux sessions on entering the tmux step.
   useEffect(() => {
     if (step !== "tmux" || !sshHost.trim()) return;
     setTmuxLoading(true);
@@ -300,15 +352,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     setTmuxAvailable(true);
     sshListTmuxSessions(sshHost.trim(), parseInt(sshPort) || 22, sshUser || undefined)
       .then((sessions) => {
-        console.log("[SessionCreator] Discovered tmux sessions:", sessions);
         setTmuxSessions(sessions);
         setTmuxLoading(false);
       })
       .catch((err) => {
-        console.warn("[SessionCreator] tmux discovery failed:", err);
         const msg = String(err);
         if (msg.includes("not installed")) {
-          // tmux not available — skip this step entirely
           setTmuxAvailable(false);
           setTmuxSessions([]);
           setSelectedTmuxSession(null);
@@ -333,7 +382,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       labelRef.current?.focus();
       setShowNewProjectInput(false);
     }
-  }, [step]);
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setHighlightedIndex(-1);
@@ -366,7 +415,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         if (cancelled) return;
         const gitIds = results.filter((r) => r.isGit).map((r) => r.projectId);
         setGitProjectIds(gitIds);
-        // Remove branch selections for projects no longer selected or no longer git repos
         setBranchSelections((prev) => {
           const next: Record<string, BranchSelection> = {};
           for (const [id, sel] of Object.entries(prev)) {
@@ -403,9 +451,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
   const toggleProject = (id: string) => {
     setSelectedProjectIds((prev) => {
       if (prev.includes(id)) return prev.filter((r) => r !== id);
-      // Shell Only: single-select (replace)
       if (isShellOnly) return [id];
-      // AI session: multi-select (append)
       return [...prev, id];
     });
   };
@@ -459,28 +505,38 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
       const sshLabel = selectedTmuxSession
         ? `${sshUser || "ssh"}@${sshHost} [${selectedTmuxSession}]`
         : `${sshUser || "ssh"}@${sshHost}`;
+
+      // Local path = agent or terminal mode.  SSH path is its own branch.
+      const isLocal = mode !== "ssh";
+      const isAgent = mode === "agent";
+      // Pass aiProvider only for terminal mode; agent mode is implicitly Claude.
+      const providerForCreate = isLocal && !isAgent ? aiProvider || undefined : isAgent ? "claude" : undefined;
+
       await onCreate({
-        label: label || (connectionType === "ssh" ? sshLabel : undefined),
+        label: label || (mode === "ssh" ? sshLabel : undefined),
         description: description || undefined,
         group: selectedGroup || undefined,
         color: selectedColor,
-        aiProvider: connectionType === "local" ? (aiProvider || undefined) : undefined,
-        autoApprove: connectionType === "local" ? (autoApprove || undefined) : undefined,
-        permissionMode: connectionType === "local" && aiProvider ? permissionMode : undefined,
-        customPrefix: connectionType === "local" && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
-        customSuffix: connectionType === "local" && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
-        channels: connectionType === "local" && aiProvider === "claude" && selectedChannels.length > 0 ? selectedChannels : undefined,
-        projectIds: connectionType === "local" && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
-        workingDirectory: connectionType === "local" ? firstProjectPath : undefined,
-        branchSelections: connectionType === "local" && Object.keys(branchSelections).length > 0 ? branchSelections : undefined,
-        sshHost: connectionType === "ssh" ? sshHost : undefined,
-        sshPort: connectionType === "ssh" ? (parseInt(sshPort) || 22) : undefined,
-        sshUser: connectionType === "ssh" ? (sshUser || undefined) : undefined,
-        tmuxSession: connectionType === "ssh" ? (selectedTmuxSession || undefined) : undefined,
-        sshIdentityFile: connectionType === "ssh" ? (sshIdentityFile || undefined) : undefined,
+        aiProvider: providerForCreate,
+        // Agent mode skips permission/prefix/suffix entirely.
+        autoApprove: isLocal && !isAgent ? (autoApprove || undefined) : undefined,
+        permissionMode: isLocal && !isAgent && aiProvider ? permissionMode : undefined,
+        customPrefix: isLocal && !isAgent && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
+        customSuffix: isLocal && !isAgent && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
+        // Channels still apply in agent mode (Telegram etc).
+        channels: isLocal && (isAgent || aiProvider === "claude") && selectedChannels.length > 0 ? selectedChannels : undefined,
+        projectIds: isLocal && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
+        workingDirectory: isLocal ? firstProjectPath : undefined,
+        branchSelections: isLocal && Object.keys(branchSelections).length > 0 ? branchSelections : undefined,
+        mode: resolvedSessionMode,
+        sshHost: mode === "ssh" ? sshHost : undefined,
+        sshPort: mode === "ssh" ? (parseInt(sshPort) || 22) : undefined,
+        sshUser: mode === "ssh" ? (sshUser || undefined) : undefined,
+        tmuxSession: mode === "ssh" ? (selectedTmuxSession || undefined) : undefined,
+        sshIdentityFile: mode === "ssh" ? (sshIdentityFile || undefined) : undefined,
       });
-      // Save SSH connection to history
-      if (connectionType === "ssh" && sshHost.trim()) {
+
+      if (mode === "ssh" && sshHost.trim()) {
         const entry: SshHistoryEntry = {
           host: sshHost.trim(),
           user: sshUser.trim() || "",
@@ -488,11 +544,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           lastUsed: new Date().toISOString(),
         };
         const updated = addToSshHistory(sshHistory, entry);
-        console.log("[SessionCreator] Saving SSH history:", updated.length, "entries");
         setSetting(SSH_HISTORY_KEY, JSON.stringify(updated))
           .catch((err) => console.warn("[SessionCreator] Failed to save SSH history:", err));
 
-        // Save as a saved host if requested
         if (saveAsHost && saveHostLabel.trim()) {
           upsertSshSavedHost({
             id: crypto.randomUUID(),
@@ -566,6 +620,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
     }
   };
 
+  // Wording helpers — playbook §8 "mode-conditional vocabulary".
+  const folderSectionTitle = mode === "agent"
+    ? "Project context"
+    : isShellOnly ? "Working directory" : "Select folders";
+  const folderSubtitle = mode === "agent"
+    ? "Claude can work across these folders. The first is the project root."
+    : isShellOnly
+      ? "Your shell will open in this folder."
+      : "The AI can work across all selected folders. The first folder is the working directory.";
+
   return (
     <div
       className="command-palette-overlay"
@@ -583,7 +647,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
         <div className="session-creator-resize-handle-bottom" onMouseDown={onResizeHeightStart} />
         {/* Header */}
         <div className="session-creator-header">
-          <span className="session-creator-title">New Session</span>
+          <span className="session-creator-title">New session</span>
           <span className="session-creator-step">Step {currentStepNumber} of {totalSteps}</span>
           <button className="close-btn settings-close" onClick={onClose} title="Close" aria-label="Close">x</button>
         </div>
@@ -598,145 +662,165 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           ))}
         </div>
 
-        {/* Step 1: Select Projects */}
-        {step === "projects" && (
+        {/* ── Step 1: cardinal mode picker ──────────────────────────── */}
+        {step === "mode" && (
           <div className="session-creator-body">
-            {connectionType === "ssh" && (
-              <div className="session-creator-connection-type">
-                <button
-                  className="session-creator-type-btn"
-                  onClick={() => setConnectionType("local")}
-                >Local</button>
-                <button
-                  className="session-creator-type-btn session-creator-type-active"
-                  onClick={() => setConnectionType("ssh")}
-                >SSH Remote <span className="session-creator-alpha-tag">Alpha</span></button>
-              </div>
-            )}
+            <SessionCreatorModeStep
+              selected={mode}
+              onSelect={(m) => setMode(m)}
+            />
+            <div className="session-creator-actions">
+              <button
+                className="session-creator-btn-primary"
+                onClick={() => {
+                  // Jump straight to the first content step for the chosen mode.
+                  if (mode === "ssh") setStep("ssh");
+                  else if (mode === "terminal") setStep("ai");
+                  else setStep("projects");
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
 
-            {connectionType === "ssh" && (
-              <div className="session-creator-ssh-fields">
-                {sshSavedHosts.length > 0 && !sshHost && (
-                  <div className="session-creator-ssh-history">
-                    <span className="session-creator-ssh-history-label">Saved</span>
-                    <div className="session-creator-ssh-history-list">
-                      {sshSavedHosts.map((h) => (
-                        <button
-                          key={h.id}
-                          className="session-creator-ssh-history-item"
-                          onClick={() => {
-                            setSshHost(h.host);
-                            setSshUser(h.user);
-                            setSshPort(String(h.port));
-                            setSshIdentityFile(h.identity_file || "");
-                          }}
-                        >
-                          <span className="session-creator-ssh-history-host">
-                            {h.label}
-                          </span>
-                          <span className="session-creator-ssh-history-port" style={{ opacity: 0.6 }}>
-                            {h.user}@{h.host}{h.port !== 22 ? `:${h.port}` : ""}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+        {/* ── SSH connection form (mode=ssh) ────────────────────────── */}
+        {step === "ssh" && mode === "ssh" && (
+          <div className="session-creator-body">
+            <div className="session-creator-section-title">SSH</div>
+            <div className="session-creator-ssh-deferred-note">
+              Agent mode for remote sessions arrives in v1.1.
+            </div>
+            <div className="session-creator-ssh-fields">
+              {sshSavedHosts.length > 0 && !sshHost && (
+                <div className="session-creator-ssh-history">
+                  <span className="session-creator-ssh-history-label">Saved</span>
+                  <div className="session-creator-ssh-history-list">
+                    {sshSavedHosts.map((h) => (
+                      <button
+                        key={h.id}
+                        className="session-creator-ssh-history-item"
+                        onClick={() => {
+                          setSshHost(h.host);
+                          setSshUser(h.user);
+                          setSshPort(String(h.port));
+                          setSshIdentityFile(h.identity_file || "");
+                        }}
+                      >
+                        <span className="session-creator-ssh-history-host">
+                          {h.label}
+                        </span>
+                        <span className="session-creator-ssh-history-port" style={{ opacity: 0.6 }}>
+                          {h.user}@{h.host}{h.port !== 22 ? `:${h.port}` : ""}
+                        </span>
+                      </button>
+                    ))}
                   </div>
-                )}
-                {sshHistory.length > 0 && !sshHost && (
-                  <div className="session-creator-ssh-history">
-                    <span className="session-creator-ssh-history-label">Recent</span>
-                    <div className="session-creator-ssh-history-list">
-                      {sshHistory.map((h, i) => (
-                        <button
-                          key={`${h.host}-${h.user}-${h.port}-${i}`}
-                          className="session-creator-ssh-history-item"
-                          onClick={() => {
-                            setSshHost(h.host);
-                            setSshUser(h.user);
-                            setSshPort(String(h.port));
-                          }}
-                        >
-                          <span className="session-creator-ssh-history-host">
-                            {h.user ? `${h.user}@` : ""}{h.host}
-                          </span>
-                          {h.port !== 22 && (
-                            <span className="session-creator-ssh-history-port">:{h.port}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <input
-                  ref={searchRef}
-                  className="command-palette-input"
-                  placeholder="Host (e.g. 192.168.1.100 or myserver.com)"
-                  value={sshHost}
-                  onChange={(e) => setSshHost(e.target.value)}
-                  autoComplete="off"
-                  autoFocus
-                />
-                <div className="session-creator-ssh-row">
-                  <input
-                    className="command-palette-input session-creator-ssh-user"
-                    placeholder="User (default: current user)"
-                    value={sshUser}
-                    onChange={(e) => setSshUser(e.target.value)}
-                    autoComplete="off"
-                  />
-                  <input
-                    className="command-palette-input session-creator-ssh-port"
-                    placeholder="Port"
-                    value={sshPort}
-                    onChange={(e) => setSshPort(e.target.value.replace(/\D/g, ""))}
-                    autoComplete="off"
-                  />
                 </div>
+              )}
+              {sshHistory.length > 0 && !sshHost && (
+                <div className="session-creator-ssh-history">
+                  <span className="session-creator-ssh-history-label">Recent</span>
+                  <div className="session-creator-ssh-history-list">
+                    {sshHistory.map((h, i) => (
+                      <button
+                        key={`${h.host}-${h.user}-${h.port}-${i}`}
+                        className="session-creator-ssh-history-item"
+                        onClick={() => {
+                          setSshHost(h.host);
+                          setSshUser(h.user);
+                          setSshPort(String(h.port));
+                        }}
+                      >
+                        <span className="session-creator-ssh-history-host">
+                          {h.user ? `${h.user}@` : ""}{h.host}
+                        </span>
+                        {h.port !== 22 && (
+                          <span className="session-creator-ssh-history-port">:{h.port}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <input
+                ref={searchRef}
+                className="command-palette-input"
+                placeholder="Host (e.g. 192.168.1.100 or myserver.com)"
+                value={sshHost}
+                onChange={(e) => setSshHost(e.target.value)}
+                autoComplete="off"
+                autoFocus
+              />
+              <div className="session-creator-ssh-row">
                 <input
-                  className="command-palette-input"
-                  placeholder="Identity file (optional, e.g. ~/.ssh/id_rsa)"
-                  value={sshIdentityFile}
-                  onChange={(e) => setSshIdentityFile(e.target.value)}
+                  className="command-palette-input session-creator-ssh-user"
+                  placeholder="User (default: current user)"
+                  value={sshUser}
+                  onChange={(e) => setSshUser(e.target.value)}
                   autoComplete="off"
                 />
                 <input
-                  className="command-palette-input"
-                  placeholder="Jump host (optional, e.g. bastion.example.com)"
-                  value={sshJumpHost}
-                  onChange={(e) => setSshJumpHost(e.target.value)}
+                  className="command-palette-input session-creator-ssh-port"
+                  placeholder="Port"
+                  value={sshPort}
+                  onChange={(e) => setSshPort(e.target.value.replace(/\D/g, ""))}
                   autoComplete="off"
                 />
-                <span className="settings-hint-inline">Uses your system SSH config and agent for authentication</span>
-                <label className="session-creator-save-host-label">
-                  <input
-                    type="checkbox"
-                    checked={saveAsHost}
-                    onChange={(e) => setSaveAsHost(e.target.checked)}
-                  />
-                  Save this host
-                  {saveAsHost && (
-                    <input
-                      className="session-creator-save-host-name"
-                      placeholder="Label (e.g. My Server)"
-                      value={saveHostLabel}
-                      onChange={(e) => setSaveHostLabel(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      autoComplete="off"
-                    />
-                  )}
-                </label>
               </div>
-            )}
+              <input
+                className="command-palette-input"
+                placeholder="Identity file (optional, e.g. ~/.ssh/id_rsa)"
+                value={sshIdentityFile}
+                onChange={(e) => setSshIdentityFile(e.target.value)}
+                autoComplete="off"
+              />
+              <input
+                className="command-palette-input"
+                placeholder="Jump host (optional, e.g. bastion.example.com)"
+                value={sshJumpHost}
+                onChange={(e) => setSshJumpHost(e.target.value)}
+                autoComplete="off"
+              />
+              <span className="settings-hint-inline">Uses your system SSH config and agent for authentication</span>
+              <label className="session-creator-save-host-label">
+                <input
+                  type="checkbox"
+                  checked={saveAsHost}
+                  onChange={(e) => setSaveAsHost(e.target.checked)}
+                />
+                Save this host
+                {saveAsHost && (
+                  <input
+                    className="session-creator-save-host-name"
+                    placeholder="Label (e.g. My Server)"
+                    value={saveHostLabel}
+                    onChange={(e) => setSaveHostLabel(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    autoComplete="off"
+                  />
+                )}
+              </label>
+            </div>
+            <div className="session-creator-actions">
+              <button className="session-creator-btn-secondary" onClick={goBack}>Back</button>
+              <button
+                className="session-creator-btn-primary"
+                onClick={goNext}
+                disabled={!sshHost.trim()}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
 
-            {connectionType === "local" && <>
-            <div className="session-creator-section-title">
-              {isShellOnly ? "Working Directory" : "Select Folders"}
-            </div>
-            <div className="session-creator-subtitle">
-              {isShellOnly
-                ? "Your shell will open in this folder."
-                : "The AI can work across all selected folders. The first folder is the working directory."}
-            </div>
+        {/* ── Folder picker (agent + terminal modes) ────────────────── */}
+        {step === "projects" && mode !== "ssh" && (
+          <div className="session-creator-body">
+            <div className="session-creator-section-title">{folderSectionTitle}</div>
+            <div className="session-creator-subtitle">{folderSubtitle}</div>
             <input
               ref={searchRef}
               className="command-palette-input"
@@ -868,27 +952,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                   : `Next (${selectedProjectIds.length} selected)`}
               </button>
             </div>
-            </>}
-
-            {connectionType === "ssh" && (
-              <div className="session-creator-actions">
-                <button
-                  className="session-creator-btn-primary"
-                  onClick={goNext}
-                  disabled={!sshHost.trim()}
-                >
-                  Next
-                </button>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Step 2 (conditional): Select Branch — per-project */}
+        {/* ── Branch isolation step ─────────────────────────────────── */}
         {step === "branch" && gitProjectIds.length > 0 && (
           <>
             <div className="session-creator-body">
-              <div className="session-creator-section-title">Select Branches</div>
+              <div className="session-creator-section-title">Select branches</div>
               <div className="session-creator-subtitle">
                 Each project gets its own isolated branch so changes in this session don't affect other sessions.
               </div>
@@ -916,7 +987,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                         onClick={() => setExpandedProjectId(isExpanded ? null : projectId)}
                         style={{ cursor: "pointer" }}
                       >
-                        <span className="session-creator-branch-project-chevron">{isExpanded ? "\u25BC" : "\u25B6"}</span>
+                        <span className="session-creator-branch-project-chevron">{isExpanded ? "▼" : "▶"}</span>
                         <span className="session-creator-branch-project-name">{projectName}</span>
                         {branchSelections[projectId] && (
                           <span className="session-creator-branch-selected-label">
@@ -965,10 +1036,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           </>
         )}
 
-        {/* Tmux session picker (SSH only) */}
-        {step === "tmux" && (
+        {/* ── tmux session picker (SSH only) ────────────────────────── */}
+        {step === "tmux" && mode === "ssh" && (
           <div className="session-creator-body">
-            <div className="session-creator-section-title">tmux Sessions</div>
+            <div className="session-creator-section-title">tmux sessions</div>
             {tmuxLoading && (
               <div className="command-palette-empty">Connecting to {sshHost}...</div>
             )}
@@ -998,7 +1069,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                     </div>
                   </div>
                 ))}
-                {/* Create new tmux session */}
                 {!showNewTmuxInput ? (
                   <div
                     className="project-picker-item"
@@ -1021,7 +1091,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                         value={newTmuxSessionName}
                         onChange={(e) => {
                           setNewTmuxSessionName(e.target.value);
-                          // Keep selectedTmuxSession in sync so Next is enabled
                           setSelectedTmuxSession(e.target.value.trim() || null);
                         }}
                         onClick={(e) => e.stopPropagation()}
@@ -1070,20 +1139,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           </div>
         )}
 
-        {/* Step 3: Pick AI Engine */}
-        {step === "ai" && (
+        {/* ── Provider picker (terminal mode only) ──────────────────── */}
+        {step === "ai" && mode === "terminal" && (
           <div className="session-creator-body" ref={aiStepRef} tabIndex={-1} style={{ outline: "none" }}>
-            <div className="session-creator-connection-type">
-              <button
-                className={`session-creator-type-btn ${connectionType === "local" ? "session-creator-type-active" : ""}`}
-                onClick={() => setConnectionType("local")}
-              >Local</button>
-              <button
-                className={`session-creator-type-btn ${connectionType === "ssh" ? "session-creator-type-active" : ""}`}
-                onClick={() => setConnectionType("ssh")}
-              >SSH Remote <span className="session-creator-alpha-tag">Alpha</span></button>
-            </div>
-            <div className="session-creator-section-title">Session Type</div>
             <div className="session-creator-provider-grid">
               {AI_PROVIDERS.map((p) => {
                 const providerIdx = enabledProviders.indexOf(p.id);
@@ -1116,7 +1174,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 className={`session-creator-provider-card ${aiProvider === null ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.length - 1 ? "selected" : ""}`}
                 onClick={() => { setAiProvider(null); setAutoApprove(false); setSelectedChannels([]); setHighlightedProviderIndex(enabledProviders.length - 1); }}
               >
-                <span className="session-creator-provider-name">Shell Only</span>
+                <span className="session-creator-provider-name">Plain shell</span>
                 <span className="session-creator-provider-desc">No AI agent</span>
               </button>
             </div>
@@ -1131,19 +1189,19 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
             )}
             {aiProvider && (
               <div className="session-creator-permission-mode">
-                <div className="session-creator-permission-mode-label">Permission Mode</div>
+                <div className="session-creator-permission-mode-label">Approval Flow</div>
                 <div className="session-creator-permission-mode-pills">
-                  {getAvailableModes(aiProvider).map((mode) => (
+                  {getAvailableModes(aiProvider).map((m) => (
                     <button
-                      key={mode}
+                      key={m}
                       type="button"
-                      className={`session-creator-permission-pill${permissionMode === mode ? " session-creator-permission-pill-active" : ""}${mode === "bypassPermissions" ? " session-creator-permission-pill-danger" : ""}`}
+                      className={`session-creator-permission-pill${permissionMode === m ? " session-creator-permission-pill-active" : ""}${m === "bypassPermissions" ? " session-creator-permission-pill-danger" : ""}`}
                       onClick={() => {
-                        setPermissionMode(mode);
-                        setAutoApprove(mode === "bypassPermissions");
+                        setPermissionMode(m);
+                        setAutoApprove(m === "bypassPermissions");
                       }}
                     >
-                      {PERMISSION_MODES[mode].shortLabel}
+                      {PERMISSION_MODES[m].shortLabel}
                     </button>
                   ))}
                 </div>
@@ -1159,7 +1217,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 </div>
               </div>
             )}
-            {aiProvider && connectionType === "local" && (
+            {aiProvider && (
               <div className="session-creator-custom-suffix">
                 <div className="session-creator-custom-suffix-label">Prefix command</div>
                 <input
@@ -1213,7 +1271,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 </span>
               </div>
             )}
-            {aiProvider && connectionType === "local" && (
+            {aiProvider && (
               <div
                 className="session-creator-launch-preview"
                 aria-live="polite"
@@ -1257,11 +1315,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               <span><kbd>Esc</kbd> close</span>
             </div>
             <div className="session-creator-actions">
-              {orderedSteps.indexOf("ai") > 0 && (
-                <button className="session-creator-btn-secondary" onClick={goBack}>
-                  Back
-                </button>
-              )}
+              <button className="session-creator-btn-secondary" onClick={goBack}>
+                Back
+              </button>
               <button className="session-creator-btn-primary" onClick={goNext}>
                 Next
               </button>
@@ -1269,12 +1325,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
           </div>
         )}
 
-        {/* Step 4: Confirm */}
+        {/* ── Confirm step ──────────────────────────────────────────── */}
         {step === "confirm" && (
           <div className="session-creator-body">
             <div className="session-creator-section-title">Confirm</div>
             <div className="session-creator-summary">
-              {connectionType === "ssh" ? (
+              {mode === "ssh" ? (
                 <>
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">Connection:</span>
@@ -1292,7 +1348,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               ) : (
                 <>
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">{isShellOnly ? "Folder:" : "Folders:"}</span>
+                    <span className="session-creator-summary-label">
+                      {mode === "agent" ? "Project context:" : (isShellOnly ? "Folder:" : "Folders:")}
+                    </span>
                     <span className="session-creator-summary-value">
                       {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
                     </span>
@@ -1315,10 +1373,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                     </div>
                   )}
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">{isShellOnly ? "Type:" : "AI Engine:"}</span>
+                    <span className="session-creator-summary-label">Mode:</span>
                     <span className="session-creator-summary-value">
-                      {aiProvider ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider : "Shell Only"}
-                      {aiProvider && permissionMode !== "default" && (
+                      {mode === "agent"
+                        ? "Chat with Claude"
+                        : aiProvider
+                          ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider
+                          : "Plain shell"}
+                      {mode === "terminal" && aiProvider && permissionMode !== "default" && (
                         <span className="session-creator-summary-flag"> ({PERMISSION_MODES[permissionMode].shortLabel})</span>
                       )}
                     </span>
@@ -1409,7 +1471,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                         if (!existingGroups.includes(name)) {
                           setExistingGroups((prev) => [...prev, name].sort());
                         }
-                        // Assign current color to the new project
                         setGroupColors((prev) => ({ ...prev, [name]: selectedColor }));
                         setSelectedGroup(name);
                         setShowNewProjectInput(false);
@@ -1463,6 +1524,35 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
               </div>
             </div>
 
+            {/* Channels (agent mode shows them here too — playbook §6 spec) */}
+            {mode === "agent" && (
+              <div className="session-creator-channels">
+                <div className="session-creator-channels-label">Channels</div>
+                <div className="session-creator-channels-desc">
+                  Let Claude interact with external services during this session.
+                </div>
+                <div className="session-creator-channels-list">
+                  {CLAUDE_CHANNELS.map((ch) => (
+                    <label key={ch.id} className="session-creator-channel-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedChannels.includes(ch.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedChannels((prev) => [...prev, ch.id]);
+                          } else {
+                            setSelectedChannels((prev) => prev.filter((c) => c !== ch.id));
+                          }
+                        }}
+                      />
+                      <span className="session-creator-channel-icon">{ch.icon}</span>
+                      <span className="session-creator-channel-name">{ch.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="session-creator-hints">
               <span><kbd>Enter</kbd> create</span>
               <span><kbd>Esc</kbd> close</span>
@@ -1476,7 +1566,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup }: SessionCreat
                 onClick={handleConfirm}
                 disabled={creating}
               >
-                {creating ? "Creating..." : "Create Session"}
+                {creating ? "Creating..." : "Create session"}
               </button>
             </div>
           </div>

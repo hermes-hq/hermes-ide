@@ -1,0 +1,112 @@
+/* ExitPlanModeCard.  Visual: §8.3.  Hairline rule sandwich w/ centered title. */
+
+.ep-card {
+  margin: 14px 0;
+  padding: 0;
+  background: var(--bg-paper, var(--bg-0));
+  border-top: 1px solid var(--rule-strong, var(--border-light));
+  border-bottom: 1px solid var(--rule-strong, var(--border-light));
+}
+
+.ep-plan-banner {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass, var(--accent));
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--rule, var(--border));
+  background: var(--brass-dim, rgba(212, 168, 106, 0.08));
+}
+
+.ep-card-header {
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary, var(--text-3));
+  text-align: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule, var(--border));
+}
+
+.ep-card-body {
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-primary, var(--text-0));
+  line-height: 1.5;
+}
+
+.ep-card-empty {
+  color: var(--ink-tertiary, var(--text-3));
+  font-style: italic;
+  margin: 0;
+}
+
+.ep-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--rule, var(--border));
+}
+
+.ep-card-reject-form {
+  padding: 10px 16px;
+  border-top: 1px solid var(--rule, var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ep-feedback {
+  width: 100%;
+  background: var(--bg-paper, var(--bg-0));
+  border: 1px solid var(--rule, var(--border));
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-primary, var(--text-0));
+  resize: vertical;
+  outline: none;
+}
+
+.ep-feedback:focus {
+  border-color: var(--brass, var(--accent));
+}
+
+.ep-reject {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-secondary, var(--text-2));
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.ep-reject:hover {
+  color: var(--red, var(--error));
+}
+
+.ep-approve {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--brass, var(--accent));
+  padding: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--brass, var(--accent));
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.ep-approve:hover {
+  background: var(--brass-dim, rgba(212, 168, 106, 0.18));
+  color: var(--brass-bright, var(--accent));
+}

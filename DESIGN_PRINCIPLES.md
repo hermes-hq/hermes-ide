@@ -2,6 +2,14 @@
 
 These principles guide every decision about what Hermes IDE is and isn't. They are ordered by priority. When principles conflict, higher wins.
 
+## 0. Agent-native for Claude, terminal-faithful for everything else
+
+Starting with v1.0.0, Hermes IDE is an **agent-native** surface for Claude Code: we talk to Claude through its structured stream-json protocol, render real messages and tool calls as first-class UI, and stop pretending a terminal is a chat. For every other AI provider — and for any user who explicitly wants a terminal — we remain **terminal-faithful**: an honest, polished xterm host that doesn't get in the way.
+
+The decision rule: if a piece of UI exists to help a user **converse with Claude**, it belongs to Agent mode and should consume Claude's structured events directly. If it exists to help a user **run a program**, it belongs to Terminal mode and should stay out of the program's way.
+
+We ask: **"Are we faking chat by typing into a TTY?"** If yes, the right answer is Agent mode, not a cleverer puppet show.
+
 ## 1. Focused, not full-featured
 
 Hermes IDE solves a specific set of problems exceptionally well rather than solving every problem adequately. We will always have fewer features than IntelliJ, VS Code, or Emacs. That is intentional.

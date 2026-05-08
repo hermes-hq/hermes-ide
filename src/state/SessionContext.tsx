@@ -1,5 +1,7 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, ReactNode } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { AgentEvent } from "../agent/types";
+import { isInitEvent } from "../agent/types";
 
 // Module-level guard to prevent React StrictMode from double-restoring sessions
 let workspaceRestoreStarted = false;
@@ -13,8 +15,11 @@ import {
   getSessions, getRecentSessions, getSessionSnapshot,
   updateSessionDescription, updateSessionGroup,
   saveAllSnapshots,
+  addWorkspacePath,
 } from "../api/sessions";
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
+import { autoAttachInsideProject } from "../utils/autoAttach";
+import { hasAddDirDrift } from "../utils/agentDrift";
 import { createWorktree, worktreeHasChanges, stashWorktree, getSessionWorktreeInfo } from "../api/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
@@ -35,14 +40,22 @@ import type { DirtyWorktreeChange } from "../components/DirtyWorktreeDialog";
 export type {
   AgentInfo, ToolCall, ProviderTokens, ActionEvent, ActionTemplate,
   MemoryFact, SessionMetrics, SessionData, SessionHistoryEntry,
-  ExecutionMode, CreateSessionOpts, SessionAction,
+  ExecutionMode, CreateSessionOpts, SessionAction, SessionMode,
 } from "../types/session";
 
 import type {
   SessionData, SessionHistoryEntry, ExecutionMode, CreateSessionOpts, SessionAction,
-  SavedWorkspace, SavedSessionInfo,
+  SavedWorkspace, SavedSessionInfo, SessionMode,
 } from "../types/session";
 import { SAVED_WORKSPACE_VERSION, validateSavedWorkspace } from "../types/session";
+import { spawnAgentSession, closeAgentSession, sendAgentInput, updateHermesState } from "../api/agent";
+import {
+  buildUserEnvelope,
+  echoUserEnvelope,
+  sendUserEnvelope,
+  type AgentAttachment,
+} from "../utils/submitToAgent";
+import { sendAgentEnvelopeWithRevive } from "../utils/sendAgentEnvelope";
 
 // ─── Workspace Restore Helpers ───────────────────────────────────────
 
@@ -84,6 +97,25 @@ function remapPaneFocusId(layout: LayoutNode, _oldFocusId: string | null): strin
   return remapPaneFocusId(layout.children[0], _oldFocusId);
 }
 
+// ─── Session Mode Helpers ───────────────────────────────────────────
+
+/**
+ * Resolve the runtime mode for a new session.
+ *
+ * Rules (1.0.0 — agent mode is Claude-only):
+ *   1. Non-Claude providers (and shell-only) are always "terminal".
+ *   2. Claude defaults to "agent" unless the caller explicitly passed "terminal".
+ *
+ * Exported for testability.
+ */
+export function resolveSessionMode(
+  requested: SessionMode | undefined,
+  aiProvider: string | null | undefined,
+): SessionMode {
+  if (aiProvider !== "claude") return "terminal";
+  return requested ?? "agent";
+}
+
 // ─── State ──────────────────────────────────────────────────────────
 
 interface SessionState {
@@ -98,6 +130,7 @@ interface SessionState {
   };
   autoApplyEnabled: boolean;
   injectionLocks: Record<string, boolean>;
+  composers: Record<string, { draft: string; height: number; expanded: boolean }>;
   layout: {
     root: LayoutNode | null;
     focusedPaneId: string | null;
@@ -106,6 +139,9 @@ interface SessionState {
   skipCloseConfirm: boolean;
   ui: {
     contextPanelOpen: boolean;
+    /** Usage panel — shows account info + rate limits + per-session cost.
+     *  Lives on the right activity bar, below the Context tab. */
+    usagePanelOpen: boolean;
     sessionListCollapsed: boolean;
     commandPaletteOpen: boolean;
     flowMode: boolean;
@@ -118,6 +154,19 @@ interface SessionState {
     activeLeftTab: "sessions" | "terminal" | "processes" | "git" | "files" | "search";
     filePreview: { projectId: string; filePath: string } | null;
   };
+}
+
+/** Mode-aware default for a fresh composer entry.  Mirrors `useComposer`:
+ *  agent sessions default to expanded (the composer IS the input surface);
+ *  terminal sessions default to collapsed (the composer is a side dock).
+ *  Used inside the reducer when a SET_COMPOSER_* action arrives before the
+ *  user has explicitly opened/closed the composer. */
+function defaultComposerEntry(
+  state: SessionState,
+  sessionId: string,
+): { draft: string; height: number; expanded: boolean } {
+  const session = state.sessions[sessionId];
+  return { draft: "", height: 120, expanded: session?.mode === "agent" };
 }
 
 /** @internal — exported for testing */
@@ -142,6 +191,13 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         && existing.metrics.tool_calls.length === action.session.metrics.tool_calls.length
         && existing.metrics.files_touched.length === action.session.metrics.files_touched.length
         && existing.metrics.memory_facts.length === action.session.metrics.memory_facts.length
+        // Multi-folder bug fix: workspace_paths drives the agent's --add-dir
+        // sandbox AND the Hermes MCP `list_projects` view.  Compared as a
+        // SET — the SDK's additionalDirectories is order-insensitive, so a
+        // pure reorder is a no-op state update (kept reference-equal so
+        // React doesn't re-render unrelated subtrees).  Real adds/removes
+        // still register and propagate.
+        && !hasAddDirDrift(existing.workspace_paths, action.session.workspace_paths)
       ) {
         return state;
       }
@@ -182,6 +238,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       // Clean per-session execution mode and injection lock
       const { [action.id]: _mode, ...restModes } = state.executionModes;
       const { [action.id]: _lock, ...restLocks } = state.injectionLocks;
+      const { [action.id]: _composer, ...restComposers } = state.composers;
       // Clear autoToast if it references the removed session
       const newAutoToast = state.ui.autoToast?.sessionId === action.id
         ? null
@@ -198,6 +255,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         activeSessionId: newActive,
         executionModes: restModes,
         injectionLocks: restLocks,
+        composers: restComposers,
         pendingCloseSessionId: newPendingClose,
         layout: { root: newRoot, focusedPaneId: newFocused },
         ui: {
@@ -206,6 +264,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ...(noSessionsLeft && {
             sessionListCollapsed: true,
             contextPanelOpen: false,
+            usagePanelOpen: false,
             processPanelOpen: false,
             gitPanelOpen: false,
             fileExplorerOpen: false,
@@ -252,7 +311,24 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "SET_RECENT":
       return { ...state, recentSessions: action.entries };
     case "TOGGLE_CONTEXT":
-      return { ...state, ui: { ...state.ui, contextPanelOpen: !state.ui.contextPanelOpen } };
+      // Right rail is single-panel: opening Context closes Usage.
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          contextPanelOpen: !state.ui.contextPanelOpen,
+          usagePanelOpen: state.ui.contextPanelOpen ? state.ui.usagePanelOpen : false,
+        },
+      };
+    case "TOGGLE_USAGE":
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          usagePanelOpen: !state.ui.usagePanelOpen,
+          contextPanelOpen: state.ui.usagePanelOpen ? state.ui.contextPanelOpen : false,
+        },
+      };
     case "TOGGLE_SIDEBAR":
       return {
         ...state,
@@ -276,6 +352,18 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, executionModes: { ...state.executionModes, [action.sessionId]: action.mode } };
     case "SET_DEFAULT_MODE":
       return { ...state, defaultMode: action.mode };
+    case "SET_SESSION_MODE": {
+      const existing = state.sessions[action.sessionId];
+      if (!existing || existing.mode === action.mode) return state;
+      workspaceDirty = true;
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [action.sessionId]: { ...existing, mode: action.mode },
+        },
+      };
+    }
     case "TOGGLE_FLOW_MODE":
       return { ...state, ui: { ...state.ui, flowMode: !state.ui.flowMode } };
     case "SHOW_AUTO_TOAST":
@@ -293,6 +381,49 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "RELEASE_INJECTION_LOCK": {
       const { [action.sessionId]: _, ...rest } = state.injectionLocks;
       return { ...state, injectionLocks: rest };
+    }
+    case "SET_COMPOSER_DRAFT": {
+      const prev = state.composers[action.sessionId] ?? defaultComposerEntry(state, action.sessionId);
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, draft: action.draft },
+        },
+      };
+    }
+    case "SET_COMPOSER_HEIGHT": {
+      const prev = state.composers[action.sessionId] ?? defaultComposerEntry(state, action.sessionId);
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, height: action.height },
+        },
+      };
+    }
+    case "TOGGLE_COMPOSER_EXPANDED": {
+      const prev = state.composers[action.sessionId] ?? defaultComposerEntry(state, action.sessionId);
+      workspaceDirty = true;
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, expanded: !prev.expanded },
+        },
+      };
+    }
+    case "SET_COMPOSER_EXPANDED": {
+      const prev = state.composers[action.sessionId] ?? defaultComposerEntry(state, action.sessionId);
+      if (prev.expanded === action.expanded) return state;
+      workspaceDirty = true;
+      return {
+        ...state,
+        composers: {
+          ...state.composers,
+          [action.sessionId]: { ...prev, expanded: action.expanded },
+        },
+      };
     }
 
     // ─── Layout Actions ───────────────────────────────────────────────
@@ -584,6 +715,7 @@ export const initialState: SessionState = {
   },
   autoApplyEnabled: true,
   injectionLocks: {},
+  composers: {},
   pendingCloseSessionId: null,
   skipCloseConfirm: false,
   layout: {
@@ -591,7 +723,10 @@ export const initialState: SessionState = {
     focusedPaneId: null,
   },
   ui: {
-    contextPanelOpen: true,
+    // Closed by default — open via the activity bar (Cmd/Ctrl+E).  The
+    // agent surface is busy enough without an unsolicited 280px right rail.
+    contextPanelOpen: false,
+    usagePanelOpen: false,
     sessionListCollapsed: false,
     commandPaletteOpen: false,
     flowMode: false,
@@ -616,6 +751,39 @@ interface SessionContextValue {
   requestCloseSession: (id: string) => void;
   setActive: (id: string | null) => void;
   saveWorkspace: () => Promise<void>;
+  /** Convert a live session between "terminal" and "agent" mode.
+   *  Tears down the previous-mode subprocess, dispatches `SET_SESSION_MODE`,
+   *  and spawns the new-mode subprocess.  Returns true on success.
+   *  The conversation history of the previous mode is NOT preserved. */
+  convertSessionMode: (sessionId: string, newMode: SessionMode) => Promise<boolean>;
+  /** Switch the model on a live agent-mode session.  Tears down the Claude
+   *  subprocess and respawns with `--model <id>` + `--resume <prior-uuid>`,
+   *  so the conversation history is preserved across the swap.  Returns
+   *  true on success.  No-op when the session isn't agent-mode. */
+  switchAgentModel: (sessionId: string, model: string | null) => Promise<boolean>;
+  /** Switch Claude's `--permission-mode` on a live agent-mode session.
+   *  Same teardown+respawn-with-resume mechanic as `switchAgentModel`.
+   *  Accepts: "default" | "acceptEdits" | "plan" | "bypassPermissions". */
+  switchAgentPermissionMode: (sessionId: string, mode: string | null) => Promise<boolean>;
+  /** Switch Claude's `--effort` on a live agent-mode session.  Same
+   *  fork-on-respawn pattern.  Accepts: "low" | "medium" | "high" | "xhigh"
+   *  | "max", or null to drop the flag. */
+  switchAgentEffort: (sessionId: string, effort: string | null) => Promise<boolean>;
+  /** Submit a user message to an agent session, auto-respawning Claude's
+   *  one-shot subprocess with `--resume <uuid>` if it has exited between
+   *  turns.  The composer should call this rather than `submitToAgent`
+   *  directly so the multi-turn flow stays alive. */
+  submitAgentMessage: (
+    sessionId: string,
+    draft: string,
+    attachments: AgentAttachment[],
+  ) => Promise<void>;
+  /** Send an arbitrary envelope (e.g. a `tool_result` for AskUserQuestion
+   *  or ExitPlanMode, or a `_hermes_perm_response` for canUseTool) to
+   *  the agent.  Wraps `send_agent_input` with a respawn-on-not-found
+   *  retry so interactive tool replies aren't dropped between turns
+   *  when the bridge subprocess has exited.  See M10. */
+  sendAgentEnvelope: (sessionId: string, envelope: unknown) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -626,6 +794,92 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const lastAutoAttachCwd = useRef<Map<string, string>>(new Map());
   const closingSessionIds = useRef<Set<string>>(new Set());
   const closeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** sessionId → Claude session UUID returned by spawn_agent_session.
+   *  Captured on first spawn (and on every successful respawn) so that a
+   *  later model swap can pass `--resume <uuid>` to preserve conversation. */
+  const claudeUuids = useRef<Map<string, string>>(new Map());
+  /** sessionId → currently-active model alias (or undefined for default).
+   *  Used so a permission-mode swap doesn't accidentally drop the model
+   *  the user previously selected, and vice versa. */
+  const claudeModels = useRef<Map<string, string | undefined>>(new Map());
+  /** sessionId → currently-active permission mode (Claude's `--permission-mode`
+   *  value).  Same role as `claudeModels` — preserved across respawns. */
+  const claudePermissionModes = useRef<Map<string, string | undefined>>(new Map());
+  /** sessionId → currently-active `--effort` value (low/medium/high/xhigh/max).
+   *  Preserved across respawns alongside model + permission mode. */
+  const claudeEfforts = useRef<Map<string, string | undefined>>(new Map());
+  /** sessionId → snapshot of `--add-dir` values the bridge was last
+   *  spawned with.  When the user attaches/detaches a project, the live
+   *  session.workspace_paths drifts from this — submitAgentMessage
+   *  detects the diff and triggers a respawn so Read/Edit tools can
+   *  actually access files in newly-attached paths. */
+  const claudeAddDirs = useRef<Map<string, string[]>>(new Map());
+  /** sessionId → flag changes the user has *requested* but not yet applied,
+   *  because applying them requires a fresh fork-respawn AND a user message
+   *  for the new subprocess to actually persist its session.
+   *
+   *  This is the production-bug fix.  Forking with empty stdin makes
+   *  Claude exit immediately without persisting the new session id, so the
+   *  next `--resume <fork-uuid>` legitimately fails with "No conversation
+   *  found".  We dodge that by queuing the flag change here on chip-click,
+   *  then applying it inside `submitAgentMessage` right before the user's
+   *  envelope hits stdin — guaranteeing the fork has work to do. */
+  const pendingFlags = useRef<
+    Map<string, { model?: string | null; permissionMode?: string | null; effort?: string | null }>
+  >(new Map());
+
+  /** Merge a new partial flag override into the queued bag for `sessionId`. */
+  const queuePendingFlag = useCallback((
+    sessionId: string,
+    patch: { model?: string | null; permissionMode?: string | null; effort?: string | null },
+  ) => {
+    const cur = pendingFlags.current.get(sessionId) ?? {};
+    pendingFlags.current.set(sessionId, { ...cur, ...patch });
+  }, []);
+  /** sessionId → unlisten function for the per-session agent-event listener
+   *  that keeps `claudeUuids` in sync with whatever id Claude reports in its
+   *  init event.  This is the defensive capture: even if our `--session-id`
+   *  isn't honored, we'll always have the canonical id Claude actually
+   *  persisted under, so `--resume` finds the conversation. */
+  const initListeners = useRef<Map<string, UnlistenFn>>(new Map());
+
+  /** Subscribe to agent-event-{sessionId} and keep `claudeUuids` synced with
+   *  Claude's reported session id.  Idempotent — calling twice for the same
+   *  session is a no-op. */
+  const attachInitListener = useCallback(async (sessionId: string) => {
+    if (initListeners.current.has(sessionId)) return;
+    try {
+      const unlisten = await listen<AgentEvent>(
+        `agent-event-${sessionId}`,
+        (msg) => {
+          const event = msg.payload;
+          if (isInitEvent(event) && typeof event.session_id === "string") {
+            const prior = claudeUuids.current.get(sessionId);
+            // Print key fields as a string so DevTools doesn't truncate
+            // them as `Object` — easier for production debugging.
+            console.log(
+              `[init] model=${event.model ?? "?"} session=${event.session_id}` +
+              ` prior=${prior ?? "<none>"} changed=${prior !== event.session_id}` +
+              ` perm=${(event as { permissionMode?: string }).permissionMode ?? "?"}`,
+            );
+            claudeUuids.current.set(sessionId, event.session_id);
+          }
+        },
+      );
+      initListeners.current.set(sessionId, unlisten);
+    } catch (err) {
+      console.warn("[SessionContext] failed to attach init listener:", err);
+    }
+  }, []);
+
+  /** Unsubscribe — called on session removal. */
+  const detachInitListener = useCallback((sessionId: string) => {
+    const fn = initListeners.current.get(sessionId);
+    if (fn) {
+      try { fn(); } catch { /* ignore */ }
+      initListeners.current.delete(sessionId);
+    }
+  }, []);
 
   // ─── Dirty worktree close state ─────────────────────────────────────
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{
@@ -666,29 +920,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         dispatch({ type: "SESSION_UPDATED", session });
 
-        // Auto-attach project on working_directory change
-        // Uses exact path match with trailing separator to prevent
-        // /home/user/app matching /home/user/app-legacy
+        // Auto-attach project on working_directory change.  Exact path
+        // match with trailing separator prevents /home/user/app matching
+        // /home/user/app-legacy.  For agent-mode sessions the helper
+        // also folds the project path into workspace_paths so the SDK
+        // gets a corresponding `--add-dir` on its next respawn — without
+        // that fold, "Claude can't see folder A" was the visible bug.
         const prevCwd = lastAutoAttachCwd.current.get(session.id);
         if (session.working_directory && session.working_directory !== prevCwd) {
           lastAutoAttachCwd.current.set(session.id, session.working_directory);
-          getProjects().then((projects) => {
-            for (const project of projects) {
-              const wd = session.working_directory;
-              const rp = project.path;
-              const isExactOrSubdir = wd === rp || wd.startsWith(rp + "/");
-              if (isExactOrSubdir) {
-                // Check if already attached
-                getSessionProjects(session.id).then((attachedProjects) => {
-                  if (!attachedProjects.some((r) => r.id === project.id)) {
-                    attachSessionProject(session.id, project.id, "primary")
-                      .catch((err) => console.warn("[SessionContext] Failed to attach project:", err));
-                  }
-                }).catch((err) => console.warn("[SessionContext] Failed to check attached projects:", err));
-                break;
-              }
-            }
-          }).catch((err) => console.warn("[SessionContext] Failed to load projects for auto-attach:", err));
+          autoAttachInsideProject(session, {
+            getProjects,
+            getSessionProjects,
+            attachSessionProject,
+            addWorkspacePath,
+          }).catch((err) => console.warn("[SessionContext] auto-attach failed:", err));
         }
 
         // Track busy → idle transitions for long-running notifications
@@ -710,11 +956,78 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
       unlisteners.push(u1);
 
+      // Lightweight workspace_paths update — emitted by Rust's
+      // add_workspace_path / remove_workspace_path for agent-mode sessions
+      // where there's no PtySession in memory to mutate (and therefore no
+      // full session-updated event to fire).  We merge the new paths into
+      // the existing session in React state so the next composer submit's
+      // drift detection sees the correct add-dirs and respawns the SDK.
+      const uWp = await listen<{ session_id: string; workspace_paths: string[] }>(
+        "session-workspace-paths-updated",
+        (event) => {
+          const { session_id, workspace_paths } = event.payload;
+          console.log(
+            `[wp-event] sid=${session_id} paths=${JSON.stringify(workspace_paths)}`,
+          );
+          const existing = stateRef.current.sessions[session_id];
+          if (!existing) {
+            console.warn(`[wp-event] no React session for ${session_id}`);
+            return;
+          }
+          dispatch({
+            type: "SESSION_UPDATED",
+            session: { ...existing, workspace_paths },
+          });
+        },
+      );
+      unlisteners.push(uWp);
+
+      // Lightweight metadata-update event from Rust's update_session_label,
+      // update_session_description, update_session_color, update_session_group
+      // — emitted ONLY for agent-mode sessions (no PtySession to mutate).
+      // Terminal-mode keeps emitting the full `session-updated` shape from
+      // in-memory state.  Each field is optional; merge non-undefined ones
+      // into the existing session.
+      const uMeta = await listen<{
+        session_id: string;
+        label?: string;
+        description?: string;
+        color?: string;
+        // Outer Option<Option<String>>: presence means "field changed",
+        // null inner means "group was cleared".
+        group?: string | null;
+      }>("session-metadata-updated", (event) => {
+        const { session_id, label, description, color, group } = event.payload;
+        const existing = stateRef.current.sessions[session_id];
+        if (!existing) {
+          console.warn(`[meta-event] no React session for ${session_id}`);
+          return;
+        }
+        dispatch({
+          type: "SESSION_UPDATED",
+          session: {
+            ...existing,
+            ...(label !== undefined ? { label } : {}),
+            ...(description !== undefined ? { description } : {}),
+            ...(color !== undefined ? { color } : {}),
+            ...(group !== undefined ? { group: group ?? null } : {}),
+          },
+        });
+      });
+      unlisteners.push(uMeta);
+
       const u2 = await listen<string>("session-removed", (event) => {
         destroyTerminal(event.payload);
         // Clean up refs that track per-session state (prevent memory leaks)
         busyTimestamps.current.delete(event.payload);
         closingSessionIds.current.delete(event.payload);
+        // Drop the per-session agent-event listener and per-session flag refs.
+        detachInitListener(event.payload);
+        claudeUuids.current.delete(event.payload);
+        claudeModels.current.delete(event.payload);
+        claudePermissionModes.current.delete(event.payload);
+        claudeEfforts.current.delete(event.payload);
+        pendingFlags.current.delete(event.payload);
         dispatch({ type: "SESSION_REMOVED", id: event.payload });
       });
       unlisteners.push(u2);
@@ -798,6 +1111,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               await createTerminal(restoreId, saved.color);
 
               const restoreDims = estimateInitialDimensions();
+              // Default missing `mode` to "terminal" so existing 0.6.16 saved
+              // workspaces never silently auto-convert sessions to agent mode.
+              const restoredMode: SessionMode = saved.mode ?? "terminal";
               const newSession = await apiCreateSession({
                 sessionId: restoreId,
                 label: saved.label,
@@ -817,7 +1133,38 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshIdentityFile: saved.ssh_info?.identity_file || null,
                 initialRows: restoreDims.rows,
                 initialCols: restoreDims.cols,
+                mode: restoredMode,
               });
+
+              // Agent-mode restore: spawn the Claude subprocess that the
+              // backend `create_session` deliberately skipped.  Honor the
+              // last-active agent state from the saved workspace so the
+              // user picks up exactly where they left off — same model,
+              // same permission mode, same effort, same conversation
+              // (via `--resume <claude_session_uuid>`).
+              if (restoredMode === "agent") {
+                void attachInitListener(newSession.id);
+                // Pre-seed the per-session refs so subsequent flag toggles
+                // build on the restored state rather than overwriting it.
+                if (saved.agent_model) claudeModels.current.set(newSession.id, saved.agent_model);
+                if (saved.agent_permission_mode) claudePermissionModes.current.set(newSession.id, saved.agent_permission_mode);
+                if (saved.agent_effort) claudeEfforts.current.set(newSession.id, saved.agent_effort);
+                const restoredDirs = saved.agent_add_dirs ?? newSession.workspace_paths;
+                claudeAddDirs.current.set(newSession.id, [...restoredDirs]);
+                spawnAgentSession({
+                  sessionId: newSession.id,
+                  workingDir: newSession.working_directory,
+                  priorUuid: saved.claude_session_uuid,
+                  model: saved.agent_model,
+                  permissionMode: saved.agent_permission_mode,
+                  effort: saved.agent_effort,
+                  addDirs: restoredDirs,
+                })
+                  .then((uuid) => { claudeUuids.current.set(newSession.id, uuid); })
+                  .catch((err) => {
+                    console.error("[SessionContext] Failed to spawn Claude agent on restore:", err);
+                  });
+              }
 
               // Restore description and group — await them to ensure they persist
               const metaPromises: Promise<void>[] = [];
@@ -948,12 +1295,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       // Set up the terminal + output listener BEFORE creating the backend
       // session so no PTY output events are missed.
+      // For agent-mode sessions there is no PTY, but we still pre-create the
+      // (empty) TerminalPool entry to keep the lifecycle uniform — destroying
+      // it later is a no-op if the session was agent-only.
       await createTerminal(preSessionId, opts?.color || "");
 
       // Estimate terminal dimensions from window size and font settings so the
       // PTY starts at the correct size.  This eliminates the SIGWINCH race where
       // the shell starts at 80x24 and misses the initial resize from attach().
       const initialDims = estimateInitialDimensions();
+
+      // Pick the runtime mode.  If the caller passed an explicit mode, use it;
+      // otherwise default to "agent" for Claude and "terminal" for everything
+      // else.  Agent mode is Claude-only in 1.0.0 — non-Claude providers are
+      // forced back to "terminal" even if the caller requested "agent".
+      const mode = resolveSessionMode(opts?.mode, opts?.aiProvider);
 
       const session = await apiCreateSession({
         sessionId: preSessionId,
@@ -975,7 +1331,38 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshIdentityFile: opts?.sshIdentityFile || null,
         initialRows: initialDims.rows,
         initialCols: initialDims.cols,
+        mode,
       });
+
+      // Agent mode: the backend `create_session` skipped PTY spawn for us.
+      // Bring up the Claude subprocess now so the AgentSessionView has a
+      // running agent to talk to.  Errors are reported through the agent
+      // event stream rather than failing this call.  We capture the returned
+      // Claude UUID into `claudeUuids` so a later model swap can pass it
+      // back as `--resume <uuid>` and keep the conversation context.
+      if (mode === "agent") {
+        // Attach the init-event listener BEFORE spawning so we don't miss
+        // the very first init that arrives during boot.
+        void attachInitListener(session.id);
+        // Snapshot the addDirs we're spawning with BEFORE the IPC fires, so
+        // that even if the user attaches another project before the spawn
+        // resolves, the drift-detection in submitAgentMessage compares
+        // against the right baseline.  Without this baseline, the first
+        // user message would see `live=[paths]` vs `prior=[]` and trigger
+        // a needless respawn-with-resume against a freshly-spawned UUID
+        // the SDK hasn't yet persisted (the visible failure was the
+        // "No conversation found with session ID" stderr).
+        claudeAddDirs.current.set(session.id, [...session.workspace_paths]);
+        spawnAgentSession({
+          sessionId: session.id,
+          workingDir: session.working_directory,
+          addDirs: session.workspace_paths,
+        })
+          .then((uuid) => { claudeUuids.current.set(session.id, uuid); })
+          .catch((err) => {
+            console.error("[SessionContext] Failed to spawn Claude agent:", err);
+          });
+      }
 
       // Restore scrollback from previous session if available
       if (opts?.restoreFromId) {
@@ -1181,6 +1568,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             const projects = await getSessionProjects(s.id);
             projectIds = projects.map((p) => p.id);
           } catch { /* ignore — projects are optional */ }
+          // Capture per-session agent state from the in-memory refs so a
+          // restart can `--resume <claude-session-uuid>` and respawn with
+          // the same model/perm/effort/add-dirs the user last had active.
+          const claudeUuid = claudeUuids.current.get(s.id);
+          const agentModel = claudeModels.current.get(s.id);
+          const agentPerm = claudePermissionModes.current.get(s.id);
+          const agentEffort = claudeEfforts.current.get(s.id);
           return {
             id: s.id,
             label: s.label,
@@ -1195,6 +1589,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             custom_suffix: s.custom_suffix ?? "",
             project_ids: projectIds,
             ssh_info: s.ssh_info || null,
+            mode: s.mode ?? "terminal",
+            // Only include agent fields when actually populated — keeps the
+            // saved JSON small and avoids stamping stale defaults on
+            // terminal-mode sessions.
+            ...(claudeUuid ? { claude_session_uuid: claudeUuid } : {}),
+            ...(agentModel ? { agent_model: agentModel } : {}),
+            ...(agentPerm ? { agent_permission_mode: agentPerm } : {}),
+            ...(agentEffort ? { agent_effort: agentEffort } : {}),
+            ...(s.workspace_paths.length > 0 ? { agent_add_dirs: s.workspace_paths } : {}),
           };
         }),
       );
@@ -1214,6 +1617,314 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ─── Mode conversion (right-click "Convert to ...") ─────────────────
+  // Tears down the existing subprocess for the current mode, flips the
+  // session's `mode` field in state, and spawns a fresh subprocess for the
+  // new mode.  The conversation/scrollback of the previous mode is dropped.
+  const convertSessionMode = useCallback(async (sessionId: string, newMode: SessionMode): Promise<boolean> => {
+    const session = stateRef.current.sessions[sessionId];
+    if (!session) return false;
+    if (session.mode === newMode) return true;
+
+    // Agent mode is Claude-only in 1.0.0.
+    if (newMode === "agent" && session.ai_provider !== "claude") {
+      console.warn("[SessionContext] Refusing to convert non-Claude session to agent mode");
+      return false;
+    }
+
+    try {
+      // 1. Close whatever process is currently running for this session.
+      if (session.mode === "agent") {
+        await closeAgentSession(sessionId).catch((err) => {
+          console.warn("[SessionContext] Failed to close agent during conversion:", err);
+        });
+      } else {
+        // Terminal/PTY: ask the backend to tear down the PTY but keep the
+        // session row (so we can re-spawn into it).  The dedicated
+        // `close_session` command also fires `session-removed`, which would
+        // wipe the session from state — that's the wrong behaviour here.
+        // For 1.0.0 we accept the simplification of losing scrollback and
+        // re-issue close_session; the SET_SESSION_MODE dispatch below
+        // immediately re-establishes state for the new mode.
+        await apiCloseSession(sessionId).catch((err) => {
+          console.warn("[SessionContext] Failed to close terminal during conversion:", err);
+        });
+      }
+
+      // 2. Flip the mode in state so SplitPane re-renders the right view.
+      dispatch({ type: "SET_SESSION_MODE", sessionId, mode: newMode });
+
+      // 3. Spawn the new-mode subprocess.
+      if (newMode === "agent") {
+        void attachInitListener(sessionId);
+        claudeAddDirs.current.set(sessionId, [...session.workspace_paths]);
+        await spawnAgentSession({
+          sessionId,
+          workingDir: session.working_directory,
+          addDirs: session.workspace_paths,
+        });
+      } else {
+        // Terminal mode: re-issue `create_session` against the backend with
+        // the same id.  The backend treats it as a fresh PTY spawn.
+        await apiCreateSession({
+          sessionId,
+          label: session.label,
+          workingDirectory: session.working_directory,
+          color: session.color,
+          workspacePaths: session.workspace_paths.length > 0 ? session.workspace_paths : null,
+          aiProvider: session.ai_provider,
+          projectIds: null,
+          autoApprove: session.auto_approve,
+          permissionMode: session.permission_mode,
+          customPrefix: session.custom_prefix,
+          customSuffix: session.custom_suffix,
+          channels: session.channels.length > 0 ? session.channels : null,
+          sshHost: session.ssh_info?.host || null,
+          sshPort: session.ssh_info?.port || null,
+          sshUser: session.ssh_info?.user || null,
+          tmuxSession: session.ssh_info?.tmux_session || null,
+          sshIdentityFile: session.ssh_info?.identity_file || null,
+          mode: "terminal",
+        });
+      }
+      return true;
+    } catch (err) {
+      console.error("[SessionContext] convertSessionMode failed:", err);
+      return false;
+    }
+  }, [dispatch]);
+
+  /** Internal: tear down the current Claude subprocess and respawn it.
+   *
+   *  Two respawn modes — picked automatically based on whether any flags are
+   *  changing on this call:
+   *
+   *    - **Plain resume** (no flag overrides): `--resume <prior-uuid>`.
+   *      Claude reloads the session and keeps its existing model + perm.
+   *      Used by `submitAgentMessage` to continue a conversation between
+   *      turns (Claude's `--print` subprocess exits after every result).
+   *    - **Fork** (overrides given): `--session-id <new> --resume <prior>
+   *      --fork-session` plus the new `--model` / `--permission-mode`.
+   *      Claude branches a fresh session id from the prior history and
+   *      applies the new flags — this is the only flag combination in
+   *      which model/permission swaps actually take effect mid-conversation.
+   *
+   *  The `claudeUuids` map is updated to whichever id Claude returned
+   *  (same id on plain resume, new id on fork) so subsequent respawns
+   *  continue from the latest active session. */
+  const respawnAgent = useCallback(async (
+    sessionId: string,
+    overrides: {
+      model?: string | null;
+      permissionMode?: string | null;
+      effort?: string | null;
+    },
+  ): Promise<boolean> => {
+    const session = stateRef.current.sessions[sessionId];
+    if (!session) return false;
+    if (session.mode !== "agent") {
+      console.warn("[SessionContext] respawnAgent: session is not agent-mode");
+      return false;
+    }
+
+    // Resolve effective flags by layering overrides on the last-known values.
+    const currentModel = claudeModels.current.get(sessionId);
+    const currentMode = claudePermissionModes.current.get(sessionId);
+    const currentEffort = claudeEfforts.current.get(sessionId);
+    const nextModelInput =
+      overrides.model !== undefined ? overrides.model : currentModel ?? null;
+    const nextModeInput =
+      overrides.permissionMode !== undefined
+        ? overrides.permissionMode
+        : currentMode ?? null;
+    const nextEffortInput =
+      overrides.effort !== undefined ? overrides.effort : currentEffort ?? null;
+
+    const nextModel =
+      nextModelInput && nextModelInput.toLowerCase() !== "default"
+        ? nextModelInput
+        : undefined;
+    const nextMode = nextModeInput ?? undefined;
+    const nextEffort = nextEffortInput ?? undefined;
+
+    const priorUuid = claudeUuids.current.get(sessionId);
+    const isFlagChange =
+      overrides.model !== undefined ||
+      overrides.permissionMode !== undefined ||
+      overrides.effort !== undefined;
+    const fork = isFlagChange && priorUuid !== undefined;
+
+    // Verbose debug logging — guarded by a global flag so we can flip it
+    // off later, but on by default during the model-swap stabilization
+    // window so production failures leave a paper trail in DevTools.
+    // Search the console for `[respawn]` to find every spawn we attempted.
+    // Plain-string log so DevTools shows the values without `Object` collapse.
+    console.log(
+      `[respawn] sid=${sessionId} prior=${priorUuid ?? "<none>"} fork=${fork}` +
+      ` overrides=${JSON.stringify(overrides)}` +
+      ` effective={model:${nextModel ?? "<none>"}, perm:${nextMode ?? "<none>"}, effort:${nextEffort ?? "<none>"}}` +
+      ` addDirs=${JSON.stringify(session.workspace_paths)}`,
+    );
+
+    try {
+      void attachInitListener(sessionId);
+
+      await closeAgentSession(sessionId).catch((err) => {
+        console.warn("[SessionContext] closeAgentSession during respawn:", err);
+      });
+
+      const newUuid = await spawnAgentSession({
+        sessionId,
+        workingDir: session.working_directory,
+        priorUuid,
+        model: nextModel,
+        permissionMode: nextMode,
+        effort: nextEffort,
+        addDirs: session.workspace_paths,
+        fork,
+      });
+      console.log("[respawn] spawn returned uuid:", newUuid, "(prior was:", priorUuid ?? "<none>", ")");
+      claudeUuids.current.set(sessionId, newUuid);
+      claudeModels.current.set(sessionId, nextModel);
+      claudePermissionModes.current.set(sessionId, nextMode);
+      claudeEfforts.current.set(sessionId, nextEffort);
+      // Snapshot the addDirs we just spawned with so submitAgentMessage
+      // can detect drift (user attached/detached a project) on the next turn.
+      claudeAddDirs.current.set(sessionId, [...session.workspace_paths]);
+      return true;
+    } catch (err) {
+      console.error("[SessionContext] respawnAgent failed:", err);
+      return false;
+    }
+  }, [attachInitListener]);
+
+  // Switch the active model on a live agent-mode session.  Claude's
+  // stream-json subprocess takes the model as a spawn-time flag, and the
+  // fork respawn that picks the new model only persists if there's user
+  // input to feed it.  So we *queue* the change here and let
+  // `submitAgentMessage` perform the fork on the next user submit.
+  // The chip's `pending` indicator stays lit between click and submit.
+  const switchAgentModel = useCallback(async (
+    sessionId: string,
+    model: string | null,
+  ): Promise<boolean> => {
+    queuePendingFlag(sessionId, { model });
+    return true;
+  }, [queuePendingFlag]);
+
+  /** Queue a permission-mode change.  Same deferred-fork pattern as
+   *  `switchAgentModel`. */
+  const switchAgentPermissionMode = useCallback(async (
+    sessionId: string,
+    permissionMode: string | null,
+  ): Promise<boolean> => {
+    queuePendingFlag(sessionId, { permissionMode });
+    return true;
+  }, [queuePendingFlag]);
+
+  /** Queue an effort change.  Same deferred-fork pattern as
+   *  `switchAgentModel`. */
+  const switchAgentEffort = useCallback(async (
+    sessionId: string,
+    effort: string | null,
+  ): Promise<boolean> => {
+    queuePendingFlag(sessionId, { effort });
+    return true;
+  }, [queuePendingFlag]);
+
+  /**
+   * Send a user message to a Claude agent session, auto-respawning the
+   * subprocess if it has exited between turns.
+   *
+   * Claude's `claude --print --output-format stream-json --input-format stream-json`
+   * is one-shot per spawn — after each turn the subprocess emits its
+   * `result` event and exits.  To keep a multi-turn conversation alive we
+   * have to spawn a fresh child for every user message, passing
+   * `--resume <claude-session-uuid>` so the same conversation thread is
+   * loaded.  This function papers over that lifecycle: callers just submit;
+   * we transparently bring the subprocess back if it's gone.
+   *
+   * On retry we reuse the same `UserEnvelope` (same `uuid`) so the message
+   * is only echoed into the rendered conversation once — no duplicate row.
+   */
+  const submitAgentMessage = useCallback(async (
+    sessionId: string,
+    draft: string,
+    attachments: AgentAttachment[],
+  ): Promise<void> => {
+    const envelope = buildUserEnvelope(draft, attachments);
+    if (!envelope) return;
+
+    // Echo first so the user sees their own message immediately even if
+    // we're about to respawn the subprocess.
+    await echoUserEnvelope(sessionId, envelope);
+
+    // Apply any queued flag changes (model / permission mode / effort)
+    // BEFORE the send.  This is the production-bug fix: forking with no
+    // user input on stdin makes Claude exit without persisting, so we
+    // wait until there's a real message to feed the new subprocess.
+    const queued = pendingFlags.current.get(sessionId);
+    let mustRespawn = !!queued && (
+      queued.model !== undefined
+      || queued.permissionMode !== undefined
+      || queued.effort !== undefined
+    );
+
+    // Detect attach/detach drift: if the live session has different
+    // workspace_paths than what the bridge was spawned with, respawn so
+    // Claude's file-tools (Read/Edit) can access the new paths.  The MCP
+    // tool already exposes the path list to Claude (M5) but file IO
+    // needs a fresh `--add-dir`, which is a spawn-time flag.
+    const session = stateRef.current.sessions[sessionId];
+    if (session?.mode === "agent") {
+      const live = session.workspace_paths;
+      const prior = claudeAddDirs.current.get(sessionId) ?? [];
+      const drift = hasAddDirDrift(prior, live);
+      console.log(
+        `[addDirs] sid=${sessionId} live=${JSON.stringify(live)}` +
+        ` prior=${JSON.stringify(prior)} drift=${drift}`,
+      );
+      if (drift) {
+        mustRespawn = true;
+      }
+    }
+
+    if (mustRespawn) {
+      const ok = await respawnAgent(sessionId, queued ?? {});
+      if (ok && queued) pendingFlags.current.delete(sessionId);
+    }
+
+    try {
+      await sendUserEnvelope(sessionId, envelope);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Rust returns `"Agent session '<id>' not found"` when the entry has
+      // been removed from the sessions map (either via close or because the
+      // subprocess exited and the waiter cleared it).
+      if (!message.toLowerCase().includes("not found")) throw err;
+
+      const ok = await respawnAgent(sessionId, {});
+      if (!ok) throw new Error("Could not revive Claude subprocess");
+      await sendUserEnvelope(sessionId, envelope);
+    }
+  }, [respawnAgent]);
+
+  /** Send an arbitrary envelope (tool_result, _hermes_perm_response,
+   *  etc.) with automatic respawn-on-not-found.  Used by the
+   *  interactive cards (AskUserQuestion, ExitPlanMode, canUseTool).
+   *  See `src/utils/sendAgentEnvelope.ts` for the retry contract. */
+  const sendAgentEnvelope = useCallback(async (
+    sessionId: string,
+    envelope: unknown,
+  ): Promise<void> => {
+    await sendAgentEnvelopeWithRevive(sessionId, envelope, {
+      // Direct IPC — Rust accepts any JSON value, looser-typed than
+      // sendUserEnvelope which insists on the UserEnvelope shape.
+      send: (sid, env) => sendAgentInput(sid, env),
+      respawn: async (sid) => respawnAgent(sid, {}),
+    });
+  }, [respawnAgent]);
+
   // Load skip_close_confirm preference on mount
   useEffect(() => {
     getSetting("skip_close_confirm")
@@ -1224,6 +1935,35 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => { /* Setting not found — use default (false) */ });
   }, []);
+
+  // ─── Hermes IDE state → bridge sync ──────────────────────────────
+  //
+  // Whenever an agent session's `workspace_paths` changes (or `phase` ticks
+  // through `idle` etc.), push a fresh state file to the bridge so its MCP
+  // tools reflect reality.  Cheap — Rust just rewrites a small JSON file.
+  // We deliberately key on a flat hash of the relevant fields rather than
+  // the whole `state.sessions` map so unrelated edits don't trigger a
+  // round-trip.
+  const lastIdeStateHash = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    for (const s of Object.values(state.sessions)) {
+      if (s.mode !== "agent") continue;
+      const payload = {
+        cwd: s.working_directory,
+        attachedPaths: s.workspace_paths,
+        // memory + pinnedFiles will be wired in M5 when the always-on
+        // Context Panel exposes them; for now they default to [].
+        memory: [],
+        pinnedFiles: [],
+      };
+      const hash = JSON.stringify(payload);
+      if (lastIdeStateHash.current.get(s.id) === hash) continue;
+      lastIdeStateHash.current.set(s.id, hash);
+      updateHermesState(s.id, payload).catch((err) => {
+        console.warn("[SessionContext] updateHermesState failed:", err);
+      });
+    }
+  }, [state.sessions]);
 
   // Periodic frontend auto-save — captures layout, focused pane, and active session
   // alongside the session metadata that the Rust auto-save also persists.
@@ -1239,7 +1979,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace }}>
+    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope }}>
       {children}
       {pendingDirtyClose && (
         <DirtyWorktreeDialog
@@ -1345,6 +2085,25 @@ export function useExecutionMode(sessionId: string | null): ExecutionMode {
   const { state } = useSession();
   if (!sessionId) return state.defaultMode;
   return state.executionModes[sessionId] || state.defaultMode;
+}
+
+/**
+ * Read this session's composer draft + height + expanded flag. Returns
+ * sensible defaults (empty draft, 120px height, collapsed) when the session
+ * has no entry yet, so callers don't need to dispatch on mount.
+ *
+ * `expanded` defaults to `false` — the composer renders as a small chat
+ * icon in the corner of the agent pane until the user opens it.
+ */
+export function useComposer(sessionId: string): { draft: string; height: number; expanded: boolean } {
+  const { state } = useSession();
+  const entry = state.composers[sessionId];
+  if (entry) return entry;
+  // Default-open for agent sessions (the composer IS the input surface) and
+  // default-collapsed for terminal sessions (where the composer is a side dock).
+  const session = state.sessions[sessionId];
+  const expandedDefault = session?.mode === "agent";
+  return { draft: "", height: 120, expanded: expandedDefault };
 }
 
 export function useAutonomousSettings() {
