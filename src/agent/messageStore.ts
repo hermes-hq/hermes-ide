@@ -120,6 +120,12 @@ export interface AgentSessionState {
    *  the most recent of each kind so the Usage panel can show all the
    *  active windows at once. */
   rateLimits: Record<string, RateLimitInfo>;
+  /** Set of result-event uuids we've already accumulated cost / tokens
+   *  for.  Some bridge versions re-emit prior result envelopes on
+   *  resume, which would otherwise double-count session cost (M1 fix).
+   *  Bounded retention is fine because Claude assigns one uuid per
+   *  turn; even a marathon session is < 10 KB. */
+  seenResultEventIds: Set<string>;
 }
 
 export function emptyState(): AgentSessionState {
@@ -140,6 +146,7 @@ export function emptyState(): AgentSessionState {
     runningToolUseIds: new Set(),
     thinkingStartedAt: new Map(),
     thinkingElapsed: new Map(),
+    seenResultEventIds: new Set(),
   };
 }
 
@@ -378,10 +385,30 @@ export function reduceEvent(
   // 2. system/* events.
   if (isSystemEvent(event)) {
     if (isInitEvent(event)) {
+      // H4 fix: a fresh init means the bridge respawned.  Any tool_use
+      // ids we were tracking belong to the prior subprocess and will
+      // never get a matching tool_result, so freeze the activity
+      // indicator's "running" state instead of letting it hang
+      // forever.  thinking timers similarly belong to the dead
+      // subprocess — freeze elapsed values so they render as final
+      // rather than ticking up.
+      const now = Date.now();
+      const { thinkingStartedAt, thinkingElapsed } = freezePendingThinking(
+        state.thinkingStartedAt,
+        state.thinkingElapsed,
+        now,
+      );
       return {
         ...state,
         initialized: true,
         initEvent: event,
+        runningToolUseIds:
+          state.runningToolUseIds.size === 0
+            ? state.runningToolUseIds
+            : new Set(),
+        streamingMessageId: null,
+        thinkingStartedAt,
+        thinkingElapsed,
       };
     }
     // Other system events (status, etc.) are flow markers — ignore quietly.
@@ -484,23 +511,48 @@ export function reduceEvent(
       state.thinkingElapsed,
       now,
     );
-    // Accumulate cost + tokens for the masthead lozenge.  result events
-    // carry per-turn totals; we sum across the session.
-    const turnCost = typeof event.total_cost_usd === "number" ? event.total_cost_usd : 0;
-    const turnOut = (() => {
-      const u = (event as { usage?: { output_tokens?: unknown } }).usage;
-      const v = u?.output_tokens;
-      return typeof v === "number" ? v : 0;
-    })();
+    // M1 fix: dedupe by uuid.  Some bridge versions re-emit prior
+    // result envelopes on resume; without this guard the masthead
+    // cost lozenge would balloon to ~2× / ~3× / N× actual spend.
+    // Events with no uuid (older bridges) skip the dedup check and
+    // accumulate as before — they aren't subject to the re-emit bug.
+    const eventId = typeof event.uuid === "string" ? event.uuid : null;
+    const alreadyAccumulated =
+      eventId !== null && state.seenResultEventIds.has(eventId);
+    const turnCost = alreadyAccumulated
+      ? 0
+      : typeof event.total_cost_usd === "number"
+        ? event.total_cost_usd
+        : 0;
+    const turnOut = alreadyAccumulated
+      ? 0
+      : (() => {
+          const u = (event as { usage?: { output_tokens?: unknown } }).usage;
+          const v = u?.output_tokens;
+          return typeof v === "number" ? v : 0;
+        })();
+    const seenResultEventIds =
+      eventId !== null && !alreadyAccumulated
+        ? new Set([...state.seenResultEventIds, eventId])
+        : state.seenResultEventIds;
+    // H4 (turn end): clear runningToolUseIds — Claude's contract
+    // says any tool_use issued in this turn has its tool_result
+    // emitted before the result event, so an entry left here is an
+    // orphan that would hang the activity indicator forever.
     return {
       ...state,
       resultEvent: event,
+      seenResultEventIds,
       cumulativeCostUsd: state.cumulativeCostUsd + turnCost,
       cumulativeOutputTokens: state.cumulativeOutputTokens + turnOut,
       lastError: event.is_error
         ? event.result ?? `Agent returned ${event.subtype}`
         : state.lastError,
       streamingMessageId: null,
+      runningToolUseIds:
+        state.runningToolUseIds.size === 0
+          ? state.runningToolUseIds
+          : new Set(),
       thinkingStartedAt,
       thinkingElapsed,
     };

@@ -1,3 +1,30 @@
+# Hermes IDE 1.1.2
+
+A focused stability release that fixes Agent mode in the shipped 1.1 build and tightens long-session memory.
+
+## Agent mode now works in shipped builds
+
+The public 1.1 build couldn't actually run Agent mode — every conversation got stuck on *awaiting claude* because the agent runtime files weren't included in the installer, and even when they were, macOS apps launched from Finder couldn't find Node.js. Both gaps are closed in 1.1.2.
+
+If you tried Agent mode on 1.1 and it hung, please update — it works now.
+
+## Reliability fixes for Agent mode
+
+- **Permission requests no longer disappear when you switch sessions.** If Claude was waiting on you to approve a tool and you clicked another session, the prompt used to vanish and the agent would hang. The prompt now follows you back when you return.
+- **No more phantom *agent process exited* banner.** When swapping models, permission modes, or effort levels, a brief race could paint a red exit notice over a perfectly healthy session.
+- **The activity indicator no longer hangs on *running* forever** if a tool was interrupted by a respawn or crash.
+- **Spawn failures show up inline now.** If the agent runtime couldn't start, the conversation pane used to stay silent; you now see exactly why, so you can fix it (for example, install Node.js).
+- **Clearer error path on the permission modal.** If your allow/deny decision fails to deliver to the agent, you now see a banner and the prompt comes back so you can try again.
+- **Model, permission-mode, and effort swaps actually take effect.** Previously the chip would update but the underlying agent kept its prior settings until the next user message; the swap is now respected immediately on the next turn.
+- **Conversation timeline survives session switching.** Switching to another session and back no longer wipes the chat — the messages you saw before are still there.
+
+## Performance & memory
+
+- **Long sessions no longer accumulate memory.** Verbose subprocess output is now capped, and every closed session is fully cleaned up — previously a handful of internal tracking entries lingered for the lifetime of the app.
+- **Cost lozenge is accurate.** A duplicate-event guard ensures usage and cost can't be double-counted when the agent runtime resumes.
+
+---
+
 # Hermes IDE 1.1.1
 
 A small patch release that restores the Windows installer for v1.1, plus a clearer statement of how each platform is supported going forward.

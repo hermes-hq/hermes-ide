@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
@@ -86,10 +86,47 @@ pub struct SpawnArgs {
 ///   1. `HERMES_BRIDGE_PATH` env var  — explicit override (used in tests).
 ///   2. `<CARGO_MANIFEST_DIR>/bridge/hermes-claude-bridge.mjs`  — dev path.
 ///   3. The Tauri resource dir under `bridge/hermes-claude-bridge.mjs`  —
-///      production path (populated by the bundler in M11).
-fn resolve_bridge_path() -> Result<std::path::PathBuf, String> {
+///      production path.  Populated by the bundler when
+///      `tauri.conf.json#bundle.resources` includes `bridge/*`.
+///
+/// Pure-by-input candidate enumeration is split out into
+/// [`bridge_path_candidates`] so unit tests can exercise the search order
+/// without needing a real `AppHandle`.
+fn bridge_path_candidates(
+    env_override: Option<&str>,
+    manifest_dir: &std::path::Path,
+    resource_dir: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::with_capacity(3);
+    if let Some(p) = env_override {
+        out.push(std::path::PathBuf::from(p));
+    }
+    out.push(
+        manifest_dir
+            .join("bridge")
+            .join("hermes-claude-bridge.mjs"),
+    );
+    if let Some(r) = resource_dir {
+        out.push(r.join("bridge").join("hermes-claude-bridge.mjs"));
+        // Some bundler/platform combinations flatten the resource subdir
+        // (notably the macOS Resources/_up_/ path Tauri uses for
+        // out-of-tree resource entries).  Probe a couple of well-known
+        // alternative layouts as a defensive fallback.
+        out.push(r.join("hermes-claude-bridge.mjs"));
+        out.push(
+            r.join("_up_")
+                .join("bridge")
+                .join("hermes-claude-bridge.mjs"),
+        );
+    }
+    out
+}
+
+fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    // Honor an explicit override even if it's broken — surface the
+    // misconfiguration loudly rather than silently falling through.
     if let Ok(p) = std::env::var("HERMES_BRIDGE_PATH") {
-        let pb = std::path::PathBuf::from(p);
+        let pb = std::path::PathBuf::from(&p);
         if pb.exists() {
             return Ok(pb);
         }
@@ -98,15 +135,90 @@ fn resolve_bridge_path() -> Result<std::path::PathBuf, String> {
             pb.display()
         ));
     }
+
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev = manifest.join("bridge").join("hermes-claude-bridge.mjs");
-    if dev.exists() {
-        return Ok(dev);
+    let resource_dir = app.path().resource_dir().ok();
+    let candidates =
+        bridge_path_candidates(None, &manifest, resource_dir.as_deref());
+
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
     }
     Err(format!(
         "could not locate hermes-claude-bridge.mjs (looked at: {})",
-        dev.display()
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     ))
+}
+
+// ─── Node resolution ──────────────────────────────────────────────
+//
+// macOS GUI apps launched from Finder/Launchpad inherit a sanitized PATH
+// from launchd that typically contains only `/usr/bin:/bin:/usr/sbin:/sbin`.
+// Homebrew (`/opt/homebrew/bin`, `/usr/local/bin`), nvm
+// (`~/.nvm/versions/node/.../bin`), volta (`~/.volta/bin`), fnm, asdf —
+// all live outside that sanitized set, so a bare `Command::new("node")`
+// fails with "No such file or directory".
+//
+// `tauri dev` doesn't have this problem because it inherits the developer's
+// shell PATH.  This is the second silent killer for Agent mode in the
+// shipped 1.1 build.
+
+/// Common locations where `node` may live on macOS / Linux even when PATH
+/// has been sanitized.  Order matters: prefer the user's own toolchains
+/// (which ship newer SDK-required versions) over OS-managed installs.
+fn fallback_node_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        let h = std::path::PathBuf::from(home);
+        // nvm: pick the highest-numbered version directory.
+        let nvm = h.join(".nvm").join("versions").join("node");
+        if let Ok(entries) = std::fs::read_dir(&nvm) {
+            let mut versions: Vec<std::path::PathBuf> = entries
+                .filter_map(|e| e.ok().map(|d| d.path()))
+                .filter(|p| p.is_dir())
+                .collect();
+            // Lexicographic sort — newest semver-ish dir wins for `vN.M.K`.
+            versions.sort();
+            if let Some(latest) = versions.last() {
+                dirs.push(latest.join("bin"));
+            }
+        }
+        dirs.push(h.join(".volta").join("bin"));
+        dirs.push(h.join(".fnm").join("aliases").join("default").join("bin"));
+        dirs.push(h.join(".local").join("bin"));
+    }
+    dirs.push(std::path::PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(std::path::PathBuf::from("/usr/local/bin"));
+    dirs.push(std::path::PathBuf::from("/usr/bin"));
+    dirs
+}
+
+/// Locate `node` on disk.  Checks PATH first, then well-known fallback
+/// directories.  Returns the first existing executable.
+fn which_node() -> Option<std::path::PathBuf> {
+    let exe_name = if cfg!(windows) { "node.exe" } else { "node" };
+
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(exe_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    for dir in fallback_node_dirs() {
+        let candidate = dir.join(exe_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 // ─── Hermes IDE state file ─────────────────────────────────────────
@@ -243,27 +355,38 @@ pub fn build_spawn_args(
             args.push(session_id.to_string());
         }
     }
-    if let Some(m) = model {
-        args.push("--model".into());
-        args.push(m.to_string());
-    }
-    if let Some(p) = permission_mode {
-        // Whitelist the values we know Claude accepts.  Passing an unknown
-        // value would make the subprocess exit immediately with an error.
-        if matches!(
-            p,
-            "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto" | "dontAsk"
-        ) {
-            args.push("--permission-mode".into());
-            args.push(p.to_string());
+    // M2 fix: `--model`, `--permission-mode`, and `--effort` are spawn-time
+    // flags.  Claude silently ignores them on a plain `--resume` (the
+    // resumed session keeps its original values).  If we still emit them
+    // we create a state-vs-reality drift: the frontend records "user
+    // wanted model X" but the live session is on whatever model the prior
+    // turn set, with no way for the user to discover the discrepancy.
+    // Only emit on initial spawn or on fork — both of which actually
+    // honor the flags.
+    let flags_apply = prior_uuid.is_none() || fork;
+    if flags_apply {
+        if let Some(m) = model {
+            args.push("--model".into());
+            args.push(m.to_string());
         }
-    }
-    if let Some(e) = effort {
-        // Real CLI flag (`--effort`) — verified via `claude --help`.
-        // Values: low, medium, high, xhigh, max.
-        if matches!(e, "low" | "medium" | "high" | "xhigh" | "max") {
-            args.push("--effort".into());
-            args.push(e.to_string());
+        if let Some(p) = permission_mode {
+            // Whitelist the values we know Claude accepts.  Passing an unknown
+            // value would make the subprocess exit immediately with an error.
+            if matches!(
+                p,
+                "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto" | "dontAsk"
+            ) {
+                args.push("--permission-mode".into());
+                args.push(p.to_string());
+            }
+        }
+        if let Some(e) = effort {
+            // Real CLI flag (`--effort`) — verified via `claude --help`.
+            // Values: low, medium, high, xhigh, max.
+            if matches!(e, "low" | "medium" | "high" | "xhigh" | "max") {
+                args.push("--effort".into());
+                args.push(e.to_string());
+            }
         }
     }
     // `--add-dir <directories...>` — attached project paths, so Claude's
@@ -335,21 +458,33 @@ pub async fn spawn_agent_session(
     let use_direct = std::env::var("HERMES_AGENT_DIRECT")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
-    let bridge_path = resolve_bridge_path()?;
+    let bridge_path = resolve_bridge_path(&app)?;
+    let node_path = if use_direct {
+        None
+    } else {
+        Some(which_node().ok_or_else(|| {
+            "Could not find `node` on PATH or in common install locations \
+             (tried Homebrew, nvm, volta, /usr/local/bin). Install Node.js 20+ \
+             or add its directory to PATH before launching Hermes."
+                .to_string()
+        })?)
+    };
 
     log::info!(
-        "[agent spawn] sid={} cwd={} bridge={} use_direct={} argv={:?}",
+        "[agent spawn] sid={} cwd={} bridge={} node={:?} use_direct={} argv={:?}",
         session_id,
         plan.working_dir,
         bridge_path.display(),
+        node_path.as_ref().map(|p| p.display().to_string()),
         use_direct,
         plan.args,
     );
     eprintln!(
-        "[agent spawn] sid={} cwd={} bridge={} use_direct={} argv={:?}",
+        "[agent spawn] sid={} cwd={} bridge={} node={:?} use_direct={} argv={:?}",
         session_id,
         plan.working_dir,
         bridge_path.display(),
+        node_path.as_ref().map(|p| p.display().to_string()),
         use_direct,
         plan.args,
     );
@@ -370,7 +505,10 @@ pub async fn spawn_agent_session(
         c.args(&plan.args);
         c
     } else {
-        let mut c = Command::new("node");
+        // SAFETY: which_node() returned Some above, otherwise we'd have
+        // bailed with the "Could not find node" error before reaching here.
+        let node = node_path.as_ref().expect("node_path set when !use_direct");
+        let mut c = Command::new(node);
         c.arg(&bridge_path);
         // The bridge needs --working-dir as a flag (it sets the SDK `cwd`).
         // We still set Command::current_dir below so any relative paths in
@@ -382,6 +520,14 @@ pub async fn spawn_agent_session(
         c.args(&plan.args);
         c
     };
+    // Enrich PATH so the bridge can locate `claude` and any tool the SDK
+    // shells out to.  GUI-launched .app bundles get a sanitized PATH that
+    // excludes Homebrew / nvm / volta — without this, the SDK would fail
+    // the very first time it tried to invoke `claude` itself.
+    if !use_direct {
+        let enriched = enriched_path_var();
+        cmd.env("PATH", &enriched);
+    }
     cmd.current_dir(&plan.working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -810,21 +956,57 @@ fn truncate_for_log(s: &str, max: usize) -> String {
 }
 
 /// Cross-platform `which`-style lookup for the `claude` binary.  Returns
-/// `None` if not found on PATH.
+/// `None` if not found on PATH or in any of the well-known fallback
+/// directories (Homebrew, nvm, volta, ~/.local/bin) that GUI-launched
+/// apps don't see by default.
 fn which_claude() -> Option<std::path::PathBuf> {
     let exe_name = if cfg!(windows) {
         "claude.exe"
     } else {
         "claude"
     };
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(exe_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    for dir in fallback_node_dirs() {
         let candidate = dir.join(exe_name);
         if candidate.is_file() {
             return Some(candidate);
         }
     }
     None
+}
+
+/// Build a PATH string suitable for child processes.  Starts with the
+/// inherited PATH and appends every directory in [`fallback_node_dirs`]
+/// that's not already present.  This is the minimum required to keep the
+/// agent bridge working in a Finder-launched .app bundle.
+fn enriched_path_var() -> std::ffi::OsString {
+    use std::collections::HashSet;
+    use std::ffi::OsString;
+
+    let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
+    let mut entries: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Some(existing) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&existing) {
+            if seen.insert(dir.clone()) {
+                entries.push(dir);
+            }
+        }
+    }
+    for dir in fallback_node_dirs() {
+        if seen.insert(dir.clone()) {
+            entries.push(dir);
+        }
+    }
+
+    std::env::join_paths(entries).unwrap_or_else(|_| OsString::from(""))
 }
 
 /// Pull a semver-ish prefix out of `claude --version` output, e.g.
@@ -1066,22 +1248,58 @@ mod tests {
     }
 
     #[test]
-    fn build_spawn_args_resume_and_model_order() {
+    fn build_spawn_args_resume_omits_silently_ignored_flags() {
+        // M2 regression: Claude silently ignores --model / --permission-mode
+        // / --effort on a plain `--resume`.  Emitting them anyway created a
+        // state-vs-reality drift (frontend believed the swap took effect).
+        // Now we omit them on plain resume so they ONLY appear when they
+        // can actually take effect (initial spawn or fork).
         let plan = build_spawn_args(
             "sid",
             "/w",
             Some("prior"),
             Some("sonnet"),
-            None,
-            None,
+            Some("acceptEdits"),
+            Some("high"),
             &[],
             false,
         );
-        let pos_resume = plan.args.iter().position(|a| a == "--resume").unwrap();
-        let pos_model = plan.args.iter().position(|a| a == "--model").unwrap();
-        assert!(pos_resume < pos_model);
-        // No --session-id at all when resuming without fork.
+        let s = plan.args.join(" ");
+        assert!(s.contains("--resume prior"), "args were: {:?}", plan.args);
+        assert!(!s.contains("--model"), "args were: {:?}", plan.args);
+        assert!(
+            !s.contains("--permission-mode"),
+            "args were: {:?}",
+            plan.args
+        );
+        assert!(!s.contains("--effort"), "args were: {:?}", plan.args);
         assert!(plan.args.iter().position(|a| a == "--session-id").is_none());
+    }
+
+    #[test]
+    fn build_spawn_args_fork_still_emits_flags() {
+        // Counterpart to the above — fork DOES honor the flags, so they
+        // must still appear here.  Without this, swap UX would be broken
+        // (model/perm/effort chips would appear no-op).
+        let plan = build_spawn_args(
+            "newid",
+            "/w",
+            Some("prior"),
+            Some("opus"),
+            Some("plan"),
+            Some("max"),
+            &[],
+            true,
+        );
+        let s = plan.args.join(" ");
+        assert!(s.contains("--fork-session"), "args were: {:?}", plan.args);
+        assert!(s.contains("--model opus"), "args were: {:?}", plan.args);
+        assert!(
+            s.contains("--permission-mode plan"),
+            "args were: {:?}",
+            plan.args
+        );
+        assert!(s.contains("--effort max"), "args were: {:?}", plan.args);
     }
 
     #[test]
@@ -1306,5 +1524,182 @@ mod tests {
             .build()
             .expect("Tokio runtime");
         rt.block_on(fut)
+    }
+
+    // ─── Bridge resolution / Node lookup regressions ─────────────────
+    //
+    // Critical bug v1.1.0: `resolve_bridge_path` only checked
+    // `HERMES_BRIDGE_PATH` and `CARGO_MANIFEST_DIR/bridge/...` — the
+    // production resource_dir branch was a docstring-only TODO.  When
+    // the bridge wasn't bundled, every Agent-mode session silently
+    // failed to spawn and the user's first message hung on
+    // "awaiting claude" forever.  These tests pin the candidate-list
+    // ordering so a future refactor can't regress past it.
+
+    #[test]
+    fn bridge_candidates_includes_resource_dir() {
+        let manifest = std::path::Path::new("/dev/manifest");
+        let resource = std::path::Path::new("/app/Resources");
+        let candidates = bridge_path_candidates(None, manifest, Some(resource));
+        // Dev path first, then resource_dir-based candidates after.
+        assert_eq!(candidates[0], manifest.join("bridge/hermes-claude-bridge.mjs"));
+        assert!(
+            candidates
+                .iter()
+                .any(|p| p == &resource.join("bridge/hermes-claude-bridge.mjs")),
+            "candidates missing primary resource_dir path: {:?}",
+            candidates,
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|p| p == &resource.join("hermes-claude-bridge.mjs")),
+            "candidates missing flattened resource_dir path: {:?}",
+            candidates,
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|p| p == &resource.join("_up_/bridge/hermes-claude-bridge.mjs")),
+            "candidates missing macOS Resources/_up_ fallback: {:?}",
+            candidates,
+        );
+    }
+
+    #[test]
+    fn bridge_candidates_env_override_first() {
+        let manifest = std::path::Path::new("/dev/manifest");
+        let resource = std::path::Path::new("/app/Resources");
+        let candidates = bridge_path_candidates(
+            Some("/tmp/explicit/hermes-claude-bridge.mjs"),
+            manifest,
+            Some(resource),
+        );
+        assert_eq!(
+            candidates[0],
+            std::path::PathBuf::from("/tmp/explicit/hermes-claude-bridge.mjs"),
+            "explicit override must win over manifest + resource_dir",
+        );
+    }
+
+    #[test]
+    fn bridge_candidates_no_resource_dir_doesnt_panic() {
+        // Confidence test: in environments where Tauri can't determine
+        // the resource dir (unusual but possible at startup), the
+        // candidate list must still be non-empty so the dev path keeps
+        // working.
+        let manifest = std::path::Path::new("/dev/manifest");
+        let candidates = bridge_path_candidates(None, manifest, None);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], manifest.join("bridge/hermes-claude-bridge.mjs"));
+    }
+
+    #[test]
+    fn bridge_resolution_uses_resource_dir_when_dev_path_missing() {
+        // Simulates the production case: write a dummy bridge file into
+        // a temp dir and verify the candidate enumeration would find it
+        // even though the dev manifest dir doesn't contain the bridge.
+        let tmp = std::env::temp_dir().join(format!(
+            "hermes-bridge-test-{}",
+            std::process::id()
+        ));
+        let resources = tmp.join("Resources");
+        std::fs::create_dir_all(resources.join("bridge")).expect("mkdir resources");
+        let bridge_file = resources.join("bridge/hermes-claude-bridge.mjs");
+        std::fs::write(&bridge_file, "// fake bridge").expect("write bridge");
+
+        let candidates = bridge_path_candidates(
+            None,
+            std::path::Path::new("/nonexistent/manifest"),
+            Some(&resources),
+        );
+
+        // The resource_dir candidate must be present and exist on disk.
+        let hit = candidates.iter().find(|p| p.exists());
+        assert_eq!(hit, Some(&bridge_file));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn fallback_node_dirs_includes_homebrew_and_usr_local() {
+        let dirs = fallback_node_dirs();
+        let s: Vec<String> = dirs.iter().map(|p| p.display().to_string()).collect();
+        assert!(
+            s.iter().any(|p| p == "/opt/homebrew/bin"),
+            "missing /opt/homebrew/bin in fallback list: {:?}",
+            s,
+        );
+        assert!(
+            s.iter().any(|p| p == "/usr/local/bin"),
+            "missing /usr/local/bin in fallback list: {:?}",
+            s,
+        );
+    }
+
+    #[test]
+    fn fallback_node_dirs_uses_home_when_set() {
+        // SAFETY: tests are single-threaded for env mutation; no other
+        // test in this module reads HOME concurrently.
+        let prev = std::env::var_os("HOME");
+        unsafe { std::env::set_var("HOME", "/Users/testuser") };
+        let dirs = fallback_node_dirs();
+        let s: Vec<String> = dirs.iter().map(|p| p.display().to_string()).collect();
+        assert!(
+            s.iter().any(|p| p == "/Users/testuser/.volta/bin"),
+            "expected ~/.volta/bin in fallback list: {:?}",
+            s,
+        );
+        assert!(
+            s.iter().any(|p| p == "/Users/testuser/.local/bin"),
+            "expected ~/.local/bin in fallback list: {:?}",
+            s,
+        );
+        // Restore to avoid leaking into sibling tests.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn enriched_path_var_appends_fallback_dirs() {
+        // SAFETY: same single-threaded justification as above.
+        let prev = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "/usr/bin:/bin") };
+        let enriched = enriched_path_var();
+        let as_str = enriched.to_string_lossy().into_owned();
+        // Existing entries preserved.
+        assert!(as_str.contains("/usr/bin"), "lost existing PATH: {}", as_str);
+        // Homebrew added even though it wasn't in PATH.
+        assert!(
+            as_str.contains("/opt/homebrew/bin") || as_str.contains("/usr/local/bin"),
+            "expected fallback dirs appended to PATH: {}",
+            as_str,
+        );
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    fn enriched_path_var_dedupes_existing_entries() {
+        let prev = std::env::var_os("PATH");
+        // /opt/homebrew/bin is already a fallback dir; it must not appear twice.
+        unsafe { std::env::set_var("PATH", "/usr/bin:/opt/homebrew/bin") };
+        let enriched = enriched_path_var();
+        let as_str = enriched.to_string_lossy().into_owned();
+        let count = as_str.matches("/opt/homebrew/bin").count();
+        assert_eq!(count, 1, "duplicate fallback dir in PATH: {}", as_str);
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
     }
 }

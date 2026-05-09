@@ -1,7 +1,6 @@
 import "../styles/components/agent/AgentSessionView.css";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEvent,
   ContentBlock,
@@ -15,8 +14,9 @@ import {
 } from "./types";
 import { softInterruptAgent } from "../api/agent";
 import { useSession } from "../state/SessionContext";
-import { deriveActivity, emptyState, reduceEvent } from "./messageStore";
+import { deriveActivity } from "./messageStore";
 import type { AgentSessionState, RenderedMessage } from "./messageStore";
+import { getOrCreateAgentSessionStore } from "./agentSessionStore";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ThinkingIndicator } from "./blocks/ThinkingIndicator";
@@ -30,9 +30,7 @@ import { TodoPanel } from "../components/TodoPanel";
 import type { AskUserQuestionInput } from "../utils/askUserQuestion";
 import type { ExitPlanModeInput } from "../utils/exitPlanMode";
 import {
-  isPermRequest,
   buildPermResponse,
-  type PermRequest,
   type PermissionDecision,
 } from "../utils/permissionRequest";
 import { extractTodos } from "../utils/todoStore";
@@ -52,6 +50,22 @@ interface AgentExitPayload {
   signal: string | null;
 }
 
+/** Bridge from `useSyncExternalStore` into the per-session store.  Returning
+ *  a stable snapshot reference (the store mutates via copy-on-write) keeps
+ *  React from over-rendering.  The third argument is the SSR snapshot —
+ *  vitest's render-tree path renders on the server first, so we pass the
+ *  same accessor (the store's snapshot is plain data, no DOM/window
+ *  dependencies). */
+function useAgentSessionSnapshot(sessionId: string) {
+  const store = getOrCreateAgentSessionStore(sessionId, listen);
+  const snapshot = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
+  return { snapshot, store };
+}
+
 /**
  * Renders Claude's stream-json output as a chat-style timeline.
  *
@@ -67,48 +81,13 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // (AskUserQuestion, ExitPlanMode, canUseTool) so a tool reply
   // doesn't get dropped when the bridge has exited between turns.
   const { sendAgentEnvelope } = useSession();
-  const [state, dispatch] = useReducer(reduceEvent, undefined, emptyState);
-  const [stderr, setStderr] = useState("");
-  const [exitInfo, setExitInfo] = useState<AgentExitPayload | null>(null);
+  // Long-lived per-session store: events keep streaming into reducer
+  // state even when this component is unmounted (e.g., the user
+  // switched to a different session in the sidebar), so the timeline
+  // is intact when the view remounts.  See `agentSessionStore.ts`.
+  const { snapshot, store } = useAgentSessionSnapshot(sessionId);
+  const { state, stderr, exit: exitInfo } = snapshot;
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let unEvent: UnlistenFn | undefined;
-    let unErr: UnlistenFn | undefined;
-    let unExit: UnlistenFn | undefined;
-    let cancelled = false;
-
-    (async () => {
-      const e = await listen<AgentEvent>(
-        `agent-event-${sessionId}`,
-        (msg) => dispatch(msg.payload),
-      );
-      const s = await listen<string>(
-        `agent-stderr-${sessionId}`,
-        (msg) => setStderr((prev) => prev + msg.payload),
-      );
-      const x = await listen<AgentExitPayload>(
-        `agent-exit-${sessionId}`,
-        (msg) => setExitInfo(msg.payload),
-      );
-      if (cancelled) {
-        e();
-        s();
-        x();
-        return;
-      }
-      unEvent = e;
-      unErr = s;
-      unExit = x;
-    })();
-
-    return () => {
-      cancelled = true;
-      unEvent?.();
-      unErr?.();
-      unExit?.();
-    };
-  }, [sessionId]);
 
   // Auto-scroll on new messages.
   useEffect(() => {
@@ -116,19 +95,6 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [state.messages, state.resultEvent, exitInfo]);
-
-  // Clear the "Agent process exited" notice when a fresh init event arrives.
-  // This is what makes a model swap (close → respawn) feel seamless: the old
-  // subprocess fires `agent-exit-…` during teardown, but the new subprocess
-  // emits a new init with a different session UUID — we use that as our cue
-  // that the agent is alive again and the prior exit is no longer relevant.
-  // Also clear any stale stderr — fresh subprocess, fresh diagnostic buffer.
-  const initSessionId = state.initEvent?.session_id;
-  useEffect(() => {
-    if (!initSessionId) return;
-    setExitInfo(null);
-    setStderr("");
-  }, [initSessionId]);
 
   if (!state.initialized && !exitInfo && state.messages.length === 0) {
     // Claude's `--print --input-format stream-json` mode doesn't emit anything
@@ -233,7 +199,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
               <button
                 type="button"
                 className="agent-exit-action"
-                onClick={() => { setExitInfo(null); setStderr(""); }}
+                onClick={() => store.clearExitNotice()}
               >
                 Start fresh from here
               </button>
@@ -300,30 +266,44 @@ function InteractivePermissionDispatcher({
   permissionMode: string;
   sendAgentEnvelope: (sessionId: string, envelope: unknown) => Promise<void>;
 }) {
-  const [request, setRequest] = useState<PermRequest | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let un: UnlistenFn | undefined;
-    listen<unknown>(`agent-event-${sessionId}`, (msg) => {
-      const ev = msg.payload;
-      if (isPermRequest(ev)) {
-        setRequest(ev);
-      }
-    }).then((u) => {
-      if (cancelled) u(); else un = u;
-    });
-    return () => { cancelled = true; un?.(); };
-  }, [sessionId]);
+  // Pending perm request lives in the long-lived store now (fix C1)
+  // so a session-switch unmount can't strand the bridge waiting on
+  // canUseTool.  The dispatcher just reads from the store and writes
+  // back via clearPendingPermRequest after a decision.
+  const { snapshot, store } = useAgentSessionSnapshot(sessionId);
+  const request = snapshot.pendingPermRequest;
+  const inFlightRef = useRef(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   if (!request) return null;
 
   function decide(decision: PermissionDecision) {
     if (!request) return;
+    // Latch immediately so a double-click on the modal can't fire
+    // two `_hermes_perm_response` envelopes for the same request id
+    // (fix H6).  The latch is stored in a ref + the store-cleared
+    // pending request so React's render scheduling can't reopen the
+    // modal between the click and the IPC.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     const env = buildPermResponse(request.id, decision);
-    sendAgentEnvelope(sessionId, env).catch((err) =>
-      console.warn("[perm] send failed:", err),
-    );
+    // Optimistically clear so the modal closes immediately; if the
+    // send fails we restore the request via the store and surface
+    // an error banner (also fix H6 — used to be silent console.warn).
+    const cached = request;
+    store.clearPendingPermRequest();
+    setSendError(null);
+    sendAgentEnvelope(sessionId, env)
+      .catch((err) => {
+        console.warn("[perm] send failed:", err);
+        // Re-surface the request — the bridge is still waiting and
+        // the user needs another shot at deciding.
+        store.injectEvent(cached as unknown as AgentEvent);
+        setSendError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+      });
     if (decision.kind === "allow" && decision.persist) {
       // Persist the rule to ~/.claude/settings.json (TUI parity per
       // locked decision §0.5).  Best-effort; the in-session allow has
@@ -336,45 +316,64 @@ function InteractivePermissionDispatcher({
         }).catch((err) => console.warn("[perm] persist failed:", err)),
       );
     }
-    setRequest(null);
   }
+
+  // Banner that surfaces a failed `_hermes_perm_response` send.  The
+  // bridge is still waiting on canUseTool, so we re-show the modal
+  // (decide() restored the request via the store) and prepend a
+  // visible error so the user understands why the click didn't land.
+  const errorBanner = sendError ? (
+    <div className="agent-perm-error" role="alert">
+      Couldn't deliver your decision: {sendError}.  Try again — the
+      agent is still waiting.
+    </div>
+  ) : null;
 
   if (request.toolName === "AskUserQuestion") {
     const input = request.input as unknown as AskUserQuestionInput;
     return (
-      <AskUserQuestionCard
-        dialogId={request.id}
-        input={input}
-        onAllow={(updatedInput) => decide({ kind: "allow", updatedInput })}
-        onDeny={() => decide({ kind: "deny", message: "User cancelled the question" })}
-      />
+      <>
+        {errorBanner}
+        <AskUserQuestionCard
+          dialogId={request.id}
+          input={input}
+          onAllow={(updatedInput) => decide({ kind: "allow", updatedInput })}
+          onDeny={() => decide({ kind: "deny", message: "User cancelled the question" })}
+        />
+      </>
     );
   }
 
   if (request.toolName === "ExitPlanMode") {
     const input = request.input as unknown as ExitPlanModeInput;
     return (
-      <ExitPlanModeCard
-        dialogId={request.id}
-        input={input}
-        permissionMode={permissionMode}
-        onAllow={() => decide({ kind: "allow" })}
-        onDeny={(feedback) =>
-          decide({
-            kind: "deny",
-            message: feedback === "" ? "User rejected the plan" : feedback,
-          })
-        }
-      />
+      <>
+        {errorBanner}
+        <ExitPlanModeCard
+          dialogId={request.id}
+          input={input}
+          permissionMode={permissionMode}
+          onAllow={() => decide({ kind: "allow" })}
+          onDeny={(feedback) =>
+            decide({
+              kind: "deny",
+              message: feedback === "" ? "User rejected the plan" : feedback,
+            })
+          }
+        />
+      </>
     );
   }
 
   return (
-    <PermissionRequestModal
-      request={request}
-      permissionMode={permissionMode}
-      onDecision={decide}
-    />
+    <>
+      {errorBanner}
+      <PermissionRequestModal
+        request={request}
+        permissionMode={permissionMode}
+        onDecision={decide}
+      />
+    </>
   );
 }
 
