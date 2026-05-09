@@ -204,11 +204,24 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
     return () => { cancelled = true; };
   }, [init?.session_id]);
 
+  // Names the user has removed during this panel's lifetime.  Claude's
+  // `--resume` restores the session's prior MCP list from its own
+  // transcript, so even after we update `~/.claude.json` and respawn
+  // the bridge, the resumed init STILL reports the old list.  We hide
+  // the removed names client-side so the UI feels responsive; the
+  // file change takes effect naturally on the next fresh-spawn (new
+  // agent session, model swap, etc.).
+  const [recentlyRemoved, setRecentlyRemoved] = useState<Set<string>>(new Set());
+
   // Static prewarm + live init merge.  Live wins when both available;
   // for orphan servers (in init but not in ~/.claude.json) the live
   // entry surfaces alone — the spec body shows the "managed elsewhere"
   // hint when the user expands them.
-  const mcpServers = mergeMcpServers(prewarm.mcpServers, init?.mcp_servers);
+  const mcpServersRaw = mergeMcpServers(prewarm.mcpServers, init?.mcp_servers);
+  const mcpServers = useMemo(
+    () => mcpServersRaw.filter((s) => !recentlyRemoved.has(s.name)),
+    [mcpServersRaw, recentlyRemoved],
+  );
   // Track local-only names so we can detect orphans (live in init but
   // NOT in ~/.claude.json) and warn the user that remove is a no-op
   // for those entries.
@@ -220,6 +233,14 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
   const tools = init?.tools ?? [];
   const memoryPaths = mergeMemoryPaths(prewarm.memoryPaths, init?.memory_paths);
   const existingMcpNames = useMemo(() => mcpServers.map((s) => s.name), [mcpServers]);
+
+  // When the cwd / session changes, clear the recently-removed set —
+  // a fresh session reads the file from scratch, so the optimistic
+  // hides are no longer needed (and would shadow servers the user
+  // re-added under the same name).
+  useEffect(() => {
+    setRecentlyRemoved(new Set());
+  }, [init?.cwd, sessionId]);
 
   const handleRemoveMcp = useCallback(async (name: string) => {
     console.log(`[mcp] remove invoked for "${name}"`);
@@ -239,27 +260,23 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
       return;
     }
 
-    // Force the prewarm + a bridge respawn so the panel reflects the
-    // new on-disk state without waiting for the next user message.
+    // Hide the row immediately — the file is updated, but Claude's
+    // `--resume` will keep loading the old list until a fresh spawn,
+    // so honest UX is to drop the row from the panel and tell the
+    // user the file is the source of truth from now on.
+    setRecentlyRemoved((prev) => {
+      const next = new Set(prev);
+      next.add(name);
+      return next;
+    });
     setMcpVersion((v) => v + 1);
     prewarm.refresh();
-    console.log(`[mcp] prewarm refreshed; respawning bridge…`);
+    console.log(`[mcp] prewarm refreshed; respawning bridge (resume mode — new session needed for full reload)`);
     try {
       const ok = await respawnAgent(sessionId);
       console.log(`[mcp] respawn after remove returned ok=${ok}`);
     } catch (err) {
       console.warn(`[mcp] respawn after remove threw:`, err);
-    }
-
-    if (!isLocal) {
-      // The remove succeeded against the local file but the server is
-      // injected from elsewhere — give the user honest feedback so they
-      // don't think the action did nothing.
-      alert(
-        `Removed any local entry for "${name}", but the server is injected from outside ` +
-        `~/.claude.json (a cloud connector or plugin).  It will reappear on the next ` +
-        `agent init.  Manage it from the source instead.`,
-      );
     }
   }, [sessionId, respawnAgent, localOnlyNames, prewarm]);
 
