@@ -507,7 +507,8 @@ pub fn run() {
             cleanup_stale_worktrees(app.handle(), &database);
 
             // Prune execution_nodes for all sessions to cap per-session history
-            if let Err(e) = database.prune_all_execution_nodes(db::EXECUTION_NODES_MAX_PER_SESSION) {
+            if let Err(e) = database.prune_all_execution_nodes(db::EXECUTION_NODES_MAX_PER_SESSION)
+            {
                 log::warn!("Startup execution_nodes cleanup failed: {}", e);
             }
 

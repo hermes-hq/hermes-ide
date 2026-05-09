@@ -1122,14 +1122,16 @@ impl Database {
         let rowid = self.conn.last_insert_rowid();
         // Keep the per-session row count bounded; silently ignore prune errors
         // so they never fail an otherwise-successful insert.
-        self.prune_execution_nodes(session_id, EXECUTION_NODES_MAX_PER_SESSION).ok();
+        self.prune_execution_nodes(session_id, EXECUTION_NODES_MAX_PER_SESSION)
+            .ok();
         Ok(rowid)
     }
 
     /// Delete all but the `keep` most-recent rows (by timestamp) for one session.
     pub fn prune_execution_nodes(&self, session_id: &str, keep: i64) -> Result<(), String> {
-        self.conn.execute(
-            "DELETE FROM execution_nodes
+        self.conn
+            .execute(
+                "DELETE FROM execution_nodes
              WHERE session_id = ?1
                AND id NOT IN (
                    SELECT id FROM execution_nodes
@@ -1137,24 +1139,25 @@ impl Database {
                    ORDER BY timestamp DESC
                    LIMIT ?2
                )",
-            params![session_id, keep],
-        ).map_err(|e| e.to_string())?;
+                params![session_id, keep],
+            )
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     /// Prune execution_nodes for every session — used at startup to clear
     /// pre-existing bloat.
     pub fn prune_all_execution_nodes(&self, keep: i64) -> Result<(), String> {
-        let session_ids: Vec<String> = {
-            let mut stmt = self
-                .conn
-                .prepare("SELECT DISTINCT session_id FROM execution_nodes")
-                .map_err(|e| e.to_string())?;
-            stmt.query_map([], |row| row.get(0))
-                .map_err(|e| e.to_string())?
-                .filter_map(|r| r.ok())
-                .collect()
-        };
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT session_id FROM execution_nodes")
+            .map_err(|e| e.to_string())?;
+        let session_ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
         for sid in &session_ids {
             self.prune_execution_nodes(sid, keep)?;
         }
@@ -3310,8 +3313,7 @@ mod tests {
         }
         let count = db.get_execution_nodes_count(sid).unwrap();
         assert_eq!(
-            count,
-            EXECUTION_NODES_MAX_PER_SESSION,
+            count, EXECUTION_NODES_MAX_PER_SESSION,
             "table should be capped at {}",
             EXECUTION_NODES_MAX_PER_SESSION
         );
