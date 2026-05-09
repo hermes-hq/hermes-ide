@@ -11,6 +11,19 @@
  * When releasing a new version, add an entry here.
  */
 
+/** Preview-mockup keys.  Each key maps to a small CSS-only
+ *  illustration rendered inside the section card so the user
+ *  can see what the feature actually looks like.  The mockups
+ *  live in `<SectionPreview>` (WhatsNewDialog.tsx) — adding a
+ *  new key requires a matching render branch there. */
+export type ChangelogPreviewKind =
+  | "timeline"
+  | "slash-popover"
+  | "mcp-row"
+  | "perm-buttons"
+  | "embedded-terminal"
+  | "classic-toggle";
+
 export interface ChangelogSection {
   /** Short heading (3-6 words). */
   title: string;
@@ -23,6 +36,9 @@ export interface ChangelogSection {
   /** Optional CTA — surfaced as a quiet hint at the bottom of the
    *  section ("try `/mcp`", "Settings → Appearance"). */
   hint?: string;
+  /** Optional CSS micro-mockup of the feature, shown above the
+   *  bullet list.  Brings the announcement to life. */
+  preview?: ChangelogPreviewKind;
 }
 
 export interface ChangelogEntry {
@@ -44,6 +60,7 @@ export const changelog: Record<string, ChangelogEntry> = {
       {
         title: "A modern session timeline",
         icon: "✦",
+        preview: "timeline",
         description:
           "The agent timeline now reads like a real conversation. Speaker chips identify who's talking; messages get a soft accent-tinted card; whitespace replaces the hairline rules.",
         items: [
@@ -55,6 +72,7 @@ export const changelog: Record<string, ChangelogEntry> = {
       {
         title: "Every slash command, in or out",
         icon: "▣",
+        preview: "slash-popover",
         description:
           "Type / and you see every Claude command — built-ins, plugins, skills — clearly labeled in-app or terminal.",
         items: [
@@ -66,6 +84,7 @@ export const changelog: Record<string, ChangelogEntry> = {
       {
         title: "MCP server panel that helps",
         icon: "◇",
+        preview: "mcp-row",
         description:
           "Click any MCP server to see why its dot is the color it is, what command runs it, and which env keys it expects.",
         items: [
@@ -78,6 +97,7 @@ export const changelog: Record<string, ChangelogEntry> = {
       {
         title: "Plan mode and permissions, fixed",
         icon: "✓",
+        preview: "perm-buttons",
         description:
           "Send no longer silently drops your reply when Claude is asking you something. Approve / deny buttons stop hiding.",
         items: [
@@ -100,6 +120,7 @@ export const changelog: Record<string, ChangelogEntry> = {
       {
         title: "Prefer the previous look?",
         icon: "↺",
+        preview: "classic-toggle",
         description:
           "If the modern timeline isn't for you, the denser logbook style is one toggle away.",
         items: [
