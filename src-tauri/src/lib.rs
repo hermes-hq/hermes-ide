@@ -529,6 +529,11 @@ pub fn run() {
             app.manage(agent::AgentState::default());
             app.manage(inline_pty::InlinePtyManager::new());
 
+            // Best-effort bridge runtime prewarm — populates OS file cache
+            // so the user's first Agent session spawns noticeably faster.
+            // Detached, capped at 10s, silent on failure (see prewarm.rs).
+            agent::prewarm_bridge_runtime(app.handle());
+
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
