@@ -945,8 +945,7 @@ mod prewarm_tests {
         assert_eq!(got.len(), 2);
         // Normalize Windows backslashes to forward slashes so the
         // suffix checks are platform-agnostic.
-        let normalized: Vec<String> =
-            got.iter().map(|p| p.replace('\\', "/")).collect();
+        let normalized: Vec<String> = got.iter().map(|p| p.replace('\\', "/")).collect();
         assert!(normalized.iter().any(|p| p.ends_with("/.claude/CLAUDE.md")));
         assert!(normalized
             .iter()
