@@ -49,6 +49,9 @@ import type {
 } from "../types/session";
 import { SAVED_WORKSPACE_VERSION, validateSavedWorkspace } from "../types/session";
 import { spawnAgentSession, closeAgentSession, sendAgentInput, updateHermesState } from "../api/agent";
+import { reportAgentSpawnFailure } from "../utils/agentSpawnFailure";
+import { destroyAgentSessionStore } from "../agent/agentSessionStore";
+import { cleanupSessionRefs } from "../utils/sessionRefCleanup";
 import {
   buildUserEnvelope,
   echoUserEnvelope,
@@ -1056,16 +1059,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       const u2 = await listen<string>("session-removed", (event) => {
         destroyTerminal(event.payload);
-        // Clean up refs that track per-session state (prevent memory leaks)
-        busyTimestamps.current.delete(event.payload);
-        closingSessionIds.current.delete(event.payload);
-        // Drop the per-session agent-event listener and per-session flag refs.
+        // H2 + H3 fix (v1.1.2): single canonical cleanup of every
+        // per-session ref + cancellation of the 500ms close-fallback
+        // timer.  Previously claudeAddDirs / lastIdeStateHash /
+        // lastAutoAttachCwd were never cleared, leaking unbounded
+        // for the lifetime of the app, and the close-fallback timer
+        // fired after the real event left a stale SESSION_REMOVED.
+        cleanupSessionRefs(
+          {
+            busyTimestamps: busyTimestamps.current,
+            closingSessionIds: closingSessionIds.current,
+            closeTimers: closeTimers.current,
+            lastAutoAttachCwd: lastAutoAttachCwd.current,
+            claudeUuids: claudeUuids.current,
+            claudeModels: claudeModels.current,
+            claudePermissionModes: claudePermissionModes.current,
+            claudeEfforts: claudeEfforts.current,
+            claudeAddDirs: claudeAddDirs.current,
+            pendingFlags: pendingFlags.current,
+            lastIdeStateHash: lastIdeStateHash.current,
+          },
+          event.payload,
+        );
+        // Drop the per-session agent-event listener.
         detachInitListener(event.payload);
-        claudeUuids.current.delete(event.payload);
-        claudeModels.current.delete(event.payload);
-        claudePermissionModes.current.delete(event.payload);
-        claudeEfforts.current.delete(event.payload);
-        pendingFlags.current.delete(event.payload);
+        // Tear down the long-lived agent message store so its Tauri
+        // listeners don't leak after the session is gone.
+        destroyAgentSessionStore(event.payload);
         dispatch({ type: "SESSION_REMOVED", id: event.payload });
       });
       unlisteners.push(u2);
@@ -1202,6 +1222,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                   .then((uuid) => { claudeUuids.current.set(newSession.id, uuid); })
                   .catch((err) => {
                     console.error("[SessionContext] Failed to spawn Claude agent on restore:", err);
+                    void reportAgentSpawnFailure({
+                      sessionId: newSession.id,
+                      error: err,
+                      context: "restore",
+                    });
                   });
               }
 
@@ -1400,6 +1425,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           .then((uuid) => { claudeUuids.current.set(session.id, uuid); })
           .catch((err) => {
             console.error("[SessionContext] Failed to spawn Claude agent:", err);
+            void reportAgentSpawnFailure({
+              sessionId: session.id,
+              error: err,
+              context: "create",
+            });
           });
       }
 
@@ -1833,6 +1863,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return true;
     } catch (err) {
       console.error("[SessionContext] respawnAgent failed:", err);
+      void reportAgentSpawnFailure({
+        sessionId,
+        error: err,
+        context: "respawn",
+      });
       return false;
     }
   }, [attachInitListener]);
