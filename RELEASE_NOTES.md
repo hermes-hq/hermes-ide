@@ -1,3 +1,13 @@
+# Hermes IDE 1.1.5
+
+A hotfix for v1.1.4 — Agent mode crashed every conversation in the installed app with a *Cannot find package* error in the activity panel. v1.1.5 ships the missing helper so Agent mode works again.
+
+If you were stuck on *Agent process crashed (code 1)* on v1.1.4, please update.
+
+A guard test now scans the agent runtime for every helper file it imports and asserts each one is included in the installer — the same kind of mistake won't slip through again.
+
+---
+
 # Hermes IDE 1.1.4
 
 A small performance touch-up.
