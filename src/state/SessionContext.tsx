@@ -23,7 +23,7 @@ import { hasAddDirDrift } from "../utils/agentDrift";
 import { createWorktree, worktreeHasChanges, stashWorktree, getSessionWorktreeInfo } from "../api/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
-import { applyTheme } from "../utils/themeManager";
+import { applyTheme, applyAgentTimelineStyle } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
 import { initNotifications, notifyLongRunningDone } from "../utils/notifications";
 import { initAnalytics, trackAppStarted, trackSessionCreated } from "../utils/analytics";
@@ -1081,6 +1081,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       .then((s) => {
         const theme = s.theme || "frosted-dark";
         applyTheme(theme, s);
+        applyAgentTimelineStyle(s.agent_timeline_style);
         restoreWindowState(s).catch(console.error);
         if (s.execution_mode === "assisted" || s.execution_mode === "autonomous") {
           dispatch({ type: "SET_DEFAULT_MODE", mode: s.execution_mode as ExecutionMode });
