@@ -6,6 +6,11 @@ export interface SlashCommandItem {
   label: string;
   description: string;
   source: "builtin" | "user" | "project";
+  /** Whether the command runs over stream-json (`native`) or needs
+   *  an interactive PTY shelling to `claude /<cmd>` (`cli`).  When
+   *  `cli`, the composer surfaces a banner instead of submitting
+   *  and the user opens the embedded terminal to actually run it. */
+  kind?: "native" | "cli";
 }
 
 interface SlashCommandsDropdownProps {
@@ -65,6 +70,21 @@ export function SlashCommandsDropdown({
           <div className="slash-dropdown-row">
             <span className="slash-dropdown-cmd">{item.command}</span>
             {item.label && <span className="slash-dropdown-label">{item.label}</span>}
+            {item.kind === "cli" ? (
+              <span
+                className="slash-dropdown-kind slash-dropdown-kind-cli"
+                title="Runs in the embedded terminal — this command's interactive TUI can't talk over stream-json, so Hermes spawns claude /<cmd> in a small inline PTY"
+              >
+                ▣ terminal
+              </span>
+            ) : (
+              <span
+                className="slash-dropdown-kind slash-dropdown-kind-native"
+                title="Runs in this chat — sent to Claude as a normal prompt"
+              >
+                ✦ in-app
+              </span>
+            )}
             {item.source !== "builtin" && (
               <span className={`slash-dropdown-source slash-dropdown-source-${item.source}`}>
                 {item.source}

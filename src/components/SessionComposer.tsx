@@ -5,8 +5,10 @@ import type { AgentAttachment } from "../utils/submitToAgent";
 import { isActionMod, isMac } from "../utils/platform";
 import { readImageForAttachment } from "../api/agent";
 import { getActiveSlashCommand, replaceSlashCommand } from "../utils/slashCommands";
+import { classifySlashCommand } from "../utils/slashCommandKind";
 import { fuzzyRank } from "../utils/fuzzy";
 import { SlashCommandsDropdown, type SlashCommandItem } from "./SlashCommandsDropdown";
+import { CliCommandBanner } from "./CliCommandBanner";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionPicker, CLAUDE_PERMISSION_MODES } from "./PermissionPicker";
 import { EffortPicker } from "./EffortPicker";
@@ -119,44 +121,53 @@ export function SessionComposer() {
   const prewarm = useAgentPrewarm(init?.cwd);
 
   // ─── Slash commands sourced from init OR static prewarm ─────────────
+  // Each item is classified `native` (run via stream-json prompt) or
+  // `cli` (must run in an embedded `claude /<cmd>` PTY).  The dropdown
+  // surfaces the kind as a badge so the user knows up-front whether
+  // accepting the item will send a chat message or pop a terminal.
   const slashCommandsFromInit = useMemo<SlashCommandItem[]>(() => {
-    if (init) {
-      const raw = init.slash_commands;
-      if (Array.isArray(raw)) {
-        return raw
-          .map((entry): SlashCommandItem | null => {
-            if (typeof entry === "string") {
-              const command = entry.startsWith("/") ? entry : `/${entry}`;
-              return { command, label: "", description: "", source: "builtin" };
-            }
-            if (entry && typeof entry === "object") {
-              const command = typeof entry.command === "string"
-                ? (entry.command.startsWith("/") ? entry.command : `/${entry.command}`)
-                : null;
-              if (!command) return null;
-              const description = typeof entry.description === "string" ? entry.description : "";
-              return { command, label: "", description, source: "builtin" };
-            }
-            return null;
-          })
-          .filter((c): c is SlashCommandItem => c !== null);
-      }
+    const raw = init?.slash_commands;
+    if (Array.isArray(raw)) {
+      const items = raw
+        .map((entry): SlashCommandItem | null => {
+          if (typeof entry === "string") {
+            const command = entry.startsWith("/") ? entry : `/${entry}`;
+            return { command, label: "", description: "", source: "builtin" };
+          }
+          if (entry && typeof entry === "object") {
+            const command = typeof entry.command === "string"
+              ? (entry.command.startsWith("/") ? entry.command : `/${entry.command}`)
+              : null;
+            if (!command) return null;
+            const description = typeof entry.description === "string" ? entry.description : "";
+            return { command, label: "", description, source: "builtin" };
+          }
+          return null;
+        })
+        .filter((c): c is SlashCommandItem => c !== null);
+      // Annotate every entry with its kind.
+      return items.map((it) => ({ ...it, kind: classifySlashCommand(it) }));
     }
     // Pre-init fallback: static prewarm.  Source is filesystem only,
     // so descriptions are blank — the dropdown still renders with the
     // command names so / autocomplete works before first message.
     const merged = mergeSlashCommands(prewarm.slashCommands, undefined);
-    return merged.map((cmd) => ({
-      command: cmd.startsWith("/") ? cmd : `/${cmd}`,
-      label: "",
-      description: "",
-      source: "builtin" as const,
-    }));
+    return merged.map((cmd) => {
+      const command = cmd.startsWith("/") ? cmd : `/${cmd}`;
+      const item: SlashCommandItem = { command, label: "", description: "", source: "builtin" };
+      return { ...item, kind: classifySlashCommand(item) };
+    });
   }, [init, prewarm.slashCommands]);
 
   // ─── Active slash overlay state ─────────────────────────────────────
   const [slash, setSlash] = useState<{ start: number; end: number; query: string } | null>(null);
   const [highlightIdx, setHighlightIdx] = useState(0);
+  /** Slash command the user picked that needs an embedded PTY (e.g.
+   *  `/mcp`, `/agents`).  When set, the composer renders a banner
+   *  offering "Open terminal" instead of attempting to send the
+   *  command as a stream-json prompt (which silently no-ops for
+   *  these CLI-only commands). */
+  const [pendingCliCommand, setPendingCliCommand] = useState<string | null>(null);
 
   const rankedCommands = useMemo<SlashCommandItem[] | null>(() => {
     if (!slash || !isAgentMode) return null;
@@ -195,6 +206,23 @@ export function SessionComposer() {
     if (!composerSessionId || !slash || !rankedCommands) return;
     const pick = rankedCommands[idx];
     if (!pick) return;
+
+    // CLI-only commands DON'T go into the chat draft — they need
+    // an embedded terminal.  Surface a banner above the composer
+    // instead so the user knows where the command will run.  The
+    // user can still cancel and type normally.
+    if (pick.kind === "cli") {
+      // Clear the partially-typed `/foo` from the draft so the
+      // composer is ready for the next message after the terminal
+      // run finishes.
+      const stripped = draft.slice(0, slash.start) + draft.slice(slash.end);
+      dispatch({ type: "SET_COMPOSER_DRAFT", sessionId: composerSessionId, draft: stripped });
+      setPendingCliCommand(pick.command);
+      setSlash(null);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+      return;
+    }
+
     const { text: newDraft, caret: newCaret } = replaceSlashCommand(draft, slash, pick.command);
     dispatch({ type: "SET_COMPOSER_DRAFT", sessionId: composerSessionId, draft: newDraft });
     setSlash(null);
@@ -641,6 +669,24 @@ export function SessionComposer() {
         aria-label="Resize composer"
         onMouseDown={handleResizeMouseDown}
       />
+      {pendingCliCommand && (
+        <CliCommandBanner
+          command={pendingCliCommand}
+          onOpenTerminal={() => {
+            // Phase 3: mount the embedded terminal here.  For now,
+            // surface a toast so the user can verify the routing
+            // is firing without us silently dropping the command.
+            console.log(`[cli-banner] open terminal requested for ${pendingCliCommand}`);
+            alert(
+              `Embedded terminal will run:\n\n  claude ${pendingCliCommand}\n\n` +
+              `(Embedded PTY mount is the next commit; this banner + dropdown badge ` +
+              `prove the slash routing.)`,
+            );
+            setPendingCliCommand(null);
+          }}
+          onCancel={() => setPendingCliCommand(null)}
+        />
+      )}
       <div className="session-composer-card">
         <div className="session-composer-window-controls">
           <button

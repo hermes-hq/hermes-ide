@@ -1,0 +1,86 @@
+/* CLI-command banner — sits above the composer textarea when the user
+ * picks a slash command that needs the embedded terminal.  Visual
+ * inspiration: Conductor's "Run /mcp in the embedded terminal" row.
+ *
+ * Yellow tint to mark it as "different routing" — same color the
+ * dropdown's `terminal` badge uses, so the user reads it as the
+ * same family of signal. */
+
+.cli-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 0 var(--space-3) 8px var(--space-3);
+  background: color-mix(in srgb, var(--yellow) 8%, var(--bg-1));
+  border: 1px solid color-mix(in srgb, var(--yellow) 32%, transparent);
+  border-radius: 6px;
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 12.5px;
+  color: var(--ink-secondary, var(--text-1));
+}
+
+.cli-banner-icon {
+  color: var(--yellow);
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.cli-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cli-banner-code {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--yellow) 18%, transparent);
+  color: var(--yellow);
+  font: 11.5px/1 var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+.cli-banner-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--bg-1);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  border-radius: 5px;
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--yellow);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cli-banner-action:hover {
+  background: color-mix(in srgb, var(--yellow) 14%, var(--bg-1));
+  border-color: var(--yellow);
+  transform: translateY(-0.5px);
+}
+
+.cli-banner-action:active {
+  transform: translateY(0);
+}
+
+.cli-banner-dismiss {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  font: 12px/1 var(--font-mono);
+  color: var(--ink-tertiary, var(--text-3));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cli-banner-dismiss:hover {
+  color: var(--ink-primary, var(--text-0));
+}

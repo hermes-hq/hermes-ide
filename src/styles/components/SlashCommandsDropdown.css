@@ -72,6 +72,36 @@
   border-color: transparent;
 }
 
+/* Kind badge — sits to the left of the source badge, marks commands
+ * that need an embedded terminal instead of running over stream-json.
+ * Yellow fill so it reads as "heads up — different routing." */
+.slash-dropdown-kind {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+}
+
+.slash-dropdown-kind-cli {
+  color: var(--yellow);
+  background: var(--yellow-dim);
+}
+
+.slash-dropdown-kind-native {
+  color: var(--accent, var(--accent-paper));
+  background: color-mix(in srgb, var(--accent, var(--accent-paper)) 14%, transparent);
+}
+
+/* When both kind and source are present, source pushes right and
+ * kind sits next to it without the auto-margin. */
+.slash-dropdown-kind + .slash-dropdown-source {
+  margin-left: 6px;
+}
+
 .slash-dropdown-desc {
   color: var(--text-2);
   font-family: var(--font-ui);
