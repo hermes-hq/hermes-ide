@@ -1,3 +1,21 @@
+# Hermes IDE 1.1.1
+
+A small patch release that restores the Windows installer for v1.1, plus a clearer statement of how each platform is supported going forward.
+
+## What changed
+
+- **Windows installer is back.** The v1.1.0 release couldn't produce a Windows build due to a packaging issue. v1.1.1 ships a working `_x64-setup.exe` (and ARM64 build). macOS and Linux installers were unaffected.
+
+## Platform support, stated clearly
+
+Hermes is built and tested primarily on macOS and Linux. Both receive every update.
+
+**Windows is supported on a best-effort basis.** Core terminal features are stable, but newer capabilities — such as Agent mode, introduced in v1.1 — may arrive late on Windows or stay macOS / Linux only. If you rely on Windows day-to-day, pin to a known-good version.
+
+The download page on hermes-ide.com now reflects this directly when you select the Windows tab.
+
+---
+
 # Hermes IDE 1.1.0
 
 ## A modern session timeline
