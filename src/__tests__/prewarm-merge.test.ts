@@ -29,12 +29,37 @@ describe("mergeMcpServers (pw-7, pw-9)", () => {
     ]);
   });
 
-  it("static-only entries removed when init arrives (init is authoritative)", () => {
+  it("static-only entries are appended when init lacks them (--resume keeps stale list)", () => {
+    // Claude's `--resume <uuid>` restores the session's prior MCP
+    // list from its transcript.  When the user adds a server to
+    // `~/.claude.json` mid-session, the new entry exists in static
+    // (read from disk) but NOT in init (still showing the old list).
+    // We surface both so the new entry doesn't vanish from the panel
+    // until a fresh-spawn session.
     const got = mergeMcpServers(
-      [{ name: "old-server", status: "unknown" }],
-      [{ name: "new-server", status: "connected" }],
+      [{ name: "newly-added", status: "unknown" }],
+      [{ name: "from-resume", status: "connected" }],
     );
-    expect(got).toEqual([{ name: "new-server", status: "connected" }]);
+    expect(got).toEqual([
+      { name: "from-resume", status: "connected" },
+      { name: "newly-added", status: "unknown" },
+    ]);
+  });
+
+  it("does NOT duplicate entries that exist in both static and live", () => {
+    const got = mergeMcpServers(
+      [
+        { name: "context7", status: "unknown" },
+        { name: "newly-added", status: "unknown" },
+      ],
+      [{ name: "context7", status: "connected" }],
+    );
+    // context7 appears once with the live status; newly-added is
+    // appended from static.
+    expect(got).toEqual([
+      { name: "context7", status: "connected" },
+      { name: "newly-added", status: "unknown" },
+    ]);
   });
 });
 

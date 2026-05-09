@@ -27,10 +27,22 @@ export function mergeMcpServers(
   staticServers: readonly PrewarmMcpServer[],
   liveServers: readonly PrewarmMcpServer[] | undefined,
 ): PrewarmMcpServer[] {
-  // Live wins when it's a real array.  When live arrives, it's the
-  // canonical list — static entries that aren't in live are stale.
-  if (Array.isArray(liveServers)) return [...liveServers];
-  return asArray(staticServers);
+  // Until live arrives, the static list is all we have.
+  if (!Array.isArray(liveServers)) return asArray(staticServers);
+
+  // Otherwise UNION: live entries win on shape (status from the SDK),
+  // and any static-only entries are appended.  Static-only happens
+  // when the user has just added a server to `~/.claude.json` but
+  // the bridge is still running on an older `--resume` that restored
+  // its prior MCP list — the new entry is on disk but not in init
+  // yet.  Without this union, freshly-added servers wouldn't appear
+  // in the panel until a brand-new session spawn.
+  const out = [...liveServers];
+  const seen = new Set(out.map((s) => s.name));
+  for (const s of asArray<PrewarmMcpServer>(staticServers)) {
+    if (!seen.has(s.name)) out.push(s);
+  }
+  return out;
 }
 
 export function mergeSlashCommands(

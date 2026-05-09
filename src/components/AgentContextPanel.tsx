@@ -345,7 +345,18 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
         />
       </Section>
       {addingMcp && (
-        <AddMcpDialog existingNames={existingMcpNames} onClose={() => setAddingMcp(false)} />
+        <AddMcpDialog
+          existingNames={existingMcpNames}
+          onClose={() => {
+            setAddingMcp(false);
+            // After the dialog writes a new entry to ~/.claude.json,
+            // re-read prewarm so the new server appears in the panel
+            // immediately — `mergeMcpServers` unions prewarm into live
+            // so the new name surfaces even though init's mcp_servers
+            // (under --resume) doesn't include it yet.
+            prewarm.refresh();
+          }}
+        />
       )}
     </>
   );
