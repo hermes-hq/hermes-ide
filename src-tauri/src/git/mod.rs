@@ -3401,6 +3401,13 @@ pub fn git_worktree_has_changes(
             continue;
         }
         let file_path = entry.path().unwrap_or("").to_string();
+        if is_dirty_close_noise_file(&file_path) {
+            // Auto-generated files some CLIs (Aider, etc.) drop into
+            // the worktree without the user's intent.  Skipping them
+            // from the dirty-close dialog because they're never what
+            // the user means to keep when they close a session.
+            continue;
+        }
         files.push(WorktreeChangedFile {
             path: file_path,
             status: map_status_flags(s).to_string(),
@@ -3411,6 +3418,23 @@ pub fn git_worktree_has_changes(
         has_changes: !files.is_empty(),
         files,
     })
+}
+
+/// Returns true when a file is auto-generated noise unrelated to user
+/// intent — typically dropped into the worktree by some AI CLI tool
+/// (Aider, etc.).  These get filtered from the dirty-close dialog so
+/// the user isn't asked about files they never created.
+fn is_dirty_close_noise_file(path: &str) -> bool {
+    let basename = path.rsplit('/').next().unwrap_or(path);
+    matches!(
+        basename,
+        ".aider.chat.history.md"
+            | ".aider.input.history"
+            | ".aider.tags.cache.v3"
+            | ".aider.llm.history"
+            | ".DS_Store"
+            | "Thumbs.db"
+    )
 }
 
 #[tauri::command]
@@ -3746,6 +3770,36 @@ mod tests {
     fn test_db() -> Database {
         let tmp = NamedTempFile::new().unwrap();
         Database::new(tmp.path()).expect("Failed to create test database")
+    }
+
+    #[test]
+    fn dirty_close_noise_filter_skips_aider_artifacts() {
+        // The user complained that closing a session would surface
+        // .aider.chat.history.md as uncommitted even on projects
+        // they never used aider on.  These auto-generated files are
+        // never user intent; skip them from the dirty-close dialog.
+        assert!(is_dirty_close_noise_file(".aider.chat.history.md"));
+        assert!(is_dirty_close_noise_file("subdir/.aider.chat.history.md"));
+        assert!(is_dirty_close_noise_file(".aider.input.history"));
+        assert!(is_dirty_close_noise_file(".aider.tags.cache.v3"));
+        assert!(is_dirty_close_noise_file(".aider.llm.history"));
+    }
+
+    #[test]
+    fn dirty_close_noise_filter_skips_os_clutter() {
+        assert!(is_dirty_close_noise_file(".DS_Store"));
+        assert!(is_dirty_close_noise_file("path/to/.DS_Store"));
+        assert!(is_dirty_close_noise_file("Thumbs.db"));
+    }
+
+    #[test]
+    fn dirty_close_noise_filter_does_not_skip_real_files() {
+        assert!(!is_dirty_close_noise_file("src/main.rs"));
+        assert!(!is_dirty_close_noise_file("README.md"));
+        // A file that *contains* the noise name as a substring but
+        // isn't the actual noise file must still surface.
+        assert!(!is_dirty_close_noise_file("notes.aider.chat.history.md.bak"));
+        assert!(!is_dirty_close_noise_file(".aider.chat.history.md.user-notes"));
     }
 
     #[test]

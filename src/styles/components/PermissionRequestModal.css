@@ -93,40 +93,92 @@
 .perm-modal-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 8px;
+  padding: 12px 16px;
   border-top: 1px solid var(--rule, var(--border));
+  background: color-mix(in srgb, var(--brass, var(--accent)) 4%, transparent);
 }
 
+/* Actual button — not the old subtle-link treatment.  The user
+ * complained the old links were "hidden, hard to see they're
+ * expecting from me" — so each action gets real button chrome. */
 .perm-link {
   appearance: none;
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
+  background: var(--bg-1);
+  border: 1px solid var(--rule, var(--border));
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 12px;
+  font-weight: 500;
   color: var(--ink-secondary, var(--text-2));
   cursor: pointer;
-  transition: color 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease;
+  white-space: nowrap;
+  letter-spacing: -0.005em;
 }
 
 .perm-link:hover:not(:disabled) {
-  color: var(--brass, var(--accent));
+  border-color: var(--brass, var(--accent));
+  color: var(--ink-primary, var(--text-0));
+  transform: translateY(-0.5px);
 }
 
-.perm-link-deny:hover:not(:disabled) {
-  color: var(--red, var(--error));
+.perm-link:active:not(:disabled) {
+  transform: translateY(0);
 }
 
+/* Primary CTA — "approve once" / "confirm edit".  Brass-filled,
+ * pre-focused, eye-catching.  The pulse keyframe is a subtle
+ * one-time pulse on mount so the action row reads as "your move." */
 .perm-link-primary {
-  color: var(--brass, var(--accent));
+  background: linear-gradient(180deg, var(--brass-bright, var(--brass)) 0%, var(--brass, var(--accent)) 100%);
+  border-color: var(--brass, var(--accent));
+  color: #1a1208;
+  font-weight: 600;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass, var(--accent)) 35%, transparent);
+  animation: perm-link-attract 1.6s ease-out 1;
+}
+
+.perm-link-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--brass-bright, var(--brass));
+  color: #1a1208;
+}
+
+@keyframes perm-link-attract {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass, var(--accent)) 0%, transparent); }
+  35%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--brass, var(--accent)) 35%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass, var(--accent)) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .perm-link-primary { animation: none; }
+  .perm-link:hover:not(:disabled) { transform: none; }
+}
+
+/* Deny — destructive treatment on hover. */
+.perm-link-deny:hover:not(:disabled) {
+  border-color: var(--red, var(--error));
+  color: var(--red, var(--error));
 }
 
 .perm-link:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+  transform: none !important;
 }
 
+/* Trailing actions push to the right — primary CTA gets prime real
+ * estate at the right edge, deny + edit sit at the left as quieter
+ * options.  This is the standard dialog pattern (cancel-left,
+ * confirm-right).  Achieved via a flex spacer. */
+.perm-modal-actions-spacer {
+  flex: 1 1 auto;
+}
+
+/* The old `·` text separator is gone — buttons stand on their own
+ * with the row's gap.  Keep the rule for legacy usages. */
 .perm-sep {
-  color: var(--ink-tertiary, var(--text-3));
+  display: none;
 }

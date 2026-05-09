@@ -132,7 +132,7 @@ describe("PermissionRequestModal (pm-6, pm-7)", () => {
       />,
     );
     expect(screen.getByRole("button", { name: /approve once/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /approve all/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /always allow/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /deny/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
   });
@@ -172,7 +172,7 @@ describe("PermissionRequestModal (pm-6, pm-7)", () => {
         onDecision={onDecision}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /approve all/i }));
+    fireEvent.click(screen.getByRole("button", { name: /always allow/i }));
     expect(onDecision).toHaveBeenCalledWith({
       kind: "allow",
       persist: "Bash(git status --short:*)",

@@ -106,8 +106,9 @@ export function PermissionRequestModal({ request, permissionMode, onDecision }: 
                 setEditText(JSON.stringify(request.input, null, 2));
               }}
             >
-              cancel edit
+              Cancel
             </button>
+            <span className="perm-modal-actions-spacer" />
             <button
               type="button"
               className="perm-link perm-link-primary"
@@ -117,43 +118,47 @@ export function PermissionRequestModal({ request, permissionMode, onDecision }: 
                   onDecision({ kind: "allow", updatedInput: parsedEdit });
                 }
               }}
+              autoFocus
             >
-              confirm edit
+              Confirm edit
             </button>
           </>
         ) : (
           <>
-            <button
-              type="button"
-              className="perm-link"
-              onClick={() => onDecision({ kind: "allow" })}
-            >
-              approve once
-            </button>
-            <span className="perm-sep">·</span>
-            <button
-              type="button"
-              className="perm-link"
-              title={`Adds  permissions.allow: ['${allowRule}']  to ~/.claude/settings.json`}
-              onClick={() => onDecision({ kind: "allow", persist: allowRule })}
-            >
-              approve all ({request.toolName})
-            </button>
-            <span className="perm-sep">·</span>
+            {/* Quieter actions on the left, primary CTA on the right.
+             * Layout follows the standard dialog pattern: destructive
+             * + secondary options sit at the leading edge, the
+             * confirm action gets the trailing spotlight. */}
             <button
               type="button"
               className="perm-link perm-link-deny"
               onClick={() => onDecision({ kind: "deny" })}
             >
-              deny
+              Deny
             </button>
-            <span className="perm-sep">·</span>
             <button
               type="button"
               className="perm-link"
               onClick={() => setEditing(true)}
             >
-              edit input
+              Edit input
+            </button>
+            <span className="perm-modal-actions-spacer" />
+            <button
+              type="button"
+              className="perm-link"
+              title={`Adds permissions.allow: ['${allowRule}'] to ~/.claude/settings.json`}
+              onClick={() => onDecision({ kind: "allow", persist: allowRule })}
+            >
+              Always allow ({request.toolName})
+            </button>
+            <button
+              type="button"
+              className="perm-link perm-link-primary"
+              onClick={() => onDecision({ kind: "allow" })}
+              autoFocus
+            >
+              Approve once
             </button>
           </>
         )}

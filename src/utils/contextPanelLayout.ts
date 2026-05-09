@@ -18,7 +18,6 @@ export const PANEL_SECTION_ORDER = [
   "memory",
   "permissions",
   "pinned",
-  "cost",
 ] as const;
 
 export type PanelSectionKey = (typeof PANEL_SECTION_ORDER)[number];

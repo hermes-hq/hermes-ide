@@ -130,11 +130,16 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     setStderr("");
   }, [initSessionId]);
 
-  if (!state.initialized && !exitInfo) {
+  if (!state.initialized && !exitInfo && state.messages.length === 0) {
     // Claude's `--print --input-format stream-json` mode doesn't emit anything
     // (not even the init event) until it receives the first user message on
     // stdin. So the "pre-init" state is just the user's empty inbox — invite
     // them to send their first message rather than implying we're stuck.
+    //
+    // Once messages.length > 0 (the user hit Send), we DROP this empty
+    // state and fall through to the normal render — the user's echoed
+    // message + the live thinking indicator give them feedback during
+    // the bridge-spawn → init-arrives gap.
     return (
       <div className="agent-session-view">
         <AgentHeader state={state} sessionId={sessionId} workspacePathCount={workspacePathCount} />
@@ -157,12 +162,22 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   const numbered = assignTurnNumbers(state.messages);
   const turnCount = numbered.length === 0 ? 0 : numbered[numbered.length - 1].turn;
 
-  // Decide whether to render the vintage thinking indicator: only when
-  // Claude is actively working AND no streaming assistant text has begun
-  // yet (the heartbeat cursor takes over once tokens start arriving).
+  // Decide whether to render the vintage thinking indicator.
+  //
+  // Two cases fire it:
+  //   1. Post-init normal turn — Claude is thinking / running a tool /
+  //      awaiting after a user message, and no streaming text has
+  //      begun yet (the heartbeat cursor takes over once tokens start
+  //      arriving on the assistant's reply).
+  //   2. Pre-init FIRST turn — the user has sent their first message
+  //      (state.messages.length > 0) but the bridge hasn't emitted
+  //      init yet.  Without this, the user sees their echoed prompt
+  //      and then dead silence until init arrives — which can be a
+  //      noticeable beat on cold spawns.  The indicator fills the gap.
   const activity = deriveActivity(state);
+  const isBootingFirstTurn = !state.initialized && state.messages.length > 0;
   const showThinkingIndicator =
-    state.initialized
+    (state.initialized || isBootingFirstTurn)
     && (activity.status === "awaiting" || activity.status === "thinking" || activity.status === "running")
     && (state.streamingMessageId === null
       || !hasAnyTextBlock(
