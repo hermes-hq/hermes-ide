@@ -1634,6 +1634,13 @@ mod tests {
         );
     }
 
+    // Unix-specific because PathBuf::join on Windows uses `\` separators,
+    // which the assertions below would have to forward-slash-normalize to
+    // be portable.  The production fallback list logic is platform-agnostic
+    // (the `~/.volta/bin` style entries are still added on Windows, just
+    // with backslashes), so a Unix-only check here adequately covers the
+    // semantics that matter.
+    #[cfg(not(windows))]
     #[test]
     fn fallback_node_dirs_uses_home_when_set() {
         // SAFETY: tests are single-threaded for env mutation; no other
@@ -1688,6 +1695,14 @@ mod tests {
         }
     }
 
+    // Unix-specific because the assertion relies on `:` as the PATH
+    // separator (Windows uses `;`, treating "/usr/bin:/opt/homebrew/bin"
+    // as a single weird path entry instead of two).  On Windows the
+    // dedup logic still works — `enriched_path_var` uses
+    // `std::env::split_paths` which is platform-correct — but the test
+    // input would have to be reshaped per-platform to actually exercise
+    // it.  Skipping on Windows is the simplest accurate gate.
+    #[cfg(not(windows))]
     #[test]
     fn enriched_path_var_dedupes_existing_entries() {
         let prev = std::env::var_os("PATH");
