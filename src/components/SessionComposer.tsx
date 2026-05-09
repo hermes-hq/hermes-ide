@@ -127,9 +127,17 @@ export function SessionComposer() {
   // surfaces the kind as a badge so the user knows up-front whether
   // accepting the item will send a chat message or pop a terminal.
   const slashCommandsFromInit = useMemo<SlashCommandItem[]>(() => {
+    // Pure dynamic source: whatever the SDK reports in init.  No
+    // hard-coded augmentation — the catalog is live and version-
+    // matched to the binary the user actually has.  CLI-only
+    // built-ins that the SDK doesn't surface (because they don't
+    // work over stream-json) won't appear here, but the user can
+    // still type them manually and `handleSubmit` routes them to
+    // the embedded terminal via `classifySlashCommand`.
     const raw = init?.slash_commands;
+    let items: SlashCommandItem[];
     if (Array.isArray(raw)) {
-      const items = raw
+      items = raw
         .map((entry): SlashCommandItem | null => {
           if (typeof entry === "string") {
             const command = entry.startsWith("/") ? entry : `/${entry}`;
@@ -146,18 +154,16 @@ export function SessionComposer() {
           return null;
         })
         .filter((c): c is SlashCommandItem => c !== null);
-      // Annotate every entry with its kind.
-      return items.map((it) => ({ ...it, kind: classifySlashCommand(it) }));
+    } else {
+      const merged = mergeSlashCommands(prewarm.slashCommands, undefined);
+      items = merged.map((cmd) => ({
+        command: cmd.startsWith("/") ? cmd : `/${cmd}`,
+        label: "",
+        description: "",
+        source: "builtin" as const,
+      }));
     }
-    // Pre-init fallback: static prewarm.  Source is filesystem only,
-    // so descriptions are blank — the dropdown still renders with the
-    // command names so / autocomplete works before first message.
-    const merged = mergeSlashCommands(prewarm.slashCommands, undefined);
-    return merged.map((cmd) => {
-      const command = cmd.startsWith("/") ? cmd : `/${cmd}`;
-      const item: SlashCommandItem = { command, label: "", description: "", source: "builtin" };
-      return { ...item, kind: classifySlashCommand(item) };
-    });
+    return items.map((it) => ({ ...it, kind: classifySlashCommand(it) }));
   }, [init, prewarm.slashCommands]);
 
   // ─── Active slash overlay state ─────────────────────────────────────
@@ -245,6 +251,24 @@ export function SessionComposer() {
     if (!composerSessionId) return;
     if (inFlightRef.current) return;
     if (!draft.trim() && pendingImages.length === 0) return;
+
+    // Pre-submit routing: if the entire draft is a single slash
+    // command and that command classifies as `cli` (built-in
+    // interactive verb the SDK can't drive over stream-json), route
+    // to the embedded terminal banner instead of sending it as a
+    // chat message.  Honors the dynamic-list contract: even commands
+    // the SDK didn't include in init.slash_commands get routed
+    // correctly when the user types them manually.
+    const trimmed = draft.trim();
+    if (trimmed.startsWith("/") && !/\s/.test(trimmed)) {
+      const kind = classifySlashCommand({ command: trimmed });
+      if (kind === "cli") {
+        dispatch({ type: "SET_COMPOSER_DRAFT", sessionId: composerSessionId, draft: "" });
+        setPendingCliCommand(trimmed);
+        return;
+      }
+    }
+
     inFlightRef.current = true;
     try {
       const attachments: AgentAttachment[] = pendingImages.map((img) => ({
@@ -666,7 +690,12 @@ export function SessionComposer() {
     <div
       ref={wrapperRef}
       className={`session-composer session-composer-claude ${isDragOver ? "session-composer-drag-over" : ""}`}
-      style={{ height: effectiveHeight }}
+      // When the embedded slash terminal is mounted, let the wrapper
+      // grow naturally to accommodate it — the user-set composer
+      // height applies only to the textarea card.  Otherwise the
+      // 280-px terminal overflows the fixed-height wrapper and lands
+      // above the conversation, leaving dead space below.
+      style={activeTerminalCommand ? undefined : { height: effectiveHeight }}
     >
       <div
         className="session-composer-resize-handle"
