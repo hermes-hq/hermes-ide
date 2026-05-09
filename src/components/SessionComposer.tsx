@@ -742,7 +742,13 @@ export function SessionComposer() {
       {activeTerminal && (
         <EmbeddedSlashTerminal
           spec={activeTerminal}
-          cwd={init?.cwd ?? null}
+          // cwd fallback chain: SDK init wins (it's the canonical
+          // session cwd), then the session's working_directory which
+          // we have on record from session creation, then a final
+          // null which lets the PTY inherit the parent process —
+          // which is rarely correct (the dev binary's launch dir is
+          // not where the user expects claude to run).
+          cwd={init?.cwd ?? session?.working_directory ?? null}
           onClose={() => setActiveTerminal(null)}
         />
       )}

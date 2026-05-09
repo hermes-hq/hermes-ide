@@ -171,21 +171,43 @@ export function EmbeddedSlashTerminal({ spec, cwd, onClose }: Props) {
         ptyIdRef.current = ptyId;
         setPhase("running");
 
+        // Slash mode: hold the command until we see Claude's REPL
+        // prompt marker (`❯ ` — the chevron + space at the input
+        // line).  Auto-typing earlier would fire mid-trust-prompt
+        // (the "Yes, I trust this folder" gate) and get interpreted
+        // as confirming that, leaving the slash text in the chat
+        // box.  Only stream output to xterm; once the marker is
+        // detected, send the input ONCE and stop watching.
+        let autoInputSent = autoInput === null;
+        let bootBuf = "";
+        const PROMPT_RE = /❯\s|^>\s/m; // ❯ space, or ">" space
         unOutput = await listen<string>(`inline-pty-output-${ptyId}`, (msg) => {
           xterm.write(msg.payload);
+          if (autoInputSent) return;
+          bootBuf += msg.payload;
+          // Cap the boot buffer so we don't grow forever if the
+          // marker never appears.
+          if (bootBuf.length > 16_000) bootBuf = bootBuf.slice(-8000);
+          if (PROMPT_RE.test(bootBuf)) {
+            autoInputSent = true;
+            // Small breath after the prompt renders so the input
+            // line is fully drawn before we stuff data.
+            setTimeout(() => {
+              if (cancelled) return;
+              invoke("write_inline_pty", { ptyId, data: autoInput! }).catch(() => {});
+            }, 180);
+          }
         });
 
-        // Slash mode: auto-type the command into Claude's REPL once
-        // it's ready.  We can't reliably detect the prompt (claude's
-        // bootstrap output is irregular), so we wait a fixed window
-        // long enough for cold spawns then send the command.  A real
-        // TTY will buffer it; the user sees the typed command echo +
-        // the resulting TUI.
+        // Safety fallback: if we never see the marker (claude version
+        // changed, theme rewrote it, etc.), still send after 6 s so
+        // the feature degrades gracefully instead of hanging silent.
         if (autoInput) {
           setTimeout(() => {
-            if (cancelled) return;
+            if (cancelled || autoInputSent) return;
+            autoInputSent = true;
             invoke("write_inline_pty", { ptyId, data: autoInput }).catch(() => {});
-          }, 1500);
+          }, 6000);
         }
         unExit = await listen<{ code: number | null }>(
           `inline-pty-exit-${ptyId}`,
