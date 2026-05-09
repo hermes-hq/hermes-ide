@@ -723,9 +723,11 @@ export const initialState: SessionState = {
     focusedPaneId: null,
   },
   ui: {
-    // Closed by default — open via the activity bar (Cmd/Ctrl+E).  The
-    // agent surface is busy enough without an unsolicited 280px right rail.
-    contextPanelOpen: false,
+    // Open by default for both panel kinds — agent sessions need the
+    // sidebar (MCP, memory, permissions) for any non-trivial work, and
+    // the activity-bar Context button (Cmd/Ctrl+E) toggles it off when
+    // the user wants more horizontal room.
+    contextPanelOpen: true,
     usagePanelOpen: false,
     sessionListCollapsed: false,
     commandPaletteOpen: false,

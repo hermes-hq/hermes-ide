@@ -47,7 +47,6 @@ const SECTION_LABELS: Record<PanelSectionKey, string> = {
   memory: "MEMORY",
   permissions: "PERMISSIONS",
   pinned: "PINNED FILES",
-  cost: "COST & TOKENS",
 };
 
 /** Placeholder content per section until M3-M5 land.  Each section
@@ -58,7 +57,6 @@ const SECTION_EMPTY_STATE: Record<PanelSectionKey, { hint: string; cta: string }
   memory: { hint: "no memory files loaded", cta: "+ Add memory line" },
   permissions: { hint: "no permission rules", cta: "+ Add rule" },
   pinned: { hint: "no pins", cta: "+ Pin file" },
-  cost: { hint: "0 turns this session", cta: "+ Set budget" },
 };
 
 export function AgentContextPanel({
@@ -331,17 +329,6 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
         <SectionEmptyState
           hint={SECTION_EMPTY_STATE.pinned.hint}
           cta={SECTION_EMPTY_STATE.pinned.cta}
-        />
-      </Section>
-      <Section
-        sectionKey="cost"
-        label={SECTION_LABELS.cost}
-        collapsed={collapsed.cost ?? false}
-        onToggle={() => onToggle("cost")}
-      >
-        <SectionEmptyState
-          hint={SECTION_EMPTY_STATE.cost.hint}
-          cta={SECTION_EMPTY_STATE.cost.cta}
         />
       </Section>
       {addingMcp && (

@@ -100,7 +100,7 @@ describe("AgentContextPanel — section order (cps-3)", () => {
     const headers = Array.from(
       document.querySelectorAll(".agent-context-section-header-label"),
     ).map((el) => el.textContent?.trim());
-    expect(headers).toEqual(["MCP", "MEMORY", "PERMISSIONS", "PINNED FILES", "COST & TOKENS"]);
+    expect(headers).toEqual(["MCP", "MEMORY", "PERMISSIONS", "PINNED FILES"]);
   });
 
   it("cps-3-b: PANEL_SECTION_ORDER constant is the single source of truth", () => {
@@ -109,7 +109,6 @@ describe("AgentContextPanel — section order (cps-3)", () => {
       "memory",
       "permissions",
       "pinned",
-      "cost",
     ]);
   });
 });
@@ -157,7 +156,7 @@ describe("loadPanelState — restore (cps-4, cps-9, cps-10)", () => {
   it("cps-4: round-trips a serialized state", () => {
     const original: PanelState = {
       width: 360,
-      collapsed: { mcp: false, memory: true, permissions: false, pinned: true, cost: false },
+      collapsed: { mcp: false, memory: true, permissions: false, pinned: true },
     };
     const got = loadPanelState(serializePanelState(original));
     expect(got).toEqual(original);
@@ -226,7 +225,7 @@ describe("AgentContextPanel — collapse persistence (cps-6)", () => {
         session={stubAgent()}
         initialState={{
           width: 320,
-          collapsed: { mcp: true, memory: false, permissions: true, pinned: false, cost: false },
+          collapsed: { mcp: true, memory: false, permissions: true, pinned: false },
         }}
       />,
     );
@@ -342,14 +341,17 @@ describe("AgentContextPanel — empty-state CTAs (decision §0.6)", () => {
   it("renders + Add CTAs in every section (discoverability)", () => {
     render(<AgentContextPanel session={stubAgent()} />);
     // Every section ships a CTA — either the M0 placeholder
-    // `.agent-context-empty-cta` (Pinned, Cost) or a section-specific
-    // CTA after M3-M5 wired their content (mcp-add-cta, memory-add-cta,
+    // `.agent-context-empty-cta` (Pinned) or a section-specific CTA
+    // after M3-M5 wired their content (mcp-add-cta, memory-add-cta,
     // perms-add-cta).  Discoverability is the contract; the class name
-    // is implementation detail.
+    // is implementation detail.  Cost & Tokens used to be a section
+    // here; it was removed because its only CTA ("Set budget") was a
+    // non-functional placeholder — the cost meter in the masthead is
+    // the live source of truth.
     const placeholderCtas = document.querySelectorAll(".agent-context-empty-cta");
     const sectionCtas = document.querySelectorAll(
       ".mcp-add-cta, .memory-add-cta, .perms-add-cta",
     );
-    expect(placeholderCtas.length + sectionCtas.length).toBeGreaterThanOrEqual(5);
+    expect(placeholderCtas.length + sectionCtas.length).toBeGreaterThanOrEqual(4);
   });
 });

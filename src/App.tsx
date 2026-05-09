@@ -931,7 +931,7 @@ function AppContent() {
            *  toggleable ContextPanel + UsagePanel pair.  Both can be
            *  cycled from the activity bar.
            */}
-          {!ui.flowMode && activeSession?.mode === "agent" && (
+          {!ui.flowMode && activeSession?.mode === "agent" && ui.contextPanelOpen && (
             <PanelErrorBoundary panelName="Agent Context Panel">
               <AgentContextPanel session={activeSession} />
             </PanelErrorBoundary>
