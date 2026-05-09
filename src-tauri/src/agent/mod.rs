@@ -101,11 +101,7 @@ fn bridge_path_candidates(
     if let Some(p) = env_override {
         out.push(std::path::PathBuf::from(p));
     }
-    out.push(
-        manifest_dir
-            .join("bridge")
-            .join("hermes-claude-bridge.mjs"),
-    );
+    out.push(manifest_dir.join("bridge").join("hermes-claude-bridge.mjs"));
     if let Some(r) = resource_dir {
         out.push(r.join("bridge").join("hermes-claude-bridge.mjs"));
         // Some bundler/platform combinations flatten the resource subdir
@@ -138,8 +134,7 @@ fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let resource_dir = app.path().resource_dir().ok();
-    let candidates =
-        bridge_path_candidates(None, &manifest, resource_dir.as_deref());
+    let candidates = bridge_path_candidates(None, &manifest, resource_dir.as_deref());
 
     for c in &candidates {
         if c.exists() {
@@ -1542,7 +1537,10 @@ mod tests {
         let resource = std::path::Path::new("/app/Resources");
         let candidates = bridge_path_candidates(None, manifest, Some(resource));
         // Dev path first, then resource_dir-based candidates after.
-        assert_eq!(candidates[0], manifest.join("bridge/hermes-claude-bridge.mjs"));
+        assert_eq!(
+            candidates[0],
+            manifest.join("bridge/hermes-claude-bridge.mjs")
+        );
         assert!(
             candidates
                 .iter()
@@ -1591,7 +1589,10 @@ mod tests {
         let manifest = std::path::Path::new("/dev/manifest");
         let candidates = bridge_path_candidates(None, manifest, None);
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0], manifest.join("bridge/hermes-claude-bridge.mjs"));
+        assert_eq!(
+            candidates[0],
+            manifest.join("bridge/hermes-claude-bridge.mjs")
+        );
     }
 
     #[test]
@@ -1599,10 +1600,7 @@ mod tests {
         // Simulates the production case: write a dummy bridge file into
         // a temp dir and verify the candidate enumeration would find it
         // even though the dev manifest dir doesn't contain the bridge.
-        let tmp = std::env::temp_dir().join(format!(
-            "hermes-bridge-test-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("hermes-bridge-test-{}", std::process::id()));
         let resources = tmp.join("Resources");
         std::fs::create_dir_all(resources.join("bridge")).expect("mkdir resources");
         let bridge_file = resources.join("bridge/hermes-claude-bridge.mjs");
@@ -1671,7 +1669,11 @@ mod tests {
         let enriched = enriched_path_var();
         let as_str = enriched.to_string_lossy().into_owned();
         // Existing entries preserved.
-        assert!(as_str.contains("/usr/bin"), "lost existing PATH: {}", as_str);
+        assert!(
+            as_str.contains("/usr/bin"),
+            "lost existing PATH: {}",
+            as_str
+        );
         // Homebrew added even though it wasn't in PATH.
         assert!(
             as_str.contains("/opt/homebrew/bin") || as_str.contains("/usr/local/bin"),
