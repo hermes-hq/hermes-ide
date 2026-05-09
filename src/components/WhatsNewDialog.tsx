@@ -14,9 +14,32 @@ interface WhatsNewDialogProps {
 export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
   const [visible, setVisible] = useState(false);
   const [suppress, setSuppress] = useState(false);
+  // Preview override — when localStorage has `hermesPreviewWhatsNew`
+  // set to a version key that exists in `changelog`, show that
+  // entry regardless of the user's last-seen / suppress state.  Used
+  // before a release to verify the release notes render correctly
+  // without bumping `package.json`.  Set via DevTools:
+  //
+  //     localStorage.setItem("hermesPreviewWhatsNew", "1.1.0");
+  //     location.reload();
+  //
+  // Clear with `localStorage.removeItem("hermesPreviewWhatsNew")`.
+  const previewVersion =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("hermesPreviewWhatsNew") ?? null
+      : null;
+  const effectiveVersion =
+    previewVersion && changelog[previewVersion] ? previewVersion : version;
 
   useEffect(() => {
     let cancelled = false;
+
+    // Preview mode short-circuit — show immediately, don't write
+    // any settings, ignore suppress.
+    if (previewVersion && changelog[previewVersion]) {
+      setVisible(true);
+      return () => { cancelled = true; };
+    }
 
     (async () => {
       try {
@@ -56,10 +79,13 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
     })();
 
     return () => { cancelled = true; };
-  }, [version]);
+  }, [version, previewVersion]);
 
   const handleDismiss = useCallback(async () => {
     setVisible(false);
+    // Preview mode: don't persist anything — the user is just
+    // looking at the dialog before a release.
+    if (previewVersion && changelog[previewVersion]) return;
     try {
       await setSetting(SETTING_LAST_SEEN, version);
       if (suppress) {
@@ -68,11 +94,11 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
     } catch {
       // Best-effort persist
     }
-  }, [version, suppress]);
+  }, [version, suppress, previewVersion]);
 
   if (!visible) return null;
 
-  const entry = changelog[version];
+  const entry = changelog[effectiveVersion];
   if (!entry) return null;
 
   return (
@@ -81,7 +107,7 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
         <div className="whatsnew-header">
           <span className="whatsnew-icon" aria-hidden="true">&#10024;</span>
           <span className="whatsnew-title">What&rsquo;s New</span>
-          <span className="whatsnew-tag">v{version}</span>
+          <span className="whatsnew-tag">v{effectiveVersion}</span>
         </div>
         <div className="whatsnew-body">
           <ul className="whatsnew-list">
