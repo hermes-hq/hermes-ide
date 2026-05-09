@@ -518,8 +518,13 @@ mod tests {
 
     #[test]
     fn canonicalise_memory_path_requires_md_extension() {
-        assert!(canonicalise_memory_path("/tmp/x.txt").is_err());
-        assert!(canonicalise_memory_path("/tmp/CLAUDE.md").is_ok());
+        // Use the platform's temp dir so the absolute-path check
+        // succeeds on Windows (where `/tmp/...` is not absolute).
+        let tmp = std::env::temp_dir();
+        let bad = tmp.join("x.txt");
+        let good = tmp.join("CLAUDE.md");
+        assert!(canonicalise_memory_path(bad.to_str().unwrap()).is_err());
+        assert!(canonicalise_memory_path(good.to_str().unwrap()).is_ok());
     }
 }
 
@@ -938,8 +943,11 @@ mod prewarm_tests {
 
         let got = read_static_memory_paths(Some(proj.path().to_string_lossy().into_owned()));
         assert_eq!(got.len(), 2);
-        assert!(got.iter().any(|p| p.ends_with("/.claude/CLAUDE.md")));
-        assert!(got
+        // Normalize Windows backslashes to forward slashes so the
+        // suffix checks are platform-agnostic.
+        let normalized: Vec<String> = got.iter().map(|p| p.replace('\\', "/")).collect();
+        assert!(normalized.iter().any(|p| p.ends_with("/.claude/CLAUDE.md")));
+        assert!(normalized
             .iter()
             .any(|p| p.ends_with("/CLAUDE.md") && !p.contains(".claude")));
     }
