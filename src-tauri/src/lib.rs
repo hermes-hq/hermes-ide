@@ -3,11 +3,11 @@ mod claude_config;
 mod clipboard;
 mod db;
 mod git;
+mod inline_pty;
 mod menu;
 mod platform;
 mod plugins;
 mod process;
-mod inline_pty;
 mod project;
 /// Exposed for benchmarks — not part of the public API.
 #[doc(hidden)]

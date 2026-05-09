@@ -3798,8 +3798,12 @@ mod tests {
         assert!(!is_dirty_close_noise_file("README.md"));
         // A file that *contains* the noise name as a substring but
         // isn't the actual noise file must still surface.
-        assert!(!is_dirty_close_noise_file("notes.aider.chat.history.md.bak"));
-        assert!(!is_dirty_close_noise_file(".aider.chat.history.md.user-notes"));
+        assert!(!is_dirty_close_noise_file(
+            "notes.aider.chat.history.md.bak"
+        ));
+        assert!(!is_dirty_close_noise_file(
+            ".aider.chat.history.md.user-notes"
+        ));
     }
 
     #[test]

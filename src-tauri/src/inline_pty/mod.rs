@@ -206,10 +206,7 @@ pub fn resize_inline_pty(
 }
 
 #[tauri::command]
-pub fn kill_inline_pty(
-    state: State<'_, InlinePtyManager>,
-    pty_id: String,
-) -> Result<(), String> {
+pub fn kill_inline_pty(state: State<'_, InlinePtyManager>, pty_id: String) -> Result<(), String> {
     let mut map = state.inner.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(mut entry) = map.remove(&pty_id) {
         let _ = entry.killer.kill();

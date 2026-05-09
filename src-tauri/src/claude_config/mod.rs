@@ -253,12 +253,7 @@ fn validate_server_name(name: &str) -> Result<&str, String> {
     // (`;` `|` `&` `$` `<` `>` `` ` `` `'` `"` `\` `/`) as defense in
     // depth + to keep accidental copy-paste honest.
     if !trimmed.chars().all(|c| {
-        c.is_ascii_alphanumeric()
-            || c == '_'
-            || c == '-'
-            || c == ' '
-            || c == '.'
-            || c == ':'
+        c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' || c == '.' || c == ':'
     }) {
         return Err("name contains invalid characters".into());
     }
@@ -760,7 +755,10 @@ mod prewarm_tests {
         // Env keys returned, sorted in insertion order; values stripped.
         let mut keys = got.env_keys.clone();
         keys.sort();
-        assert_eq!(keys, vec!["CONTEXT7_API_KEY".to_string(), "DEBUG".to_string()]);
+        assert_eq!(
+            keys,
+            vec!["CONTEXT7_API_KEY".to_string(), "DEBUG".to_string()]
+        );
     }
 
     #[test]
