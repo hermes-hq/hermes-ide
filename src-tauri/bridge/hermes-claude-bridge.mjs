@@ -64,7 +64,10 @@ import { argv, exit, stdin, stdout, stderr } from "node:process";
 import { createInterface } from "node:readline";
 import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod";
-import { normalizeBridgeAllowDecision } from "./canUseToolHelpers.mjs";
+import {
+  createCanUseToolHandler,
+  buildPermissionOptions,
+} from "./canUseToolHelpers.mjs";
 
 // ─── 1. Parse CLI args ──────────────────────────────────────────────
 
@@ -404,7 +407,9 @@ const sdkOptions = {
   ...(flags.resume ? { resume: flags.resume } : { sessionId: flags.sessionId }),
   ...(flags.forkSession ? { forkSession: true } : {}),
   ...(flags.model ? { model: flags.model } : {}),
-  ...(flags.permissionMode ? { permissionMode: flags.permissionMode } : {}),
+  // bypassPermissions also requires allowDangerouslySkipPermissions: true.
+  // See buildPermissionOptions() in canUseToolHelpers.mjs.
+  ...buildPermissionOptions(flags),
   ...(flags.effort ? { effort: flags.effort } : {}),
   ...(flags.addDir.length > 0 ? { additionalDirectories: flags.addDir } : {}),
   includePartialMessages: !!flags.includePartialMessages,
@@ -446,22 +451,15 @@ const sdkOptions = {
   // (allow / deny / edit input / approve-all) round-trips through
   // Hermes' native React modal — no chat-string permission prompts.
   // Skipped under bypassPermissions; the SDK auto-allows there.
-  canUseTool: async (toolName, input, _meta) => {
-    const id = `perm-${++permIdSeq}-${Date.now()}`;
-    const promise = new Promise((resolve) => {
-      permPending.set(id, { resolve });
-    });
-    // Write request to stdout — frontend listens on the agent event
-    // stream for envelopes with type === "_hermes_perm_request".
-    stdout.write(JSON.stringify({
-      type: "_hermes_perm_request",
-      id,
-      toolName,
-      input,
-    }) + "\n");
-    const decision = await promise;
-    return normalizeBridgeAllowDecision(decision, input);
-  },
+  //
+  // Honours the SDK's abort signal (3rd-arg `options.signal`) so a
+  // mid-prompt abort settles the pending request with a deny instead
+  // of hanging until SIGTERM.  See createCanUseToolHandler().
+  canUseTool: createCanUseToolHandler({
+    stdout,
+    permPending,
+    idGen: () => `perm-${++permIdSeq}-${Date.now()}`,
+  }),
   // Forward bridge stderr-by-line so SDK panics surface to Rust.
   stderr: (data) => stderr.write(data),
   env: {
@@ -583,6 +581,12 @@ async function handleControl(op) {
       await queryHandle.setPermissionMode(op.mode);
       return;
     case "setMaxThinkingTokens":
+      // SDK marks `setMaxThinkingTokens` as deprecated in favour of the
+      // `thinking` option on `query()`.  But the streaming Query interface
+      // exposes no live `setThinking` (and `applyFlagSettings` only takes
+      // `Settings` keys, not `thinking`), so the deprecated method is
+      // currently the only mid-session path.  Migrate when the SDK adds a
+      // live setter (track via a future SDK changelog entry).
       await queryHandle.setMaxThinkingTokens(op.tokens ?? null);
       return;
     case "setMcpServers":
