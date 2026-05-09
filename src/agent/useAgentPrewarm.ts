@@ -9,7 +9,7 @@
  * data takes over (init is authoritative — see merge helpers in
  * `src/utils/prewarm.ts`).
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PrewarmMcpServer } from "../utils/prewarm";
 
@@ -17,12 +17,24 @@ export interface PrewarmData {
   mcpServers: PrewarmMcpServer[];
   slashCommands: string[];
   memoryPaths: string[];
+  /** Force a fresh re-read of the static prewarm sources.  Use after
+   *  a write that may have changed `~/.claude.json` (e.g. removing an
+   *  MCP server) so the panel reflects the new on-disk state without
+   *  waiting for the next session-context-panel mount. */
+  refresh: () => void;
 }
 
-const EMPTY: PrewarmData = { mcpServers: [], slashCommands: [], memoryPaths: [] };
+interface PrewarmRaw {
+  mcpServers: PrewarmMcpServer[];
+  slashCommands: string[];
+  memoryPaths: string[];
+}
+
+const EMPTY_DATA: PrewarmRaw = { mcpServers: [], slashCommands: [], memoryPaths: [] };
 
 export function useAgentPrewarm(cwd: string | null | undefined): PrewarmData {
-  const [data, setData] = useState<PrewarmData>(EMPTY);
+  const [data, setData] = useState<PrewarmRaw>(EMPTY_DATA);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,7 +48,9 @@ export function useAgentPrewarm(cwd: string | null | undefined): PrewarmData {
       setData({ mcpServers, slashCommands, memoryPaths });
     });
     return () => { cancelled = true; };
-  }, [cwd]);
+  }, [cwd, tick]);
 
-  return data;
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  return { ...data, refresh };
 }

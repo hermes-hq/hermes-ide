@@ -186,7 +186,10 @@ function McpRowDetails({
             type="button"
             className="mcp-action mcp-action-deny"
             disabled={busy}
-            onClick={() => setConfirmRemove(true)}
+            onClick={() => {
+              console.log(`[mcp-ui] remove button clicked for "${name}"`);
+              setConfirmRemove(true);
+            }}
           >
             remove
           </button>
@@ -200,7 +203,10 @@ function McpRowDetails({
               type="button"
               className="mcp-action"
               disabled={busy}
-              onClick={() => setConfirmRemove(false)}
+              onClick={() => {
+                console.log(`[mcp-ui] remove cancelled for "${name}"`);
+                setConfirmRemove(false);
+              }}
             >
               cancel
             </button>
@@ -209,9 +215,17 @@ function McpRowDetails({
               className="mcp-action mcp-action-deny mcp-action-confirm"
               disabled={busy}
               onClick={async () => {
+                console.log(`[mcp-ui] yes-remove confirmed for "${name}" — calling onRequestRemove`);
                 setBusy(true);
-                try { await onRequestRemove(name); } catch { /* parent handles */ }
-                finally { setBusy(false); setConfirmRemove(false); }
+                try {
+                  await onRequestRemove(name);
+                  console.log(`[mcp-ui] onRequestRemove resolved for "${name}"`);
+                } catch (err) {
+                  console.warn(`[mcp-ui] onRequestRemove threw for "${name}":`, err);
+                } finally {
+                  setBusy(false);
+                  setConfirmRemove(false);
+                }
               }}
             >
               {busy ? "removing…" : "yes, remove"}

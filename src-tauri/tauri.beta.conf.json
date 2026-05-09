@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Hermes IDE Beta",
+  "identifier": "com.hermes-ide.terminal.beta",
+  "app": {
+    "windows": [
+      {
+        "title": "Hermes IDE · Beta"
+      }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}
