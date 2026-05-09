@@ -1,3 +1,15 @@
+# Hermes IDE 1.1.3
+
+A focused hotfix that finishes restoring Agent mode in shipped builds.
+
+## Agent mode now actually starts
+
+1.1.2 was supposed to restore Agent mode for installed apps, but a piece of the agent runtime was still missing from the bundle — every conversation crashed within seconds with a *Cannot find package* error in the activity panel. 1.1.3 ships the missing runtime, so Agent mode starts and stays running on installed builds.
+
+If you were stuck on *Agent process crashed (code 1)* on 1.1.2, please update.
+
+---
+
 # Hermes IDE 1.1.2
 
 A focused stability release that fixes Agent mode in the shipped 1.1 build and tightens long-session memory.
