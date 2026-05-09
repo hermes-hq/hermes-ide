@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import "../styles/components/WhatsNewDialog.css";
-import { changelog } from "../data/changelog";
+import { changelog, type ChangelogEntry, type ChangelogSection } from "../data/changelog";
 import { getSetting, setSetting } from "../api/settings";
 
 const SETTING_LAST_SEEN = "last_seen_version";
@@ -14,16 +14,8 @@ interface WhatsNewDialogProps {
 export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
   const [visible, setVisible] = useState(false);
   const [suppress, setSuppress] = useState(false);
-  // Preview override — when localStorage has `hermesPreviewWhatsNew`
-  // set to a version key that exists in `changelog`, show that
-  // entry regardless of the user's last-seen / suppress state.  Used
-  // before a release to verify the release notes render correctly
-  // without bumping `package.json`.  Set via DevTools:
-  //
-  //     localStorage.setItem("hermesPreviewWhatsNew", "1.1.0");
-  //     location.reload();
-  //
-  // Clear with `localStorage.removeItem("hermesPreviewWhatsNew")`.
+  // Preview override — see WhatsNewDialog#preview-mode in the file
+  // for the DevTools snippet that activates this path.
   const previewVersion =
     typeof window !== "undefined"
       ? window.localStorage.getItem("hermesPreviewWhatsNew") ?? null
@@ -34,8 +26,6 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
   useEffect(() => {
     let cancelled = false;
 
-    // Preview mode short-circuit — show immediately, don't write
-    // any settings, ignore suppress.
     if (previewVersion && changelog[previewVersion]) {
       setVisible(true);
       return () => { cancelled = true; };
@@ -50,27 +40,21 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
 
         if (cancelled) return;
 
-        // Fresh install — no previous version saved. Save current and don't show.
         if (!lastSeen) {
           await setSetting(SETTING_LAST_SEEN, version);
           return;
         }
 
-        // Same version — nothing new
         if (lastSeen === version) return;
 
-        // User permanently suppressed the dialog
         if (suppressed === "true") {
-          // Still update the last-seen version so we don't re-check
           await setSetting(SETTING_LAST_SEEN, version);
           return;
         }
 
-        // New version + not suppressed + we have changelog content for it
         if (changelog[version]) {
           setVisible(true);
         } else {
-          // No changelog entry for this version — just update silently
           await setSetting(SETTING_LAST_SEEN, version);
         }
       } catch {
@@ -83,8 +67,6 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
 
   const handleDismiss = useCallback(async () => {
     setVisible(false);
-    // Preview mode: don't persist anything — the user is just
-    // looking at the dialog before a release.
     if (previewVersion && changelog[previewVersion]) return;
     try {
       await setSetting(SETTING_LAST_SEEN, version);
@@ -103,21 +85,33 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
 
   return (
     <div className="whatsnew-backdrop" onClick={handleDismiss}>
-      <div className="whatsnew-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="whatsnew-header">
-          <span className="whatsnew-icon" aria-hidden="true">&#10024;</span>
-          <span className="whatsnew-title">What&rsquo;s New</span>
-          <span className="whatsnew-tag">v{effectiveVersion}</span>
-        </div>
+      <div
+        className="whatsnew-dialog"
+        data-accent={entry.accent ?? "default"}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <WhatsNewHero version={effectiveVersion} tagline={entry.tagline} />
         <div className="whatsnew-body">
-          <ul className="whatsnew-list">
-            {entry.items.map((item, i) => (
-              <li key={i} className="whatsnew-list-item">
-                <span className="whatsnew-list-bullet" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+          {entry.sections && entry.sections.length > 0 ? (
+            <div className="whatsnew-sections">
+              {entry.sections.map((section, idx) => (
+                <SectionCard key={idx} section={section} index={idx} />
+              ))}
+            </div>
+          ) : entry.items && entry.items.length > 0 ? (
+            <ul className="whatsnew-flat-list">
+              {entry.items.map((item, i) => (
+                <li
+                  key={i}
+                  className="whatsnew-flat-item"
+                  style={{ animationDelay: `${60 + i * 28}ms` }}
+                >
+                  <span className="whatsnew-flat-bullet" aria-hidden="true">·</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
         <div className="whatsnew-footer">
           <label className="whatsnew-suppress">
@@ -129,7 +123,7 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
             Don&rsquo;t show after updates
           </label>
           <div className="whatsnew-spacer" />
-          <button className="whatsnew-btn" onClick={handleDismiss}>
+          <button className="whatsnew-btn whatsnew-btn-primary" onClick={handleDismiss}>
             Got it
           </button>
         </div>
@@ -137,3 +131,62 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
     </div>
   );
 }
+
+function WhatsNewHero({ version, tagline }: { version: string; tagline?: string }) {
+  return (
+    <header className="whatsnew-hero" aria-hidden={false}>
+      {/* Decorative animated mesh — accents from the active theme. */}
+      <div className="whatsnew-hero-mesh" aria-hidden="true">
+        <span className="whatsnew-hero-orb whatsnew-hero-orb-a" />
+        <span className="whatsnew-hero-orb whatsnew-hero-orb-b" />
+        <span className="whatsnew-hero-orb whatsnew-hero-orb-c" />
+      </div>
+      <div className="whatsnew-hero-content">
+        <span className="whatsnew-hero-eyebrow">What&rsquo;s New</span>
+        <h1 className="whatsnew-hero-version">v{version}</h1>
+        {tagline && <p className="whatsnew-hero-tagline">{tagline}</p>}
+      </div>
+    </header>
+  );
+}
+
+function SectionCard({ section, index }: { section: ChangelogSection; index: number }) {
+  return (
+    <section
+      className="whatsnew-section"
+      style={{ animationDelay: `${100 + index * 70}ms` }}
+    >
+      <div className="whatsnew-section-header">
+        {section.icon && (
+          <span className="whatsnew-section-icon" aria-hidden="true">
+            {section.icon}
+          </span>
+        )}
+        <h2 className="whatsnew-section-title">{section.title}</h2>
+      </div>
+      {section.description && (
+        <p className="whatsnew-section-desc">{section.description}</p>
+      )}
+      {section.items.length > 0 && (
+        <ul className="whatsnew-section-list">
+          {section.items.map((item, i) => (
+            <li
+              key={i}
+              className="whatsnew-section-item"
+              style={{ animationDelay: `${140 + index * 70 + i * 22}ms` }}
+            >
+              <span className="whatsnew-section-bullet" aria-hidden="true" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {section.hint && (
+        <p className="whatsnew-section-hint">{section.hint}</p>
+      )}
+    </section>
+  );
+}
+
+// Re-export for tests
+export type { ChangelogEntry };
