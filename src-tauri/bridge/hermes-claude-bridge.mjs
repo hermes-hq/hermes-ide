@@ -68,6 +68,10 @@ import {
   createCanUseToolHandler,
   buildPermissionOptions,
 } from "./canUseToolHelpers.mjs";
+import {
+  createIdempotentLatch,
+  createControlOpBuffer,
+} from "./bridgeRuntimeHelpers.mjs";
 
 // ─── 1. Parse CLI args ──────────────────────────────────────────────
 
@@ -112,8 +116,11 @@ rl.on("line", (line) => {
     return;
   }
   // Bridge control ops short-circuit and don't reach the SDK input stream.
+  // Buffered until queryHandle is ready (microsecond window between
+  // bridge startup and `query()` returning) so an op arriving early is
+  // queued and drained instead of dropped.
   if (parsed && parsed.type === "_hermes_control") {
-    handleControl(parsed).catch((err) => {
+    controlOpBuffer.dispatch(parsed).catch((err) => {
       stderr.write(`[hermes-bridge] control op '${parsed.op}' failed: ${err}\n`);
     });
     return;
@@ -297,11 +304,9 @@ const liveRuntime = {
 // await it so they don't race ahead of the SDK's internal init: by the
 // time UserPromptSubmit returns its `additionalContext`, the runtime
 // line carries the actually-loaded model, not "(account default)".
-const initSeen = (() => {
-  let resolve;
-  const promise = new Promise((r) => { resolve = r; });
-  return { promise, resolve };
-})();
+// Idempotent so the for-await loop can call `.resolve()` on every init
+// event without worrying about double-resolution.
+const initSeen = createIdempotentLatch();
 
 function buildRuntimeLine(hookInput) {
   const m = liveRuntime.reportedModel ?? liveRuntime.model ?? "(account default)";
@@ -483,6 +488,13 @@ async function main() {
     exit(1);
   }
 
+  // Drain any control ops that landed on stdin between bridge startup
+  // and `query()` returning.  After this, every dispatch flows straight
+  // through to handleControl.
+  controlOpBuffer.markReady().catch((err) => {
+    stderr.write(`[hermes-bridge] control op buffer drain failed: ${err}\n`);
+  });
+
   try {
     let canonicalSessionId = flags.sessionId; // populated on init
     for await (const message of queryHandle) {
@@ -568,8 +580,10 @@ async function main() {
   exit(0);
 }
 
+// Wraps the SDK control verbs.  Always invoked through `controlOpBuffer`
+// so we never reach this with a null `queryHandle` — early ops are
+// queued and drained after `markReady()` in main().
 async function handleControl(op) {
-  if (!queryHandle) return; // ops before query() init: ignore
   switch (op.op) {
     case "interrupt":
       await queryHandle.interrupt();
@@ -597,6 +611,10 @@ async function handleControl(op) {
       stderr.write(`[hermes-bridge] unknown control op: ${op.op}\n`);
   }
 }
+
+// Wraps handleControl: queues ops that arrive before queryHandle is
+// set, then drains them in arrival order once main() flips the latch.
+const controlOpBuffer = createControlOpBuffer(handleControl);
 
 process.on("SIGINT", () => {
   aborted = true;

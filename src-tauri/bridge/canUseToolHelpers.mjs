@@ -12,13 +12,13 @@
  * Normalize a decision returned by the host into the exact shape the
  * SDK's canUseTool callback expects.
  *
- * Background — the SDK's Zod schema requires the `allow` decision
- * shape to be `{ behavior: "allow", updatedInput: <record> }`.  When
- * the host approves WITHOUT editing the tool input, the bridge must
- * echo the ORIGINAL input back as `updatedInput` — otherwise the SDK
- * throws `ZodError("expected record, received undefined")` and the
- * tool call silently fails (this was the v1 plan-mode "Send does
- * nothing" bug).
+ * Defensive echo of `updatedInput`: current SDK types mark the field
+ * as optional on the allow shape, but a prior 0.x release rejected
+ * omission with `ZodError("expected record, received undefined")` and
+ * the tool call silently failed (the v1 plan-mode "Send does nothing"
+ * regression).  Echoing the original input keeps us safe across SDK
+ * versions and across hosts that approve without editing.  Cheap to
+ * keep; expensive to rediscover.
  *
  * @param {unknown} decision           Raw value the host wrote on stdin.
  * @param {unknown} originalInput      The tool's original input (echoed
