@@ -19,7 +19,7 @@
  * button.  Esc inside the terminal closes the panel.
  */
 import "../styles/components/EmbeddedSlashTerminal.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
@@ -53,23 +53,31 @@ interface Props {
 
 export function EmbeddedSlashTerminal({ spec, cwd, onClose }: Props) {
   // Resolve the binary + args + display label up front from the spec.
-  // Slash mode runs `claude <verb>`; shell mode runs the user's
-  // default interactive shell ($SHELL → zsh → bash → sh).
-  const { spawnBinary, spawnArgs, displayLabel } = (() => {
-    if (spec.kind === "slash") {
-      const argList = spec.command.replace(/^\//, "").split(/\s+/).filter(Boolean);
+  //
+  // Slash mode: `claude` interactive REPL (no args).  We then write
+  //   the slash command to stdin after spawn so the user lands
+  //   directly in the command's TUI.  Calling `claude mcp` (positional
+  //   arg) gives the CLI-FLAG interface, which just prints usage —
+  //   only the in-REPL `/mcp` triggers the actual interactive TUI
+  //   the user expects.
+  //
+  // Shell mode: spawn the user's default shell with `-i` so they see
+  //   their prompt + history.
+  const isSlash = spec.kind === "slash";
+  const { spawnBinary, spawnArgs, displayLabel, autoInput } = useMemo(() => {
+    if (isSlash) {
+      // The command needs to be sent INTO claude's REPL, not as argv.
+      // We retain the raw `/cmd` as autoInput and pipe it after spawn.
       return {
         spawnBinary: "claude",
-        spawnArgs: argList,
-        displayLabel: `claude ${spec.command.replace(/^\//, "")}`,
+        spawnArgs: [] as string[],
+        displayLabel: `claude → ${spec.command}`,
+        autoInput: `${spec.command}\r`,
       };
     }
-    // Shell mode: pick a sensible default.  Browser-side we can't read
-    // process.env, so we fall back to /bin/zsh (default macOS shell on
-    // 10.15+) when the prop doesn't override.  An interactive shell
-    // wants `-i` so the user sees their prompt + history.
+    const shellSpec = spec as { binary?: string };
     const bin =
-      spec.binary?.trim() ||
+      shellSpec.binary?.trim() ||
       (typeof navigator !== "undefined" && navigator.platform.includes("Win")
         ? "powershell.exe"
         : "/bin/zsh");
@@ -77,8 +85,9 @@ export function EmbeddedSlashTerminal({ spec, cwd, onClose }: Props) {
       spawnBinary: bin,
       spawnArgs: ["-i"],
       displayLabel: bin.split("/").pop() ?? bin,
+      autoInput: null as string | null,
     };
-  })();
+  }, [isSlash, spec]);
   const [phase, setPhase] = useState<"booting" | "running" | "exited" | "error">("booting");
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -165,6 +174,19 @@ export function EmbeddedSlashTerminal({ spec, cwd, onClose }: Props) {
         unOutput = await listen<string>(`inline-pty-output-${ptyId}`, (msg) => {
           xterm.write(msg.payload);
         });
+
+        // Slash mode: auto-type the command into Claude's REPL once
+        // it's ready.  We can't reliably detect the prompt (claude's
+        // bootstrap output is irregular), so we wait a fixed window
+        // long enough for cold spawns then send the command.  A real
+        // TTY will buffer it; the user sees the typed command echo +
+        // the resulting TUI.
+        if (autoInput) {
+          setTimeout(() => {
+            if (cancelled) return;
+            invoke("write_inline_pty", { ptyId, data: autoInput }).catch(() => {});
+          }, 1500);
+        }
         unExit = await listen<{ code: number | null }>(
           `inline-pty-exit-${ptyId}`,
           (msg) => {
@@ -193,7 +215,7 @@ export function EmbeddedSlashTerminal({ spec, cwd, onClose }: Props) {
       try { xterm.dispose(); } catch { /* already gone */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.kind, spec.kind === "slash" ? spec.command : null, spawnBinary, cwd]);
+  }, [spawnBinary, autoInput, cwd]);
 
   const subtitle =
     phase === "booting" ? "spawning…" :

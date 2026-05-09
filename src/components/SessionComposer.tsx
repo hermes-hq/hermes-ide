@@ -169,15 +169,21 @@ export function SessionComposer() {
       }));
     }
     // Append curated CLI built-ins that the SDK didn't include.
+    // These are interactive-only by definition — mark them `cli`
+    // explicitly so the classifier doesn't get tripped up by their
+    // descriptions (which don't carry a CLI hint phrase).
     for (const builtin of missingCliBuiltins(items)) {
       items.push({
         command: builtin.command,
         label: "",
         description: builtin.description,
         source: "builtin",
+        kind: "cli",
       });
     }
-    return items.map((it) => ({ ...it, kind: classifySlashCommand(it) }));
+    // Items already marked (catalog) keep their kind.  Everything
+    // else runs through the classifier.
+    return items.map((it) => ({ ...it, kind: it.kind ?? classifySlashCommand(it) }));
   }, [init, prewarm.slashCommands]);
 
   // ─── Active slash overlay state ─────────────────────────────────────
@@ -709,12 +715,12 @@ export function SessionComposer() {
     <div
       ref={wrapperRef}
       className={`session-composer session-composer-claude ${isDragOver ? "session-composer-drag-over" : ""}`}
-      // When the embedded terminal is mounted, let the wrapper grow
-      // naturally to accommodate it — the user-set composer height
-      // applies only to the textarea card.  Otherwise the 280-px
-      // terminal overflows the fixed-height wrapper and lands above
-      // the conversation, leaving dead space below.
-      style={activeTerminal ? undefined : { height: effectiveHeight }}
+      // When the embedded terminal OR the CLI banner is mounted,
+      // let the wrapper grow naturally — the user-set composer height
+      // applies only to the textarea card.  Otherwise the extra
+      // chrome overflows the fixed-height wrapper and clips the
+      // textarea below.
+      style={(activeTerminal || pendingCliCommand) ? undefined : { height: effectiveHeight }}
     >
       <div
         className="session-composer-resize-handle"
