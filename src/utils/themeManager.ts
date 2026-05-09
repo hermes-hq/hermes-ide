@@ -129,3 +129,17 @@ export function applyTheme(themeId: string, allSettings: Record<string, string>)
   // Notify editor to refresh syntax highlight colours
   window.dispatchEvent(new CustomEvent("hermes:theme-changed"));
 }
+
+/** Apply the agent-timeline style preference to <html>.  CSS under
+ *  `html[data-agent-timeline-style="classic"]` restores the denser
+ *  pre-1.1 logbook look (mono body, brass left-bar on user messages,
+ *  hairline rules between turns) on top of whichever theme is active.
+ *  `modern` (default) is the speaker-chip / sans-serif layout. */
+export function applyAgentTimelineStyle(style: string | undefined): void {
+  const value = style === "classic" ? "classic" : "modern";
+  if (value === "modern") {
+    delete document.documentElement.dataset.agentTimelineStyle;
+  } else {
+    document.documentElement.dataset.agentTimelineStyle = value;
+  }
+}

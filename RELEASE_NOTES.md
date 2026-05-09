@@ -1,3 +1,67 @@
+# Hermes IDE 1.1.0
+
+## A modern session timeline
+
+The agent timeline got a top-to-bottom redesign that reads like a real conversation, not an instrument-panel logbook.
+
+- A small avatar chip identifies who's talking — **You** with your accent color, **Hermes** with a friendly bot icon. Replaces the cramped `№ 01` left-gutter numbering.
+- Body text moves to a refined sans-serif at a comfortable reading size; mono is preserved where it matters (code, file paths, tool calls, the cost meter).
+- Your messages appear in a soft accent-tinted card instead of a vertical brass stripe.
+- Whitespace replaces the hairline rules between turns. Conversations breathe.
+- The masthead is calmer — `Agent · model · cwd` in normal case, no more all-caps tracked mono.
+
+Every theme paints this layout differently — `hacker` keeps its phosphor scanlines, `designer` adds a subtle paper grain, `tron` pulses a cyan rail, `nightowl` gets a glass aurora. Switching themes now changes how a conversation feels, not just what color it is.
+
+## Slash commands you can actually find
+
+Type `/` and Hermes shows **every Claude Code slash command** in the popover — built-ins, plugins, skills, your custom `~/.claude/commands` files. Each entry is clearly labeled:
+
+- `✦ in-app` — runs in the chat (sent as a prompt to Claude)
+- `▣ terminal` — opens an embedded terminal that runs `claude /<command>` interactively
+
+Pick `/mcp`, `/agents`, `/cost`, `/help`, `/login`, or any other interactive built-in and a small inline terminal pops above the composer running the actual Claude REPL with the command auto-typed for you. Arrow-navigate the TUI, hit Enter, close when done.
+
+## Inline shell terminal
+
+A new **Terminal** button next to Builder opens a quick shell prompt right where the chat composer lives — for `git status`, `npm run dev`, `ls`, anything you'd reach for without leaving the agent surface. Same xterm, your default shell, current project as the working directory.
+
+## MCP server panel that actually helps
+
+Click any MCP server in the right panel and you see:
+
+- A color-coded status note (Connected / Needs auth / Failed / Unknown) explaining why the dot is the color it is
+- The transport (stdio / sse / http) plus command + args or URL
+- The environment-variable keys the server expects (values are never shown — they may carry secrets)
+- The list of tools that server exposes
+- **Restart** and **Remove** actions, with a confirmation step on remove
+
+Removing an MCP server now actually disappears it from the panel immediately; cloud-managed servers (claude.ai Gmail, Drive, Calendar, etc.) are detected and labeled "managed elsewhere" so you don't get stuck trying to delete them locally.
+
+## Permission cards stop hiding
+
+The "approve / deny / always allow" buttons that appear when Claude asks to run a tool are now real, prominent buttons — not tiny mono-link text. The primary "Approve once" gets a brief attract pulse so your eye lands on the right thing. Standard dialog layout: deny on the left, confirm on the right, Enter submits.
+
+## Plan mode actually works
+
+Plan mode used to silently drop your responses — clicking Approve on a plan or answering a multi-question prompt looked like nothing happened. Both flows now route through the correct path and Claude sees your answer.
+
+Switching the model or permission mode mid-session also stays in sync now; the picker chips reflect Claude's reality even when the change came from inside a conversation (e.g. Claude entered plan mode itself).
+
+## Smaller things you'll notice
+
+- The first message in a fresh session shows the thinking indicator immediately, not after a silent pause while the bridge boots
+- The Cost & Tokens panel section is gone — its only button didn't work; the running cost meter in the header is the live source of truth
+- The activity-bar Context button now actually toggles the agent context panel (Cmd+E to hide it for more horizontal room)
+- The dirty-close session dialog stops surfacing `.aider.chat.history.md` and other auto-generated noise files
+- Composer chips truncate cleanly on narrow widths instead of overlapping each other
+- The bot/person icons in the speaker chip take the theme accent — green-phosphor on `hacker`, cyan on `tron`, terracotta on `designer`
+
+## Prefer the previous look?
+
+If the new timeline isn't for you, **Settings → Appearance → Use classic compact timeline** restores the denser, mono-bodied logbook style this release replaced — with the brass left bar on user messages, hairline rules between turns, and the prior typography. Toggle it back any time. Themes still apply on top.
+
+---
+
 # Hermes IDE 1.0.0
 
 ## Agent mode for Claude

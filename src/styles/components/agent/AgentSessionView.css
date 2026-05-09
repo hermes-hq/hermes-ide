@@ -1986,3 +1986,94 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * Classic compact timeline (opt-in via Settings → Appearance)
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * Restores the pre-1.1 logbook layout for users who prefer the denser
+ * mono-bodied style.  CSS-only overrides on top of the modern layout
+ * — no JSX branch.  Toggling the setting flips a `data-agent-timeline-
+ * style="classic"` attribute on <html>; everything below scopes to
+ * that selector so the modern look stays intact for everyone else.
+ *
+ * Theme tokens (--bg-1, --accent, --brass, --rule, etc.) still apply,
+ * so each of the 30 themes paints classic mode in its own colors. */
+
+html[data-agent-timeline-style="classic"] .agent-message-body {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0;
+  padding-left: 0;
+  gap: 8px;
+}
+
+html[data-agent-timeline-style="classic"] .agent-text-block {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0;
+}
+
+html[data-agent-timeline-style="classic"] .agent-message-speaker {
+  font-size: 11px;
+  gap: 8px;
+}
+
+html[data-agent-timeline-style="classic"] .agent-message-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+html[data-agent-timeline-style="classic"] .agent-message-avatar svg {
+  width: 13px;
+  height: 13px;
+}
+
+html[data-agent-timeline-style="classic"] .agent-message-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+html[data-agent-timeline-style="classic"] .agent-message-time {
+  font-size: 10px;
+}
+
+html[data-agent-timeline-style="classic"]
+  .agent-message[data-role="user"] .agent-message-body {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--brass, var(--accent));
+  border-radius: 0;
+  padding: 0 0 0 14px;
+  margin-left: 0;
+  box-shadow: -8px 0 16px -10px var(--brass-dim, transparent);
+  font-style: italic;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  line-height: 1.55;
+}
+
+html[data-agent-timeline-style="classic"]
+  .agent-message + .agent-message[data-role="user"] {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+html[data-agent-timeline-style="classic"]
+  .agent-message + .agent-message[data-role="assistant"] {
+  margin-top: 8px;
+}
+
+html[data-agent-timeline-style="classic"] .agent-message {
+  max-width: none;
+}

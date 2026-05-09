@@ -5,7 +5,7 @@ import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
-import { applyTheme, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS } from "../utils/themeManager";
+import { applyTheme, applyAgentTimelineStyle, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { fmt, PLATFORM } from "../utils/platform";
 import {
   AI_PROVIDERS,
@@ -149,6 +149,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
       applyTheme(value, next);
     } else if (["font_size", "font_family", "scrollback", "ui_scale"].includes(key)) {
       applyTheme(next.theme || "frosted-dark", next);
+    } else if (key === "agent_timeline_style") {
+      applyAgentTimelineStyle(value);
     }
     setSetting(key, value).catch(console.error);
     // Sync autonomous settings to live state
@@ -396,6 +398,23 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Agent Timeline Style</label>
+                  <span className="settings-hint-inline">
+                    Modern (default) uses the speaker-chip layout with sans-serif body.
+                    Classic restores the denser logbook style — mono body, brass left
+                    bar on user messages, hairline rules between turns.
+                  </span>
+                  <select
+                    className="settings-select"
+                    value={settings.agent_timeline_style || "modern"}
+                    onChange={(e) => updateSetting("agent_timeline_style", e.target.value)}
+                  >
+                    <option value="modern">Modern (default)</option>
+                    <option value="classic">Classic compact</option>
+                  </select>
                 </div>
 
                 <div className="settings-group">
