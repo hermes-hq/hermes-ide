@@ -384,6 +384,41 @@
   transform: translateY(1px);
 }
 
+/* Inline shell-terminal toggle — sits next to Builder.  Yellow tint
+ * matches the dropdown's `terminal` badge + the CliCommandBanner so
+ * the whole "embedded terminal" family reads as one signal. */
+.session-composer-terminal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--ink-secondary, var(--text-1));
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.session-composer-terminal-btn:hover {
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.session-composer-terminal-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--yellow) 18%, transparent);
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
 /* ─── Detected agent chip ────────────────────────────────── */
 
 .session-composer-agent {

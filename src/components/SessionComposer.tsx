@@ -5,7 +5,7 @@ import type { AgentAttachment } from "../utils/submitToAgent";
 import { isActionMod, isMac } from "../utils/platform";
 import { readImageForAttachment } from "../api/agent";
 import { getActiveSlashCommand, replaceSlashCommand } from "../utils/slashCommands";
-import { classifySlashCommand } from "../utils/slashCommandKind";
+import { classifySlashCommand, missingCliBuiltins } from "../utils/slashCommandKind";
 import { fuzzyRank } from "../utils/fuzzy";
 import { SlashCommandsDropdown, type SlashCommandItem } from "./SlashCommandsDropdown";
 import { CliCommandBanner } from "./CliCommandBanner";
@@ -127,13 +127,18 @@ export function SessionComposer() {
   // surfaces the kind as a badge so the user knows up-front whether
   // accepting the item will send a chat message or pop a terminal.
   const slashCommandsFromInit = useMemo<SlashCommandItem[]>(() => {
-    // Pure dynamic source: whatever the SDK reports in init.  No
-    // hard-coded augmentation — the catalog is live and version-
-    // matched to the binary the user actually has.  CLI-only
-    // built-ins that the SDK doesn't surface (because they don't
-    // work over stream-json) won't appear here, but the user can
-    // still type them manually and `handleSubmit` routes them to
-    // the embedded terminal via `classifySlashCommand`.
+    // Two-source merge:
+    //   1. Live: whatever the SDK reports in `init.slash_commands`.
+    //      This is the only truly version-matched source — picks up
+    //      every plugin / skill / user command the user has installed.
+    //   2. Curated: the well-known Claude Code CLI-only built-ins
+    //      (`/mcp`, `/agents`, `/login`, etc.) that the SDK omits
+    //      because they don't work over stream-json.  The binary
+    //      doesn't expose an enumeration API, so Conductor and other
+    //      clients curate the same list — see CLAUDE_CLI_BUILTINS in
+    //      slashCommandKind.ts.
+    //   The merge is deduped: if the SDK does report a name, it
+    //   wins (we trust the SDK's description over ours).
     const raw = init?.slash_commands;
     let items: SlashCommandItem[];
     if (Array.isArray(raw)) {
@@ -163,6 +168,15 @@ export function SessionComposer() {
         source: "builtin" as const,
       }));
     }
+    // Append curated CLI built-ins that the SDK didn't include.
+    for (const builtin of missingCliBuiltins(items)) {
+      items.push({
+        command: builtin.command,
+        label: "",
+        description: builtin.description,
+        source: "builtin",
+      });
+    }
     return items.map((it) => ({ ...it, kind: classifySlashCommand(it) }));
   }, [init, prewarm.slashCommands]);
 
@@ -175,11 +189,16 @@ export function SessionComposer() {
    *  command as a stream-json prompt (which silently no-ops for
    *  these CLI-only commands). */
   const [pendingCliCommand, setPendingCliCommand] = useState<string | null>(null);
-  /** When the user clicks "Open terminal" on the banner, this flips
-   *  to the command we're running.  The composer mounts an inline
-   *  `<EmbeddedSlashTerminal>` for the duration; closing it returns
-   *  to the normal composer. */
-  const [activeTerminalCommand, setActiveTerminalCommand] = useState<string | null>(null);
+  /** What's running in the embedded terminal pane, if anything.
+   *  - `{ kind: "slash", command: "/mcp" }` — opened from the banner
+   *    after picking a CLI slash command.
+   *  - `{ kind: "shell" }` — opened from the composer's terminal
+   *    button for ad-hoc shell access (Conductor-style "Terminal" tab).
+   *  Closing the embedded terminal sets this back to null. */
+  type EmbeddedTerminalState =
+    | { kind: "slash"; command: string }
+    | { kind: "shell" };
+  const [activeTerminal, setActiveTerminal] = useState<EmbeddedTerminalState | null>(null);
 
   const rankedCommands = useMemo<SlashCommandItem[] | null>(() => {
     if (!slash || !isAgentMode) return null;
@@ -690,12 +709,12 @@ export function SessionComposer() {
     <div
       ref={wrapperRef}
       className={`session-composer session-composer-claude ${isDragOver ? "session-composer-drag-over" : ""}`}
-      // When the embedded slash terminal is mounted, let the wrapper
-      // grow naturally to accommodate it — the user-set composer
-      // height applies only to the textarea card.  Otherwise the
-      // 280-px terminal overflows the fixed-height wrapper and lands
-      // above the conversation, leaving dead space below.
-      style={activeTerminalCommand ? undefined : { height: effectiveHeight }}
+      // When the embedded terminal is mounted, let the wrapper grow
+      // naturally to accommodate it — the user-set composer height
+      // applies only to the textarea card.  Otherwise the 280-px
+      // terminal overflows the fixed-height wrapper and lands above
+      // the conversation, leaving dead space below.
+      style={activeTerminal ? undefined : { height: effectiveHeight }}
     >
       <div
         className="session-composer-resize-handle"
@@ -704,21 +723,21 @@ export function SessionComposer() {
         aria-label="Resize composer"
         onMouseDown={handleResizeMouseDown}
       />
-      {pendingCliCommand && !activeTerminalCommand && (
+      {pendingCliCommand && !activeTerminal && (
         <CliCommandBanner
           command={pendingCliCommand}
           onOpenTerminal={() => {
-            setActiveTerminalCommand(pendingCliCommand);
+            setActiveTerminal({ kind: "slash", command: pendingCliCommand });
             setPendingCliCommand(null);
           }}
           onCancel={() => setPendingCliCommand(null)}
         />
       )}
-      {activeTerminalCommand && (
+      {activeTerminal && (
         <EmbeddedSlashTerminal
-          command={activeTerminalCommand}
+          spec={activeTerminal}
           cwd={init?.cwd ?? null}
-          onClose={() => setActiveTerminalCommand(null)}
+          onClose={() => setActiveTerminal(null)}
         />
       )}
       <div className="session-composer-card">
@@ -818,6 +837,25 @@ export function SessionComposer() {
               aria-label="Open prompt builder"
             >
               ✨ Builder
+            </button>
+            {/* Ad-hoc shell terminal — opens the same embedded PTY
+                the slash-CLI banner uses, but spawns the user's
+                default shell instead of `claude /<cmd>`.  Lets the
+                user run any command (git, npm, ls, etc.) without
+                leaving the agent surface.  Toggles open/closed. */}
+            <button
+              type="button"
+              className="session-composer-terminal-btn"
+              onClick={() => {
+                setActiveTerminal((cur) =>
+                  cur && cur.kind === "shell" ? null : { kind: "shell" },
+                );
+              }}
+              title="Toggle inline shell terminal"
+              aria-label="Toggle inline shell terminal"
+              aria-pressed={activeTerminal?.kind === "shell"}
+            >
+              ›_ Terminal
             </button>
             {/* Model picker.  Click → opens ModelPicker → switchAgentModel
                 respawns the Claude subprocess with the new --model flag and

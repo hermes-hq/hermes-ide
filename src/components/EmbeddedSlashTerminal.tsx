@@ -26,9 +26,24 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-interface Props {
+interface SlashCommandSpec {
+  kind: "slash";
   /** The slash command including the leading slash, e.g. `/mcp`. */
   command: string;
+}
+
+interface ShellSpec {
+  kind: "shell";
+  /** Optional shell binary override.  Defaults to $SHELL or zsh. */
+  binary?: string;
+}
+
+export type EmbeddedTerminalSpec = SlashCommandSpec | ShellSpec;
+
+interface Props {
+  /** What to spawn in the PTY: a one-shot `claude /<cmd>` invocation,
+   *  or the user's interactive shell for ad-hoc use. */
+  spec: EmbeddedTerminalSpec;
   /** cwd to spawn the PTY in.  Falls back to home if undefined. */
   cwd: string | null | undefined;
   /** Called when the user closes the terminal — banner is dismissed
@@ -36,7 +51,34 @@ interface Props {
   onClose: () => void;
 }
 
-export function EmbeddedSlashTerminal({ command, cwd, onClose }: Props) {
+export function EmbeddedSlashTerminal({ spec, cwd, onClose }: Props) {
+  // Resolve the binary + args + display label up front from the spec.
+  // Slash mode runs `claude <verb>`; shell mode runs the user's
+  // default interactive shell ($SHELL → zsh → bash → sh).
+  const { spawnBinary, spawnArgs, displayLabel } = (() => {
+    if (spec.kind === "slash") {
+      const argList = spec.command.replace(/^\//, "").split(/\s+/).filter(Boolean);
+      return {
+        spawnBinary: "claude",
+        spawnArgs: argList,
+        displayLabel: `claude ${spec.command.replace(/^\//, "")}`,
+      };
+    }
+    // Shell mode: pick a sensible default.  Browser-side we can't read
+    // process.env, so we fall back to /bin/zsh (default macOS shell on
+    // 10.15+) when the prop doesn't override.  An interactive shell
+    // wants `-i` so the user sees their prompt + history.
+    const bin =
+      spec.binary?.trim() ||
+      (typeof navigator !== "undefined" && navigator.platform.includes("Win")
+        ? "powershell.exe"
+        : "/bin/zsh");
+    return {
+      spawnBinary: bin,
+      spawnArgs: ["-i"],
+      displayLabel: bin.split("/").pop() ?? bin,
+    };
+  })();
   const [phase, setPhase] = useState<"booting" | "running" | "exited" | "error">("booting");
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -51,10 +93,6 @@ export function EmbeddedSlashTerminal({ command, cwd, onClose }: Props) {
     let cancelled = false;
     let unOutput: UnlistenFn | undefined;
     let unExit: UnlistenFn | undefined;
-
-    // Strip the leading slash so we pass `mcp` not `/mcp` as argv to
-    // claude.  The bare verb is what the CLI expects.
-    const argList = command.replace(/^\//, "").split(/\s+/).filter(Boolean);
 
     const xterm = new Terminal({
       fontFamily: 'JetBrains Mono, Menlo, monospace',
@@ -111,8 +149,8 @@ export function EmbeddedSlashTerminal({ command, cwd, onClose }: Props) {
     (async () => {
       try {
         const ptyId = await invoke<string>("spawn_inline_pty", {
-          command: "claude",
-          args: argList,
+          command: spawnBinary,
+          args: spawnArgs,
           cwd: cwd ?? null,
           rows: xterm.rows ?? 24,
           cols: xterm.cols ?? 80,
@@ -154,7 +192,8 @@ export function EmbeddedSlashTerminal({ command, cwd, onClose }: Props) {
       }
       try { xterm.dispose(); } catch { /* already gone */ }
     };
-  }, [command, cwd]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec.kind, spec.kind === "slash" ? spec.command : null, spawnBinary, cwd]);
 
   const subtitle =
     phase === "booting" ? "spawning…" :
@@ -166,7 +205,7 @@ export function EmbeddedSlashTerminal({ command, cwd, onClose }: Props) {
     <div className="ipty-card" data-phase={phase}>
       <header className="ipty-card-header">
         <span className="ipty-card-icon" aria-hidden="true">▣</span>
-        <code className="ipty-card-cmd">claude {command.replace(/^\//, "")}</code>
+        <code className="ipty-card-cmd">{displayLabel}</code>
         <span className="ipty-card-status" aria-live="polite">{subtitle}</span>
         <button
           type="button"
