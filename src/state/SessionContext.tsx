@@ -723,11 +723,13 @@ export const initialState: SessionState = {
     focusedPaneId: null,
   },
   ui: {
-    // Open by default for both panel kinds — agent sessions need the
-    // sidebar (MCP, memory, permissions) for any non-trivial work, and
-    // the activity-bar Context button (Cmd/Ctrl+E) toggles it off when
-    // the user wants more horizontal room.
-    contextPanelOpen: true,
+    // Closed by default — the conversation gets the full horizontal
+    // room.  The activity-bar Context button (Cmd/Ctrl+E) opens the
+    // panel on demand.  Earlier default-open landed in #261 but felt
+    // claustrophobic when the Sessions sidebar was also open; the
+    // user prefers to start clean and reach for the panel only when
+    // they need it.
+    contextPanelOpen: false,
     usagePanelOpen: false,
     sessionListCollapsed: false,
     commandPaletteOpen: false,
