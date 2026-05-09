@@ -1,0 +1,102 @@
+/* Inline embedded slash-command terminal.
+ *
+ * Sits between the message timeline and the composer.  Default
+ * height 280px, expandable.  Matches the rest of the agent surface:
+ * --bg-1 surface, hairline accent border (yellow tint to mark this
+ * as the "in-terminal" routing — same family as the dropdown's
+ * `terminal` badge and the CliCommandBanner). */
+
+.ipty-card {
+  display: flex;
+  flex-direction: column;
+  margin: 8px var(--space-3);
+  height: 280px;
+  min-height: 200px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 32%, transparent);
+  border-radius: 8px;
+  background: var(--bg-1);
+  overflow: hidden;
+  box-shadow: 0 4px 12px color-mix(in srgb, #000 20%, transparent);
+}
+
+.ipty-card[data-phase="error"] {
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+.ipty-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--yellow) 6%, var(--bg-1));
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow) 24%, transparent);
+  font-family: var(--font-display, var(--font-ui));
+  font-size: 12px;
+  color: var(--ink-secondary, var(--text-1));
+}
+
+.ipty-card-icon {
+  color: var(--yellow);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.ipty-card-cmd {
+  font: 11.5px/1 var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+  color: var(--yellow);
+  letter-spacing: 0.01em;
+  flex-shrink: 0;
+}
+
+.ipty-card-status {
+  font: 11px/1 var(--font-mono);
+  color: var(--ink-tertiary, var(--text-3));
+  flex: 1 1 auto;
+  text-align: right;
+}
+
+.ipty-card-close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  font: 12px/1 var(--font-mono);
+  color: var(--ink-tertiary, var(--text-3));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ipty-card-close:hover {
+  color: var(--ink-primary, var(--text-0));
+}
+
+.ipty-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 0 4px 8px;
+  background: #0d1218;
+}
+
+/* xterm canvas needs to fill its container. */
+.ipty-card-body .xterm,
+.ipty-card-body .xterm-viewport,
+.ipty-card-body .xterm-screen {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+.ipty-card-footer {
+  padding: 6px 12px;
+  font: 11px/1.4 var(--font-display, var(--font-ui));
+  color: var(--ink-tertiary, var(--text-3));
+  background: var(--bg-2, var(--bg-1));
+  border-top: 1px solid var(--rule);
+}
+
+.ipty-card-footer-error {
+  color: var(--red);
+}

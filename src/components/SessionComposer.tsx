@@ -9,6 +9,7 @@ import { classifySlashCommand } from "../utils/slashCommandKind";
 import { fuzzyRank } from "../utils/fuzzy";
 import { SlashCommandsDropdown, type SlashCommandItem } from "./SlashCommandsDropdown";
 import { CliCommandBanner } from "./CliCommandBanner";
+import { EmbeddedSlashTerminal } from "./EmbeddedSlashTerminal";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionPicker, CLAUDE_PERMISSION_MODES } from "./PermissionPicker";
 import { EffortPicker } from "./EffortPicker";
@@ -168,6 +169,11 @@ export function SessionComposer() {
    *  command as a stream-json prompt (which silently no-ops for
    *  these CLI-only commands). */
   const [pendingCliCommand, setPendingCliCommand] = useState<string | null>(null);
+  /** When the user clicks "Open terminal" on the banner, this flips
+   *  to the command we're running.  The composer mounts an inline
+   *  `<EmbeddedSlashTerminal>` for the duration; closing it returns
+   *  to the normal composer. */
+  const [activeTerminalCommand, setActiveTerminalCommand] = useState<string | null>(null);
 
   const rankedCommands = useMemo<SlashCommandItem[] | null>(() => {
     if (!slash || !isAgentMode) return null;
@@ -669,22 +675,21 @@ export function SessionComposer() {
         aria-label="Resize composer"
         onMouseDown={handleResizeMouseDown}
       />
-      {pendingCliCommand && (
+      {pendingCliCommand && !activeTerminalCommand && (
         <CliCommandBanner
           command={pendingCliCommand}
           onOpenTerminal={() => {
-            // Phase 3: mount the embedded terminal here.  For now,
-            // surface a toast so the user can verify the routing
-            // is firing without us silently dropping the command.
-            console.log(`[cli-banner] open terminal requested for ${pendingCliCommand}`);
-            alert(
-              `Embedded terminal will run:\n\n  claude ${pendingCliCommand}\n\n` +
-              `(Embedded PTY mount is the next commit; this banner + dropdown badge ` +
-              `prove the slash routing.)`,
-            );
+            setActiveTerminalCommand(pendingCliCommand);
             setPendingCliCommand(null);
           }}
           onCancel={() => setPendingCliCommand(null)}
+        />
+      )}
+      {activeTerminalCommand && (
+        <EmbeddedSlashTerminal
+          command={activeTerminalCommand}
+          cwd={init?.cwd ?? null}
+          onClose={() => setActiveTerminalCommand(null)}
         />
       )}
       <div className="session-composer-card">

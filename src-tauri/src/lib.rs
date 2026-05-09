@@ -7,6 +7,7 @@ mod menu;
 mod platform;
 mod plugins;
 mod process;
+mod inline_pty;
 mod project;
 /// Exposed for benchmarks — not part of the public API.
 #[doc(hidden)]
@@ -526,6 +527,7 @@ pub fn run() {
             app.manage(state);
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
+            app.manage(inline_pty::InlinePtyManager::new());
 
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
@@ -763,6 +765,12 @@ pub fn run() {
             claude_config::read_static_mcp_servers,
             claude_config::read_static_slash_commands,
             claude_config::read_static_memory_paths,
+            // Inline PTY for embedded slash-command terminals
+            // (see src/inline_pty/mod.rs).
+            inline_pty::spawn_inline_pty,
+            inline_pty::write_inline_pty,
+            inline_pty::resize_inline_pty,
+            inline_pty::kill_inline_pty,
         ])
         .build(tauri::generate_context!())
         .expect("error while building HERMES-IDE")
