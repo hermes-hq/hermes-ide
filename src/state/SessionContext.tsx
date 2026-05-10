@@ -188,6 +188,13 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         && existing.color === action.session.color
         && existing.group === action.session.group
         && existing.description === action.session.description
+        // permission_mode drives the live agent's auto-allow behavior
+        // (see `InteractivePermissionDispatcher`'s bypass effect in
+        // AgentSessionView).  When a user flips the chip mid-session
+        // we dispatch SESSION_UPDATED with only this field changed, so
+        // it MUST be part of the dedup check or the update is silently
+        // dropped and the auto-allow effect never re-fires.
+        && existing.permission_mode === action.session.permission_mode
         && existing.detected_agent?.name === action.session.detected_agent?.name
         && existing.detected_agent?.model === action.session.detected_agent?.model
         && existing.metrics.output_lines === action.session.metrics.output_lines
@@ -903,6 +910,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             }
             if (typeof event.permissionMode === "string") {
               claudePermissionModes.current.set(sessionId, event.permissionMode);
+              // Mirror the bridge's reported permission_mode into the
+              // React session state too — covers the case where the
+              // mode flipped without a chip click (EnterPlanMode /
+              // ExitPlanMode tools, /model slash command, etc.).  The
+              // optimistic dispatch in switchAgentPermissionMode covers
+              // the chip path; this covers everything else.
+              const existing = stateRef.current.sessions[sessionId];
+              if (existing && existing.permission_mode !== event.permissionMode) {
+                dispatch({
+                  type: "SESSION_UPDATED",
+                  session: { ...existing, permission_mode: event.permissionMode },
+                });
+              }
             }
           }
         },
@@ -1900,6 +1920,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Step (a) is best-effort — the bridge may have exited between turns,
     // in which case the queued flag in (b) is what brings it back.
     if (permissionMode !== null) {
+      // Optimistic React-state update — flip session.permission_mode in
+      // the store IMMEDIATELY so the AgentSessionView's auto-allow
+      // effect (which keys off `state.sessions[id].permission_mode`)
+      // can fire on the very next render, before the bridge has even
+      // acknowledged the setPermissionMode op.  Without this, the chip
+      // visually flips but a perm modal already on screen sits there
+      // until you send a new message.
+      const existing = stateRef.current.sessions[sessionId];
+      if (existing && existing.permission_mode !== permissionMode) {
+        dispatch({
+          type: "SESSION_UPDATED",
+          session: { ...existing, permission_mode: permissionMode },
+        });
+      }
       try {
         await setAgentPermissionMode(sessionId, permissionMode);
       } catch { /* bridge may be down between turns; queued flag will apply */ }
