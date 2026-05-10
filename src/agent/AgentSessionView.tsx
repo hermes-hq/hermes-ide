@@ -317,34 +317,118 @@ function InteractivePermissionDispatcher({
   const { snapshot, store } = useAgentSessionSnapshot(sessionId);
   const request = snapshot.pendingPermRequest;
 
+  // Per-request latch for the bypass auto-allow effect (fix B1).
+  // React StrictMode + the store's snapshot churn can re-fire the
+  // effect with the SAME closure-captured `request`, which used to
+  // send the response envelope multiple times.  Tracking the last
+  // request id we've sent for makes the effect idempotent per id.
+  const lastBypassSentId = useRef<string | null>(null);
+  // Per-request latch for in-flight IPC (fix B4).  A boolean shared
+  // across requests would lock out the FIRST click on request B
+  // while request A's send is still pending.  Keying by id means
+  // each request gets its own dedup window.
+  const inFlightForId = useRef<string | null>(null);
+  // B3 — pin the send-error to the request id it came from so a stale
+  // banner from request A can't leak into the render of an unrelated
+  // request B.  The banner only renders when `sendError.requestId`
+  // matches the currently-displayed request.
+  const [sendError, setSendError] = useState<{ requestId: string; message: string } | null>(null);
+
   // Defense-in-depth: if the user is in bypass mode and a perm request is
   // sitting in the store, auto-resolve it as allow + clear it.  This catches
   // the race where the bridge dispatched a request milliseconds before the
   // setPermissionMode control op landed.  The PermissionRequestModal also
   // self-auto-allows on bypass (cosmetic), but doing it here means the
   // envelope never even gets to render.
+  //
+  // B1 — claim the latch DURING RENDER (not in the effect) so the early-
+  // return below can suppress the modal on the SAME PASS.  Otherwise the
+  // modal mounts before our effect runs and self-auto-allows a duplicate
+  // envelope (the effect's send + the modal's onMount call both fire).
+  // Refs are safe to mutate during render as long as the mutation is
+  // purely a closure latch with no hook-ordering dependency.
+  const willBypassAutoAllow =
+    !!request
+    && permissionMode === "bypassPermissions"
+    && lastBypassSentId.current !== request.id;
+  if (willBypassAutoAllow && request) {
+    lastBypassSentId.current = request.id;
+  }
   useEffect(() => {
-    if (request && permissionMode === "bypassPermissions") {
-      const env = buildPermResponse(request.id, { kind: "allow" });
-      sendAgentEnvelope(sessionId, env)
-        .catch((err) => console.warn("[perm] bypass auto-allow send failed:", err));
-      store.clearPendingPermRequest();
+    if (!willBypassAutoAllow || !request) return;
+    const cached = request;
+    // B2 — AskUserQuestion's `canUseTool` contract requires an
+    // `answers` record on `updatedInput`; sending plain `allow` with
+    // no payload makes the SDK treat the answer set as empty.
+    // Synthesize a sensible default by picking the first option for
+    // each question so bypass mode preserves the auto-allow promise
+    // without breaking the tool contract.
+    let decision: PermissionDecision = { kind: "allow" };
+    if (request.toolName === "AskUserQuestion") {
+      const askInput = request.input as unknown as AskUserQuestionInput;
+      const answers: Record<string, string> = {};
+      const questions = Array.isArray(askInput?.questions)
+        ? askInput.questions
+        : [];
+      for (const q of questions) {
+        const first = q?.options?.[0]?.label;
+        if (typeof q?.question === "string") {
+          answers[q.question] = typeof first === "string" ? first : "";
+        }
+      }
+      decision = {
+        kind: "allow",
+        updatedInput: { ...(askInput as unknown as Record<string, unknown>), answers },
+      };
     }
-  }, [request, permissionMode, sessionId, sendAgentEnvelope, store]);
-  const inFlightRef = useRef(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+    const env = buildPermResponse(request.id, decision);
+    // B1b — clear AFTER send succeeds so a failed send doesn't strand
+    // the bridge.  On failure, re-inject the request and surface a
+    // banner so the user can decide manually (mirrors decide()'s
+    // recovery path).
+    sendAgentEnvelope(sessionId, env)
+      .then(() => {
+        store.clearPendingPermRequest();
+      })
+      .catch((err) => {
+        console.warn("[perm] bypass auto-allow send failed:", err);
+        // Restore the request so the bridge isn't stranded — the user
+        // can decide manually via the modal once it re-renders.  We
+        // intentionally do NOT release `lastBypassSentId` here: the
+        // request is back in the store and the effect would otherwise
+        // re-fire and loop forever auto-retrying a broken send.
+        store.injectEvent(cached as unknown as AgentEvent);
+        setSendError({
+          requestId: cached.id,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+  }, [willBypassAutoAllow, request, permissionMode, sessionId, sendAgentEnvelope, store]);
 
   if (!request) return null;
+  // B1 — once the bypass effect has latched for this request, avoid
+  // rendering the interactive cards / modal underneath: the
+  // PermissionRequestModal also self-auto-allows on bypass mount,
+  // which would queue a SECOND envelope for the same id before our
+  // optimistic clear lands.  Render nothing during the auto-allow
+  // window — and for AskUserQuestion too, where the bypass effect
+  // synthesizes the answer envelope itself.
+  if (
+    permissionMode === "bypassPermissions"
+    && lastBypassSentId.current === request.id
+  ) {
+    return null;
+  }
 
   function decide(decision: PermissionDecision) {
     if (!request) return;
     // Latch immediately so a double-click on the modal can't fire
     // two `_hermes_perm_response` envelopes for the same request id
-    // (fix H6).  The latch is stored in a ref + the store-cleared
-    // pending request so React's render scheduling can't reopen the
-    // modal between the click and the IPC.
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+    // (fix H6).  Keyed by request id (fix B4) so an in-flight send
+    // for request A doesn't silently drop the first click on
+    // request B.
+    if (inFlightForId.current === request.id) return;
+    inFlightForId.current = request.id;
     const env = buildPermResponse(request.id, decision);
     // Optimistically clear so the modal closes immediately; if the
     // send fails we restore the request via the store and surface
@@ -358,10 +442,15 @@ function InteractivePermissionDispatcher({
         // Re-surface the request — the bridge is still waiting and
         // the user needs another shot at deciding.
         store.injectEvent(cached as unknown as AgentEvent);
-        setSendError(err instanceof Error ? err.message : String(err));
+        setSendError({
+          requestId: cached.id,
+          message: err instanceof Error ? err.message : String(err),
+        });
       })
       .finally(() => {
-        inFlightRef.current = false;
+        if (inFlightForId.current === cached.id) {
+          inFlightForId.current = null;
+        }
       });
     if (decision.kind === "allow" && decision.persist) {
       // Persist the rule to ~/.claude/settings.json (TUI parity per
@@ -381,9 +470,12 @@ function InteractivePermissionDispatcher({
   // bridge is still waiting on canUseTool, so we re-show the modal
   // (decide() restored the request via the store) and prepend a
   // visible error so the user understands why the click didn't land.
-  const errorBanner = sendError ? (
+  // B3 — only show the banner when the error belongs to the request
+  // currently on screen; otherwise a stale failure from request A
+  // would mis-attribute itself to an unrelated request B.
+  const errorBanner = sendError && sendError.requestId === request.id ? (
     <div className="agent-perm-error" role="alert">
-      Couldn't deliver your decision: {sendError}.  Try again — the
+      Couldn't deliver your decision: {sendError.message}.  Try again — the
       agent is still waiting.
     </div>
   ) : null;
@@ -569,14 +661,12 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
       </div>
 
       <div className="agent-session-header-meta">
-        {state.cumulativeCostUsd > 0 || state.cumulativeOutputTokens > 0 ? (
+        {state.cumulativeOutputTokens > 0 ? (
           <span
             className="agent-session-cost"
-            title={`Session cost: $${state.cumulativeCostUsd.toFixed(4)}\nOutput tokens: ${state.cumulativeOutputTokens.toLocaleString()}`}
-            aria-label={`session cost ${state.cumulativeCostUsd.toFixed(2)} dollars`}
+            title={`Output tokens: ${state.cumulativeOutputTokens.toLocaleString()}`}
+            aria-label={`${state.cumulativeOutputTokens.toLocaleString()} output tokens`}
           >
-            <span className="agent-session-cost-amount">{`$${formatCost(state.cumulativeCostUsd)}`}</span>
-            <span className="agent-session-cost-sep" aria-hidden="true"> · </span>
             <span className="agent-session-cost-tokens">{`${formatTokens(state.cumulativeOutputTokens)} out`}</span>
           </span>
         ) : null}
@@ -601,15 +691,6 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
       </div>
     </div>
   );
-}
-
-/** Format cost for the masthead lozenge.  Always shows at least cents
- *  precision, more decimals for very small amounts so the user sees
- *  the meter actually moving on cheap turns. */
-function formatCost(usd: number): string {
-  if (usd >= 1) return usd.toFixed(2);
-  if (usd >= 0.01) return usd.toFixed(3);
-  return usd.toFixed(4);
 }
 
 /** Token count formatter — k for thousands, plain for under 1k. */

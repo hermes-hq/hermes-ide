@@ -93,7 +93,9 @@ function computeSummary(
     const offset = numberValue(input.offset);
     const limit = numberValue(input.limit);
     if (offset !== undefined && limit !== undefined) {
-      return `lines ${offset}–${offset + limit - 1}`;
+      const start = Math.max(1, offset);
+      const end = start + limit - 1;
+      return `lines ${start}–${end}`;
     }
     if (limit !== undefined) return `lines 1–${limit}`;
     if (offset !== undefined) return `from line ${offset}`;
@@ -184,10 +186,6 @@ function languageFromPath(filePath: string): string | null {
     case "lua": return "lua";
     case "pl": return "perl";
     case "r": return "r";
-    case "ex": case "exs": return "elixir";
-    case "clj": case "cljs": return "clojure";
-    case "scala": return "scala";
-    case "dart": return "dart";
     default: return null;
   }
 }
@@ -232,6 +230,11 @@ function stringifyContent(content: string | ContentBlock[]): string {
     .map((b) => {
       if (b.type === "text" && typeof (b as { text?: unknown }).text === "string") {
         return (b as { text: string }).text;
+      }
+      if (b.type === "image") {
+        const mediaType = (b as any).source?.media_type ?? "unknown";
+        const dataLength = (b as any).source?.data?.length ?? 0;
+        return `[image: ${mediaType}, ${dataLength} bytes]`;
       }
       try {
         return JSON.stringify(b, null, 2);

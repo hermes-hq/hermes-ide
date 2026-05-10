@@ -95,6 +95,11 @@ function stringifyContent(content: string | ContentBlock[]): string {
       if (b.type === "text" && typeof (b as { text?: unknown }).text === "string") {
         return (b as { text: string }).text;
       }
+      if (b.type === "image") {
+        const mediaType = (b as any).source?.media_type ?? "unknown";
+        const dataLength = (b as any).source?.data?.length ?? 0;
+        return `[image: ${mediaType}, ${dataLength} bytes]`;
+      }
       try {
         return JSON.stringify(b, null, 2);
       } catch {

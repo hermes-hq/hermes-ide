@@ -190,16 +190,118 @@ function upsertAssistant(
   }
 
   const existing = messages[existingIdx];
+  const mergedBlocks = mergeAssistantBlocks(existing.blocks, incomingBlocks);
+  // If the merge produced no real change (replay of an identical event),
+  // skip the array allocation entirely so React reference-equality stays cheap.
+  if (mergedBlocks === existing.blocks && (event.message.usage ?? existing.usage) === existing.usage) {
+    return messages;
+  }
   const merged: RenderedMessage = {
     ...existing,
-    // Preserve arrival order; multiple events with the same id append blocks.
-    blocks: [...existing.blocks, ...incomingBlocks],
+    blocks: mergedBlocks,
     // Latest usage wins (Claude reports cumulative usage on the latest event).
     usage: event.message.usage ?? existing.usage,
   };
   const out = messages.slice();
   out[existingIdx] = merged;
   return out;
+}
+
+/**
+ * Merge incoming assistant content blocks into an existing list while
+ * deduping by content-block identity.  This guards against bridge-resume
+ * scenarios where the same assistant event is replayed and the SDK quirk
+ * where a cumulative-content payload arrives alongside incremental updates.
+ *
+ * Identity rules (in order of precedence):
+ *   - `tool_use`  → match on `(type, id)`.
+ *   - `thinking`  → match on `(type, signature)` if `signature` is set; else
+ *                   if an empty-thinking placeholder exists at the same
+ *                   index, replace it in-place with the non-empty version.
+ *   - `text`      → match on `(type, text)` exact.
+ *
+ * Returns the original `existing` reference if no incoming block contributed
+ * a change, so callers can short-circuit downstream allocations.
+ */
+function mergeAssistantBlocks(
+  existing: ContentBlock[],
+  incoming: ContentBlock[],
+): ContentBlock[] {
+  if (incoming.length === 0) return existing;
+
+  let out: ContentBlock[] | null = null;
+  const target = (): ContentBlock[] => {
+    if (!out) out = existing.slice();
+    return out;
+  };
+
+  for (let i = 0; i < incoming.length; i++) {
+    const block = incoming[i];
+    const current = out ?? existing;
+
+    if (isToolUseBlock(block)) {
+      const dup = current.some(
+        (b) => isToolUseBlock(b) && b.id === block.id,
+      );
+      if (dup) continue;
+      target().push(block);
+      continue;
+    }
+
+    if (isThinkingBlock(block)) {
+      const sig = (block as { signature?: unknown }).signature;
+      if (typeof sig === "string" && sig.length > 0) {
+        const dup = current.some(
+          (b) =>
+            isThinkingBlock(b) &&
+            (b as { signature?: unknown }).signature === sig,
+        );
+        if (dup) continue;
+        target().push(block);
+        continue;
+      }
+      // Replace an empty-thinking placeholder at the same index with the
+      // non-empty version (newer-SDK pattern: empty event lands first,
+      // text-bearing event arrives later).
+      const sameIdx = i < current.length ? current[i] : undefined;
+      if (
+        sameIdx !== undefined &&
+        isThinkingBlock(sameIdx) &&
+        (sameIdx as { thinking?: string }).thinking === "" &&
+        typeof (block as { thinking?: string }).thinking === "string" &&
+        (block as { thinking?: string }).thinking !== ""
+      ) {
+        const arr = target();
+        arr[i] = block;
+        continue;
+      }
+      // Exact-content match dedupe (replay).
+      const dup = current.some(
+        (b) =>
+          isThinkingBlock(b) &&
+          (b as { thinking?: string }).thinking ===
+            (block as { thinking?: string }).thinking,
+      );
+      if (dup) continue;
+      target().push(block);
+      continue;
+    }
+
+    if (block.type === "text") {
+      const text = (block as { text?: string }).text ?? "";
+      const dup = current.some(
+        (b) => b.type === "text" && (b as { text?: string }).text === text,
+      );
+      if (dup) continue;
+      target().push(block);
+      continue;
+    }
+
+    // Fallback: append unfamiliar block types as-is (no dedupe basis).
+    target().push(block);
+  }
+
+  return out ?? existing;
 }
 
 function appendUserMessage(
@@ -297,16 +399,24 @@ function reconcileThinkingForMessage(
     if (!isThinkingBlock(block)) continue;
     const key = thinkingBlockKey(messageId, i);
 
+    // Track whether this entry's timer pre-existed before this invocation.
+    // If we create the timer here, we must NOT also freeze it in the same
+    // call — that would record elapsed=0 for late-arriving thinking blocks
+    // whose merged layout already has trailing non-thinking content.
+    const preExisted = thinkingStartedAt.has(key);
+
     // 1. First-seen → start timer (only if no elapsed already captured).
-    if (!thinkingStartedAt.has(key) && !thinkingElapsed.has(key)) {
+    if (!preExisted && !thinkingElapsed.has(key)) {
       if (!nextStarted) nextStarted = new Map(thinkingStartedAt);
       nextStarted.set(key, now);
     }
 
     // 2. Has another non-thinking block come in *after* this thinking block?
     // If so, the thinking step has ended — capture elapsed and clear started.
+    // Only freeze entries whose timer pre-existed, otherwise we'd record an
+    // immediate elapsed=0 for a never-observed-alive thinking block (B3b).
     const ended = lastNonThinkingIdx > i;
-    if (ended) {
+    if (ended && preExisted) {
       const startedAt =
         (nextStarted ?? thinkingStartedAt).get(key) ?? thinkingStartedAt.get(key);
       if (startedAt !== undefined && !thinkingElapsed.has(key)) {
@@ -359,6 +469,25 @@ export function freezePendingThinking(
 }
 
 /**
+ * Count the number of distinct message ids that own a pending thinking
+ * timer.  Used by the `result` event branch (B8) to decide whether the
+ * freeze is unambiguous: at most one message → freeze; multiple → leave
+ * alone, since `result` doesn't carry a message id and we can't tell
+ * which concurrent sub-agent message it terminated.
+ */
+function countDistinctMessageIdsInThinking(
+  thinkingStartedAt: Map<string, number>,
+): number {
+  if (thinkingStartedAt.size === 0) return 0;
+  const ids = new Set<string>();
+  for (const key of thinkingStartedAt.keys()) {
+    const colonIdx = key.lastIndexOf(":");
+    ids.add(colonIdx >= 0 ? key.slice(0, colonIdx) : key);
+  }
+  return ids.size;
+}
+
+/**
  * For an assistant event, walk the new (this-event-only) content blocks and
  * mark any tool_use ids as running. Note: matching tool_results may arrive in
  * a *later* user event, which is where we remove ids — see `clearToolResults`.
@@ -366,10 +495,17 @@ export function freezePendingThinking(
 function addRunningToolUses(
   running: Set<string>,
   blocks: ContentBlock[],
+  toolResults: Map<string, ToolResultBlockData>,
 ): Set<string> {
   let next: Set<string> | null = null;
   for (const b of blocks) {
     if (isToolUseBlock(b)) {
+      // Out-of-order delivery: a tool_result may have already arrived for
+      // this tool_use_id before the assistant event itself.  In that case
+      // the tool isn't running — skip it, otherwise it would be stuck
+      // "running" forever (no future tool_result will clear it) (B7).
+      if (toolResults.has(b.id)) continue;
+      if (running.has(b.id)) continue;
       if (!next) next = new Set(running);
       next.add(b.id);
     }
@@ -514,6 +650,13 @@ export function reduceEvent(
         // dead subprocess.  Clearing prevents a fresh delta from being
         // attached to the wrong message slot.
         currentStreamMessageId: null,
+        // Same reasoning for the streaming-thinking-text accumulator:
+        // entries belong to the dead subprocess and would otherwise leak
+        // forever across bridge respawns (B5).
+        streamingThinkingText:
+          state.streamingThinkingText.size === 0
+            ? state.streamingThinkingText
+            : new Map(),
       };
     }
     // Other system events (status, etc.) are flow markers — ignore quietly.
@@ -538,9 +681,12 @@ export function reduceEvent(
     const streamingMessageId = isClosing ? null : messageId;
 
     // Run-set: add any new tool_use ids from this event's incoming blocks.
+    // Pass `state.toolResults` so out-of-order delivery (tool_result before
+    // assistant event) doesn't re-mark an already-resolved tool as running.
     const runningToolUseIds = addRunningToolUses(
       state.runningToolUseIds,
       incomingBlocks,
+      state.toolResults,
     );
 
     // Thinking state: reconcile against the *merged* block layout.
@@ -611,11 +757,23 @@ export function reduceEvent(
   // 5. Result event — captured for end-of-turn footer.
   if (isResultEvent(event)) {
     const now = Date.now();
-    const { thinkingStartedAt, thinkingElapsed } = freezePendingThinking(
+    // B8: a `result` event indicates the *parent* turn ended, not
+    // necessarily every concurrently-streaming sub-agent message.  When
+    // multiple distinct messageIds have pending thinking timers we can't
+    // tell which one ended, so leave them all alive — a stale ticker is
+    // less harmful than freezing an unrelated sub-agent's clock.  The
+    // single-message case (the common one) still freezes as before.
+    const distinctMessageIds = countDistinctMessageIdsInThinking(
       state.thinkingStartedAt,
-      state.thinkingElapsed,
-      now,
     );
+    const { thinkingStartedAt, thinkingElapsed } =
+      distinctMessageIds <= 1
+        ? freezePendingThinking(
+            state.thinkingStartedAt,
+            state.thinkingElapsed,
+            now,
+          )
+        : { thinkingStartedAt: state.thinkingStartedAt, thinkingElapsed: state.thinkingElapsed };
     // M1 fix: dedupe by uuid.  Some bridge versions re-emit prior
     // result envelopes on resume; without this guard the masthead
     // cost lozenge would balloon to ~2× / ~3× / N× actual spend.
@@ -638,7 +796,7 @@ export function reduceEvent(
         })();
     const seenResultEventIds =
       eventId !== null && !alreadyAccumulated
-        ? new Set([...state.seenResultEventIds, eventId])
+        ? appendCappedResultId(state.seenResultEventIds, eventId)
         : state.seenResultEventIds;
     // H4 (turn end): clear runningToolUseIds — Claude's contract
     // says any tool_use issued in this turn has its tool_result
@@ -660,6 +818,10 @@ export function reduceEvent(
           : new Set(),
       thinkingStartedAt,
       thinkingElapsed,
+      // The turn is over — drop the latched stream message id so a stray
+      // late-arriving content_block_delta doesn't get attributed to the
+      // previous message's accumulator (B6).
+      currentStreamMessageId: null,
     };
   }
 
@@ -726,6 +888,31 @@ function appendCappedUnknown(
   const slice = prev.slice(prev.length - UNKNOWN_EVENT_BUFFER_CAP + 1);
   slice.push(next);
   return slice;
+}
+
+/**
+ * Cap on `seenResultEventIds` retention.  Sets are insertion-ordered in
+ * JavaScript, so we can implement FIFO eviction by slicing off the oldest
+ * entries when adding a new one would exceed the cap.  In a healthy session
+ * this cap is never reached (Claude assigns one uuid per turn); a
+ * misbehaving bridge that fires synthetic result events on every keystroke
+ * would otherwise grow this set without bound. */
+const RESULT_EVENT_ID_CAP = 1000;
+
+function appendCappedResultId(
+  prev: Set<string>,
+  next: string,
+): Set<string> {
+  if (prev.size < RESULT_EVENT_ID_CAP) {
+    const out = new Set(prev);
+    out.add(next);
+    return out;
+  }
+  // Drop oldest entries to make room for the new one.
+  const arr = [...prev];
+  const sliced = arr.slice(arr.length - RESULT_EVENT_ID_CAP + 1);
+  sliced.push(next);
+  return new Set(sliced);
 }
 
 /** Convenience: fold an array of events into a final state. */

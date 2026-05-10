@@ -80,7 +80,7 @@ export function ThinkingBlock({
  *   ≥ 10s → integer seconds ("24s")
  */
 export function formatElapsedSeconds(ms: number): string {
-  const s = ms / 1000;
+  const s = Math.max(0, ms) / 1000;
   if (s < 10) return `${s.toFixed(1)}s`;
   return `${Math.round(s)}s`;
 }

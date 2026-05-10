@@ -68,11 +68,18 @@ function HighlightedCode({ code, language }: { code: string; language: string })
       if (language && hljs.getLanguage(language)) {
         return hljs.highlight(displayedCode, { language, ignoreIllegals: true }).value;
       }
-      // No language given (or unrecognized) — render as plain escaped code.
-      // hljs's auto-detect aggressively classifies short freeform text as
-      // CSS selectors or shell, producing misleading colours.  Plain text is
-      // the honest default; the user can always copy the snippet to its
-      // proper home for highlighting.
+      if (language) {
+        // Language hint was given but the common bundle doesn't carry it
+        // (e.g. scala, dart, elixir).  Fall back to auto-detection so the
+        // user still sees coloured tokens — better than a labelled pill
+        // sitting over plain text.
+        return hljs.highlightAuto(displayedCode).value;
+      }
+      // No language given — render as plain escaped code.  hljs's auto-detect
+      // aggressively classifies short freeform text as CSS selectors or
+      // shell, producing misleading colours.  Plain text is the honest
+      // default; the user can always copy the snippet to its proper home
+      // for highlighting.
       return escapeHtml(displayedCode);
     } catch {
       // Highlighting must never crash the surface; on error return the raw

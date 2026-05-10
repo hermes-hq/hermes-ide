@@ -83,15 +83,24 @@ const STDERR_MAX_BYTES = 1 << 20;
  *  observed event-loop reordering window in production traces. */
 const POST_INIT_EXIT_GRACE_MS = 300;
 
+/** Header prepended to a truncated stderr buffer.  Computed once so we
+ *  can subtract its byte length from `STDERR_MAX_BYTES` when slicing —
+ *  otherwise the returned buffer would exceed the cap by the header
+ *  length on every truncation (fix B4). */
+const STDERR_TRUNC_HEADER =
+  `[stderr truncated; showing last ${STDERR_MAX_BYTES} bytes]\n`;
+
 export function _capStderr(buf: string, chunk: string): string {
   // Fast path: the common case is small chunks well under the cap.
   if (buf.length + chunk.length <= STDERR_MAX_BYTES) return buf + chunk;
-  // Otherwise we keep the tail (most-recent N bytes).  The 80-char
-  // header makes it obvious to anyone reading the stderr panel why
-  // earlier output is gone.
+  // Otherwise we keep the tail (most-recent N bytes).  The header
+  // makes it obvious to anyone reading the stderr panel why earlier
+  // output is gone.  We subtract the header length so the returned
+  // buffer stays at or under STDERR_MAX_BYTES (fix B4).
   const combined = buf + chunk;
-  const keep = combined.slice(combined.length - STDERR_MAX_BYTES);
-  return `[stderr truncated; showing last ${STDERR_MAX_BYTES} bytes]\n${keep}`;
+  const keepBytes = STDERR_MAX_BYTES - STDERR_TRUNC_HEADER.length;
+  const keep = combined.slice(combined.length - keepBytes);
+  return `${STDERR_TRUNC_HEADER}${keep}`;
 }
 
 export class AgentSessionStore {
@@ -146,13 +155,27 @@ export class AgentSessionStore {
       if (ev?.type === "system" && ev?.subtype === "init") {
         this.initGeneration += 1;
         this.lastInitAt = Date.now();
-        this.snapshot = { ...this.snapshot, exit: null, stderr: "" };
+        // Bridge respawn: clear any pending permission request from the
+        // dead bridge.  Otherwise the modal would still be showing the
+        // old request id, and clicking allow/deny would write a
+        // _hermes_perm_response that the new bridge has never heard of
+        // (a no-op), leaving the modal stuck open (fix B1).
+        this.snapshot = {
+          ...this.snapshot,
+          exit: null,
+          stderr: "",
+          pendingPermRequest: null,
+        };
       }
       this.notify();
     }).then((un) => this.collect(un)).catch(() => undefined);
 
     listen<string>(`agent-stderr-${sessionId}`, (msg) => {
       if (this.destroyed) return;
+      // Empty chunk: skip the snapshot allocation so React's
+      // useSyncExternalStore doesn't re-render on every keepalive
+      // (fix B3).
+      if (msg.payload.length === 0) return;
       this.snapshot = {
         ...this.snapshot,
         stderr: _capStderr(this.snapshot.stderr, msg.payload),

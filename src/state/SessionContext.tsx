@@ -199,6 +199,25 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         && existing.detected_agent?.model === action.session.detected_agent?.model
         && existing.metrics.output_lines === action.session.metrics.output_lines
         && existing.metrics.tool_calls.length === action.session.metrics.tool_calls.length
+        // Also check the last tool_call's identity — backend sometimes
+        // mutates the most-recent entry in place (compaction, coalescing,
+        // canonicalization) without changing the array length.  Without
+        // this comparison the reducer drops the update and AgentToolBlock
+        // keeps rendering a stale tool name/args.  We only inspect the
+        // tail because that's the only realistic mutation pattern (the
+        // backend never rewrites historical entries) and we want the
+        // dedup check to stay O(1).
+        //
+        // PERF: compare by REFERENCE equality only.  An earlier draft
+        // used JSON.stringify(args) but that runs on every backend
+        // session-update tick — and tool args can carry kilobytes of
+        // payload (Bash stdout, Read content), making the dedup itself
+        // the slow path that the dedup is supposed to prevent.  The
+        // backend always replaces the last tool_call object when the
+        // call mutates, so reference inequality catches the same case
+        // in O(1) without serialising anything.
+        && existing.metrics.tool_calls[existing.metrics.tool_calls.length - 1]
+          === action.session.metrics.tool_calls[action.session.metrics.tool_calls.length - 1]
         && existing.metrics.files_touched.length === action.session.metrics.files_touched.length
         && existing.metrics.memory_facts.length === action.session.metrics.memory_facts.length
         // Multi-folder bug fix: workspace_paths drives the agent's --add-dir
@@ -1039,6 +1058,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             type: "SESSION_UPDATED",
             session: { ...existing, workspace_paths },
           });
+          // NOTE: an earlier draft (Bug C) auto-respawned the bridge here
+          // when `hasAddDirDrift(claudeAddDirs.current, workspace_paths)`
+          // was true, so file tools would see freshly-attached projects
+          // before the next message.  That created an infinite respawn
+          // loop because `claudeAddDirs.current` is only updated inside
+          // `submitAgentMessage` — every fresh bridge re-emitted the same
+          // wp-event and the drift check kept triggering another respawn.
+          // The drift check inside `submitAgentMessage` already handles
+          // the next-turn case correctly; the gap (attach without submit)
+          // is rare and harmless (Read/Edit will fail clearly until the
+          // user sends a message), so no auto-respawn here.
         },
       );
       unlisteners.push(uWp);
@@ -1912,6 +1942,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     sessionId: string,
     permissionMode: string | null,
   ): Promise<boolean> => {
+    // `null` means "no change requested" — bail out before touching the
+    // bridge or queueing a flag.  Otherwise the queued `permissionMode: null`
+    // would slip through `submitAgentMessage`'s `!== undefined` mustRespawn
+    // check and trigger a fork-respawn for nothing.
+    if (permissionMode === null) return true;
     // Two-step:
     //   (a) immediately tell the live bridge so an in-flight turn's
     //       tool calls honor the new mode without waiting for the user
@@ -1919,25 +1954,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     //   (b) queue the flag so a future respawn carries it.
     // Step (a) is best-effort — the bridge may have exited between turns,
     // in which case the queued flag in (b) is what brings it back.
-    if (permissionMode !== null) {
-      // Optimistic React-state update — flip session.permission_mode in
-      // the store IMMEDIATELY so the AgentSessionView's auto-allow
-      // effect (which keys off `state.sessions[id].permission_mode`)
-      // can fire on the very next render, before the bridge has even
-      // acknowledged the setPermissionMode op.  Without this, the chip
-      // visually flips but a perm modal already on screen sits there
-      // until you send a new message.
-      const existing = stateRef.current.sessions[sessionId];
-      if (existing && existing.permission_mode !== permissionMode) {
-        dispatch({
-          type: "SESSION_UPDATED",
-          session: { ...existing, permission_mode: permissionMode },
-        });
-      }
-      try {
-        await setAgentPermissionMode(sessionId, permissionMode);
-      } catch { /* bridge may be down between turns; queued flag will apply */ }
+    // Optimistic React-state update — flip session.permission_mode in
+    // the store IMMEDIATELY so the AgentSessionView's auto-allow
+    // effect (which keys off `state.sessions[id].permission_mode`)
+    // can fire on the very next render, before the bridge has even
+    // acknowledged the setPermissionMode op.  Without this, the chip
+    // visually flips but a perm modal already on screen sits there
+    // until you send a new message.
+    const existing = stateRef.current.sessions[sessionId];
+    if (existing && existing.permission_mode !== permissionMode) {
+      dispatch({
+        type: "SESSION_UPDATED",
+        session: { ...existing, permission_mode: permissionMode },
+      });
     }
+    try {
+      await setAgentPermissionMode(sessionId, permissionMode);
+    } catch { /* bridge may be down between turns; queued flag will apply */ }
     queuePendingFlag(sessionId, { permissionMode });
     return true;
   }, [queuePendingFlag]);
@@ -2011,7 +2044,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     if (mustRespawn) {
       const ok = await respawnAgent(sessionId, queued ?? {});
-      if (ok && queued) pendingFlags.current.delete(sessionId);
+      // Bug D fix: drop the queued flag whether the respawn succeeded or
+      // failed.  If we kept it on failure, every subsequent submit would
+      // re-trigger another fork-respawn with the same broken flag — no
+      // back-off, no surrender — silently tearing down the bridge again
+      // each time the user typed.  One attempt per chip-click is the
+      // contract; the user can re-click if they really want a retry.
+      if (queued) pendingFlags.current.delete(sessionId);
+      if (!ok) {
+        console.warn(
+          `[SessionContext] respawnAgent failed for ${sessionId};` +
+          ` dropped queued flags=${JSON.stringify(queued)} to avoid retry-loop`,
+        );
+      }
     }
 
     try {
