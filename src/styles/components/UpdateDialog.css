@@ -112,7 +112,7 @@
 
 .update-dialog-error {
   font-size: var(--text-base);
-  color: #f87171;
+  color: var(--red);
   margin-bottom: 12px;
 }
 

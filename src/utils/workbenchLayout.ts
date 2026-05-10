@@ -14,7 +14,7 @@
 
 // ─── Tabs ───────────────────────────────────────────────────────────
 
-export const WORKBENCH_TABS = ["files", "context"] as const;
+export const WORKBENCH_TABS = ["files", "context", "git"] as const;
 export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];
 
 export const DEFAULT_WORKBENCH_TAB: WorkbenchTab = "files";

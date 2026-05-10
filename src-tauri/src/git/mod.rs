@@ -679,14 +679,20 @@ pub fn git_unstage(
     drop(db);
     let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
 
-    let head_tree = repo.head().and_then(|h| h.peel_to_tree()).ok();
+    // `reset_default` resets index entries to match the given commit
+    // (libgit2's equivalent of `git reset` for paths).  The target
+    // argument must be peelable to a commit — passing the HEAD's tree
+    // (as we did pre-1.1.15) tripped libgit2's peel-to-commit check
+    // with: "git_object … can not be successfully peeled into a commit".
+    // Use the HEAD commit itself; trees are not commitish.
+    let head_commit = repo.head().and_then(|h| h.peel_to_commit()).ok();
 
     if paths.len() == 1 && paths[0] == "." {
         let all_paths: Vec<String> = vec!["*".to_string()];
-        repo.reset_default(head_tree.as_ref().map(|t| t.as_object()), &all_paths)
+        repo.reset_default(head_commit.as_ref().map(|c| c.as_object()), &all_paths)
             .map_err(|e| e.to_string())?;
     } else {
-        repo.reset_default(head_tree.as_ref().map(|t| t.as_object()), &paths)
+        repo.reset_default(head_commit.as_ref().map(|c| c.as_object()), &paths)
             .map_err(|e| e.to_string())?;
     }
 

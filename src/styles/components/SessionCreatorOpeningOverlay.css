@@ -18,7 +18,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(11, 15, 20, 0.72);
+  /* Theme-aware backdrop: dim the active theme's bg-0 rather than
+   * forcing a dark wash, so the overlay matches the theme on light
+   * surfaces (Newsprint cream, Atrium daylight). */
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   pointer-events: none;
   animation: session-creator-opening-in 100ms ease-out;
 }
@@ -29,11 +32,11 @@
   font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--brass, #d4a86a);
+  color: var(--accent);
   padding: 8px 18px;
-  border-top: 1px solid rgba(212, 168, 106, 0.4);
-  border-bottom: 1px solid rgba(212, 168, 106, 0.4);
-  background: var(--bg-paper, #0d1218);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--bg-1);
   animation: session-creator-opening-pulse 1.4s ease-in-out infinite;
 }
 

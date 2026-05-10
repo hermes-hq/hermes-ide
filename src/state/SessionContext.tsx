@@ -172,7 +172,7 @@ interface SessionState {
      *  `DEFAULT_PERSISTED_WORKBENCH` in `utils/workbenchLayout.ts`. */
     workbench: {
       open: boolean;
-      tab: "files" | "context";
+      tab: "files" | "context" | "git";
       ratio: number;
       filesNotesSplit: number;
     };

@@ -46,6 +46,9 @@ vi.mock("../components/FileExplorerPanel", () => ({
 vi.mock("../components/AgentContextPanel", () => ({
   AgentContextPanel: () => <div data-testid="agent-context-stub">context</div>,
 }));
+vi.mock("../components/GitPanel", () => ({
+  GitPanel: () => <div data-testid="git-panel-stub">git</div>,
+}));
 vi.mock("../components/WorkbenchNotes", () => ({
   WorkbenchNotes: () => <div data-testid="workbench-notes">notes</div>,
 }));

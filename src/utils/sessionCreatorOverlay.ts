@@ -109,6 +109,11 @@ export function showOpeningOverlay(): OverlayState {
   el.setAttribute("role", "status");
   el.setAttribute("aria-live", "polite");
   el.setAttribute("data-testid", "session-creator-opening-overlay");
+  // Theme-aware backdrop: rather than a fixed dark wash, mix the active
+  // theme's `--bg-0` with high alpha so the overlay reads as "the app
+  // dimmed" on every theme (cream paper on Newsprint, near-black on
+  // Frosted Dark).  Raw `rgba(0,0,0,0.55)` would force a dark wash on
+  // light themes and look out of place.
   el.style.cssText = [
     "position:fixed",
     "inset:0",
@@ -116,7 +121,7 @@ export function showOpeningOverlay(): OverlayState {
     "display:flex",
     "align-items:center",
     "justify-content:center",
-    "background:rgba(11,15,20,0.82)",
+    "background:color-mix(in srgb, var(--bg-0) 82%, transparent)",
     // pointer-events:auto so the user can click to dismiss if the
     // modal mount silently fails (the safety net for "loader stuck").
     "pointer-events:auto",
@@ -146,7 +151,8 @@ export function showOpeningOverlay(): OverlayState {
     "flex-direction:column",
     "gap:14px",
     "padding:20px 32px",
-    "background:#0d1218",
+    "background:var(--bg-1)",
+    "border:1px solid var(--border)",
     "min-width:460px",
     "max-width:560px",
   ].join(";");
@@ -168,7 +174,7 @@ export function showOpeningOverlay(): OverlayState {
     "font-weight:600",
     "letter-spacing:0.18em",
     "text-transform:uppercase",
-    "color:#d4a86a",
+    "color:var(--accent)",
   ].join(";");
 
   // Reference number — typeset notebooks number their entries; this
@@ -184,7 +190,7 @@ export function showOpeningOverlay(): OverlayState {
     "font-weight:500",
     "letter-spacing:0.16em",
     "text-transform:uppercase",
-    "color:#5d6878",
+    "color:var(--text-3)",
     "font-variant-numeric:tabular-nums",
   ].join(";");
 
@@ -195,7 +201,7 @@ export function showOpeningOverlay(): OverlayState {
   const ruleTop = document.createElement("div");
   ruleTop.style.cssText = [
     "height:1px",
-    "background:rgba(212,168,106,0.6)",
+    "background:color-mix(in srgb, var(--accent) 60%, transparent)",
     "transform-origin:left center",
     "animation:hermes-overlay-rule-sweep 1.6s ease-in-out infinite",
   ].join(";");
@@ -252,7 +258,10 @@ export function showOpeningOverlay(): OverlayState {
       "flex:1 1 0",
       "min-width:0",
       "height:32px",
-      "background:#d4a86a",
+      // Pre-animation initial color — the keyframe overrides this on
+      // first paint, but using --accent keeps it themed for the < 1
+      // frame it might be visible.
+      "background:var(--accent)",
       "transform-origin:bottom center",
       `animation:hermes-overlay-bar-bounce ${dur}ms ease-in-out ${negDelay}ms infinite`,
       "will-change:transform",
@@ -270,7 +279,7 @@ export function showOpeningOverlay(): OverlayState {
     "font-weight:600",
     "letter-spacing:0.18em",
     "text-transform:uppercase",
-    "color:#e2e8f0",
+    "color:var(--text-0)",
     "line-height:1.4",
   ].join(";");
 
@@ -281,7 +290,7 @@ export function showOpeningOverlay(): OverlayState {
   const ruleBottom = document.createElement("div");
   ruleBottom.style.cssText = [
     "height:1px",
-    "background:rgba(212,168,106,0.6)",
+    "background:color-mix(in srgb, var(--accent) 60%, transparent)",
     "transform-origin:right center",
     "animation:hermes-overlay-rule-sweep 1.6s ease-in-out infinite",
     "animation-delay:0.4s",
@@ -297,7 +306,7 @@ export function showOpeningOverlay(): OverlayState {
     "font-size:11px",
     "font-style:italic",
     "letter-spacing:0.01em",
-    "color:#a0aab8",
+    "color:var(--text-2)",
     "min-height:1.4em",
   ].join(";");
 

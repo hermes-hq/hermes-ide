@@ -996,8 +996,15 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             )}
           </div>
         )}
-        {/* Sub-view toolbar — only shown for the active session */}
-        {isActive && session.phase !== "destroyed" && session.phase !== "disconnected" && (
+        {/* Sub-view toolbar — only shown for the active TERMINAL session.
+         *
+         * For agent sessions the right-rail Workbench owns Files / Search /
+         * Git / Notes (1.1.15 — Git lives as a dedicated tab; the plugin-
+         * supplied "notes" action is redundant with the built-in Notes
+         * drawer; Search lives inside the file tree).  Hiding the whole
+         * row keeps the session card focused on identity (label + branch
+         * line) rather than redundant entry points. */}
+        {isActive && session.phase !== "destroyed" && session.phase !== "disconnected" && session.mode !== "agent" && (
           <div className="session-subviews">
             {([
               { id: "git" as const, title: "Git", badge: gitBadge, icon: (

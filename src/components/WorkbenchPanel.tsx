@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSession } from "../state/SessionContext";
 import { FileExplorerPanel } from "./FileExplorerPanel";
 import { AgentContextPanel } from "./AgentContextPanel";
+import { GitPanel } from "./GitPanel";
 import { WorkbenchNotes } from "./WorkbenchNotes";
 import {
   clampFilesNotesSplit,
@@ -163,7 +164,7 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
   }, [dispatch]);
 
   const setTab = useCallback(
-    (tab: "files" | "context") => {
+    (tab: "files" | "context" | "git") => {
       dispatch({ type: "SET_WORKBENCH_TAB", tab });
     },
     [dispatch],
@@ -243,6 +244,15 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
           >
             Context
           </button>
+          <button
+            type="button"
+            className="workbench-tab"
+            role="tab"
+            aria-selected={wb.tab === "git"}
+            onClick={() => setTab("git")}
+          >
+            Git
+          </button>
         </div>
       </header>
 
@@ -265,6 +275,14 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
         hidden={wb.tab !== "context"}
       >
         <AgentContextPanel session={session} />
+      </div>
+      <div
+        className="workbench-body"
+        role="tabpanel"
+        aria-label="Git"
+        hidden={wb.tab !== "git"}
+      >
+        <GitPanel visible={wb.tab === "git"} />
       </div>
 
       <div

@@ -201,14 +201,19 @@
  * via inline `style={width}` (drag-handle drives that), so we have
  * to !important-override it. */
 .workbench-body .file-explorer,
-.workbench-body .agent-context-panel {
+.workbench-body .agent-context-panel,
+.workbench-body .git-panel {
   width: 100% !important;
   max-width: none !important;
   min-width: 0 !important;
   height: 100%;
   border-left: none;
   border-right: none;
-  position: static;
+  /* NOTE: do NOT force `position: static` here — GitPanel relies on
+   * `position: relative` so its inner absolute-positioned popovers
+   * (commit hint, branch picker dropdown, stash menu) anchor to it.
+   * Forcing static reparents those popovers to the viewport and
+   * breaks their click hit-testing — Unstage was the visible victim. */
 }
 
 .workbench-body .agent-context-panel-resize-handle {

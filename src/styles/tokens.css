@@ -60,35 +60,40 @@
  * ──────────────────────────────────────────────────────────── */
 
 :root {
-  --bg-0: #0B0F14;
-  --bg-1: #111820;
-  --bg-2: #1a222d;
-  --bg-3: #1f2937;
-  --bg-hover: #1f2937;
-  --bg-active: #2a3444;
-  --text-0: #e2e8f0;
-  --text-1: #c8d6e5;
-  --text-2: #7f8c9b;
-  --text-3: #4a5568;
-  --accent: #7b93db;
-  --accent-dim: #7b93db26;
-  --green: #34d399;
-  --green-dim: #34d39926;
-  --red: #ff4444;
-  --red-dim: #ff444426;
-  --yellow: #ffb000;
-  --yellow-dim: #ffb00026;
-  --error: #ee5555;
-  --violet: #a78bfa;
-  --violet-dim: #a78bfa26;
-  --border: #1a2332;
-  --border-light: #243040;
-  --scanline-opacity: 0.08;
+  /* :root mirrors the v1.1.15 default theme (Frosted Dark) so an
+   * unset/loading state is visually identical to the default.  Each
+   * [data-theme=…] block in themes.css overrides these.  Adding a
+   * new color token here means adding it to every theme block. */
+  --bg-0: #1c1c1e;
+  --bg-1: #232325;
+  --bg-2: #2d2d2f;
+  --bg-3: #3a3a3c;
+  --bg-hover: #2d2d2f;
+  --bg-active: #48484a;
+  --text-0: #f5f5f7;
+  --text-1: #d6d6d9;
+  --text-2: #8e8e93;
+  --text-3: #5c5c61;
+  --accent: #0a84ff;
+  --accent-bright: #5ea7ff;
+  --accent-dim: rgba(10, 132, 255, 0.18);
+  --green: #30d158;
+  --green-dim: rgba(48, 209, 88, 0.18);
+  --red: #ff453a;
+  --red-dim: rgba(255, 69, 58, 0.18);
+  --yellow: #ffd60a;
+  --yellow-dim: rgba(255, 214, 10, 0.18);
+  --error: #ff453a;
+  --violet: #bf5af2;
+  --violet-dim: rgba(191, 90, 242, 0.18);
+  --border: #2d2d2f;
+  --border-light: #3a3a3c;
+  --scanline-opacity: 0;
   --accent-glow: none;
-  --radius: 3px;
-  --radius-sm: 3px;
-  --radius-lg: 6px;
-  --radius-pill: 10px;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+  --radius-pill: 14px;
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", Menlo, monospace;
   --font-ui: "Inter Tight", "Inter", system-ui, sans-serif;
   --font-sans: var(--font-ui);
@@ -140,31 +145,45 @@
  * ──────────────────────────────────────────────────────── */
 
 :root {
+  /* ─── Legacy "paper / ink / brass" aliases (1.1.15) ──────────
+   * The agent surface CSS (~600 usages) reads `--bg-paper`,
+   * `--ink-primary`, `--rule`, `--brass`, etc — a separate token
+   * vocabulary that pre-dates the consolidated theme system.
+   *
+   * Rather than rename ~600 references, we alias the legacy names
+   * to the new theme-controlled tokens here.  Then `[data-theme=…]`
+   * in themes.css overrides only the new names (`--bg-0`, `--text-0`,
+   * `--accent`, etc) and the legacy names follow automatically via
+   * CSS variable resolution.
+   *
+   * That's how the agent surface re-paints when you switch from
+   * Frosted Dark to Newsprint without any agent-CSS changes. */
+
   /* Page surface (where the conversation lives) */
-  --bg-paper: #0d1218;
+  --bg-paper: var(--bg-0);
 
   /* Hairlines */
-  --rule: #1a2230;
-  --rule-strong: #243040;
+  --rule: var(--border);
+  --rule-strong: var(--border-light);
 
   /* Ink (text colors, refined for reading copy) */
-  --ink-primary: #e2e8f0;     /* body text, prose */
-  --ink-secondary: #a0aab8;   /* secondary metadata, output */
-  --ink-tertiary: #5d6878;    /* whispers — line numbers, timestamps */
+  --ink-primary: var(--text-0);
+  --ink-secondary: var(--text-2);
+  --ink-tertiary: var(--text-3);
 
-  /* Reading-optimized accent (less saturated than --accent for in-copy use).
-   * Slate-blue lives here for STRUCTURAL roles — links, hairlines, cool cues. */
-  --accent-paper: #6b88d0;
+  /* Reading-optimized accent — alias to the theme's primary accent.
+   * Pre-1.1.15 this was a separate slate-blue used for structural
+   * roles; the new themes don't carry a separate "cool structural"
+   * accent, so we use the primary. */
+  --accent-paper: var(--accent);
 
-  /* "Workshop" palette — warm brass tones for ACTIVE / live / yours-here
-   * affordances.  Paired with the cool slate-blue `--accent-paper` they give
-   * the surface the warm-cool tension of vintage instrument panels.
-   *   --brass:        primary active hue (user margin bar, cursor, LEDs)
-   *   --brass-bright: a hover pop, highlights, active chip border
-   *   --brass-dim:    glows, focus rings, tinted fills */
-  --brass: #d4a86a;
-  --brass-bright: #e8c485;
-  --brass-dim: rgba(212, 168, 106, 0.18);
+  /* "Workshop" palette — alias to the theme's accent.  In Observatory
+   * this resolves back to true brass (#d4a86a); in Atelier it's
+   * terracotta; in Newsprint it's black.  Each theme reinterprets
+   * "warm/active/yours-here" through its own accent. */
+  --brass: var(--accent);
+  --brass-bright: var(--accent-bright);
+  --brass-dim: var(--accent-dim);
 
   /* Tool family accents (semantic) */
   --tool-file: var(--violet);

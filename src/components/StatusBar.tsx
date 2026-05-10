@@ -1,12 +1,14 @@
 import "../styles/components/StatusBar.css";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import { setSetting, getSetting, getSettings } from "../api/settings";
+import { setSetting } from "../api/settings";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
-import { DARK_THEMES, LIGHT_THEMES, applyTheme, normalizeThemeId } from "../utils/themeManager";
+// Theme switching moved to Settings → Appearance in 1.1.15.  The
+// status bar is for state, not configuration; keeping the picker
+// out of here removes a redundant entry point.
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -184,7 +186,9 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
             <path d="M2.5 13.5h11" />
           </svg>
         </button>
-        <ThemePicker />
+        {/* ThemePicker removed in 1.1.15 — theme switching now lives
+            in Settings → Appearance, the single source of truth.  The
+            status bar should communicate state, not configuration. */}
         <button
           className="status-bug-btn"
           onClick={() => {
@@ -218,146 +222,5 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         )}
       </div>
     </div>
-  );
-}
-
-/* ─── Theme Picker (status bar) ────────────────────────────── */
-
-// Swatch accent colour per theme — keyed by id from DARK_THEMES / LIGHT_THEMES.
-// Values come from the canonical `--accent` token in `themes.css`; keep in sync
-// when a theme's accent changes.  Unknown keys fall back to "#888" at the
-// callsite, so adding a future theme here is purely cosmetic.
-const THEME_COLORS: Record<string, string> = {
-  // Dark
-  "frosted-dark": "#0a84ff",
-  atelier:        "#e07850",
-  observatory:    "#d4a86a",
-  phosphor:       "#b0f0a8",
-  // Light
-  "frosted-light": "#0a84ff",
-  linen:           "#c45a32",
-  newsprint:       "#0a0a0a",
-  atrium:          "#4a6a8c",
-};
-
-function ThemePicker() {
-  const [open, setOpen] = useState(false);
-  const [current, setCurrent] = useState("frosted-dark");
-  const savedThemeRef = useRef("frosted-dark");
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-
-  // Load current theme on mount.  Stored value may be a legacy id from a
-  // pre-1.1.15 install — normalise so the picker highlights the migrated
-  // theme rather than showing nothing as "active".
-  useEffect(() => {
-    getSetting("theme").then((v) => {
-      if (v) {
-        const normalized = normalizeThemeId(v);
-        setCurrent(normalized);
-        savedThemeRef.current = normalized;
-      }
-    }).catch(() => {});
-  }, []);
-
-  // Close on outside click — restore theme if not committed
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (btnRef.current?.contains(t) || popRef.current?.contains(t)) return;
-      // Restore saved theme on close without selection
-      getSettings().then((all) => applyTheme(savedThemeRef.current, { ...all, theme: savedThemeRef.current })).catch(() => {});
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ x: r.right, y: r.top });
-      savedThemeRef.current = current;
-    }
-    setOpen((o) => !o);
-  };
-
-  const preview = async (id: string) => {
-    const all = await getSettings();
-    applyTheme(id, { ...all, theme: id });
-  };
-
-  const restorePreview = async () => {
-    const all = await getSettings();
-    applyTheme(savedThemeRef.current, { ...all, theme: savedThemeRef.current });
-  };
-
-  const select = async (id: string) => {
-    setCurrent(id);
-    savedThemeRef.current = id;
-    setOpen(false);
-    await setSetting("theme", id);
-    const all = await getSettings();
-    applyTheme(id, { ...all, theme: id });
-  };
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        className="status-theme-btn"
-        onClick={toggle}
-        title="Switch theme"
-      >
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="8" cy="8" r="3" />
-          <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
-        </svg>
-      </button>
-      {open && pos && (
-        <div
-          ref={popRef}
-          className="status-theme-popover"
-          style={{ right: `${window.innerWidth - pos.x}px`, bottom: `${window.innerHeight - pos.y + 4}px`, maxHeight: "min(400px, 70vh)", overflowY: "auto" }}
-          onMouseLeave={restorePreview}
-        >
-          <div className="status-theme-group-label">Dark</div>
-          {DARK_THEMES.map((t) => (
-            <button
-              key={t.id}
-              className={`status-theme-option ${current === t.id ? "active" : ""}`}
-              onClick={() => select(t.id)}
-              onMouseEnter={() => preview(t.id)}
-              title={t.label}
-            >
-              <span
-                className="status-theme-swatch"
-                style={{ background: THEME_COLORS[t.id] || "#888" }}
-              />
-              {t.label}
-            </button>
-          ))}
-          <div className="status-theme-separator" />
-          <div className="status-theme-group-label">Light</div>
-          {LIGHT_THEMES.map((t) => (
-            <button
-              key={t.id}
-              className={`status-theme-option ${current === t.id ? "active" : ""}`}
-              onClick={() => select(t.id)}
-              onMouseEnter={() => preview(t.id)}
-              title={t.label}
-            >
-              <span
-                className="status-theme-swatch"
-                style={{ background: THEME_COLORS[t.id] || "#888" }}
-              />
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </>
   );
 }
