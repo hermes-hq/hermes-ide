@@ -354,11 +354,43 @@ export function SessionComposer() {
     }
   }, [slash, rankedCommands, highlightIdx, acceptSlash, handleSubmit, composerSessionId, draft, dispatch]);
 
+  // AGENT-18: while an IME composition is in progress (CJK input, dead-keys
+  // on macOS for accented characters, voice dictation), the browser still
+  // fires `input` / `change` events for each partial codepoint — but those
+  // partial codepoints don't represent committed text. Dispatching a draft
+  // update or refreshing the slash-command overlay on each composition tick
+  // (a) burns CPU on transient values and (b) on slow paths can cancel the
+  // composition mid-character on some IMEs. We track composition state and
+  // suppress until `compositionend`, then dispatch once with the final text.
+  const isComposingRef = useRef(false);
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (!composerSessionId) return;
+    // Belt + suspenders: prefer the native `isComposing` flag where the browser
+    // exposes it; fall back to our ref otherwise.
+    const composing =
+      isComposingRef.current ||
+      (e.nativeEvent as InputEvent | undefined)?.isComposing === true;
+    if (composing) {
+      // Still update the textarea-controlled value — React needs `value` and
+      // the DOM in sync to avoid jumping the caret — but skip the dispatch.
+      return;
+    }
     const value = e.target.value;
     dispatch({ type: "SET_COMPOSER_DRAFT", sessionId: composerSessionId, draft: value });
     refreshOverlay(value, e.target.selectionStart);
+  }, [composerSessionId, dispatch, refreshOverlay]);
+
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLTextAreaElement>) => {
+    isComposingRef.current = false;
+    if (!composerSessionId) return;
+    const target = e.currentTarget;
+    const value = target.value;
+    dispatch({ type: "SET_COMPOSER_DRAFT", sessionId: composerSessionId, draft: value });
+    refreshOverlay(value, target.selectionStart);
   }, [composerSessionId, dispatch, refreshOverlay]);
 
   const handleSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -836,6 +868,8 @@ export function SessionComposer() {
           onKeyDown={handleKeyDown}
           onSelect={handleSelect}
           onPaste={handlePaste}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           placeholder={placeholder}
           aria-label="Compose agent message"
           spellCheck={false}

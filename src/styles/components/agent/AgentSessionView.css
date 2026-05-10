@@ -448,6 +448,17 @@
    * don't blow past comfortable reading length.  68ch is the sweet
    * spot for sans-serif body at 14–15px. */
   max-width: 68ch;
+  /* AGENT-25: skip layout/paint for off-screen messages in long sessions.
+   * `content-visibility: auto` lets the browser elide rendering work for
+   * rows scrolled out of view; `contain-intrinsic-size` reserves a sane
+   * placeholder height so the scroll thumb is stable. `contain` isolates
+   * each row so a child re-render doesn't invalidate ancestors.
+   *
+   * Estimated row height (200–800px) is a hint, not a contract — the
+   * browser uses the real measured size once the row scrolls into view. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+  contain: layout style;
 }
 
 /* Generous space between turns — the modern app feel.  No hairline

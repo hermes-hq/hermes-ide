@@ -161,10 +161,24 @@ pub struct SshSavedHost {
 impl Database {
     pub fn new(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| format!("Failed to open database: {}", e))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|e| e.to_string())?;
-        conn.execute_batch("PRAGMA foreign_keys=ON;")
-            .map_err(|e| e.to_string())?;
+        // Performance PRAGMAs (DB-01).
+        // - journal_mode=WAL: concurrent readers + single writer, fewer fsyncs
+        // - synchronous=NORMAL: safe under WAL, ~3-5x faster writes than FULL
+        // - temp_store=MEMORY: keep temp tables/indexes in RAM
+        // - cache_size=-20000: ~20 MB page cache (negative = KiB)
+        // - mmap_size=268435456: 256 MB memory-mapped reads
+        // - foreign_keys=ON: enforced FK constraints
+        // - busy_timeout=5000: tolerate 5s of WAL contention before SQLITE_BUSY
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA temp_store=MEMORY;
+             PRAGMA cache_size=-20000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA foreign_keys=ON;
+             PRAGMA busy_timeout=5000;",
+        )
+        .map_err(|e| e.to_string())?;
 
         let db = Self { conn };
         db.run_migrations()?;
@@ -517,6 +531,26 @@ impl Database {
                 last_opened_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
         ",
+        );
+
+        // Performance indexes (DB-08 / DB-09 / DB-10 / DB-11). All idempotent.
+        // - idx_sessions_closed_phase: speeds get_recent_sessions (filter on phase + sort by closed_at).
+        // - idx_token_usage_recorded_at: speeds get_token_usage_today and update_cost_daily_rollup
+        //   (both filter on recorded_at; previously only an index on session_id existed).
+        // - idx_session_realms_realm: speeds get_sessions_for_project and delete_project (WHERE realm_id = ?).
+        // - idx_cmd_patterns_freq: covering index for predict_next_command's
+        //   ORDER BY frequency DESC LIMIT N on the keystroke hot path.
+        let _ = self.conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_sessions_closed_phase
+                ON sessions(closed_at DESC, phase) WHERE closed_at IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_token_usage_recorded_at
+                ON token_usage(recorded_at);
+            CREATE INDEX IF NOT EXISTS idx_session_realms_realm
+                ON session_realms(realm_id);
+            CREATE INDEX IF NOT EXISTS idx_cmd_patterns_freq
+                ON command_patterns(project_id, sequence, frequency DESC);
+            ",
         );
 
         Ok(())
@@ -3058,6 +3092,125 @@ mod tests {
 
         assert_eq!(db.count_sessions_for_worktree_path("/path/a").unwrap(), 1);
         assert_eq!(db.count_sessions_for_worktree_path("/path/b").unwrap(), 1);
+    }
+
+    // ─── DB-01: Performance PRAGMAs ────────────────────────────────────────
+
+    /// Asserts that all performance PRAGMAs configured in `Database::new`
+    /// are actually applied. Catches regressions where the PRAGMA block
+    /// is moved or accidentally dropped.
+    #[test]
+    fn test_perf_pragmas_applied() {
+        let db = test_db();
+
+        let read_pragma_int = |name: &str| -> i64 {
+            db.conn
+                .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
+                .unwrap_or(-1)
+        };
+        let read_pragma_str = |name: &str| -> String {
+            db.conn
+                .pragma_query_value(None, name, |row| row.get::<_, String>(0))
+                .unwrap_or_default()
+        };
+
+        // journal_mode: WAL is returned as the lowercase string "wal".
+        assert_eq!(read_pragma_str("journal_mode").to_lowercase(), "wal");
+        // synchronous=NORMAL is integer code 1.
+        assert_eq!(read_pragma_int("synchronous"), 1);
+        // temp_store=MEMORY is integer code 2.
+        assert_eq!(read_pragma_int("temp_store"), 2);
+        // foreign_keys=ON is integer 1.
+        assert_eq!(read_pragma_int("foreign_keys"), 1);
+        // busy_timeout is in milliseconds.
+        assert_eq!(read_pragma_int("busy_timeout"), 5000);
+        // cache_size: we set -20000 (20 MiB negative-form). SQLite returns the same.
+        assert_eq!(read_pragma_int("cache_size"), -20000);
+        // mmap_size: 256 MiB.
+        assert_eq!(read_pragma_int("mmap_size"), 268_435_456);
+    }
+
+    // ─── DB-08/09/10/11: Performance indexes ───────────────────────────────
+
+    /// Asserts that the four performance indexes added by the perf audit are
+    /// present in the schema. Each is `CREATE INDEX IF NOT EXISTS` so this
+    /// test will catch regressions where the migration block is moved/deleted.
+    #[test]
+    fn test_perf_indexes_exist() {
+        let db = test_db();
+
+        let index_exists = |name: &str| -> bool {
+            db.conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    params![name],
+                    |row| row.get::<_, i64>(0),
+                )
+                .is_ok()
+        };
+
+        assert!(
+            index_exists("idx_sessions_closed_phase"),
+            "missing idx_sessions_closed_phase"
+        );
+        assert!(
+            index_exists("idx_token_usage_recorded_at"),
+            "missing idx_token_usage_recorded_at"
+        );
+        assert!(
+            index_exists("idx_session_realms_realm"),
+            "missing idx_session_realms_realm"
+        );
+        assert!(
+            index_exists("idx_cmd_patterns_freq"),
+            "missing idx_cmd_patterns_freq"
+        );
+    }
+
+    /// Sanity: query planner picks idx_sessions_closed_phase for the typical
+    /// "recent sessions" query shape. If this regresses the index has been
+    /// dropped or the query has drifted out of its expected form.
+    #[test]
+    fn test_recent_sessions_query_uses_index() {
+        let db = test_db();
+        let plan: String = db
+            .conn
+            .query_row(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM sessions
+                  WHERE phase = 'destroyed' AND closed_at IS NOT NULL
+                  ORDER BY closed_at DESC LIMIT 1",
+                [],
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap_or_default();
+        assert!(
+            plan.contains("idx_sessions_closed_phase"),
+            "expected idx_sessions_closed_phase in plan, got: {}",
+            plan
+        );
+    }
+
+    /// Sanity: query planner picks idx_token_usage_recorded_at for daily aggregations.
+    #[test]
+    fn test_token_usage_today_query_uses_index() {
+        let db = test_db();
+        let plan: String = db
+            .conn
+            .query_row(
+                "EXPLAIN QUERY PLAN
+                 SELECT provider, SUM(input_tokens) FROM token_usage
+                  WHERE recorded_at >= date('now')
+                  GROUP BY provider",
+                [],
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap_or_default();
+        assert!(
+            plan.contains("idx_token_usage_recorded_at"),
+            "expected idx_token_usage_recorded_at in plan, got: {}",
+            plan
+        );
     }
 }
 

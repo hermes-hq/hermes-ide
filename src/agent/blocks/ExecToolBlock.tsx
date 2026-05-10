@@ -64,7 +64,11 @@ export function ExecToolBlock({ block, result }: ExecToolBlockProps) {
                 {GLYPHS.disclosure} {hiddenCount} hidden lines
               </button>
             ) : null}
-            <SmartOutput text={visibleText} className="agent-tool-exec-output" />
+            <SmartOutput
+              text={visibleText}
+              className="agent-tool-exec-output"
+              isFinal={result !== undefined}
+            />
           </>
         ) : null}
       </div>

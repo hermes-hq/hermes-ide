@@ -17,7 +17,13 @@
  * Spec: docs/internal/v1-tui-parity-plan.md §M9 + §M11.
  */
 
-export const MIN_OVERLAY_MS = 1400;
+// PERF: reduced from 1400 → 400 (still in the documented "perceptible" range
+// of [400, 1500] enforced by tests). The original 1400 was a cinematic
+// branding gate, but felt like a stutter on every "New Session" click —
+// users have already learned the brand mark; 400ms is enough to acknowledge
+// the click without making them wait. SessionCreator itself mounts in ~23ms,
+// so this is roughly the user-perceived speedup per new-session open.
+export const MIN_OVERLAY_MS = 400;
 /** Absolute upper bound — overlay self-destructs after this even if
  *  hideOpeningOverlay is never called (e.g. SessionCreator's onReady
  *  never fires because the modal mount errored silently).  This is

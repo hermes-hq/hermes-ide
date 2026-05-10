@@ -1,5 +1,5 @@
 import "../styles/components/agent/AgentSessionView.css";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AgentEvent,
@@ -115,11 +115,27 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
 
   // Auto-scroll on new messages — but only when the user is at the bottom.
   // If they've scrolled up to re-read history, never yank them back.
+  //
+  // AGENT-05: rAF-coalesced. The reducer can fire dozens of streaming
+  // events per second, and writing `el.scrollTop = el.scrollHeight` on each
+  // forces a synchronous layout. We schedule at most one scroll-to-bottom
+  // per animation frame so streaming taxes the layout pipeline only at
+  // the display refresh rate.
+  const pendingScrollRef = useRef(false);
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (!stickyBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
+    if (pendingScrollRef.current) return;
+    pendingScrollRef.current = true;
+    const id = requestAnimationFrame(() => {
+      pendingScrollRef.current = false;
+      const el = scrollRef.current;
+      if (!el) return;
+      if (!stickyBottomRef.current) return;
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => {
+      pendingScrollRef.current = false;
+      cancelAnimationFrame(id);
+    };
   }, [state.messages, state.resultEvent, exitInfo]);
 
   // Hooks below MUST run on every render — they sit above the
@@ -129,6 +145,14 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     () => extractTodosFromMessages(state.messages),
     [state.messages],
   );
+  // AGENT-09: turn-number assignment is memoized so it doesn't recompute
+  // on every reducer notification (it only depends on `state.messages`).
+  // MUST be above the early return for the same React #310 reason.
+  const numbered = useMemo(
+    () => assignTurnNumbers(state.messages),
+    [state.messages],
+  );
+  const turnCount = numbered.length === 0 ? 0 : numbered[numbered.length - 1].turn;
   // Read the user's CURRENT intended mode from session state, not from
   // the bridge's stale init event.  When the user flips the chip mid-
   // session, the reducer updates `permission_mode` immediately, so the
@@ -162,12 +186,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     );
   }
 
-  // Compute turn numbers — every user message starts a new turn, all
-  // following assistant messages share that turn until the next user input.
-  // The number lives in the left gutter as `№ 01`, anchoring the page like
-  // a numbered logbook entry rather than a flat chat thread.
-  const numbered = assignTurnNumbers(state.messages);
-  const turnCount = numbered.length === 0 ? 0 : numbered[numbered.length - 1].turn;
+  // (`numbered` and `turnCount` are computed above the empty-state early
+  //  return — see the AGENT-09 comment near the top of the body.)
 
   // Decide whether to render the vintage thinking indicator.
   //
@@ -556,17 +576,23 @@ function hasAnyTextBlock(msg: RenderedMessage | undefined): boolean {
  * Pure helper — exported below for testability.
  */
 export function assignTurnNumbers(messages: RenderedMessage[]): NumberedMessage[] {
+  // O(N) — was O(N^2) due to `out.some(...)` per assistant message (AGENT-09).
+  // We track which turn numbers have already had their first-of-turn marker
+  // assigned in a Set so the per-message cost is amortized O(1).
   const out: NumberedMessage[] = [];
+  const seenTurns = new Set<number>();
   let turn = 0;
   for (const msg of messages) {
     if (msg.role === "user") {
       turn += 1;
+      seenTurns.add(turn);
       out.push({ message: msg, turn, isFirstOfTurn: true });
     } else {
       // assistant messages before any user message are treated as turn 1.
       const t = turn === 0 ? 1 : turn;
       if (turn === 0) turn = 1;
-      const isFirst = !out.some((m) => m.turn === t);
+      const isFirst = !seenTurns.has(t);
+      if (isFirst) seenTurns.add(t);
       out.push({ message: msg, turn: t, isFirstOfTurn: isFirst });
     }
   }
@@ -579,7 +605,11 @@ interface AgentHeaderProps {
   workspacePathCount: number;
 }
 
-function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps) {
+// AGENT-19: memoized so a 1Hz tick from ElapsedCounter (a child) and other
+// reducer notifies that don't actually change the props don't force the
+// header — and its activity-derivation work — to re-run. Default shallow
+// equality is correct: AgentHeaderProps are all primitives or stable refs.
+const AgentHeader = memo(function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps) {
   const model = state.initEvent?.model;
   const cwd = state.initEvent?.cwd;
   const rate = state.rateLimitInfo;
@@ -691,7 +721,7 @@ function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps)
       </div>
     </div>
   );
-}
+});
 
 /** Token count formatter — k for thousands, plain for under 1k. */
 function formatTokens(n: number): string {

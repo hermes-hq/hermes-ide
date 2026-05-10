@@ -30,14 +30,40 @@ export function ThinkingBlock({
   // stays current even if React batches.
   const [, setTick] = useState(0);
 
-  // Live-update the elapsed counter at 10Hz while we're streaming.
+  // Live-update the elapsed counter while we're streaming.
   // Once `elapsedMs` is provided, the reducer has frozen the value; stop ticking.
+  //
+  // AGENT-20: tick at 100ms only while elapsed < 10s (formatter shows tenths
+  // there); after that, drop to 1Hz since the formatter only renders integer
+  // seconds. With many simultaneous thinking blocks (sub-agents, forks),
+  // this avoids 10× redundant re-renders per block per second.
   const live = startedAt !== undefined && elapsedMs === undefined;
   useEffect(() => {
-    if (!live) return;
-    const id = setInterval(() => setTick((t) => t + 1), 100);
-    return () => clearInterval(id);
-  }, [live]);
+    if (!live || startedAt === undefined) return;
+    let cancelled = false;
+    const FAST_TICK_MS = 100;
+    const SLOW_TICK_MS = 1000;
+    const FAST_PHASE_MS = 10_000;
+
+    const schedule = (ms: number) => {
+      if (cancelled) return;
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        setTick((t) => t + 1);
+        const elapsedMs = Date.now() - startedAt;
+        schedule(elapsedMs < FAST_PHASE_MS ? FAST_TICK_MS : SLOW_TICK_MS);
+      }, ms);
+    };
+
+    let timer: ReturnType<typeof setTimeout>;
+    const initialElapsed = Date.now() - startedAt;
+    schedule(initialElapsed < FAST_PHASE_MS ? FAST_TICK_MS : SLOW_TICK_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer!);
+    };
+  }, [live, startedAt]);
 
   const elapsed =
     elapsedMs !== undefined

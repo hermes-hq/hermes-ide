@@ -716,6 +716,29 @@ enum BoundedLine {
 /// byte-by-byte.  On overshoot we keep consuming subsequent chunks
 /// without appending until we find a newline, so the byte stream stays
 /// aligned to subsequent line boundaries.
+/// Move the bytes out of `buf` into an owned `String`, validating UTF-8 in
+/// place and falling back to a lossy decode only when the bytes aren't
+/// valid UTF-8 (vanishingly rare in NDJSON traffic from Claude).
+///
+/// AGENT-23: this avoids the O(L) memcpy that
+/// `String::from_utf8_lossy(buf).into_owned()` would always perform on the
+/// happy path. We preserve the caller's buffer capacity by swapping in a
+/// fresh `Vec` of the same capacity, so subsequent reads don't pay re-growth
+/// costs from zero.
+fn take_buf_as_string(buf: &mut Vec<u8>) -> String {
+    let cap = buf.capacity();
+    let bytes = std::mem::replace(buf, Vec::with_capacity(cap));
+    match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            // Invalid UTF-8: fall back to lossy decode of the recovered bytes.
+            // This path costs an extra alloc + copy, but is virtually never
+            // hit on Claude's stream-json output.
+            String::from_utf8_lossy(&e.into_bytes()).into_owned()
+        }
+    }
+}
+
 async fn read_bounded_line<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     buf: &mut Vec<u8>,
@@ -733,8 +756,7 @@ async fn read_bounded_line<R: AsyncBufRead + Unpin>(
                 return Ok(BoundedLine::Eof);
             }
             // Last line without a trailing newline.
-            let s = String::from_utf8_lossy(buf).into_owned();
-            return Ok(BoundedLine::Line(s));
+            return Ok(BoundedLine::Line(take_buf_as_string(buf)));
         }
 
         // Look for the newline within the currently buffered bytes.
@@ -752,8 +774,7 @@ async fn read_bounded_line<R: AsyncBufRead + Unpin>(
                 if buf.last().copied() == Some(b'\r') {
                     buf.pop();
                 }
-                let s = String::from_utf8_lossy(buf).into_owned();
-                return Ok(BoundedLine::Line(s));
+                return Ok(BoundedLine::Line(take_buf_as_string(buf)));
             }
             // We were already in overshoot mode — finish draining at the
             // newline boundary.
@@ -1962,5 +1983,49 @@ mod tests {
                 _ => panic!("expected Line(\"{}\")", expected),
             }
         }
+    }
+
+    /// AGENT-23: regression test for the take-buf-as-string optimization.
+    /// Multi-byte UTF-8 lines (emoji, CJK, accented chars) must round-trip
+    /// byte-for-byte through `read_bounded_line` after the move-don't-copy
+    /// refactor.
+    #[tokio::test]
+    async fn read_bounded_line_preserves_multibyte_utf8() {
+        // Mix of: emoji (4-byte), CJK (3-byte), Cyrillic (2-byte), ASCII (1-byte).
+        let lines = ["🎉 ship it", "日本語テスト", "Привет, мир", "plain ascii"];
+        let mut input = String::new();
+        for l in &lines {
+            input.push_str(l);
+            input.push('\n');
+        }
+        let bytes = input.into_bytes();
+        let mut reader = BufReader::new(&bytes[..]);
+        let mut buf = Vec::with_capacity(64);
+        for expected in lines {
+            let r = read_bounded_line(&mut reader, &mut buf, 256)
+                .await
+                .unwrap();
+            match r {
+                BoundedLine::Line(s) => assert_eq!(s, expected),
+                _ => panic!("expected Line(\"{}\")", expected),
+            }
+        }
+    }
+
+    /// AGENT-23: confirm `take_buf_as_string` recovers from invalid UTF-8 via
+    /// the lossy fallback path rather than panicking.
+    #[test]
+    fn take_buf_as_string_handles_invalid_utf8() {
+        // 0xFF is never valid in UTF-8.
+        let mut buf: Vec<u8> = vec![b'a', 0xFF, b'b'];
+        let s = take_buf_as_string(&mut buf);
+        // Should contain the surrounding ASCII; the invalid byte is replaced
+        // with the Unicode replacement character.
+        assert!(s.starts_with('a'));
+        assert!(s.ends_with('b'));
+        assert!(s.contains('\u{FFFD}'));
+        // buf is taken — caller's slot now holds an empty Vec with the
+        // original capacity for reuse.
+        assert!(buf.is_empty());
     }
 }

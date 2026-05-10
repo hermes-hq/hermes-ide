@@ -298,13 +298,18 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     }
   }, [step, orderedSteps]);
 
+  // PERF: Mount-time loads — keep ONLY the work that's needed for the
+  // first interactive frame. Everything mode-specific or step-specific
+  // is deferred to its own effect below. Without this split, the modal
+  // mounts and the DB mutex serialises 8 simultaneous IPC calls (one
+  // of which spawns child processes via checkAiProviders), making the
+  // open feel laggy even though the React mount itself is sub-50ms.
   useEffect(() => {
     getProjectsOrdered()
       .then((r) => setAllProjects(r))
       .catch((err) => console.warn("[SessionCreator] Failed to load projects:", err));
-    checkAiProviders()
-      .then((r) => { setProviderAvailability(r); setAvailabilityLoaded(true); })
-      .catch((err) => { console.warn("[SessionCreator] Failed to check AI providers:", err); setAvailabilityLoaded(true); });
+    // Settings: 3 small key/value lookups. Cheap (~ms each) and the
+    // values are needed for permission/prefix/suffix UI. Keep at mount.
     getSetting("default_permission_mode")
       .then((val) => { if (val) setPermissionMode(val as PermissionMode); })
       .catch(() => {});
@@ -317,15 +322,62 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         setAgentPrefixDefaults(map);
       })
       .catch(() => {});
+    // If the parent passed a defaultGroup, we need getSessions() up-front
+    // to look up that group's colour. Otherwise the existingGroups +
+    // groupColors UI doesn't appear until the user reaches a non-mode
+    // step, so we defer the load below.
+    if (defaultGroup) {
+      loadSessionsForGroups(defaultGroup);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // PERF: AI-provider availability check spawns one child process per
+  // configured provider (via `which claude` etc.) — typically the slowest
+  // load on mount. Only matters in terminal mode where the user picks
+  // a provider. Agent mode forces "claude" and never shows the picker.
+  useEffect(() => {
+    if (mode !== "terminal" || availabilityLoaded) return;
+    checkAiProviders()
+      .then((r) => { setProviderAvailability(r); setAvailabilityLoaded(true); })
+      .catch((err) => {
+        console.warn("[SessionCreator] Failed to check AI providers:", err);
+        setAvailabilityLoaded(true);
+      });
+  }, [mode, availabilityLoaded]);
+
+  // PERF: SSH-related state is only used inside the SSH step. Defer
+  // both the history setting + the saved-hosts table query until the
+  // user actually picks SSH mode. Saves two IPC round-trips at mount
+  // for every non-SSH session creation (the common case).
+  const sshLoadedRef = useRef(false);
+  useEffect(() => {
+    if (mode !== "ssh" || sshLoadedRef.current) return;
+    sshLoadedRef.current = true;
     getSetting(SSH_HISTORY_KEY)
-      .then((json) => {
-        const history = parseSshHistory(json);
-        setSshHistory(history);
-      })
+      .then((json) => setSshHistory(parseSshHistory(json)))
       .catch((err) => console.warn("[SessionCreator] Failed to load SSH history:", err));
     listSshSavedHosts()
       .then(setSshSavedHosts)
       .catch((err) => console.warn("[SessionCreator] Failed to load saved SSH hosts:", err));
+  }, [mode]);
+
+  // PERF: getSessions() can return a large list (every session ever).
+  // It's only used to derive `existingGroups` + `groupColors`, which
+  // appear on the projects/confirm step. Defer until the user advances
+  // past the mode-select step (or load eagerly above when defaultGroup
+  // is set).
+  const sessionsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (sessionsLoadedRef.current) return;
+    if (step === "mode" && !defaultGroup) return; // wait for advance
+    sessionsLoadedRef.current = true;
+    loadSessionsForGroups(defaultGroup);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  /** Shared by the eager (mount-with-defaultGroup) and lazy (post-mode-step)
+   *  load paths above. Pulled out so both call sites stay in sync. */
+  function loadSessionsForGroups(defaultGroupArg: string | undefined) {
     getSessions()
       .then((sessions) => {
         const groups = [...new Set(sessions.map((s) => s.group).filter((g): g is string => !!g))].sort();
@@ -337,12 +389,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           if (groupSession) colors[g] = groupSession.color;
         }
         setGroupColors(colors);
-        if (defaultGroup && colors[defaultGroup]) {
-          setSelectedColor(colors[defaultGroup]);
+        if (defaultGroupArg && colors[defaultGroupArg]) {
+          setSelectedColor(colors[defaultGroupArg]);
         }
       })
       .catch((err) => console.warn("[SessionCreator] Failed to load sessions:", err));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   // Discover tmux sessions on entering the tmux step.
   useEffect(() => {

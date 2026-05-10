@@ -9,6 +9,16 @@ interface SmartOutputProps {
   /** ClassName for the fallback <pre> when no smart treatment applies.
    *  Defaults to a generic agent-tool-output class. */
   className?: string;
+  /**
+   * Whether the output is final (i.e. the parent tool has emitted its result)
+   * or still streaming.  AGENT-13: while streaming, skip the JSON.parse +
+   * JSON.stringify round-trip — it's quadratic over the chunks since we'd
+   * re-parse the whole growing buffer per delta. We render plain text mid-stream
+   * and switch to the JSON-pretty rendering only when `isFinal === true`.
+   * Defaults to `true` for backward compatibility — most call sites already
+   * pass a finalized string.
+   */
+  isFinal?: boolean;
 }
 
 /**
@@ -26,19 +36,29 @@ interface SmartOutputProps {
  * Pure component — no IO, no animation, no streaming hooks.  Cheap enough
  * to call inline from any tool-block renderer.
  */
-export function SmartOutput({ text, languageHint, className }: SmartOutputProps) {
+export function SmartOutput({
+  text,
+  languageHint,
+  className,
+  isFinal = true,
+}: SmartOutputProps) {
   const cleaned = useMemo(() => stripAnsi(text), [text]);
 
   const detection = useMemo(() => {
     if (languageHint) {
       return { kind: "code" as const, language: languageHint, body: cleaned };
     }
-    const json = tryParseJson(cleaned);
-    if (json !== undefined) {
-      return { kind: "code" as const, language: "json", body: json };
+    // AGENT-13: only attempt JSON parsing when the tool has finalized.
+    // Streaming chunks of a JSON-shaped output would otherwise cost O(L)
+    // per delta (parse + stringify the whole buffer) → O(L²) over the turn.
+    if (isFinal) {
+      const json = tryParseJson(cleaned);
+      if (json !== undefined) {
+        return { kind: "code" as const, language: "json", body: json };
+      }
     }
     return { kind: "text" as const, body: cleaned };
-  }, [cleaned, languageHint]);
+  }, [cleaned, languageHint, isFinal]);
 
   if (detection.kind === "code") {
     return <CodeFence code={detection.body} language={detection.language} />;

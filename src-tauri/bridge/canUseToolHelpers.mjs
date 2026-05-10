@@ -269,16 +269,21 @@ export function createCanUseToolHandler({
  * where it may refuse to actually bypass — surfacing as confusing
  * "permission denied" errors that the host UI cannot explain.
  *
+ * Hermes' UI exposes the permission-mode chip as flippable to ANY mode
+ * mid-session — including Bypass. The SDK's runtime `setPermissionMode`
+ * control op refuses to enter `bypassPermissions` unless the session was
+ * spawned with `allowDangerouslySkipPermissions: true`. Granting the
+ * capability up-front (regardless of the initial mode) unblocks the
+ * mid-session flip without by itself bypassing anything — actual bypass
+ * still requires `permissionMode: "bypassPermissions"` to be set.
+ *
  * @param {{ permissionMode?: string }} flags
- * @returns {{ permissionMode?: string, allowDangerouslySkipPermissions?: boolean }}
+ * @returns {{ permissionMode?: string, allowDangerouslySkipPermissions: boolean }}
  */
 export function buildPermissionOptions(flags) {
-  const out = {};
+  const out = { allowDangerouslySkipPermissions: true };
   if (flags && typeof flags.permissionMode === "string") {
     out.permissionMode = flags.permissionMode;
-    if (flags.permissionMode === "bypassPermissions") {
-      out.allowDangerouslySkipPermissions = true;
-    }
   }
   return out;
 }

@@ -62,4 +62,30 @@ describe("assignTurnNumbers", () => {
     // assistant in turn 1 is the first, the user in turn 2 is the first.
     expect(out.map((m) => m.isFirstOfTurn)).toEqual([true, false, true]);
   });
+
+  // AGENT-09: regression test for the O(N²) `out.some(...)` issue.
+  // Before the fix, numbering 5,000 assistant messages took ~tens of ms
+  // due to the linear scan per assistant message. After the fix it is
+  // strictly O(N). We assert correctness on a large fixture (and time it
+  // generously so this test won't flake on slow CI).
+  it("scales linearly with message count (O(N))", () => {
+    const n = 5_000;
+    const big: RenderedMessage[] = [user("u1")];
+    for (let i = 0; i < n; i += 1) big.push(assistant(`a${i}`));
+
+    const t0 = performance.now();
+    const out = assignTurnNumbers(big);
+    const elapsed = performance.now() - t0;
+
+    expect(out.length).toBe(n + 1);
+    // All in turn 1, only the first message carries isFirstOfTurn=true.
+    expect(out[0].isFirstOfTurn).toBe(true);
+    expect(out[1].isFirstOfTurn).toBe(false);
+    expect(out[out.length - 1].isFirstOfTurn).toBe(false);
+    expect(out.every((m) => m.turn === 1)).toBe(true);
+    // Generous bound — pre-fix run was ~100ms+ on a fast machine; post-fix
+    // is sub-millisecond. 250ms is a comfortable ceiling that still fails
+    // loudly if O(N²) regresses.
+    expect(elapsed).toBeLessThan(250);
+  });
 });

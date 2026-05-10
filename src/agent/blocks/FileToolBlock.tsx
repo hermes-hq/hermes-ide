@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ContentBlock, ToolResultBlockData, ToolUseBlockData } from "../types";
 import { GLYPHS } from "./glyphs";
 import { UnifiedDiff } from "./UnifiedDiff";
@@ -32,7 +32,14 @@ export function FileToolBlock({ block, result }: FileToolBlockProps) {
   const variant = pickVariant(block.name);
   const summary = computeSummary(variant, block.input);
 
-  const body = renderBody(variant, block, result, filePath);
+  // AGENT-12: memoize the body — `renderBody` calls `computeDiff` (DP, O(m·n))
+  // for Edit/Write tools. Without this, every parent re-render (every reducer
+  // notify) re-runs the LCS over potentially large strings even when the
+  // inputs haven't changed.
+  const body = useMemo(
+    () => renderBody(variant, block, result, filePath),
+    [variant, block, result, filePath],
+  );
   const longContent = body.lineCount > 8;
   const [expanded, setExpanded] = useState(!longContent);
 
