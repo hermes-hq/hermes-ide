@@ -27,6 +27,8 @@ export interface UpdateState {
   error: boolean;
   /** Download appears stalled (no progress for 15s) */
   stalled: boolean;
+  /** Install-and-relaunch in progress (after the user clicks "Install & Relaunch") */
+  installing: boolean;
 }
 
 const INITIAL: UpdateState = {
@@ -42,6 +44,7 @@ const INITIAL: UpdateState = {
   dismissedVersion: "",
   error: false,
   stalled: false,
+  installing: false,
 };
 
 const CHECK_DELAY_MS = 5_000;
@@ -52,20 +55,21 @@ export function useAutoUpdater() {
   const [state, setState] = useState<UpdateState>(INITIAL);
   const updateRef = useRef<Update | null>(null);
   const downloadingRef = useRef(false);
+  const installingRef = useRef(false);
   const cancelledRef = useRef(false);
   const lastProgressRef = useRef(0);
   const stallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const doCheck = useCallback(async () => {
-    // Skip periodic checks while a download is in progress or install is ready
-    if (downloadingRef.current) return;
+    // Skip periodic checks while download or install is in progress
+    if (downloadingRef.current || installingRef.current) return;
 
     try {
       const update = await check();
       if (update) {
         setState((s) => {
-          // Don't clobber state during an active download
-          if (s.downloading) return s;
+          // Don't clobber state during an active download or install
+          if (s.downloading || s.installing) return s;
 
           const isNewVersion = s.version !== update.version;
           // Only replace the update ref if not mid-download/ready,
@@ -202,16 +206,25 @@ export function useAutoUpdater() {
     downloadingRef.current = false;
   }, [clearStallTimer]);
 
-  const installAndRelaunch = useCallback(async () => {
+  const installAndRelaunch = useCallback(async (beforeInstall?: () => Promise<void>) => {
     const update = updateRef.current;
     if (!update) return;
+    // Re-entrancy guard — multiple rapid clicks fire only one install pipeline
+    if (installingRef.current) return;
+    installingRef.current = true;
+    // Flip UI to "Installing…" BEFORE any slow pre-step (e.g. saveWorkspace)
+    setState((s) => ({ ...s, installing: true, error: false }));
+
     try {
+      if (beforeInstall) await beforeInstall();
       await update.install();
       await relaunch();
+      // Process is being torn down for relaunch — we don't normally reach here.
     } catch {
+      installingRef.current = false;
       // Keep ready: true so the correct "Install failed" message shows
       // and the "Install & Relaunch" button remains visible for retry
-      setState((s) => ({ ...s, error: true }));
+      setState((s) => ({ ...s, installing: false, error: true }));
     }
   }, []);
 

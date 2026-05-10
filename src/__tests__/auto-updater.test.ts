@@ -30,7 +30,7 @@ function applyCheckResult(
   if (!update) return state;
 
   // Don't clobber state during an active download
-  if (state.downloading) return state;
+  if (state.downloading || state.installing) return state;
 
   const isNewVersion = state.version !== update.version;
 
@@ -81,6 +81,16 @@ function applyManualCheckReset(state: UpdateState): UpdateState {
   return { ...state, dismissed: false, error: false };
 }
 
+/** Simulates the synchronous part of installAndRelaunch (flipping installing: true) */
+function applyInstallStart(state: UpdateState): UpdateState {
+  return { ...state, installing: true, error: false };
+}
+
+/** Simulates install-failure error path */
+function applyInstallReject(state: UpdateState): UpdateState {
+  return { ...state, installing: false, error: true };
+}
+
 const INITIAL: UpdateState = {
   available: false,
   version: "",
@@ -94,6 +104,7 @@ const INITIAL: UpdateState = {
   dismissedVersion: "",
   error: false,
   stalled: false,
+  installing: false,
 };
 
 beforeEach(() => {
@@ -412,5 +423,51 @@ describe("full update lifecycle", () => {
 
     // 4. At this point user would click "Install & Relaunch"
     // (actual install/relaunch tested via Tauri mock in integration tests)
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// REGRESSION: "Install & Relaunch" must show busy state immediately
+// (Bug: clicking the button did nothing visible for 5–30 s, so users
+// would click many times.)
+// ─────────────────────────────────────────────────────────────────
+describe("install busy-state feedback (no double-click)", () => {
+  it("flips state.installing on click before install() runs", () => {
+    let s = INITIAL;
+    s = applyCheckResult(s, { version: "1.0.0", body: "" });
+    s = applyDownloadStart(s);
+    s = applyDownloadComplete(s);
+    expect(s.ready).toBe(true);
+    expect(s.installing).toBe(false);
+
+    s = applyInstallStart(s);
+    expect(s.installing).toBe(true);
+    expect(s.ready).toBe(true);
+    expect(s.error).toBe(false);
+  });
+
+  it("clears state.installing on install failure and surfaces error", () => {
+    let s = INITIAL;
+    s = applyCheckResult(s, { version: "1.0.0", body: "" });
+    s = applyDownloadStart(s);
+    s = applyDownloadComplete(s);
+    s = applyInstallStart(s);
+
+    s = applyInstallReject(s);
+    expect(s.installing).toBe(false);
+    expect(s.error).toBe(true);
+    expect(s.ready).toBe(true);
+  });
+
+  it("periodic check is a no-op while installing (no clobber)", () => {
+    let s = INITIAL;
+    s = applyCheckResult(s, { version: "1.0.0", body: "notes" });
+    s = applyDownloadStart(s);
+    s = applyDownloadComplete(s);
+    s = applyInstallStart(s);
+    const before = { ...s };
+
+    s = applyCheckResult(s, { version: "2.0.0", body: "newer" });
+    expect(s).toEqual(before);
   });
 });

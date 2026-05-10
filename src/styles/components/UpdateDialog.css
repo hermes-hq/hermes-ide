@@ -144,6 +144,23 @@
   cursor: default;
 }
 
+.update-dialog-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: updateDialogSpin 0.7s linear infinite;
+}
+
+@keyframes updateDialogSpin {
+  to { transform: rotate(360deg); }
+}
+
+
 .update-dialog-btn-cancel {
   border-color: var(--yellow);
   color: var(--yellow);

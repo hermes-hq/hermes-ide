@@ -1168,10 +1168,9 @@ function AppContent() {
         onDismiss={updater.dismiss}
         onDownload={updater.download}
         onCancel={updater.cancelDownload}
-        onInstall={async () => {
-          await saveWorkspace();
-          await updater.installAndRelaunch();
-        }}
+        onInstall={() =>
+          updater.installAndRelaunch(async () => { await saveWorkspace(); })
+        }
       />
 
       <OnboardingWizard />

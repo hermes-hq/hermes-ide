@@ -21,9 +21,10 @@ export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall
   if (!state.available || state.dismissed) return null;
 
   const showByteProgress = state.downloading && state.totalBytes > 0;
+  const isBusy = state.downloading || state.installing;
 
   return (
-    <div className="update-dialog-backdrop" onClick={state.downloading ? undefined : onDismiss}>
+    <div className="update-dialog-backdrop" onClick={isBusy ? undefined : onDismiss}>
       <div className="update-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="update-dialog-header">
           <span className="update-dialog-title">
@@ -82,7 +83,7 @@ export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall
             <button className="update-dialog-btn update-dialog-btn-cancel" onClick={onCancel}>
               Cancel
             </button>
-          ) : (
+          ) : state.installing ? null : (
             <button className="update-dialog-btn" onClick={onDismiss}>
               Later
             </button>
@@ -92,8 +93,17 @@ export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall
             <button
               className="update-dialog-btn update-dialog-btn-primary"
               onClick={onInstall}
+              disabled={state.installing}
+              aria-busy={state.installing || undefined}
             >
-              Install &amp; Relaunch
+              {state.installing ? (
+                <>
+                  <span className="update-dialog-spinner" aria-hidden="true" />
+                  Installing&hellip;
+                </>
+              ) : (
+                <>Install &amp; Relaunch</>
+              )}
             </button>
           ) : (
             <button
