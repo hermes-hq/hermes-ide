@@ -221,6 +221,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
               streamingMessageId={state.streamingMessageId}
               thinkingStartedAt={state.thinkingStartedAt}
               thinkingElapsed={state.thinkingElapsed}
+              streamingThinkingText={state.streamingThinkingText}
             />
           ))}
           {showThinkingIndicator ? (
@@ -704,6 +705,9 @@ interface MessageRowProps {
   streamingMessageId?: string | null;
   thinkingStartedAt?: Map<string, number>;
   thinkingElapsed?: Map<string, number>;
+  /** Fallback text for thinking blocks whose `block.thinking` field
+   *  arrived empty (newer SDK / model behaviour with partial messages). */
+  streamingThinkingText?: Map<string, string>;
   /** No longer used by the speaker-chip layout but kept on the prop
    *  surface so existing callers / tests don't break. */
   turnNumber?: number;
@@ -720,6 +724,7 @@ export function MessageRow({
   streamingMessageId = null,
   thinkingStartedAt,
   thinkingElapsed,
+  streamingThinkingText,
   isFirstOfTurn = true,
 }: MessageRowProps) {
   // Find the index of the last text block — the heartbeat cursor only goes on
@@ -780,6 +785,7 @@ export function MessageRow({
               isStreamingTail={isStreamingMessage && i === lastTextIdx}
               thinkingStartedAt={thinkingStartedAt}
               thinkingElapsed={thinkingElapsed}
+              streamingThinkingText={streamingThinkingText}
             />
           ))
         )}
@@ -917,6 +923,7 @@ interface BlockRendererProps {
   isStreamingTail?: boolean;
   thinkingStartedAt?: Map<string, number>;
   thinkingElapsed?: Map<string, number>;
+  streamingThinkingText?: Map<string, string>;
 }
 
 function BlockRenderer({
@@ -927,15 +934,25 @@ function BlockRenderer({
   isStreamingTail,
   thinkingStartedAt,
   thinkingElapsed,
+  streamingThinkingText,
 }: BlockRendererProps) {
   if (isTextBlock(block)) {
     return <TextBlock block={block} isStreamingTail={isStreamingTail} />;
   }
   if (isThinkingBlock(block)) {
     const key = `${messageId}:${blockIndex}`;
+    // Fallback: when the consolidated `assistant` event ships the
+    // thinking block as `{ thinking: "" }` (newer SDK / model
+    // behaviour under `includePartialMessages: true`), the actual
+    // text only ever arrived via `thinking_delta` partials and is
+    // now in the streaming accumulator.  Render whichever is non-empty.
+    const fallback = streamingThinkingText?.get(key) ?? "";
+    const effective = block.thinking || fallback;
+    const blockToRender =
+      effective === block.thinking ? block : { ...block, thinking: effective };
     return (
       <ThinkingBlock
-        block={block}
+        block={blockToRender}
         startedAt={thinkingStartedAt?.get(key)}
         elapsedMs={thinkingElapsed?.get(key)}
       />

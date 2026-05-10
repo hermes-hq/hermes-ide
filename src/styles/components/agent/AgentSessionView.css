@@ -906,13 +906,33 @@
 
 .agent-code-fence-body {
   margin: 0;
-  padding: 10px 12px;
+  /* Padding-top is an integer multiple of the line-height (12px × 1.5 =
+   * 18px) so the first line's baseline lands on the same vertical grid
+   * as every subsequent line.  Previously this was 10px, which left the
+   * first line's text — including the leading line-number glyphs from
+   * Claude's `   N→` Read-tool format — visibly off-grid relative to
+   * lines 2..N. */
+  padding: 9px 12px;
   overflow-x: auto;
   font: 12px/1.5 var(--font-mono);
   font-feature-settings: var(--font-mono-features);
   color: var(--ink-primary);
   white-space: pre;
   position: relative;
+}
+
+/* Force `<code>` to render as a block so its first line uses the same
+ * line-box metrics as the rest, instead of inheriting the inline
+ * baseline of its containing `<pre>`.  Combined with the integer
+ * line-height padding above, this lines up `   920→}` with the lines
+ * underneath it. */
+.agent-code-fence-body > code {
+  display: block;
+  /* Reset any inherited padding from variant-scoped rules (the Read
+   * variant sets `.agent-tool-file-body-read code { padding: 8px 12px }`
+   * which would stack on top of the `<pre>` padding and shift the first
+   * line further off-grid). */
+  padding: 0;
 }
 
 /* Collapse state — long blocks render only the head, with a fade-to-bg

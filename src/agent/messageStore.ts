@@ -97,6 +97,23 @@ export interface AgentSessionState {
   runningToolUseIds: Set<string>;
   thinkingStartedAt: Map<string, number>;
   thinkingElapsed: Map<string, number>;
+  /**
+   * Streaming-thinking-text accumulator.  Keyed identically to
+   * `thinkingStartedAt` (`messageId + ":" + blockIndex`).  Populated from
+   * `stream_event` → `content_block_delta` → `thinking_delta` envelopes
+   * when the SDK's consolidated `assistant` event ships an empty
+   * `thinking: ""` placeholder (newer SDK / model behavior with
+   * `includePartialMessages: true`).  The renderer falls back to this
+   * value when `block.thinking` is empty.
+   */
+  streamingThinkingText: Map<string, string>;
+  /**
+   * The id of the most recent `stream_event` `message_start` envelope.
+   * Needed because the per-block partial events (`content_block_delta`,
+   * etc.) only carry an `index`, not a `message.id`, so we have to
+   * remember which assistant message they belong to.
+   */
+  currentStreamMessageId: string | null;
   /** Running total of `total_cost_usd` across every `result` event seen
    *  this session.  Drives the masthead cost lozenge.  Note this is the
    *  *bridge process's* lifetime, which with the long-lived bridge equals
@@ -146,6 +163,8 @@ export function emptyState(): AgentSessionState {
     runningToolUseIds: new Set(),
     thinkingStartedAt: new Map(),
     thinkingElapsed: new Map(),
+    streamingThinkingText: new Map(),
+    currentStreamMessageId: null,
     seenResultEventIds: new Set(),
   };
 }
@@ -375,6 +394,77 @@ function clearToolResults(
 }
 
 /**
+ * Inspect a `stream_event` partial and update the streaming-thinking-text
+ * accumulator when it carries a `thinking_delta`.  Every other partial is
+ * a no-op — we still rely on full `assistant` events for everything else.
+ *
+ * Three subtypes are interesting:
+ *   - `message_start`        → latch the assistant `message.id`.  Per-block
+ *                              deltas below carry only an `index`, so we
+ *                              need this id to build a stable accumulator
+ *                              key (`messageId:blockIndex`).
+ *   - `content_block_start`  → if the block is `thinking`, clear any
+ *                              accumulator entry for this slot so a new
+ *                              block doesn't inherit stale text from a
+ *                              prior thinking block at the same index
+ *                              (different message id ⇒ different key
+ *                              already, but explicit reset costs nothing
+ *                              and is robust to id collisions on resume).
+ *   - `content_block_delta`  → if `delta.type === "thinking_delta"`,
+ *                              append `delta.thinking` to the slot.
+ */
+function reduceStreamPartial(
+  state: AgentSessionState,
+  event: AgentEvent,
+): AgentSessionState {
+  const inner = (event as { event?: {
+    type?: string;
+    index?: number;
+    delta?: { type?: string; thinking?: string };
+    content_block?: { type?: string };
+    message?: { id?: string };
+  } }).event;
+  if (!inner) return state;
+
+  if (inner.type === "message_start") {
+    const id = inner.message?.id;
+    if (typeof id === "string" && id !== state.currentStreamMessageId) {
+      return { ...state, currentStreamMessageId: id };
+    }
+    return state;
+  }
+
+  if (
+    inner.type === "content_block_start"
+    && inner.content_block?.type === "thinking"
+    && typeof inner.index === "number"
+    && state.currentStreamMessageId
+  ) {
+    const key = `${state.currentStreamMessageId}:${inner.index}`;
+    if (!state.streamingThinkingText.has(key)) return state;
+    const next = new Map(state.streamingThinkingText);
+    next.delete(key);
+    return { ...state, streamingThinkingText: next };
+  }
+
+  if (
+    inner.type === "content_block_delta"
+    && inner.delta?.type === "thinking_delta"
+    && typeof inner.delta.thinking === "string"
+    && typeof inner.index === "number"
+    && state.currentStreamMessageId
+  ) {
+    const key = `${state.currentStreamMessageId}:${inner.index}`;
+    const prev = state.streamingThinkingText.get(key) ?? "";
+    const next = new Map(state.streamingThinkingText);
+    next.set(key, prev + inner.delta.thinking);
+    return { ...state, streamingThinkingText: next };
+  }
+
+  return state;
+}
+
+/**
  * Pure reducer — given the previous state and an incoming event,
  * return the next state. Never mutates the input.
  */
@@ -382,9 +472,15 @@ export function reduceEvent(
   state: AgentSessionState,
   event: AgentEvent,
 ): AgentSessionState {
-  // 1. Drop stream_event partials by spec.
+  // 1. stream_event partials.  Historically dropped wholesale, but newer
+  //    SDK / model combinations only ever emit thinking text via
+  //    `thinking_delta` envelopes — the consolidated `assistant` event
+  //    arrives with `thinking: ""`.  We selectively harvest just enough
+  //    state from partials to populate the thinking accumulator; every
+  //    other partial is still ignored (the rest of the reducer continues
+  //    to fold from full `assistant` events as before).
   if (isStreamPartial(event)) {
-    return state;
+    return reduceStreamPartial(state, event);
   }
 
   // 2. system/* events.
@@ -414,6 +510,10 @@ export function reduceEvent(
         streamingMessageId: null,
         thinkingStartedAt,
         thinkingElapsed,
+        // Bridge respawn — any cached stream message-id belongs to the
+        // dead subprocess.  Clearing prevents a fresh delta from being
+        // attached to the wrong message slot.
+        currentStreamMessageId: null,
       };
     }
     // Other system events (status, etc.) are flow markers — ignore quietly.
