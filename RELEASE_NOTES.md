@@ -1,3 +1,44 @@
+# Hermes IDE 1.1.8
+
+A small fix-up release. Four polish items that smooth over rough
+edges users would notice in their first hour with the app.
+
+## The "Install & Relaunch" button now feels alive
+
+Pressing it used to look like nothing happened — the button label
+didn't change, nothing spun, and on macOS the install can take
+many seconds. People clicked it again and again thinking it was
+broken. Now you get a spinner and an "Installing…" label the
+instant you click, the button disables itself, and the dismiss
+options disappear so an accidental click outside the dialog can't
+cancel an install in flight.
+
+## The Bypass chip applies the moment you flip it
+
+If you switched permission mode to Bypass while a turn was in
+flight, the next tool call still asked for permission. The chip's
+choice didn't reach the live agent until your next message. Now
+flipping the chip takes effect immediately — any tool call already
+on its way is auto-allowed without a prompt.
+
+## The blue cursor stops blinking after a turn ends abnormally
+
+When an agent turn ended via interrupt, signal, or a sudden
+subprocess exit instead of a clean finish, the small blue cursor
+at the end of the latest reply kept blinking forever, and any
+in-progress thinking timer kept ticking up. Both now settle the
+same way they would after a normal turn-end.
+
+## The welcome screen fits compact windows
+
+On smaller displays the empty-state landing page was hiding the
+bottom of the logbook behind the window edge with no way to scroll.
+The whole composition now scales to the available height and lets
+you scroll when it has to, with the Hermes IDE wordmark always the
+first thing you see at the top.
+
+---
+
 # Hermes IDE 1.1.7
 
 A memory-hardening release for Agent mode. No new features — every
