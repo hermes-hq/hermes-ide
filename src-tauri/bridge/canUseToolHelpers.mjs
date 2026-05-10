@@ -148,6 +148,7 @@ export function ruleMatches(rule, toolName, input) {
  * @param {() => string} deps.idGen                                                  Generates a unique request id per call.
  * @param {(decision: unknown, originalInput: unknown) => unknown} [deps.normalize]  Decision normalizer (defaults to {@link normalizeBridgeAllowDecision}).
  * @param {string} [deps.permissionMode]                                             SDK permissionMode flag.  When "bypassPermissions" the handler short-circuits to allow.
+ * @param {() => string | undefined} [deps.getPermissionMode]                        Live getter — when present, takes precedence over `permissionMode`.  Use this so a mid-session `setPermissionMode` control op flips the bypass short-circuit immediately.
  * @param {Set<string>} [deps.sessionAllowList]                                      In-memory allowlist; mutated with persisted rules from host responses.
  * @returns {(toolName: string, input: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>}
  */
@@ -157,9 +158,16 @@ export function createCanUseToolHandler({
   idGen,
   normalize = normalizeBridgeAllowDecision,
   permissionMode,
+  getPermissionMode,
   sessionAllowList,
   permPendingMaxSize = 1024,
 }) {
+  // Resolve "what is the current mode?" on every call, not on construction.
+  // A static `permissionMode` value still works for back-compat (older tests
+  // and any host that doesn't track live state).
+  const readMode = typeof getPermissionMode === "function"
+    ? getPermissionMode
+    : () => permissionMode;
   return async function canUseTool(toolName, input, options) {
     const signal = options && options.signal;
     // Short-circuit when the signal is already aborted: don't even bother
@@ -168,7 +176,7 @@ export function createCanUseToolHandler({
       return normalize({ behavior: "deny", message: "aborted" }, input);
     }
     // 1. bypassPermissions — auto-allow without round-trip.
-    if (permissionMode === "bypassPermissions") {
+    if (readMode() === "bypassPermissions") {
       return normalize({ behavior: "allow" }, input);
     }
     // 2. Session allowlist — auto-allow when a prior decision matches.

@@ -536,7 +536,16 @@ const sdkOptions = {
     // bypassPermissions short-circuits inside the handler so the host
     // modal never even mounts — see canUseToolHelpers.mjs for why a
     // round-trip in bypass mode was fragile.
-    permissionMode: flags.permissionMode,
+    // Live getter so a mid-session `setPermissionMode` control op flips
+    // the bypass short-circuit immediately.  Reads `reportedPermissionMode`
+    // (set on every SDK init / session_started event) and falls back to
+    // the spawn-time CLI flag.  Without this getter, the handler captured
+    // the spawn-time value forever and a chip flip from default→bypass
+    // mid-turn still routed the in-flight tool call through the host.
+    getPermissionMode: () =>
+      liveRuntime.reportedPermissionMode
+      ?? liveRuntime.permissionMode
+      ?? flags.permissionMode,
     // Session allowlist; mutated by the handler when a host response
     // includes a `persist` rule.
     sessionAllowList,
@@ -671,6 +680,13 @@ async function handleControl(op) {
       return;
     case "setPermissionMode":
       await queryHandle.setPermissionMode(op.mode);
+      // Mirror the change into liveRuntime so canUseTool's getter sees
+      // it before the next system/init event arrives (init only fires on
+      // spawn / resume / compact — not on a runtime mode flip).
+      if (typeof op.mode === "string") {
+        liveRuntime.permissionMode = op.mode;
+        liveRuntime.reportedPermissionMode = op.mode;
+      }
       return;
     case "setMaxThinkingTokens":
       // SDK marks `setMaxThinkingTokens` as deprecated in favour of the

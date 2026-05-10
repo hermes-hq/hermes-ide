@@ -191,7 +191,17 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     () => extractTodosFromMessages(state.messages),
     [state.messages],
   );
-  const permissionMode = state.initEvent?.permissionMode ?? "default";
+  // Read the user's CURRENT intended mode from session state, not from
+  // the bridge's stale init event.  When the user flips the chip mid-
+  // session, the reducer updates `permission_mode` immediately, so the
+  // modal can self-auto-allow even before the bridge has been told about
+  // the change. Falls back to the init event for sessions that haven't
+  // surfaced a session entry yet.
+  const sessionEntryForPerm = useSession().state.sessions[sessionId];
+  const permissionMode =
+    sessionEntryForPerm?.permission_mode
+    ?? state.initEvent?.permissionMode
+    ?? "default";
 
   return (
     <div className="agent-session-view">
@@ -302,6 +312,21 @@ function InteractivePermissionDispatcher({
   // back via clearPendingPermRequest after a decision.
   const { snapshot, store } = useAgentSessionSnapshot(sessionId);
   const request = snapshot.pendingPermRequest;
+
+  // Defense-in-depth: if the user is in bypass mode and a perm request is
+  // sitting in the store, auto-resolve it as allow + clear it.  This catches
+  // the race where the bridge dispatched a request milliseconds before the
+  // setPermissionMode control op landed.  The PermissionRequestModal also
+  // self-auto-allows on bypass (cosmetic), but doing it here means the
+  // envelope never even gets to render.
+  useEffect(() => {
+    if (request && permissionMode === "bypassPermissions") {
+      const env = buildPermResponse(request.id, { kind: "allow" });
+      sendAgentEnvelope(sessionId, env)
+        .catch((err) => console.warn("[perm] bypass auto-allow send failed:", err));
+      store.clearPendingPermRequest();
+    }
+  }, [request, permissionMode, sessionId, sendAgentEnvelope, store]);
   const inFlightRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
 

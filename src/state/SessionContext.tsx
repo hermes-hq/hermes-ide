@@ -48,7 +48,7 @@ import type {
   SavedWorkspace, SavedSessionInfo, SessionMode,
 } from "../types/session";
 import { SAVED_WORKSPACE_VERSION, validateSavedWorkspace } from "../types/session";
-import { spawnAgentSession, closeAgentSession, sendAgentInput, updateHermesState } from "../api/agent";
+import { spawnAgentSession, closeAgentSession, sendAgentInput, updateHermesState, setAgentPermissionMode } from "../api/agent";
 import { reportAgentSpawnFailure } from "../utils/agentSpawnFailure";
 import { destroyAgentSessionStore } from "../agent/agentSessionStore";
 import { cleanupSessionRefs } from "../utils/sessionRefCleanup";
@@ -1892,6 +1892,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     sessionId: string,
     permissionMode: string | null,
   ): Promise<boolean> => {
+    // Two-step:
+    //   (a) immediately tell the live bridge so an in-flight turn's
+    //       tool calls honor the new mode without waiting for the user
+    //       to send a new message.
+    //   (b) queue the flag so a future respawn carries it.
+    // Step (a) is best-effort — the bridge may have exited between turns,
+    // in which case the queued flag in (b) is what brings it back.
+    if (permissionMode !== null) {
+      try {
+        await setAgentPermissionMode(sessionId, permissionMode);
+      } catch { /* bridge may be down between turns; queued flag will apply */ }
+    }
     queuePendingFlag(sessionId, { permissionMode });
     return true;
   }, [queuePendingFlag]);

@@ -452,6 +452,67 @@ describe("createCanUseToolHandler — session allowlist", () => {
   });
 });
 
+describe("createCanUseToolHandler — live mode getter (regression)", () => {
+  it("honors a mid-session flip from default to bypassPermissions", async () => {
+    const writes: string[] = [];
+    const stdout = { write: (chunk: string) => writes.push(chunk) };
+    const permPending: PermPending = new Map();
+    let liveMode: string = "default";
+    const handler = createCanUseToolHandler({
+      stdout,
+      permPending,
+      idGen: () => "should-not-fire",
+      getPermissionMode: () => liveMode,
+    });
+
+    liveMode = "bypassPermissions";
+    const result = await handler("Bash", { command: "rm -rf /" });
+
+    expect(result).toEqual({ behavior: "allow", updatedInput: { command: "rm -rf /" } });
+    expect(writes).toHaveLength(0);
+    expect(permPending.size).toBe(0);
+  });
+
+  it("honors a mid-session flip from bypassPermissions back to default (round-trips again)", async () => {
+    const writes: string[] = [];
+    const stdout = { write: (chunk: string) => writes.push(chunk) };
+    const permPending: PermPending = new Map();
+    let liveMode: string = "bypassPermissions";
+    let nextId = 0;
+    const handler = createCanUseToolHandler({
+      stdout,
+      permPending,
+      idGen: () => `perm-${++nextId}`,
+      getPermissionMode: () => liveMode,
+    });
+
+    await handler("Bash", { command: "ls" });
+    expect(writes).toHaveLength(0);
+
+    liveMode = "default";
+    const promise = handler("Bash", { command: "rm -rf /" });
+    expect(writes).toHaveLength(1);
+    permPending.get("perm-1")!.resolve({ behavior: "deny", message: "no" });
+    const r = await promise;
+    expect(r.behavior).toBe("deny");
+  });
+
+  it("getter takes precedence over the static permissionMode value", async () => {
+    const writes: string[] = [];
+    const stdout = { write: (chunk: string) => writes.push(chunk) };
+    const handler = createCanUseToolHandler({
+      stdout,
+      permPending: new Map(),
+      idGen: () => "x",
+      permissionMode: "default",
+      getPermissionMode: () => "bypassPermissions",
+    });
+    const r = await handler("Bash", { command: "ls" });
+    expect((r as { behavior: string }).behavior).toBe("allow");
+    expect(writes).toHaveLength(0);
+  });
+});
+
 // ─── Memory-safety hardening — caps + overwrite guard ──────────────
 
 describe("createCanUseToolHandler — permPending overflow protection", () => {

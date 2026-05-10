@@ -54,6 +54,20 @@ export function softInterruptAgent(sessionId: string): Promise<void> {
   return sendAgentInput(sessionId, { type: "_hermes_control", op: "interrupt" });
 }
 
+/**
+ * Live-flip the bridge's permission mode without a respawn.  Mirrors the
+ * SDK's runtime `setPermissionMode` so a chip flip takes effect on the
+ * NEXT canUseTool call from the in-flight turn — not on the next user
+ * message.  Best-effort: if the bridge has exited between turns, this
+ * is a no-op (the next spawn picks up the queued flag instead).
+ */
+export async function setAgentPermissionMode(
+  sessionId: string,
+  mode: string,
+): Promise<void> {
+  return sendAgentInput(sessionId, { type: "_hermes_control", op: "setPermissionMode", mode });
+}
+
 /** Graceful shutdown: drop stdin, wait briefly, kill if still alive. */
 export function closeAgentSession(sessionId: string): Promise<void> {
   return invoke("close_agent_session", { sessionId });
