@@ -1,3 +1,89 @@
+# Hermes IDE 1.1.11
+
+A reliability + cleanup pass on Agent mode. A systematic audit found
+two dozen concrete defects in the freshly-shipped Agent surface, each
+pinned by a regression test before it was fixed. The most user-visible
+ones:
+
+## A stale permission prompt no longer survives a bridge restart
+
+If the bridge subprocess died mid-tool with the permission modal on
+screen, the modal would stay there forever — clicking Allow/Deny on
+it sent a decision the new subprocess never asked for, so nothing
+happened. A fresh bridge start now clears any prompt left over from
+the dead one.
+
+## Bypass mode no longer fires the same approval twice
+
+Flipping permission mode to Bypass while a tool prompt was on screen
+could send the auto-allow envelope two or three times in a row.
+Bypass now fires exactly once per request, and on the rare path
+where the send itself fails, the prompt comes back so you can
+decide manually instead of being silently stranded.
+
+## Bypass + Ask-a-question / Exit-plan-mode no longer break the turn
+
+These two interactive tools need a real user answer to function.
+Under Bypass, they used to receive a blank approval and Claude would
+either error or proceed with empty inputs. They now stay interactive
+under Bypass — you still get the question card or the plan-review
+card, and the rest of the agent's tool calls keep flowing through
+without prompts.
+
+## Tool clicks no longer get eaten while another decision is in flight
+
+If two permission prompts arrived back-to-back and the first one's
+network round-trip was slow, your first click on the second prompt
+used to do nothing. The latch is now per-request, so a fresh prompt
+is always interactive even if a prior decision is still being
+delivered.
+
+## Image attachments in Read results no longer dump base64 into the chat
+
+When a tool's result included an image (Read of a screenshot, etc.),
+the entire base64 payload landed in the conversation as a syntax-
+highlighted wall of characters — visible spam, plus a real memory
+hit. Image blocks now render as a compact `[image: type, N bytes]`
+placeholder instead.
+
+## Cost lozenge in the agent header is now token-only
+
+The `$X.XX · NNk out` chip at the top of the agent pane drops the
+dollar amount and shows just the running output-token count. The
+cost number was noisy on cheap turns and not useful at a glance;
+output tokens are. Detailed cost breakdowns still live in the Usage
+panel.
+
+## Smaller fixes you might notice
+
+- Thinking timers no longer freeze unrelated sub-agents' clocks the
+  moment one sub-turn ends.
+- The "thought · 0.0s" frozen timer that occasionally appeared on
+  thinking blocks that arrived after their following text is gone.
+- Reading a file with a starting line offset of 0 now shows
+  `lines 1–N` instead of the impossible `lines 0–N`.
+- File extensions for languages we didn't ship a highlighter for
+  (Scala, Dart, Elixir, Clojure) now render as plain text rather
+  than mislabeled, blank-coloured "Scala" pills with no actual
+  highlighting.
+- Long agent sessions no longer accumulate small per-turn artifacts:
+  thinking-text accumulator clears on subprocess restarts, the
+  result-event-id de-dup set is now bounded, and a stuck "running"
+  indicator from out-of-order tool messages is now self-correcting.
+- Workspace-paths drift now respawns the bridge between turns
+  instead of waiting for your next message, so newly-attached
+  projects are visible to file tools immediately.
+- The chip-flip-to-default no longer queues a phantom respawn on
+  the next message.
+- A failed mid-session permission flip no longer retries on every
+  subsequent submit.
+- The bridge's queued-control-op buffer no longer drops every
+  remaining op on the first failure during drain.
+- The stderr panel buffer cap is now actually honored (was off by
+  the truncation header's length).
+
+---
+
 # Hermes IDE 1.1.10
 
 Three Agent-mode papercut fixes: collapsible thinking blocks now
