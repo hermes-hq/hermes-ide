@@ -303,3 +303,104 @@ describe("getOrCreateAgentSessionStore registry", () => {
     expect(b).not.toBe(a);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────
+// REGRESSION: subprocess exit without a result event must clear the
+// streaming cursor and freeze thinking timers — the symptom was a
+// blue heartbeat cursor that kept blinking forever after a turn
+// ended via signal kill / abort instead of a normal `result`.
+// ─────────────────────────────────────────────────────────────────
+describe("AgentSessionStore — exit-without-result freezes streaming state", () => {
+  beforeEach(() => {
+    _resetAgentSessionStoresForTest();
+  });
+
+  it("clears streamingMessageId on exit without a prior result event", async () => {
+    const bus = makeStubBus();
+    const store = getOrCreateAgentSessionStore("sx", bus.listen);
+    await Promise.resolve();
+
+    // Mid-stream assistant event with stop_reason: null leaves cursor on.
+    store.injectEvent({
+      type: "assistant",
+      message: {
+        id: "m1",
+        role: "assistant",
+        model: "m",
+        content: [{ type: "text", text: "partial reply" }],
+        stop_reason: null,
+      },
+      session_id: "s",
+      uuid: "u-m1",
+    } as unknown as AgentEvent);
+    expect(store.getSnapshot().state.streamingMessageId).toBe("m1");
+
+    // Subprocess dies without sending a result event.
+    store.injectExit({ code: null, signal: "SIGTERM" });
+
+    expect(store.getSnapshot().state.streamingMessageId).toBeNull();
+    expect(store.getSnapshot().exit).toEqual({ code: null, signal: "SIGTERM" });
+  });
+
+  it("empties runningToolUseIds on exit without a prior result event", async () => {
+    const bus = makeStubBus();
+    const store = getOrCreateAgentSessionStore("sx", bus.listen);
+    await Promise.resolve();
+
+    // Tool issued but its result never arrived — runningToolUseIds = {tu_1}.
+    store.injectEvent({
+      type: "assistant",
+      message: {
+        id: "m1",
+        role: "assistant",
+        model: "m",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
+        stop_reason: null,
+      },
+      session_id: "s",
+      uuid: "u-m1",
+    } as unknown as AgentEvent);
+    expect(store.getSnapshot().state.runningToolUseIds.has("tu_1")).toBe(true);
+
+    store.injectExit({ code: 1, signal: null });
+    expect(store.getSnapshot().state.runningToolUseIds.size).toBe(0);
+  });
+
+  it("freezes thinking timers on exit without a prior result event", async () => {
+    const bus = makeStubBus();
+    const store = getOrCreateAgentSessionStore("sx", bus.listen);
+    await Promise.resolve();
+
+    // A thinking block opened but never closed.
+    store.injectEvent({
+      type: "assistant",
+      message: {
+        id: "m1",
+        role: "assistant",
+        model: "m",
+        content: [{ type: "thinking", thinking: "still going" }],
+        stop_reason: null,
+      },
+      session_id: "s",
+      uuid: "u-m1",
+    } as unknown as AgentEvent);
+    expect(store.getSnapshot().state.thinkingStartedAt.size).toBe(1);
+
+    store.injectExit({ code: null, signal: "SIGKILL" });
+    expect(store.getSnapshot().state.thinkingStartedAt.size).toBe(0);
+    // Frozen elapsed values are captured so the UI can render a final value.
+    expect(store.getSnapshot().state.thinkingElapsed.has("m1:0")).toBe(true);
+  });
+
+  it("is a no-op when there is nothing in flight (idle exit)", async () => {
+    const bus = makeStubBus();
+    const store = getOrCreateAgentSessionStore("sx", bus.listen);
+    await Promise.resolve();
+
+    const before = store.getSnapshot().state;
+    store.injectExit({ code: 0, signal: null });
+    // State object is reference-equal — no spurious React re-render work.
+    expect(store.getSnapshot().state).toBe(before);
+    expect(store.getSnapshot().exit).toEqual({ code: 0, signal: null });
+  });
+});

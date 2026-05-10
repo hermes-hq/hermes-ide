@@ -310,8 +310,13 @@ function reconcileThinkingForMessage(
 /**
  * Freeze every still-pending thinking timer. Used when the turn ends (closing
  * assistant event with a `stop_reason`, or the final `result` event).
+ *
+ * Exported so the per-session store can apply the same freeze on a subprocess
+ * exit that arrives without a result event (signal kill, abort, crash) —
+ * otherwise the heartbeat cursor and thinking elapsed counter would tick
+ * forever even though the turn is over.
  */
-function freezePendingThinking(
+export function freezePendingThinking(
   thinkingStartedAt: Map<string, number>,
   thinkingElapsed: Map<string, number>,
   now: number,

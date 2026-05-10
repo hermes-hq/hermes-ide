@@ -43,7 +43,7 @@
  */
 
 import type { AgentEvent } from "./types";
-import { emptyState, reduceEvent } from "./messageStore";
+import { emptyState, freezePendingThinking, reduceEvent } from "./messageStore";
 import type { AgentSessionState } from "./messageStore";
 import { isPermRequest, type PermRequest } from "../utils/permissionRequest";
 
@@ -171,7 +171,11 @@ export class AgentSessionStore {
         // Drop silently — the new bridge's init already cleared exit.
         return;
       }
-      this.snapshot = { ...this.snapshot, exit: msg.payload };
+      this.snapshot = {
+        ...this.snapshot,
+        exit: msg.payload,
+        state: freezeStreamingOnExit(this.snapshot.state),
+      };
       this.notify();
     }).then((un) => this.collect(un)).catch(() => undefined);
   }
@@ -261,7 +265,11 @@ export class AgentSessionStore {
     if (this.lastInitAt > 0 && sinceInit < POST_INIT_EXIT_GRACE_MS) {
       return;
     }
-    this.snapshot = { ...this.snapshot, exit: info };
+    this.snapshot = {
+      ...this.snapshot,
+      exit: info,
+      state: freezeStreamingOnExit(this.snapshot.state),
+    };
     this.notify();
   };
 
@@ -313,6 +321,48 @@ export function destroyAgentSessionStore(sessionId: string): void {
   if (!store) return;
   store.destroy();
   stores.delete(sessionId);
+}
+
+/**
+ * Freeze in-flight streaming state when the bridge subprocess exits.
+ *
+ * Normally the `result` event clears `streamingMessageId`, empties
+ * `runningToolUseIds`, and freezes thinking timers — that's what stops
+ * the heartbeat cursor blinking and the elapsed counters ticking when a
+ * turn ends.  When the subprocess dies WITHOUT a result event (signal
+ * kill, abort, crash), the agent-exit channel fires but the reducer
+ * never gets a clearing event, so the cursor blinks forever and any
+ * thinking timer keeps incrementing in the UI.
+ *
+ * This helper applies the same freeze that `result` would have, so the
+ * UI settles even on an abnormal exit.  Idempotent: returns the same
+ * state object when nothing needs clearing, so React identity-based
+ * memoization stays cheap.
+ *
+ * Exported for tests.
+ */
+export function freezeStreamingOnExit(state: AgentSessionState): AgentSessionState {
+  const needsFreeze =
+    state.streamingMessageId !== null
+    || state.runningToolUseIds.size > 0
+    || state.thinkingStartedAt.size > 0;
+  if (!needsFreeze) return state;
+  const now = Date.now();
+  const { thinkingStartedAt, thinkingElapsed } = freezePendingThinking(
+    state.thinkingStartedAt,
+    state.thinkingElapsed,
+    now,
+  );
+  return {
+    ...state,
+    streamingMessageId: null,
+    runningToolUseIds:
+      state.runningToolUseIds.size === 0
+        ? state.runningToolUseIds
+        : new Set(),
+    thinkingStartedAt,
+    thinkingElapsed,
+  };
 }
 
 /** Test-only utility: reset the global registry.  Real callers should
