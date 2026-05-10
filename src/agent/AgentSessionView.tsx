@@ -82,7 +82,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // respawn-on-not-found retry.  Used by the interactive cards
   // (AskUserQuestion, ExitPlanMode, canUseTool) so a tool reply
   // doesn't get dropped when the bridge has exited between turns.
-  const { sendAgentEnvelope } = useSession();
+  const sessionCtx = useSession();
+  const { sendAgentEnvelope } = sessionCtx;
   // Long-lived per-session store: events keep streaming into reducer
   // state even when this component is unmounted (e.g., the user
   // switched to a different session in the sidebar), so the timeline
@@ -120,6 +121,21 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     if (!stickyBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
   }, [state.messages, state.resultEvent, exitInfo]);
+
+  // Hooks below MUST run on every render — they sit above the
+  // empty-state early return so the hook count never changes between
+  // pre-init and post-first-message renders (see React #310).
+  const todos = useMemo(
+    () => extractTodosFromMessages(state.messages),
+    [state.messages],
+  );
+  // Read the user's CURRENT intended mode from session state, not from
+  // the bridge's stale init event.  When the user flips the chip mid-
+  // session, the reducer updates `permission_mode` immediately, so the
+  // modal can self-auto-allow even before the bridge has been told about
+  // the change. Falls back to the init event for sessions that haven't
+  // surfaced a session entry yet.
+  const sessionEntryForPerm = sessionCtx.state.sessions[sessionId];
 
   if (!state.initialized && !exitInfo && state.messages.length === 0) {
     // Claude's `--print --input-format stream-json` mode doesn't emit anything
@@ -183,21 +199,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // see <InteractivePermissionDispatcher /> below.  That's the SDK's
   // contract: the host injects answers as `updatedInput` rather than
   // writing a tool_result envelope.  No tool_use scanning needed here.
-  // Memoize so we don't reallocate per render and so we walk
-  // newest-first directly instead of materialising a flat block list
-  // for every assistant turn in history.  Cheap fix; large GC win in
-  // long sessions where extractTodos used to dominate per-frame cost.
-  const todos = useMemo(
-    () => extractTodosFromMessages(state.messages),
-    [state.messages],
-  );
-  // Read the user's CURRENT intended mode from session state, not from
-  // the bridge's stale init event.  When the user flips the chip mid-
-  // session, the reducer updates `permission_mode` immediately, so the
-  // modal can self-auto-allow even before the bridge has been told about
-  // the change. Falls back to the init event for sessions that haven't
-  // surfaced a session entry yet.
-  const sessionEntryForPerm = useSession().state.sessions[sessionId];
+  // (`todos` and `sessionEntryForPerm` are computed via hooks above
+  // the empty-state early return — keep that order.)
   const permissionMode =
     sessionEntryForPerm?.permission_mode
     ?? state.initEvent?.permissionMode

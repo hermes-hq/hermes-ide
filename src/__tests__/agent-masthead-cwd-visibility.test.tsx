@@ -16,12 +16,15 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 
-// AgentSessionView now calls `useSession` for the resilient envelope
-// sender (M10).  Mock the SessionContext hook so this test can render
-// the component without a full provider tree.
+// AgentSessionView calls `useSession` for the resilient envelope sender
+// AND reads `state.sessions[sessionId]` to get the current permission
+// mode (since the bypass-mode chip fix in 1.1.8).  Both reads now sit
+// above the empty-state early return — the mock must therefore expose
+// `state.sessions` even when this test renders the empty-state path.
 vi.mock("../state/SessionContext", () => ({
   useSession: () => ({
     sendAgentEnvelope: vi.fn(),
+    state: { sessions: {} },
   }),
 }));
 vi.mock("@tauri-apps/api/event", () => ({
