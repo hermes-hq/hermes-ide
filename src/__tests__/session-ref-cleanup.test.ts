@@ -30,6 +30,7 @@ function emptyBundle(): SessionRefBundle {
     claudeAddDirs: new Map(),
     pendingFlags: new Map(),
     lastIdeStateHash: new Map(),
+    autoNamedSessions: new Set(),
   };
 }
 
@@ -48,10 +49,11 @@ describe("cleanupSessionRefs (v1.1.2 H2 + H3 leak fixes)", () => {
     b.claudeAddDirs.set(sid, ["/a", "/b"]);
     b.pendingFlags.set(sid, { model: "opus" });
     b.lastIdeStateHash.set(sid, "hash-1");
+    b.autoNamedSessions.add(sid);
 
     const { removed } = cleanupSessionRefs(b, sid);
 
-    expect(removed).toBe(10);
+    expect(removed).toBe(11);
     expect(b.busyTimestamps.has(sid)).toBe(false);
     expect(b.closingSessionIds.has(sid)).toBe(false);
     expect(b.lastAutoAttachCwd.has(sid)).toBe(false);
@@ -62,6 +64,7 @@ describe("cleanupSessionRefs (v1.1.2 H2 + H3 leak fixes)", () => {
     expect(b.claudeAddDirs.has(sid)).toBe(false);
     expect(b.pendingFlags.has(sid)).toBe(false);
     expect(b.lastIdeStateHash.has(sid)).toBe(false);
+    expect(b.autoNamedSessions.has(sid)).toBe(false);
   });
 
   it("H3: leaves OTHER sessions' entries untouched", () => {
