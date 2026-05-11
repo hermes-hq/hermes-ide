@@ -2396,6 +2396,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     // AI agent defaults
     "default_permission_mode",
     "custom_command_suffix",
+    "last_ai_provider",
     // Per-agent launch command prefix (JSON map of providerId -> prefix string)
     "ai_agent_prefixes",
     // Keyboard shortcuts
