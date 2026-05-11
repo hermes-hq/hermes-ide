@@ -23,6 +23,7 @@ export interface PromptBundle {
 export interface BundleImportResult {
 	templatesAdded: number;
 	templatesSkipped: number;
+	templatesRenamed: number;
 	rolesAdded: number;
 	stylesAdded: number;
 }
@@ -162,8 +163,13 @@ export function validateBundle(
  * Strategy:
  * - Roles/styles: deduplicate by label (case-insensitive). If match found,
  *   reuse existing ID. Otherwise add with a regenerated ID.
- * - Templates: deduplicate by name (case-insensitive). If match found,
- *   skip. Otherwise add with a regenerated ID. All role/style refs remapped.
+ * - Templates: compare by name (case-insensitive) AND content fingerprint.
+ *   - Name match + fingerprint match: silently skip (true duplicate).
+ *   - Name match + fingerprint differs: auto-rename to "Name (2)" (or the
+ *     next free integer suffix) and import — preserves the incoming content
+ *     instead of silently dropping it.
+ *   - No name match: add with a regenerated ID.
+ *   All role/style refs are remapped in either case.
  */
 export function importBundle(
 	bundle: PromptBundle,
@@ -184,6 +190,7 @@ export function importBundle(
 	const result: BundleImportResult = {
 		templatesAdded: 0,
 		templatesSkipped: 0,
+		templatesRenamed: 0,
 		rolesAdded: 0,
 		stylesAdded: 0,
 	};
@@ -229,17 +236,21 @@ export function importBundle(
 	}
 
 	// ── Step 3: Import templates ──────────────────────────────────────
-	const existingNameSet = new Set(
-		[...existingTemplates, ...builtInTemplates].map((t) => t.name.toLowerCase()),
-	);
+	// Index existing templates (user + built-in) by normalized name so we
+	// can detect collisions and, when needed, compare content fingerprints
+	// to decide skip-vs-rename.
+	const nameKey = (n: string) => n.trim().toLowerCase();
+	const existingByName = new Map<string, PromptTemplate[]>();
+	for (const t of [...existingTemplates, ...builtInTemplates]) {
+		const key = nameKey(t.name);
+		const list = existingByName.get(key);
+		if (list) list.push(t);
+		else existingByName.set(key, [t]);
+	}
 	const newTemplates = [...existingTemplates];
 
 	for (let i = 0; i < bundle.templates.length; i++) {
 		const tpl = bundle.templates[i];
-		if (existingNameSet.has(tpl.name.toLowerCase())) {
-			result.templatesSkipped++;
-			continue;
-		}
 
 		const newId = `user-${now}-${i}`;
 		const remapped: PromptTemplate = {
@@ -262,8 +273,26 @@ export function importBundle(
 			})),
 		};
 
+		const collisions = existingByName.get(nameKey(tpl.name));
+		if (collisions && collisions.length > 0) {
+			const incomingFp = templateFingerprint(remapped);
+			const isTrueDuplicate = collisions.some(
+				(existing) => templateFingerprint(existing) === incomingFp,
+			);
+			if (isTrueDuplicate) {
+				result.templatesSkipped++;
+				continue;
+			}
+			// Same name, different body: keep the user's content by renaming.
+			remapped.name = nextAvailableName(tpl.name.trim(), existingByName);
+			result.templatesRenamed++;
+		}
+
 		newTemplates.push(remapped);
-		existingNameSet.add(tpl.name.toLowerCase());
+		const finalKey = nameKey(remapped.name);
+		const list = existingByName.get(finalKey);
+		if (list) list.push(remapped);
+		else existingByName.set(finalKey, [remapped]);
 		result.templatesAdded++;
 	}
 
@@ -286,4 +315,44 @@ function remapId(
 ): string {
 	if (builtInIds.has(id)) return id;
 	return idMap.get(id) ?? id;
+}
+
+/** Deterministic fingerprint of a template's substantive prose content, used
+ *  to decide whether a name collision is a true duplicate (skip) or a real
+ *  content change that should be preserved by renaming.
+ *
+ *  Only user-authored prose is fingerprinted (name, category, description,
+ *  task, scope, constraints, style). Identity-only fields (id, builtIn,
+ *  group) are excluded, and role/style ID arrays are deliberately excluded
+ *  too: those IDs get regenerated on every import, so two semantically-
+ *  equivalent templates would otherwise fingerprint differently after one
+ *  round trip. The trade-off is that two templates that differ ONLY in
+ *  which roles/styles they reference will be treated as duplicates — that
+ *  is acceptable because it matches the user's intuition of "same template"
+ *  and the import path already remaps those references on each pass. */
+function templateFingerprint(tpl: PromptTemplate): string {
+	const stable = {
+		name: tpl.name.trim().toLowerCase(),
+		category: tpl.category ?? "",
+		description: (tpl as { description?: string }).description ?? "",
+		task: tpl.fields?.task ?? "",
+		scope: tpl.fields?.scope ?? "",
+		constraints: tpl.fields?.constraints ?? "",
+		style: tpl.fields?.style ?? "",
+	};
+	return JSON.stringify(stable);
+}
+
+/** Pick the first unused "Name (N)" suffix for a template whose base name
+ *  is already taken by a different-content template. Starts at (2). */
+function nextAvailableName(
+	baseName: string,
+	existingByName: Map<string, PromptTemplate[]>,
+): string {
+	for (let n = 2; n < 1000; n++) {
+		const candidate = `${baseName} (${n})`;
+		if (!existingByName.has(candidate.trim().toLowerCase())) return candidate;
+	}
+	// Pathological fallback: use timestamp to guarantee uniqueness.
+	return `${baseName} (${Date.now()})`;
 }

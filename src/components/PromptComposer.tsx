@@ -436,10 +436,13 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
       if (result.templatesAdded > 0) parts.push(`${result.templatesAdded} template${result.templatesAdded === 1 ? "" : "s"}`);
       if (result.rolesAdded > 0) parts.push(`${result.rolesAdded} role${result.rolesAdded === 1 ? "" : "s"}`);
       if (result.stylesAdded > 0) parts.push(`${result.stylesAdded} style${result.stylesAdded === 1 ? "" : "s"}`);
-      const skipped = result.templatesSkipped > 0 ? ` (${result.templatesSkipped} skipped)` : "";
+      const notes: string[] = [];
+      if (result.templatesRenamed > 0) notes.push(`${result.templatesRenamed} renamed to avoid name conflict`);
+      if (result.templatesSkipped > 0) notes.push(`${result.templatesSkipped} skipped as duplicate${result.templatesSkipped === 1 ? "" : "s"}`);
+      const suffix = notes.length > 0 ? ` (${notes.join(", ")})` : "";
       const msg = parts.length > 0
-        ? `Imported ${parts.join(", ")}${skipped}`
-        : `Nothing new to import${skipped}`;
+        ? `Imported ${parts.join(", ")}${suffix}`
+        : `Nothing new to import${suffix}`;
       addToast?.({ message: msg, type: parts.length > 0 ? "success" : "info", duration: 4000 });
     } catch (err) {
       console.error("[PromptComposer] Import failed:", err);
