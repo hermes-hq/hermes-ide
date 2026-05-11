@@ -1735,33 +1735,47 @@ pub fn write_to_session(
     if let Ok(mut a) = session.analyzer.lock() {
         a.mark_input_sent();
 
-        let text = String::from_utf8_lossy(&bytes);
-        let is_enter = text.contains('\r') || text.contains('\n');
+        // While a TUI owns the screen (vim, less, htop, claude, etc.) the
+        // line buffer must stay quiescent. Keystrokes typed at a TUI are
+        // application input, not shell commands, and recording them would
+        // pollute the execution-node stream and feed garbage into the
+        // command-prediction system (issue #172).
+        if !a.in_alternate_screen {
+            let text = String::from_utf8_lossy(&bytes);
+            let is_enter = text.contains('\r') || text.contains('\n');
 
-        // Accumulate printable chars into the line buffer
-        for ch in text.chars() {
-            if ch == '\r' || ch == '\n' {
-                // Enter pressed — commit the accumulated line
-                continue;
-            } else if ch == '\x7f' || ch == '\x08' {
-                // Backspace — pop last char
-                a.input_line_buffer.pop();
-            } else if ch == '\x03' {
-                // Ctrl+C — clear buffer
-                a.input_line_buffer.clear();
-            } else if !ch.is_control() {
-                a.input_line_buffer.push(ch);
+            // Accumulate printable chars into the line buffer
+            for ch in text.chars() {
+                if ch == '\r' || ch == '\n' {
+                    // Enter pressed — commit the accumulated line
+                    continue;
+                } else if ch == '\x7f' || ch == '\x08' {
+                    // Backspace — pop last char
+                    a.input_line_buffer.pop();
+                } else if ch == '\x03' {
+                    // Ctrl+C — clear buffer
+                    a.input_line_buffer.clear();
+                } else if !ch.is_control() {
+                    a.input_line_buffer.push(ch);
+                }
             }
-        }
 
-        if is_enter && !a.input_line_buffer.is_empty() {
-            let line = a.input_line_buffer.drain(..).collect::<String>();
-            a.mark_input_line(&line);
-            let cwd = a.current_cwd.clone().unwrap_or_default();
-            a.start_node(&cwd);
-        } else if is_enter {
-            // Enter with empty buffer — still mark activity
-            a.input_line_buffer.clear();
+            if is_enter && !a.input_line_buffer.is_empty() {
+                let line = a.input_line_buffer.drain(..).collect::<String>();
+                a.mark_input_line(&line);
+                let cwd = a.current_cwd.clone().unwrap_or_default();
+                a.start_node(&cwd);
+            } else if is_enter {
+                // Enter with empty buffer — still mark activity
+                a.input_line_buffer.clear();
+            }
+        } else {
+            // Defensive: a TUI may launch mid-line. Any half-typed shell
+            // command in the buffer at that point isn't a real command —
+            // drop it so we don't commit it on the next post-TUI Enter.
+            if !a.input_line_buffer.is_empty() {
+                a.input_line_buffer.clear();
+            }
         }
     }
 
