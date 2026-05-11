@@ -2362,6 +2362,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "ui_scale",
     "font_size",
     "font_family",
+    "editor_font_size",
     "agent_timeline_style",
     // Terminal
     "default_shell",
