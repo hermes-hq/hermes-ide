@@ -70,9 +70,9 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  overflow: hidden;
-  /* Items inside the title can themselves shrink (cwd path is the
-   * usual culprit); ellipsis happens at the leaf level. */
+  /* No overflow: hidden here — it clips the brass glow on .agent-session-ticker
+   * along the bottom edge.  Children handle their own truncation (the ticker,
+   * cwd label, and model label all set white-space + ellipsis). */
 }
 
 .agent-session-header-title > * {
@@ -129,6 +129,14 @@
   letter-spacing: -0.005em;
   text-shadow: 0 0 8px var(--brass-dim);
   font-size: 13px;
+  line-height: 1.4;
+  /* Keep multi-word labels ("Running Bash", "Awaiting Claude") on a
+   * single line.  Without nowrap the title row would jump to a second
+   * line in narrow panes, causing the whole header to grow and the
+   * surrounding chips to shift on every state change. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-session-cwd-name {
