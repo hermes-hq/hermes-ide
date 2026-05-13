@@ -1,4 +1,4 @@
-# Hermes IDE 1.2.4
+# Hermes IDE 1.2.5
 
 The model picker, the permission chip, the effort selector — they
 stay where you put them. Even when you switch sessions and come back.
@@ -25,5 +25,5 @@ at boot time silently lost its chip data and never got it back until
 the next respawn. The fix caches that snapshot per session and
 restores it whenever the composer mounts.
 
-That's all in 1.2.4. Same Agent mode, same branch isolation
+That's all in 1.2.5. Same Agent mode, same branch isolation
 guarantees from 1.2.3 — just no more vanishing chips.
