@@ -1051,6 +1051,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       {isExpanded && (
                         <SessionBranchSelector
                           projectId={projectId}
+                          // Tell the selector what we already have for this
+                          // project so it skips Bug 2's auto-propagation
+                          // (which would otherwise re-fire on every
+                          // re-expand, retrigger the auto-advance effect
+                          // below, and snap the panel shut).
+                          existingBranchName={branchSelections[projectId]?.branch}
                           onBranchSelected={(name, isNew, fromRemote) => {
                             setBranchSelections((prev) => ({
                               ...prev,

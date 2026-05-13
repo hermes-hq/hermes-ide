@@ -142,6 +142,66 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
     expect(onBranchSelected).not.toHaveBeenCalled();
   });
 
+  it("skips auto-propagation when existingBranchName is provided (re-expand case)", async () => {
+    // Bug 2 follow-up (1.2.x manual-test regression):
+    //   When the user collapses then re-expands a project they've
+    //   already selected a branch for, the SessionBranchSelector
+    //   remounts.  Without this guard the selector re-fires
+    //   onBranchSelected on load — which re-triggers the parent's
+    //   auto-advance/collapse effect and slams the panel shut
+    //   immediately.  The user saw "the dropdown closes super fast
+    //   and I cannot see it".
+    //
+    //   Passing existingBranchName tells the selector "the parent
+    //   already has a selection for this project — pre-highlight it
+    //   in the list, do NOT re-propagate".
+    mockBackend([
+      { name: "feature-x", is_remote: false, is_current: true, last_commit_summary: null },
+      { name: "main", is_remote: false, is_current: false, last_commit_summary: null },
+    ]);
+    const onBranchSelected = vi.fn();
+    render(
+      <SessionBranchSelector
+        projectId="p1"
+        existingBranchName="main"
+        onBranchSelected={onBranchSelected}
+        onSkip={() => {}}
+      />,
+    );
+
+    // Wait long enough for any latent propagation to fire (waitFor
+    // doesn't work for negative assertions — we wait then verify).
+    await new Promise((r) => setTimeout(r, 60));
+    expect(onBranchSelected).not.toHaveBeenCalled();
+  });
+
+  it("pre-selects the existing branch row when existingBranchName is provided", async () => {
+    // The selector should highlight the user's prior choice so they
+    // can see what's currently set and either keep it (just click
+    // "Use Branch" again) or pick a different one.
+    mockBackend([
+      { name: "feature-x", is_remote: false, is_current: true, last_commit_summary: null },
+      { name: "main", is_remote: false, is_current: false, last_commit_summary: null },
+    ]);
+    const { container } = render(
+      <SessionBranchSelector
+        projectId="p1"
+        existingBranchName="main"
+        onBranchSelected={vi.fn()}
+        onSkip={() => {}}
+      />,
+    );
+
+    // Wait for branches to load.
+    await waitFor(() => {
+      expect(container.querySelectorAll(".branch-selector-item").length).toBeGreaterThan(0);
+    });
+
+    const selectedRow = container.querySelector(".branch-selector-item-selected");
+    expect(selectedRow, "the existing-branch row should be visually selected").toBeTruthy();
+    expect(selectedRow?.textContent).toContain("main");
+  });
+
   it("'Use current branch' (onSkip) still clears the parent's selection", async () => {
     // Regression: the auto-propagate happens BEFORE onSkip can be called,
     // so the parent's branchSelections briefly has an entry.  Clicking

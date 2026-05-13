@@ -6,6 +6,24 @@ import type { GitBranch, WorktreeInfo } from "../types/git";
 
 interface SessionBranchSelectorProps {
   projectId: string;
+  /**
+   * Branch the parent already has stored for this project (if any).
+   *
+   * Bug 2 follow-up: the selector auto-propagates the current local
+   * branch to the parent on mount so the user doesn't have to click
+   * "Use Branch" for the common case.  When the user collapses then
+   * re-expands the same project, the selector remounts, runs loadData
+   * again, and would re-propagate.  The parent's auto-advance effect
+   * watches `branchSelections` and collapses the panel when every
+   * project has a selection — so on every re-expand the panel would
+   * snap shut, making it impossible to change the branch.
+   *
+   * When `existingBranchName` is provided we:
+   *   1. Skip the auto-propagation (the parent already knows).
+   *   2. Pre-select the existing branch in the list so the user sees
+   *      what's currently chosen and can change it.
+   */
+  existingBranchName?: string;
   onBranchSelected: (branchName: string, createNew: boolean, fromRemote?: string) => void;
   onSkip: () => void;
 }
@@ -83,7 +101,7 @@ export function sortBranchesMainFirst<T extends { name: string; is_remote: boole
   });
 }
 
-export function SessionBranchSelector({ projectId, onBranchSelected, onSkip }: SessionBranchSelectorProps) {
+export function SessionBranchSelector({ projectId, existingBranchName, onBranchSelected, onSkip }: SessionBranchSelectorProps) {
   // Keep the latest onBranchSelected behind a ref so loadData can read
   // it without including it in the useCallback dependency array.  The
   // parent re-creates the inline callback on every render; if we put it
@@ -92,6 +110,13 @@ export function SessionBranchSelector({ projectId, onBranchSelected, onSkip }: S
   // IPC, freezing the UI.
   const onBranchSelectedRef = useRef(onBranchSelected);
   onBranchSelectedRef.current = onBranchSelected;
+
+  // Mirror `existingBranchName` behind a ref for the same reason — the
+  // parent passes a fresh value on every render via
+  // `branchSelections[projectId]?.branch`, but we only need the value
+  // at mount time inside loadData.
+  const existingBranchNameRef = useRef(existingBranchName);
+  existingBranchNameRef.current = existingBranchName;
 
   const [tab, setTab] = useState<Tab>("existing");
   const [branches, setBranches] = useState<GitBranch[]>([]);
@@ -145,11 +170,26 @@ export function SessionBranchSelector({ projectId, onBranchSelected, onSkip }: S
       //   - Only propagate when no other session's worktree already
       //     claims that branch (avoids the "branch in use" failure
       //     downstream in git_create_worktree).
+      //   - Skip propagation when the parent already has a selection
+      //     for this project (we're re-mounting because the user
+      //     clicked the chevron to change their mind).  Without this
+      //     guard the parent's auto-advance effect would re-fire and
+      //     instantly collapse the panel, making re-selection
+      //     impossible — that was the "expand closes super fast"
+      //     follow-up bug observed during manual testing of the
+      //     v1.2.x Bug 2 fix.
       //
       // The user can still override by selecting a different branch +
       // "Use Branch", or skip isolation entirely via "Use current
       // branch" (which calls onSkip and clears the selection upstream).
-      if (current) {
+      const priorSelection = existingBranchNameRef.current;
+      if (priorSelection) {
+        // Pre-highlight the user's existing choice so they can see it
+        // and either click another row or click "Use Branch" to keep
+        // it.  We deliberately do NOT call onBranchSelected here — the
+        // parent already has this selection.
+        setSelectedBranch(priorSelection);
+      } else if (current) {
         const taken = worktreeList.some((wt) => wt.branchName === current.name);
         if (!taken) {
           // Read through the ref so loadData's deps stay stable.
