@@ -383,24 +383,35 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
     return () => clearTimeout(timer);
   }, [newBranchName, projectId, localBranchNames]);
 
-  const handleSelectBranch = useCallback(
+  /**
+   * Single-click commits.  Clicking a row on the Existing Branch tab fires
+   * `onBranchSelected` immediately — there is no intermediate "highlighted
+   * but uncommitted" state any more.
+   *
+   * Why: in multi-project sessions the old select-then-confirm flow was a
+   * silent trap.  Users would click a branch in each expanded picker, never
+   * realise they also had to click "Use Branch", and end up with zero
+   * isolated branches.  The outer modal's "Continue" / "Continue without
+   * isolation" buttons now own the only legitimate confirmation gate.
+   *
+   * The visual "selected" state (`selectedBranch`) survives only as a brief
+   * flash before the parent collapses the picker — see the row className.
+   */
+  const handleCommitBranch = useCallback(
     (branchName: string) => {
-      setSelectedBranch((prev) => (prev === branchName ? null : branchName));
+      const branch = augmentedBranches.find((b) => b.name === branchName);
+      if (!branch || branch.taken) return;
+      setSelectedBranch(branchName); // for the brief visual ack
+      if (branch.is_remote) {
+        // For remote branches: pass the local name (stripped prefix) and the
+        // full remote ref so the worktree backend can fetch it.
+        onBranchSelected(stripRemotePrefix(branch.name), false, branch.name);
+      } else {
+        onBranchSelected(branchName, false);
+      }
     },
-    [],
+    [augmentedBranches, onBranchSelected],
   );
-
-  const handleConfirmExisting = useCallback(() => {
-    if (!selectedBranch) return;
-    const branch = augmentedBranches.find((b) => b.name === selectedBranch);
-    if (branch?.is_remote) {
-      // For remote branches: pass the local name (stripped prefix) and the full remote ref
-      const localName = stripRemotePrefix(branch.name);
-      onBranchSelected(localName, false, branch.name);
-    } else {
-      onBranchSelected(selectedBranch, false);
-    }
-  }, [selectedBranch, augmentedBranches, onBranchSelected]);
 
   const handleConfirmNew = useCallback(() => {
     if (!newBranchName.trim() || validationError || checkingAvailability) return;
@@ -418,12 +429,9 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
       } else if (e.key === "Enter" && highlightedIndex >= 0) {
         e.preventDefault();
         const branch = flatFiltered[highlightedIndex];
+        // Single Enter commits — matches the mouse single-click contract.
         if (branch && !branch.taken) {
-          if (selectedBranch === branch.name) {
-            handleConfirmExisting();
-          } else {
-            handleSelectBranch(branch.name);
-          }
+          handleCommitBranch(branch.name);
         }
       }
     } else if (tab === "new") {
@@ -548,18 +556,27 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
                     branch.taken ? "branch-selector-item-taken" : "",
                     selectedBranch === branch.name ? "branch-selector-item-selected" : "",
                     highlightedIndex === idx ? "branch-selector-item-highlighted" : "",
+                    branch.is_remote ? "branch-selector-item-remote" : "",
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  onClick={() => !branch.taken && handleSelectBranch(branch.name)}
+                  onClick={() => handleCommitBranch(branch.name)}
                   title={branch.last_commit_summary || undefined}
                 >
                   <span className="branch-selector-item-name">{displayName}</span>
                   {branch.is_current && (
                     <span className="branch-selector-item-current">current</span>
                   )}
+                  {branch.is_remote && !branch.taken && (
+                    <span className="branch-selector-item-remote-badge">remote</span>
+                  )}
                   {branch.taken && (
                     <span className="branch-selector-item-taken-label">in use</span>
+                  )}
+                  {/* Hover-only affordance telegraphing single-click commits.
+                      Hidden on .branch-selector-item-taken via CSS. */}
+                  {!branch.taken && (
+                    <span className="branch-selector-item-commit-hint" aria-hidden="true">→</span>
                   )}
                 </div>
               );
@@ -608,7 +625,17 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
         </div>
       )}
 
-      {/* Actions */}
+      {/* Actions
+       *
+       * Existing tab: the redundant "Use Branch" button is gone — single-click
+       * on a row commits the selection (the silent multi-project confirmation
+       * trap is what we're fixing).  "Use current branch" stays, because it's
+       * the only per-project escape from isolation in multi-project sessions;
+       * the outer "Continue without isolation" skips ALL projects, which is a
+       * different operation.
+       *
+       * New tab: the submit button stays — the user is typing into a form and
+       * there is nothing to single-click on. */}
       <div className="session-creator-actions">
         <button
           className="session-creator-btn-secondary"
@@ -617,15 +644,7 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
         >
           Use current branch
         </button>
-        {tab === "existing" ? (
-          <button
-            className="session-creator-btn-primary"
-            onClick={handleConfirmExisting}
-            disabled={!selectedBranch}
-          >
-            Use Branch
-          </button>
-        ) : (
+        {tab === "new" && (
           <button
             className="session-creator-btn-primary"
             onClick={handleConfirmNew}

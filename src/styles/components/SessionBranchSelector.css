@@ -73,18 +73,9 @@
   background: var(--bg-hover);
 }
 
-.branch-selector-item.branch-selector-item-selected {
-  background: var(--accent-dim);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
 .branch-selector-item.branch-selector-item-highlighted {
   background: var(--bg-hover);
   box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.branch-selector-item.branch-selector-item-selected.branch-selector-item-highlighted {
-  background: var(--accent-dim);
 }
 
 .branch-selector-item.branch-selector-item-taken {
@@ -98,6 +89,38 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Hover-only commit hint.  Single-click on a row commits the selection;
+ * the chevron telegraphs that the click is the action and prevents the
+ * "I selected it but nothing happened" trap that bit users in the old
+ * select-then-confirm flow. */
+.branch-selector-item-commit-hint {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  flex-shrink: 0;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, color 0.12s ease;
+}
+
+.branch-selector-item:hover:not(.branch-selector-item-taken) .branch-selector-item-commit-hint,
+.branch-selector-item.branch-selector-item-highlighted .branch-selector-item-commit-hint {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--accent);
+}
+
+/* Briefly flash the row when single-click commits, so the user gets a
+ * visible acknowledgement before the parent collapses the picker and
+ * auto-expands the next project. */
+@keyframes branch-selector-commit-flash {
+  0%   { background: var(--accent-dim); }
+  100% { background: transparent; }
+}
+
+.branch-selector-item.branch-selector-item-selected {
+  animation: branch-selector-commit-flash 0.35s ease-out;
 }
 
 .branch-selector-item-current {
