@@ -3322,16 +3322,14 @@ html[data-agent-timeline-style="classic"] .agent-message {
   z-index: 200;
   min-width: 280px;
   max-width: 360px;
-  /* Opaque underlay (`--bg-0` is the deepest ground — always opaque)
-   * with an `--bg-elevated` veneer painted on top.  This guarantees
-   * legibility on themes whose `--bg-elevated` is semi-transparent
-   * (e.g. Frosted Dark) without losing the slight tonal lift that
-   * `--bg-elevated` gives on themes where it's a solid color. */
-  background:
-    linear-gradient(var(--bg-elevated, var(--bg-1)), var(--bg-elevated, var(--bg-1))),
-    var(--bg-0);
-  backdrop-filter: blur(10px) saturate(120%);
-  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  /* Fully opaque single fill.  Earlier we layered a gradient over `--bg-0`
+   * with `backdrop-filter: blur(10px)` as a fallback for themes whose
+   * `--bg-elevated` might be semi-transparent — but every shipped theme
+   * defines `--bg-elevated` as an opaque hex, and the backdrop-filter
+   * still leaked a subtle blurred bleed of the chat content through on
+   * some GPU compositors.  A solid `--bg-elevated` (with `--bg-1`
+   * fallback) is correct, simpler, and reliably opaque. */
+  background: var(--bg-elevated, var(--bg-1));
   border: 1px solid var(--rule-strong, var(--rule));
   border-radius: 8px;
   box-shadow:
