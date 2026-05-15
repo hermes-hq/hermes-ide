@@ -249,3 +249,14 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.aq-send-kbd {
+  /* Inline keyboard-shortcut chip on the send button — mirrors the
+   * `.aq-cancel-kbd` "Esc" chip for visual symmetry across the two
+   * actions.  `fmt({mod})` resolves to ⌘ on macOS, "Ctrl+" elsewhere. */
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  margin-right: 6px;
+  opacity: 0.85;
+}

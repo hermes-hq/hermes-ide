@@ -22,6 +22,7 @@ import {
   type AskUserQuestionInput,
   type AskUserQuestionOption,
 } from "../utils/askUserQuestion";
+import { fmt, isActionMod } from "../utils/platform";
 
 const OTHER_LABEL = "Other";
 
@@ -52,15 +53,32 @@ export function AskUserQuestionCard({ input, onAllow, onDeny, dialogId }: Props)
   const onDenyRef = useRef(onDeny);
   onDenyRef.current = onDeny;
 
+  // Mirror the latest submit handler and disabled flag behind a ref so
+  // the global keydown listener doesn't need to re-bind on every state
+  // change.  Set just below, where `handleSubmit` is declared.
+  const submitActionRef = useRef<() => void>(() => {});
+
   // Degenerate input: empty questions array → nothing to ask, auto-deny.
   useEffect(() => {
     if (questions.length === 0) onDenyRef.current();
   }, [questions.length]);
 
-  // Esc cancels.
+  // Global shortcuts.  Esc cancels; Cmd/Ctrl+Enter submits (when the
+  // form is valid — the ref's wrapper short-circuits on disabled state
+  // so we don't have to thread `submitDisabled` through here).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onDenyRef.current();
+      if (e.key === "Escape") {
+        onDenyRef.current();
+        return;
+      }
+      if (e.key === "Enter" && isActionMod(e)) {
+        // Naked Enter belongs to the "Other" textarea (newlines).  Only
+        // the action-mod combo submits — this is the cross-app
+        // convention (Slack, GitHub, Linear).
+        e.preventDefault();
+        submitActionRef.current();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -118,6 +136,10 @@ export function AskUserQuestionCard({ input, onAllow, onDeny, dialogId }: Props)
     const updatedInput = buildAskAnswersUpdatedInput(input, answers);
     onAllow(updatedInput);
   }
+
+  // Keep the keydown listener's view of "submit" in sync with the latest
+  // closure (which captures the current `state`, `input`, `submitDisabled`).
+  submitActionRef.current = handleSubmit;
 
   return (
     <div
@@ -180,8 +202,10 @@ export function AskUserQuestionCard({ input, onAllow, onDeny, dialogId }: Props)
             className="aq-send"
             onClick={handleSubmit}
             disabled={submitDisabled}
+            title={`Submit answers (${fmt("{mod}")}Enter)`}
           >
-            ⏎ send
+            <span className="aq-send-kbd" aria-hidden="true">{fmt("{mod}")}⏎</span>
+            send
           </button>
         </div>
       </div>
