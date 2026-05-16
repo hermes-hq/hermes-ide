@@ -1,29 +1,58 @@
-# Hermes IDE 1.2.5
+# Hermes IDE 1.3.0
 
-The model picker, the permission chip, the effort selector — they
-stay where you put them. Even when you switch sessions and come back.
+A keyboard convention overhaul, a quieter branch picker, and several
+header and popover polish fixes.
 
-## Your chips stay put
+## Press Enter to send
 
-If you opened two Agent sessions, clicked between them a few times,
-and watched the model picker / permission chip / effort selector
-quietly disappear from your composer — leaving only the `Builder`,
-`Terminal`, and `Attach` buttons — that's fixed.
+The agent composer now sends on **Enter**, with **Shift+Enter** for a
+new line — matching Claude.ai, ChatGPT, Cursor, Slack, and the
+muscle memory you bring to Hermes from those tools.
 
-The chips now reflect the actual state of each agent the moment you
-look at them, regardless of how long ago the session was spawned or
-how many times you've switched away. Plan-mode flips, manual model
-swaps, and effort changes all show up immediately on whichever
-session you're viewing.
+If you've already learned the older binding, **Cmd+Enter** (Ctrl+Enter
+on Windows and Linux) still sends. Nothing lost, just an extra route in.
 
-## Why this kept happening
+The send button's tooltip now reads `Send · Shift+Enter for newline` so
+the convention is discoverable at a glance.
 
-The chips read from a per-session snapshot that was reset every time
-you switched, and the underlying signal that populates it only fires
-once when the agent boots — so any session you didn't have visible
-at boot time silently lost its chip data and never got it back until
-the next respawn. The fix caches that snapshot per session and
-restores it whenever the composer mounts.
+## One click picks a branch
 
-That's all in 1.2.5. Same Agent mode, same branch isolation
-guarantees from 1.2.3 — just no more vanishing chips.
+When you create a session and pick a branch — especially across
+multiple projects at once — clicking a branch row now commits your
+choice immediately. No more silent trap where the row looked
+"selected" but never actually registered, and you ended up with no
+branch isolation when you continued.
+
+A small `→` chevron fades in on hover to telegraph that the click is
+the action. Remote-only branches get a small `remote` tag so the
+single click doesn't feel surprising.
+
+The per-project **Use current branch** escape stays — pick one project
+to share, another to isolate.
+
+## Cmd+Enter sends Claude's option lists
+
+When Claude asks you a multiple-choice question in the chat,
+**Cmd+Enter** (Ctrl+Enter on Windows and Linux) now sends your
+selection without reaching for the mouse. The send button shows the
+shortcut as a small chip next to the word, mirroring the **Esc**
+cancel chip.
+
+## Quieter agent header
+
+- **"Thinking" is no longer clipped** along its baseline. The brass
+  glow had been getting cut off at the bottom edge of the header on
+  some themes.
+- **No more row jitter** when the status switches between one-word and
+  two-word labels. Previously, "Running Bash" or "Awaiting Claude"
+  could wrap to a second line in narrow panes, making the whole header
+  height jump on every state change.
+
+## Readable subagents popover
+
+The popover that shows your running subagents now has a fully opaque
+background. The previous build still let a faint blurred copy of the
+chat bleed through on some setups, hurting legibility — that's gone.
+
+The chat behind the popover stays where it is; the popover just stops
+being half-see-through.
