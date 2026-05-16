@@ -336,6 +336,31 @@ export function SessionComposer() {
       void handleSubmit();
       return;
     }
+    // Plain Enter sends; Shift+Enter inserts a newline.  This matches
+    // the chat-app convention (Claude.ai, ChatGPT, Cursor, Slack,
+    // Discord) that the agent composer competes with.  Cmd/Ctrl+Enter
+    // above remains as a compat path for users who learned the older
+    // binding.
+    //
+    // Skip the send when:
+    //   - any modifier other than Shift is held (Shift is reserved for
+    //     newline; Cmd/Ctrl is handled above; Alt is the wildcard for
+    //     OS-level shortcuts we don't want to swallow)
+    //   - an IME composition is in progress — the Enter is committing
+    //     a codepoint (CJK, dead-keys, voice dictation), not the
+    //     message.  Both `isComposingRef.current` and the native
+    //     `isComposing` flag are checked; WebKit doesn't always set
+    //     the native flag in the right places.
+    if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
+      const native = e.nativeEvent as KeyboardEvent | undefined;
+      const composing = isComposingRef.current || native?.isComposing === true;
+      if (!composing) {
+        e.preventDefault();
+        e.stopPropagation();
+        void handleSubmit();
+        return;
+      }
+    }
     if (e.key === "Escape") {
       e.preventDefault();
       if (!composerSessionId) return;
@@ -1163,7 +1188,7 @@ export function SessionComposer() {
             className="session-composer-send-btn"
             onClick={() => void handleSubmit()}
             disabled={!draft.trim() && pendingImages.length === 0}
-            title={`Send (${isMac ? "⌘" : "Ctrl"}+Enter)`}
+            title={`Send (Enter · Shift+Enter for newline)`}
             aria-label="Send message"
           >
             <span className="session-composer-send-label">Send</span>
