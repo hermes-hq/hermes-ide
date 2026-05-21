@@ -21,6 +21,7 @@ import {
 } from "../utils/aiProviders";
 import { PLATFORM } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
+import { LAST_AI_PROVIDER_KEY, resolveDefaultAiProvider } from "../utils/lastAiProvider";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
 import { isGitRepo as checkIsGitRepo } from "../api/git";
@@ -106,6 +107,15 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // For terminal mode the user picks an AI provider; for agent mode it's
   // forced to "claude"; for ssh mode it's irrelevant (mode is "terminal").
   const [aiProvider, setAiProvider] = useState<string | null>(initialMode === "agent" ? "claude" : null);
+  // Pre-selection default for terminal-mode (issue #3). Loaded async from
+  // the persisted setting; applied once on the first transition into
+  // terminal mode via `defaultProviderAppliedRef`. Stays null if the user
+  // never picked a provider before, or if the saved provider is no longer
+  // in the registry (silent fall-through is the right UX — better than
+  // surfacing a dead selection the user has to clear).
+  const [defaultAiProvider, setDefaultAiProvider] = useState<string | null>(null);
+  const [defaultAiProviderLoaded, setDefaultAiProviderLoaded] = useState(false);
+  const defaultProviderAppliedRef = useRef(false);
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [allProjects, setAllProjects] = useState<ProjectOrdered[]>([]);
@@ -624,9 +634,53 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     []
   );
 
+  const knownProviderIds = useMemo(() => AI_PROVIDERS.map((p) => p.id), []);
+
+  // Load the persisted default once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    getSetting(LAST_AI_PROVIDER_KEY)
+      .then((raw) => {
+        if (cancelled) return;
+        setDefaultAiProvider(resolveDefaultAiProvider(raw, knownProviderIds));
+        setDefaultAiProviderLoaded(true);
+      })
+      .catch((err) => {
+        if (!cancelled) setDefaultAiProviderLoaded(true);
+        console.warn("[SessionCreator] Failed to load last_ai_provider:", err);
+      });
+    return () => { cancelled = true; };
+    // knownProviderIds is a stable useMemo — exhaustive-deps lint silenced.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Apply the saved default the first time the user lands in terminal mode
+  // with the setting loaded. One-shot: subsequent mode flips don't override
+  // the user's in-flight selection.
+  useEffect(() => {
+    if (defaultProviderAppliedRef.current) return;
+    if (mode !== "terminal") return;
+    if (!defaultAiProviderLoaded) return;
+    if (!defaultAiProvider) return;
+    defaultProviderAppliedRef.current = true;
+    setAiProvider(defaultAiProvider);
+  }, [mode, defaultAiProvider, defaultAiProviderLoaded]);
+
+  /** Wrap setAiProvider so an explicit user pick is also persisted as the
+   *  new global default. Only non-null choices are persisted — "no AI"
+   *  leaves the previous default intact so it can pre-select next time. */
+  const chooseAiProvider = useCallback((id: string | null) => {
+    setAiProvider(id);
+    if (id) {
+      setSetting(LAST_AI_PROVIDER_KEY, id).catch((err) =>
+        console.warn("[SessionCreator] Failed to persist last_ai_provider:", err),
+      );
+    }
+  }, []);
+
   const selectProviderAndAdvance = (idx: number) => {
     const id = enabledProviders[idx] ?? null;
-    setAiProvider(id as string | null);
+    chooseAiProvider(id as string | null);
     if (!id) { setAutoApprove(false); setPermissionMode("default"); }
     if (id !== "claude") setSelectedChannels([]);
     goNext();
@@ -1208,7 +1262,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   <button
                     key={p.id}
                     className={`session-creator-provider-card ${aiProvider === p.id ? "selected" : ""} ${highlightedProviderIndex === providerIdx ? "selected" : ""} ${availabilityLoaded && !isAvailable ? "session-creator-provider-unavailable" : ""}`}
-                    onClick={() => { setAiProvider(p.id); setHighlightedProviderIndex(providerIdx); if (p.id !== "claude") setSelectedChannels([]); }}
+                    onClick={() => { chooseAiProvider(p.id); setHighlightedProviderIndex(providerIdx); if (p.id !== "claude") setSelectedChannels([]); }}
                   >
                     <span className="session-creator-provider-name">
                       {p.label}
