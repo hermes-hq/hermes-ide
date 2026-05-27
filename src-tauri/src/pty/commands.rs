@@ -2099,6 +2099,13 @@ fn remove_owned_worktrees_from_disk(
 ) {
     let mut repos_to_prune: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    let custom_base = db
+        .get_setting("worktree_base_path")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from);
+
     for wt in worktrees {
         let Ok(Some(proj)) = db.get_project(&wt.project_id) else {
             // Project gone — we can't locate the parent repo to run
@@ -2112,7 +2119,12 @@ fn remove_owned_worktrees_from_disk(
 
         repos_to_prune.insert(proj.path.clone());
 
-        match crate::git::worktree::remove_worktree(&proj.path, session_id, &wt.worktree_path) {
+        match crate::git::worktree::remove_worktree(
+            &proj.path,
+            session_id,
+            &wt.worktree_path,
+            custom_base.as_deref(),
+        ) {
             Ok(()) => {
                 if let Err(e) = db.delete_session_worktree(&wt.id) {
                     log::warn!(

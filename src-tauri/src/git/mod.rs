@@ -22,18 +22,30 @@ use crate::AppState;
 /// exclusion fails or a repo has an unusual number of real changes.
 const VCS_STATUS_FILE_CAP: usize = 10_000;
 
+/// Returns the custom worktree base path if configured in settings.
+fn get_custom_worktree_base(db: &Database) -> Option<std::path::PathBuf> {
+    db.get_setting("worktree_base_path")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
 /// Validates that a path is inside the Hermes worktrees directory
-/// (`hermes-worktrees/`). Returns the canonical path if valid, or an error
-/// if the path is outside the expected worktree directory (prevents path
-/// traversal attacks).
-fn validate_worktree_path(path: &str) -> Result<std::path::PathBuf, String> {
+/// (`hermes-worktrees/` or a custom configured base). Returns the
+/// canonical path if valid, or an error if the path is outside the
+/// expected directory (prevents path traversal attacks).
+fn validate_worktree_path(
+    path: &str,
+    custom_base: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
     let p = std::path::Path::new(path);
 
     // First check the raw path string before canonicalizing
     // (canonicalize follows symlinks, which we want for the final check)
-    if !worktree::is_hermes_worktree_path(path) {
+    if !worktree::is_hermes_worktree_path(path, custom_base) {
         return Err(format!(
-            "Refusing to operate on '{}': not inside a hermes-worktrees/ directory",
+            "Refusing to operate on '{}': not inside a valid worktree directory",
             path
         ));
     }
@@ -44,9 +56,9 @@ fn validate_worktree_path(path: &str) -> Result<std::path::PathBuf, String> {
             .canonicalize()
             .map_err(|e| format!("Failed to resolve path '{}': {}", path, e))?;
         let canonical_str = canonical.to_string_lossy();
-        if !worktree::is_hermes_worktree_path(&canonical_str) {
+        if !worktree::is_hermes_worktree_path(&canonical_str, custom_base) {
             return Err(format!(
-                "Refusing to operate on '{}': canonical path '{}' is not inside a hermes-worktrees/ directory",
+                "Refusing to operate on '{}': canonical path '{}' is not inside a valid worktree directory",
                 path, canonical_str
             ));
         }
@@ -2864,7 +2876,7 @@ pub fn git_create_worktree(
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
 
-    // 1. Get project path from DB
+    // 1. Get project path and settings from DB
     let db = state
         .db
         .lock()
@@ -2874,11 +2886,17 @@ pub fn git_create_worktree(
         .map_err(|e| format!("Failed to look up project: {}", e))?
         .ok_or_else(|| format!("Project '{}' not found", project_id))?;
     let root_path = project.path.clone();
+    let custom_base = get_custom_worktree_base(&db);
     drop(db);
 
     // Journal: log the CREATE operation before performing it
-    let intended_path =
-        worktree::worktree_path_for_session(&app_data_dir, &root_path, &session_id, &branch_name);
+    let intended_path = worktree::worktree_path_for_session(
+        &app_data_dir,
+        &root_path,
+        &session_id,
+        &branch_name,
+        custom_base.as_deref(),
+    );
     let _ = journal::log_operation(
         &app_data_dir,
         &root_path,
@@ -2887,6 +2905,7 @@ pub fn git_create_worktree(
         &project_id,
         &branch_name,
         &intended_path.to_string_lossy(),
+        custom_base.as_deref(),
     );
 
     // 2. Create the worktree
@@ -2897,6 +2916,7 @@ pub fn git_create_worktree(
         &branch_name,
         create_branch,
         from_remote.as_deref(),
+        custom_base.as_deref(),
     )?;
 
     // 3. Insert into session_worktrees table — if this fails, roll back the worktree
@@ -2916,7 +2936,12 @@ pub fn git_create_worktree(
         // Rollback: remove the worktree we just created
         log::warn!("DB insert failed for worktree, rolling back: {}", db_err);
         if !result.is_main_worktree {
-            let _ = worktree::remove_worktree(&root_path, &session_id, &result.worktree_path);
+            let _ = worktree::remove_worktree(
+                &root_path,
+                &session_id,
+                &result.worktree_path,
+                custom_base.as_deref(),
+            );
         }
         return Err(format!("Failed to record worktree: {}", db_err));
     }
@@ -2929,6 +2954,7 @@ pub fn git_create_worktree(
         "CREATE",
         &session_id,
         &project_id,
+        custom_base.as_deref(),
     );
 
     // 4. Emit event for frontend
@@ -2968,6 +2994,7 @@ pub fn git_remove_worktree(
     let wt_branch = wt.branch_name.clone();
     let root_path = project.path.clone();
     let is_main = wt.is_main_worktree;
+    let custom_base = get_custom_worktree_base(&db);
     drop(db);
 
     // SAFETY: never remove the main worktree (it IS the project root)
@@ -2976,6 +3003,9 @@ pub fn git_remove_worktree(
             "Cannot remove the main worktree — it is the project root directory".to_string(),
         );
     }
+
+    // Safety: validate path before removal
+    let _ = validate_worktree_path(&wt_path, custom_base.as_deref())?;
 
     // Get the app data directory for journal storage
     let app_data_dir = app
@@ -2992,10 +3022,12 @@ pub fn git_remove_worktree(
         &project_id,
         "",
         &wt_path,
+        custom_base.as_deref(),
     );
 
     // 2. Try to remove the worktree from the filesystem
-    let remove_result = worktree::remove_worktree(&root_path, &session_id, &wt_path);
+    let remove_result =
+        worktree::remove_worktree(&root_path, &session_id, &wt_path, custom_base.as_deref());
 
     // 3. Only delete DB record if git removal succeeded (or directory no longer exists)
     let dir_gone = !std::path::Path::new(&wt_path).is_dir();
@@ -3024,6 +3056,7 @@ pub fn git_remove_worktree(
         "REMOVE",
         &session_id,
         &project_id,
+        custom_base.as_deref(),
     );
 
     // 4. Emit event for frontend
@@ -3593,7 +3626,7 @@ pub fn git_detect_orphan_worktrees(
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
 
     // 1. Collect all DB data while holding the lock
-    let (all_records, projects) = {
+    let (all_records, projects, custom_base) = {
         let db = state
             .db
             .lock()
@@ -3601,7 +3634,8 @@ pub fn git_detect_orphan_worktrees(
 
         let records = db.get_all_session_worktrees().unwrap_or_default();
         let projects = db.get_all_projects().unwrap_or_default();
-        (records, projects)
+        let custom_base = get_custom_worktree_base(&db);
+        (records, projects, custom_base)
     };
     // DB lock is dropped here
 
@@ -3631,33 +3665,40 @@ pub fn git_detect_orphan_worktrees(
     }
 
     // 3. Check for "directory_only" — directory exists but no DB record
-    //    Scan each project's worktree hash directory in the app data dir
+    //    Scan each project's worktree hash directory in both default and custom base
     for project in &projects {
-        let wt_dir = worktree::worktree_dir(&app_data_dir, &project.path);
-        if wt_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&wt_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    // Skip non-directories and the repo_path.txt marker file
-                    if !path.is_dir() {
-                        continue;
-                    }
-                    let path_str = path
-                        .to_string_lossy()
-                        .trim_end_matches('/')
-                        .trim_end_matches('\\')
-                        .to_string();
-                    if !record_paths.contains(&path_str) {
-                        // Extract branch name from directory name: {session_prefix}_{branch}
-                        let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
-                        let branch = dir_name.split_once('_').map(|x| x.1.to_string());
-                        orphans.push(OrphanWorktree {
-                            worktree_path: path_str,
-                            branch_name: branch,
-                            kind: "directory_only".to_string(),
-                            root_path: Some(project.path.clone()),
-                            session_id: None,
-                        });
+        let mut bases = vec![None]; // None represents default base
+        if custom_base.is_some() {
+            bases.push(custom_base.as_deref());
+        }
+
+        for base in bases {
+            let wt_dir = worktree::worktree_dir(&app_data_dir, &project.path, base);
+            if wt_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&wt_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        // Skip non-directories and the repo_path.txt marker file
+                        if !path.is_dir() {
+                            continue;
+                        }
+                        let path_str = path
+                            .to_string_lossy()
+                            .trim_end_matches('/')
+                            .trim_end_matches('\\')
+                            .to_string();
+                        if !record_paths.contains(&path_str) {
+                            // Extract branch name from directory name: {session_prefix}_{branch}
+                            let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
+                            let branch = dir_name.split_once('_').map(|x| x.1.to_string());
+                            orphans.push(OrphanWorktree {
+                                worktree_path: path_str,
+                                branch_name: branch,
+                                kind: "directory_only".to_string(),
+                                root_path: Some(project.path.clone()),
+                                session_id: None,
+                            });
+                        }
                     }
                 }
             }
@@ -3668,9 +3709,20 @@ pub fn git_detect_orphan_worktrees(
 }
 
 #[tauri::command]
-pub fn git_worktree_disk_usage(worktree_path: String) -> Result<u64, String> {
-    // Validate the path is inside a .hermes/worktrees/ directory
-    let validated = validate_worktree_path(&worktree_path)?;
+pub fn git_worktree_disk_usage(
+    state: State<'_, AppState>,
+    worktree_path: String,
+) -> Result<u64, String> {
+    let custom_base = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        get_custom_worktree_base(&db)
+    };
+
+    // Validate the path is inside an allowed worktree directory
+    let validated = validate_worktree_path(&worktree_path, custom_base.as_deref())?;
 
     fn dir_size(path: &std::path::Path) -> u64 {
         let mut size = 0;
@@ -3698,11 +3750,19 @@ pub fn git_cleanup_orphan_worktrees(
     state: State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<Vec<CleanupResult>, String> {
+    let custom_base = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        get_custom_worktree_base(&db)
+    };
+
     let mut results = Vec::new();
 
     for path in &paths {
-        // Validate the path is inside a .hermes/worktrees/ directory
-        let validated = match validate_worktree_path(path) {
+        // Validate the path is inside an allowed worktree directory
+        let validated = match validate_worktree_path(path, custom_base.as_deref()) {
             Ok(v) => v,
             Err(e) => {
                 results.push(CleanupResult {

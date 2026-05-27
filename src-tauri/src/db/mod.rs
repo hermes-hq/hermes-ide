@@ -2392,6 +2392,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "git_author_email",
     "git_auto_stage",
     "git_show_untracked",
+    "worktree_base_path",
     // Autonomous mode
     "auto_command_min_frequency",
     "auto_cancel_delay_ms",
@@ -3279,6 +3280,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "saved_workspace",
     // Default CWD — absolute path, won't exist on another machine
     "default_cwd",
+    // Worktree base path — absolute path, machine-specific
+    "worktree_base_path",
     // Onboarding / What's New — per-install lifecycle
     "onboarding_completed",
     "last_seen_version",

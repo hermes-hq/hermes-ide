@@ -43,19 +43,30 @@ impl WorktreeWatcher {
     }
 }
 
-/// Start watching `{base_dir}/hermes-worktrees/` recursively.
+/// Start watching `{base_dir}/hermes-worktrees/` and optionally `custom_base` recursively.
 ///
-/// Returns `None` if the directory does not exist or the watcher fails to
+/// Returns `None` if no directories exist or the watcher fails to
 /// initialise.  Errors are logged but never cause a panic.
-pub fn start_watching(app: AppHandle, base_dir: PathBuf) -> Option<WorktreeWatcher> {
+pub fn start_watching(
+    app: AppHandle,
+    base_dir: PathBuf,
+    custom_base: Option<PathBuf>,
+) -> Option<WorktreeWatcher> {
     let worktrees_dir = base_dir.join(super::worktree::HERMES_WORKTREE_MARKER);
 
-    // Only start if the directory already exists (it may not exist for brand-new users)
-    if !worktrees_dir.is_dir() {
-        log::info!(
-            "[worktree-watcher] {} does not exist yet — skipping watcher",
-            worktrees_dir.display()
-        );
+    // Collect directories that exist and should be watched
+    let mut dirs_to_watch = Vec::new();
+    if worktrees_dir.is_dir() {
+        dirs_to_watch.push(worktrees_dir);
+    }
+    if let Some(ref cb) = custom_base {
+        if cb.is_dir() {
+            dirs_to_watch.push(cb.clone());
+        }
+    }
+
+    if dirs_to_watch.is_empty() {
+        log::info!("[worktree-watcher] no worktree directories exist yet — skipping watcher");
         return None;
     }
 
@@ -69,6 +80,7 @@ pub fn start_watching(app: AppHandle, base_dir: PathBuf) -> Option<WorktreeWatch
     let debounce_window = Duration::from_millis(500);
 
     let app_handle = app.clone();
+    let custom_base_clone = custom_base.clone();
 
     let mut watcher =
         match notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
@@ -97,8 +109,9 @@ pub fn start_watching(app: AppHandle, base_dir: PathBuf) -> Option<WorktreeWatch
             for path in &event.paths {
                 let path_str = path.to_string_lossy().to_string();
 
-                // Only consider paths inside hermes-worktrees/
-                if !super::worktree::is_hermes_worktree_path(&path_str) {
+                // Only consider paths inside an allowed worktree directory
+                if !super::worktree::is_hermes_worktree_path(&path_str, custom_base_clone.as_deref())
+                {
                     continue;
                 }
 
@@ -168,19 +181,17 @@ pub fn start_watching(app: AppHandle, base_dir: PathBuf) -> Option<WorktreeWatch
             }
         };
 
-    if let Err(e) = watcher.watch(&worktrees_dir, RecursiveMode::Recursive) {
-        log::warn!(
-            "[worktree-watcher] failed to watch {}: {}",
-            worktrees_dir.display(),
-            e
-        );
-        return None;
+    for dir in &dirs_to_watch {
+        if let Err(e) = watcher.watch(dir, RecursiveMode::Recursive) {
+            log::warn!(
+                "[worktree-watcher] failed to watch {}: {}",
+                dir.display(),
+                e
+            );
+        } else {
+            log::info!("[worktree-watcher] now watching {}", dir.display());
+        }
     }
-
-    log::info!(
-        "[worktree-watcher] now watching {}",
-        worktrees_dir.display()
-    );
 
     Some(WorktreeWatcher {
         _watcher: watcher,

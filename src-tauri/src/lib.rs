@@ -73,7 +73,7 @@ static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
 /// Called once during app startup. For each `session_worktrees` record whose
 /// session is missing from the `sessions` table, we remove the git worktree
 /// from disk (if it is a linked worktree) and delete the DB record. We also
-/// scan `{app_data_dir}/hermes-worktrees/` directories for orphans that have
+/// scan both default and custom worktree directories for orphans that have
 /// no DB record, and replay any incomplete journal operations from prior
 /// crashes. Finally, we run `git worktree prune` on every repo that had
 /// stale entries and emit a cleanup summary event to the frontend.
@@ -88,6 +88,13 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
             return;
         }
     };
+
+    let custom_base = database
+        .get_setting("worktree_base_path")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from);
 
     let all_worktrees = match database.get_all_session_worktrees() {
         Ok(wts) => wts,
@@ -120,6 +127,7 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                     &project_entry.path,
                     &wt.session_id,
                     &wt.worktree_path,
+                    custom_base.as_deref(),
                 ) {
                     log::warn!(
                         "Startup worktree cleanup: failed to remove worktree '{}': {}",
@@ -206,40 +214,47 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
             .collect();
 
         for proj in &projects {
-            let wt_dir = git::worktree::worktree_dir(&app_data_dir, &proj.path);
-            if !wt_dir.is_dir() {
-                continue;
+            let mut bases = vec![None]; // None represents default base
+            if custom_base.is_some() {
+                bases.push(custom_base.as_deref());
             }
 
-            if let Ok(entries) = std::fs::read_dir(&wt_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    // Skip non-directories and marker files (repo_path.txt)
-                    if !path.is_dir() {
-                        continue;
-                    }
-                    let path_str = path.to_string_lossy().to_string();
+            for base in bases {
+                let wt_dir = git::worktree::worktree_dir(&app_data_dir, &proj.path, base);
+                if !wt_dir.is_dir() {
+                    continue;
+                }
 
-                    // Check if this directory has a DB record
-                    if !known_paths.contains(&path_str) {
-                        log::info!("Removing orphaned worktree directory: {}", path_str);
-                        // Try git worktree prune first, then remove directory
-                        let _ = std::process::Command::new("git")
-                            .arg("-C")
-                            .arg(&proj.path)
-                            .arg("worktree")
-                            .arg("prune")
-                            .output();
-                        match std::fs::remove_dir_all(&path) {
-                            Ok(_) => {
-                                cleanup_count += 1;
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "[worktree-cleanup] Failed to remove orphan {}: {}",
-                                    path_str,
-                                    e
-                                );
+                if let Ok(entries) = std::fs::read_dir(&wt_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        // Skip non-directories and marker files (repo_path.txt)
+                        if !path.is_dir() {
+                            continue;
+                        }
+                        let path_str = path.to_string_lossy().to_string();
+
+                        // Check if this directory has a DB record
+                        if !known_paths.contains(&path_str) {
+                            log::info!("Removing orphaned worktree directory: {}", path_str);
+                            // Try git worktree prune first, then remove directory
+                            let _ = std::process::Command::new("git")
+                                .arg("-C")
+                                .arg(&proj.path)
+                                .arg("worktree")
+                                .arg("prune")
+                                .output();
+                            match std::fs::remove_dir_all(&path) {
+                                Ok(_) => {
+                                    cleanup_count += 1;
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "[worktree-cleanup] Failed to remove orphan {}: {}",
+                                        path_str,
+                                        e
+                                    );
+                                }
                             }
                         }
                     }
@@ -247,7 +262,8 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
             }
 
             // Replay incomplete journal operations for this project
-            let incomplete = git::journal::get_incomplete_operations(&app_data_dir, &proj.path);
+            let incomplete =
+                git::journal::get_incomplete_operations(&app_data_dir, &proj.path, custom_base.as_deref());
             for entry in &incomplete {
                 match entry.action.as_str() {
                     "CREATE" => {
@@ -315,7 +331,7 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
             }
             if all_cleaned {
                 // Only clear the journal once we've verified all orphans are gone
-                git::journal::clear_journal(&app_data_dir, &proj.path);
+                git::journal::clear_journal(&app_data_dir, &proj.path, custom_base.as_deref());
             } else {
                 log::warn!(
                     "[worktree-cleanup] Keeping journal for '{}' — some orphans were not cleaned",
@@ -514,7 +530,15 @@ pub fn run() {
 
             // Start worktree file watcher (notification only — never
             // deletes projects or closes sessions)
-            let watcher = git::watcher::start_watching(app.handle().clone(), app_dir.clone());
+            let custom_base = database
+                .get_setting("worktree_base_path")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from);
+
+            let watcher =
+                git::watcher::start_watching(app.handle().clone(), app_dir.clone(), custom_base);
 
             let state = AppState {
                 db: Mutex::new(database),
@@ -881,11 +905,12 @@ mod tests {
             "proj1",
             "feat",
             orphan_path,
+            None,
         )
         .unwrap();
 
         // Verify journal has incomplete operations
-        let incomplete = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let incomplete = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path, None);
         assert_eq!(incomplete.len(), 1);
 
         // Remove the orphan (simulating replay)
@@ -895,10 +920,10 @@ mod tests {
         assert!(!orphan_dir.exists());
 
         // Clear journal (this is what the production code does after verification passes)
-        git::journal::clear_journal(app_data_dir.path(), repo_path);
+        git::journal::clear_journal(app_data_dir.path(), repo_path, None);
 
         // Journal should now be empty
-        let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path, None);
         assert!(remaining.is_empty());
     }
 
@@ -1037,6 +1062,7 @@ mod tests {
             "proj1",
             "",
             orphan_path,
+            None,
         )
         .unwrap();
 
@@ -1044,7 +1070,7 @@ mod tests {
         assert!(orphan_dir.exists());
 
         // Verification check: orphan is still there, should NOT clear
-        let incomplete = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let incomplete = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path, None);
         let mut all_cleaned = true;
         for entry in &incomplete {
             if entry.worktree_path != "pending" && Path::new(&entry.worktree_path).is_dir() {
@@ -1054,7 +1080,7 @@ mod tests {
         assert!(!all_cleaned, "verification should detect remaining orphan");
 
         // Journal should still have entries
-        let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
+        let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path, None);
         assert_eq!(remaining.len(), 1);
     }
 }
