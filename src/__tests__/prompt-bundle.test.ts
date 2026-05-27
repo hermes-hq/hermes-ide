@@ -682,6 +682,180 @@ describe("importBundle", () => {
 		expect(templates).toHaveLength(1);
 	});
 
+	// ── Content-aware dedupe (issue #224) ────────────────────────────────
+
+	it("renames an imported template that shares a name but has different content", () => {
+		const existing = makeTemplate({
+			id: "ex-1",
+			name: "Shared Name",
+			fields: {
+				roleIds: [],
+				task: "EXISTING task body",
+				scope: "",
+				constraints: "",
+				styleSelections: [],
+				style: "",
+			},
+			recommendedRoles: [],
+			recommendedStyles: [],
+		});
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [
+				makeTemplate({
+					id: "in-1",
+					name: "Shared Name",
+					fields: {
+						roleIds: [],
+						task: "INCOMING task body — clearly different",
+						scope: "",
+						constraints: "",
+						styleSelections: [],
+						style: "",
+					},
+					recommendedRoles: [],
+					recommendedStyles: [],
+				}),
+			],
+			roles: [],
+			styles: [],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [existing], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS,
+		);
+
+		expect(result.templatesAdded).toBe(1);
+		expect(result.templatesRenamed).toBe(1);
+		expect(result.templatesSkipped).toBe(0);
+		expect(templates).toHaveLength(2);
+		// Original existing template kept as-is
+		expect(templates[0].name).toBe("Shared Name");
+		expect(templates[0].fields?.task).toBe("EXISTING task body");
+		// Incoming template renamed and added; its body is preserved
+		expect(templates[1].name).toBe("Shared Name (2)");
+		expect(templates[1].fields?.task).toBe("INCOMING task body — clearly different");
+	});
+
+	it("skips silently when name AND content match identically", () => {
+		// makeTemplate() returns the same default body, so this is a true duplicate.
+		const existing = makeTemplate({ id: "ex-1", name: "Same Everything" });
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [makeTemplate({ id: "in-1", name: "Same Everything" })],
+			roles: [makeRole()],
+			styles: [makeStyle()],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [existing], [makeRole()], [makeStyle()], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS,
+		);
+
+		expect(result.templatesAdded).toBe(0);
+		expect(result.templatesRenamed).toBe(0);
+		expect(result.templatesSkipped).toBe(1);
+		expect(templates).toHaveLength(1); // only the existing one remains
+	});
+
+	it("picks the next free suffix when (2) is also taken", () => {
+		const existingA = makeTemplate({
+			id: "ex-a", name: "Notes",
+			fields: { roleIds: [], task: "A", scope: "", constraints: "", styleSelections: [], style: "" },
+			recommendedRoles: [], recommendedStyles: [],
+		});
+		const existingB = makeTemplate({
+			id: "ex-b", name: "Notes (2)",
+			fields: { roleIds: [], task: "B", scope: "", constraints: "", styleSelections: [], style: "" },
+			recommendedRoles: [], recommendedStyles: [],
+		});
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [makeTemplate({
+				id: "in-1", name: "Notes",
+				fields: { roleIds: [], task: "C — yet another body", scope: "", constraints: "", styleSelections: [], style: "" },
+				recommendedRoles: [], recommendedStyles: [],
+			})],
+			roles: [],
+			styles: [],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [existingA, existingB], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS,
+		);
+
+		expect(result.templatesRenamed).toBe(1);
+		expect(templates).toHaveLength(3);
+		expect(templates[2].name).toBe("Notes (3)");
+		expect(templates[2].fields?.task).toBe("C — yet another body");
+	});
+
+	it("renames against built-in template names with differing content", () => {
+		const builtInTemplates = [
+			makeTemplate({
+				id: "builtin-1", name: "Code Review", builtIn: true,
+				fields: { roleIds: [], task: "official body", scope: "", constraints: "", styleSelections: [], style: "" },
+				recommendedRoles: [], recommendedStyles: [],
+			}),
+		];
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [makeTemplate({
+				id: "in-1", name: "Code Review",
+				fields: { roleIds: [], task: "my custom variant", scope: "", constraints: "", styleSelections: [], style: "" },
+				recommendedRoles: [], recommendedStyles: [],
+			})],
+			roles: [],
+			styles: [],
+		};
+
+		const { templates, result } = importBundle(
+			bundle, [], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS, builtInTemplates,
+		);
+
+		expect(result.templatesAdded).toBe(1);
+		expect(result.templatesRenamed).toBe(1);
+		expect(result.templatesSkipped).toBe(0);
+		expect(templates).toHaveLength(1);
+		expect(templates[0].name).toBe("Code Review (2)");
+		expect(templates[0].fields?.task).toBe("my custom variant");
+	});
+
+	it("treats whitespace and case differences in name as the same for collision purposes", () => {
+		const existing = makeTemplate({
+			id: "ex-1", name: "  My Template  ",
+			fields: { roleIds: [], task: "v1", scope: "", constraints: "", styleSelections: [], style: "" },
+			recommendedRoles: [], recommendedStyles: [],
+		});
+		const bundle: PromptBundle = {
+			_hermes_bundle_version: 1,
+			_hermes_app_version: "0.6.4",
+			_hermes_exported_at: "",
+			templates: [makeTemplate({
+				id: "in-1", name: "MY TEMPLATE",
+				fields: { roleIds: [], task: "v2", scope: "", constraints: "", styleSelections: [], style: "" },
+				recommendedRoles: [], recommendedStyles: [],
+			})],
+			roles: [],
+			styles: [],
+		};
+
+		const { result } = importBundle(
+			bundle, [existing], [], [], BUILT_IN_ROLE_IDS, BUILT_IN_STYLE_IDS,
+		);
+
+		// Different content, so the name collision triggers a rename, not a skip.
+		expect(result.templatesRenamed).toBe(1);
+		expect(result.templatesSkipped).toBe(0);
+	});
+
 	it("handles template with missing fields gracefully", () => {
 		const bundle: PromptBundle = {
 			_hermes_bundle_version: 1,
