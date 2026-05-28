@@ -999,6 +999,24 @@ function AppContent() {
               </PanelErrorBoundary>
             </>
           )}
+          {ui.contextPanelOpen && !ui.flowMode && !activeSession && (
+            <>
+              <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
+              <PanelErrorBoundary panelName="Context Panel">
+                <aside className="context-panel" aria-label={t("empty.contextPanelTitle")}>
+                  <div className="context-panel-header">
+                    <span className="context-panel-title">{t("empty.contextPanelTitle")}</span>
+                  </div>
+                  <div className="context-panel-body">
+                    <section className="ctx-section">
+                      <div className="ctx-section-title">{t("empty.beginSession")}</div>
+                      <p className="text-muted">{t("empty.contextPanelDesc")}</p>
+                    </section>
+                  </div>
+                </aside>
+              </PanelErrorBoundary>
+            </>
+          )}
           {/* Usage panel.  Mounted for both agent and terminal sessions,
               mutex with the right-rail occupant of the moment:
               - terminal: mutex with ContextPanel (same column)
