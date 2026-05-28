@@ -6,6 +6,7 @@ import { PluginLoader } from "./plugins/PluginLoader";
 import { builtinPlugins } from "./plugins/builtin";
 import { usePluginRuntime } from "./plugins/usePluginRuntime";
 import { PluginPanelHost } from "./plugins/PluginPanelHost";
+import { I18nProvider, useI18n } from "./i18n/I18nProvider";
 
 // Expose React and ReactDOM as globals for dynamically loaded plugins.
 // Plugins are IIFE bundles that externalize React and reference window.React.
@@ -79,6 +80,7 @@ const AI_PROVIDER_INFO_MAP: Record<string, { label: string; installCmd: string }
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 
 function AppContent() {
+  const { t } = useI18n();
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace } = useSession();
   const activeSession = useActiveSession();
   const sessions = useSessionList();
@@ -814,7 +816,7 @@ function AppContent() {
           <ActivityBar
             side="left"
             pinnedTabs={[
-              { id: "sessions", label: `Sessions (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
+              { id: "sessions", label: `${t("sessions.title")} (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
             ]}
             tabs={(() => {
               const filtered = pluginPanels
@@ -857,10 +859,10 @@ function AppContent() {
                 }
               }
             }}
-            topAction={{ icon: PlusIcon, label: `New Session (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen({}) }}
+            topAction={{ icon: PlusIcon, label: `${t("session.new")} (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen({}) }}
             bottomActions={[
-              { icon: PluginsIcon, label: "Plugins", onClick: () => setSettingsOpen("plugins") },
-              { icon: SettingsIcon, label: "Settings", onClick: () => setSettingsOpen("general") },
+              { icon: PluginsIcon, label: t("app.plugins"), onClick: () => setSettingsOpen("plugins") },
+              { icon: SettingsIcon, label: t("app.settings"), onClick: () => setSettingsOpen("general") },
             ]}
           />
         )}
@@ -964,6 +966,8 @@ function AppContent() {
                     console.log("[opening-overlay] EmptyState 'New Session' clicked");
                     setSessionCreatorOpen({});
                   }}
+                  onOpenPalette={() => dispatch({ type: "TOGGLE_PALETTE" })}
+                  onToggleContext={() => dispatch({ type: "TOGGLE_CONTEXT" })}
                   onRestore={(entry, restoreScrollback) => createSession({ label: entry.label, workingDirectory: entry.working_directory, restoreFromId: restoreScrollback ? entry.id : undefined })}
                 />
               )}
@@ -1022,14 +1026,14 @@ function AppContent() {
                 ? [
                     {
                       id: "workbench",
-                      label: `Workbench (${fmt("{mod}{alt}B")})`,
+                      label: `${t("app.workbench")} (${fmt("{mod}{alt}B")})`,
                       icon: WorkbenchIcon,
                     },
-                    { id: "usage", label: "Usage · plan & limits", icon: UsageIcon },
+                    { id: "usage", label: t("app.usage"), icon: UsageIcon },
                   ]
                 : [
                     { id: "context", label: `Context (${fmt("{mod}E")})`, icon: ContextIcon },
-                    { id: "usage", label: "Usage · plan & limits", icon: UsageIcon },
+                    { id: "usage", label: t("app.usage"), icon: UsageIcon },
                   ]
             }
             activeTabId={
@@ -1343,9 +1347,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 function App() {
   return (
     <ErrorBoundary>
-      <SessionProvider>
-        <AppContent />
-      </SessionProvider>
+      <I18nProvider>
+        <SessionProvider>
+          <AppContent />
+        </SessionProvider>
+      </I18nProvider>
     </ErrorBoundary>
   );
 }

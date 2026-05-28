@@ -1,18 +1,18 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "HERMES-IDE",
+  "productName": "HERMES-IDE-I18N",
   "version": "1.3.2",
-  "identifier": "com.hermes-ide.terminal",
+  "identifier": "com.hermes-ide.i18n-upstream",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1430",
     "beforeBuildCommand": "npm run prepare:bridge && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "HERMES-IDE",
+        "title": "HERMES-IDE I18N",
         "width": 1200,
         "height": 800,
         "minWidth": 600,

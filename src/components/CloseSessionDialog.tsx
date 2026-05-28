@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import "../styles/components/CloseSessionDialog.css";
 import type { SessionMode } from "../types/session";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface CloseSessionDialogProps {
   sessionId: string;
@@ -32,6 +33,7 @@ export function closeSessionDialogConfirmLabel(mode: "agent" | "terminal"): stri
 }
 
 export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel, onDontAskAgain }: CloseSessionDialogProps) {
+  const { t } = useI18n();
   const [dontAsk, setDontAsk] = useState(false);
   const mode: "agent" | "terminal" = sessionMode === "agent" ? "agent" : "terminal";
 
@@ -59,9 +61,9 @@ export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel
   return (
     <div className="close-dialog-backdrop" onClick={onCancel}>
       <div className="close-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="close-dialog-title">{closeSessionDialogTitle(mode)}</div>
+        <div className="close-dialog-title">{mode === "agent" ? t("close.agent.title") : t("close.terminal.title")}</div>
         <div className="close-dialog-body">
-          {closeSessionDialogCopy(mode)}
+          {mode === "agent" ? t("close.agent.body") : t("close.terminal.body")}
         </div>
         <label className="close-dialog-checkbox">
           <input
@@ -69,12 +71,12 @@ export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel
             checked={dontAsk}
             onChange={(e) => setDontAsk(e.target.checked)}
           />
-          Don't ask again
+          {t("close.dontAsk")}
         </label>
         <div className="close-dialog-actions">
-          <button className="close-dialog-btn" onClick={onCancel}>Cancel</button>
+          <button className="close-dialog-btn" onClick={onCancel}>{t("common.cancel")}</button>
           <button className="close-dialog-btn close-dialog-btn-confirm" onClick={handleConfirm}>
-            {closeSessionDialogConfirmLabel(mode)}
+            {mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm")}
           </button>
         </div>
       </div>

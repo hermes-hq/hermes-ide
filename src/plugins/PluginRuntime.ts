@@ -322,6 +322,13 @@ export class PluginRuntime {
 		return this.plugins.size;
 	}
 
+	getAllPlugins(): { manifest: PluginManifest; status: PluginStatus }[] {
+		return Array.from(this.plugins.values()).map((entry) => ({
+			manifest: entry.module.manifest,
+			status: entry.status,
+		}));
+	}
+
 	subscribe(listener: () => void): () => void {
 		this.changeListeners.add(listener);
 		return () => this.changeListeners.delete(listener);

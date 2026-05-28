@@ -27,6 +27,7 @@ import { listSshSavedHosts, upsertSshSavedHost, deleteSshSavedHost, type SshSave
 import { setAnalyticsEnabled } from "../utils/analytics";
 import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
 import { PluginManager } from "./PluginManager";
+import { useI18n } from "../i18n/I18nProvider";
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  SETTINGS PAGE — EXPORT / IMPORT CONTRACT                              ║
@@ -60,6 +61,7 @@ interface SettingsProps {
 }
 
 export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, onConfirmPluginUpdateAll, pluginRefreshTrigger }: SettingsProps) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
   const [activeTab, setActiveTab] = useState(initialTab || "general");
@@ -215,15 +217,15 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   }, []);
 
   const tabs = [
-    { id: "general", label: "General" },
-    { id: "appearance", label: "Appearance" },
+    { id: "general", label: t("settings.general") },
+    { id: "appearance", label: t("settings.appearance") },
     { id: "ssh", label: "SSH" },
     { id: "git", label: "Git" },
-    { id: "autonomous", label: "Autonomous" },
-    { id: "ai-agent", label: "AI Agent" },
-    { id: "shortcuts", label: "Shortcuts" },
-    { id: "plugins", label: "Plugins" },
-    { id: "privacy", label: "Privacy" },
+    { id: "autonomous", label: t("settings.autonomous") },
+    { id: "ai-agent", label: t("settings.aiAgent") },
+    { id: "shortcuts", label: t("settings.shortcuts") },
+    { id: "plugins", label: t("app.plugins") },
+    { id: "privacy", label: t("settings.privacy") },
   ];
 
   return (
@@ -232,14 +234,14 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
       onClick={() => handleOverlayClick(onClose)}
       role="dialog"
       aria-modal="true"
-      aria-label="Settings"
+      aria-label={t("settings.title")}
     >
       <div className="settings-panel" onClick={(e) => e.stopPropagation()} style={{ width: panelWidth, height: panelHeight }}>
         <div className="settings-resize-handle" onMouseDown={onResizeWidthStart} />
         <div className="settings-resize-handle-bottom" onMouseDown={onResizeHeightStart} />
         <div className="settings-header">
-          <span className="settings-title">Settings</span>
-          <button className="close-btn settings-close" onClick={onClose} aria-label="Close">&times;</button>
+          <span className="settings-title">{t("settings.title")}</span>
+          <button className="close-btn settings-close" onClick={onClose} aria-label={t("common.close")}>&times;</button>
         </div>
 
         <div className="settings-body">
@@ -259,13 +261,13 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "general" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">Default Shell</label>
+                  <label className="settings-label">{t("settings.defaultShell")}</label>
                   <select
                     className="settings-select"
                     value={settings.default_shell || ""}
                     onChange={(e) => updateSetting("default_shell", e.target.value)}
                   >
-                    <option value="">System default</option>
+                    <option value="">{t("settings.systemDefault")}</option>
                     {shells.map((s) => (
                       <option key={s.path} value={s.path}>{s.name}</option>
                     ))}
@@ -273,7 +275,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Terminal Scrollback</label>
+                  <label className="settings-label">{t("settings.terminalScrollback")}</label>
                   <select
                     className="settings-select"
                     value={settings.scrollback || "10000"}
@@ -287,7 +289,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Default Working Directory</label>
+                  <label className="settings-label">{t("settings.defaultWorkingDirectory")}</label>
                   <input
                     className="settings-input"
                     placeholder="~ (home directory)"
@@ -298,7 +300,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Command Palette Shortcut</label>
+                  <label className="settings-label">{t("settings.commandPaletteShortcut")}</label>
                   <select
                     className="settings-select"
                     value={settings.command_palette_shortcut || "cmd_k"}
@@ -307,17 +309,17 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="cmd_k">{fmt("{mod}K")} (default)</option>
                     <option value="cmd_shift_p">{fmt("{mod}{shift}P")} (frees {fmt("{mod}K")} for Clear Terminal)</option>
                   </select>
-                  <span className="settings-hint-inline">Requires restart to update the native menu</span>
+                  <span className="settings-hint-inline">{t("settings.requiresRestartMenu")}</span>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Preferred External Editor</label>
+                  <label className="settings-label">{t("settings.preferredEditor")}</label>
                   <select
                     className="settings-select"
                     value={settings.preferred_editor || ""}
                     onChange={(e) => updateSetting("preferred_editor", e.target.value)}
                   >
-                    <option value="">System Default</option>
+                    <option value="">{t("settings.systemDefault")}</option>
                     <option value="code">VS Code</option>
                     <option value="cursor">Cursor</option>
                     <option value="zed">Zed</option>
@@ -329,20 +331,20 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="nvim">Neovim</option>
                     <option value="emacs">Emacs</option>
                   </select>
-                  <span className="settings-hint-inline">Editor used when opening files from the file browser</span>
+                  <span className="settings-hint-inline">{t("settings.editorHint")}</span>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Restore Sessions on Launch</label>
+                  <label className="settings-label">{t("settings.restoreSessions")}</label>
                   <select
                     className="settings-select"
                     value={settings.restore_sessions || "always"}
                     onChange={(e) => updateSetting("restore_sessions", e.target.value)}
                   >
-                    <option value="always">Always</option>
-                    <option value="never">Never</option>
+                    <option value="always">{t("settings.always")}</option>
+                    <option value="never">{t("settings.never")}</option>
                   </select>
-                  <span className="settings-hint-inline">Re-open previous sessions and layout when the app restarts</span>
+                  <span className="settings-hint-inline">{t("settings.restoreHint")}</span>
                 </div>
 
                 <div className="settings-group">
@@ -356,9 +358,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip });
                       }}
                     />
-                    {" "}Confirm before closing sessions
+                    {" "}{t("settings.confirmBeforeClosing")}
                   </label>
-                  <span className="settings-hint-inline">Show a confirmation dialog when closing a terminal session</span>
+                  <span className="settings-hint-inline">{t("settings.confirmBeforeClosingHint")}</span>
                 </div>
               </div>
             )}
@@ -366,7 +368,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "appearance" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">Theme</label>
+                  <label className="settings-label">{t("settings.theme")}</label>
                   <div
                     className="settings-theme-grid"
                     onMouseLeave={() => {
@@ -374,7 +376,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       applyTheme(saved, settings);
                     }}
                   >
-                    <span className="settings-theme-group-label">Dark</span>
+                    <span className="settings-theme-group-label">{t("settings.dark")}</span>
                     {DARK_THEMES.map((t) => (
                       <button
                         key={t.id}
@@ -386,7 +388,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       </button>
                     ))}
                     <div className="settings-theme-separator" />
-                    <span className="settings-theme-group-label">Light</span>
+                    <span className="settings-theme-group-label">{t("settings.light")}</span>
                     {LIGHT_THEMES.map((t) => (
                       <button
                         key={t.id}
@@ -401,25 +403,23 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Agent Timeline Style</label>
+                  <label className="settings-label">{t("settings.agentTimelineStyle")}</label>
                   <span className="settings-hint-inline">
-                    Modern (default) uses the speaker-chip layout with sans-serif body.
-                    Classic restores the denser logbook style — mono body, brass left
-                    bar on user messages, hairline rules between turns.
+                    {t("settings.agentTimelineHint")}
                   </span>
                   <select
                     className="settings-select"
                     value={settings.agent_timeline_style || "modern"}
                     onChange={(e) => updateSetting("agent_timeline_style", e.target.value)}
                   >
-                    <option value="modern">Modern (default)</option>
-                    <option value="classic">Classic compact</option>
+                    <option value="modern">{t("settings.modernDefault")}</option>
+                    <option value="classic">{t("settings.classicCompact")}</option>
                   </select>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">UI Scale</label>
-                  <span className="settings-hint-inline">Scales icons, text and spacing (not terminal)</span>
+                  <label className="settings-label">{t("settings.uiScale")}</label>
+                  <span className="settings-hint-inline">{t("settings.uiScaleHint")}</span>
                   <select
                     className="settings-select"
                     value={settings.ui_scale || "default"}
@@ -432,7 +432,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Terminal Font Size</label>
+                  <label className="settings-label">{t("settings.terminalFontSize")}</label>
                   <select
                     className="settings-select"
                     value={settings.font_size || "14"}
@@ -445,7 +445,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Font Family</label>
+                  <label className="settings-label">{t("settings.fontFamily")}</label>
                   <select
                     className="settings-select"
                     value={settings.font_family || "default"}
@@ -460,7 +460,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Window Size</label>
+                  <label className="settings-label">{t("settings.windowSize")}</label>
                   <div className="settings-size-row">
                     <div className="settings-stepper">
                       <button
@@ -468,7 +468,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         onPointerDown={() => startRepeat("w", -10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title="Decrease width"
+                        title={t("settings.decreaseWidth")}
                       >&#9666;</button>
                       <input
                         className="settings-stepper-input"
@@ -484,7 +484,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         onPointerDown={() => startRepeat("w", 10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title="Increase width"
+                        title={t("settings.increaseWidth")}
                       >&#9656;</button>
                     </div>
                     <span className="settings-size-separator">&times;</span>
@@ -494,7 +494,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         onPointerDown={() => startRepeat("h", -10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title="Decrease height"
+                        title={t("settings.decreaseHeight")}
                       >&#9666;</button>
                       <input
                         className="settings-stepper-input"
@@ -510,7 +510,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         onPointerDown={() => startRepeat("h", 10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title="Increase height"
+                        title={t("settings.increaseHeight")}
                       >&#9656;</button>
                     </div>
                     <span className="settings-size-unit">px</span>
@@ -522,15 +522,15 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "shortcuts" && (
               <div className="settings-section">
                 <p className="settings-hint">
-                  All available keyboard shortcuts. Customization coming soon.
+                  {t("settings.shortcutsHint")}
                 </p>
                 {SHORTCUT_GROUPS.map((group) => (
-                  <div key={group.label} className="settings-shortcut-group">
-                    <div className="settings-shortcut-group-label">{group.label}</div>
+                  <div key={group.labelKey} className="settings-shortcut-group">
+                    <div className="settings-shortcut-group-label">{t(group.labelKey)}</div>
                     {group.shortcuts.map((s) => (
                       <div key={s.keys} className="settings-shortcut-row">
-                        <span className="settings-shortcut-action">{s.action}</span>
-                        <kbd className="settings-shortcut-kbd">{s.keys}</kbd>
+                        <span className="settings-shortcut-action">{t(s.actionKey)}</span>
+                        <kbd className="settings-shortcut-kbd">{fmt(s.keys)}</kbd>
                       </div>
                     ))}
                   </div>
@@ -541,29 +541,29 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "ssh" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">SSH File Editor</label>
+                  <label className="settings-label">{t("settings.sshFileEditor")}</label>
                   <select
                     className="settings-select"
                     value={settings.preferred_ssh_editor || "vim"}
                     onChange={(e) => updateSetting("preferred_ssh_editor", e.target.value)}
                   >
-                    <optgroup label="Terminal editors (run in PTY)">
+                    <optgroup label={t("settings.terminalEditors")}>
                       <option value="vim">Vim</option>
                       <option value="nvim">Neovim</option>
                       <option value="nano">Nano</option>
                       <option value="emacs">Emacs</option>
                       <option value="vi">Vi</option>
                     </optgroup>
-                    <optgroup label="GUI editors (open locally via SSH remote)">
+                    <optgroup label={t("settings.guiEditors")}>
                       <option value="code">VS Code (Remote SSH)</option>
                       <option value="cursor">Cursor (Remote SSH)</option>
                       <option value="zed">Zed (Remote SSH)</option>
                     </optgroup>
                   </select>
-                  <span className="settings-hint-inline">Editor used when opening files on SSH sessions</span>
+                  <span className="settings-hint-inline">{t("settings.sshEditorHint")}</span>
                 </div>
 
-                <h3 className="settings-section-title" style={{ marginTop: 16 }}>Saved Hosts</h3>
+                <h3 className="settings-section-title" style={{ marginTop: 16 }}>{t("settings.savedHosts")}</h3>
 
                 {sshHosts.length > 0 && (
                   <div className="settings-ssh-hosts-list">
@@ -577,14 +577,14 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                           <button
                             className="settings-btn-sm"
                             onClick={() => setEditingHost({ ...h })}
-                          >Edit</button>
+                          >{t("settings.edit")}</button>
                           <button
                             className="settings-btn-sm settings-btn-danger"
                             onClick={async () => {
                               await deleteSshSavedHost(h.id);
                               setSshHosts((prev) => prev.filter((x) => x.id !== h.id));
                             }}
-                          >Delete</button>
+                          >{t("common.delete")}</button>
                         </div>
                       </div>
                     ))}
@@ -592,13 +592,13 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 )}
 
                 {sshHosts.length === 0 && !editingHost && (
-                  <p className="settings-hint">No saved SSH hosts yet.</p>
+                  <p className="settings-hint">{t("settings.noSshHosts")}</p>
                 )}
 
                 {editingHost ? (
                   <div className="settings-ssh-host-form">
                     <div className="settings-group">
-                      <label className="settings-label">Label</label>
+                      <label className="settings-label">{t("settings.label")}</label>
                       <input
                         className="settings-input"
                         placeholder="My Server"
@@ -608,7 +608,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">Host</label>
+                      <label className="settings-label">{t("settings.host")}</label>
                       <input
                         className="settings-input"
                         placeholder="example.com"
@@ -618,7 +618,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">User</label>
+                      <label className="settings-label">{t("settings.user")}</label>
                       <input
                         className="settings-input"
                         placeholder="root"
@@ -628,7 +628,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">Port</label>
+                      <label className="settings-label">{t("settings.port")}</label>
                       <input
                         className="settings-input"
                         type="number"
@@ -638,7 +638,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">Identity File (optional)</label>
+                      <label className="settings-label">{t("settings.identityFile")}</label>
                       <input
                         className="settings-input"
                         placeholder="~/.ssh/id_rsa"
@@ -648,7 +648,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">Jump Host (optional)</label>
+                      <label className="settings-label">{t("settings.jumpHost")}</label>
                       <input
                         className="settings-input"
                         placeholder="bastion.example.com"
@@ -667,8 +667,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                           setSshHosts(hosts);
                           setEditingHost(null);
                         }}
-                      >Save</button>
-                      <button className="settings-btn" onClick={() => setEditingHost(null)}>Cancel</button>
+                      >{t("settings.save")}</button>
+                      <button className="settings-btn" onClick={() => setEditingHost(null)}>{t("common.cancel")}</button>
                     </div>
                   </div>
                 ) : (
@@ -687,7 +687,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       created_at: new Date().toISOString(),
                       updated_at: new Date().toISOString(),
                     })}
-                  >Add Host</button>
+                  >{t("settings.addHost")}</button>
                 )}
               </div>
             )}
@@ -695,25 +695,25 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "git" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">Auto-refresh Interval</label>
+                  <label className="settings-label">{t("settings.autoRefreshInterval")}</label>
                   <select
                     className="settings-select"
                     value={settings.git_poll_interval || "3000"}
                     onChange={(e) => updateSetting("git_poll_interval", e.target.value)}
                   >
-                    <option value="1000">1 second</option>
-                    <option value="3000">3 seconds</option>
-                    <option value="5000">5 seconds</option>
-                    <option value="10000">10 seconds</option>
-                    <option value="0">Off</option>
+                    <option value="1000">{t("settings.oneSecond")}</option>
+                    <option value="3000">{t("settings.seconds", { count: "3" })}</option>
+                    <option value="5000">{t("settings.seconds", { count: "5" })}</option>
+                    <option value="10000">{t("settings.seconds", { count: "10" })}</option>
+                    <option value="0">{t("settings.off")}</option>
                   </select>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Author Name Override</label>
+                  <label className="settings-label">{t("settings.authorNameOverride")}</label>
                   <input
                     className="settings-input"
-                    placeholder="Use git config (default)"
+                    placeholder={t("settings.useGitConfig")}
                     value={settings.git_author_name || ""}
                     onChange={(e) => updateSetting("git_author_name", e.target.value)}
                     onContextMenu={textContextMenu}
@@ -721,10 +721,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">Author Email Override</label>
+                  <label className="settings-label">{t("settings.authorEmailOverride")}</label>
                   <input
                     className="settings-input"
-                    placeholder="Use git config (default)"
+                    placeholder={t("settings.useGitConfig")}
                     value={settings.git_author_email || ""}
                     onChange={(e) => updateSetting("git_author_email", e.target.value)}
                     onContextMenu={textContextMenu}
@@ -738,7 +738,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       checked={settings.git_auto_stage === "true"}
                       onChange={(e) => updateSetting("git_auto_stage", e.target.checked ? "true" : "false")}
                     />
-                    Auto-stage all changes on commit
+                    {t("settings.autoStageCommit")}
                   </label>
                 </div>
 
@@ -749,7 +749,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       checked={settings.git_show_untracked !== "false"}
                       onChange={(e) => updateSetting("git_show_untracked", e.target.checked ? "true" : "false")}
                     />
-                    Show untracked files
+                    {t("settings.showUntracked")}
                   </label>
                 </div>
               </div>
@@ -759,12 +759,11 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "autonomous" && (
               <div className="settings-section">
                 <p className="settings-hint">
-                  Autonomous mode auto-executes frequent commands and repeated error fixes
-                  after a countdown. Adjust thresholds below.
+                  {t("settings.autonomousHint")}
                 </p>
                 <div className="settings-group">
                   <label className="settings-label">
-                    Min command frequency for auto-predict: {settings.auto_command_min_frequency || "5"}
+                    {t("settings.autoCommandFrequency", { value: settings.auto_command_min_frequency || "5" })}
                   </label>
                   <input
                     type="range"
@@ -776,7 +775,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
                 <div className="settings-group">
                   <label className="settings-label">
-                    Cancel delay: {settings.auto_cancel_delay_ms ? `${parseInt(settings.auto_cancel_delay_ms) / 1000}s` : "3s"}
+                    {t("settings.cancelDelay", { value: settings.auto_cancel_delay_ms ? `${parseInt(settings.auto_cancel_delay_ms) / 1000}s` : "3s" })}
                   </label>
                   <input
                     type="range"
@@ -799,18 +798,18 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "plugins" && (
               <>
                 <div className="settings-section">
-                  <h3 className="settings-section-title">Plugin Updates</h3>
+                  <h3 className="settings-section-title">{t("settings.pluginUpdates")}</h3>
                   <div className="settings-group">
-                    <label className="settings-label">Check for plugin updates</label>
+                    <label className="settings-label">{t("settings.checkPluginUpdates")}</label>
                     <select
                       className="settings-select"
                       value={settings.plugin_update_check || "startup"}
                       onChange={(e) => updateSetting("plugin_update_check", e.target.value)}
                     >
-                      <option value="startup">On startup</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="never">Never</option>
+                      <option value="startup">{t("settings.onStartup")}</option>
+                      <option value="daily">{t("settings.daily")}</option>
+                      <option value="weekly">{t("settings.weekly")}</option>
+                      <option value="never">{t("settings.never")}</option>
                     </select>
                   </div>
                   <div className="settings-group">
@@ -822,10 +821,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                           updateSetting("plugin_auto_update", e.target.checked ? "true" : "false")
                         }
                       />
-                      Auto-update plugins
+                      {t("settings.autoUpdatePlugins")}
                     </label>
                     <p className="settings-hint">
-                      Automatically install plugin updates when they become available.
+                      {t("settings.autoUpdatePluginsHint")}
                     </p>
                   </div>
                 </div>
@@ -846,10 +845,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         setAnalyticsEnabled(val);
                       }}
                     />
-                    Send anonymous usage analytics
+                    {t("settings.analytics")}
                   </label>
                   <p className="settings-hint">
-                    Help improve Hermes IDE by sending anonymous usage data. No personal information, terminal content, or file paths are collected.
+                    {t("settings.analyticsHint")}
                   </p>
                 </div>
               </div>
@@ -875,7 +874,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               }
             }}
           >
-            Export Settings
+            {t("settings.export")}
           </button>
           <button
             className="settings-btn"
@@ -908,7 +907,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               }
             }}
           >
-            Import Settings
+            {t("settings.import")}
           </button>
           {footerStatus && <span className="settings-footer-status">{footerStatus}</span>}
         </div>
@@ -929,6 +928,7 @@ interface AiAgentSettingsTabProps {
 }
 
 function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps) {
+  const { t } = useI18n();
   const prefixes = parseAgentPrefixes(settings[AI_AGENT_PREFIXES_KEY]);
   const examples = PREFIX_EXAMPLES[PLATFORM];
   const placeholder = getPrefixPlaceholder(PLATFORM);
@@ -945,27 +945,26 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
   return (
     <div className="settings-section">
       <p className="settings-hint">
-        Default permission mode and launch-command customization for new AI agent sessions.
-        All values can be overridden per session in the session creator.
+        {t("settings.aiAgentHint")}
       </p>
 
       <div className="settings-group">
-        <label className="settings-label">Default permission mode</label>
+        <label className="settings-label">{t("settings.defaultPermissionMode")}</label>
         <select
           className="settings-select"
           value={settings.default_permission_mode || "default"}
           onChange={(e) => updateSetting("default_permission_mode", e.target.value)}
         >
-          <option value="default">Ask Permissions</option>
-          <option value="acceptEdits">Accept Edits</option>
-          <option value="plan">Plan Mode</option>
-          <option value="auto">Auto Mode</option>
-          <option value="bypassPermissions">Bypass Permissions</option>
+          <option value="default">{t("settings.askPermissions")}</option>
+          <option value="acceptEdits">{t("settings.acceptEdits")}</option>
+          <option value="plan">{t("settings.planMode")}</option>
+          <option value="auto">{t("settings.autoMode")}</option>
+          <option value="bypassPermissions">{t("settings.bypassPermissions")}</option>
         </select>
       </div>
 
       <div className="settings-group">
-        <label className="settings-label">Custom command suffix (applies to every agent)</label>
+        <label className="settings-label">{t("settings.customCommandSuffix")}</label>
         <input
           type="text"
           className="settings-input"
@@ -974,19 +973,17 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
           placeholder="e.g. --model opus --max-tokens 4096"
         />
         <p className="settings-hint">
-          Text appended to AI agent launch commands in every new session.
+          {t("settings.customCommandSuffixHint")}
         </p>
       </div>
 
-      <h3 className="settings-section-title" style={{ marginTop: 16 }}>Per-agent launch prefix</h3>
+      <h3 className="settings-section-title" style={{ marginTop: 16 }}>{t("settings.perAgentPrefix")}</h3>
       <p className="settings-hint">
-        Prepended to the launch command for the matching agent — e.g. {" "}
-        <code>caffeinate -i claude</code> on macOS or <code>wsl claude</code> on Windows.
-        Runs on your local machine. Ignored for SSH sessions.
+        {t("settings.perAgentPrefixHint", { example1: "caffeinate -i claude", example2: "wsl claude" })}
       </p>
 
       <fieldset className="settings-agent-prefix-grid">
-        <legend className="settings-agent-prefix-legend">Agents</legend>
+        <legend className="settings-agent-prefix-legend">{t("settings.agents")}</legend>
         {AI_PROVIDERS.map((p) => {
           const value = prefixes[p.id] ?? "";
           const inputId = `agent-prefix-${p.id}`;
@@ -1010,7 +1007,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
                 autoCorrect="off"
               />
               {examples.length > 0 && (
-                <div className="settings-agent-prefix-chips" role="group" aria-label={`${p.label} prefix examples`}>
+                <div className="settings-agent-prefix-chips" role="group" aria-label={t("settings.prefixExamples", { agent: p.label })}>
                   {examples.map((ex) => (
                     <button
                       key={ex.value}
@@ -1029,7 +1026,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
                 className="settings-agent-prefix-preview"
                 aria-live="polite"
               >
-                <span className="settings-agent-prefix-preview-label">Preview</span>
+                <span className="settings-agent-prefix-preview-label">{t("settings.preview")}</span>
                 <code className="settings-agent-prefix-preview-cmd">{preview || p.label}</code>
               </div>
             </div>
