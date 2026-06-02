@@ -682,6 +682,7 @@ pub fn run() {
             project::get_registered_projects,
             project::get_projects_ordered,
             project::get_project,
+            project::set_project_worktree_path,
             project::delete_project,
             project::attach_session_project,
             project::detach_session_project,

@@ -2869,6 +2869,7 @@ pub fn git_create_worktree(
     branch_name: String,
     create_branch: bool,
     from_remote: Option<String>,
+    worktree_base_path: Option<String>, // Session override
 ) -> Result<worktree::WorktreeCreateResult, String> {
     // Get the app data directory for storing worktrees outside the project
     let app_data_dir = app
@@ -2886,7 +2887,19 @@ pub fn git_create_worktree(
         .map_err(|e| format!("Failed to look up project: {}", e))?
         .ok_or_else(|| format!("Project '{}' not found", project_id))?;
     let root_path = project.path.clone();
-    let custom_base = get_custom_worktree_base(&db);
+
+    // Hierarchy of base paths:
+    // 1. Session override (passed to this command)
+    // 2. Project-specific base (from DB)
+    // 3. Global custom base (from settings)
+    // 4. Default (None)
+    let custom_base = if let Some(ref path) = worktree_base_path {
+        Some(std::path::PathBuf::from(path))
+    } else if let Some(ref path) = project.worktree_base_path {
+        Some(std::path::PathBuf::from(path))
+    } else {
+        get_custom_worktree_base(&db)
+    };
     drop(db);
 
     // Journal: log the CREATE operation before performing it
@@ -2994,7 +3007,15 @@ pub fn git_remove_worktree(
     let wt_branch = wt.branch_name.clone();
     let root_path = project.path.clone();
     let is_main = wt.is_main_worktree;
-    let custom_base = get_custom_worktree_base(&db);
+
+    // Hierarchy of bases for validation:
+    // If project has a specific base, we MUST check against it.
+    // Otherwise check against global custom base or default.
+    let custom_base = if let Some(ref path) = project.worktree_base_path {
+        Some(std::path::PathBuf::from(path))
+    } else {
+        get_custom_worktree_base(&db)
+    };
     drop(db);
 
     // SAFETY: never remove the main worktree (it IS the project root)

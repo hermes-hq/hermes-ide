@@ -145,6 +145,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [sshHistory, setSshHistory] = useState<SshHistoryEntry[]>([]);
   const [sshSavedHosts, setSshSavedHosts] = useState<SshSavedHost[]>([]);
   const [sshIdentityFile, setSshIdentityFile] = useState("");
+  const [worktreeBasePath, setWorktreeBasePath] = useState("");
   const [sshJumpHost, setSshJumpHost] = useState("");
   const [saveAsHost, setSaveAsHost] = useState(false);
   const [saveHostLabel, setSaveHostLabel] = useState("");
@@ -580,6 +581,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         projectIds: isLocal && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
         workingDirectory: isLocal ? firstProjectPath : undefined,
         branchSelections: isLocal && Object.keys(branchSelections).length > 0 ? branchSelections : undefined,
+        worktreeBasePath: worktreeBasePath.trim() || undefined,
         mode: resolvedSessionMode,
         sshHost: mode === "ssh" ? sshHost : undefined,
         sshPort: mode === "ssh" ? (parseInt(sshPort) || 22) : undefined,
@@ -1482,6 +1484,44 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               autoCapitalize="off"
               spellCheck={false}
             />
+
+            {mode !== "ssh" && (
+              <div className="session-creator-worktree-override">
+                <div className="settings-input-with-btn">
+                  <input
+                    className="command-palette-input"
+                    placeholder="Worktree base path override (optional)"
+                    value={worktreeBasePath}
+                    onChange={(e) => setWorktreeBasePath(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !creating) handleConfirm();
+                    }}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                  />
+                  <button
+                    className="session-creator-btn-browse"
+                    onClick={async () => {
+                      const selected = await open({
+                        directory: true,
+                        multiple: false,
+                        title: "Select Worktree Base Directory",
+                      });
+                      if (selected && typeof selected === "string") {
+                        setWorktreeBasePath(selected);
+                      }
+                    }}
+                  >
+                    Browse
+                  </button>
+                </div>
+                <div className="session-creator-hint">
+                  Default: {selectedProjectIds.length > 0 && allProjects.find(p => p.id === selectedProjectIds[0])?.worktree_base_path ? "Project base" : "App data"}
+                </div>
+              </div>
+            )}
 
             {/* Inline project assignment */}
             <div className="session-creator-project-picker">

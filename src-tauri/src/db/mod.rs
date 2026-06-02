@@ -198,6 +198,7 @@ impl Database {
                 working_directory TEXT NOT NULL,
                 shell TEXT NOT NULL,
                 workspace_paths TEXT NOT NULL DEFAULT '[]',
+                worktree_base_path TEXT,
                 created_at TEXT NOT NULL,
                 closed_at TEXT,
                 scrollback_snapshot TEXT
@@ -280,6 +281,7 @@ impl Database {
                 detected_languages TEXT,
                 detected_frameworks TEXT,
                 file_tree_hash TEXT,
+                worktree_base_path TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -354,6 +356,7 @@ impl Database {
                 conventions TEXT NOT NULL DEFAULT '[]',
                 scan_status TEXT NOT NULL DEFAULT 'pending',
                 last_scanned_at TEXT,
+                worktree_base_path TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -477,6 +480,21 @@ impl Database {
             .conn
             .execute_batch("ALTER TABLE session_worktrees ADD COLUMN last_activity_at TEXT;");
 
+        // Add worktree_base_path column to projects (idempotent)
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE projects ADD COLUMN worktree_base_path TEXT;");
+
+        // Add worktree_base_path column to realms (idempotent)
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE realms ADD COLUMN worktree_base_path TEXT;");
+
+        // Add worktree_base_path column to sessions (idempotent)
+        let _ = self
+            .conn
+            .execute_batch("ALTER TABLE sessions ADD COLUMN worktree_base_path TEXT;");
+
         // Migration: drop UNIQUE(worktree_path) constraint from session_worktrees
         // so that shared worktrees (multiple sessions on the same branch) can coexist.
         // SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table.
@@ -577,7 +595,7 @@ impl Database {
     pub fn get_all_projects_ordered(&self) -> Result<Vec<crate::project::ProjectOrdered>, String> {
         let mut stmt = self.conn.prepare(
             "SELECT r.id, r.path, r.name, r.languages, r.frameworks, r.architecture, r.conventions,
-                    r.scan_status, r.last_scanned_at, r.created_at, r.updated_at,
+                    r.scan_status, r.last_scanned_at, r.created_at, r.updated_at, r.worktree_base_path,
                     COALESCE(pu.session_count, 0) AS session_count,
                     pu.last_opened_at
              FROM realms r
@@ -606,8 +624,9 @@ impl Database {
                     last_scanned_at: row.get(8)?,
                     created_at: row.get(9)?,
                     updated_at: row.get(10)?,
-                    session_count: row.get(11)?,
-                    last_opened_at: row.get(12)?,
+                    worktree_base_path: row.get(11)?,
+                    session_count: row.get(12)?,
+                    last_opened_at: row.get(13)?,
                     path_exists: false, // filled in by the command handler
                 })
             })
@@ -624,10 +643,10 @@ impl Database {
 
     pub fn create_session_v2(&self, s: &SessionUpdate) -> Result<(), String> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO sessions (id, label, description, color, group_name, phase, working_directory, shell, workspace_paths, created_at, ssh_info)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT OR REPLACE INTO sessions (id, label, description, color, group_name, phase, working_directory, shell, workspace_paths, worktree_base_path, created_at, ssh_info)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![s.id, s.label, s.description, s.color, s.group, s.phase, s.working_directory, s.shell,
-                    serde_json::to_string(&s.workspace_paths).unwrap_or_default(), s.created_at,
+                    serde_json::to_string(&s.workspace_paths).unwrap_or_default(), s.worktree_base_path, s.created_at,
                     s.ssh_info.as_ref().map(|info| serde_json::to_string(info).unwrap_or_default())],
         ).map_err(|e| e.to_string())?;
         Ok(())
@@ -1624,7 +1643,7 @@ impl Database {
 
     pub fn get_all_projects(&self) -> Result<Vec<crate::project::Project>, String> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, name, languages, frameworks, architecture, conventions, scan_status, last_scanned_at, created_at, updated_at
+            "SELECT id, path, name, languages, frameworks, architecture, conventions, scan_status, last_scanned_at, created_at, updated_at, worktree_base_path
              FROM realms ORDER BY updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
@@ -1646,6 +1665,7 @@ impl Database {
                     last_scanned_at: row.get(8)?,
                     created_at: row.get(9)?,
                     updated_at: row.get(10)?,
+                    worktree_base_path: row.get(11)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1659,7 +1679,7 @@ impl Database {
 
     pub fn get_project(&self, id: &str) -> Result<Option<crate::project::Project>, String> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, name, languages, frameworks, architecture, conventions, scan_status, last_scanned_at, created_at, updated_at
+            "SELECT id, path, name, languages, frameworks, architecture, conventions, scan_status, last_scanned_at, created_at, updated_at, worktree_base_path
              FROM realms WHERE id = ?1"
         ).map_err(|e| e.to_string())?;
 
@@ -1681,9 +1701,11 @@ impl Database {
                     last_scanned_at: row.get(8)?,
                     created_at: row.get(9)?,
                     updated_at: row.get(10)?,
+                    worktree_base_path: row.get(11)?,
                 })
             })
-            .ok();
+            .optional()
+            .map_err(|e| e.to_string())?;
         Ok(result)
     }
 
@@ -1692,7 +1714,7 @@ impl Database {
         path: &str,
     ) -> Result<Option<crate::project::Project>, String> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, name, languages, frameworks, architecture, conventions, scan_status, last_scanned_at, created_at, updated_at
+            "SELECT id, path, name, languages, frameworks, architecture, conventions, scan_status, last_scanned_at, created_at, updated_at, worktree_base_path
              FROM realms WHERE path = ?1"
         ).map_err(|e| e.to_string())?;
 
@@ -1714,9 +1736,11 @@ impl Database {
                     last_scanned_at: row.get(8)?,
                     created_at: row.get(9)?,
                     updated_at: row.get(10)?,
+                    worktree_base_path: row.get(11)?,
                 })
             })
-            .ok();
+            .optional()
+            .map_err(|e| e.to_string())?;
         Ok(result)
     }
 
@@ -1766,6 +1790,16 @@ impl Database {
                 )
                 .map_err(|e| e.to_string())?;
         }
+        Ok(())
+    }
+
+    pub fn set_project_worktree_path(&self, id: &str, path: Option<&str>) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE realms SET worktree_base_path = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![path, id],
+            )
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 

@@ -608,6 +608,7 @@ pub fn create_session(
     ssh_identity_file: Option<String>,
     initial_rows: Option<u16>,
     initial_cols: Option<u16>,
+    worktree_base_path: Option<String>,
     // `mode` is the frontend-chosen runtime mode.  `"terminal"` (default)
     // spawns a PTY; `"agent"` skips PTY spawn and lets the frontend drive
     // the Claude subprocess via `agent::spawn_agent_session` after this
@@ -720,6 +721,7 @@ pub fn create_session(
             identity_file: ssh_identity_file.clone(),
             port_forwards: Vec::new(),
         }),
+        worktree_base_path,
         mode: session_mode,
     };
 
