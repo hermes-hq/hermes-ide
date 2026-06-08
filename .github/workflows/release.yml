@@ -49,7 +49,7 @@ jobs:
       build_linux: ${{ steps.platforms.outputs.linux }}
       build_windows: ${{ steps.platforms.outputs.windows }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
@@ -86,7 +86,7 @@ jobs:
   test-frontend:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
@@ -124,7 +124,7 @@ jobs:
         if: matrix.enabled != 'true'
         run: echo "Skipping Rust tests for this platform"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         if: matrix.enabled == 'true'
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -231,7 +231,7 @@ jobs:
           [[ "$GROUP" == "windows" && "$WINDOWS" == "true" ]] && ENABLED=true
           echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         if: steps.check.outputs.enabled == 'true'
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -482,7 +482,7 @@ jobs:
       VERSION: ${{ needs.config.outputs.version }}
       TAG: ${{ needs.config.outputs.tag }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -713,7 +713,7 @@ jobs:
       contents: read
       attestations: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
