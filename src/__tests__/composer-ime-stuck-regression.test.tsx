@@ -82,6 +82,7 @@ vi.mock("../api/agent", () => ({
 }));
 
 import { SessionComposer } from "../components/SessionComposer";
+import { I18nProvider } from "../i18n/I18nProvider";
 
 // Helper: filter the dispatch calls down to the SET_COMPOSER_DRAFT
 // actions and return the draft string each one carried.  Lets the
@@ -110,7 +111,7 @@ afterEach(() => {
 
 describe("SessionComposer IME-composition stuck regression (1.1.12 bug)", () => {
   it("dispatches draft updates even after a stranded compositionstart (no matching compositionend)", () => {
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const textarea = container.querySelector(
       "textarea.session-composer-input",
     ) as HTMLTextAreaElement | null;
@@ -136,7 +137,7 @@ describe("SessionComposer IME-composition stuck regression (1.1.12 bug)", () => 
   });
 
   it("focus-out clears the composing flag so the next refresh runs the slash-overlay path", () => {
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const textarea = container.querySelector(
       "textarea.session-composer-input",
     ) as HTMLTextAreaElement | null;
@@ -160,7 +161,7 @@ describe("SessionComposer IME-composition stuck regression (1.1.12 bug)", () => 
   it("normal typing (no composition events) dispatches drafts as expected", () => {
     // Pins the happy path so a future refactor of the composing-
     // guard can't accidentally drop normal keystrokes either.
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const textarea = container.querySelector(
       "textarea.session-composer-input",
     ) as HTMLTextAreaElement | null;

@@ -73,6 +73,7 @@ vi.mock("../api/agent", () => ({
 }));
 
 import { SessionComposer } from "../components/SessionComposer";
+import { I18nProvider } from "../i18n/I18nProvider";
 
 function getTextarea(container: HTMLElement): HTMLTextAreaElement {
   const el = container.querySelector("textarea.session-composer-input");
@@ -93,7 +94,7 @@ afterEach(() => {
 
 describe("Agent composer — Enter sends, Shift+Enter newline", () => {
   it("plain Enter submits the message", async () => {
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const ta = getTextarea(container);
 
     fireEvent.keyDown(ta, { key: "Enter" });
@@ -105,7 +106,7 @@ describe("Agent composer — Enter sends, Shift+Enter newline", () => {
   });
 
   it("Shift+Enter does NOT submit (newline is the default textarea behaviour)", () => {
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const ta = getTextarea(container);
 
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
@@ -114,7 +115,7 @@ describe("Agent composer — Enter sends, Shift+Enter newline", () => {
   });
 
   it("Cmd/Ctrl+Enter still submits (compat path)", async () => {
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const ta = getTextarea(container);
 
     // Either modifier — isActionMod handles platform routing.
@@ -125,7 +126,7 @@ describe("Agent composer — Enter sends, Shift+Enter newline", () => {
   });
 
   it("Enter during an IME composition does NOT submit", () => {
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const ta = getTextarea(container);
 
     // Composition begins; Enter commits the IME codepoint, not the
@@ -139,7 +140,7 @@ describe("Agent composer — Enter sends, Shift+Enter newline", () => {
 
   it("plain Enter on an empty draft is a no-op (no submit, no error)", () => {
     fakeState.composers["test-session"]!.draft = "";
-    const { container } = render(<SessionComposer />);
+    const { container } = render(<I18nProvider><SessionComposer /></I18nProvider>);
     const ta = getTextarea(container);
 
     fireEvent.keyDown(ta, { key: "Enter" });

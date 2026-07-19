@@ -2,6 +2,7 @@ import "../styles/components/RoleSelector.css";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import type { RoleDefinition } from "../lib/roles";
 import { validateCustomRole } from "../lib/roles";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface RoleSelectorProps {
   selectedIds: string[];
@@ -18,6 +19,7 @@ export function RoleSelector({
   onCreateCustom,
   onDeleteCustom,
 }: RoleSelectorProps) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -129,7 +131,7 @@ export function RoleSelector({
       allRoles,
     );
     if (!result.valid) {
-      setCreateError(result.error || "Invalid role");
+      setCreateError(result.error || t("builder.invalidRole"));
       return;
     }
     onCreateCustom({
@@ -142,7 +144,7 @@ export function RoleSelector({
     setNewInstruction("");
     setCreateError("");
     setShowCreateForm(false);
-  }, [newLabel, newDescription, newInstruction, allRoles, onCreateCustom]);
+  }, [newLabel, newDescription, newInstruction, allRoles, onCreateCustom, t]);
 
   const selectedRoles = selectedIds
     .map((id) => allRoles.find((r) => r.id === id))
@@ -150,7 +152,7 @@ export function RoleSelector({
 
   return (
     <div className="role-selector" ref={wrapperRef}>
-      <label className="prompt-composer-field-label">Roles</label>
+      <label className="prompt-composer-field-label">{t("builder.roles")}</label>
 
       {/* Selected pills */}
       {selectedRoles.length > 0 && (
@@ -161,7 +163,7 @@ export function RoleSelector({
               <button
                 className="role-selector-pill-remove"
                 onClick={() => toggleRole(role.id)}
-                title="Remove role"
+                title={t("builder.removeRole")}
               >
                 x
               </button>
@@ -174,7 +176,7 @@ export function RoleSelector({
       <input
         ref={inputRef}
         className="role-selector-search"
-        placeholder={selectedIds.length ? `${selectedIds.length} role${selectedIds.length > 1 ? "s" : ""} selected — search to add more...` : "Search roles..."}
+        placeholder={selectedIds.length ? t("builder.rolesSelectedPlaceholder", { count: selectedIds.length }) : t("builder.searchRoles")}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -210,7 +212,7 @@ export function RoleSelector({
                     e.stopPropagation();
                     onDeleteCustom(role.id);
                   }}
-                  title="Delete custom role"
+                  title={t("builder.deleteCustomRole")}
                 >
                   x
                 </button>
@@ -218,13 +220,13 @@ export function RoleSelector({
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="role-selector-item role-selector-empty">No roles match "{query}"</div>
+            <div className="role-selector-item role-selector-empty">{t("builder.noRolesMatch", { query })}</div>
           )}
           <button
             className="role-selector-create-btn"
             onClick={() => setShowCreateForm(true)}
           >
-            + Create custom role...
+            + {t("builder.createCustomRole")}
           </button>
         </div>
       )}
@@ -234,35 +236,35 @@ export function RoleSelector({
         <div className="role-selector-dropdown">
           <div className="role-selector-create-form">
             <div className="role-selector-create-field">
-              <label>Label</label>
+              <label>{t("builder.label")}</label>
               <input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="e.g. Data Engineer"
+                placeholder={t("builder.roleLabelPlaceholder")}
                 autoFocus
               />
             </div>
             <div className="role-selector-create-field">
-              <label>Description (optional)</label>
+              <label>{t("builder.descriptionOptional")}</label>
               <input
                 value={newDescription}
                 onChange={(e) => setNewDescription(e.target.value)}
-                placeholder="e.g. ETL, data pipelines, warehousing"
+                placeholder={t("builder.roleDescriptionPlaceholder")}
               />
             </div>
             <div className="role-selector-create-field">
-              <label>System Instruction</label>
+              <label>{t("builder.systemInstruction")}</label>
               <textarea
                 value={newInstruction}
                 onChange={(e) => setNewInstruction(e.target.value)}
-                placeholder="e.g. You are a data engineer with expertise in..."
+                placeholder={t("builder.systemInstructionPlaceholder")}
                 rows={3}
               />
             </div>
             {createError && <div className="role-selector-create-error">{createError}</div>}
             <div className="role-selector-create-actions">
               <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={handleCreate}>
-                Save
+                {t("builder.save")}
               </button>
               <button
                 className="prompt-composer-btn prompt-composer-btn-sm"
@@ -271,7 +273,7 @@ export function RoleSelector({
                   setCreateError("");
                 }}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>
