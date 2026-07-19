@@ -1,51 +1,35 @@
-# Hermes IDE 1.3.2
+# Hermes IDE 1.4.0
 
-A recovery release for the agent mode: when a conversation grows past
-the model's context window, Hermes now tells you what happened and
-gives you a one-step path out.
+Hermes now speaks your language. The interface ships translated into
+eight languages, and switching takes two clicks — no restart.
 
-## You'll know when Claude can't continue
+## Eight languages, built in
 
-Previously, if a conversation hit "prompt is too long" — usually after
-a multi-task workflow with a few large file reads or a long todo list
-— the agent would simply stop responding with no explanation. The
-chat looked frozen. The error was being recorded internally but
-nothing surfaced it.
+Open **Plugins → Hermes Language Pack** and pick your language from
+the selector: Russian, Spanish, French, German, Portuguese (Brazil),
+Simplified Chinese, Japanese, or Hindi — alongside English.
 
-Now you get a clear red banner the moment it happens. It shows the
-exact reason Claude returned, and when the cause is a context-window
-overflow it points at the recovery commands so you don't have to
-guess.
+The switch is instant: every translated surface re-renders in place.
+Your choice is remembered across launches.
 
-## `/compact` actually compacts the session
+## The whole interface, not just the menus
 
-This is the headline fix. Before, typing `/compact` in agent mode
-opened a separate embedded terminal that compacted a different
-session entirely — so the conversation you cared about was never
-touched, and you had no way back.
+Translations cover the surfaces you actually live in: the start
+screen, the command palette and every shortcut description, the
+settings tabs end to end, the session creation flow including the SSH
+and tmux steps, the usage and plan limits panel, the plugin manager,
+and the prompt composer with its roles, styles, and templates.
 
-Now `/compact` runs against the live agent session over the same
-channel as your normal messages. After it finishes, the conversation
-continues from the summarised history. The same fix applies to
-`/clear`, `/init`, and `/review` — all of these used to be misrouted
-to the wrong place, and all of them now work where you'd expect.
+The language pack is a built-in plugin, so it appears in your
+installed plugins list where you can see its version and manage it
+like anything else — but there is nothing to install, and it can't be
+removed by accident.
 
-## Cleaner feedback for the side-effect-only commands
+One honest limit: the native macOS menu bar stays English for now.
 
-`/compact` and `/clear` don't have anything conversational to say
-back — their effect is internal. Previously you'd see a "Hermes: (no
-content)" turn after sending one, which read as a broken response.
+## Also in this release
 
-Now you see a small confirmation card with a brass checkmark — for
-example, **✓ Compacted conversation — Older turns were summarised so
-the session can continue.** Same shape for `/clear`, `/init`, and
-`/review`.
-
-## Subagents popover scrollbar is grabbable
-
-The thin scrollbar on the conversation pane now fattens when you
-hover directly on it and stays thin everywhere else. Earlier this
-version of the redesign left the pill big for as long as the cursor
-was anywhere in the conversation — now it shrinks back the moment you
-move off the pill, so the timeline reads cleanly while you're
-reading.
+- The usage panel now counts input tokens from the whole session,
+  including the turns that happened before you opened the panel.
+- The Context Panel action on the start screen works before you've
+  opened a session.
