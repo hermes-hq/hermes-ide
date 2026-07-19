@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import {
   getI18nSnapshot,
   initI18n,
@@ -16,12 +16,13 @@ interface I18nContextValue extends I18nSnapshot {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [snapshot, setSnapshot] = useState<I18nSnapshot>(() => getI18nSnapshot());
+  // useSyncExternalStore re-pulls the snapshot on subscribe, so registrations
+  // that land between render and effect are not missed. getI18nSnapshot is
+  // referentially stable between mutations, which the API requires.
+  const snapshot = useSyncExternalStore(subscribeI18n, getI18nSnapshot, getI18nSnapshot);
 
   useEffect(() => {
-    const unsubscribe = subscribeI18n(() => setSnapshot(getI18nSnapshot()));
     initI18n().catch(console.warn);
-    return unsubscribe;
   }, []);
 
   const value = useMemo<I18nContextValue>(() => ({

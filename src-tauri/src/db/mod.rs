@@ -2416,6 +2416,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "ssh_connection_history",
     // UI layout
     "activity_bar_order",
+    // Localization
+    "ui_language",
 ];
 
 #[tauri::command]

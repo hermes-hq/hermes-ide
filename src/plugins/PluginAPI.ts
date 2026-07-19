@@ -66,6 +66,8 @@ export interface HermesPluginAPI {
 		focus(sessionId: string): Promise<void>;
 	};
 	agents: AgentsAPI;
+	// NOTE: setLanguage is intentionally not permission-gated for now — the
+	// built-in language pack is the intended consumer of this API.
 	i18n: {
 		registerLanguagePack(pack: LanguagePack): Disposable;
 		getCurrentLanguage(): string;

@@ -152,6 +152,8 @@ const ENGLISH_PACK: LanguagePack = {
     "session.filterFolders": "Filter folders...",
     "session.noFolders": "No folders found. Scan a directory below to add one.",
     "session.noFoldersMatch": "No folders matching \"{query}\"",
+    "session.folderNotFound": "Folder not found",
+    "session.notGitRepo": "Not a git repository",
     "session.pathOrBrowse": "Path or browse...",
     "session.account": "Account",
     "session.account.active": "Switcher active",
@@ -161,13 +163,24 @@ const ENGLISH_PACK: LanguagePack = {
     "session.approvalFlow": "Approval Flow",
     "session.prefixCommand": "Prefix command",
     "session.customFlags": "Custom flags",
-    "session.prefixCommandHint": "Prepended to the launch command (e.g.",
+    "session.prefixCommandHint": "Prepended to the launch command:",
     "session.customFlagsHint": "Appended to the AI agent launch command",
+    "session.flagsPlaceholder": "e.g. --model opus --permission-mode plan",
     "session.preview": "Preview",
     "session.channels": "Channels",
     "session.channelsHint": "Let Claude interact with external services during this session.",
     "session.plainShell": "Plain shell",
     "session.noAiAgent": "No AI agent",
+    "session.sshRemote": "SSH Remote",
+    "session.sshLabelExample": "Label (e.g. My Server)",
+    "session.sshConfigHint": "Uses your system SSH config and agent for authentication.",
+    "session.tmuxSessions": "tmux sessions",
+    "session.newTmuxSession": "New tmux session",
+    "session.newTmuxSessionHint": "Create a new persistent session",
+    "session.notDetected": "Not detected",
+    "session.cliNotDetected": "{cli} was not detected on your system.",
+    "session.saved": "Saved",
+    "session.recent": "Recent",
     "session.confirm": "Confirm",
     "session.connection": "Connection:",
     "session.host": "Host:",
@@ -252,6 +265,7 @@ const ENGLISH_PACK: LanguagePack = {
     "empty.commandPaletteDesc": "Jump to settings, themes, recent sessions, anywhere.",
     "empty.contextPanelTitle": "Context panel",
     "empty.contextPanelDesc": "MCP servers, memory, permissions — show or hide.",
+    "empty.contextPanelPlaceholder": "Open a session to inspect its context — MCP servers, memory, and permissions show up here.",
     "empty.dropFolderHint": "or drop a folder onto the window to bind it as a workspace.",
     "empty.recentSessions": "Recent sessions",
     "empty.logbook": "Logbook",
@@ -306,7 +320,16 @@ const ENGLISH_PACK: LanguagePack = {
     "status.workingDirectory": "Working directory: {path}",
     "status.reportBug": "Report a Bug",
     "status.keyboardShortcuts": "Keyboard Shortcuts ({shortcut})",
+    "statusbar.executionMode": "Execution mode",
+    "statusbar.ioTitle": "Input: {input} · Output: {output}",
+    "statusbar.update.available": "Update to v{version}",
+    "statusbar.update.check": "Check for updates",
+    "statusbar.update.downloading": "Downloading v{version}…",
+    "statusbar.update.ready": "v{version} ready",
     "time.justNow": "just now",
+    "time.minutesAgo": "{n}m ago",
+    "time.hoursAgo": "{n}h ago",
+    "time.daysAgo": "{n}d ago",
     "settings.title": "Settings",
     "settings.general": "General",
     "settings.appearance": "Appearance",
@@ -464,6 +487,10 @@ const ENGLISH_PACK: LanguagePack = {
     "workspace.noProjects": "No projects detected yet.",
     "workspace.scanHome": "Scan home directory",
     "workspace.scanning": "Scanning...",
+    "workspace.scan.pending": "Pending",
+    "workspace.scan.surface": "Surface",
+    "workspace.scan.deep": "Deep",
+    "workspace.scan.full": "Full",
     "workspace.triggerDeepScan": "Trigger deep scan",
     "workspace.deleteProject": "Delete project",
     "common.delete": "Delete",
@@ -472,6 +499,7 @@ const ENGLISH_PACK: LanguagePack = {
     "shortcuts.general": "General",
     "shortcuts.panels": "Panels",
     "shortcuts.panesSessions": "Panes & Sessions",
+    "shortcuts.git": "Git",
     "shortcuts.closePaneSession": "Close Pane / Session",
     "shortcuts.commandPalette": "Command Palette",
     "shortcuts.promptComposer": "Prompt Composer",
@@ -524,17 +552,25 @@ function normalizePack(pack: LanguagePack): LanguagePack {
   };
 }
 
+// Cached snapshot so getI18nSnapshot() returns a referentially stable value
+// between mutations — required for useSyncExternalStore consumers.
+let snapshotCache: I18nSnapshot | null = null;
+
 function notify(): void {
+  snapshotCache = null;
   for (const listener of listeners) {
     try { listener(); } catch {}
   }
 }
 
 export function getI18nSnapshot(): I18nSnapshot {
-  return {
-    currentLanguage,
-    languages: Array.from(packs.values()).sort((a, b) => a.label.localeCompare(b.label)),
-  };
+  if (!snapshotCache) {
+    snapshotCache = {
+      currentLanguage,
+      languages: Array.from(packs.values()).sort((a, b) => a.label.localeCompare(b.label)),
+    };
+  }
+  return snapshotCache;
 }
 
 export function subscribeI18n(listener: () => void): () => void {
@@ -545,14 +581,16 @@ export function subscribeI18n(listener: () => void): () => void {
 export async function initI18n(): Promise<void> {
   if (initialized) return;
   initialized = true;
+  // Capture the language at init start: a setLanguage() call that lands while
+  // the async settings read is in flight must win over the stored value.
+  const languageAtInit = currentLanguage;
   const stored = (await getSetting(UI_LANGUAGE_SETTING).catch(() => "")) || localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || "";
-  if (stored && packs.has(stored)) {
-    currentLanguage = stored;
-    notify();
-  } else if (stored) {
-    currentLanguage = stored;
-    notify();
-  }
+  if (!stored || currentLanguage !== languageAtInit) return;
+  // Apply the stored locale even if no pack is registered for it yet (packs
+  // arrive with plugins): keep it as a pending preference — translate()
+  // falls back to English until the matching pack registers.
+  currentLanguage = stored;
+  notify();
 }
 
 export function registerLanguagePack(pack: LanguagePack): { dispose(): void } {
@@ -562,6 +600,10 @@ export function registerLanguagePack(pack: LanguagePack): { dispose(): void } {
   notify();
   return {
     dispose() {
+      // Ownership check: only remove/restore when the live entry is still the
+      // pack this disposable registered. If another plugin has re-registered
+      // the locale since, this dispose is stale and must leave it alone.
+      if (packs.get(normalized.locale) !== normalized) return;
       if (previous) {
         packs.set(previous.locale, previous);
       } else {
@@ -576,20 +618,49 @@ export function registerLanguagePack(pack: LanguagePack): { dispose(): void } {
   };
 }
 
+// Cheap case normalization so "PT-br" / "EN" still match a registered
+// "pt-BR" / "en" pack. Language subtag lowercased, region subtag uppercased.
+function normalizeLocale(locale: string): string {
+  const [language, region] = locale.trim().split("-");
+  const lang = language.toLowerCase();
+  return region ? `${lang}-${region.toUpperCase()}` : lang;
+}
+
 export async function setLanguage(locale: string): Promise<void> {
-  currentLanguage = locale;
+  const normalized = normalizeLocale(locale);
+  if (!packs.has(normalized)) {
+    console.warn(`[i18n] Ignoring setLanguage("${locale}"): no language pack is registered for "${normalized}".`);
+    return;
+  }
+  currentLanguage = normalized;
   notify();
-  localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, locale);
-  await setSetting(UI_LANGUAGE_SETTING, locale).catch(console.warn);
+  localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, normalized);
+  await setSetting(UI_LANGUAGE_SETTING, normalized).catch(console.warn);
 }
 
 export function getCurrentLanguage(): string {
   return currentLanguage;
 }
 
+// Keys already reported as missing, so the dev warning fires once per key.
+const warnedMissingKeys = new Set<string>();
+
+// NOTE on pluralization: count-bearing strings use plain {count} / {n}
+// substitution only — there is no CLDR plural-form selection (one/few/many)
+// yet. Phrase count-bearing copy so a bare number reads acceptably in every
+// language until that lands.
 export function translate(key: string, values?: Record<string, string | number>): string {
   const active = packs.get(currentLanguage);
-  const text = active?.messages[key] ?? ENGLISH_PACK.messages[key] ?? key;
+  let text = active?.messages[key] ?? ENGLISH_PACK.messages[key];
+  if (text === undefined) {
+    // Missing from both the active pack and English: render the raw key, and
+    // warn once per key in dev so the gap gets fixed instead of shipping.
+    if (import.meta.env.DEV && !warnedMissingKeys.has(key)) {
+      warnedMissingKeys.add(key);
+      console.warn(`[i18n] Missing translation key "${key}" (locale "${currentLanguage}", no English fallback).`);
+    }
+    text = key;
+  }
   if (!values) return text;
   return text.replace(/\{(\w+)\}/g, (_match, name: string) => String(values[name] ?? `{${name}}`));
 }
