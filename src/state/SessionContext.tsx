@@ -13,10 +13,11 @@ let workspaceDirty = false;
 import {
   createSession as apiCreateSession, closeSession as apiCloseSession,
   getSessions, getRecentSessions, getSessionSnapshot,
-  updateSessionDescription, updateSessionGroup,
+  updateSessionDescription, updateSessionGroup, updateSessionLabel,
   saveAllSnapshots,
   addWorkspacePath,
 } from "../api/sessions";
+import { deriveSessionLabelFromMessage, isDefaultSessionLabel } from "../utils/autoSessionLabel";
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
 import { autoAttachInsideProject } from "../utils/autoAttach";
 import { hasAddDirDrift } from "../utils/agentDrift";
@@ -1163,6 +1164,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    *  detects the diff and triggers a respawn so Read/Edit tools can
    *  actually access files in newly-attached paths. */
   const claudeAddDirs = useRef<Map<string, string[]>>(new Map());
+  /** sessionId → "already auto-named, don't try again". Prevents racing
+   *  duplicate label writes if the user submits two messages in quick
+   *  succession before the first persist round-trip completes. */
+  const autoNamedSessions = useRef<Set<string>>(new Set());
   /** sessionId → flag changes the user has *requested* but not yet applied,
    *  because applying them requires a fresh fork-respawn AND a user message
    *  for the new subprocess to actually persist its session.
@@ -1458,6 +1463,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             claudeAddDirs: claudeAddDirs.current,
             pendingFlags: pendingFlags.current,
             lastIdeStateHash: lastIdeStateHash.current,
+            autoNamedSessions: autoNamedSessions.current,
           },
           event.payload,
         );
@@ -2432,6 +2438,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Echo first so the user sees their own message immediately even if
     // we're about to respawn the subprocess.
     await echoUserEnvelope(sessionId, envelope);
+
+    // Auto-name unnamed agent sessions from the first user message
+    // (issue #1). Cheap heuristic — no model round-trip; the first
+    // message is already a great summary. Fire-and-forget so the
+    // persist doesn't block the send.
+    if (!autoNamedSessions.current.has(sessionId)) {
+      const sess = stateRef.current.sessions[sessionId];
+      if (sess?.mode === "agent" && isDefaultSessionLabel(sess.label)) {
+        const derived = deriveSessionLabelFromMessage(draft);
+        if (derived) {
+          autoNamedSessions.current.add(sessionId);
+          updateSessionLabel(sessionId, derived).catch((err) =>
+            console.warn(`[SessionContext] auto-name failed for ${sessionId}:`, err),
+          );
+        }
+      }
+    }
 
     // Apply any queued flag changes (model / permission mode / effort)
     // BEFORE the send.  This is the production-bug fix: forking with no

@@ -29,6 +29,7 @@ export interface SessionRefBundle {
   claudeAddDirs: Map<string, string[]>;
   pendingFlags: Map<string, unknown>;
   lastIdeStateHash: Map<string, string>;
+  autoNamedSessions: Set<string>;
 }
 
 /**
@@ -60,6 +61,7 @@ export function cleanupSessionRefs(
   tryDelete(bundle.claudeAddDirs as Map<string, unknown>);
   tryDelete(bundle.pendingFlags as Map<string, unknown>);
   tryDelete(bundle.lastIdeStateHash as Map<string, unknown>);
+  tryDelete(bundle.autoNamedSessions);
 
   // Cancel + delete any pending close-fallback timer (H2 fix).
   let cancelledTimer = false;
