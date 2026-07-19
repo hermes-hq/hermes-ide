@@ -13,11 +13,11 @@ function projectShortPath(path: string): string {
   return path.replace(/^\/Users\/[^/]+/, "~");
 }
 
-const SCAN_STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  surface: "Surface",
-  deep: "Deep",
-  full: "Full",
+const SCAN_STATUS_KEYS: Record<string, string> = {
+  pending: "workspace.scan.pending",
+  surface: "workspace.scan.surface",
+  deep: "workspace.scan.deep",
+  full: "workspace.scan.full",
 };
 
 export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
@@ -121,7 +121,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
                 <div className="workspace-project-header">
                   <span className="workspace-project-name">{project.name}</span>
                   <span className="project-scan-badge" data-status={project.scan_status}>
-                    {SCAN_STATUS_LABELS[project.scan_status] || project.scan_status}
+                    {SCAN_STATUS_KEYS[project.scan_status] ? t(SCAN_STATUS_KEYS[project.scan_status]) : project.scan_status}
                   </span>
                   <div className="workspace-project-tags">
                     {project.languages.map((lang) => (

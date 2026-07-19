@@ -104,7 +104,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         {active && active.mode !== "agent" && (
           <>
             <span className="status-bar-divider" />
-            <div className="status-mode-segmented" role="radiogroup" aria-label="Execution mode">
+            <div className="status-mode-segmented" role="radiogroup" aria-label={t("statusbar.executionMode")}>
               {(["manual", "assisted", "autonomous"] as const).map((m) => (
                 <button
                   key={m}
@@ -128,10 +128,10 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
               {active.detected_agent.model && <span className="status-bar-model"> ({active.detected_agent.model})</span>}
               {active.permission_mode && active.permission_mode !== "default" && (
                 <span className={`status-bar-perm-mode${active.permission_mode === "bypassPermissions" ? " status-bar-perm-mode-danger" : ""}`}>
-                  {active.permission_mode === "acceptEdits" ? "Accept Edits" :
-                   active.permission_mode === "plan" ? "Plan" :
-                   active.permission_mode === "auto" ? "Auto" :
-                   active.permission_mode === "bypassPermissions" ? "Bypass" : ""}
+                  {active.permission_mode === "acceptEdits" ? t("permission.acceptEdits.shortLabel") :
+                   active.permission_mode === "plan" ? t("permission.plan.shortLabel") :
+                   active.permission_mode === "auto" ? t("permission.auto.shortLabel") :
+                   active.permission_mode === "bypassPermissions" ? t("permission.bypassPermissions.shortLabel") : ""}
                 </span>
               )}
               {active.phase === "busy" && (
@@ -153,7 +153,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
       <div className="status-bar-right">
         {hasTokens && (
           <>
-            <span className="status-bar-item status-bar-tokens" title={`Input: ${totalTokens.input.toLocaleString()} · Output: ${totalTokens.output.toLocaleString()}`}>
+            <span className="status-bar-item status-bar-tokens" title={t("statusbar.ioTitle", { input: totalTokens.input.toLocaleString(), output: totalTokens.output.toLocaleString() })}>
               {t("status.tokens", { count: formatTokens(totalTokens.input + totalTokens.output) })}
             </span>
             <span className="status-bar-divider" />
@@ -192,10 +192,10 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
             : undefined}
           title={
             versionState === "downloading"
-              ? `Downloading v${updateVersion}… ${updateProgress ?? 0}%`
+              ? `${t("statusbar.update.downloading", { version: updateVersion ?? "" })} ${updateProgress ?? 0}%`
               : versionState === "available"
-              ? `Update to v${updateVersion}`
-              : "Check for updates"
+              ? t("statusbar.update.available", { version: updateVersion ?? "" })
+              : t("statusbar.update.check")
           }
           onClick={
             versionState === "available" ? onShowUpdate :
@@ -208,8 +208,8 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           )}
           <span className="status-version-label">
             {versionState === "idle" && `v${__APP_VERSION__}`}
-            {versionState === "available" && `v${updateVersion} ready`}
-            {versionState === "downloading" && `v${__APP_VERSION__} → ${updateVersion}`}
+            {versionState === "available" && t("statusbar.update.ready", { version: updateVersion ?? "" })}
+            {versionState === "downloading" && t("statusbar.update.downloading", { version: updateVersion ?? "" })}
           </span>
           {versionState === "downloading" && (
             <span className="status-version-pct">{updateProgress ?? 0}%</span>

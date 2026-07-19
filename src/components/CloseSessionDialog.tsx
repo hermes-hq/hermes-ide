@@ -13,25 +13,6 @@ interface CloseSessionDialogProps {
   onDontAskAgain: () => void;
 }
 
-/** Returns the body-text shown in the dialog, mode-conditional.
- *  Exported as a tiny pure function so unit tests can cover both branches
- *  without rendering the full React component. */
-export function closeSessionDialogCopy(mode: "agent" | "terminal"): string {
-  return mode === "agent"
-    ? "This will end the conversation with Claude."
-    : "This will terminate the running terminal session.";
-}
-
-/** Returns the dialog title, mode-conditional. */
-export function closeSessionDialogTitle(mode: "agent" | "terminal"): string {
-  return mode === "agent" ? "End conversation?" : "Close session?";
-}
-
-/** Returns the confirm-button label, mode-conditional. */
-export function closeSessionDialogConfirmLabel(mode: "agent" | "terminal"): string {
-  return mode === "agent" ? "End conversation" : "Close session";
-}
-
 export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel, onDontAskAgain }: CloseSessionDialogProps) {
   const { t } = useI18n();
   const [dontAsk, setDontAsk] = useState(false);

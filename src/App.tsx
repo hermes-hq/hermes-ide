@@ -1010,7 +1010,7 @@ function AppContent() {
                   <div className="context-panel-body">
                     <section className="ctx-section">
                       <div className="ctx-section-title">{t("empty.beginSession")}</div>
-                      <p className="text-muted">{t("empty.contextPanelDesc")}</p>
+                      <p className="text-muted">{t("empty.contextPanelPlaceholder")}</p>
                     </section>
                   </div>
                 </aside>
@@ -1050,7 +1050,7 @@ function AppContent() {
                     { id: "usage", label: t("app.usage"), icon: UsageIcon },
                   ]
                 : [
-                    { id: "context", label: `Context (${fmt("{mod}E")})`, icon: ContextIcon },
+                    { id: "context", label: `${t("app.context")} (${fmt("{mod}E")})`, icon: ContextIcon },
                     { id: "usage", label: t("app.usage"), icon: UsageIcon },
                   ]
             }

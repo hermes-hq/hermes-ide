@@ -750,7 +750,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <div className="session-creator-ssh-fields">
               {sshSavedHosts.length > 0 && !sshHost && (
                 <div className="session-creator-ssh-history">
-                  <span className="session-creator-ssh-history-label">Saved</span>
+                  <span className="session-creator-ssh-history-label">{t("session.saved")}</span>
                   <div className="session-creator-ssh-history-list">
                     {sshSavedHosts.map((h) => (
                       <button
@@ -776,7 +776,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               )}
               {sshHistory.length > 0 && !sshHost && (
                 <div className="session-creator-ssh-history">
-                  <span className="session-creator-ssh-history-label">Recent</span>
+                  <span className="session-creator-ssh-history-label">{t("session.recent")}</span>
                   <div className="session-creator-ssh-history-list">
                     {sshHistory.map((h, i) => (
                       <button
@@ -802,7 +802,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <input
                 ref={searchRef}
                 className="command-palette-input"
-                placeholder="Host (e.g. 192.168.1.100 or myserver.com)"
+                placeholder={t("session.sshHostPlaceholder")}
                 value={sshHost}
                 onChange={(e) => setSshHost(e.target.value)}
                 autoComplete="off"
@@ -811,14 +811,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <div className="session-creator-ssh-row">
                 <input
                   className="command-palette-input session-creator-ssh-user"
-                  placeholder="User (default: current user)"
+                  placeholder={t("session.sshUserPlaceholder")}
                   value={sshUser}
                   onChange={(e) => setSshUser(e.target.value)}
                   autoComplete="off"
                 />
                 <input
                   className="command-palette-input session-creator-ssh-port"
-                  placeholder="Port"
+                  placeholder={t("session.sshPortPlaceholder")}
                   value={sshPort}
                   onChange={(e) => setSshPort(e.target.value.replace(/\D/g, ""))}
                   autoComplete="off"
@@ -826,19 +826,19 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </div>
               <input
                 className="command-palette-input"
-                placeholder="Identity file (optional, e.g. ~/.ssh/id_rsa)"
+                placeholder={t("session.sshIdentityFilePlaceholder")}
                 value={sshIdentityFile}
                 onChange={(e) => setSshIdentityFile(e.target.value)}
                 autoComplete="off"
               />
               <input
                 className="command-palette-input"
-                placeholder="Jump host (optional, e.g. bastion.example.com)"
+                placeholder={t("session.sshJumpHostPlaceholder")}
                 value={sshJumpHost}
                 onChange={(e) => setSshJumpHost(e.target.value)}
                 autoComplete="off"
               />
-              <span className="settings-hint-inline">Uses your system SSH config and agent for authentication</span>
+              <span className="settings-hint-inline">{t("session.sshConfigHint")}</span>
               <label className="session-creator-save-host-label">
                 <input
                   type="checkbox"
@@ -849,7 +849,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 {saveAsHost && (
                   <input
                     className="session-creator-save-host-name"
-                    placeholder="Label (e.g. My Server)"
+                    placeholder={t("session.sshLabelExample")}
                     value={saveHostLabel}
                     onChange={(e) => setSaveHostLabel(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
@@ -923,7 +923,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     </div>
                     <div className="project-picker-path">{shortPath(project.path)}</div>
                     {"path_exists" in project && !project.path_exists && (
-                      <div className="project-picker-missing-label">Folder not found</div>
+                      <div className="project-picker-missing-label">{t("session.folderNotFound")}</div>
                     )}
                     {(project.languages.length > 0 || project.frameworks.length > 0) && (
                       <div className="project-picker-tags">
@@ -988,7 +988,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <span><kbd>&uarr;&darr;</kbd> {t("common.navigate")}</span>
               <span><kbd>Space</kbd> {isShellOnly ? t("common.select") : t("common.toggle")}</span>
               <span><kbd>Enter</kbd> {t("common.next")}</span>
-              <span><kbd>Esc</kbd> {t("common.close").toLowerCase()}</span>
+              <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
               <button className="session-creator-btn-secondary" onClick={goBack}>
@@ -1029,7 +1029,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       <div key={projectId} className="session-creator-branch-project">
                         <div className="session-creator-branch-project-header">
                           <span className="session-creator-branch-project-name">{projectName}</span>
-                          <span className="session-creator-branch-nonGit">Not a git repository</span>
+                          <span className="session-creator-branch-nonGit">{t("session.notGitRepo")}</span>
                         </div>
                       </div>
                     );
@@ -1100,7 +1100,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         {/* ── tmux session picker (SSH only) ────────────────────────── */}
         {step === "tmux" && mode === "ssh" && (
           <div className="session-creator-body">
-            <div className="session-creator-section-title">tmux sessions</div>
+            <div className="session-creator-section-title">{t("session.tmuxSessions")}</div>
             {tmuxLoading && (
               <div className="command-palette-empty">Connecting to {sshHost}...</div>
             )}
@@ -1137,8 +1137,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   >
                     <span className="project-picker-check" style={{ opacity: 0.5 }}>+</span>
                     <div className="project-picker-info">
-                      <div className="project-picker-name">New tmux session</div>
-                      <div className="project-picker-path">Create a new persistent session</div>
+                      <div className="project-picker-name">{t("session.newTmuxSession")}</div>
+                      <div className="project-picker-path">{t("session.newTmuxSessionHint")}</div>
                     </div>
                   </div>
                 ) : (
@@ -1216,7 +1216,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     <span className="session-creator-provider-name">
                       {p.label}
                       {availabilityLoaded && !isAvailable && (
-                        <span className="session-creator-provider-status-badge">Not detected</span>
+                        <span className="session-creator-provider-status-badge">{t("session.notDetected")}</span>
                       )}
                     </span>
                     <span className="session-creator-provider-desc">{p.description}</span>
@@ -1242,7 +1242,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {aiProvider && availabilityLoaded && !providerAvailability[aiProvider] && (
               <div className="session-creator-install-hint">
                 <div className="session-creator-install-hint-title">
-                  {getProviderInfo(aiProvider)?.label} CLI was not detected on your system
+                  {t("session.cliNotDetected", { cli: getProviderInfo(aiProvider)?.label ?? aiProvider })}
                 </div>
                 <code className="session-creator-install-hint-cmd">{getProviderInfo(aiProvider)?.installCmd}</code>
                 <div className="session-creator-install-hint-auth">{getProviderInfo(aiProvider)?.authHint}</div>
@@ -1325,7 +1325,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   value={customSuffix}
                   onChange={(e) => setCustomSuffix(e.target.value)}
                   onKeyDown={(e) => e.stopPropagation()}
-                  placeholder="e.g. --model opus --max-tokens 4096"
+                  placeholder={t("session.flagsPlaceholder")}
                 />
                 <span className="session-creator-custom-suffix-hint">
                   {t("session.customFlagsHint")}
@@ -1373,7 +1373,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <div className="session-creator-hints">
               <span><kbd>&uarr;&darr;</kbd><kbd>&larr;&rarr;</kbd> {t("common.navigate")}</span>
               <span><kbd>Enter</kbd> {t("common.select")}</span>
-              <span><kbd>Esc</kbd> {t("common.close").toLowerCase()}</span>
+              <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
               <button className="session-creator-btn-secondary" onClick={goBack}>
@@ -1395,7 +1395,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 <>
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">{t("session.connection")}</span>
-                    <span className="session-creator-summary-value">SSH Remote</span>
+                    <span className="session-creator-summary-value">{t("session.sshRemote")}</span>
                   </div>
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">{t("session.host")}</span>

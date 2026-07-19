@@ -23,9 +23,13 @@ export const SESSION_COLORS = [
 ];
 
 /** Returns the close-button tooltip text, mode-conditional.
- *  Exported as a tiny pure function so unit tests can cover both branches. */
-export function sessionCloseTitle(mode: "agent" | "terminal" | undefined): string {
-  return mode === "agent" ? "End conversation" : "Close session";
+ *  Exported as a tiny pure function so unit tests can cover both branches.
+ *  Takes the i18n `t` so the labels track the active language pack. */
+export function sessionCloseTitle(
+  mode: "agent" | "terminal" | undefined,
+  t: (key: string) => string,
+): string {
+  return mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm");
 }
 
 export type SessionView = "git" | "files" | "search" | null;
@@ -943,7 +947,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <button
             className="session-item-close"
             onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
-            title={sessionCloseTitle(session.mode)}
+            title={sessionCloseTitle(session.mode, t)}
           >&times;</button>
         </div>
         {/* Tmux window tabs for SSH+tmux sessions */}

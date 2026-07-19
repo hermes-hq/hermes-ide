@@ -11,15 +11,15 @@ interface EmptyStateProps {
   onRestore: (entry: SessionHistoryEntry, restoreScrollback: boolean) => void;
 }
 
-function timeAgo(dateStr: string, justNow: string): string {
+function timeAgo(dateStr: string, t: (key: string, values?: Record<string, string | number>) => string): string {
   const d = new Date(dateStr);
   const now = new Date();
   const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
-  if (diffMin < 1) return justNow;
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 1) return t("time.justNow");
+  if (diffMin < 60) return t("time.minutesAgo", { n: diffMin });
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  return `${Math.floor(diffHr / 24)}d ago`;
+  if (diffHr < 24) return t("time.hoursAgo", { n: diffHr });
+  return t("time.daysAgo", { n: Math.floor(diffHr / 24) });
 }
 
 function projectName(path: string): string {
@@ -132,21 +132,21 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
                   <li key={entry.id} className="es-recent-item-wrap">
                     <button className="es-recent-item" onClick={() => onRestore(entry, true)} type="button">
                       <span className="es-recent-edge" aria-hidden="true" />
-                      <span className="es-recent-num">{`No. ${String(i + 1).padStart(2, "0")}`}</span>
+                      <span className="es-recent-num">{`№ ${String(i + 1).padStart(2, "0")}`}</span>
                       <span className="es-recent-dot" style={{ background: entry.color }} aria-hidden="true" />
                       <div className="es-recent-body">
                         <div className="es-recent-head">
                           <span className="es-recent-label">{entry.label}</span>
                           <span className="es-recent-path">{projectName(entry.working_directory)}</span>
                           {entry.closed_at && (
-                            <span className="es-recent-time">{timeAgo(entry.closed_at, t("time.justNow"))}</span>
+                            <span className="es-recent-time">{timeAgo(entry.closed_at, t)}</span>
                           )}
                         </div>
                         {(snippet || entry.shell) && (
                           <div className="es-recent-tail">
                             {snippet && (
                               <span className="es-recent-snippet" title={snippet}>
-                                &gt;&nbsp;{snippet.length > 90 ? snippet.slice(0, 90) + "..." : snippet}
+                                ›&nbsp;{snippet.length > 90 ? snippet.slice(0, 90) + "…" : snippet}
                               </span>
                             )}
                             <span className="es-recent-chips">
@@ -159,7 +159,7 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
                           </div>
                         )}
                       </div>
-                      <span className="es-recent-arrow" aria-hidden="true">↩</span>
+                      <span className="es-recent-arrow" aria-hidden="true">⤍</span>
                     </button>
                   </li>
                 );

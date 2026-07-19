@@ -219,8 +219,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   const tabs = [
     { id: "general", label: t("settings.general") },
     { id: "appearance", label: t("settings.appearance") },
-    { id: "ssh", label: "SSH" },
-    { id: "git", label: "Git" },
+    { id: "ssh", label: t("settings.ssh") },
+    { id: "git", label: t("settings.git") },
     { id: "autonomous", label: t("settings.autonomous") },
     { id: "ai-agent", label: t("settings.aiAgent") },
     { id: "shortcuts", label: t("settings.shortcuts") },
@@ -281,10 +281,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     value={settings.scrollback || "10000"}
                     onChange={(e) => updateSetting("scrollback", e.target.value)}
                   >
-                    <option value="5000">5,000 lines</option>
-                    <option value="10000">10,000 lines</option>
-                    <option value="25000">25,000 lines</option>
-                    <option value="50000">50,000 lines</option>
+                    <option value="5000">{t("settings.lines", { count: "5,000" })}</option>
+                    <option value="10000">{t("settings.lines", { count: "10,000" })}</option>
+                    <option value="25000">{t("settings.lines", { count: "25,000" })}</option>
+                    <option value="50000">{t("settings.lines", { count: "50,000" })}</option>
                   </select>
                 </div>
 
@@ -292,7 +292,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   <label className="settings-label">{t("settings.defaultWorkingDirectory")}</label>
                   <input
                     className="settings-input"
-                    placeholder="~ (home directory)"
+                    placeholder={t("settings.homeDirectoryPlaceholder")}
                     value={settings.default_cwd || ""}
                     onChange={(e) => updateSetting("default_cwd", e.target.value)}
                     onContextMenu={textContextMenu}
@@ -306,8 +306,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     value={settings.command_palette_shortcut || "cmd_k"}
                     onChange={(e) => updateSetting("command_palette_shortcut", e.target.value)}
                   >
-                    <option value="cmd_k">{fmt("{mod}K")} (default)</option>
-                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} (frees {fmt("{mod}K")} for Clear Terminal)</option>
+                    <option value="cmd_k">{fmt("{mod}K")} ({t("settings.defaultOption")})</option>
+                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} ({t("settings.freesShortcut", { shortcut: fmt("{mod}K") })})</option>
                   </select>
                   <span className="settings-hint-inline">{t("settings.requiresRestartMenu")}</span>
                 </div>
@@ -451,7 +451,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     value={settings.font_family || "default"}
                     onChange={(e) => updateSetting("font_family", e.target.value)}
                   >
-                    <option value="default">SF Mono (default)</option>
+                    <option value="default">SF Mono ({t("settings.defaultOption")})</option>
                     <option value="fira">Fira Code</option>
                     <option value="jetbrains">JetBrains Mono</option>
                     <option value="cascadia">Cascadia Code</option>
@@ -601,7 +601,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <label className="settings-label">{t("settings.label")}</label>
                       <input
                         className="settings-input"
-                        placeholder="My Server"
+                        placeholder={t("settings.serverLabelPlaceholder")}
                         value={editingHost.label}
                         onChange={(e) => setEditingHost({ ...editingHost, label: e.target.value })}
                         onContextMenu={textContextMenu}
@@ -611,7 +611,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <label className="settings-label">{t("settings.host")}</label>
                       <input
                         className="settings-input"
-                        placeholder="example.com"
+                        placeholder={t("settings.hostPlaceholder")}
                         value={editingHost.host}
                         onChange={(e) => setEditingHost({ ...editingHost, host: e.target.value })}
                         onContextMenu={textContextMenu}
@@ -621,7 +621,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <label className="settings-label">{t("settings.user")}</label>
                       <input
                         className="settings-input"
-                        placeholder="root"
+                        placeholder={t("settings.userPlaceholder")}
                         value={editingHost.user}
                         onChange={(e) => setEditingHost({ ...editingHost, user: e.target.value })}
                         onContextMenu={textContextMenu}
@@ -641,7 +641,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <label className="settings-label">{t("settings.identityFile")}</label>
                       <input
                         className="settings-input"
-                        placeholder="~/.ssh/id_rsa"
+                        placeholder={t("settings.identityFilePlaceholder")}
                         value={editingHost.identity_file || ""}
                         onChange={(e) => setEditingHost({ ...editingHost, identity_file: e.target.value || null })}
                         onContextMenu={textContextMenu}
@@ -651,7 +651,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <label className="settings-label">{t("settings.jumpHost")}</label>
                       <input
                         className="settings-input"
-                        placeholder="bastion.example.com"
+                        placeholder={t("settings.jumpHostPlaceholder")}
                         value={editingHost.jump_host || ""}
                         onChange={(e) => setEditingHost({ ...editingHost, jump_host: e.target.value || null })}
                         onContextMenu={textContextMenu}
@@ -867,9 +867,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               if (path) {
                 try {
                   await exportSettings(path);
-                  setFooterStatus("Settings exported");
+                  setFooterStatus(t("settings.exported"));
                 } catch (e) {
-                  setFooterStatus(`Export failed: ${e}`);
+                  setFooterStatus(t("settings.exportFailed", { error: String(e) }));
                 }
               }
             }}
@@ -900,9 +900,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       });
                     }
                   }
-                  setFooterStatus("Settings imported");
+                  setFooterStatus(t("settings.imported"));
                 } catch (e) {
-                  setFooterStatus(`Import failed: ${e}`);
+                  setFooterStatus(t("settings.importFailed", { error: String(e) }));
                 }
               }
             }}
@@ -970,7 +970,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
           className="settings-input"
           value={settings.custom_command_suffix || ""}
           onChange={(e) => updateSetting("custom_command_suffix", e.target.value)}
-          placeholder="e.g. --model opus --max-tokens 4096"
+          placeholder={t("settings.customCommandSuffixPlaceholder")}
         />
         <p className="settings-hint">
           {t("settings.customCommandSuffixHint")}

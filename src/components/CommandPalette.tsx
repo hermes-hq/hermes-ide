@@ -44,7 +44,7 @@ export function CommandPalette({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const { onContextMenu: textContextMenu } = useTextContextMenu();
-  const { t } = useI18n();
+  const { t, currentLanguage } = useI18n();
 
   const commands: Command[] = useMemo(() => [
     { id: "new", label: t("palette.newSession"), category: t("app.session"), shortcut: fmt("{mod}N"), action: () => { onNewSession(); onClose(); } },
@@ -89,7 +89,10 @@ export function CommandPalette({
       category: pc.category || pc.pluginName || t("app.plugins"),
       action: () => { onPluginCommand?.(pc.command); onClose(); },
     })),
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t]);
+  // currentLanguage is intentionally in the deps: t() is referentially stable,
+  // so without it the memoized labels would never update on a language switch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);
