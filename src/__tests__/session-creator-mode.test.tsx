@@ -59,6 +59,8 @@ import {
   SESSION_CREATOR_MODES,
   type SessionCreatorMode,
 } from "../components/SessionCreatorModeStep";
+import { I18nProvider } from "../i18n/I18nProvider";
+import { translate } from "../i18n/registry";
 
 // =====================================================================
 // SessionCreatorModeStep — the standalone Step 1 component
@@ -66,7 +68,9 @@ import {
 describe("SessionCreatorModeStep (Phase 6)", () => {
   function renderModeStep(selected: SessionCreatorMode) {
     return renderToString(
-      <SessionCreatorModeStep selected={selected} onSelect={() => {}} />,
+      <I18nProvider>
+        <SessionCreatorModeStep selected={selected} onSelect={() => {}} />
+      </I18nProvider>,
     );
   }
 
@@ -82,15 +86,17 @@ describe("SessionCreatorModeStep (Phase 6)", () => {
     const map = Object.fromEntries(
       SESSION_CREATOR_MODES.map((m) => [m.id, m]),
     );
-    expect(map.agent.label).toBe("Chat with Claude");
-    expect(map.agent.description).toContain("Diffs");
-    expect(map.agent.description).toContain("Built natively into Hermes");
-    expect(map.terminal.label).toBe("Terminal");
-    expect(map.terminal.description.toLowerCase()).toContain("universal");
-    expect(map.terminal.description).toContain("Claude Code");
-    expect(map.terminal.description).toContain("Aider");
-    expect(map.ssh.label).toBe("SSH");
-    expect(map.ssh.description.toLowerCase()).toContain("v1.1");
+    // Mode cards carry i18n keys — resolve them through the English base
+    // pack so the public-facing copy is still pinned exactly.
+    expect(translate(map.agent.labelKey)).toBe("Chat with Claude");
+    expect(translate(map.agent.descriptionKey)).toContain("Diffs");
+    expect(translate(map.agent.descriptionKey)).toContain("Built natively into Hermes");
+    expect(translate(map.terminal.labelKey)).toBe("Terminal");
+    expect(translate(map.terminal.descriptionKey).toLowerCase()).toContain("universal");
+    expect(translate(map.terminal.descriptionKey)).toContain("Claude Code");
+    expect(translate(map.terminal.descriptionKey)).toContain("Aider");
+    expect(translate(map.ssh.labelKey)).toBe("SSH");
+    expect(translate(map.ssh.descriptionKey).toLowerCase()).toContain("v1.1");
   });
 
   it("renders all three options with the heading question", () => {
@@ -141,11 +147,13 @@ describe("SessionCreatorModeStep (Phase 6)", () => {
 describe("SessionCreator mode-conditional UI (Phase 6)", () => {
   function renderCreator(initialMode: SessionCreatorMode) {
     return renderToString(
-      <SessionCreator
-        onClose={() => {}}
-        onCreate={() => Promise.resolve()}
-        initialMode={initialMode}
-      />,
+      <I18nProvider>
+        <SessionCreator
+          onClose={() => {}}
+          onCreate={() => Promise.resolve()}
+          initialMode={initialMode}
+        />
+      </I18nProvider>,
     );
   }
 
@@ -208,7 +216,9 @@ describe("SessionCreator mode-conditional UI (Phase 6)", () => {
 describe("SessionCreator mode-card copy snapshot", () => {
   it("contains the three exact mode labels in Step 1", () => {
     const html = renderToString(
-      <SessionCreatorModeStep selected="agent" onSelect={() => {}} />,
+      <I18nProvider>
+        <SessionCreatorModeStep selected="agent" onSelect={() => {}} />
+      </I18nProvider>,
     );
     // These three strings are the public-facing v1.0.0 copy — guard them.
     expect(html).toContain("Chat with Claude");

@@ -14,6 +14,16 @@ import {
   SESSION_CREATOR_MODES,
   SessionCreatorModeStep,
 } from "../components/SessionCreatorModeStep";
+import { I18nProvider } from "../i18n/I18nProvider";
+import { translate } from "../i18n/registry";
+
+function renderModeStep(selected: "agent" | "terminal" | "ssh") {
+  return render(
+    <I18nProvider>
+      <SessionCreatorModeStep selected={selected} onSelect={() => {}} />
+    </I18nProvider>,
+  );
+}
 
 describe("SESSION_CREATOR_MODES — shape / categorisation", () => {
   it("every mode declares a category", () => {
@@ -25,7 +35,8 @@ describe("SESSION_CREATOR_MODES — shape / categorisation", () => {
     expect(native.length).toBeGreaterThanOrEqual(1);
     const claude = native.find((m) => m.id === "agent");
     expect(claude).toBeDefined();
-    expect(claude!.label.toLowerCase()).toContain("claude");
+    // Copy lives behind i18n keys — resolve through the English base pack.
+    expect(translate(claude!.labelKey).toLowerCase()).toContain("claude");
   });
 
   it("Terminal carries category=universal (older, any-CLI mode)", () => {
@@ -38,14 +49,15 @@ describe("SESSION_CREATOR_MODES — shape / categorisation", () => {
     expect(ssh?.category).toBe("remote");
   });
 
-  it("native modes carry a `badge` field — surfaced as a NEW pill", () => {
+  it("native modes carry a badge key — surfaced as a NEW pill", () => {
     const claude = SESSION_CREATOR_MODES.find((m) => m.id === "agent");
-    expect(claude?.badge).toBe("NEW");
+    expect(claude?.badgeKey).toBeDefined();
+    expect(translate(claude!.badgeKey!)).toBe("NEW");
   });
 
   it("universal mode does NOT carry a NEW badge", () => {
     const term = SESSION_CREATOR_MODES.find((m) => m.id === "terminal");
-    expect(term?.badge).toBeUndefined();
+    expect(term?.badgeKey).toBeUndefined();
   });
 
   it("structure permits future natives — extending the array doesn't break the shape", () => {
@@ -54,9 +66,13 @@ describe("SESSION_CREATOR_MODES — shape / categorisation", () => {
     // renderer must not break.
     for (const m of SESSION_CREATOR_MODES) {
       expect(typeof m.id).toBe("string");
-      expect(typeof m.label).toBe("string");
-      expect(typeof m.description).toBe("string");
+      expect(typeof m.labelKey).toBe("string");
+      expect(typeof m.descriptionKey).toBe("string");
       expect(typeof m.category).toBe("string");
+      // The keys must resolve to real copy in the English base pack —
+      // translate() returns the raw key when nothing matches.
+      expect(translate(m.labelKey)).not.toBe(m.labelKey);
+      expect(translate(m.descriptionKey)).not.toBe(m.descriptionKey);
     }
   });
 });
@@ -65,17 +81,17 @@ describe("SessionCreatorModeStep — render", () => {
   afterEach(() => cleanup());
 
   it("renders the NATIVE section header above Claude", () => {
-    render(<SessionCreatorModeStep selected="agent" onSelect={() => {}} />);
+    renderModeStep("agent");
     expect(screen.getByText(/^NATIVE$/i)).toBeInTheDocument();
   });
 
   it("renders the UNIVERSAL section header above Terminal", () => {
-    render(<SessionCreatorModeStep selected="agent" onSelect={() => {}} />);
+    renderModeStep("agent");
     expect(screen.getByText(/^UNIVERSAL$/i)).toBeInTheDocument();
   });
 
   it("renders the NEW badge on Chat with Claude", () => {
-    render(<SessionCreatorModeStep selected="agent" onSelect={() => {}} />);
+    renderModeStep("agent");
     const badges = document.querySelectorAll(".session-creator-mode-badge");
     expect(badges.length).toBeGreaterThanOrEqual(1);
     const newBadge = Array.from(badges).find((b) => b.textContent === "NEW");
@@ -83,7 +99,7 @@ describe("SessionCreatorModeStep — render", () => {
   });
 
   it("Terminal description mentions 'older' or 'generic' framing for clarity", () => {
-    render(<SessionCreatorModeStep selected="agent" onSelect={() => {}} />);
+    renderModeStep("agent");
     const term = screen.getByText(/Chat with Claude/i).closest(".session-creator-mode-step");
     // Find the terminal card — its description must mention the universal framing.
     const cards = document.querySelectorAll(".session-creator-mode-card");
@@ -93,7 +109,7 @@ describe("SessionCreatorModeStep — render", () => {
   });
 
   it("groups order: native first → universal → remote (locked rendering)", () => {
-    render(<SessionCreatorModeStep selected="agent" onSelect={() => {}} />);
+    renderModeStep("agent");
     const headers = Array.from(document.querySelectorAll(".session-creator-mode-group-label"))
       .map((h) => h.textContent?.trim().toUpperCase());
     expect(headers).toEqual(["NATIVE", "UNIVERSAL", "REMOTE"]);

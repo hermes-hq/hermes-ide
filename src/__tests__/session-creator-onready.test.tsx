@@ -22,6 +22,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 import { SessionCreator } from "../components/SessionCreator";
+import { I18nProvider } from "../i18n/I18nProvider";
 
 describe("SessionCreator — onReady contract (M9)", () => {
   afterEach(() => cleanup());
@@ -29,11 +30,13 @@ describe("SessionCreator — onReady contract (M9)", () => {
   it("fires onReady exactly once after mount", async () => {
     const onReady = vi.fn();
     render(
-      <SessionCreator
-        onClose={() => {}}
-        onCreate={async () => {}}
-        onReady={onReady}
-      />,
+      <I18nProvider>
+        <SessionCreator
+          onClose={() => {}}
+          onCreate={async () => {}}
+          onReady={onReady}
+        />
+      </I18nProvider>,
     );
     // Effects run synchronously in RTL's render — onReady should have
     // fired by now.
@@ -43,10 +46,12 @@ describe("SessionCreator — onReady contract (M9)", () => {
   it("does not crash when onReady is omitted (optional prop)", () => {
     expect(() => {
       render(
-        <SessionCreator
-          onClose={() => {}}
-          onCreate={async () => {}}
-        />,
+        <I18nProvider>
+          <SessionCreator
+            onClose={() => {}}
+            onCreate={async () => {}}
+          />
+        </I18nProvider>,
       );
     }).not.toThrow();
   });

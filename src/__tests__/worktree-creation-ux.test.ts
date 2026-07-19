@@ -29,6 +29,8 @@ vi.mock("../utils/notifications", () => ({
   notifyLongRunningDone: vi.fn(),
 }));
 
+import { translate } from "../i18n/registry";
+
 // =====================================================================
 // P0#3: Worktree creation error event emission
 // =====================================================================
@@ -257,8 +259,11 @@ describe("P1#7: Shared branch warning text", () => {
     const filePath = path.resolve(__dirname, "../components/SessionBranchSelector.tsx");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    // Warning moved to tooltip on "Use current branch" button
-    expect(source).toContain("changes will be shared");
+    // Warning moved to tooltip on "Use current branch" button.  The copy
+    // now lives in the language packs; the source wires the i18n key into
+    // the button's title — assert both ends of the contract.
+    expect(source).toContain('title={t("branch.useCurrentHint")}');
+    expect(translate("branch.useCurrentHint")).toContain("changes will be shared");
     // Old inline warning block should be gone
     expect(source).not.toContain(
       "Skipping means this session will share the working directory"
@@ -292,7 +297,9 @@ describe("P2#8: Button label renames", () => {
     const filePath = path.resolve(__dirname, "../components/SessionCreator.tsx");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    expect(source).toContain("Continue without isolation");
+    // The label moved behind an i18n key — pin the key and the English copy.
+    expect(source).toContain("session.continueWithoutIsolation");
+    expect(translate("session.continueWithoutIsolation")).toBe("Continue without isolation");
     expect(source).not.toContain("Skip branches");
   });
 
@@ -302,7 +309,9 @@ describe("P2#8: Button label renames", () => {
     const filePath = path.resolve(__dirname, "../components/SessionCreator.tsx");
     const source = fs.readFileSync(filePath, "utf-8");
 
-    expect(source).toContain(
+    // The subtitle renders via the session.selectBranchesHint key.
+    expect(source).toContain("session.selectBranchesHint");
+    expect(translate("session.selectBranchesHint")).toContain(
       "Each project gets its own isolated branch so changes in this session don't affect other sessions."
     );
   });
