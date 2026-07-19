@@ -49,7 +49,7 @@ jobs:
       build_linux: ${{ steps.platforms.outputs.linux }}
       build_windows: ${{ steps.platforms.outputs.windows }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
@@ -86,7 +86,7 @@ jobs:
   test-frontend:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
@@ -124,7 +124,7 @@ jobs:
         if: matrix.enabled != 'true'
         run: echo "Skipping Rust tests for this platform"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         if: matrix.enabled == 'true'
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -147,7 +147,7 @@ jobs:
 
       - name: Cache apt packages
         if: matrix.enabled == 'true' && runner.os == 'Linux'
-        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: 1.0
@@ -231,7 +231,7 @@ jobs:
           [[ "$GROUP" == "windows" && "$WINDOWS" == "true" ]] && ENABLED=true
           echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         if: steps.check.outputs.enabled == 'true'
         with:
           ref: ${{ inputs.tag || github.ref }}
@@ -258,7 +258,7 @@ jobs:
 
       - name: Cache apt packages
         if: steps.check.outputs.enabled == 'true' && runner.os == 'Linux'
-        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libfuse2
           version: 1.0
@@ -482,7 +482,7 @@ jobs:
       VERSION: ${{ needs.config.outputs.version }}
       TAG: ${{ needs.config.outputs.tag }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -713,7 +713,7 @@ jobs:
       contents: read
       attestations: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
@@ -735,6 +735,6 @@ jobs:
           ls -la attest-files/
 
       - name: Generate SLSA provenance attestation
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: 'attest-files/*'
