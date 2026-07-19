@@ -35,6 +35,7 @@ vi.mock("../utils/notifications", () => ({
 import { sessionReducer, initialState } from "../state/SessionContext";
 import { highlightMatch, formatResultCount, debounce } from "../components/SearchPanel";
 import { SHORTCUT_GROUPS } from "../components/ShortcutsPanel";
+import { translate } from "../i18n/registry";
 import type { SearchMatch, SearchFileResult, SearchResponse } from "../types/git";
 
 // ─── highlightMatch ──────────────────────────────────────────────────
@@ -396,14 +397,18 @@ describe("ShortcutsPanel accuracy", () => {
   it("{mod}{shift}F is mapped to Search in Folder, not Flow Mode", () => {
     const s = findShortcut("{mod}{shift}F");
     expect(s).toBeDefined();
-    expect(s!.action).toBe("Search in Folder");
-    expect(s!.action).not.toContain("Flow");
+    // Shortcuts carry i18n keys now — assert the key, then resolve it
+    // through the English base pack to guard the visible label.
+    expect(s!.actionKey).toBe("shortcuts.searchInFolder");
+    expect(translate(s!.actionKey)).toBe("Search in Folder");
+    expect(translate(s!.actionKey)).not.toContain("Flow");
   });
 
   it("{mod}{shift}Z is mapped to Toggle Flow Mode", () => {
     const s = findShortcut("{mod}{shift}Z");
     expect(s).toBeDefined();
-    expect(s!.action).toBe("Toggle Flow Mode");
+    expect(s!.actionKey).toBe("shortcuts.toggleFlowMode");
+    expect(translate(s!.actionKey)).toBe("Toggle Flow Mode");
   });
 
   it("left-panel tabs are listed ({mod}P, {mod}G, {mod}F)", () => {

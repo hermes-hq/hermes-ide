@@ -1,4 +1,4 @@
 import type { PluginModule } from "../PluginRuntime";
+import { languagePackPlugin } from "./languagePack";
 
-// Built-in plugins removed — all plugins now install from the registry.
-export const builtinPlugins: PluginModule[] = [];
+export const builtinPlugins: PluginModule[] = [languagePackPlugin];

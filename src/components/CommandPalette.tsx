@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { SessionData } from "../state/SessionContext";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt } from "../utils/platform";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface CommandPaletteProps {
   onClose: () => void;
@@ -43,51 +44,55 @@ export function CommandPalette({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const { onContextMenu: textContextMenu } = useTextContextMenu();
+  const { t, currentLanguage } = useI18n();
 
   const commands: Command[] = useMemo(() => [
-    { id: "new", label: "New Session", category: "Session", shortcut: fmt("{mod}N"), action: () => { onNewSession(); onClose(); } },
-    { id: "ctx", label: "Toggle Context Panel", category: "View", shortcut: fmt("{mod}E"), action: () => { onToggleContext(); onClose(); } },
-    { id: "sidebar", label: "Toggle Sidebar", category: "View", shortcut: fmt("{mod}B"), action: () => { onToggleSessions(); onClose(); } },
-    { id: "settings", label: "Settings", category: "App", shortcut: fmt("{mod},"), action: () => { onOpenSettings(); onClose(); } },
-    { id: "settings-general", label: "Settings / General", category: "Settings", hidden: true, action: () => { onOpenSettings("general"); onClose(); } },
-    { id: "settings-appearance", label: "Settings / Appearance", category: "Settings", hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
-    { id: "settings-theme", label: "Settings / Theme", category: "Settings", hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
-    { id: "settings-autonomous", label: "Settings / Autonomous", category: "Settings", hidden: true, action: () => { onOpenSettings("autonomous"); onClose(); } },
-    { id: "settings-git", label: "Settings / Git", category: "Settings", hidden: true, action: () => { onOpenSettings("git"); onClose(); } },
-    { id: "settings-privacy", label: "Settings / Privacy", category: "Settings", hidden: true, action: () => { onOpenSettings("privacy"); onClose(); } },
-        { id: "settings-shortcuts", label: "Settings / Shortcuts", category: "Settings", hidden: true, action: () => { onOpenSettings("shortcuts"); onClose(); } },
-    { id: "settings-plugins", label: "Settings / Plugins", category: "Settings", hidden: true, action: () => { onOpenSettings("plugins"); onClose(); } },
+    { id: "new", label: t("palette.newSession"), category: t("app.session"), shortcut: fmt("{mod}N"), action: () => { onNewSession(); onClose(); } },
+    { id: "ctx", label: t("palette.toggleContext"), category: t("app.view"), shortcut: fmt("{mod}E"), action: () => { onToggleContext(); onClose(); } },
+    { id: "sidebar", label: t("palette.toggleSidebar"), category: t("app.view"), shortcut: fmt("{mod}B"), action: () => { onToggleSessions(); onClose(); } },
+    { id: "settings", label: t("app.settings"), category: t("app.app"), shortcut: fmt("{mod},"), action: () => { onOpenSettings(); onClose(); } },
+    { id: "settings-general", label: t("palette.settingsGeneral"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("general"); onClose(); } },
+    { id: "settings-appearance", label: t("palette.settingsAppearance"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
+    { id: "settings-theme", label: t("palette.settingsTheme"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
+    { id: "settings-autonomous", label: t("palette.settingsAutonomous"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("autonomous"); onClose(); } },
+    { id: "settings-git", label: t("palette.settingsGit"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("git"); onClose(); } },
+    { id: "settings-privacy", label: t("palette.settingsPrivacy"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("privacy"); onClose(); } },
+    { id: "settings-shortcuts", label: t("palette.settingsShortcuts"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("shortcuts"); onClose(); } },
+    { id: "settings-plugins", label: t("palette.settingsPlugins"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("plugins"); onClose(); } },
     ...(pluginsWithSettings ?? []).map(p => ({
       id: `settings-plugin-${p.pluginId}`,
-      label: `Settings / ${p.pluginName}`,
-      category: "Plugin Settings",
+      label: t("palette.pluginSettings", { name: p.pluginName }),
+      category: t("app.plugins"),
       hidden: true,
       action: () => { onOpenSettings("plugins"); onClose(); },
     })),
-    { id: "workspace", label: "Folders", category: "App", action: () => { onOpenWorkspace(); onClose(); } },
-    ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: "Cost Dashboard", category: "App", shortcut: fmt("{mod}$"), action: () => { onOpenCostDashboard(); onClose(); } }] : []),
-    ...(onToggleFlowMode ? [{ id: "flow-mode", label: "Toggle Flow Mode", category: "View", shortcut: fmt("{mod}{shift}Z"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
-    ...(onAttachProject ? [{ id: "attach-project", label: "Add Folder...", category: "Folders", action: () => { onAttachProject(); onClose(); } }] : []),
-    ...(onScanCwd ? [{ id: "scan-cwd", label: "Scan Current Directory", category: "Folders", action: () => { onScanCwd(); onClose(); } }] : []),
-    ...(onOpenComposer ? [{ id: "composer", label: "Prompt Composer", category: "Tools", shortcut: fmt("{mod}J"), action: () => { onOpenComposer(); onClose(); } }] : []),
-    ...(onOpenShortcuts ? [{ id: "shortcuts", label: "Keyboard Shortcuts", category: "Help", shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
-    ...(onToggleGit ? [{ id: "git", label: "Toggle Git Panel", category: "View", shortcut: fmt("{mod}G"), action: () => { onToggleGit(); onClose(); } }] : []),
-    ...(onToggleSearch ? [{ id: "search", label: "Search in Folder", category: "View", shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
+    { id: "workspace", label: t("app.folders"), category: t("app.app"), action: () => { onOpenWorkspace(); onClose(); } },
+    ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: t("palette.costDashboard"), category: t("app.app"), shortcut: fmt("{mod}$"), action: () => { onOpenCostDashboard(); onClose(); } }] : []),
+    ...(onToggleFlowMode ? [{ id: "flow-mode", label: t("palette.toggleFlowMode"), category: t("app.view"), shortcut: fmt("{mod}{shift}Z"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
+    ...(onAttachProject ? [{ id: "attach-project", label: t("palette.addFolder"), category: t("app.folders"), action: () => { onAttachProject(); onClose(); } }] : []),
+    ...(onScanCwd ? [{ id: "scan-cwd", label: t("palette.scanCurrentDirectory"), category: t("app.folders"), action: () => { onScanCwd(); onClose(); } }] : []),
+    ...(onOpenComposer ? [{ id: "composer", label: t("palette.promptComposer"), category: t("app.tools"), shortcut: fmt("{mod}J"), action: () => { onOpenComposer(); onClose(); } }] : []),
+    ...(onOpenShortcuts ? [{ id: "shortcuts", label: t("palette.keyboardShortcuts"), category: t("app.help"), shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
+    ...(onToggleGit ? [{ id: "git", label: t("palette.toggleGitPanel"), category: t("app.view"), shortcut: fmt("{mod}G"), action: () => { onToggleGit(); onClose(); } }] : []),
+    ...(onToggleSearch ? [{ id: "search", label: t("palette.searchInFolder"), category: t("app.view"), shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,
       label: s.label,
-      category: s.detected_agent?.name || "Session",
+      category: s.detected_agent?.name || t("app.session"),
       shortcut: i < 9 ? fmt(`{mod}${i + 1}`) : undefined,
       action: () => { onSelectSession(s.id); onClose(); },
     })),
-    ...(onCheckPluginUpdates ? [{ id: "check-plugin-updates", label: "Check for Plugin Updates", category: "Plugins", action: () => { onCheckPluginUpdates(); onClose(); } }] : []),
+    ...(onCheckPluginUpdates ? [{ id: "check-plugin-updates", label: t("palette.checkPluginUpdates"), category: t("app.plugins"), action: () => { onCheckPluginUpdates(); onClose(); } }] : []),
     ...(pluginCommands ?? []).map(pc => ({
       id: `plugin-${pc.command}`,
       label: pc.title,
-      category: pc.category || pc.pluginName || "Plugin",
+      category: pc.category || pc.pluginName || t("app.plugins"),
       action: () => { onPluginCommand?.(pc.command); onClose(); },
     })),
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates]);
+  // currentLanguage is intentionally in the deps: t() is referentially stable,
+  // so without it the memoized labels would never update on a language switch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);
@@ -115,7 +120,7 @@ export function CommandPalette({
         <input
           ref={inputRef}
           className="command-palette-input"
-          placeholder="Type a command or session name..."
+          placeholder={t("palette.placeholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -141,7 +146,7 @@ export function CommandPalette({
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="command-palette-empty">No results for "{query}"</div>
+            <div className="command-palette-empty">{t("palette.noResults", { query })}</div>
           )}
         </div>
       </div>

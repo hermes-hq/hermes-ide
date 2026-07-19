@@ -2,6 +2,7 @@ import "../styles/components/TemplatePicker.css";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { TEMPLATE_CATEGORIES, type PromptTemplate, type TemplateCategory } from "../lib/templates";
 import { fmt } from "../utils/platform";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface TemplatePickerProps {
   builtInTemplates: PromptTemplate[];
@@ -42,6 +43,7 @@ export function TemplatePicker({
   onDeleteGroup,
   onMoveToGroup,
 }: TemplatePickerProps) {
+  const { t } = useI18n();
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -217,7 +219,7 @@ export function TemplatePicker({
           <button
             className={`template-picker-item-pin${isPinned ? " pinned" : ""}`}
             onClick={(e) => { e.stopPropagation(); onTogglePin(tpl.id); }}
-            title={isPinned ? "Unpin template" : "Pin template"}
+            title={isPinned ? t("builder.unpinTemplate") : t("builder.pinTemplate")}
           >
             📌
           </button>
@@ -226,7 +228,7 @@ export function TemplatePicker({
               <button
                 className="template-picker-item-move"
                 onClick={(e) => { e.stopPropagation(); setMoveMenuId(moveMenuId === tpl.id ? null : tpl.id); }}
-                title="Move to group"
+                title={t("builder.moveToGroup")}
               >
                 📁
               </button>
@@ -236,7 +238,7 @@ export function TemplatePicker({
                     className="template-picker-move-option"
                     onClick={() => { onMoveToGroup(tpl.id, null); setMoveMenuId(null); }}
                   >
-                    Ungrouped
+                    {t("builder.ungrouped")}
                   </div>
                   {templateGroups.map((g) => (
                     <div
@@ -253,7 +255,7 @@ export function TemplatePicker({
                 <button
                   className="template-picker-item-export"
                   onClick={(e) => { e.stopPropagation(); onExportTemplate(tpl); }}
-                  title="Export template"
+                  title={t("builder.exportTemplate")}
                 >
                   &#8599;
                 </button>
@@ -261,7 +263,7 @@ export function TemplatePicker({
               <button
                 className="template-picker-item-delete"
                 onClick={(e) => { e.stopPropagation(); onDeleteUser(tpl.id); }}
-                title="Delete template"
+                title={t("builder.deleteTemplate")}
               >
                 x
               </button>
@@ -278,10 +280,10 @@ export function TemplatePicker({
         ref={btnRef}
         className="template-picker-btn"
         onClick={onToggle}
-        title={`Browse templates (${fmt("{mod}T")})`}
+        title={t("builder.browseTemplatesTitle", { shortcut: fmt("{mod}T") })}
       >
         <span className="template-picker-btn-icon">&#9776;</span>
-        Templates
+        {t("builder.templates")}
       </button>
 
       {open && dropdownPos && (
@@ -296,7 +298,7 @@ export function TemplatePicker({
               ref={searchRef}
               className="template-picker-search"
               type="text"
-              placeholder="Search templates..."
+              placeholder={t("builder.searchTemplates")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
@@ -323,13 +325,13 @@ export function TemplatePicker({
               className={`template-picker-tab${activeTab === "built-in" ? " template-picker-tab-active" : ""}`}
               onClick={() => setActiveTab("built-in")}
             >
-              Built-in
+              {t("builder.builtIn")}
             </button>
             <button
               className={`template-picker-tab${activeTab === "my-templates" ? " template-picker-tab-active" : ""}`}
               onClick={() => setActiveTab("my-templates")}
             >
-              My Templates
+              {t("builder.myTemplates")}
               {userTemplates.length > 0 && (
                 <span className="template-picker-tab-count">{userTemplates.length}</span>
               )}
@@ -340,7 +342,7 @@ export function TemplatePicker({
             {/* Pinned — always visible at top of list */}
             {pinnedTemplates.length > 0 && !search && (
               <>
-                <div className="template-picker-section-label template-picker-section-pinned">📌 Pinned</div>
+                <div className="template-picker-section-label template-picker-section-pinned">📌 {t("builder.pinned")}</div>
                 <div className="template-picker-items">
                   {pinnedTemplates.map((tpl) => renderItem(tpl))}
                 </div>
@@ -352,7 +354,7 @@ export function TemplatePicker({
               filteredTemplates.length > 0 ? (
                 filteredTemplates.map((tpl) => renderItem(tpl, true))
               ) : (
-                <div className="template-picker-empty">No templates match &ldquo;{search}&rdquo;</div>
+                <div className="template-picker-empty">{t("builder.noTemplatesMatch", { query: search })}</div>
               )
             ) : activeTab === "built-in" ? (
               /* Built-in tab: category-grouped view */
@@ -392,18 +394,18 @@ export function TemplatePicker({
                       <button
                         className="template-picker-bundle-btn"
                         onClick={(e) => { e.stopPropagation(); onImportBundle(); }}
-                        title="Import templates from a .hermes-prompts file"
+                        title={t("builder.importTemplatesHint")}
                       >
-                        Import
+                        {t("builder.import")}
                       </button>
                     )}
                     {onExportAll && userTemplates.length > 0 && (
                       <button
                         className="template-picker-bundle-btn"
                         onClick={(e) => { e.stopPropagation(); onExportAll(); }}
-                        title="Export all saved templates to a .hermes-prompts file"
+                        title={t("builder.exportAllHint")}
                       >
-                        Export All
+                        {t("builder.exportAll")}
                       </button>
                     )}
                   </div>
@@ -416,7 +418,7 @@ export function TemplatePicker({
                       ref={newGroupRef}
                       className="template-picker-new-group-input"
                       type="text"
-                      placeholder="Group name..."
+                      placeholder={t("builder.groupNamePlaceholder")}
                       value={newGroupName}
                       onChange={(e) => setNewGroupName(e.target.value)}
                       onKeyDown={(e) => {
@@ -432,7 +434,7 @@ export function TemplatePicker({
                     className="template-picker-new-group-btn"
                     onClick={() => setShowNewGroupInput(true)}
                   >
-                    + New Group
+                    + {t("builder.newGroup")}
                   </button>
                 )}
 
@@ -475,14 +477,14 @@ export function TemplatePicker({
                               setEditingGroup(groupName);
                               setEditingGroupName(groupName);
                             }}
-                            title="Rename group"
+                            title={t("builder.renameGroup")}
                           >
                             &#9998;
                           </button>
                           <button
                             className="template-picker-group-action"
                             onClick={(e) => { e.stopPropagation(); onDeleteGroup(groupName); }}
-                            title="Delete group (templates are kept)"
+                            title={t("builder.deleteGroup")}
                           >
                             x
                           </button>
@@ -492,7 +494,7 @@ export function TemplatePicker({
                         <div className="template-picker-items">
                           {items.length > 0
                             ? items.map((tpl) => renderItem(tpl))
-                            : <div className="template-picker-empty-group">No templates in this group</div>
+                            : <div className="template-picker-empty-group">{t("builder.noTemplatesInGroup")}</div>
                           }
                         </div>
                       )}
@@ -503,7 +505,7 @@ export function TemplatePicker({
                 {/* Ungrouped templates */}
                 {userGrouped.ungrouped.length > 0 && (
                   <>
-                    <div className="template-picker-section-label">Ungrouped</div>
+                    <div className="template-picker-section-label">{t("builder.ungrouped")}</div>
                     <div className="template-picker-items">
                       {userGrouped.ungrouped.map((tpl) => renderItem(tpl))}
                     </div>
@@ -512,7 +514,7 @@ export function TemplatePicker({
 
                 {userTemplates.length === 0 && templateGroups.length === 0 && (
                   <div className="template-picker-empty">
-                    No saved templates yet. Save a prompt or import a bundle.
+                    {t("builder.noSavedTemplates")}
                   </div>
                 )}
               </>

@@ -7,6 +7,19 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 
 ---
 
+# 1.4.0 (2026-07-19)
+
+## New
+- Interface translations built in — switch Hermes to Russian, Spanish, French, German, Portuguese (Brazil), Simplified Chinese, Japanese, or Hindi from Plugins → Hermes Language Pack; the switch is instant, needs no restart, and is remembered across launches
+- Language Pack ships as a built-in plugin, visible and manageable in the installed plugins list
+- Localized the start screen, command palette, settings, session creation flow (including the SSH and tmux steps), usage and plan limits, shortcuts, plugin manager, and the prompt composer with roles, styles, and templates
+
+## Fixed
+- Usage panel now counts input tokens from the whole session, including turns from before the panel was opened
+
+## Improved
+- Context Panel action on the start screen works before a session is opened
+
 # 1.2.0 (2026-05-11)
 
 ## New

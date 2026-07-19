@@ -2,6 +2,7 @@ import "../styles/components/StyleSelector.css";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import type { StyleDefinition, SelectedStyle } from "../lib/styles";
 import { validateCustomStyle } from "../lib/styles";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface StyleSelectorProps {
   selections: SelectedStyle[];
@@ -18,8 +19,9 @@ function LevelDots({
   level: number;
   onChange: (level: number) => void;
 }) {
+  const { t } = useI18n();
   return (
-    <span className="style-selector-dots" title={`Intensity: ${level}/5`}>
+    <span className="style-selector-dots" title={t("builder.intensityLevel", { level })}>
       {[1, 2, 3, 4, 5].map((n) => (
         <button
           key={n}
@@ -28,7 +30,7 @@ function LevelDots({
             e.stopPropagation();
             onChange(n);
           }}
-          title={`Level ${n}`}
+          title={t("builder.levelDot", { level: n })}
         />
       ))}
     </span>
@@ -42,6 +44,7 @@ export function StyleSelector({
   onCreateCustom,
   onDeleteCustom,
 }: StyleSelectorProps) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -158,7 +161,7 @@ export function StyleSelector({
       allStyles,
     );
     if (!result.valid) {
-      setCreateError(result.error || "Invalid style");
+      setCreateError(result.error || t("builder.invalidStyle"));
       return;
     }
     onCreateCustom({
@@ -171,7 +174,7 @@ export function StyleSelector({
     setNewLevels(["", "", "", "", ""]);
     setCreateError("");
     setShowCreateForm(false);
-  }, [newLabel, newDescription, newLevels, allStyles, onCreateCustom]);
+  }, [newLabel, newDescription, newLevels, allStyles, onCreateCustom, t]);
 
   const selectedStyles = selections
     .map((sel) => {
@@ -182,7 +185,7 @@ export function StyleSelector({
 
   return (
     <div className="style-selector" ref={wrapperRef}>
-      <label className="prompt-composer-field-label">Style</label>
+      <label className="prompt-composer-field-label">{t("builder.style")}</label>
 
       {/* Selected pills with level dots */}
       {selectedStyles.length > 0 && (
@@ -197,7 +200,7 @@ export function StyleSelector({
               <button
                 className="style-selector-pill-remove"
                 onClick={() => toggleStyle(style.id)}
-                title="Remove style"
+                title={t("builder.removeStyle")}
               >
                 x
               </button>
@@ -210,7 +213,7 @@ export function StyleSelector({
       <input
         ref={inputRef}
         className="style-selector-search"
-        placeholder={selections.length ? `${selections.length} style${selections.length > 1 ? "s" : ""} selected — search to add more...` : "Search styles..."}
+        placeholder={selections.length ? t("builder.stylesSelectedPlaceholder", { count: selections.length }) : t("builder.searchStyles")}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -249,7 +252,7 @@ export function StyleSelector({
                       e.stopPropagation();
                       onDeleteCustom(style.id);
                     }}
-                    title="Delete custom style"
+                    title={t("builder.deleteCustomStyle")}
                   >
                     x
                   </button>
@@ -258,13 +261,13 @@ export function StyleSelector({
             );
           })}
           {filtered.length === 0 && (
-            <div className="style-selector-item style-selector-empty">No styles match "{query}"</div>
+            <div className="style-selector-item style-selector-empty">{t("builder.noStylesMatch", { query })}</div>
           )}
           <button
             className="style-selector-create-btn"
             onClick={() => setShowCreateForm(true)}
           >
-            + Create custom style...
+            + {t("builder.createCustomStyle")}
           </button>
         </div>
       )}
@@ -274,26 +277,26 @@ export function StyleSelector({
         <div className="style-selector-dropdown">
           <div className="style-selector-create-form">
             <div className="style-selector-create-field">
-              <label>Label</label>
+              <label>{t("builder.label")}</label>
               <input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="e.g. Minimalist"
+                placeholder={t("builder.styleLabelPlaceholder")}
                 autoFocus
               />
             </div>
             <div className="style-selector-create-field">
-              <label>Description (optional)</label>
+              <label>{t("builder.descriptionOptional")}</label>
               <input
                 value={newDescription}
                 onChange={(e) => setNewDescription(e.target.value)}
-                placeholder="e.g. Extremely minimal output"
+                placeholder={t("builder.styleDescriptionPlaceholder")}
               />
             </div>
             {[1, 2, 3, 4, 5].map((lvl) => (
               <div key={lvl} className="style-selector-create-field">
                 <label>
-                  Level {lvl} instruction
+                  {t("builder.levelInstruction", { level: lvl })}
                   <span className="style-selector-create-dots">
                     {Array.from({ length: 5 }, (_, i) => (
                       <span key={i} className={`style-selector-dot-preview${i < lvl ? " style-selector-dot-preview-filled" : ""}`} />
@@ -308,9 +311,9 @@ export function StyleSelector({
                     setNewLevels(updated);
                   }}
                   placeholder={
-                    lvl === 1 ? "Subtle version..."
-                    : lvl === 3 ? "Standard version..."
-                    : lvl === 5 ? "Maximum intensity..."
+                    lvl === 1 ? t("builder.subtleVersion")
+                    : lvl === 3 ? t("builder.standardVersion")
+                    : lvl === 5 ? t("builder.maximumIntensity")
                     : ""
                   }
                 />
@@ -319,7 +322,7 @@ export function StyleSelector({
             {createError && <div className="style-selector-create-error">{createError}</div>}
             <div className="style-selector-create-actions">
               <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={handleCreate}>
-                Save
+                {t("builder.save")}
               </button>
               <button
                 className="prompt-composer-btn prompt-composer-btn-sm"
@@ -328,7 +331,7 @@ export function StyleSelector({
                   setCreateError("");
                 }}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>

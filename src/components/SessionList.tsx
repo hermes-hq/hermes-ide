@@ -14,6 +14,7 @@ import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 import { useRemoteSshInfo } from "../hooks/useRemoteSshInfo";
 import { PortForwardsPanel } from "./PortForwardsPanel";
 import type { PluginSessionActionContribution } from "../plugins/types";
+import { useI18n } from "../i18n/I18nProvider";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -22,9 +23,13 @@ export const SESSION_COLORS = [
 ];
 
 /** Returns the close-button tooltip text, mode-conditional.
- *  Exported as a tiny pure function so unit tests can cover both branches. */
-export function sessionCloseTitle(mode: "agent" | "terminal" | undefined): string {
-  return mode === "agent" ? "End conversation" : "Close session";
+ *  Exported as a tiny pure function so unit tests can cover both branches.
+ *  Takes the i18n `t` so the labels track the active language pack. */
+export function sessionCloseTitle(
+  mode: "agent" | "terminal" | undefined,
+  t: (key: string) => string,
+): string {
+  return mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm");
 }
 
 export type SessionView = "git" | "files" | "search" | null;
@@ -334,6 +339,7 @@ function InlineNameEditor({ sessionId, label, triggerEdit, onTriggered }: { sess
 
 /** Inline editable description — click to edit, shows placeholder when empty on active session. */
 function InlineDescriptionEditor({ sessionId, description, isActive }: { sessionId: string; description: string; isActive: boolean }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(description);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -362,7 +368,7 @@ function InlineDescriptionEditor({ sessionId, description, isActive }: { session
         className="session-item-description-input"
         value={value}
         autoFocus
-        placeholder="Add description..."
+        placeholder={t("sessions.addDescription")}
         maxLength={120}
         rows={1}
         onChange={(e) => {
@@ -401,7 +407,7 @@ function InlineDescriptionEditor({ sessionId, description, isActive }: { session
         className="session-item-description session-item-description-placeholder"
         onClick={(e) => { e.stopPropagation(); setEditing(true); setValue(""); }}
       >
-        Add description...
+        {t("sessions.addDescription")}
       </div>
     );
   }
@@ -559,6 +565,7 @@ function InlineProjectNameEditor({
 }
 
 export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, onReconnect, activeView, onViewChange, gitBadge, pluginSessionActions, activePluginPanel, onPluginActionClick }: SessionListProps) {
+  const { t } = useI18n();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
@@ -898,7 +905,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-agent-tag">{session.detected_agent.name}</span>
               )}
               <span className="session-phase-tag" data-phase={session.phase}>
-                {session.phase === "busy" ? "working" : session.phase === "needs_input" ? "needs input" : session.phase === "shell_ready" ? "ready" : session.phase === "creating" ? "starting" : session.phase === "disconnected" ? "disconnected" : session.phase}
+                {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
               </span>
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
@@ -907,7 +914,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 className="session-item-reconnect-btn"
                 onClick={(e) => { e.stopPropagation(); onReconnect(session); }}
               >
-                Reconnect
+                {t("sessions.reconnect")}
               </button>
             )}
             <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed" || session.phase === "disconnected"} workingDirectory={session.working_directory} isSsh={!!session.ssh_info} />
@@ -940,7 +947,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <button
             className="session-item-close"
             onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
-            title={sessionCloseTitle(session.mode)}
+            title={sessionCloseTitle(session.mode, t)}
           >&times;</button>
         </div>
         {/* Tmux window tabs for SSH+tmux sessions */}
@@ -954,7 +961,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               className={`session-move-project-option ${!session.group ? "active" : ""}`}
               onClick={() => { handleMoveToProject(session.id, null); setMoveSessionId(null); }}
             >
-              No Project
+              {t("sessions.noProject")}
             </button>
             {allGroups.map((g) => (
               <button
@@ -973,13 +980,13 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 className="session-move-project-option session-move-project-new"
                 onClick={() => { setShowMoveNewInput(true); setMoveNewName(""); }}
               >
-                + New Project
+                {t("sessions.newProject")}
               </button>
             ) : (
               <input
                 className="session-move-project-input"
                 autoFocus
-                placeholder="Project name..."
+                placeholder={t("sessions.projectName")}
                 value={moveNewName}
                 onChange={(e) => setMoveNewName(e.target.value)}
                 onKeyDown={(e) => {
@@ -1082,11 +1089,11 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
   return (
     <div className="session-list">
       <div className="session-list-header">
-        <span className="session-list-title">SESSIONS</span>
+        <span className="session-list-title">{t("sessions.title")}</span>
       </div>
       <div className="session-list-body" onContextMenu={handleEmptyAreaContextMenu}>
         {sessions.length === 0 && (
-          <div className="session-list-empty">No active sessions<br/><span className="text-muted">Press {fmt("{mod}N")} to create one</span></div>
+          <div className="session-list-empty">{t("sessions.noActive")}<br/><span className="text-muted">{t("sessions.createHint", { shortcut: fmt("{mod}N") })}</span></div>
         )}
 
         {/* Projects (groups) first */}
@@ -1166,7 +1173,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
         >
           {((grouped.get(null) || []).length > 0 || (isDraggingSession && allGroups.length > 0)) && (
             <div className="ungrouped-divider">
-              <span>{dropTarget === "__ungrouped__" ? "Drop here to remove from project" : "Ungrouped"}</span>
+              <span>{dropTarget === "__ungrouped__" ? t("sessions.dropRemoveProject") : t("sessions.ungrouped")}</span>
             </div>
           )}
           {(grouped.get(null) || []).map((session) => {
@@ -1181,7 +1188,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <div className="session-list-new-project-input">
             <input
               autoFocus
-              placeholder="Project name..."
+              placeholder={t("sessions.projectName")}
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               onKeyDown={(e) => {
@@ -1215,7 +1222,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="12" height="12">
               <path d="M2 5C2 3.9 2.9 3 4 3H7L9 5H14C15.1 5 16 5.9 16 7V13C16 14.1 15.1 15 14 15H4C2.9 15 2 14.1 2 13V5Z" />
             </svg>
-            New Project
+            {t("sessions.newProject")}
           </button>
         )}
       </div>

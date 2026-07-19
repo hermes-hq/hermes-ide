@@ -2,6 +2,12 @@ import type { Disposable, PluginSettingsSchema, HermesEvent, SessionInfo, Transc
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import {
+	getCurrentLanguage,
+	registerLanguagePack,
+	setLanguage,
+	type LanguagePack,
+} from "../i18n/registry";
 
 // Props passed to plugin panel components via React context
 export interface PluginPanelProps {
@@ -60,6 +66,13 @@ export interface HermesPluginAPI {
 		focus(sessionId: string): Promise<void>;
 	};
 	agents: AgentsAPI;
+	// NOTE: setLanguage is intentionally not permission-gated for now — the
+	// built-in language pack is the intended consumer of this API.
+	i18n: {
+		registerLanguagePack(pack: LanguagePack): Disposable;
+		getCurrentLanguage(): string;
+		setLanguage(locale: string): Promise<void>;
+	};
 	subscriptions: Disposable[];
 	/** @internal Used by PluginRuntime to forward UI settings changes to plugin listeners. */
 	_notifySettingChanged(key: string, value: string | number | boolean): void;
@@ -424,6 +437,15 @@ export function createPluginAPI(
 					return { dispose() {} };
 				}
 			},
+		},
+		i18n: {
+			registerLanguagePack(pack: LanguagePack): Disposable {
+				const disposable = registerLanguagePack(pack);
+				subscriptions.push(disposable);
+				return disposable;
+			},
+			getCurrentLanguage,
+			setLanguage,
 		},
 		subscriptions,
 	};

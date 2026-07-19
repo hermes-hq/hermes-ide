@@ -23,6 +23,7 @@ import type { StyleDefinition, SelectedStyle } from "../lib/styles";
 import { RoleSelector } from "./RoleSelector";
 import { StyleSelector } from "./StyleSelector";
 import { TemplatePicker } from "./TemplatePicker";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface PromptComposerProps {
   sessionId: string;
@@ -30,9 +31,9 @@ interface PromptComposerProps {
   addToast?: (toast: { message: string; type: "info" | "success" | "warning" | "error"; duration: number }) => void;
 }
 
-const FIELD_META: { key: "task" | "scope"; label: string; placeholder: string; rows: number }[] = [
-  { key: "task", label: "Task", placeholder: "What should the AI do? This is the main instruction.", rows: 4 },
-  { key: "scope", label: "Scope", placeholder: "Files, directories, or boundaries. e.g. Focus on src/auth/. Don't touch tests.", rows: 2 },
+const FIELD_META: { key: "task" | "scope"; labelKey: string; placeholderKey: string; rows: number }[] = [
+  { key: "task", labelKey: "builder.task", placeholderKey: "builder.taskPlaceholder", rows: 4 },
+  { key: "scope", labelKey: "builder.scope", placeholderKey: "builder.scopePlaceholder", rows: 2 },
 ];
 
 /**
@@ -76,6 +77,7 @@ function migrateTemplate(tpl: Record<string, unknown>): PromptTemplate {
 }
 
 export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerProps) {
+  const { t } = useI18n();
   // Session mode awareness — agent-mode sessions don't have a PTY, so the
   // Builder needs to drop its compiled prompt into the chat composer's
   // draft instead of writing bracketed-paste bytes to a terminal.
@@ -358,12 +360,12 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
       });
       if (!path) return;
       await exportPromptBundle(path, json);
-      addToast?.({ message: `Exported "${tpl.name}"`, type: "success", duration: 3000 });
+      addToast?.({ message: t("builder.exportedTemplate", { name: tpl.name }), type: "success", duration: 3000 });
     } catch (err) {
       console.error("[PromptComposer] Export failed:", err);
-      addToast?.({ message: `Export failed: ${err}`, type: "error", duration: 5000 });
+      addToast?.({ message: t("builder.exportFailed", { error: String(err) }), type: "error", duration: 5000 });
     }
-  }, [customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast]);
+  }, [customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast, t]);
 
   const handleExportAll = useCallback(async () => {
     if (userTemplates.length === 0) return;
@@ -377,12 +379,12 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
       });
       if (!path) return;
       await exportPromptBundle(path, json);
-      addToast?.({ message: `Exported ${userTemplates.length} template${userTemplates.length === 1 ? "" : "s"}`, type: "success", duration: 3000 });
+      addToast?.({ message: t("builder.exportedAll", { count: userTemplates.length }), type: "success", duration: 3000 });
     } catch (err) {
       console.error("[PromptComposer] Export all failed:", err);
-      addToast?.({ message: `Export failed: ${err}`, type: "error", duration: 5000 });
+      addToast?.({ message: t("builder.exportFailed", { error: String(err) }), type: "error", duration: 5000 });
     }
-  }, [userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast]);
+  }, [userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast, t]);
 
   const handleImportBundle = useCallback(async () => {
     try {
@@ -397,7 +399,7 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
       try {
         parsed = JSON.parse(raw);
       } catch {
-        addToast?.({ message: "Invalid bundle file: not valid JSON", type: "error", duration: 5000 });
+        addToast?.({ message: t("builder.invalidBundleJson"), type: "error", duration: 5000 });
         return;
       }
       const validation = validateBundle(parsed);
@@ -433,19 +435,22 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
 
       // Summary toast
       const parts: string[] = [];
-      if (result.templatesAdded > 0) parts.push(`${result.templatesAdded} template${result.templatesAdded === 1 ? "" : "s"}`);
-      if (result.rolesAdded > 0) parts.push(`${result.rolesAdded} role${result.rolesAdded === 1 ? "" : "s"}`);
-      if (result.stylesAdded > 0) parts.push(`${result.stylesAdded} style${result.stylesAdded === 1 ? "" : "s"}`);
-      const skipped = result.templatesSkipped > 0 ? ` (${result.templatesSkipped} skipped)` : "";
+      if (result.templatesAdded > 0) parts.push(t("builder.importedTemplates", { count: result.templatesAdded }));
+      if (result.rolesAdded > 0) parts.push(t("builder.importedRoles", { count: result.rolesAdded }));
+      if (result.stylesAdded > 0) parts.push(t("builder.importedStyles", { count: result.stylesAdded }));
       const msg = parts.length > 0
-        ? `Imported ${parts.join(", ")}${skipped}`
-        : `Nothing new to import${skipped}`;
+        ? result.templatesSkipped > 0
+          ? t("builder.importedSummarySkipped", { parts: parts.join(", "), count: result.templatesSkipped })
+          : t("builder.importedSummary", { parts: parts.join(", ") })
+        : result.templatesSkipped > 0
+          ? t("builder.nothingToImportSkipped", { count: result.templatesSkipped })
+          : t("builder.nothingToImport");
       addToast?.({ message: msg, type: parts.length > 0 ? "success" : "info", duration: 4000 });
     } catch (err) {
       console.error("[PromptComposer] Import failed:", err);
-      addToast?.({ message: `Import failed: ${err}`, type: "error", duration: 5000 });
+      addToast?.({ message: t("builder.importFailed", { error: String(err) }), type: "error", duration: 5000 });
     }
-  }, [userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast]);
+  }, [userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds, addToast, t]);
 
   const createCustomRole = useCallback((role: Omit<RoleDefinition, "id" | "builtIn">) => {
     const newRole: RoleDefinition = {
@@ -531,7 +536,7 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
         {/* Header */}
         <div className="prompt-composer-header">
           <div className="prompt-composer-header-left">
-            <span className="prompt-composer-title">Prompt Composer</span>
+            <span className="prompt-composer-title">{t("builder.title")}</span>
             <TemplatePicker
               builtInTemplates={BUILT_IN_TEMPLATES}
               userTemplates={userTemplates}
@@ -551,7 +556,7 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
               onMoveToGroup={moveToGroup}
             />
           </div>
-          <button className="prompt-composer-close" onClick={onClose} title="Close (Esc)">&#10005;</button>
+          <button className="prompt-composer-close" onClick={onClose} title={t("builder.close")}>&#10005;</button>
         </div>
 
         {/* Body: fields + preview */}
@@ -565,8 +570,8 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
               >
                 <span className="prompt-composer-empty-cta-icon">&#9776;</span>
                 <span className="prompt-composer-empty-cta-text">
-                  <strong>Start from a template</strong>
-                  <span>Browse {BUILT_IN_TEMPLATES.length} ready-to-use prompt templates</span>
+                  <strong>{t("builder.startFromTemplate")}</strong>
+                  <span>{t("builder.browseTemplates", { count: BUILT_IN_TEMPLATES.length })}</span>
                 </span>
                 <kbd className="prompt-composer-empty-cta-kbd">{fmt("{mod}T")}</kbd>
               </button>
@@ -591,13 +596,13 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
             />
 
             {/* Task + Scope */}
-            {FIELD_META.map(({ key, label, placeholder, rows }) => (
+            {FIELD_META.map(({ key, labelKey, placeholderKey, rows }) => (
               <div key={key} className="prompt-composer-field">
-                <label>{label}</label>
+                <label>{t(labelKey)}</label>
                 <textarea
                   ref={key === "task" ? taskRef : undefined}
                   rows={rows}
-                  placeholder={placeholder}
+                  placeholder={t(placeholderKey)}
                   value={fields[key]}
                   onChange={(e) => updateField(key, e.target.value)}
                   onContextMenu={textContextMenu}
@@ -609,30 +614,30 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
             <button
               className="prompt-composer-advanced-toggle"
               onClick={() => setAdvancedOpen(!advancedOpen)}
-              title="Toggle advanced options"
+              title={t("builder.toggleAdvanced")}
             >
               <span className="prompt-composer-advanced-chevron">
                 {advancedOpen ? "\u25be" : "\u25b8"}
               </span>
-              Advanced
+              {t("builder.advanced")}
             </button>
             {advancedOpen && (
               <div className="prompt-composer-advanced-body">
                 <div className="prompt-composer-field">
-                  <label>Constraints</label>
+                  <label>{t("builder.constraints")}</label>
                   <textarea
                     rows={2}
-                    placeholder="Rules, limitations, requirements. e.g. No new dependencies. Keep backward compat."
+                    placeholder={t("builder.constraintsPlaceholder")}
                     value={fields.constraints}
                     onChange={(e) => updateField("constraints", e.target.value)}
                     onContextMenu={textContextMenu}
                   />
                 </div>
                 <div className="prompt-composer-field">
-                  <label>Additional Style Notes</label>
+                  <label>{t("builder.additionalStyleNotes")}</label>
                   <textarea
                     rows={2}
-                    placeholder="Extra style instructions beyond the presets above. e.g. Show line references."
+                    placeholder={t("builder.additionalStyleNotesPlaceholder")}
                     value={fields.style}
                     onChange={(e) => updateField("style", e.target.value)}
                     onContextMenu={textContextMenu}
@@ -642,9 +647,9 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
             )}
           </div>
           <div className="prompt-composer-preview">
-            <div className="prompt-composer-preview-label">Preview</div>
+            <div className="prompt-composer-preview-label">{t("builder.preview")}</div>
             <pre className="prompt-composer-preview-content">
-              {compiled || "Fill in the fields to see the compiled prompt..."}
+              {compiled || t("builder.emptyPreview")}
             </pre>
           </div>
         </div>
@@ -657,7 +662,7 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
                 <input
                   ref={saveInputRef}
                   className="prompt-composer-save-input"
-                  placeholder="Template name..."
+                  placeholder={t("builder.templateNamePlaceholder")}
                   value={saveTemplateName}
                   onChange={(e) => setSaveTemplateName(e.target.value)}
                   onKeyDown={(e) => {
@@ -666,28 +671,28 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
                   }}
                   onContextMenu={textContextMenu}
                 />
-                <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={saveTemplate}>Save</button>
-                <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={() => setShowSaveInput(false)}>Cancel</button>
+                <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={saveTemplate}>{t("builder.save")}</button>
+                <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={() => setShowSaveInput(false)}>{t("common.cancel")}</button>
               </div>
             ) : (
-              <button className="prompt-composer-btn" onClick={() => setShowSaveInput(true)}>Save Template</button>
+              <button className="prompt-composer-btn" onClick={() => setShowSaveInput(true)}>{t("builder.saveTemplate")}</button>
             )}
             {!fieldsEmpty && (
               confirmingClear ? (
                 <div className="prompt-composer-clear-confirm">
-                  <span className="prompt-composer-clear-confirm-label">Clear all fields?</span>
-                  <button className="prompt-composer-btn prompt-composer-btn-sm prompt-composer-btn-danger" onClick={clearFields}>Yes, clear</button>
-                  <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={() => setConfirmingClear(false)}>Cancel</button>
+                  <span className="prompt-composer-clear-confirm-label">{t("builder.clearAllFields")}</span>
+                  <button className="prompt-composer-btn prompt-composer-btn-sm prompt-composer-btn-danger" onClick={clearFields}>{t("builder.yesClear")}</button>
+                  <button className="prompt-composer-btn prompt-composer-btn-sm" onClick={() => setConfirmingClear(false)}>{t("common.cancel")}</button>
                 </div>
               ) : (
-                <button className="prompt-composer-btn prompt-composer-btn-clear" onClick={() => setConfirmingClear(true)}>Clear</button>
+                <button className="prompt-composer-btn prompt-composer-btn-clear" onClick={() => setConfirmingClear(true)}>{t("builder.clear")}</button>
               )
             )}
           </div>
           <div className="prompt-composer-actions-right">
-            <button className="prompt-composer-btn" onClick={copyPrompt} disabled={!compiled.trim()}>Copy</button>
+            <button className="prompt-composer-btn" onClick={copyPrompt} disabled={!compiled.trim()}>{t("builder.copy")}</button>
             <button className="prompt-composer-btn prompt-composer-btn-send" onClick={sendPrompt} disabled={!compiled.trim()}>
-              Send <kbd>{fmt("{mod}")}&#8629;</kbd>
+              {t("builder.send")} <kbd>{fmt("{mod}")}&#8629;</kbd>
             </button>
           </div>
         </div>

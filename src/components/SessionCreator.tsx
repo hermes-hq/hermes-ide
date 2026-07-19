@@ -10,7 +10,6 @@ import { getSessions, sshListTmuxSessions, checkAiProviders } from "../api/sessi
 import {
   AI_PROVIDERS,
   getProviderInfo,
-  PERMISSION_MODES,
   PERMISSION_MODE_FLAGS,
   getAvailableModes,
   AI_AGENT_PREFIXES_KEY,
@@ -31,6 +30,7 @@ import {
   SessionCreatorModeStep,
   type SessionCreatorMode,
 } from "./SessionCreatorModeStep";
+import { useI18n } from "../i18n/I18nProvider";
 
 // ─── SSH Connection History ──────────────────────────────────────────
 
@@ -93,6 +93,9 @@ interface SessionCreatorProps {
 }
 
 export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, onReady }: SessionCreatorProps) {
+  const { t } = useI18n();
+  const permissionShortLabel = (mode: PermissionMode) => t(`permission.${mode}.shortLabel`);
+  const permissionDescription = (mode: PermissionMode) => t(`permission.${mode}.description`);
   // Diagnostic — logs every time React calls the function component
   // body.  Combined with the App.tsx click timestamp, lets us see
   // how long elapses between click and first-render-start.
@@ -674,13 +677,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
 
   // Wording helpers — playbook §8 "mode-conditional vocabulary".
   const folderSectionTitle = mode === "agent"
-    ? "Project context"
-    : isShellOnly ? "Working directory" : "Select folders";
+    ? t("session.projectContext")
+    : isShellOnly ? t("session.workingDirectory") : t("session.selectFolders");
   const folderSubtitle = mode === "agent"
-    ? "Claude can work across these folders. The first is the project root."
+    ? t("session.projectContextHint")
     : isShellOnly
-      ? "Your shell will open in this folder."
-      : "The AI can work across all selected folders. The first folder is the working directory.";
+      ? t("session.workingDirectoryHint")
+      : t("session.selectFoldersHint");
 
   return (
     <div
@@ -699,9 +702,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         <div className="session-creator-resize-handle-bottom" onMouseDown={onResizeHeightStart} />
         {/* Header */}
         <div className="session-creator-header">
-          <span className="session-creator-title">New session</span>
-          <span className="session-creator-step">Step {currentStepNumber} of {totalSteps}</span>
-          <button className="close-btn settings-close" onClick={onClose} title="Close" aria-label="Close">x</button>
+          <span className="session-creator-title">{t("session.new")}</span>
+          <span className="session-creator-step">{t("session.step", { current: currentStepNumber, total: totalSteps })}</span>
+          <button className="close-btn settings-close" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}>x</button>
         </div>
 
         {/* Step indicator */}
@@ -731,7 +734,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   else setStep("projects");
                 }}
               >
-                Continue
+                {t("common.continue")}
               </button>
             </div>
           </div>
@@ -747,7 +750,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <div className="session-creator-ssh-fields">
               {sshSavedHosts.length > 0 && !sshHost && (
                 <div className="session-creator-ssh-history">
-                  <span className="session-creator-ssh-history-label">Saved</span>
+                  <span className="session-creator-ssh-history-label">{t("session.saved")}</span>
                   <div className="session-creator-ssh-history-list">
                     {sshSavedHosts.map((h) => (
                       <button
@@ -773,7 +776,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               )}
               {sshHistory.length > 0 && !sshHost && (
                 <div className="session-creator-ssh-history">
-                  <span className="session-creator-ssh-history-label">Recent</span>
+                  <span className="session-creator-ssh-history-label">{t("session.recent")}</span>
                   <div className="session-creator-ssh-history-list">
                     {sshHistory.map((h, i) => (
                       <button
@@ -799,7 +802,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <input
                 ref={searchRef}
                 className="command-palette-input"
-                placeholder="Host (e.g. 192.168.1.100 or myserver.com)"
+                placeholder={t("session.sshHostPlaceholder")}
                 value={sshHost}
                 onChange={(e) => setSshHost(e.target.value)}
                 autoComplete="off"
@@ -808,14 +811,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <div className="session-creator-ssh-row">
                 <input
                   className="command-palette-input session-creator-ssh-user"
-                  placeholder="User (default: current user)"
+                  placeholder={t("session.sshUserPlaceholder")}
                   value={sshUser}
                   onChange={(e) => setSshUser(e.target.value)}
                   autoComplete="off"
                 />
                 <input
                   className="command-palette-input session-creator-ssh-port"
-                  placeholder="Port"
+                  placeholder={t("session.sshPortPlaceholder")}
                   value={sshPort}
                   onChange={(e) => setSshPort(e.target.value.replace(/\D/g, ""))}
                   autoComplete="off"
@@ -823,19 +826,19 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </div>
               <input
                 className="command-palette-input"
-                placeholder="Identity file (optional, e.g. ~/.ssh/id_rsa)"
+                placeholder={t("session.sshIdentityFilePlaceholder")}
                 value={sshIdentityFile}
                 onChange={(e) => setSshIdentityFile(e.target.value)}
                 autoComplete="off"
               />
               <input
                 className="command-palette-input"
-                placeholder="Jump host (optional, e.g. bastion.example.com)"
+                placeholder={t("session.sshJumpHostPlaceholder")}
                 value={sshJumpHost}
                 onChange={(e) => setSshJumpHost(e.target.value)}
                 autoComplete="off"
               />
-              <span className="settings-hint-inline">Uses your system SSH config and agent for authentication</span>
+              <span className="settings-hint-inline">{t("session.sshConfigHint")}</span>
               <label className="session-creator-save-host-label">
                 <input
                   type="checkbox"
@@ -846,7 +849,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 {saveAsHost && (
                   <input
                     className="session-creator-save-host-name"
-                    placeholder="Label (e.g. My Server)"
+                    placeholder={t("session.sshLabelExample")}
                     value={saveHostLabel}
                     onChange={(e) => setSaveHostLabel(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
@@ -856,13 +859,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </label>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>Back</button>
+              <button className="session-creator-btn-secondary" onClick={goBack}>{t("common.back")}</button>
               <button
                 className="session-creator-btn-primary"
                 onClick={goNext}
                 disabled={!sshHost.trim()}
               >
-                Next
+                {t("common.next")}
               </button>
             </div>
           </div>
@@ -876,7 +879,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <input
               ref={searchRef}
               className="command-palette-input"
-              placeholder="Filter folders..."
+                placeholder={t("session.filterFolders")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               autoComplete="off"
@@ -887,12 +890,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <div className="session-creator-list" ref={listRef}>
               {filtered.length === 0 && !query && (
                 <div className="workspace-empty">
-                  No folders found. Scan a directory below to add one.
+                  {t("session.noFolders")}
                 </div>
               )}
               {filtered.length === 0 && query && (
                 <div className="command-palette-empty">
-                  No folders matching &ldquo;{query}&rdquo;
+                  {t("session.noFoldersMatch", { query })}
                 </div>
               )}
               {filtered.map((project, idx) => (
@@ -920,7 +923,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     </div>
                     <div className="project-picker-path">{shortPath(project.path)}</div>
                     {"path_exists" in project && !project.path_exists && (
-                      <div className="project-picker-missing-label">Folder not found</div>
+                      <div className="project-picker-missing-label">{t("session.folderNotFound")}</div>
                     )}
                     {(project.languages.length > 0 || project.frameworks.length > 0) && (
                       <div className="project-picker-tags">
@@ -955,7 +958,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <div className="project-picker-footer">
               <input
                 className="workspace-scan-input"
-                placeholder="Path or browse..."
+                placeholder={t("session.pathOrBrowse")}
                 value={scanPath}
                 onChange={(e) => setScanPath(e.target.value)}
                 onKeyDown={(e) => {
@@ -971,37 +974,37 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 onClick={handleBrowse}
                 disabled={scanning}
               >
-                {scanning ? "..." : "Browse"}
+                {scanning ? "..." : t("common.browse")}
               </button>
               <button
                 className="workspace-scan-btn"
                 onClick={() => scanNewPath(scanPath)}
                 disabled={scanning || !scanPath.trim()}
               >
-                Scan
+                {t("common.scan")}
               </button>
             </div>
             <div className="session-creator-hints">
-              <span><kbd>&uarr;&darr;</kbd> navigate</span>
-              <span><kbd>Space</kbd> {isShellOnly ? "select" : "toggle"}</span>
-              <span><kbd>Enter</kbd> next</span>
-              <span><kbd>Esc</kbd> close</span>
+              <span><kbd>&uarr;&darr;</kbd> {t("common.navigate")}</span>
+              <span><kbd>Space</kbd> {isShellOnly ? t("common.select") : t("common.toggle")}</span>
+              <span><kbd>Enter</kbd> {t("common.next")}</span>
+              <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
               <button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
+                {t("common.back")}
               </button>
               <button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); goNext(); }}>
-                Skip
+                {t("common.skip")}
               </button>
               <button
                 className="session-creator-btn-primary"
                 onClick={goNext}
                 disabled={checkingGit}
               >
-                {checkingGit ? "Checking..." : isShellOnly
-                  ? "Next"
-                  : `Next (${selectedProjectIds.length} selected)`}
+                {checkingGit ? t("common.checking") : isShellOnly
+                  ? t("common.next")
+                  : t("common.selectedCount", { count: selectedProjectIds.length })}
               </button>
             </div>
           </div>
@@ -1011,9 +1014,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         {step === "branch" && gitProjectIds.length > 0 && (
           <>
             <div className="session-creator-body">
-              <div className="session-creator-section-title">Select branches</div>
+              <div className="session-creator-section-title">{t("session.selectBranches")}</div>
               <div className="session-creator-subtitle">
-                Each project gets its own isolated branch so changes in this session don't affect other sessions.
+                {t("session.selectBranchesHint")}
               </div>
               <div className="session-creator-branch-multi">
                 {selectedProjectIds.map((projectId) => {
@@ -1026,7 +1029,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       <div key={projectId} className="session-creator-branch-project">
                         <div className="session-creator-branch-project-header">
                           <span className="session-creator-branch-project-name">{projectName}</span>
-                          <span className="session-creator-branch-nonGit">Not a git repository</span>
+                          <span className="session-creator-branch-nonGit">{t("session.notGitRepo")}</span>
                         </div>
                       </div>
                     );
@@ -1079,16 +1082,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             </div>
             <div className="session-creator-footer-actions">
               <button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
+                {t("common.back")}
               </button>
               <button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
-                Continue without isolation
+                {t("session.continueWithoutIsolation")}
               </button>
               <button
                 className="session-creator-btn-primary"
                 onClick={goNext}
               >
-                Continue
+                {t("common.continue")}
               </button>
             </div>
           </>
@@ -1097,7 +1100,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         {/* ── tmux session picker (SSH only) ────────────────────────── */}
         {step === "tmux" && mode === "ssh" && (
           <div className="session-creator-body">
-            <div className="session-creator-section-title">tmux sessions</div>
+            <div className="session-creator-section-title">{t("session.tmuxSessions")}</div>
             {tmuxLoading && (
               <div className="command-palette-empty">Connecting to {sshHost}...</div>
             )}
@@ -1134,8 +1137,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   >
                     <span className="project-picker-check" style={{ opacity: 0.5 }}>+</span>
                     <div className="project-picker-info">
-                      <div className="project-picker-name">New tmux session</div>
-                      <div className="project-picker-path">Create a new persistent session</div>
+                      <div className="project-picker-name">{t("session.newTmuxSession")}</div>
+                      <div className="project-picker-path">{t("session.newTmuxSessionHint")}</div>
                     </div>
                   </div>
                 ) : (
@@ -1213,7 +1216,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     <span className="session-creator-provider-name">
                       {p.label}
                       {availabilityLoaded && !isAvailable && (
-                        <span className="session-creator-provider-status-badge">Not detected</span>
+                        <span className="session-creator-provider-status-badge">{t("session.notDetected")}</span>
                       )}
                     </span>
                     <span className="session-creator-provider-desc">{p.description}</span>
@@ -1232,14 +1235,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 className={`session-creator-provider-card ${aiProvider === null ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.length - 1 ? "selected" : ""}`}
                 onClick={() => { setAiProvider(null); setAutoApprove(false); setSelectedChannels([]); setHighlightedProviderIndex(enabledProviders.length - 1); }}
               >
-                <span className="session-creator-provider-name">Plain shell</span>
-                <span className="session-creator-provider-desc">No AI agent</span>
+                <span className="session-creator-provider-name">{t("session.plainShell")}</span>
+                <span className="session-creator-provider-desc">{t("session.noAiAgent")}</span>
               </button>
             </div>
             {aiProvider && availabilityLoaded && !providerAvailability[aiProvider] && (
               <div className="session-creator-install-hint">
                 <div className="session-creator-install-hint-title">
-                  {getProviderInfo(aiProvider)?.label} CLI was not detected on your system
+                  {t("session.cliNotDetected", { cli: getProviderInfo(aiProvider)?.label ?? aiProvider })}
                 </div>
                 <code className="session-creator-install-hint-cmd">{getProviderInfo(aiProvider)?.installCmd}</code>
                 <div className="session-creator-install-hint-auth">{getProviderInfo(aiProvider)?.authHint}</div>
@@ -1247,7 +1250,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
             {aiProvider && (
               <div className="session-creator-permission-mode">
-                <div className="session-creator-permission-mode-label">Approval Flow</div>
+                <div className="session-creator-permission-mode-label">{t("session.approvalFlow")}</div>
                 <div className="session-creator-permission-mode-pills">
                   {getAvailableModes(aiProvider).map((m) => (
                     <button
@@ -1259,13 +1262,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                         setAutoApprove(m === "bypassPermissions");
                       }}
                     >
-                      {PERMISSION_MODES[m].shortLabel}
+                      {permissionShortLabel(m)}
                     </button>
                   ))}
                 </div>
                 <div className="session-creator-permission-mode-info">
                   <span className="session-creator-permission-mode-desc">
-                    {PERMISSION_MODES[permissionMode].description}
+                    {permissionDescription(permissionMode)}
                   </span>
                   {PERMISSION_MODE_FLAGS[aiProvider]?.[permissionMode]?.flag && (
                     <code className="session-creator-permission-mode-flag">
@@ -1277,7 +1280,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
             {aiProvider && (
               <div className="session-creator-custom-suffix">
-                <div className="session-creator-custom-suffix-label">Prefix command</div>
+                <div className="session-creator-custom-suffix-label">{t("session.prefixCommand")}</div>
                 <input
                   type="text"
                   className="session-creator-custom-suffix-input"
@@ -1290,7 +1293,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   autoCorrect="off"
                 />
                 <span className="session-creator-custom-suffix-hint">
-                  Prepended to the launch command (e.g. <code>caffeinate -i</code>, <code>wsl</code>, <code>nice -n 10</code>).
+                  {t("session.prefixCommandHint")} <code>caffeinate -i</code>, <code>wsl</code>, <code>nice -n 10</code>.
                 </span>
                 {PREFIX_EXAMPLES[PLATFORM].length > 0 && (
                   <div
@@ -1315,17 +1318,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
             {aiProvider && (
               <div className="session-creator-custom-suffix">
-                <div className="session-creator-custom-suffix-label">Custom flags</div>
+                <div className="session-creator-custom-suffix-label">{t("session.customFlags")}</div>
                 <input
                   type="text"
                   className="session-creator-custom-suffix-input"
                   value={customSuffix}
                   onChange={(e) => setCustomSuffix(e.target.value)}
                   onKeyDown={(e) => e.stopPropagation()}
-                  placeholder="e.g. --model opus --max-tokens 4096"
+                  placeholder={t("session.flagsPlaceholder")}
                 />
                 <span className="session-creator-custom-suffix-hint">
-                  Appended to the AI agent launch command
+                  {t("session.customFlagsHint")}
                 </span>
               </div>
             )}
@@ -1334,7 +1337,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 className="session-creator-launch-preview"
                 aria-live="polite"
               >
-                <span className="session-creator-launch-preview-label">Preview</span>
+                <span className="session-creator-launch-preview-label">{t("session.preview")}</span>
                 <code className="session-creator-launch-preview-cmd">
                   {buildLaunchPreview(aiProvider, permissionMode, customPrefix, customSuffix)}
                 </code>
@@ -1342,9 +1345,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
             {aiProvider === "claude" && (
               <div className="session-creator-channels">
-                <div className="session-creator-channels-label">Channels</div>
+                <div className="session-creator-channels-label">{t("session.channels")}</div>
                 <div className="session-creator-channels-desc">
-                  Let Claude interact with external services during this session.
+                  {t("session.channelsHint")}
                 </div>
                 <div className="session-creator-channels-list">
                   {CLAUDE_CHANNELS.map((ch) => (
@@ -1368,16 +1371,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </div>
             )}
             <div className="session-creator-hints">
-              <span><kbd>&uarr;&darr;</kbd><kbd>&larr;&rarr;</kbd> navigate</span>
-              <span><kbd>Enter</kbd> select</span>
-              <span><kbd>Esc</kbd> close</span>
+              <span><kbd>&uarr;&darr;</kbd><kbd>&larr;&rarr;</kbd> {t("common.navigate")}</span>
+              <span><kbd>Enter</kbd> {t("common.select")}</span>
+              <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
               <button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
+                {t("common.back")}
               </button>
               <button className="session-creator-btn-primary" onClick={goNext}>
-                Next
+                {t("common.next")}
               </button>
             </div>
           </div>
@@ -1386,16 +1389,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         {/* ── Confirm step ──────────────────────────────────────────── */}
         {step === "confirm" && (
           <div className="session-creator-body">
-            <div className="session-creator-section-title">Confirm</div>
+            <div className="session-creator-section-title">{t("session.confirm")}</div>
             <div className="session-creator-summary">
               {mode === "ssh" ? (
                 <>
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">Connection:</span>
-                    <span className="session-creator-summary-value">SSH Remote</span>
+                    <span className="session-creator-summary-label">{t("session.connection")}</span>
+                    <span className="session-creator-summary-value">{t("session.sshRemote")}</span>
                   </div>
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">Host:</span>
+                    <span className="session-creator-summary-label">{t("session.host")}</span>
                     <span className="session-creator-summary-value">{sshUser ? `${sshUser}@` : ""}{sshHost}{sshPort !== "22" ? `:${sshPort}` : ""}</span>
                   </div>
                   <div className="session-creator-summary-row">
@@ -1407,10 +1410,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 <>
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">
-                      {mode === "agent" ? "Project context:" : (isShellOnly ? "Folder:" : "Folders:")}
+                      {mode === "agent" ? `${t("session.projectContext")}:` : (isShellOnly ? t("session.folder") : t("session.folders"))}
                     </span>
                     <span className="session-creator-summary-value">
-                      {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : "None"}
+                      {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : t("common.none")}
                     </span>
                   </div>
                   {Object.keys(branchSelections).length > 0 && (
@@ -1431,21 +1434,21 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     </div>
                   )}
                   <div className="session-creator-summary-row">
-                    <span className="session-creator-summary-label">Mode:</span>
+                    <span className="session-creator-summary-label">{t("session.mode")}</span>
                     <span className="session-creator-summary-value">
                       {mode === "agent"
-                        ? "Chat with Claude"
+                        ? t("mode.agent.label")
                         : aiProvider
                           ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider
-                          : "Plain shell"}
+                          : t("session.plainShell")}
                       {mode === "terminal" && aiProvider && permissionMode !== "default" && (
-                        <span className="session-creator-summary-flag"> ({PERMISSION_MODES[permissionMode].shortLabel})</span>
+                        <span className="session-creator-summary-flag"> ({permissionShortLabel(permissionMode)})</span>
                       )}
                     </span>
                   </div>
                   {selectedChannels.length > 0 && (
                     <div className="session-creator-summary-row">
-                      <span className="session-creator-summary-label">Channels</span>
+                      <span className="session-creator-summary-label">{t("session.channels")}</span>
                       <span className="session-creator-summary-value">
                         {selectedChannels.map((ch) => CLAUDE_CHANNELS.find((c) => c.id === ch)?.label || ch).join(", ")}
                       </span>
@@ -1457,7 +1460,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             <input
               ref={labelRef}
               className="command-palette-input"
-              placeholder="Session name (optional)"
+              placeholder={t("session.namePlaceholder")}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               onKeyDown={(e) => {
@@ -1470,7 +1473,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             />
             <input
               className="command-palette-input"
-              placeholder="Description (optional)"
+              placeholder={t("session.descriptionPlaceholder")}
               value={description}
               maxLength={120}
               onChange={(e) => setDescription(e.target.value)}
@@ -1485,13 +1488,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
 
             {/* Inline project assignment */}
             <div className="session-creator-project-picker">
-              <span className="session-creator-project-picker-label">Project</span>
+              <span className="session-creator-project-picker-label">{t("session.project")}</span>
               <div className="session-creator-project-chips">
                 <button
                   className={`session-creator-project-chip ${selectedGroup === null ? "selected" : ""}`}
                   onClick={() => setSelectedGroup(null)}
                 >
-                  None
+                  {t("common.none")}
                 </button>
                 {existingGroups.map((group) => (
                   <button
@@ -1513,13 +1516,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     className="session-creator-project-chip session-creator-project-chip-new"
                     onClick={() => { setShowNewProjectInput(true); setNewProjectName(""); }}
                   >
-                    + New
+                    {t("session.newProject")}
                   </button>
                 ) : (
                   <input
                     className="session-creator-project-chip-input"
                     autoFocus
-                    placeholder="Project name..."
+                    placeholder={t("session.projectName")}
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
                     onKeyDown={(e) => {
@@ -1559,7 +1562,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
 
             {/* Color picker */}
             <div className="session-creator-color-picker">
-              <span className="session-creator-color-picker-label">Color</span>
+              <span className="session-creator-color-picker-label">{t("session.color")}</span>
               <div className="session-creator-color-swatches">
                 <button
                   className={`session-creator-color-swatch session-creator-color-swatch-none ${selectedColor === "" ? "selected" : ""}`}
@@ -1585,9 +1588,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {/* Channels (agent mode shows them here too — playbook §6 spec) */}
             {mode === "agent" && (
               <div className="session-creator-channels">
-                <div className="session-creator-channels-label">Channels</div>
+                <div className="session-creator-channels-label">{t("session.channels")}</div>
                 <div className="session-creator-channels-desc">
-                  Let Claude interact with external services during this session.
+                  {t("session.channelsHint")}
                 </div>
                 <div className="session-creator-channels-list">
                   {CLAUDE_CHANNELS.map((ch) => (
@@ -1612,19 +1615,19 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
 
             <div className="session-creator-hints">
-              <span><kbd>Enter</kbd> create</span>
-              <span><kbd>Esc</kbd> close</span>
+              <span><kbd>Enter</kbd> {t("session.createHint")}</span>
+              <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
               <button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
+                {t("common.back")}
               </button>
               <button
                 className="session-creator-btn-primary"
                 onClick={handleConfirm}
                 disabled={creating}
               >
-                {creating ? "Creating..." : "Create session"}
+                {creating ? t("common.creating") : t("session.createSession")}
               </button>
             </div>
           </div>

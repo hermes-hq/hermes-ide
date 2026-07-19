@@ -59,6 +59,16 @@ vi.mock("../state/SessionContext", () => ({
 import { renderToString } from "react-dom/server";
 import type { SessionData, SessionMode } from "../types/session";
 import { StatusBar } from "../components/StatusBar";
+import { I18nProvider } from "../i18n/I18nProvider";
+
+// StatusBar reads its copy through useI18n() — wrap every render.
+function renderBar(): string {
+  return renderToString(
+    <I18nProvider>
+      <StatusBar />
+    </I18nProvider>,
+  );
+}
 
 function makeSession(mode: SessionMode, workingDir = "/Users/me/projects/h-ide"): SessionData {
   return {
@@ -106,7 +116,7 @@ function makeSession(mode: SessionMode, workingDir = "/Users/me/projects/h-ide")
 describe("StatusBar mode-conditional segmented control (Phase 7 → design-system v2)", () => {
   it("hides the Manual/Assisted/Auto segmented control when active session is in agent mode", () => {
     currentSession = makeSession("agent");
-    const html = renderToString(<StatusBar />);
+    const html = renderBar();
     // Design-system v2: the cycle button was replaced with a 3-segment
     // segmented control (see docs/design-system/06-components.md ·
     // "Mode segmented control").  Assert against the new class.
@@ -120,7 +130,7 @@ describe("StatusBar mode-conditional segmented control (Phase 7 → design-syste
 
   it("renders the segmented control when active session is in terminal mode", () => {
     currentSession = makeSession("terminal");
-    const html = renderToString(<StatusBar />);
+    const html = renderBar();
     expect(html).toContain("status-mode-segmented");
     expect(html).toContain("status-mode-seg");
     expect(html).toMatch(/>Manual</);
@@ -130,8 +140,8 @@ describe("StatusBar mode-conditional segmented control (Phase 7 → design-syste
 
   it("does not crash when there is no active session", () => {
     currentSession = null;
-    expect(() => renderToString(<StatusBar />)).not.toThrow();
-    const html = renderToString(<StatusBar />);
+    expect(() => renderBar()).not.toThrow();
+    const html = renderBar();
     expect(html).not.toContain("status-mode-segmented");
   });
 });
@@ -139,21 +149,21 @@ describe("StatusBar mode-conditional segmented control (Phase 7 → design-syste
 describe("StatusBar CWD tooltip semantics (Phase 7)", () => {
   it("uses 'Project context: <path>' in agent mode", () => {
     currentSession = makeSession("agent", "/Users/me/projects/h-ide");
-    const html = renderToString(<StatusBar />);
+    const html = renderBar();
     expect(html).toContain('title="Project context: /Users/me/projects/h-ide"');
     expect(html).not.toContain('title="Working directory: /Users/me/projects/h-ide"');
   });
 
   it("uses 'Working directory: <path>' in terminal mode", () => {
     currentSession = makeSession("terminal", "/Users/me/projects/h-ide");
-    const html = renderToString(<StatusBar />);
+    const html = renderBar();
     expect(html).toContain('title="Working directory: /Users/me/projects/h-ide"');
     expect(html).not.toContain('title="Project context: /Users/me/projects/h-ide"');
   });
 
   it("renders the basename only as visible text", () => {
     currentSession = makeSession("agent", "/Users/me/projects/h-ide");
-    const html = renderToString(<StatusBar />);
+    const html = renderBar();
     // The visible text inside the cwd span is the basename.
     expect(html).toContain(">h-ide<");
     // The full path is not rendered as visible text — only as a title attr.

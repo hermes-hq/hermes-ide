@@ -121,6 +121,8 @@ export interface AgentSessionState {
    *  *bridge process's* lifetime, which with the long-lived bridge equals
    *  the user's session.  Reset on workspace restore. */
   cumulativeCostUsd: number;
+  /** Same idea for input tokens. Used by the Usage panel after it opens late. */
+  cumulativeInputTokens: number;
   /** Same idea for output tokens — quick "how much have I gotten back?" */
   cumulativeOutputTokens: number;
   /** Account info from the SDK's `query.accountInfo()`.  Captured once
@@ -158,6 +160,7 @@ export interface AgentSessionState {
 export function emptyState(): AgentSessionState {
   return {
     cumulativeCostUsd: 0,
+    cumulativeInputTokens: 0,
     cumulativeOutputTokens: 0,
     accountInfo: null,
     rateLimits: {},
@@ -907,6 +910,13 @@ export function reduceEvent(
           const v = u?.output_tokens;
           return typeof v === "number" ? v : 0;
         })();
+    const turnIn = alreadyAccumulated
+      ? 0
+      : (() => {
+          const u = (event as { usage?: { input_tokens?: unknown } }).usage;
+          const v = u?.input_tokens;
+          return typeof v === "number" ? v : 0;
+        })();
     const seenResultEventIds =
       eventId !== null && !alreadyAccumulated
         ? appendCappedResultId(state.seenResultEventIds, eventId)
@@ -921,6 +931,7 @@ export function reduceEvent(
       resultEventAt: now,
       seenResultEventIds,
       cumulativeCostUsd: state.cumulativeCostUsd + turnCost,
+      cumulativeInputTokens: state.cumulativeInputTokens + turnIn,
       cumulativeOutputTokens: state.cumulativeOutputTokens + turnOut,
       // A SUCCESSFUL result clears any prior error — once the user has
       // recovered (via /compact, /branch, a fork, etc.) the banner

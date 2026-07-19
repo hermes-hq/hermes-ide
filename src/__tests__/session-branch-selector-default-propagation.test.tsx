@@ -35,6 +35,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) })
 
 import { invoke } from "@tauri-apps/api/core";
 import { SessionBranchSelector } from "../components/SessionBranchSelector";
+import { I18nProvider } from "../i18n/I18nProvider";
 
 interface MockBranch {
   name: string;
@@ -74,6 +75,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={onBranchSelected}
         onSkip={() => {}}
       />,
+      { wrapper: I18nProvider },
     );
 
     await waitFor(() => {
@@ -97,6 +99,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={onBranchSelected}
         onSkip={() => {}}
       />,
+      { wrapper: I18nProvider },
     );
 
     // Give effects time to fire.  We assert *negative* behaviour, so we
@@ -117,6 +120,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={onBranchSelected}
         onSkip={() => {}}
       />,
+      { wrapper: I18nProvider },
     );
     await new Promise((r) => setTimeout(r, 50));
     expect(onBranchSelected).not.toHaveBeenCalled();
@@ -137,6 +141,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={onBranchSelected}
         onSkip={() => {}}
       />,
+      { wrapper: I18nProvider },
     );
     await new Promise((r) => setTimeout(r, 50));
     expect(onBranchSelected).not.toHaveBeenCalled();
@@ -167,6 +172,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={onBranchSelected}
         onSkip={() => {}}
       />,
+      { wrapper: I18nProvider },
     );
 
     // Wait long enough for any latent propagation to fire (waitFor
@@ -190,6 +196,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={vi.fn()}
         onSkip={() => {}}
       />,
+      { wrapper: I18nProvider },
     );
 
     // Wait for branches to load.
@@ -219,6 +226,7 @@ describe("Bug 2 — SessionBranchSelector auto-propagates the current branch", (
         onBranchSelected={onBranchSelected}
         onSkip={onSkip}
       />,
+      { wrapper: I18nProvider },
     );
 
     await waitFor(() => {

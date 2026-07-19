@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import "../styles/components/CloseSessionDialog.css";
 import type { SessionMode } from "../types/session";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface CloseSessionDialogProps {
   sessionId: string;
@@ -12,26 +13,8 @@ interface CloseSessionDialogProps {
   onDontAskAgain: () => void;
 }
 
-/** Returns the body-text shown in the dialog, mode-conditional.
- *  Exported as a tiny pure function so unit tests can cover both branches
- *  without rendering the full React component. */
-export function closeSessionDialogCopy(mode: "agent" | "terminal"): string {
-  return mode === "agent"
-    ? "This will end the conversation with Claude."
-    : "This will terminate the running terminal session.";
-}
-
-/** Returns the dialog title, mode-conditional. */
-export function closeSessionDialogTitle(mode: "agent" | "terminal"): string {
-  return mode === "agent" ? "End conversation?" : "Close session?";
-}
-
-/** Returns the confirm-button label, mode-conditional. */
-export function closeSessionDialogConfirmLabel(mode: "agent" | "terminal"): string {
-  return mode === "agent" ? "End conversation" : "Close session";
-}
-
 export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel, onDontAskAgain }: CloseSessionDialogProps) {
+  const { t } = useI18n();
   const [dontAsk, setDontAsk] = useState(false);
   const mode: "agent" | "terminal" = sessionMode === "agent" ? "agent" : "terminal";
 
@@ -59,9 +42,9 @@ export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel
   return (
     <div className="close-dialog-backdrop" onClick={onCancel}>
       <div className="close-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="close-dialog-title">{closeSessionDialogTitle(mode)}</div>
+        <div className="close-dialog-title">{mode === "agent" ? t("close.agent.title") : t("close.terminal.title")}</div>
         <div className="close-dialog-body">
-          {closeSessionDialogCopy(mode)}
+          {mode === "agent" ? t("close.agent.body") : t("close.terminal.body")}
         </div>
         <label className="close-dialog-checkbox">
           <input
@@ -69,12 +52,12 @@ export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel
             checked={dontAsk}
             onChange={(e) => setDontAsk(e.target.checked)}
           />
-          Don't ask again
+          {t("close.dontAsk")}
         </label>
         <div className="close-dialog-actions">
-          <button className="close-dialog-btn" onClick={onCancel}>Cancel</button>
+          <button className="close-dialog-btn" onClick={onCancel}>{t("common.cancel")}</button>
           <button className="close-dialog-btn close-dialog-btn-confirm" onClick={handleConfirm}>
-            {closeSessionDialogConfirmLabel(mode)}
+            {mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm")}
           </button>
         </div>
       </div>
