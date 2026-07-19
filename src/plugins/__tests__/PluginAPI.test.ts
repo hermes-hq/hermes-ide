@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createPluginAPI, PermissionDeniedError, type PluginAPICallbacks } from "../PluginAPI";
+import { getI18nSnapshot } from "../../i18n/registry";
 
 vi.mock("@tauri-apps/api/core", () => ({
 	invoke: vi.fn(),
@@ -301,6 +302,33 @@ describe("createPluginAPI", () => {
 			const api = createPluginAPI("my-plugin", new Set(["shell.exec"]), undefined, callbacks, commandHandlers, panelComponents);
 			await api.shell.exec("whoami");
 			expect(mockInvoke).toHaveBeenCalledWith("plugin_exec_command", { command: "whoami", args: [], pluginId: "my-plugin" });
+		});
+	});
+
+	describe("i18n", () => {
+		it("registerLanguagePack tracks the disposable in api.subscriptions", () => {
+			const api = createPluginAPI("test", new Set(), undefined, callbacks, commandHandlers, panelComponents);
+			const disposable = api.i18n.registerLanguagePack({
+				locale: "xtest",
+				label: "Test Pack",
+				messages: { "common.close": "Test Close" },
+			});
+			expect(api.subscriptions).toContain(disposable);
+			// Registering a pack never changes the active language by itself.
+			expect(api.i18n.getCurrentLanguage()).toBe("en");
+			disposable.dispose();
+		});
+
+		it("registered packs join the registry until disposed", () => {
+			const api = createPluginAPI("test", new Set(), undefined, callbacks, commandHandlers, panelComponents);
+			const disposable = api.i18n.registerLanguagePack({
+				locale: "xtest2",
+				label: "Test Pack 2",
+				messages: { "common.close": "Test Close 2" },
+			});
+			expect(getI18nSnapshot().languages.some((p) => p.locale === "xtest2")).toBe(true);
+			disposable.dispose();
+			expect(getI18nSnapshot().languages.some((p) => p.locale === "xtest2")).toBe(false);
 		});
 	});
 });

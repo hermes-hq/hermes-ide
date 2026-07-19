@@ -73,6 +73,26 @@ describe("PluginRuntime", () => {
 		});
 	});
 
+	describe("getAllPlugins", () => {
+		it("should return manifest and status for every registered plugin", () => {
+			runtime.register(createTestPlugin());
+			runtime.register(createTestPlugin({
+				manifest: { ...createTestPlugin().manifest, id: "test.other", name: "Other Plugin" },
+			}));
+			const all = runtime.getAllPlugins();
+			expect(all).toHaveLength(2);
+			expect(all.map((p) => p.manifest.id).sort()).toEqual(["test.other", "test.plugin"]);
+			expect(all.every((p) => p.status === "registered")).toBe(true);
+		});
+
+		it("should reflect the status change after activation", async () => {
+			runtime.register(createTestPlugin());
+			await runtime.activate("test.plugin");
+			const entry = runtime.getAllPlugins().find((p) => p.manifest.id === "test.plugin");
+			expect(entry?.status).toBe("active");
+		});
+	});
+
 	describe("activate", () => {
 		it("should call activate function on the plugin module", async () => {
 			const activate = vi.fn();
