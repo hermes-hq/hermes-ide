@@ -122,6 +122,12 @@ pub struct OutputAnalyzer {
     pub ai_launch_failed: Option<String>,
     /// Provider being launched (set before launch, cleared after check window).
     pub ai_launching_provider: Option<String>,
+    /// True when the terminal is currently inside an "alternate screen buffer"
+    /// (DEC private modes 1049 / 1047 / 47), i.e. running a full-screen TUI
+    /// like vim, less, htop, nano, ssh, or the Claude/Codex CLIs. While this
+    /// is true the input path skips the line-buffer machinery so random
+    /// keystrokes typed at the TUI don't get recorded as shell commands.
+    pub in_alternate_screen: bool,
 }
 
 impl Default for OutputAnalyzer {
@@ -168,6 +174,7 @@ impl OutputAnalyzer {
             ai_launch_check_remaining: 0,
             ai_launch_failed: None,
             ai_launching_provider: None,
+            in_alternate_screen: false,
         }
     }
 
@@ -215,6 +222,11 @@ impl OutputAnalyzer {
                 }
             }
         }
+
+        // Track alternate-screen-buffer state on the raw byte stream before
+        // ANSI escapes are stripped. Used by the input path to suppress
+        // line-buffer recording while a TUI owns the screen.
+        Self::update_alt_screen_state(&mut self.in_alternate_screen, raw);
 
         // Strip ANSI escapes once — reused for busy detection, cost/token scanning,
         // and line-by-line analysis below.
@@ -690,4 +702,133 @@ fn percentile(samples: &VecDeque<f64>, pct: f64) -> Option<f64> {
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = ((pct / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
     sorted.get(idx).copied()
+}
+
+impl OutputAnalyzer {
+    /// Scan `raw` for DEC private-mode set/reset sequences that toggle the
+    /// alternate screen buffer and update `state` to reflect the most-recent
+    /// transition observed. Handles all three variants in common use:
+    ///   - `\x1b[?1049h` / `\x1b[?1049l` (xterm-style, modern default)
+    ///   - `\x1b[?1047h` / `\x1b[?1047l`
+    ///   - `\x1b[?47h`   / `\x1b[?47l`   (older terminals)
+    /// Only the latest transition in a chunk matters — if a TUI exits and a
+    /// new one starts inside the same PTY read, we should land on "in TUI".
+    fn update_alt_screen_state(state: &mut bool, raw: &[u8]) {
+        const PATTERNS: &[(&[u8], bool)] = &[
+            (b"\x1b[?1049h", true),
+            (b"\x1b[?1049l", false),
+            (b"\x1b[?1047h", true),
+            (b"\x1b[?1047l", false),
+            (b"\x1b[?47h", true),
+            (b"\x1b[?47l", false),
+        ];
+        let mut latest: Option<(usize, bool)> = None;
+        for (needle, enter) in PATTERNS {
+            if needle.is_empty() || raw.len() < needle.len() {
+                continue;
+            }
+            let mut start = 0usize;
+            while let Some(rel) = raw[start..]
+                .windows(needle.len())
+                .position(|w| w == *needle)
+            {
+                let abs = start + rel;
+                match latest {
+                    Some((cur, _)) if cur >= abs => {}
+                    _ => latest = Some((abs, *enter)),
+                }
+                start = abs + needle.len();
+            }
+        }
+        if let Some((_, enter)) = latest {
+            *state = enter;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alt_screen_enter_sets_state() {
+        let mut s = false;
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"\x1b[?1049h");
+        assert!(s, "1049h should enter alt screen");
+    }
+
+    #[test]
+    fn alt_screen_exit_clears_state() {
+        let mut s = true;
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"some output\x1b[?1049l\r\n");
+        assert!(!s, "1049l should leave alt screen");
+    }
+
+    #[test]
+    fn alt_screen_older_1047_variants_supported() {
+        let mut s = false;
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"\x1b[?1047h");
+        assert!(s);
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"\x1b[?1047l");
+        assert!(!s);
+    }
+
+    #[test]
+    fn alt_screen_oldest_47_variants_supported() {
+        let mut s = false;
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"\x1b[?47h");
+        assert!(s);
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"\x1b[?47l");
+        assert!(!s);
+    }
+
+    #[test]
+    fn alt_screen_latest_transition_in_chunk_wins() {
+        // Enter, exit, re-enter — final state should be "in alt screen".
+        let mut s = false;
+        let chunk = b"\x1b[?1049h...content...\x1b[?1049l...gap...\x1b[?1049h";
+        OutputAnalyzer::update_alt_screen_state(&mut s, chunk);
+        assert!(s, "last transition (re-enter) should win");
+    }
+
+    #[test]
+    fn alt_screen_state_persists_when_chunk_has_no_transitions() {
+        let mut s = true;
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"plain output, no escapes");
+        assert!(s, "unchanged when no toggle present");
+
+        let mut s2 = false;
+        OutputAnalyzer::update_alt_screen_state(&mut s2, b"plain output, no escapes");
+        assert!(!s2, "unchanged when no toggle present");
+    }
+
+    #[test]
+    fn alt_screen_process_integration() {
+        // End-to-end through process(): receive TUI enter, then receive
+        // some content, then receive exit. The flag tracks each transition.
+        let mut a = OutputAnalyzer::new();
+        assert!(!a.in_alternate_screen);
+
+        a.process(b"\x1b[?1049h\x1b[2J");
+        assert!(a.in_alternate_screen, "should be in alt screen after enter");
+
+        a.process(b"some TUI content with cursor moves \x1b[5;10H more text");
+        assert!(a.in_alternate_screen, "still in alt screen during TUI");
+
+        a.process(b"\x1b[?1049l");
+        assert!(!a.in_alternate_screen, "should have left alt screen");
+    }
+
+    #[test]
+    fn alt_screen_unrelated_dec_modes_do_not_toggle() {
+        // 1049/1047/47 are the alt-screen modes; other DEC private modes
+        // (e.g. ?25h hide-cursor, ?2004h bracketed-paste) must NOT affect us.
+        let mut s = false;
+        OutputAnalyzer::update_alt_screen_state(&mut s, b"\x1b[?25h\x1b[?2004h");
+        assert!(!s, "unrelated DEC modes should not enter alt screen");
+
+        let mut s2 = true;
+        OutputAnalyzer::update_alt_screen_state(&mut s2, b"\x1b[?25l\x1b[?2004l");
+        assert!(s2, "unrelated DEC modes should not leave alt screen");
+    }
 }
