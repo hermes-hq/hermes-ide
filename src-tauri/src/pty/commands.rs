@@ -608,6 +608,7 @@ pub fn create_session(
     ssh_identity_file: Option<String>,
     initial_rows: Option<u16>,
     initial_cols: Option<u16>,
+    worktree_base_path: Option<String>,
     // `mode` is the frontend-chosen runtime mode.  `"terminal"` (default)
     // spawns a PTY; `"agent"` skips PTY spawn and lets the frontend drive
     // the Claude subprocess via `agent::spawn_agent_session` after this
@@ -720,6 +721,7 @@ pub fn create_session(
             identity_file: ssh_identity_file.clone(),
             port_forwards: Vec::new(),
         }),
+        worktree_base_path,
         mode: session_mode,
     };
 
@@ -2099,6 +2101,13 @@ fn remove_owned_worktrees_from_disk(
 ) {
     let mut repos_to_prune: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    let custom_base = db
+        .get_setting("worktree_base_path")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from);
+
     for wt in worktrees {
         let Ok(Some(proj)) = db.get_project(&wt.project_id) else {
             // Project gone — we can't locate the parent repo to run
@@ -2112,7 +2121,12 @@ fn remove_owned_worktrees_from_disk(
 
         repos_to_prune.insert(proj.path.clone());
 
-        match crate::git::worktree::remove_worktree(&proj.path, session_id, &wt.worktree_path) {
+        match crate::git::worktree::remove_worktree(
+            &proj.path,
+            session_id,
+            &wt.worktree_path,
+            custom_base.as_deref(),
+        ) {
             Ok(()) => {
                 if let Err(e) = db.delete_session_worktree(&wt.id) {
                     log::warn!(

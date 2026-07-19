@@ -242,6 +242,7 @@ export async function createWorktree(
   branchName: string,
   createBranch: boolean = false,
   fromRemote?: string,
+  worktreeBasePath?: string,
 ): Promise<WorktreeCreateResult> {
   return invoke<WorktreeCreateResult>("git_create_worktree", {
     sessionId,
@@ -249,6 +250,7 @@ export async function createWorktree(
     branchName,
     createBranch,
     fromRemote: fromRemote ?? null,
+    worktreeBasePath: worktreeBasePath ?? null,
   });
 }
 

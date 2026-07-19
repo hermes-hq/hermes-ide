@@ -207,6 +207,7 @@ pub struct Session {
     pub has_initial_context: bool,
     pub last_nudged_version: i64,
     pub ssh_info: Option<SshConnectionInfo>,
+    pub worktree_base_path: Option<String>,
     /// Frontend runtime mode.  `terminal` spawns a PTY; `agent` drives the
     /// Claude subprocess via `crate::agent::spawn_agent_session`.  Defaults
     /// to `terminal` for backward compat with on-disk session rows that
@@ -252,6 +253,7 @@ pub struct SessionUpdate {
     pub has_initial_context: bool,
     pub last_nudged_version: i64,
     pub ssh_info: Option<SshConnectionInfo>,
+    pub worktree_base_path: Option<String>,
     #[serde(default)]
     pub mode: SessionMode,
 }
@@ -282,6 +284,7 @@ impl From<&Session> for SessionUpdate {
             has_initial_context: s.has_initial_context,
             last_nudged_version: s.last_nudged_version,
             ssh_info: s.ssh_info.clone(),
+            worktree_base_path: s.worktree_base_path.clone(),
             mode: s.mode,
         }
     }

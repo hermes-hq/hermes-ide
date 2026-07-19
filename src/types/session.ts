@@ -173,6 +173,8 @@ export interface CreateSessionOpts {
   sshUser?: string;
   tmuxSession?: string;
   sshIdentityFile?: string;
+  /** Custom base path for git worktrees for this session. */
+  worktreeBasePath?: string;
   /** Frontend-chosen session mode.  Defaults to `agent` for Claude, `terminal` otherwise. */
   mode?: SessionMode;
 }

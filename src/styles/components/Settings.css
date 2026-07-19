@@ -141,6 +141,13 @@
   padding: 8px 10px;
   outline: none;
 }
+.settings-input-with-btn {
+  display: flex;
+  gap: 8px;
+}
+.settings-input-with-btn .settings-input {
+  flex: 1;
+}
 .settings-input:focus, .settings-select:focus { border-color: var(--accent); }
 .settings-input::placeholder { color: var(--text-3); }
 
