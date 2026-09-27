@@ -165,8 +165,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // empty-state early return so the hook count never changes between
   // pre-init and post-first-message renders (see React #310).
   const todoSnapshot = useMemo(
-    () => extractTodoSnapshot(state.messages),
-    [state.messages],
+    () => extractTodoSnapshot(state.messages, state.toolResults),
+    [state.messages, state.toolResults],
   );
   // AGENT-09: turn-number assignment is memoized so it doesn't recompute
   // on every reducer notification (it only depends on `state.messages`).
