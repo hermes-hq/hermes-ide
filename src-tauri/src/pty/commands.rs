@@ -1071,6 +1071,17 @@ pub fn create_session(
                         break;
                     }
                     Ok(n) => {
+                        // Session was closed but something still holds the PTY
+                        // open (e.g. a TUI that ignored SIGHUP).  Stop reading so
+                        // we never re-announce a closed session; exiting also
+                        // drops our master fd so the kernel hangs up the PTY.
+                        if session_clone
+                            .lock()
+                            .map(|s| s.phase == SessionPhase::Destroyed)
+                            .unwrap_or(false)
+                        {
+                            break;
+                        }
                         let data = &buf[..n];
 
                         // Declare outside analyzer lock scope so DB work can
@@ -1103,7 +1114,7 @@ pub fn create_session(
 
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_clone.lock() {
-                                    if s.phase != new_phase {
+                                    if s.phase.can_transition_to(&new_phase) {
                                         s.phase = new_phase.clone();
                                         s.last_activity_at = now();
                                         s.detected_agent = a.detected_agent.clone();
@@ -1535,7 +1546,7 @@ pub fn create_session(
                 if let Some((new_phase, detected_agent, metrics, launch_info)) = silence_result {
                     if let Some(new_phase) = new_phase {
                         if let (Some(metrics), Ok(mut s)) = (metrics, session_silence.lock()) {
-                            if s.phase != new_phase {
+                            if s.phase.can_transition_to(&new_phase) {
                                 s.phase = new_phase.clone();
                                 s.detected_agent = detected_agent;
                                 s.metrics = metrics;

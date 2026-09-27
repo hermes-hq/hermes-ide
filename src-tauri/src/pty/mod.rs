@@ -430,6 +430,18 @@ mod tests {
     }
 
     #[test]
+    fn destroyed_phase_is_terminal() {
+        // A closed session must never be revived by late PTY output —
+        // otherwise the frontend re-adds it as a black "ghost" session.
+        assert!(!SessionPhase::Destroyed.can_transition_to(&SessionPhase::Idle));
+        assert!(!SessionPhase::Destroyed.can_transition_to(&SessionPhase::Busy));
+        assert!(!SessionPhase::Destroyed.can_transition_to(&SessionPhase::NeedsInput));
+        assert!(!SessionPhase::Idle.can_transition_to(&SessionPhase::Idle));
+        assert!(SessionPhase::Idle.can_transition_to(&SessionPhase::Busy));
+        assert!(SessionPhase::Busy.can_transition_to(&SessionPhase::NeedsInput));
+    }
+
+    #[test]
     fn needs_input_phase_str() {
         assert_eq!(SessionPhase::NeedsInput.as_str(), "needs_input");
         assert_eq!(SessionPhase::Idle.as_str(), "idle");
