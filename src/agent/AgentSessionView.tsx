@@ -233,8 +233,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   const { respawnAgent, createSession } = sessionCtx;
   const handleRetry = () => {
     setRetrying(true);
-    // A second click while this runs joins the same restart (backend
-    // spawn lock), so it is safe to leave the button enabled.
+    // A second click while this runs joins the same restart (per-session
+    // respawn lock), so it is safe to leave the button enabled.
     void respawnAgent(sessionId)
       .then((ok) => {
         // Started: the old error no longer describes the session. A failed

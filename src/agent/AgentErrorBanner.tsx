@@ -15,8 +15,9 @@ interface AgentErrorBannerProps {
  * agentErrors.ts) for styling and for tests.
  *
  * Retry stays clickable while a restart runs: a second click joins the
- * restart already in progress (the backend's per-session spawn lock), so it
- * never starts a second agent process.
+ * restart already in progress (the per-session respawn lock, see
+ * utils/respawnQueue.ts and the backend's agent/respawn.rs), so it never
+ * starts a second agent process.
  */
 export function AgentErrorBanner({ error, retrying, onRetry, onSignIn }: AgentErrorBannerProps) {
   return (

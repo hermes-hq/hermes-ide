@@ -9,6 +9,9 @@
 //! restarts or closes that session's process holds it, so those steps never
 //! interleave. A plain restart that had to wait for another restart to finish
 //! joins that restart's result instead of starting a second process.
+//! It can only merge requests that overlap here; a second request that
+//! arrives after the first restart finished is merged by the page instead
+//! (`src/utils/respawnQueue.ts`), which knows both were meant as one.
 //!
 //! The gate is generic over the actual spawn / liveness check so the locking
 //! rules are unit-tested with a counting fake instead of a real child.

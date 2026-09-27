@@ -21,11 +21,14 @@
 //             restore it, Retry -> running again
 //          e. the agent prints a line that is not JSON -> "Claude sent output
 //             Hermes couldn't read"; Retry clears it
-//   run 3  NEGATIVE CONTROL: same app, same steps a–b, with the respawn lock
-//          turned off (HERMES_E2E_NO_RESPAWN_LOCK=1, honoured only by test
-//          builds). The double Retry must now show TWO new processes; if it
-//          does not, this scenario cannot tell a locked build from an
-//          unlocked one and fails.
+//   run 3  steps a–b with only the backend's merging turned off: the page's
+//          lock alone must still give one process.
+//          NEGATIVE CONTROL (same launch, a new session): steps a–b with the
+//          lock off in both halves, the backend's (HERMES_E2E_NO_RESPAWN_LOCK=1)
+//          and the page's (window.__HERMES_E2E_NO_RESPAWN_LOCK__), both honoured
+//          only by test builds. The double Retry must now show TWO new
+//          processes; if it does not, this scenario cannot tell a locked build
+//          from an unlocked one and fails.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F07-agent-view-respawn.mjs
@@ -424,12 +427,26 @@ try {
   await app.bridge.waitFor("the error panel to clear", `return !e2e.first(".agent-error-banner");`, { timeoutMs: 20_000 });
   await quit(app);
 
-  // ── run 3: negative control ────────────────────────────────────────
-  log("step 9: NEGATIVE CONTROL — same steps with the respawn lock turned off");
+  // ── run 3: only the page's lock ────────────────────────────────────
+  // The backend can only merge restarts that reach it at the same time; on a
+  // slow runner the second click's request can arrive after the first
+  // restart finished. With the backend's merging off, the page's lock alone
+  // must still give one process.
+  log("step 9: backend lock OFF, page lock on — still exactly one process");
   app = await launch(3, { env: appEnv({ HERMES_E2E_NO_RESPAWN_LOCK: "1" }) });
   await waitForReturningLaunch(app.bridge);
+  const sid3 = await createAgentSession(app.bridge);
+  let t0 = Date.now();
+  while (appSpawns(app.runDir, sid3) < 1 && Date.now() - t0 < 20_000) await sleep(100);
+  const p3 = await crashThenDoubleRetry(app, sid3, { expectPanelToClear: true });
+  details.pageLockOnlyNewProcesses = p3.newSpawns;
+  assert(p3.newSpawns === 1, `the page's lock alone started exactly one process (${p3.newSpawns})`);
+
+  // ── run 4: negative control ────────────────────────────────────────
+  log("step 10: NEGATIVE CONTROL — both halves of the lock off");
+  await app.bridge.eval(`window.__HERMES_E2E_NO_RESPAWN_LOCK__ = true; return true;`);
   const sid2 = await createAgentSession(app.bridge);
-  const t0 = Date.now();
+  t0 = Date.now();
   while (appSpawns(app.runDir, sid2) < 1 && Date.now() - t0 < 20_000) await sleep(100);
   const n = await crashThenDoubleRetry(app, sid2, { expectPanelToClear: false });
   details.unlockedNewProcesses = n.newSpawns;
