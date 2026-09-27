@@ -170,11 +170,9 @@ function setInput(bridge, selector, value) {
  */
 async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.click("button.es-tile-primary");
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, {
     timeoutMs: 20_000,
   });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await bridge.click(".session-creator-actions .session-creator-btn-primary");
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.clickWhenReady(`
     const cards = e2e.all(".session-creator-provider-card");
@@ -199,10 +197,10 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
     return e2e.all(".project-picker-item-attached").some((el) => el.innerText.includes(${JSON.stringify(basename(repo))}));
   `);
   // The wizard checks whether the folder is a git repo; once it knows, a
-  // branch step joins the progress dots (4 -> 5). Continuing earlier skips it.
+  // branch step joins the progress dots (3 -> 4). Continuing earlier skips it.
   await bridge.waitFor("the wizard to detect the git repo (branch step added)", `
     const next = e2e.first(".session-creator-actions .session-creator-btn-primary");
-    return e2e.all(".session-creator-step-dot").length === 5 && !!next && !next.disabled;
+    return e2e.all(".session-creator-step-dot").length === 4 && !!next && !next.disabled;
   `, { timeoutMs: 20_000 });
   await bridge.click(".session-creator-actions .session-creator-btn-primary");
 

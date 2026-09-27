@@ -1,8 +1,15 @@
 # ADR 001 — Agent mode for Claude (v1.0.0)
 
-**Status:** Accepted
+**Status:** Superseded in part by [ADR 003 — Terminal first, vendor-neutral](003-terminal-first-vendor-neutral.md)
 **Date:** 2026-05-07
 **Deciders:** Project lead, contributors
+
+> **Superseded note (ADR 003).** Two things in this record no longer hold:
+>
+> 1. **Default mode.** New Claude sessions now open in Terminal mode, like every other agent. What this ADR calls Agent mode is now the optional **Agent view**, chosen per session with "Agent view for Claude" in the New Session wizard. The forks "Default for new Claude sessions: Agent mode" and "Default for non-Claude providers: Terminal mode (locked)" are replaced by one rule: terminal for every agent, Agent view on request where an agent has one.
+> 2. **Transport.** The Agent view does not spawn `claude --print --output-format stream-json --input-format stream-json`. Before 1.0.0 shipped, that was replaced by a per-session Node bridge (`src-tauri/bridge/hermes-claude-bridge.mjs`) that drives the Claude Agent SDK and speaks the same stream-json wire format to the app, so the event model, renderer and composer described below are unchanged. See also [ADR 002](002-bridge-runtime-tarball.md) for how the SDK runtime ships.
+>
+> The rest is kept as the historical record of the 1.0.0 decision.
 
 ## Context
 

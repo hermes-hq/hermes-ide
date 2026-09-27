@@ -58,6 +58,7 @@ import type {
   SavedWorkspace, SavedSessionInfo, SessionMode,
 } from "../types/session";
 import { SAVED_WORKSPACE_VERSION, validateSavedWorkspace } from "../types/session";
+import { hasAgentView } from "../utils/sessionModePref";
 import {
   clampWorkbenchRatio,
   clampFilesNotesSplit,
@@ -311,9 +312,9 @@ function remapPaneFocusId(layout: LayoutNode, _oldFocusId: string | null): strin
 /**
  * Resolve the runtime mode for a new session.
  *
- * Rules (1.0.0 — agent mode is Claude-only):
- *   1. Non-Claude providers (and shell-only) are always "terminal".
- *   2. Claude defaults to "agent" unless the caller explicitly passed "terminal".
+ * Terminal first (ADR 003): every session runs in terminal mode unless the
+ * caller explicitly asked for the Agent view AND the provider has one.
+ * There is no provider-specific default any more — Claude included.
  *
  * Exported for testability.
  */
@@ -321,8 +322,7 @@ export function resolveSessionMode(
   requested: SessionMode | undefined,
   aiProvider: string | null | undefined,
 ): SessionMode {
-  if (aiProvider !== "claude") return "terminal";
-  return requested ?? "agent";
+  return requested === "agent" && hasAgentView(aiProvider) ? "agent" : "terminal";
 }
 
 // ─── State ──────────────────────────────────────────────────────────
@@ -1810,10 +1810,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // the shell starts at 80x24 and misses the initial resize from attach().
       const initialDims = estimateInitialDimensions();
 
-      // Pick the runtime mode.  If the caller passed an explicit mode, use it;
-      // otherwise default to "agent" for Claude and "terminal" for everything
-      // else.  Agent mode is Claude-only in 1.0.0 — non-Claude providers are
-      // forced back to "terminal" even if the caller requested "agent".
+      // Pick the runtime mode.  Terminal is the default for every provider;
+      // the Agent view is used only when the caller asked for it and the
+      // provider has one (Claude today).
       const mode = resolveSessionMode(opts?.mode, opts?.aiProvider);
 
       const session = await apiCreateSession({
@@ -2481,10 +2480,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    * Send a user message to a Claude agent session, auto-respawning the
    * subprocess if it has exited between turns.
    *
-   * Claude's `claude --print --output-format stream-json --input-format stream-json`
-   * is one-shot per spawn — after each turn the subprocess emits its
-   * `result` event and exits.  To keep a multi-turn conversation alive we
-   * have to spawn a fresh child for every user message, passing
+   * The Agent view runs a per-session Node bridge (the Claude Agent SDK
+   * behind a stream-json wire format, see `src-tauri/bridge/`), and that
+   * subprocess can exit between turns.  To keep a multi-turn conversation
+   * alive we spawn a fresh child when needed, passing
    * `--resume <claude-session-uuid>` so the same conversation thread is
    * loaded.  This function papers over that lifecycle: callers just submit;
    * we transparently bring the subprocess back if it's gone.

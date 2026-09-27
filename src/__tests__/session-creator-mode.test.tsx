@@ -1,20 +1,20 @@
+// @vitest-environment jsdom
 /**
- * Phase 6 (v1.0.0 redesign) — SessionCreator mode-cardinal flow.
+ * Terminal first (ADR 003) — the session creator flow.
  *
- * Asserts:
- *   - The new Step 1 ("How do you want to work?") renders three radio cards
- *     with the exact playbook §8 copy and correct aria-checked semantics.
- *   - When SessionCreator opens with `initialMode = "agent"`, the Step 2 UI
- *     hides terminal-only fields (no Approval Flow / permission pills, no
- *     Prefix command, no shell-launch knobs).
- *   - When SessionCreator opens with `initialMode = "terminal"`, the same
- *     fields ARE present once a provider is picked.
- *   - "Session Type" header is gone (the cardinal mode picker replaces it).
- *
- * Rendering uses `react-dom/server` `renderToString` — the established
- * pattern in this codebase.  All Tauri-bridge dependencies are mocked.
+ * Drives the real SessionCreator through clicks and asserts what it hands to
+ * `onCreate` and what it stores:
+ *   - The creator opens on the agent step; there is no separate mode step.
+ *   - A Claude session is a terminal session unless "Agent view for Claude"
+ *     is ticked.
+ *   - The Agent view option only exists for agents that have one.
+ *   - The choice is remembered per agent (session_mode_by_provider) and
+ *     preselected next time.
+ *   - "Connect over SSH" switches to the SSH form and Back returns.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 
 // ─── Tauri & API mocks (must come before SessionCreator import) ──────
 vi.mock("@tauri-apps/api/core", () => ({
@@ -22,6 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
+  emit: vi.fn(),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(() => Promise.resolve(null)),
@@ -38,11 +39,19 @@ vi.mock("../api/projects", () => ({
 vi.mock("../api/sessions", () => ({
   getSessions: vi.fn(() => Promise.resolve([])),
   sshListTmuxSessions: vi.fn(() => Promise.resolve([])),
-  checkAiProviders: vi.fn(() => Promise.resolve({})),
+  checkAiProviders: vi.fn(() =>
+    Promise.resolve({ claude: true, codex: true, gemini: true, aider: true, copilot: true, kiro: true }),
+  ),
 }));
+
+// In-memory settings store, so the creator reads back what it wrote.
+const settingsStore = new Map<string, string>();
 vi.mock("../api/settings", () => ({
-  getSetting: vi.fn(() => Promise.resolve(null)),
-  setSetting: vi.fn(() => Promise.resolve()),
+  getSetting: vi.fn((key: string) => Promise.resolve(settingsStore.get(key) ?? null)),
+  setSetting: vi.fn((key: string, value: string) => {
+    settingsStore.set(key, value);
+    return Promise.resolve();
+  }),
 }));
 vi.mock("../api/ssh", () => ({
   listSshSavedHosts: vi.fn(() => Promise.resolve([])),
@@ -52,182 +61,188 @@ vi.mock("../api/git", () => ({
   isGitRepo: vi.fn(() => Promise.resolve(false)),
 }));
 
-import { renderToString } from "react-dom/server";
 import { SessionCreator } from "../components/SessionCreator";
-import {
-  SessionCreatorModeStep,
-  SESSION_CREATOR_MODES,
-  type SessionCreatorMode,
-} from "../components/SessionCreatorModeStep";
+import type { CreateSessionOpts } from "../types/session";
 import { I18nProvider } from "../i18n/I18nProvider";
-import { translate } from "../i18n/registry";
 
-// =====================================================================
-// SessionCreatorModeStep — the standalone Step 1 component
-// =====================================================================
-describe("SessionCreatorModeStep (Phase 6)", () => {
-  function renderModeStep(selected: SessionCreatorMode) {
-    return renderToString(
-      <I18nProvider>
-        <SessionCreatorModeStep selected={selected} onSelect={() => {}} />
-      </I18nProvider>,
-    );
-  }
+type OnCreate = (opts: CreateSessionOpts) => Promise<void>;
 
-  it("exports the canonical mode list with three options", () => {
-    expect(SESSION_CREATOR_MODES.map((m) => m.id)).toEqual([
-      "agent",
-      "terminal",
-      "ssh",
-    ]);
+async function openCreator(onCreate: OnCreate = vi.fn(async () => {})) {
+  const utils = render(
+    <I18nProvider>
+      <SessionCreator onClose={() => {}} onCreate={onCreate} />
+    </I18nProvider>,
+  );
+  // Let the mount-time settings / availability loads settle.
+  await act(async () => {
+    await Promise.resolve();
   });
+  return utils;
+}
 
-  it("uses the v1.0 mode-card copy (M8 categorisation refresh)", () => {
-    const map = Object.fromEntries(
-      SESSION_CREATOR_MODES.map((m) => [m.id, m]),
-    );
-    // Mode cards carry i18n keys — resolve them through the English base
-    // pack so the public-facing copy is still pinned exactly.
-    expect(translate(map.agent.labelKey)).toBe("Chat with Claude");
-    expect(translate(map.agent.descriptionKey)).toContain("Diffs");
-    expect(translate(map.agent.descriptionKey)).toContain("Built natively into Hermes");
-    expect(translate(map.terminal.labelKey)).toBe("Terminal");
-    expect(translate(map.terminal.descriptionKey).toLowerCase()).toContain("universal");
-    expect(translate(map.terminal.descriptionKey)).toContain("Claude Code");
-    expect(translate(map.terminal.descriptionKey)).toContain("Aider");
-    expect(translate(map.ssh.labelKey)).toBe("SSH");
-    expect(translate(map.ssh.descriptionKey).toLowerCase()).toContain("v1.1");
-  });
+function providerCard(label: string): HTMLElement {
+  const card = screen
+    .getAllByRole("button")
+    .find((b) => b.classList.contains("session-creator-provider-card") && b.textContent?.startsWith(label));
+  if (!card) throw new Error(`no provider card for ${label}`);
+  return card;
+}
 
-  it("renders all three options with the heading question", () => {
-    const html = renderModeStep("agent");
-    expect(html).toContain("How do you want to work?");
-    expect(html).toContain("Chat with Claude");
-    expect(html).toContain("Terminal");
-    expect(html).toContain("SSH");
-  });
+function agentViewCheckbox(): HTMLInputElement | null {
+  return screen.queryByRole("checkbox", { name: /Agent view for Claude/ }) as HTMLInputElement | null;
+}
 
-  it("renders selected=agent with aria-checked on the agent card only", () => {
-    const html = renderModeStep("agent");
-    // The agent button is selected.
-    expect(html).toMatch(
-      /aria-checked="true"[^>]*>[\s\S]*?Chat with Claude/,
-    );
-    // The other two are unchecked.
-    expect(html).toMatch(/aria-checked="false"[^>]*>[\s\S]*?Terminal</);
-    expect(html).toMatch(/aria-checked="false"[^>]*>[\s\S]*?SSH</);
-    // CSS selected modifier applied to agent only.
-    expect(html.match(/session-creator-mode-card-selected/g)?.length).toBe(1);
+/** Walk the remaining steps (folder, confirm) and press Create. */
+async function finishWizard() {
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  // Folder step: nothing selected = default folder.
+  await screen.findByText(/Select folders|Project context|Working directory/);
+  const next = screen
+    .getAllByRole("button")
+    .find((b) => b.classList.contains("session-creator-btn-primary"));
+  fireEvent.click(next!);
+  const create = await screen.findByRole("button", { name: /Create session/ });
+  await act(async () => {
+    fireEvent.click(create);
   });
+}
 
-  it("renders selected=terminal with aria-checked on the terminal card only", () => {
-    const html = renderModeStep("terminal");
-    expect(html).toMatch(/aria-checked="true"[^>]*>[\s\S]*?Terminal</);
-    expect(html).toMatch(/aria-checked="false"[^>]*>[\s\S]*?Chat with Claude/);
-    expect(html).toMatch(/aria-checked="false"[^>]*>[\s\S]*?SSH</);
-  });
-
-  it("renders selected=ssh with aria-checked on the ssh card only", () => {
-    const html = renderModeStep("ssh");
-    expect(html).toMatch(/aria-checked="true"[^>]*>[\s\S]*?SSH</);
-    expect(html).toMatch(/aria-checked="false"[^>]*>[\s\S]*?Chat with Claude/);
-    expect(html).toMatch(/aria-checked="false"[^>]*>[\s\S]*?Terminal</);
-  });
-
-  it("uses radio role + radiogroup container for accessibility", () => {
-    const html = renderModeStep("agent");
-    expect(html).toContain('role="radiogroup"');
-    expect(html.match(/role="radio"/g)?.length).toBe(3);
-  });
+beforeEach(() => {
+  settingsStore.clear();
 });
+afterEach(() => cleanup());
 
-// =====================================================================
-// SessionCreator — mode-conditional Step 2 visibility
-// =====================================================================
-describe("SessionCreator mode-conditional UI (Phase 6)", () => {
-  function renderCreator(initialMode: SessionCreatorMode) {
-    return renderToString(
-      <I18nProvider>
-        <SessionCreator
-          onClose={() => {}}
-          onCreate={() => Promise.resolve()}
-          initialMode={initialMode}
-        />
-      </I18nProvider>,
-    );
-  }
-
-  it("agent mode hides terminal-only fields (Approval Flow, Prefix, Permission Mode)", () => {
-    const html = renderCreator("agent");
-    // Agent path lands on the folder picker.  None of the terminal-only
-    // launch knobs should appear in the DOM.
-    expect(html).not.toContain("Approval Flow");
-    expect(html).not.toContain("Permission Mode");
-    expect(html).not.toContain("Prefix command");
-    expect(html).not.toContain("Custom flags");
-    expect(html).not.toContain("Initial dimensions");
-    // Provider grid is not rendered either — agent mode is forced to Claude.
-    expect(html).not.toContain("session-creator-provider-grid");
-    // Wording check: agent mode uses "Project context" instead of
-    // "Working directory".
-    expect(html).toContain("Project context");
-    expect(html).not.toContain("Working Directory");
+describe("SessionCreator — terminal first", () => {
+  it("opens on the agent step: no mode step, agents and a plain shell to pick from", async () => {
+    await openCreator();
+    expect(screen.getByText("What do you want to run?")).toBeInTheDocument();
+    expect(screen.queryByText("How do you want to work?")).not.toBeInTheDocument();
+    expect(screen.queryByText("Chat with Claude")).not.toBeInTheDocument();
+    for (const label of ["Claude", "Gemini", "Aider", "Codex", "GitHub Copilot", "Kiro", "Plain shell"]) {
+      expect(providerCard(label)).toBeInTheDocument();
+    }
+    // Nothing chosen yet → no Agent view option.
+    expect(agentViewCheckbox()).toBeNull();
   });
 
-  it("terminal mode shows the provider picker and exposes Approval Flow when a provider is selected", () => {
-    // initialMode="terminal" lands on the provider picker step ("ai").
-    // No provider is auto-selected; the "Approval Flow" pills only render
-    // after a provider is picked, so the picker and "Plain shell" should
-    // both be visible.
-    const html = renderCreator("terminal");
-    expect(html).toContain("session-creator-provider-grid");
-    expect(html).toContain("Plain shell");
-    // The provider list should include all six AI options.
-    expect(html).toContain("Claude");
-    expect(html).toContain("Gemini");
-    expect(html).toContain("Aider");
-    expect(html).toContain("Codex");
-    expect(html).toContain("Copilot");
-    expect(html).toContain("Kiro");
-    // Old playbook anti-pattern label should be gone.
-    expect(html).not.toContain("Session Type");
-    expect(html).not.toContain("Permission Mode");
-    // "Approval Flow" pills do not render until a provider is picked.
-    expect(html).not.toContain("Approval Flow");
+  it("a new Claude session is a terminal session by default", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    const box = agentViewCheckbox();
+    expect(box).not.toBeNull();
+    expect(box!.checked).toBe(false);
+    // Terminal launch knobs are visible for a terminal session.
+    expect(screen.getByText("Approval Flow")).toBeInTheDocument();
+
+    await finishWizard();
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "claude", mode: "terminal" });
+    expect(JSON.parse(settingsStore.get("session_mode_by_provider")!)).toEqual({ claude: "terminal" });
   });
 
-  it("agent mode title bar reads 'New session' (not 'New Terminal Session')", () => {
-    const html = renderCreator("agent");
-    expect(html).toContain("New session");
-    expect(html).not.toContain("New Terminal Session");
+  it("ticking 'Agent view for Claude' creates an Agent-view session and hides terminal knobs", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    fireEvent.click(agentViewCheckbox()!);
+    expect(agentViewCheckbox()!.checked).toBe(true);
+    expect(screen.queryByText("Approval Flow")).not.toBeInTheDocument();
+    expect(screen.queryByText("Prefix command")).not.toBeInTheDocument();
+
+    await finishWizard();
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "claude", mode: "agent" });
+    expect(JSON.parse(settingsStore.get("session_mode_by_provider")!)).toEqual({ claude: "agent" });
   });
 
-  it("agent mode does not render the legacy 'Open as terminal instead' link", () => {
-    const html = renderCreator("agent");
-    // The mode question is now upfront — the buried inline toggle is gone.
-    expect(html).not.toContain("Open as terminal instead");
-    expect(html).not.toContain("Open as agent (default)");
-  });
-});
+  it("agents without an Agent view never show the option and always run in terminal mode", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Codex"));
+    expect(agentViewCheckbox()).toBeNull();
+    fireEvent.click(providerCard("Plain shell"));
+    expect(agentViewCheckbox()).toBeNull();
+    fireEvent.click(providerCard("Codex"));
 
-// =====================================================================
-// Snapshot-style: exact mode-card copy
-// =====================================================================
-describe("SessionCreator mode-card copy snapshot", () => {
-  it("contains the three exact mode labels in Step 1", () => {
-    const html = renderToString(
-      <I18nProvider>
-        <SessionCreatorModeStep selected="agent" onSelect={() => {}} />
-      </I18nProvider>,
-    );
-    // These three strings are the public-facing v1.0.0 copy — guard them.
-    expect(html).toContain("Chat with Claude");
-    expect(html).toContain("Terminal");
-    expect(html).toContain("SSH");
-    // M8 refresh: copy now distinguishes native (Claude) from
-    // universal (Terminal); exact strings live in the
-    // SESSION_CREATOR_MODES array tested above.
-    expect(html.toLowerCase()).toContain("native");
-    expect(html.toLowerCase()).toContain("universal");
+    await finishWizard();
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "codex", mode: "terminal" });
+  });
+
+  it("switching from Claude with Agent view to another agent goes back to terminal", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    fireEvent.click(agentViewCheckbox()!);
+    fireEvent.click(providerCard("Gemini"));
+    expect(agentViewCheckbox()).toBeNull();
+
+    await finishWizard();
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "gemini", mode: "terminal" });
+  });
+
+  it("remembers the Agent view choice for Claude and preselects it next time", async () => {
+    settingsStore.set("session_mode_by_provider", JSON.stringify({ claude: "agent" }));
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    expect(agentViewCheckbox()!.checked).toBe(true);
+    // Codex is unaffected by Claude's choice.
+    fireEvent.click(providerCard("Codex"));
+    expect(agentViewCheckbox()).toBeNull();
+    fireEvent.click(providerCard("Claude"));
+    expect(agentViewCheckbox()!.checked).toBe(true);
+
+    await finishWizard();
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "claude", mode: "agent" });
+  });
+
+  it("preselects the last agent together with its remembered choice", async () => {
+    settingsStore.set("last_ai_provider", "claude");
+    settingsStore.set("session_mode_by_provider", JSON.stringify({ claude: "agent" }));
+    await openCreator();
+    await waitFor(() => expect(providerCard("Claude")).toHaveClass("selected"));
+    expect(agentViewCheckbox()!.checked).toBe(true);
+  });
+
+  it("re-picking the selected agent keeps an unsaved Agent view tick", async () => {
+    await openCreator();
+    fireEvent.click(providerCard("Claude"));
+    fireEvent.click(agentViewCheckbox()!);
+    fireEvent.click(providerCard("Claude"));
+    expect(agentViewCheckbox()!.checked).toBe(true);
+  });
+
+  it("'Connect over SSH' opens the SSH form and Back returns to the agent step", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(screen.getByRole("button", { name: "Connect over SSH" }));
+    expect(screen.getByText("SSH")).toBeInTheDocument();
+    expect(screen.queryByText("What do you want to run?")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByText("What do you want to run?")).toBeInTheDocument();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("Back from the SSH form keeps the agent and Agent view choice picked before", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    fireEvent.click(agentViewCheckbox()!);
+    fireEvent.click(screen.getByRole("button", { name: "Connect over SSH" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(providerCard("Claude")).toHaveClass("selected");
+    expect(agentViewCheckbox()!.checked).toBe(true);
+    await finishWizard();
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "claude", mode: "agent" });
+  });
+
+  it("only the preselected agent is highlighted when the creator opens", async () => {
+    settingsStore.set("last_ai_provider", "claude");
+    await openCreator();
+    await waitFor(() => expect(providerCard("Claude")).toHaveClass("selected"));
+    const highlighted = screen
+      .getAllByRole("button")
+      .filter((b) => b.classList.contains("session-creator-provider-card") && b.classList.contains("selected"));
+    expect(highlighted).toEqual([providerCard("Claude")]);
   });
 });

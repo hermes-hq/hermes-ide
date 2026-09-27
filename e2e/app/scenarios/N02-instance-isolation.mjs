@@ -164,11 +164,9 @@ async function finishOnboarding(bridge) {
 
 async function openPlainTerminal(bridge) {
   await bridge.click("button.es-tile-primary");
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, {
     timeoutMs: 20_000,
   });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await bridge.click(".session-creator-actions .session-creator-btn-primary");
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.clickWhenReady(`
     const cards = e2e.all(".session-creator-provider-card");

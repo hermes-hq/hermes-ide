@@ -245,13 +245,21 @@ async function createAgentSession(bridge) {
     const b = e2e.first("button.es-tile-primary") || e2e.byName("New Session");
     return e2e.click(e2e.must(b, "a New Session button"));
   `);
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, {
     timeoutMs: 20_000,
   });
-  await bridge.click('.session-creator-mode-card[data-category="native"]');
-  await bridge.waitFor("Agent view to be selected", `
-    return e2e.first('.session-creator-mode-card[data-category="native"]')?.getAttribute("aria-checked") === "true";
+  // The wizard opens on the agent step: pick Claude, then tick "Agent view for Claude".
+  await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
+  await bridge.clickWhenReady(`
+    const claude = e2e.all(".session-creator-provider-card").find((c) => c.innerText.trim().startsWith("Claude"));
+    return e2e.click(e2e.must(claude, "the Claude card"));
   `);
+  const agentViewBox = `e2e.first(".session-creator-agent-view input[type=checkbox]")`;
+  await bridge.waitFor("the Agent view option", `return !!${agentViewBox};`);
+  if (!(await bridge.eval(`return ${agentViewBox}.checked;`))) {
+    await bridge.clickWhenReady(`return e2e.click(e2e.must(${agentViewBox}, "the Agent view checkbox"));`);
+  }
+  await bridge.waitFor("Agent view to be selected", `return ${agentViewBox}?.checked === true;`);
   for (let i = 0; i < 8; i++) {
     if (!(await bridge.exists(".session-creator"))) break;
     const clicked = await bridge.clickWhenReady(`

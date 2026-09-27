@@ -1916,6 +1916,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "last_ai_provider",
     // Per-agent launch command prefix (JSON map of providerId -> prefix string)
     "ai_agent_prefixes",
+    // Per-agent Terminal / Agent view choice (JSON map of providerId -> "terminal" | "agent")
+    "session_mode_by_provider",
     // Keyboard shortcuts
     "command_palette_shortcut",
     // Plugin updates

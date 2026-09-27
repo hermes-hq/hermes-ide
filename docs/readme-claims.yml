@@ -32,7 +32,7 @@
 
 claims:
   agent-chat:
-    text: "Real chat for Claude"
+    text: "Structured conversation"
     unproven: "No real-app scenario proves this yet"
     planned: agent-chat.mjs
   agent-images:
@@ -60,10 +60,17 @@ claims:
     text: "WebGL-accelerated rendering"
     unproven: "No real-app scenario proves this yet"
     planned: webgl-rendering.mjs
-  terminal-mode-other-tools:
-    text: "Still excellent for everything else"
-    unproven: "No real-app scenario proves this yet"
-    planned: N09-terminal-first.mjs
+  every-agent-terminal:
+    text: "Every agent in its own terminal"
+    # N09 opens Claude (a stand-in CLI) from the New Session wizard in its own
+    # terminal; other agents use the same path but are not launched there.
+    scenario: N09-terminal-first.mjs
+  remember-agent-choice:
+    text: "Remembers your choice per agent"
+    scenario: N09-terminal-first.mjs
+  agent-view-opt-in:
+    text: "Opt in per session"
+    scenario: N09-terminal-first.mjs
   git-panel:
     text: "Built-in git panel"
     unproven: "No real-app scenario proves this yet"

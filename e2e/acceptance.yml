@@ -241,3 +241,53 @@ features:
       N23-3:
         text: "A README claim with no scenario fails CI"
         scenarios: [N23-docs-gates.mjs]
+  N09:
+    name: "Terminal mode first, for every agent"
+    # Proven on macOS and Linux only: the fake claude the scenario puts on
+    # PATH is a POSIX shell script, so nothing runs it on Windows yet.
+    status: partial
+    criteria:
+      N09-1:
+        text: "A new Claude session opens the Claude terminal interface"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+      N09-2:
+        text: "Choosing Agent view for Claude once makes it the preselected choice for Claude next time"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+      N09-3:
+        text: "A saved Agent-view session restores in Agent view"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+  F17:
+    name: "ADR 003: terminal first, vendor-neutral"
+    # Documents (ADR 003, DESIGN_PRINCIPLES.md, README); no scenario reads
+    # them. N09 proves the behaviour they describe.
+    status: partial
+    criteria:
+      F17-1:
+        text: "ADR 003 is merged and the design principles match it"
+        scenarios: []
+      F17-2:
+        text: "The README lists every agent under Terminal, with Agent view marked optional for Claude"
+        scenarios: []
+  F01:
+    name: "Honest copy and the Nous line"
+    # README, CLAUDE.md and ADR 001 are documents, and the About dialog is a
+    # native window the bridge cannot read (a Rust unit test covers its text).
+    status: partial
+    criteria:
+      F01-1:
+        text: "README has no 'Execution timeline' string and includes the non-affiliation line"
+        scenarios: []
+      F01-2:
+        text: "The About dialog shows the non-affiliation line"
+        scenarios: []
+      F01-3:
+        text: "CLAUDE.md and ADR 001 describe the SDK bridge, not claude --print"
+        scenarios: []
+      F01-4:
+        text: "The ShortcutsPanel lists every accelerator in menu/mod.rs, and none are stale"
+        # The panel is generated from the menu (N23); that scenario checks
+        # every row against the generator's output.
+        scenarios: [N23-shortcuts-panel.mjs]

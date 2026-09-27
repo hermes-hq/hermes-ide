@@ -94,9 +94,11 @@ export interface TmuxWindowEntry {
 
 /**
  * How the session is run and rendered.
- *  - `terminal`: existing PTY/xterm flow.  All non-Claude sessions use this.
- *  - `agent`:    `claude --print` stream-json subprocess driving an
- *                `<AgentSessionView>` chat surface.  Claude-only in 1.0.0.
+ *  - `terminal`: the agent's (or shell's) own interface in a PTY/xterm.  The
+ *                default for every provider, Claude included (ADR 003).
+ *  - `agent`:    the optional Agent view.  A per-session Node bridge running
+ *                the Claude Agent SDK drives an `<AgentSessionView>`.  Claude
+ *                only, and only when the user asks for it.
  */
 export type SessionMode = "terminal" | "agent";
 
@@ -128,8 +130,8 @@ export interface SessionData {
   channels: string[];
   context_injected: boolean;
   ssh_info: SshConnectionInfo | null;
-  /** "terminal" → existing PTY/xterm flow.  "agent" → `claude --print`
-   *  stream-json subprocess + AgentSessionView render.  Claude-only in 1.0.0. */
+  /** "terminal" (default) → the agent's own interface in a PTY/xterm.
+   *  "agent" → optional Agent view (SDK bridge + AgentSessionView), Claude only. */
   mode: SessionMode;
 }
 

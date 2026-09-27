@@ -16,22 +16,26 @@ Hermes IDE is a desktop terminal emulator that deeply integrates AI assistance i
 
 **Platforms:** macOS, Windows, Linux
 
+Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
+
 ---
 ![GIF](https://github.com/user-attachments/assets/dce248cc-d215-48c7-a1c1-33e539c2a20f)
 
 ## Features
 
-### Agent mode for Claude (new in 1.0.0)
-- **Real chat for Claude** — Claude sessions open in a rich chat interface by default, with thinking blocks, tool-call cards, and diff previews instead of a TUI in a terminal <!-- claim:agent-chat -->
-- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels <!-- claim:agent-images -->
-- **Persistent conversations** — Claude sessions resume across app restarts <!-- claim:agent-persistent-conversations -->
-- **Bring your own auth** — uses your existing `claude` CLI auth (Pro, Max, or API key); Hermes never asks for tokens <!-- claim:agent-own-auth -->
-
-### Terminal
-- **Multi-session management** — create, switch, and organize parallel terminal sessions <!-- claim:multi-session -->
+### Terminal first, for every agent
+- **Every agent in its own terminal** — Claude Code, Codex, Gemini, Aider, Copilot, Kiro and plain shells all open in a real terminal by default, running the agent's own interface exactly as it would anywhere else <!-- claim:every-agent-terminal -->
+- **Bring your own auth** — agents use their own CLI sign-in (for Claude: Pro, Max, or API key); Hermes never asks for tokens <!-- claim:agent-own-auth -->
+- **Multi-session management** — create, switch, and organize parallel sessions <!-- claim:multi-session -->
 - **Split panes** — horizontal and vertical splits with drag-and-drop reordering <!-- claim:split-panes -->
 - **WebGL-accelerated rendering** — fast terminal with web links and auto-fit <!-- claim:webgl-rendering -->
-- **Still excellent for everything else** — Aider, Codex, Gemini, Copilot, Kiro, plain shells all run in classic Terminal mode, unchanged <!-- claim:terminal-mode-other-tools -->
+- **Remembers your choice per agent** — the New Session wizard preselects the last agent and how you ran it <!-- claim:remember-agent-choice -->
+
+### Agent view for Claude (optional)
+- **Opt in per session** — tick "Agent view for Claude" in the New Session wizard to have Hermes render the conversation instead of Claude's terminal interface <!-- claim:agent-view-opt-in -->
+- **Structured conversation** — thinking blocks, tool-call cards, and diff previews <!-- claim:agent-chat -->
+- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels <!-- claim:agent-images -->
+- **Persistent conversations** — Agent-view sessions resume across app restarts <!-- claim:agent-persistent-conversations -->
 
 ### Git Integration
 - **Built-in git panel** — view staged, unstaged, and untracked files per project <!-- claim:git-panel -->

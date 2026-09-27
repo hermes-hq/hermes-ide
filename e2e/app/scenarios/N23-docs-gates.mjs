@@ -139,7 +139,7 @@ try {
 
   log("case 5: a copy of README.md with a new, unproven feature bullet");
   const readme = readFileSync(README, "utf8");
-  const withBullet = readme.replace(/^(### Terminal\r?\n)/m, "$1- **Time travel** — rewind any command you ran\n");
+  const withBullet = readme.replace(/^(### Terminal[^\r\n]*\r?\n)/m, "$1- **Time travel** — rewind any command you ran\n");
   assert(withBullet !== readme, "the copy adds a bullet under ## Features");
   const readmeCopy = join(work, "README.md");
   writeFileSync(readmeCopy, withBullet);

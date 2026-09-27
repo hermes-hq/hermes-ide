@@ -100,14 +100,9 @@ try {
   // ── 3. Create a plain terminal through the UI ────────────────────
   log("step 3: create a plain terminal session through the New Session wizard");
   await bridge.click("button.es-tile-primary");
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, {
     timeoutMs: 20_000,
   });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await bridge.waitFor("terminal mode to be selected", `
-    return e2e.first('.session-creator-mode-card[data-category="universal"]')?.getAttribute("aria-checked") === "true";
-  `);
-  await bridge.click(".session-creator-actions .session-creator-btn-primary");
 
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   const providers = await bridge.eval(`return e2e.all(".session-creator-provider-card").map(e2e.nameOf);`);

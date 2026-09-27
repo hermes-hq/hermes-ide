@@ -93,14 +93,9 @@ async function createPlainSession(bridge) {
       return e2e.click(e2e.must(btn, "the New session button"));
     `);
   }
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, {
     timeoutMs: 20_000,
   });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await bridge.waitFor("terminal mode to be selected", `
-    return e2e.first('.session-creator-mode-card[data-category="universal"]')?.getAttribute("aria-checked") === "true";
-  `);
-  await bridge.click(".session-creator-actions .session-creator-btn-primary");
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.clickWhenReady(`
     const cards = e2e.all(".session-creator-provider-card");

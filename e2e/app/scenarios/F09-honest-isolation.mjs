@@ -180,9 +180,7 @@ async function clickPrimary(bridge, what) {
  */
 async function startTask(bridge, { label, pickBranch = null }) {
   await bridge.click(".activity-bar-action");
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, { timeoutMs: 20_000 });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await clickPrimary(bridge, "mode");
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.clickWhenReady(`
     const cards = e2e.all(".session-creator-provider-card");

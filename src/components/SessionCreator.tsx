@@ -27,6 +27,14 @@ import {
 import { PLATFORM } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { LAST_AI_PROVIDER_KEY, resolveDefaultAiProvider } from "../utils/lastAiProvider";
+import {
+  SESSION_MODE_BY_PROVIDER_KEY,
+  hasAgentView,
+  parseSessionModeByProvider,
+  preferredSessionMode,
+  rememberSessionMode,
+  type SessionModeByProvider,
+} from "../utils/sessionModePref";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
 import { isGitRepo as checkIsGitRepo } from "../api/git";
@@ -35,10 +43,6 @@ import { SessionBranchSelector } from "./SessionBranchSelector";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { randomTaskSlug } from "../state/isolation";
 import { SESSION_COLORS } from "./SessionList";
-import {
-  SessionCreatorModeStep,
-  type SessionCreatorMode,
-} from "./SessionCreatorModeStep";
 import { useI18n } from "../i18n/I18nProvider";
 
 // ─── SSH Connection History ──────────────────────────────────────────
@@ -77,23 +81,28 @@ export const CLAUDE_CHANNELS = [
   { id: "plugin:telegram@claude-plugins-official", label: "Telegram", icon: "\u{1F4F1}" },
 ] as const;
 
+/** How the new session runs.  "terminal" (the default) runs the agent in its
+ *  own terminal interface; "agent" is the optional Agent view for agents that
+ *  have one (Claude); "ssh" connects to a remote machine. */
+export type SessionCreatorMode = "agent" | "terminal" | "ssh";
+
 // Internal step identifiers (not displayed to user).
 //
-// Phase 6 (v1.0.0) inserts a `mode` step as the cardinal Step 1 — every flow
-// starts there. After that:
-//  - mode="agent"    → projects → branch (if any) → confirm
-//  - mode="terminal" → ai → projects → branch (if any) → confirm
-//  - mode="ssh"      → ssh → tmux → confirm
-type Step = "mode" | "projects" | "branch" | "ai" | "tmux" | "ssh" | "confirm";
+// Terminal first (ADR 003): every flow starts on the agent step ("ai"), where
+// the user picks an agent or a plain shell.  An agent that has an Agent view
+// shows an opt-in checkbox there, and a link switches to SSH.  After that:
+//  - mode="terminal" | "agent" → projects → branch (if any) → confirm
+//  - mode="ssh"                → ssh → tmux → confirm
+type Step = "projects" | "branch" | "ai" | "tmux" | "ssh" | "confirm";
 
 interface SessionCreatorProps {
   onClose: () => void;
   onCreate: (opts: CreateSessionOpts) => Promise<void>;
   /** Pre-select a project group when creating from a project's "+" button */
   defaultGroup?: string;
-  /** Test/integration hook — start the modal already on a chosen mode and
-   *  skip Step 1.  Tests use this to render the "agent path" or "terminal
-   *  path" of Step 2+ directly without simulating a click. */
+  /** Test/integration hook — start the modal already on a chosen mode.
+   *  "agent" opens on the folder step with Claude's Agent view chosen,
+   *  "ssh" opens on the SSH form, "terminal" (the default) on the agent step. */
   initialMode?: SessionCreatorMode;
   /** Called once on first paint so the parent can dismiss its
    *  "opening…" placeholder.  Without this, a heavy first-mount makes
@@ -109,14 +118,18 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // body.  Combined with the App.tsx click timestamp, lets us see
   // how long elapses between click and first-render-start.
   console.log(`[opening-overlay] SessionCreator render() at ${performance.now().toFixed(0)}ms`);
-  // Cardinal mode (Phase 6).  Drives every conditional below.  Defaults to
-  // "agent" so v1.0.0 leads with "Chat with Claude" (the headline experience).
-  const [mode, setMode] = useState<SessionCreatorMode>(initialMode ?? "agent");
-  const [step, setStep] = useState<Step>(initialMode ? (initialMode === "ssh" ? "ssh" : initialMode === "terminal" ? "ai" : "projects") : "mode");
+  // Session mode.  Drives every conditional below.  Terminal first: every
+  // agent opens in its own terminal interface unless the user opts into the
+  // Agent view (ADR 003).
+  const [mode, setMode] = useState<SessionCreatorMode>(initialMode ?? "terminal");
+  const [step, setStep] = useState<Step>(initialMode === "ssh" ? "ssh" : initialMode === "agent" ? "projects" : "ai");
+  // Per-agent remembered Terminal / Agent view choice (session_mode_by_provider).
+  const [modePrefs, setModePrefs] = useState<SessionModeByProvider>({});
+  const [modePrefsLoaded, setModePrefsLoaded] = useState(false);
 
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
-  // For terminal mode the user picks an AI provider; for agent mode it's
-  // forced to "claude"; for ssh mode it's irrelevant (mode is "terminal").
+  // The agent the session runs.  The Agent view forces "claude"; for ssh
+  // mode it's irrelevant (the session mode is "terminal").
   const [aiProvider, setAiProvider] = useState<string | null>(initialMode === "agent" ? "claude" : null);
   // Pre-selection default for terminal-mode (issue #3). Loaded async from
   // the persisted setting; applied once on the first transition into
@@ -127,6 +140,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [defaultAiProvider, setDefaultAiProvider] = useState<string | null>(null);
   const [defaultAiProviderLoaded, setDefaultAiProviderLoaded] = useState(false);
   const defaultProviderAppliedRef = useRef(false);
+  // The local choice (agent + Terminal / Agent view) in place when the user
+  // opened the SSH form, so Back from it restores that choice.
+  const beforeSshRef = useRef<{ mode: SessionCreatorMode; aiProvider: string | null }>({ mode: "terminal", aiProvider: null });
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [allProjects, setAllProjects] = useState<ProjectOrdered[]>([]);
@@ -209,8 +225,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     isFeatureFlagEnabled("honestIsolation") ? randomTaskSlug() : undefined,
   );
 
-  // Resolve session-mode that gets persisted to the session.  Agent mode is
-  // Claude-only; ssh always = terminal (per v1.0.0 — see playbook §8).
+  // Resolve session-mode that gets persisted to the session.  The Agent view
+  // is Claude-only; ssh always = terminal.
   const resolvedSessionMode: SessionMode = mode === "agent" ? "agent" : "terminal";
 
   const isShellOnly = mode === "terminal" && aiProvider === null;
@@ -258,20 +274,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // Compute ordered steps for the progress dots & footer nav.
   const orderedSteps = useMemo<Step[]>(() => {
     if (mode === "ssh") {
-      // SSH path is unchanged from v0.6 — host → tmux → confirm.  We add the
-      // mode step in front so the user can revisit Step 1.
-      return ["mode", "ssh", "tmux", "confirm"];
+      // SSH path: host → tmux → confirm.  The agent step stays in front so
+      // Back returns to it.
+      return ["ai", "ssh", "tmux", "confirm"];
     }
-    if (mode === "agent") {
-      // Agent path: mode → folder picker → (branch) → confirm.  No provider
-      // step (forced to claude), no permission pills, no shell prefix.
-      const steps: Step[] = ["mode", "projects"];
-      if (showBranchStep) steps.push("branch");
-      steps.push("confirm");
-      return steps;
-    }
-    // Terminal path: mode → provider picker → folder picker → (branch) → confirm.
-    const steps: Step[] = ["mode", "ai", "projects"];
+    // Local path (terminal or Agent view): agent picker → folder picker →
+    // (branch) → confirm.
+    const steps: Step[] = ["ai", "projects"];
     if (showBranchStep) steps.push("branch");
     steps.push("confirm");
     return steps;
@@ -284,16 +293,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     }
   }, [isShellOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When mode changes, force aiProvider to "claude" for agent mode and clear
-  // out terminal-only state.  When switching back to terminal, leave the
-  // aiProvider null so the user reopens the picker explicitly.
+  // When mode changes, force aiProvider to "claude" for the Agent view.
+  // Terminal-only knobs (permission, prefix, flags) are kept as they are:
+  // they are hidden and ignored while the Agent view is chosen, and come
+  // back unchanged if the user unticks it.
   useEffect(() => {
     if (mode === "agent") {
       setAiProvider("claude");
-      setAutoApprove(false);
-      setPermissionMode("default");
-      setCustomPrefix("");
-      setCustomSuffix("");
     }
     if (mode === "ssh") {
       setAiProvider(null);
@@ -325,9 +331,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const goBack = useCallback(() => {
     const idx = orderedSteps.indexOf(step);
     if (idx > 0) {
-      setStep(orderedSteps[idx - 1]);
+      const prev = orderedSteps[idx - 1];
+      // Leaving the SSH form for the agent step returns to the local session
+      // the user had picked before opening it (agent and Terminal / Agent view).
+      if (prev === "ai" && mode === "ssh") {
+        const before = beforeSshRef.current;
+        setMode(before.mode);
+        setAiProvider(before.aiProvider);
+      }
+      setStep(prev);
     }
-  }, [step, orderedSteps]);
+  }, [step, orderedSteps, mode]);
 
   // PERF: Mount-time loads — keep ONLY the work that's needed for the
   // first interactive frame. Everything mode-specific or step-specific
@@ -364,10 +378,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
 
   // PERF: AI-provider availability check spawns one child process per
   // configured provider (via `which claude` etc.) — typically the slowest
-  // load on mount. Only matters in terminal mode where the user picks
-  // a provider. Agent mode forces "claude" and never shows the picker.
+  // load on mount. Only matters on the agent step (not for SSH).
   useEffect(() => {
-    if (mode !== "terminal" || availabilityLoaded) return;
+    if (mode === "ssh" || availabilityLoaded) return;
     checkAiProviders()
       .then((r) => { setProviderAvailability(r); setAvailabilityLoaded(true); })
       .catch((err) => {
@@ -395,18 +408,18 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // PERF: getSessions() can return a large list (every session ever).
   // It's only used to derive `existingGroups` + `groupColors`, which
   // appear on the projects/confirm step. Defer until the user advances
-  // past the mode-select step (or load eagerly above when defaultGroup
+  // past the agent step (or load eagerly above when defaultGroup
   // is set).
   const sessionsLoadedRef = useRef(false);
   useEffect(() => {
     if (sessionsLoadedRef.current) return;
-    if (step === "mode" && !defaultGroup) return; // wait for advance
+    if (step === "ai" && !defaultGroup) return; // wait for advance
     sessionsLoadedRef.current = true;
     loadSessionsForGroups(defaultGroup);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  /** Shared by the eager (mount-with-defaultGroup) and lazy (post-mode-step)
+  /** Shared by the eager (mount-with-defaultGroup) and lazy (post-agent-step)
    *  load paths above. Pulled out so both call sites stay in sync. */
   function loadSessionsForGroups(defaultGroupArg: string | undefined) {
     getSessions()
@@ -597,10 +610,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         ? `${sshDest} [${selectedTmuxSession}]`
         : sshDest;
 
-      // Local path = agent or terminal mode.  SSH path is its own branch.
+      // Local path = terminal or Agent view.  SSH path is its own branch.
       const isLocal = mode !== "ssh";
       const isAgent = mode === "agent";
-      // Pass aiProvider only for terminal mode; agent mode is implicitly Claude.
+      // Pass aiProvider only for local sessions; the Agent view is implicitly Claude.
       const providerForCreate = isLocal && !isAgent ? aiProvider || undefined : isAgent ? "claude" : undefined;
       const isCustomAgent = providerForCreate === CUSTOM_AGENT_ID;
 
@@ -610,14 +623,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         group: selectedGroup || undefined,
         color: selectedColor,
         aiProvider: providerForCreate,
-        // Agent mode skips permission/prefix/suffix entirely.
+        // The Agent view skips permission/prefix/suffix entirely.
         autoApprove: isLocal && !isAgent ? (autoApprove || undefined) : undefined,
         permissionMode: isLocal && !isAgent && aiProvider ? permissionMode : undefined,
         customPrefix: isLocal && !isAgent && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
         customSuffix: isLocal && !isAgent && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
         agentName: isCustomAgent ? sanitizeCommandFragment(customAgentName) || undefined : undefined,
         agentCommand: isCustomAgent ? sanitizeCommandFragment(customAgentCommand) : undefined,
-        // Channels still apply in agent mode (Telegram etc).
+        // Channels still apply in the Agent view (Telegram etc).
         channels: isLocal && (isAgent || aiProvider === "claude") && selectedChannels.length > 0 ? selectedChannels : undefined,
         projectIds: isLocal && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
         workingDirectory: isLocal ? firstProjectPath : undefined,
@@ -630,6 +643,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         sshIdentityFile: mode === "ssh" ? (sshIdentityFile || undefined) : undefined,
         sshJumpHost: mode === "ssh" ? (sshJumpHost.trim() || undefined) : undefined,
       });
+
+      // Remember Terminal vs Agent view for this agent, so the next new
+      // session preselects the same choice.
+      if (isLocal && providerForCreate) {
+        const next = rememberSessionMode(modePrefs, providerForCreate, resolvedSessionMode);
+        setModePrefs(next);
+        setSetting(SESSION_MODE_BY_PROVIDER_KEY, JSON.stringify(next)).catch((err) =>
+          console.warn("[SessionCreator] Failed to persist session_mode_by_provider:", err),
+        );
+      }
 
       if (mode === "ssh" && sshHost.trim()) {
         const entry: SshHistoryEntry = {
@@ -674,6 +697,23 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const knownProviderIds = useMemo(() => enabledProviders.filter((id): id is string => id !== null), [enabledProviders]);
   const customCommandMissing = aiProvider === CUSTOM_AGENT_ID && !sanitizeCommandFragment(customAgentCommand);
 
+  // Keep the keyboard highlight on the chosen agent when the choice changes
+  // without a click (the saved default arrives after the first render), so
+  // only one card looks selected.
+  useEffect(() => {
+    setHighlightedProviderIndex(enabledProviders.indexOf(aiProvider as (typeof enabledProviders)[number]));
+  }, [aiProvider, enabledProviders]);
+
+  // Load the per-agent Terminal / Agent view choice once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    getSetting(SESSION_MODE_BY_PROVIDER_KEY)
+      .then((raw) => { if (!cancelled) setModePrefs(parseSessionModeByProvider(raw)); })
+      .catch((err) => console.warn("[SessionCreator] Failed to load session_mode_by_provider:", err))
+      .finally(() => { if (!cancelled) setModePrefsLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Load the persisted default once on mount.
   useEffect(() => {
     let cancelled = false;
@@ -692,29 +732,35 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Apply the saved default the first time the user lands in terminal mode
-  // with the setting loaded. One-shot: subsequent mode flips don't override
-  // the user's in-flight selection.
+  // Apply the saved default the first time the user lands on the agent step
+  // with both settings loaded. One-shot: subsequent mode flips don't override
+  // the user's in-flight selection. The remembered Terminal / Agent view
+  // choice for that agent is preselected with it.
   useEffect(() => {
     if (defaultProviderAppliedRef.current) return;
     if (mode !== "terminal") return;
-    if (!defaultAiProviderLoaded) return;
+    if (!defaultAiProviderLoaded || !modePrefsLoaded) return;
     if (!defaultAiProvider) return;
     defaultProviderAppliedRef.current = true;
     setAiProvider(defaultAiProvider);
-  }, [mode, defaultAiProvider, defaultAiProviderLoaded]);
+    setMode(preferredSessionMode(modePrefs, defaultAiProvider));
+  }, [mode, defaultAiProvider, defaultAiProviderLoaded, modePrefs, modePrefsLoaded]);
 
   /** Wrap setAiProvider so an explicit user pick is also persisted as the
    *  new global default. Only non-null choices are persisted — "no AI"
-   *  leaves the previous default intact so it can pre-select next time. */
+   *  leaves the previous default intact so it can pre-select next time.
+   *  Picking an agent also preselects its remembered Terminal / Agent view
+   *  choice (terminal unless the user chose the Agent view last time).
+   *  Re-picking the agent that is already selected keeps the current choice. */
   const chooseAiProvider = useCallback((id: string | null) => {
+    if (id !== aiProvider) setMode(preferredSessionMode(modePrefs, id));
     setAiProvider(id);
     if (id) {
       setSetting(LAST_AI_PROVIDER_KEY, id).catch((err) =>
         console.warn("[SessionCreator] Failed to persist last_ai_provider:", err),
       );
     }
-  }, []);
+  }, [modePrefs, aiProvider]);
 
   const selectProviderAndAdvance = (idx: number) => {
     const id = enabledProviders[idx] ?? null;
@@ -766,7 +812,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     }
   };
 
-  // Wording helpers — playbook §8 "mode-conditional vocabulary".
+  // Wording helpers — mode-conditional vocabulary.
   const folderSectionTitle = mode === "agent"
     ? t("session.projectContext")
     : isShellOnly ? t("session.workingDirectory") : t("session.selectFolders");
@@ -808,36 +854,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           ))}
         </div>
 
-        {/* ── Step 1: cardinal mode picker ──────────────────────────── */}
-        {step === "mode" && (
-          <div className="session-creator-body">
-            <SessionCreatorModeStep
-              selected={mode}
-              onSelect={(m) => setMode(m)}
-            />
-            <div className="session-creator-actions">
-              <button
-                className="session-creator-btn-primary"
-                onClick={() => {
-                  // Jump straight to the first content step for the chosen mode.
-                  if (mode === "ssh") setStep("ssh");
-                  else if (mode === "terminal") setStep("ai");
-                  else setStep("projects");
-                }}
-              >
-                {t("common.continue")}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* ── SSH connection form (mode=ssh) ────────────────────────── */}
         {step === "ssh" && mode === "ssh" && (
           <div className="session-creator-body">
             <div className="session-creator-section-title">SSH</div>
-            <div className="session-creator-ssh-deferred-note">
-              Agent mode for remote sessions arrives in v1.1.
-            </div>
             <div className="session-creator-ssh-fields">
               {sshSavedHosts.length > 0 && !sshHost && (
                 <div className="session-creator-ssh-history">
@@ -963,7 +983,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           </div>
         )}
 
-        {/* ── Folder picker (agent + terminal modes) ────────────────── */}
+        {/* ── Folder picker (terminal + Agent view) ─────────────────── */}
         {step === "projects" && mode !== "ssh" && (
           <div className="session-creator-body">
             <div className="session-creator-section-title">{folderSectionTitle}</div>
@@ -1293,9 +1313,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           </div>
         )}
 
-        {/* ── Provider picker (terminal mode only) ──────────────────── */}
-        {step === "ai" && mode === "terminal" && (
+        {/* ── Agent picker (first step for every local session) ─────── */}
+        {step === "ai" && mode !== "ssh" && (
           <div className="session-creator-body" ref={aiStepRef} tabIndex={-1} style={{ outline: "none" }}>
+            <div className="session-creator-section-title">{t("session.chooseAgent")}</div>
             <div className="session-creator-provider-grid">
               {agents.map((p) => {
                 const providerIdx = enabledProviders.indexOf(p.id);
@@ -1343,7 +1364,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               )}
               <button
                 className={`session-creator-provider-card ${aiProvider === null ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.length - 1 ? "selected" : ""}`}
-                onClick={() => { setAiProvider(null); setAutoApprove(false); setSelectedChannels([]); setHighlightedProviderIndex(enabledProviders.length - 1); }}
+                onClick={() => { chooseAiProvider(null); setAutoApprove(false); setSelectedChannels([]); setHighlightedProviderIndex(enabledProviders.length - 1); }}
               >
                 <span className="session-creator-provider-name">{t("session.plainShell")}</span>
                 <span className="session-creator-provider-desc">{t("session.noAiAgent")}</span>
@@ -1399,7 +1420,21 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </div>
               </div>
             )}
-            {aiProvider && aiProvider !== CUSTOM_AGENT_ID && (
+            {hasAgentView(aiProvider) && (
+              <label className="session-creator-agent-view">
+                <input
+                  type="checkbox"
+                  checked={mode === "agent"}
+                  onChange={(e) => setMode(e.target.checked ? "agent" : "terminal")}
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+                <span className="session-creator-agent-view-text">
+                  <span className="session-creator-agent-view-label">{t("session.agentView")}</span>
+                  <span className="session-creator-agent-view-hint">{t("session.agentViewHint")}</span>
+                </span>
+              </label>
+            )}
+            {aiProvider && aiProvider !== CUSTOM_AGENT_ID && mode === "terminal" && (
               <div className="session-creator-permission-mode">
                 <div className="session-creator-permission-mode-label">{t("session.approvalFlow")}</div>
                 <div className="session-creator-permission-mode-pills">
@@ -1429,7 +1464,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </div>
               </div>
             )}
-            {aiProvider && (
+            {aiProvider && mode === "terminal" && (
               <div className="session-creator-custom-suffix">
                 <div className="session-creator-custom-suffix-label">{t("session.prefixCommand")}</div>
                 <input
@@ -1467,7 +1502,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 )}
               </div>
             )}
-            {aiProvider && (
+            {aiProvider && mode === "terminal" && (
               <div className="session-creator-custom-suffix">
                 <div className="session-creator-custom-suffix-label">{t("session.customFlags")}</div>
                 <input
@@ -1483,7 +1518,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </span>
               </div>
             )}
-            {aiProvider && (
+            {aiProvider && mode === "terminal" && (
               <div
                 className="session-creator-launch-preview"
                 aria-live="polite"
@@ -1527,8 +1562,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>
-                {t("common.back")}
+              <button
+                type="button"
+                className="session-creator-ssh-link"
+                onClick={() => { beforeSshRef.current = { mode, aiProvider }; setMode("ssh"); setStep("ssh"); }}
+              >
+                {t("session.connectSsh")}
               </button>
               <button className="session-creator-btn-primary" onClick={goNext} disabled={customCommandMissing}>
                 {t("common.next")}
@@ -1588,7 +1627,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     <span className="session-creator-summary-label">{t("session.mode")}</span>
                     <span className="session-creator-summary-value">
                       {mode === "agent"
-                        ? t("mode.agent.label")
+                        ? t("session.agentViewSummary")
                         : aiProvider
                           ? (aiProvider === CUSTOM_AGENT_ID ? sanitizeCommandFragment(customAgentName) : "") || getAgent(aiProvider)?.name || aiProvider
                           : t("session.plainShell")}
@@ -1735,35 +1774,6 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 ))}
               </div>
             </div>
-
-            {/* Channels (agent mode shows them here too — playbook §6 spec) */}
-            {mode === "agent" && (
-              <div className="session-creator-channels">
-                <div className="session-creator-channels-label">{t("session.channels")}</div>
-                <div className="session-creator-channels-desc">
-                  {t("session.channelsHint")}
-                </div>
-                <div className="session-creator-channels-list">
-                  {CLAUDE_CHANNELS.map((ch) => (
-                    <label key={ch.id} className="session-creator-channel-item">
-                      <input
-                        type="checkbox"
-                        checked={selectedChannels.includes(ch.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedChannels((prev) => [...prev, ch.id]);
-                          } else {
-                            setSelectedChannels((prev) => prev.filter((c) => c !== ch.id));
-                          }
-                        }}
-                      />
-                      <span className="session-creator-channel-icon">{ch.icon}</span>
-                      <span className="session-creator-channel-name">{ch.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div className="session-creator-hints">
               <span><kbd>Enter</kbd> {t("session.createHint")}</span>
