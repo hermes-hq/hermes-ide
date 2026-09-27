@@ -17,20 +17,29 @@ let unlisten: UnlistenFn | null = null;
 let listenerPromise: Promise<void> | null = null;
 
 // An app chord can reach both the webview's key listener and the native
-// menu (depending on the OS webview). The keyboard path runs first; a native
-// event for the same action right after it is the same key press.
-const KEYBOARD_ECHO_WINDOW_MS = 500;
-let lastKeyboardAction: { id: string; at: number } | null = null;
+// menu (depending on the OS webview), in either order. Whichever arrives
+// first runs the action; the other one, for the same action right after it,
+// is the same key press and is dropped.
+const ECHO_WINDOW_MS = 500;
+type ActionSource = "keyboard" | "native";
+let lastAction: { id: string; at: number; source: ActionSource } | null = null;
+
+/** True when this delivery is the other path's echo of the same key press. */
+function isEcho(id: string, source: ActionSource): boolean {
+  if (
+    lastAction &&
+    lastAction.id === id &&
+    lastAction.source !== source &&
+    Date.now() - lastAction.at < ECHO_WINDOW_MS
+  ) {
+    lastAction = null;
+    return true;
+  }
+  return false;
+}
 
 function onMenuAction(payload: { action: string }) {
-  if (
-    lastKeyboardAction &&
-    lastKeyboardAction.id === payload.action &&
-    Date.now() - lastKeyboardAction.at < KEYBOARD_ECHO_WINDOW_MS
-  ) {
-    lastKeyboardAction = null;
-    return;
-  }
+  if (isEcho(payload.action, "native")) return;
   // Context menu handler takes priority (it's the most recently opened)
   if (contextMenuHandler) {
     const handler = contextMenuHandler;
@@ -38,6 +47,7 @@ function onMenuAction(payload: { action: string }) {
     handler(payload.action);
     return;
   }
+  lastAction = { id: payload.action, at: Date.now(), source: "native" };
   // Fall through to menu bar handler
   if (menuBarHandler) {
     menuBarHandler(payload.action);
@@ -72,7 +82,8 @@ export function triggerMenuBarAction(actionId: string): void {
 
 /** Run a menu bar action for a key chord pressed in the webview. */
 export function triggerMenuBarActionFromKeyboard(actionId: string): void {
-  lastKeyboardAction = { id: actionId, at: Date.now() };
+  if (isEcho(actionId, "keyboard")) return;
+  lastAction = { id: actionId, at: Date.now(), source: "keyboard" };
   menuBarHandler?.(actionId);
 }
 
@@ -90,5 +101,5 @@ export function cleanupListener(): void {
   listenerPromise = null;
   menuBarHandler = null;
   contextMenuHandler = null;
-  lastKeyboardAction = null;
+  lastAction = null;
 }
