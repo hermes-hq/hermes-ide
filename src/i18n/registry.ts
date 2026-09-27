@@ -621,6 +621,17 @@ const ENGLISH_PACK: LanguagePack = {
     "language.panel.selectLabel": "Language",
     "language.panel.subtitle": "Language packs are provided by plugins. English remains the core fallback.",
     "language.panel.active": "Active",
+    "crash.app.title": "Something went wrong",
+    "crash.app.hint": "Your sessions are still running. Reload to bring the window back.",
+    "crash.pane.title": "This pane stopped working",
+    "crash.pane.titleNamed": "This pane stopped working: {label}",
+    "crash.pane.hint": "Other panes are not affected. Reload to try again.",
+    "crash.block.title": "This block could not be shown",
+    "crash.block.titleNamed": "This block could not be shown: {label}",
+    "crash.block.hint": "The rest of the conversation is not affected.",
+    "crash.reload": "Reload",
+    "crash.reloadPane": "Reload pane",
+    "crash.closePane": "Close pane",
   },
 };
 

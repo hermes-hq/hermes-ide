@@ -1,5 +1,6 @@
 import "../styles/components/ContainedErrorBoundary.css";
 import { Component, Fragment, type ErrorInfo, type ReactNode } from "react";
+import { translate } from "../i18n/registry";
 
 /**
  * Where a crash is contained.
@@ -28,16 +29,11 @@ interface State {
 	generation: number;
 }
 
-const TITLES: Record<ContainmentScope, string> = {
-	app: "Something went wrong",
-	pane: "This pane stopped working",
-	block: "This block could not be shown",
-};
-
-const HINTS: Record<ContainmentScope, string> = {
-	app: "Your sessions are still running. Reload to bring the window back.",
-	pane: "Other panes are not affected. Reload to try again.",
-	block: "The rest of the conversation is not affected.",
+/** Card text for each scope, looked up in the current interface language. */
+const TEXT: Record<ContainmentScope, { title: string; titleNamed: string; hint: string; reload: string }> = {
+	app: { title: "crash.app.title", titleNamed: "crash.app.title", hint: "crash.app.hint", reload: "crash.reload" },
+	pane: { title: "crash.pane.title", titleNamed: "crash.pane.titleNamed", hint: "crash.pane.hint", reload: "crash.reloadPane" },
+	block: { title: "crash.block.title", titleNamed: "crash.block.titleNamed", hint: "crash.block.hint", reload: "crash.reload" },
 };
 
 /**
@@ -70,7 +66,8 @@ export class ContainedErrorBoundary extends Component<Props, State> {
 		if (!error) {
 			return <Fragment key={generation}>{children}</Fragment>;
 		}
-		const title = scope !== "app" && label ? `${TITLES[scope]}: ${label}` : TITLES[scope];
+		const text = TEXT[scope];
+		const title = scope !== "app" && label ? translate(text.titleNamed, { label }) : translate(text.title);
 		return (
 			<div
 				className={`contained-error contained-error-${scope}`}
@@ -78,11 +75,11 @@ export class ContainedErrorBoundary extends Component<Props, State> {
 				data-error-scope={scope}
 			>
 				<div className="contained-error-title">{title}</div>
-				<div className="contained-error-hint">{HINTS[scope]}</div>
+				<div className="contained-error-hint">{translate(text.hint)}</div>
 				{error.message ? <pre className="contained-error-message">{error.message}</pre> : null}
 				<div className="contained-error-actions">
 					<button type="button" className="contained-error-reload" onClick={this.reload}>
-						{scope === "pane" ? "Reload pane" : "Reload"}
+						{translate(text.reload)}
 					</button>
 					{actions}
 				</div>

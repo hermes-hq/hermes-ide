@@ -6,6 +6,7 @@ import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
+import { translate } from "../i18n/registry";
 import { CrashProbe } from "./CrashProbe";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
@@ -347,7 +348,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             label={session.label}
             actions={
               <button type="button" onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
-                Close pane
+                {translate("crash.closePane")}
               </button>
             }
           >

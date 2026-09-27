@@ -4,6 +4,7 @@ import { SplitPane } from "./SplitPane";
 import { SplitDivider } from "./SplitDivider";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { useSession } from "../state/SessionContext";
+import { translate } from "../i18n/registry";
 
 interface SplitLayoutProps {
   node: LayoutNode;
@@ -37,16 +38,18 @@ export function SplitLayout({ node }: SplitLayoutProps) {
 
 /** One pane, fenced off so a crash in its header or body cannot take the
  *  other panes (or the rest of the window) down with it. SplitPane adds a
- *  second, inner fence around the pane body that keeps the header usable. */
+ *  second, inner fence around the pane body that keeps the header usable;
+ *  both show the same card. */
 function ContainedPane({ paneId, sessionId }: { paneId: string; sessionId: string }) {
-  const { dispatch } = useSession();
+  const { state, dispatch } = useSession();
   return (
     <ContainedErrorBoundary
       key={sessionId}
       scope="pane"
+      label={state.sessions[sessionId]?.label}
       actions={
         <button type="button" onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
-          Close pane
+          {translate("crash.closePane")}
         </button>
       }
     >

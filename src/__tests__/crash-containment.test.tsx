@@ -12,6 +12,11 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => () => {}),
 }));
 
+vi.mock("../api/settings", () => ({
+  getSetting: vi.fn(async () => null),
+  setSetting: vi.fn(async () => {}),
+}));
+
 // A text block whose text is "BOOM" throws while rendering — stands in for
 // any malformed block the agent could send.
 vi.mock("../agent/blocks/TextBlock", async (importOriginal) => {
@@ -26,6 +31,8 @@ vi.mock("../agent/blocks/TextBlock", async (importOriginal) => {
 });
 
 import { ContainedErrorBoundary } from "../components/ContainedErrorBoundary";
+import { registerLanguagePack, setLanguage } from "../i18n/registry";
+import { dePack } from "../i18n/packs/de";
 import { CrashProbe, armCrash, isCrashArmed } from "../components/CrashProbe";
 import { MessageRow } from "../agent/AgentSessionView";
 import type { RenderedMessage } from "../agent/messageStore";
@@ -119,6 +126,22 @@ describe("pane-level containment", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("speaks the interface language, naming the session", async () => {
+    const pack = registerLanguagePack(dePack);
+    await setLanguage("de");
+    try {
+      render(<Pane id="l10n" />);
+      act(() => armCrash("pane:l10n"));
+      const card = await screen.findByRole("alert");
+      expect(card.textContent).toContain("Dieses Pane funktioniert nicht mehr: session l10n");
+      expect(card.textContent).toContain("Andere Panes sind nicht betroffen.");
+      expect(screen.getByRole("button", { name: "Pane neu laden" })).toBeTruthy();
+    } finally {
+      await setLanguage("en");
+      pack.dispose();
+    }
   });
 
   it("app-level Reload keeps state that lives above the boundary (the session store)", () => {
