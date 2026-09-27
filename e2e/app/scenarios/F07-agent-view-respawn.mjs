@@ -5,7 +5,9 @@
 // fake-claude-bridge.mjs, started through HERMES_BRIDGE_PATH exactly like the
 // real one). No network, no account: the Sign in step runs a fake `claude`
 // placed first on PATH, and every directory holding a real `claude` is taken
-// off the app's PATH.
+// off the app's PATH. (Windows terminals read PATH from the registry, so on a
+// Windows CI runner the fake is also added to the user's registry Path for
+// the Sign in step and removed again.)
 //
 //   run 1  fresh install: onboarding; turn on the "agentViewErrors" flag
 //   run 2  (flag on, normal build)
@@ -36,6 +38,7 @@
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/F07-agent-view-respawn.
 
+import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -88,6 +91,39 @@ if (onWindows) {
   );
   chmodSync(join(fakeBin, "claude"), 0o755);
 }
+
+/**
+ * Windows terminals do not inherit the app's PATH: the terminal library
+ * rebuilds PATH from the registry (machine Path, then the user's
+ * HKCU\Environment Path) for every new terminal. So on Windows the fake
+ * `claude` has to be on the user's registry Path. That is a machine setting,
+ * so it is only changed on a throwaway CI runner, and restored afterwards.
+ * Returns an undo function, or null when the change was not made.
+ */
+const canEditRegistryPath = onWindows && process.env.GITHUB_ACTIONS === "true";
+function addFakeBinToRegistryPath() {
+  if (!canEditRegistryPath) return null;
+  let old = null;
+  try {
+    const out = execFileSync("reg", ["query", "HKCU\\Environment", "/v", "Path"], { encoding: "utf8" });
+    const m = out.match(/^\s*Path\s+REG_\w+\s+(.*)$/im);
+    old = m ? m[1].trim() : "";
+  } catch {
+    old = null; // no user Path yet
+  }
+  const next = old ? `${old};${fakeBin}` : fakeBin;
+  execFileSync("reg", ["add", "HKCU\\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", next, "/f"]);
+  log(`  (CI runner: added the fake claude folder to the user's registry Path)`);
+  return () => {
+    if (old === null) {
+      execFileSync("reg", ["delete", "HKCU\\Environment", "/v", "Path", "/f"]);
+    } else {
+      execFileSync("reg", ["add", "HKCU\\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", old, "/f"]);
+    }
+    log("  (CI runner: restored the user's registry Path)");
+  };
+}
+let undoRegistryPath = null;
 
 /** PATH for the app: the fake `claude` first, no directory with a real one. */
 function testPath() {
@@ -367,6 +403,7 @@ try {
   assert(!(await app.bridge.exists(".agent-result-error")), "the generic 'couldn't continue' banner is not repeated");
   await app.bridge.screenshot(join(evidenceDir, "04-signed-out-panel.png")).catch((e) => log(`  (screenshot: ${e.message})`));
 
+  undoRegistryPath = addFakeBinToRegistryPath();
   const sessionsBefore = await app.bridge.eval(`return e2e.all(".session-item").length;`);
   const termsBefore = await app.bridge.terminalIds();
   await app.bridge.click('.agent-error-banner-action[data-action="sign-in"]');
@@ -375,12 +412,22 @@ try {
     return e2e.all(".session-item").length === ${sessionsBefore + 1} && ids.length > 0 ? ids[ids.length - 1] : null;
   `, { timeoutMs: 20_000 });
   assert(!!signInSid, `Sign in opened a new terminal session (${signInSid})`);
-  // The fake `claude` leaves a file when it runs: proof on every OS that the
-  // new terminal session started the agent itself (nothing else runs it).
-  const ranBy = Date.now() + 45_000;
-  while (!existsSync(signInRanFile) && Date.now() < ranBy) await sleep(250);
-  log(`  terminal: ${JSON.stringify((await app.bridge.readTerminal(signInSid))?.slice(-6))}`);
-  assert(existsSync(signInRanFile), "the terminal session ran the agent's own sign-in (the fake `claude` started)");
+  // The fake `claude` leaves a file when it runs: proof that the new
+  // terminal session started the agent itself (nothing else runs it).
+  if (onWindows && !canEditRegistryPath) {
+    // Outside CI the fake cannot reach a Windows terminal's PATH without
+    // changing the person's registry, so this one check is CI-only there.
+    log("  (Windows outside CI: the fake `claude` cannot be put on the terminal's PATH; not checked)");
+  } else {
+    const ranBy = Date.now() + 45_000;
+    while (!existsSync(signInRanFile) && Date.now() < ranBy) await sleep(250);
+    log(`  terminal: ${JSON.stringify((await app.bridge.readTerminal(signInSid))?.slice(-6))}`);
+    assert(existsSync(signInRanFile), "the terminal session ran the agent's own sign-in (the fake `claude` started)");
+  }
+  if (undoRegistryPath) {
+    undoRegistryPath();
+    undoRegistryPath = null;
+  }
   if (!onWindows) {
     await app.bridge.waitForTerminal(signInSid, new RegExp(SIGN_IN_MARK), { timeoutMs: 30_000 });
     assert(true, "its sign-in screen shows in the terminal (the fake `claude` printed it)");
@@ -483,6 +530,9 @@ try {
   }
   log(`  fake bridge log: ${existsSync(fakeLog) ? readFileSync(fakeLog, "utf8").split("\n").slice(-20).join("\n    ") : "(none)"}`);
 } finally {
+  if (undoRegistryPath) {
+    try { undoRegistryPath(); } catch (e) { log(`  (could not restore the registry Path: ${e.message})`); }
+  }
   if (app?.isRunning()) {
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
