@@ -1,0 +1,43 @@
+{
+  "$comment": "Allowlist for scripts/privacy-check.mjs (the `privacy` CI job). This repository is public: keep every entry synthetic and justify additions in the pull request.",
+  "userNames": [
+    "a",
+    "alice",
+    "bob",
+    "dev",
+    "example",
+    "foo",
+    "jane",
+    "john",
+    "linuxbrew",
+    "me",
+    "runner",
+    "Shared",
+    "someone",
+    "test",
+    "testuser",
+    "user",
+    "username",
+    "you"
+  ],
+  "emailDomains": [
+    "example.com",
+    "example.org",
+    "example.net",
+    "test.com",
+    "localhost",
+    "users.noreply.github.com",
+    "noreply.github.com",
+    "*.example.com",
+    "*.example.org",
+    "*.example.net",
+    "*.internal",
+    "*.invalid",
+    "*.test",
+    "*.local"
+  ],
+  "emailLocalParts": ["git", "noreply", "no-reply"],
+  "emailFiles": ["LICENSE", "CLA.md"],
+  "dataFileDirs": ["public/", "src/assets/", "src-tauri/icons/", "docs/design-system/"],
+  "files": []
+}
