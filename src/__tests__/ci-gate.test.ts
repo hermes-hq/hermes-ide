@@ -19,6 +19,7 @@ function allJobs(result: string): Needs {
 		"rust-clippy": { result },
 		"rust-test": { result },
 		"e2e-app": { result },
+		privacy: { result: "success" },
 	};
 }
 
@@ -77,6 +78,25 @@ describe("CI gate", () => {
 		const base = { changes: changes({}), ...allJobs("skipped") };
 		expect(evaluateGate({ ...base, "new-job": { result: "skipped" } }).ok).toBe(false);
 		expect(evaluateGate({ ...base, "new-job": { result: "success" } }).ok).toBe(true);
+	});
+
+	it("fails when the privacy check failed or was skipped, even on a docs-only change", () => {
+		for (const result of ["failure", "skipped", "cancelled"]) {
+			const needs = { changes: changes({}), ...allJobs("skipped"), privacy: { result } };
+			const { ok, lines } = evaluateGate(needs);
+			expect(ok, result).toBe(false);
+			expect(lines.join("\n")).toMatch(/privacy: /);
+		}
+	});
+
+	it("fails when a required job is missing from gate.needs", () => {
+		const needs = { changes: changes({}), ...allJobs("skipped") } as Needs;
+		delete needs.privacy;
+		delete needs["rust-test"];
+		const { ok, lines } = evaluateGate(needs);
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/privacy: missing from gate.needs/);
+		expect(lines.join("\n")).toMatch(/rust-test: missing from gate.needs/);
 	});
 
 	it("the CLI exits non-zero on a cancelled job and zero on success", () => {

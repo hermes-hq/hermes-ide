@@ -63,6 +63,10 @@ jobs:
               - 'index.html'
               - 'eslint.config.js'
               - 'eslint-rules/**'
+              # Scripts whose unit tests live in src/__tests__
+              - 'scripts/privacy-check.mjs'
+              - 'scripts/mutation-score.mjs'
+              - '.github/privacy-allowlist.json'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -265,13 +269,68 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # ── Privacy: this repository is public ───────────────────────────────
+  # Runs on every change. Fails on secrets (gitleaks over the new commits)
+  # and on added personal home paths, non-synthetic email addresses, or new
+  # binary/data files outside the asset directories
+  # (scripts/privacy-check.mjs, allowlist in .github/privacy-allowlist.json).
+  privacy:
+    name: Privacy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Work out which commits to check
+        id: range
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            merge_group)  base="$MQ_BASE" ;;
+            *)            base="$PUSH_BEFORE" ;;
+          esac
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::warning::base commit '$base' is not available; checking only the last commit"
+            base="$(git rev-parse HEAD~1)"
+          fi
+          echo "Checking $base..$(git rev-parse HEAD)"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP" gitleaks
+      - name: Secrets in the new commits (gitleaks)
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --log-opts="$BASE..HEAD" --redact --no-banner --exit-code 1 .
+      - name: Personal paths, email addresses and data files
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+        run: node scripts/privacy-check.mjs --base "$BASE"
+
   # ── Gate: the one required check ─────────────────────────────────────
   # Always runs. Fails when any job it needs failed, was cancelled, or was
   # skipped although its inputs changed. Make only this check required.
   gate:
     name: gate
     if: always()
-    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app]
+    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, privacy]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

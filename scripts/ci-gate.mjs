@@ -8,8 +8,9 @@
 // never merge on a cancelled or missing check.
 //
 // Which jobs are expected is decided by the `changes` job outputs. Keep
-// JOB_TRIGGERS in sync with the jobs listed under `gate.needs`. A job that
-// is not listed here is always expected to succeed.
+// JOB_TRIGGERS and ALWAYS_REQUIRED in sync with the jobs listed under
+// `gate.needs`: a job named there but missing from `needs` fails the gate.
+// A job that is not listed in JOB_TRIGGERS is always expected to succeed.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,9 @@ export const JOB_TRIGGERS = {
   "rust-test": ["rust", "ci"],
   "e2e-app": ["frontend", "rust", "ci"],
 };
+
+/** Jobs that run on every change and must always succeed. */
+export const ALWAYS_REQUIRED = ["privacy"];
 
 /**
  * @param {Record<string, { result: string, outputs?: Record<string, string> }>} needs
@@ -51,6 +55,10 @@ export function evaluateGate(needs) {
   }
   lines.push("ok   changes: success");
   const outputs = changes.outputs || {};
+
+  for (const job of [...Object.keys(JOB_TRIGGERS), ...ALWAYS_REQUIRED]) {
+    if (!(job in needs)) fail(`${job}: missing from gate.needs, so its result is unknown`);
+  }
 
   for (const [job, info] of Object.entries(needs)) {
     if (job === "changes") continue;
