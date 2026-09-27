@@ -591,7 +591,8 @@ function InteractivePermissionDispatcher({
       // ~/.claude/settings.json: approving a command in one project must
       // not approve it everywhere.  Best-effort; the in-session allow has
       // already been wired via the response above.  Without a project
-      // folder there is nowhere safe to write, so nothing is persisted.
+      // folder there is nowhere safe to write: the prompt does not offer
+      // "Always allow" then, and nothing is persisted.
       if (!projectDir) {
         console.warn("[perm] no project folder for this session; rule not persisted");
       } else {
@@ -665,6 +666,7 @@ function InteractivePermissionDispatcher({
         request={request}
         permissionMode={permissionMode}
         onDecision={decide}
+        canPersist={!!projectDir}
       />
     </>
   );

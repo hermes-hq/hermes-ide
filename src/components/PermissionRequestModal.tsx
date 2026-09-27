@@ -23,9 +23,15 @@ interface Props {
   request: PermRequest;
   permissionMode: string;
   onDecision: (decision: PermissionDecision) => void;
+  /**
+   * Whether an "Always allow" rule can be saved.  False when the session
+   * has no project folder: the rule would have nowhere to go, so the
+   * button is not offered rather than silently saving nothing.
+   */
+  canPersist?: boolean;
 }
 
-export function PermissionRequestModal({ request, permissionMode, onDecision }: Props) {
+export function PermissionRequestModal({ request, permissionMode, onDecision, canPersist = true }: Props) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(() =>
     JSON.stringify(request.input, null, 2),
@@ -147,14 +153,16 @@ export function PermissionRequestModal({ request, permissionMode, onDecision }: 
               Edit input
             </button>
             <span className="perm-modal-actions-spacer" />
-            <button
-              type="button"
-              className="perm-link"
-              title={`Adds permissions.allow: ['${allowRule}'] to this project's .claude/settings.local.json`}
-              onClick={() => onDecision({ kind: "allow", persist: allowRule })}
-            >
-              Always allow ({request.toolName})
-            </button>
+            {canPersist && (
+              <button
+                type="button"
+                className="perm-link"
+                title={`Adds permissions.allow: ['${allowRule}'] to this project's .claude/settings.local.json`}
+                onClick={() => onDecision({ kind: "allow", persist: allowRule })}
+              >
+                Always allow ({request.toolName})
+              </button>
+            )}
             <button
               type="button"
               className="perm-link perm-link-primary"

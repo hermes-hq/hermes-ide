@@ -135,6 +135,12 @@ describe("F13 — the permission prompt never takes keyboard focus", () => {
     expect(always.getAttribute("title")).toContain(".claude/settings.local.json");
     expect(always.getAttribute("title")).not.toContain("~/.claude/settings.json");
   });
+
+  it("does not offer Always allow when the rule cannot be saved", () => {
+    render(<PermissionRequestModal request={bashRequest} permissionMode="default" onDecision={vi.fn()} canPersist={false} />);
+    expect(screen.queryByRole("button", { name: /Always allow/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeInTheDocument();
+  });
 });
 
 describe("F13 — Always allow is saved to the project, not globally", () => {
@@ -159,7 +165,7 @@ describe("F13 — Always allow is saved to the project, not globally", () => {
     act(() => {
       store.injectEvent(bashRequest as unknown as AgentEvent);
     });
-    return screen.getByRole("button", { name: /Always allow/ });
+    return screen.getByRole("dialog", { name: "Permission request" });
   }
 
   async function flush() {
@@ -174,8 +180,8 @@ describe("F13 — Always allow is saved to the project, not globally", () => {
   it("writes the rule with scope local for the session's working directory", async () => {
     sessions = { "s-local": { working_directory: "/work/project", permission_mode: "default" } };
     const user = userEvent.setup();
-    const always = await showPrompt("s-local");
-    await user.click(always);
+    await showPrompt("s-local");
+    await user.click(screen.getByRole("button", { name: /Always allow/ }));
     await flush();
 
     const writes = invokeMock.mock.calls.filter(([cmd]) => cmd === "write_permission_rule");
@@ -193,14 +199,13 @@ describe("F13 — Always allow is saved to the project, not globally", () => {
     });
   });
 
-  it("without a project folder nothing is persisted — never falls back to the global file", async () => {
+  it("without a project folder Always allow is not offered and nothing is persisted", async () => {
     sessions = { "s-none": { working_directory: "", permission_mode: "default" } };
     const user = userEvent.setup();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const always = await showPrompt("s-none");
-    await user.click(always);
+    await showPrompt("s-none");
+    expect(screen.queryByRole("button", { name: /Always allow/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Approve once" }));
     await flush();
-    warn.mockRestore();
 
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "write_permission_rule")).toEqual([]);
     // The in-session allow still reaches the agent.
