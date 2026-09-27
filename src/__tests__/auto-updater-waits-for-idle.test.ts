@@ -166,4 +166,30 @@ describe("useAutoUpdater — N10 waits for idle sessions", () => {
     await bootAndCheck();
     expect(result.current.state.busySessionCount).toBe(0);
   });
+
+  it("ignores the e2e test override outside the e2e build", async () => {
+    const update = fakeUpdate("1.2.3");
+    mockCheck.mockResolvedValue(update);
+    window.__HERMES_TEST_UPDATE__ = { forcedUpdate: { version: "99.0.0" }, installCalls: 0, relaunchCalls: 0 };
+    try {
+      const { result } = renderHook(() => useAutoUpdater(0));
+      await bootAndCheck();
+      // The real update source was asked, not the forced one.
+      expect(mockCheck).toHaveBeenCalled();
+      expect(result.current.state.version).toBe("1.2.3");
+
+      await act(async () => {
+        await result.current.download();
+      });
+      await act(async () => {
+        await result.current.installAndRelaunch();
+      });
+      // The real relaunch ran; the override's counters were never touched.
+      expect(update.install).toHaveBeenCalledTimes(1);
+      expect(mockRelaunch).toHaveBeenCalledTimes(1);
+      expect(window.__HERMES_TEST_UPDATE__?.relaunchCalls).toBe(0);
+    } finally {
+      delete window.__HERMES_TEST_UPDATE__;
+    }
+  });
 });

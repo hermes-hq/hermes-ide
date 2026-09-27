@@ -3,12 +3,12 @@ import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updat
 import { relaunch } from "@tauri-apps/plugin-process";
 
 /**
- * Test-only escape hatch for e2e runs (never present in production: the
- * build flag that loads `src/e2e/hooks.ts` is stripped from normal builds,
- * and this global stays `undefined` until that module sets it). Lets a
- * scenario force the "update ready" state without reaching a real update
- * server, and records install/relaunch attempts instead of tearing the
- * test app down — see N10's real-app scenario.
+ * Test-only escape hatch for e2e runs. Only read when the frontend is built
+ * with VITE_HERMES_E2E=1 (the same flag that loads `src/e2e/hooks.ts`), so
+ * it is compiled out of normal builds. Lets a scenario force the "update
+ * ready" state without reaching a real update server, and records
+ * install/relaunch attempts instead of tearing the test app down — see
+ * N10's real-app scenario.
  */
 declare global {
   interface Window {
@@ -21,6 +21,9 @@ declare global {
 }
 
 function testUpdateOverride() {
+  // Dead code outside the e2e build: Vite inlines the flag, so normal
+  // builds never read the global.
+  if (import.meta.env.VITE_HERMES_E2E !== "1") return undefined;
   return typeof window !== "undefined" ? window.__HERMES_TEST_UPDATE__ : undefined;
 }
 
