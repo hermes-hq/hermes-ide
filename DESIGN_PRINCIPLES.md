@@ -2,13 +2,19 @@
 
 These principles guide every decision about what Hermes IDE is and isn't. They are ordered by priority. When principles conflict, higher wins.
 
-## 0. Agent-native for Claude, terminal-faithful for everything else
+## 0. Terminal-faithful first; structured views are optional
 
-Starting with v1.0.0, Hermes IDE is an **agent-native** surface for Claude Code: we talk to Claude through its structured stream-json protocol, render real messages and tool calls as first-class UI, and stop pretending a terminal is a chat. For every other AI provider — and for any user who explicitly wants a terminal — we remain **terminal-faithful**: an honest, polished xterm host that doesn't get in the way.
+Every agent runs in its own terminal interface by default, byte for byte. Hermes observes only what the agent reports on purpose (its hooks, notifications, exit codes) and what git shows. Supervision (status, history, review, landing) works the same for every agent. Hermes never types into a terminal on its own; the only allowed write is one visible line you trigger yourself.
 
-The decision rule: if a piece of UI exists to help a user **converse with Claude**, it belongs to Agent mode and should consume Claude's structured events directly. If it exists to help a user **run a program**, it belongs to Terminal mode and should stay out of the program's way.
+A structured view (today: the optional Agent view for Claude) is something a user opts into per session. It is built only for an agent with a documented, stable machine protocol, and only when it gives users something the agent's own interface cannot. See [ADR 003](docs/adr/003-terminal-first-vendor-neutral.md).
 
-We ask: **"Are we faking chat by typing into a TTY?"** If yes, the right answer is Agent mode, not a cleverer puppet show.
+Three rules follow from this:
+
+- **Observe, never answer.** Hermes reads agent signals but never answers a permission prompt or a question on your behalf.
+- **Status is honest.** Every status shows its source (exact, signal or guessed).
+- **Every new surface retires one.** A change that adds a panel, mode or view names the one it removes.
+
+We ask: **"Would this work the same for every agent, without faking what the agent did not report?"** If not, it does not belong in the default path.
 
 ## 1. Focused, not full-featured
 

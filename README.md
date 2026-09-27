@@ -16,23 +16,26 @@ Hermes IDE is a desktop terminal emulator that deeply integrates AI assistance i
 
 **Platforms:** macOS, Windows, Linux
 
+Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
+
 ---
 ![GIF](https://github.com/user-attachments/assets/dce248cc-d215-48c7-a1c1-33e539c2a20f)
 
 ## Features
 
-### Agent mode for Claude (new in 1.0.0)
-- **Real chat for Claude** — Claude sessions open in a rich chat interface by default, with thinking blocks, tool-call cards, and diff previews instead of a TUI in a terminal
-- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels
-- **Persistent conversations** — Claude sessions resume across app restarts
-- **Bring your own auth** — uses your existing `claude` CLI auth (Pro, Max, or API key); Hermes never asks for tokens
-
-### Terminal
-- **Multi-session management** — create, switch, and organize parallel terminal sessions
+### Terminal first, for every agent
+- **Every agent in its own terminal** — Claude Code, Codex, Gemini, Aider, Copilot, Kiro and plain shells all open in a real terminal by default, running the agent's own interface exactly as it would anywhere else
+- **Bring your own auth** — agents use their own CLI sign-in (for Claude: Pro, Max, or API key); Hermes never asks for tokens
+- **Multi-session management** — create, switch, and organize parallel sessions
 - **Split panes** — horizontal and vertical splits with drag-and-drop reordering
 - **WebGL-accelerated rendering** — fast terminal with web links and auto-fit
-- **Execution timeline** — visual history of every command with exit codes and durations
-- **Still excellent for everything else** — Aider, Codex, Gemini, Copilot, Kiro, plain shells all run in classic Terminal mode, unchanged
+- **Remembers your choice per agent** — the New Session wizard preselects the last agent and how you ran it
+
+### Agent view for Claude (optional)
+- **Opt in per session** — tick "Agent view for Claude" in the New Session wizard to have Hermes render the conversation instead of Claude's terminal interface
+- **Structured conversation** — thinking blocks, tool-call cards, and diff previews
+- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels
+- **Persistent conversations** — Agent-view sessions resume across app restarts
 
 ### Git Integration
 - **Built-in git panel** — view staged, unstaged, and untracked files per project
