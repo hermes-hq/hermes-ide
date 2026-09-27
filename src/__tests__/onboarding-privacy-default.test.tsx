@@ -14,7 +14,7 @@ const mockGetSetting = vi.fn();
 const mockGetSettings = vi.fn();
 const mockSetSetting = vi.fn(() => Promise.resolve());
 const mockCheckAiProviders = vi.fn(() => Promise.resolve({}));
-const mockSetAnalyticsEnabled = vi.fn();
+const mockInvoke = vi.fn(() => Promise.resolve(true));
 
 vi.mock("../api/settings", () => ({
   getSetting: (...args: unknown[]) => mockGetSetting(...args),
@@ -24,8 +24,8 @@ vi.mock("../api/settings", () => ({
 vi.mock("../api/sessions", () => ({
   checkAiProviders: (...args: unknown[]) => mockCheckAiProviders(...args),
 }));
-vi.mock("../utils/analytics", () => ({
-  setAnalyticsEnabled: (...args: unknown[]) => mockSetAnalyticsEnabled(...args),
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...(args as [])),
 }));
 vi.mock("@tauri-apps/plugin-shell", () => ({
   open: vi.fn(),
@@ -38,7 +38,7 @@ beforeEach(() => {
   mockGetSettings.mockResolvedValue({});
   mockSetSetting.mockClear();
   mockCheckAiProviders.mockClear();
-  mockSetAnalyticsEnabled.mockClear();
+  mockInvoke.mockClear();
 });
 
 afterEach(() => {
@@ -81,6 +81,23 @@ describe("OnboardingWizard privacy step", () => {
     await waitFor(() => {
       expect(mockSetSetting).toHaveBeenCalledWith("telemetry_enabled", "false");
     });
-    expect(mockSetAnalyticsEnabled).toHaveBeenCalledWith(false);
+    // Analytics is never started for a user who did not opt in.
+    expect(mockInvoke).not.toHaveBeenCalledWith("enable_analytics");
+  });
+
+  it("ticking the checkbox persists the opt-in and starts analytics right away", async () => {
+    const { OnboardingWizard } = await import("../components/OnboardingWizard");
+    render(<OnboardingWizard />);
+
+    await goToPrivacyStep();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Help improve Hermes IDE/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I accept the/ }));
+    fireEvent.click(screen.getByText("Finish"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("enable_analytics");
+    });
+    expect(mockSetSetting).toHaveBeenCalledWith("telemetry_enabled", "true");
   });
 });

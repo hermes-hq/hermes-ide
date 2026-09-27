@@ -1,34 +1,45 @@
-import { trackEvent } from "@aptabase/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { getSetting, setSetting } from "../api/settings";
 
-// e2e/CI builds (`VITE_HERMES_E2E=1`, set by e2e/app/build.mjs — see
-// src/main.tsx for the same flag gating the test-only automation hooks)
-// never send analytics, no matter what a fixture profile's settings say.
-const isE2eBuild = import.meta.env.VITE_HERMES_E2E === "1";
-
+// Private by default: nothing is tracked until the user opts in, and the
+// backend only creates its analytics client once the opt-in is stored. The
+// backend has the final say — it refuses in test runs (HERMES_E2E) — so
+// `enabled` is only ever true when it confirmed analytics is active.
 let enabled = false;
+// Bumped on every change of mind, so a slow "on" cannot land after a later "off".
+let generation = 0;
+
+/** Asks the backend to turn analytics on for the running app. Resolves to
+ *  whether it is active; never rejects. */
+function activateAnalytics(): Promise<boolean> {
+  return invoke<boolean>("enable_analytics").then((active) => active === true, () => false);
+}
 
 export async function initAnalytics(): Promise<void> {
-  if (isE2eBuild) {
-    enabled = false;
-    return;
-  }
+  const gen = generation;
   const stored = await getSetting("telemetry_enabled").catch(() => null);
-  enabled = stored === "true";
+  const active = stored === "true" && (await activateAnalytics());
+  if (gen === generation) enabled = active;
 }
 
-export function setAnalyticsEnabled(value: boolean): void {
-  enabled = isE2eBuild ? false : value;
-  setSetting("telemetry_enabled", value ? "true" : "false").catch(console.error);
+/** Persists the choice, then applies it right away (no restart needed). */
+export async function setAnalyticsEnabled(value: boolean): Promise<void> {
+  const gen = ++generation;
+  enabled = false;
+  await setSetting("telemetry_enabled", value ? "true" : "false").catch(console.error);
+  if (!value) return;
+  const active = await activateAnalytics();
+  if (gen === generation) enabled = active;
 }
 
+// Sent straight to the analytics plugin's command. The @aptabase/tauri
+// package speaks the Tauri 1 IPC, which this app does not have, so events
+// sent through it never arrived.
 function track(name: string, props?: Record<string, string | number>): void {
   if (!enabled) return;
-  try {
-    trackEvent(name, props);
-  } catch {
-    // silently ignore
-  }
+  invoke("plugin:aptabase|track_event", { name, props: props ?? null }).catch(() => {
+    // Analytics must never disturb the app.
+  });
 }
 
 export function trackAppStarted(): void {

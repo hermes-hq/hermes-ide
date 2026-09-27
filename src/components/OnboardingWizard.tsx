@@ -113,9 +113,7 @@ export function OnboardingWizard() {
 
   const handleFinish = useCallback(async () => {
     // Save analytics preference
-    const telemetryValue = analyticsOptIn ? "true" : "false";
-    await setSetting("telemetry_enabled", telemetryValue).catch(console.warn);
-    setAnalyticsEnabled(analyticsOptIn);
+    await setAnalyticsEnabled(analyticsOptIn);
 
     // Mark onboarding as completed
     await setSetting(SETTING_KEY, "true").catch(console.warn);
