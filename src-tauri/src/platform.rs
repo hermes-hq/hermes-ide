@@ -149,7 +149,12 @@ pub fn ai_cli_providers() -> Vec<(&'static str, &'static str)> {
 ///      `~/.nvm/versions/node/*/bin`, `~/.local/bin`, `~/.cargo/bin`) as a
 ///      last resort for users whose profile is misconfigured.
 ///   3. **Bare `which`** on Windows or as a last fallback on Unix.
-pub fn check_ai_cli_availability() -> std::collections::HashMap<String, bool> {
+///
+/// `include_beta` is whether the UI shows the beta-channel agents (the
+/// agentCatalog flag). The fallback spawns one `which`/`where` per agent, so
+/// without the flag the beta agents are reported missing without a spawn.
+/// The Unix login-shell check is one script for every agent either way.
+pub fn check_ai_cli_availability(include_beta: bool) -> std::collections::HashMap<String, bool> {
     #[cfg(unix)]
     {
         if let Some(mut results) = check_ai_cli_via_login_shell() {
@@ -168,9 +173,23 @@ pub fn check_ai_cli_availability() -> std::collections::HashMap<String, bool> {
 
     // Fallback: direct which/where (works when launched from a terminal
     // or on Windows).
+    let probed = fallback_probe_list(include_beta);
     ai_cli_providers()
         .iter()
-        .map(|(id, cmd)| (id.to_string(), command_exists(cmd)))
+        .map(|(id, cmd)| {
+            (
+                id.to_string(),
+                probed.contains(&(*id, *cmd)) && command_exists(cmd),
+            )
+        })
+        .collect()
+}
+
+/// The agents the which/where fallback spawns a check for.
+fn fallback_probe_list(include_beta: bool) -> Vec<(&'static str, &'static str)> {
+    ai_cli_providers()
+        .into_iter()
+        .filter(|(id, _)| include_beta || !crate::agent_catalog::is_beta(id))
         .collect()
 }
 
@@ -304,8 +323,30 @@ mod tests {
     }
 
     #[test]
+    fn fallback_probes_beta_agents_only_with_the_flag() {
+        let ids = |v: Vec<(&'static str, &'static str)>| {
+            v.into_iter().map(|(id, _)| id).collect::<Vec<_>>()
+        };
+        let stable = ids(fallback_probe_list(false));
+        let all = ids(fallback_probe_list(true));
+        assert_eq!(
+            stable,
+            vec!["claude", "codex", "gemini", "copilot", "aider", "kiro"]
+        );
+        assert_eq!(all.len(), ai_cli_providers().len());
+        for beta in ["antigravity", "opencode", "goose", "hermes-agent"] {
+            assert!(all.contains(&beta) && !stable.contains(&beta), "{beta}");
+        }
+        // Keys are always complete, so the UI never sees a missing entry.
+        let result = check_ai_cli_availability(false);
+        for (id, _) in ai_cli_providers().iter() {
+            assert!(result.contains_key(*id), "Missing provider key: {}", id);
+        }
+    }
+
+    #[test]
     fn check_ai_cli_availability_returns_all_provider_keys() {
-        let result = check_ai_cli_availability();
+        let result = check_ai_cli_availability(true);
         for (id, _) in ai_cli_providers().iter() {
             assert!(result.contains_key(*id), "Missing provider key: {}", id);
         }

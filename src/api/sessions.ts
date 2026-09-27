@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import type { SessionData, SessionHistoryEntry, SessionMode, TmuxSessionEntry, TmuxWindowEntry, PortForward } from "../types/session";
 
 export interface RemoteGitInfo {
@@ -92,7 +93,8 @@ export function sshTmuxNewWindow(
 }
 
 export function checkAiProviders(): Promise<Record<string, boolean>> {
-  return invoke<Record<string, boolean>>("check_ai_providers");
+  // Beta-channel agents are only looked for when the UI shows them.
+  return invoke<Record<string, boolean>>("check_ai_providers", { includeBeta: isFeatureFlagEnabled("agentCatalog") });
 }
 
 export function closeSession(sessionId: string): Promise<void> {

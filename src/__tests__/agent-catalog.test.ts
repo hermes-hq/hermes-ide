@@ -36,6 +36,7 @@ import {
 } from "../catalog/agentCatalog";
 import { initFeatureFlags, __resetFeatureFlagsForTest, FEATURE_FLAG_OVERRIDES_KEY } from "../featureFlags";
 import type { PermissionMode } from "../types/session";
+import { checkAiProviders } from "../api/sessions";
 
 const ajv = new Ajv({ allErrors: true, strict: true, strictRequired: false, strictTuples: false, allowUnionTypes: true });
 const validate = ajv.compile(schema);
@@ -175,6 +176,17 @@ describe("agent catalog: what a build shows", () => {
 		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: true }) });
 		expect(ids(listAgents())).toEqual(["claude", "codex", "antigravity", "gemini", "copilot", "opencode", "goose", "hermes-agent", "aider", "kiro"]);
 		expect(customAgent()?.id).toBe("custom");
+	});
+
+	it("asks the backend to look for the beta agents only when the flag shows them", async () => {
+		h.invoke.mockResolvedValue({});
+		await initFeatureFlags({});
+		await checkAiProviders();
+		expect(h.invoke).toHaveBeenLastCalledWith("check_ai_providers", { includeBeta: false });
+		__resetFeatureFlagsForTest();
+		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: true }) });
+		await checkAiProviders();
+		expect(h.invoke).toHaveBeenLastCalledWith("check_ai_providers", { includeBeta: true });
 	});
 
 	it("beta channel shows them without an override; a forced-off override hides them", async () => {

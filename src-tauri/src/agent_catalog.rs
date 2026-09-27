@@ -23,8 +23,6 @@ pub struct Catalog {
 pub struct Agent {
     pub id: String,
     /// `stable` (everyone) or `beta` (behind the agentCatalog flag in the UI).
-    /// The UI does the gating; the backend only reads this in tests.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub channel: String,
     /// The "Custom agent" entry: the user types the command.
     #[serde(default)]
@@ -60,6 +58,12 @@ pub fn catalog() -> &'static Catalog {
 
 pub fn agent(id: &str) -> Option<&'static Agent> {
     catalog().agents.iter().find(|a| a.id == id)
+}
+
+/// Whether the agent is on the `beta` channel (shown only with the
+/// agentCatalog flag).
+pub fn is_beta(id: &str) -> bool {
+    agent(id).is_some_and(|a| a.channel == "beta")
 }
 
 /// `(agent id, binary)` for every agent that has a detect command, in

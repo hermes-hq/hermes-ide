@@ -678,8 +678,8 @@ pub async fn ssh_tmux_rename_window(
 }
 
 #[tauri::command]
-pub fn check_ai_providers() -> std::collections::HashMap<String, bool> {
-    crate::platform::check_ai_cli_availability()
+pub fn check_ai_providers(include_beta: Option<bool>) -> std::collections::HashMap<String, bool> {
+    crate::platform::check_ai_cli_availability(include_beta.unwrap_or(false))
 }
 
 // Tauri command handler — params come from frontend invocation
