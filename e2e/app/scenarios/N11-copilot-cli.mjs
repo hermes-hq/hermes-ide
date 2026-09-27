@@ -72,6 +72,8 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
     return t ? t : null;
   `);
   log(`  launch preview: ${preview}`);
+  await bridge.eval(`e2e.first(".session-creator-launch-preview")?.scrollIntoView({ block: "center" }); return true;`);
+  await sleep(300);
   const previewShot = await bridge.screenshot(join(evidenceDir, "00-copilot-launch-preview.png"));
   log(`  screenshot saved: ${previewShot.file}`);
   assert(preview === "copilot", "the wizard previews the copilot command the app actually runs");

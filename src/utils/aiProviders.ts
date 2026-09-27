@@ -23,7 +23,7 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
 	{
 		id: "gemini",
 		label: "Gemini",
-		description: "Gemini CLI for API key and Code Assist users. Personal Google accounts: use Antigravity CLI (agy) instead",
+		description: "Gemini CLI. Personal Google accounts: use Antigravity CLI (agy)",
 		installUrl: "https://github.com/google-gemini/gemini-cli",
 		installCmd: "npm install -g @google/gemini-cli",
 		authHint: "Set GEMINI_API_KEY or sign in with a Code Assist license; personal Google accounts moved to Antigravity CLI (agy)",
