@@ -645,6 +645,44 @@ mod tests {
         );
     }
 
+    /// Copilot is detected by the standalone `copilot` binary (what the install
+    /// hint installs and what Hermes launches), not by `gh`, whose retired
+    /// `gh copilot` extension no longer works.
+    #[cfg(unix)]
+    #[test]
+    fn copilot_is_detected_by_the_copilot_binary_not_gh() {
+        use std::os::unix::fs::PermissionsExt;
+
+        fn run_with_bins(bins: &[&str]) -> std::collections::HashMap<String, bool> {
+            let dir = std::env::temp_dir().join(format!(
+                "hermes-detect-{}-{}",
+                std::process::id(),
+                bins.join("-")
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            for b in bins {
+                let p = dir.join(b);
+                std::fs::write(&p, "#!/bin/sh\nexit 0\n").unwrap();
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            let out = std::process::Command::new("/bin/sh")
+                .args(["-c", &build_detection_script()])
+                .env("PATH", &dir)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            parse_detection_output(&String::from_utf8_lossy(&out.stdout))
+        }
+
+        let only_gh = run_with_bins(&["gh"]);
+        assert_eq!(only_gh.get("copilot").copied(), Some(false));
+
+        let with_copilot = run_with_bins(&["copilot"]);
+        assert_eq!(with_copilot.get("copilot").copied(), Some(true));
+        assert_eq!(with_copilot.get("gemini").copied(), Some(false));
+    }
+
     // ── Script generation & parsing ────────────────────────────────────
 
     /// The login-shell script must not be injectable.  Provider IDs and

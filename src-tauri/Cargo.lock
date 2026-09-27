@@ -2028,6 +2028,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "vte",
  "walkdir",
  "windows-sys 0.61.2",
 ]

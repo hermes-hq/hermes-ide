@@ -291,3 +291,22 @@ features:
         # The panel is generated from the menu (N23); that scenario checks
         # every row against the generator's output.
         scenarios: [N23-shortcuts-panel.mjs]
+  N11:
+    name: "Defect sweep from the review"
+    # Proven on macOS locally. The scenarios set up zsh/sh in a private home,
+    # so they are macOS-only until Linux and Windows variants exist and the
+    # E2E workflow runs them; until then the gate does not require results.
+    status: planned
+    criteria:
+      N11-1:
+        text: "With two agents in two projects, each session shows its own transcript"
+        scenarios: [N11-transcript-per-project.mjs@darwin]
+      N11-2:
+        text: "Workbench layout and notes survive a restart"
+        scenarios: [N11-workbench-notes-restore.mjs@darwin]
+      N11-3:
+        text: "A directory change split across reads still updates the header"
+        scenarios: [N11-split-cwd-report.mjs@darwin]
+      N11-4:
+        text: "Gemini and Copilot install hints install the command Hermes checks for and launches"
+        scenarios: [N11-install-hints.mjs@darwin, N11-copilot-cli.mjs@darwin]

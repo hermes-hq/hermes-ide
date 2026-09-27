@@ -301,6 +301,13 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     layout: obj.layout ?? null,
     focused_pane_id: typeof obj.focused_pane_id === "string" ? obj.focused_pane_id : null,
     active_session_id: typeof obj.active_session_id === "string" ? obj.active_session_id : null,
+    // Passed through; the restore path checks each field with
+    // loadWorkbenchLayout / loadNotesMap.
+    workbench: obj.workbench,
+    notes:
+      obj.notes !== null && typeof obj.notes === "object" && !Array.isArray(obj.notes)
+        ? (obj.notes as Record<string, string>)
+        : undefined,
   };
 }
 

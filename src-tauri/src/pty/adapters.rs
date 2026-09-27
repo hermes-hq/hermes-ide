@@ -1181,7 +1181,7 @@ impl ProviderAdapter for CopilotAdapter {
         let now_str = now();
         let lower = line.to_lowercase();
 
-        // Detect suggestions: "Suggestion:" or "Command:" output from gh copilot suggest
+        // Detect suggestions: "Suggestion:" or "Command:" lines in Copilot output
         if lower.starts_with("suggestion:") || lower.starts_with("command:") {
             result.action = Some(ActionEvent {
                 label: "Suggestion".into(),

@@ -1227,6 +1227,7 @@ pub fn create_session(
                                         s.custom_suffix.clone(),
                                         s.channels.clone(),
                                         s.agent_command.clone(),
+                                        s.shell.clone(),
                                     )
                                 });
                                 if let Some((
@@ -1237,6 +1238,7 @@ pub fn create_session(
                                     ref custom_suffix,
                                     ref channels,
                                     ref agent_command,
+                                    ref shell,
                                 )) = launch_info
                                 {
                                     // Only launch known/allowed AI providers (reject unknown values)
@@ -1254,7 +1256,11 @@ pub fn create_session(
                                         // Build command: base+flags, then prompt, then --channels
                                         // (channels must come AFTER prompt so CLI doesn't treat prompt as a channel entry)
                                         let mut cmd = if has_context && supports_cli_prompt {
-                                            format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
+                                            format!(
+                                                "{} {}",
+                                                launch_cmd,
+                                                crate::pty::context_prompt_arg(shell)
+                                            )
                                         } else {
                                             launch_cmd
                                         };
@@ -1477,6 +1483,7 @@ pub fn create_session(
                                 s.custom_suffix.clone(),
                                 s.channels.clone(),
                                 s.agent_command.clone(),
+                                s.shell.clone(),
                             )
                         });
                         if let Some((
@@ -1487,6 +1494,7 @@ pub fn create_session(
                             ref custom_suffix,
                             ref channels,
                             ref agent_command,
+                            ref shell,
                         )) = launch_data
                         {
                             if let Some(launch_cmd) = ai_launch_command(
@@ -1499,7 +1507,11 @@ pub fn create_session(
                                 let supports_cli_prompt =
                                     provider == "claude" || provider == "gemini";
                                 let mut cmd = if has_context && supports_cli_prompt {
-                                    format!("{} \"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"", launch_cmd)
+                                    format!(
+                                        "{} {}",
+                                        launch_cmd,
+                                        crate::pty::context_prompt_arg(shell)
+                                    )
                                 } else {
                                     launch_cmd
                                 };

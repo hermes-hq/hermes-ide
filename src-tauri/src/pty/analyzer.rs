@@ -55,6 +55,47 @@ pub struct OutputAnalyzer {
     /// is true the input path skips the line-buffer machinery so random
     /// keystrokes typed at the TUI don't get recorded as shell commands.
     pub in_alternate_screen: bool,
+    /// Streaming escape-sequence parser for OSC reports. Holds a partial
+    /// sequence from one read until the rest arrives in the next.
+    osc_parser: vte::Parser,
+    /// Bytes fed to `osc_parser` since the last byte that can end an OSC
+    /// sequence. vte buffers an open OSC without limit, so a stray `ESC ]`
+    /// followed by a long run of plain output would otherwise be held in
+    /// memory until the next escape.
+    osc_open_len: usize,
+}
+
+/// Longest open OSC sequence kept across reads. A real OSC 7 report is at
+/// most a PATH_MAX path, percent-encoded (about 12 KiB); anything past this
+/// is a stray `ESC ]` and the parser is reset.
+const MAX_OPEN_OSC_BYTES: usize = 64 * 1024;
+
+/// Collects the working directory from OSC 7 reports
+/// (`ESC ] 7 ; file://host/path BEL` or `... ESC \`) seen by the parser.
+/// The last report in a read wins.
+#[derive(Default)]
+struct CwdReportCollector {
+    last: Option<String>,
+}
+
+impl vte::Perform for CwdReportCollector {
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if params.len() < 2 || params[0] != b"7" {
+            return;
+        }
+        // The parser splits on ';', which is legal inside a path.
+        let uri = params[1..].join(&b';');
+        if let Some(path) = osc7_path(&String::from_utf8_lossy(&uri)) {
+            self.last = Some(path);
+        }
+    }
+}
+
+/// Path from an OSC 7 `file://host/path` URI, percent-decoded.
+pub(crate) fn osc7_path(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let path = &rest[rest.find('/')?..];
+    Some(percent_decode(path))
 }
 
 impl Default for OutputAnalyzer {
@@ -97,6 +138,8 @@ impl OutputAnalyzer {
             ai_launch_failed: None,
             ai_launching_provider: None,
             in_alternate_screen: false,
+            osc_parser: vte::Parser::new(),
+            osc_open_len: 0,
         }
     }
 
@@ -137,10 +180,23 @@ impl OutputAnalyzer {
             self.last_output_at = Some(std::time::Instant::now());
         }
 
-        // Check for OSC 7 (CWD reporting) in raw data before stripping
-        let raw_text = String::from_utf8_lossy(raw);
-        if let Some(caps) = OSC7_RE.captures(&raw_text) {
-            let path = percent_decode(&caps[1]);
+        // OSC 7 (CWD reporting). The parser keeps its state between reads, so
+        // a report split across two PTY reads is still seen once complete.
+        let mut cwd_reports = CwdReportCollector::default();
+        self.osc_parser.advance(&mut cwd_reports, raw);
+        // BEL, CAN, SUB and ESC all end an open OSC sequence.
+        self.osc_open_len = match raw
+            .iter()
+            .rposition(|b| matches!(b, 0x07 | 0x18 | 0x1a | 0x1b))
+        {
+            Some(i) => raw.len() - i - 1,
+            None => self.osc_open_len.saturating_add(raw.len()),
+        };
+        if self.osc_open_len > MAX_OPEN_OSC_BYTES {
+            self.osc_parser = vte::Parser::new();
+            self.osc_open_len = 0;
+        }
+        if let Some(path) = cwd_reports.last {
             // On Windows, OSC 7 emits file:///C:/... which captures as /C:/...
             // Strip the leading slash before the drive letter to get a valid path.
             #[cfg(windows)]
@@ -717,5 +773,139 @@ mod tests {
         let mut s2 = true;
         OutputAnalyzer::update_alt_screen_state(&mut s2, b"\x1b[?25l\x1b[?2004l");
         assert!(s2, "unrelated DEC modes should not leave alt screen");
+    }
+
+    // ── OSC 7 (working directory reports) ──────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_in_one_read_updates_cwd() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]7;file://host/work/test/project\x07prompt$ ");
+        assert_eq!(a.current_cwd.as_deref(), Some("/work/test/project"));
+        assert_eq!(a.take_pending_cwd().as_deref(), Some("/work/test/project"));
+        assert_eq!(a.take_pending_cwd(), None, "reported once");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_split_across_reads_still_updates_cwd() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"output\r\n\x1b]7;file://host/work/te");
+        assert_eq!(a.take_pending_cwd(), None, "incomplete report is not used");
+        a.process(b"st/split%20dir\x1b\\prompt$ ");
+        assert_eq!(
+            a.take_pending_cwd().as_deref(),
+            Some("/work/test/split dir")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_split_at_every_byte_still_updates_cwd() {
+        let report = b"\x1b]7;file://host/tmp/one-byte-at-a-time\x07";
+        let mut a = OutputAnalyzer::new();
+        for b in report.iter() {
+            a.process(std::slice::from_ref(b));
+        }
+        assert_eq!(
+            a.take_pending_cwd().as_deref(),
+            Some("/tmp/one-byte-at-a-time")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_last_report_in_a_read_wins_and_semicolons_survive() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]7;file://h/first\x07\x1b]7;file:///second;part\x07");
+        assert_eq!(a.take_pending_cwd().as_deref(), Some("/second;part"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_root_directory_is_reported() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]7;file://host/tmp\x07");
+        a.take_pending_cwd();
+        a.process(b"\x1b]7;file://host/\x07");
+        assert_eq!(a.take_pending_cwd().as_deref(), Some("/"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn osc7_long_percent_encoded_path_is_not_truncated() {
+        // A deep path near PATH_MAX, with every byte except '/' percent-
+        // encoded (as for non-ASCII names), is far longer than 1 KiB. vte
+        // caps OSC data at 1 KiB only with its `no_std` feature, which must
+        // stay off (`default-features = false` in Cargo.toml).
+        let path = format!("/work/{}", "d".repeat(3000));
+        let encoded: String = path
+            .bytes()
+            .map(|b| match b {
+                b'/' => "/".to_string(),
+                _ => format!("%{:02X}", b),
+            })
+            .collect();
+        let report = format!("\x1b]7;file://host{}\x07", encoded);
+        assert!(report.len() > 9000);
+        let mut a = OutputAnalyzer::new();
+        a.process(report.as_bytes());
+        assert_eq!(a.take_pending_cwd().as_deref(), Some(path.as_str()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stray_osc_start_does_not_hold_unbounded_output() {
+        // `printf '\e]'; cat bigfile`: an OSC is opened and never closed.
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]");
+        let chunk = vec![b'a'; 4096];
+        for _ in 0..256 {
+            a.process(&chunk);
+            assert!(a.osc_open_len <= MAX_OPEN_OSC_BYTES);
+        }
+        // The analyzer still reads later reports, including split ones.
+        a.process(b"\x1b]7;file://host/work/te");
+        a.process(b"st/after-stray\x07");
+        assert_eq!(
+            a.take_pending_cwd().as_deref(),
+            Some("/work/test/after-stray")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn long_report_split_across_reads_survives_the_open_osc_limit() {
+        let path = format!("/work/{}", "d".repeat(4000));
+        let encoded: String = path
+            .bytes()
+            .map(|b| match b {
+                b'/' => "/".to_string(),
+                _ => format!("%{:02X}", b),
+            })
+            .collect();
+        let report = format!("\x1b]7;file://host{}\x07", encoded);
+        let mut a = OutputAnalyzer::new();
+        for part in report.as_bytes().chunks(1000) {
+            a.process(part);
+        }
+        assert_eq!(a.take_pending_cwd().as_deref(), Some(path.as_str()));
+    }
+
+    #[test]
+    fn other_osc_sequences_do_not_change_cwd() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]0;window title /not/a/dir\x07\x1b]8;;file:///x\x07link\x1b]8;;\x07");
+        assert_eq!(a.take_pending_cwd(), None);
+        assert_eq!(a.current_cwd, None);
+    }
+
+    #[test]
+    fn osc7_path_parsing() {
+        assert_eq!(osc7_path("file://host/a/b").as_deref(), Some("/a/b"));
+        assert_eq!(osc7_path("file:///a%2Fb").as_deref(), Some("/a/b"));
+        assert_eq!(osc7_path("http://host/a"), None);
+        assert_eq!(osc7_path("file://host"), None);
     }
 }

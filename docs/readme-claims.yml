@@ -55,7 +55,8 @@ claims:
   split-panes:
     text: "Split panes"
     unproven: "No real-app scenario proves this yet"
-    planned: N11-split-cwd-report.mjs
+    # N11-split-cwd-report.mjs is about a report split across two reads, not panes.
+    planned: split-panes.mjs
   webgl-rendering:
     text: "WebGL-accelerated rendering"
     unproven: "No real-app scenario proves this yet"

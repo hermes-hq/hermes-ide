@@ -53,31 +53,79 @@ pub struct TranscriptWatcherState {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
+/// Claude Code caps a project folder name at this many characters and adds a
+/// hash suffix to longer ones.
+const CLAUDE_PROJECT_DIR_MAX_LEN: usize = 200;
+
+/// The folder name Claude Code uses under `~/.claude/projects/` for a working
+/// directory: every character that is not an ASCII letter or digit becomes
+/// `-` (one per UTF-16 unit, as Claude Code's JavaScript does). The leading
+/// `/` is kept, so real names start with `-`:
+/// `/work/test/my.app` -> `-work-test-my-app`, `C:\work` -> `C--work`.
+fn claude_project_dir_name(working_directory: &str) -> String {
+    let mut out = String::with_capacity(working_directory.len());
+    for c in working_directory.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else {
+            for _ in 0..c.len_utf16() {
+                out.push('-');
+            }
+        }
+    }
+    out
+}
+
 /// Find the Claude Code JSONL transcript file for a given working directory.
-/// Claude Code stores transcripts in `~/.claude/projects/<path-hash>/`.
-/// We look for the most recently modified `.jsonl` file.
+/// Claude Code stores transcripts in `~/.claude/projects/<project-folder>/`.
+/// We look for the most recently modified `.jsonl` file in that folder only:
+/// when no folder belongs to this directory there is no transcript, rather
+/// than some other project's.
 fn find_transcript_file(working_directory: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let claude_dir = home.join(".claude").join("projects");
-    if !claude_dir.is_dir() {
+    find_transcript_file_in(&home.join(".claude").join("projects"), working_directory)
+}
+
+fn find_transcript_file_in(
+    claude_projects_dir: &std::path::Path,
+    working_directory: &str,
+) -> Option<PathBuf> {
+    if !claude_projects_dir.is_dir() || working_directory.is_empty() {
         return None;
     }
 
-    // Claude Code uses the workspace path to determine the project directory.
-    // The directory name is a sanitised version of the absolute path where
-    // slashes are replaced with hyphens and the leading slash is dropped.
-    // e.g. /Users/foo/code/bar -> Users-foo-code-bar
-    let sanitised = working_directory.trim_start_matches('/').replace('/', "-");
-
-    let project_dir = claude_dir.join(&sanitised);
-    if !project_dir.is_dir() {
-        // Fallback: scan all project dirs looking for one that matches
-        // by checking if a `.project_path` file exists with matching content,
-        // or just find the most recently modified .jsonl across all dirs.
-        return find_most_recent_jsonl_across(&claude_dir);
+    // The shell may report a path through a symlink (macOS `/tmp` is
+    // `/private/tmp`); Claude Code names the folder after the resolved path.
+    let mut candidates = vec![working_directory.to_string()];
+    // `dunce` keeps Windows paths in their plain `C:\...` form; the
+    // `\\?\C:\...` form std returns would never match Claude Code's folder.
+    if let Ok(resolved) = dunce::canonicalize(working_directory) {
+        let resolved = resolved.to_string_lossy().to_string();
+        if resolved != working_directory {
+            candidates.push(resolved);
+        }
     }
 
-    find_most_recent_jsonl_in(&project_dir)
+    for dir in &candidates {
+        let name = claude_project_dir_name(dir);
+        let exact = claude_projects_dir.join(&name);
+        if exact.is_dir() {
+            if let Some(found) = find_most_recent_jsonl_in(&exact) {
+                return Some(found);
+            }
+        }
+        // Long paths: Claude Code keeps the first 200 characters and appends
+        // `-<hash>`. Match on that prefix.
+        if name.len() > CLAUDE_PROJECT_DIR_MAX_LEN {
+            let prefix = format!("{}-", &name[..CLAUDE_PROJECT_DIR_MAX_LEN]);
+            if let Some(found) =
+                find_most_recent_jsonl_in_matching(claude_projects_dir, |n| n.starts_with(&prefix))
+            {
+                return Some(found);
+            }
+        }
+    }
+    None
 }
 
 fn find_most_recent_jsonl_in(dir: &std::path::Path) -> Option<PathBuf> {
@@ -101,13 +149,16 @@ fn find_most_recent_jsonl_in(dir: &std::path::Path) -> Option<PathBuf> {
     best.map(|(p, _)| p)
 }
 
-fn find_most_recent_jsonl_across(claude_projects_dir: &std::path::Path) -> Option<PathBuf> {
+fn find_most_recent_jsonl_in_matching(
+    claude_projects_dir: &std::path::Path,
+    name_matches: impl Fn(&str) -> bool,
+) -> Option<PathBuf> {
     let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
 
     if let Ok(project_dirs) = std::fs::read_dir(claude_projects_dir) {
         for dir_entry in project_dirs.flatten() {
             let dir_path = dir_entry.path();
-            if !dir_path.is_dir() {
+            if !dir_path.is_dir() || !name_matches(&dir_entry.file_name().to_string_lossy()) {
                 continue;
             }
             if let Some((path, modified)) = find_most_recent_jsonl_in(&dir_path).and_then(|p| {
@@ -343,4 +394,142 @@ pub fn cleanup_session_watchers(
     // when the stop flag is set or the file becomes inaccessible.
     // For a more targeted cleanup, we could add a session_id field to the watcher state.
     let _ = transcript_watchers; // Currently a no-op; watchers stop on their own
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    fn write_jsonl(dir: &std::path::Path, name: &str, age_secs: u64) -> PathBuf {
+        fs::create_dir_all(dir).unwrap();
+        let path = dir.join(name);
+        fs::write(&path, "{}\n").unwrap();
+        let mtime = SystemTime::now() - Duration::from_secs(age_secs);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn project_dir_name_matches_claude_code_folder_names() {
+        assert_eq!(
+            claude_project_dir_name("/work/test/code/app"),
+            "-work-test-code-app"
+        );
+        assert_eq!(
+            claude_project_dir_name("/work/test/.config/my_app v2"),
+            "-work-test--config-my-app-v2"
+        );
+        assert_eq!(
+            claude_project_dir_name(r"C:\work\test\app"),
+            "C--work-test-app"
+        );
+        // Non-ASCII: one dash per UTF-16 unit, like JavaScript's replace().
+        assert_eq!(claude_project_dir_name("/tmp/caf\u{e9}"), "-tmp-caf-");
+        assert_eq!(claude_project_dir_name("/tmp/\u{1F600}"), "-tmp---");
+    }
+
+    #[test]
+    fn each_project_gets_its_own_transcript() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let a = write_jsonl(&projects.join("-work-alpha"), "a.jsonl", 60);
+        // Project beta's transcript is the newest file of all.
+        let b = write_jsonl(&projects.join("-work-beta"), "b.jsonl", 1);
+
+        assert_eq!(find_transcript_file_in(&projects, "/work/alpha"), Some(a));
+        assert_eq!(find_transcript_file_in(&projects, "/work/beta"), Some(b));
+    }
+
+    #[test]
+    fn newest_transcript_inside_the_project_wins() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let dir = projects.join("-work-alpha");
+        write_jsonl(&dir, "old.jsonl", 300);
+        let new = write_jsonl(&dir, "new.jsonl", 5);
+        assert_eq!(find_transcript_file_in(&projects, "/work/alpha"), Some(new));
+    }
+
+    #[test]
+    fn unknown_project_has_no_transcript_instead_of_another_projects() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        write_jsonl(&projects.join("-work-alpha"), "a.jsonl", 1);
+        assert_eq!(find_transcript_file_in(&projects, "/work/gamma"), None);
+        assert_eq!(find_transcript_file_in(&projects, ""), None);
+    }
+
+    #[test]
+    fn old_dashless_folder_name_is_not_matched() {
+        // The previous lookup dropped the leading slash ("work-alpha"); Claude
+        // Code never creates that folder, so it must not be picked up.
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        write_jsonl(&projects.join("work-alpha"), "stale.jsonl", 1);
+        assert_eq!(find_transcript_file_in(&projects, "/work/alpha"), None);
+    }
+
+    #[test]
+    fn long_paths_match_the_hashed_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let long_dir = format!("/work/{}", "x".repeat(250));
+        let name = claude_project_dir_name(&long_dir);
+        let hashed = format!("{}-abc123", &name[..CLAUDE_PROJECT_DIR_MAX_LEN]);
+        let t = write_jsonl(&projects.join(hashed), "t.jsonl", 1);
+        assert_eq!(find_transcript_file_in(&projects, &long_dir), Some(t));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_working_directory_uses_the_resolved_path() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real-project");
+        fs::create_dir_all(&real).unwrap();
+        let link = root.path().join("link-project");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let resolved = fs::canonicalize(&real).unwrap();
+
+        let projects = root.path().join("projects");
+        let t = write_jsonl(
+            &projects.join(claude_project_dir_name(&resolved.to_string_lossy())),
+            "t.jsonl",
+            1,
+        );
+        assert_eq!(
+            find_transcript_file_in(&projects, &link.to_string_lossy()),
+            Some(t)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolved_directory_matches_claude_folder() {
+        // Temp folders are often reported in 8.3 short form
+        // (`C:\Users\RUNNER~1\...`); Claude Code names the folder after the
+        // long, plain `C:\...` path, never the `\\?\` form.
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real-project");
+        fs::create_dir_all(&real).unwrap();
+        let resolved = dunce::canonicalize(&real).unwrap();
+        assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+
+        let projects = root.path().join("projects");
+        let t = write_jsonl(
+            &projects.join(claude_project_dir_name(&resolved.to_string_lossy())),
+            "t.jsonl",
+            1,
+        );
+        assert_eq!(
+            find_transcript_file_in(&projects, &real.to_string_lossy()),
+            Some(t)
+        );
+    }
 }
