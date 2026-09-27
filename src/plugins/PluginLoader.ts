@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { claimHostKey } from "./identity";
+import { claimHostKey, hostInvoke } from "./identity";
 import type { PluginManifest } from "./types";
 import type { PluginRuntime, PluginModule } from "./PluginRuntime";
 import type { PluginActivateFn, PluginDeactivateFn } from "./PluginRuntime";
@@ -30,13 +29,27 @@ declare global {
  * The IIFE bundle is loaded via a blob URL to satisfy CSP (script-src 'self' blob:).
  * React is provided as window.React so plugins can use JSX without bundling React.
  */
+export interface PluginLoaderOptions {
+	/**
+	 * Told when plugins could not be loaded at all (for example when the
+	 * host key could not be claimed). The message is meant for a person.
+	 */
+	onNotice?: (message: string) => void;
+}
+
+/** What a person is told when the app cannot prove its identity to the backend. */
+export const PLUGINS_NOT_LOADED_MESSAGE =
+	"Plugins were not loaded: the app could not verify itself to its backend. Restart the app to try again.";
+
 export class PluginLoader {
 	private runtime: PluginRuntime;
 	private loadedPlugins = new Set<string>();
 	private disabledIds = new Set<string>();
+	private onNotice: ((message: string) => void) | undefined;
 
-	constructor(runtime: PluginRuntime) {
+	constructor(runtime: PluginRuntime, options: PluginLoaderOptions = {}) {
 		this.runtime = runtime;
+		this.onNotice = options.onNotice;
 	}
 
 	/**
@@ -51,12 +64,13 @@ export class PluginLoader {
 			await claimHostKey();
 		} catch (err) {
 			console.error("[PluginLoader] Not loading plugins: the host could not prove its identity to the backend.", err);
+			this.onNotice?.(PLUGINS_NOT_LOADED_MESSAGE);
 			return;
 		}
 
 		// Fetch disabled plugin IDs from DB
 		try {
-			const disabled = await invoke<string[]>("get_disabled_plugin_ids");
+			const disabled = await hostInvoke<string[]>("get_disabled_plugin_ids");
 			this.disabledIds = new Set(disabled);
 		} catch {
 			// DB not available — load all
@@ -64,7 +78,7 @@ export class PluginLoader {
 
 		let plugins: InstalledPluginInfo[];
 		try {
-			plugins = await invoke<InstalledPluginInfo[]>("list_installed_plugins");
+			plugins = await hostInvoke<InstalledPluginInfo[]>("list_installed_plugins");
 		} catch (err) {
 			console.warn("[PluginLoader] Failed to list installed plugins:", err);
 			return;
@@ -106,7 +120,7 @@ export class PluginLoader {
 		// Read the JS bundle from disk via Tauri IPC
 		let bundleCode: string;
 		try {
-			bundleCode = await invoke<string>("read_plugin_bundle", {
+			bundleCode = await hostInvoke<string>("read_plugin_bundle", {
 				pluginDir: info.dir_name,
 			});
 		} catch (err) {

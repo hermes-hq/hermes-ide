@@ -1,6 +1,5 @@
 import "../styles/components/PluginManager.css";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import type { PluginManifest, RegistryPlugin, ChangelogEntry } from "../plugins/types";
 import { downloadAndInstallPlugin, type InstallPhase } from "../plugins/pluginInstaller";
 import { hasUpdate, meetsMinVersion } from "../plugins/semver";
@@ -92,9 +91,9 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 		setError(null);
 		try {
 			const [plugins, dir, disabledIds] = await Promise.all([
-				invoke<InstalledPluginInfo[]>("list_installed_plugins"),
-				invoke<string>("get_plugins_dir"),
-				invoke<string[]>("get_disabled_plugin_ids").catch(() => [] as string[]),
+				hostInvoke<InstalledPluginInfo[]>("list_installed_plugins"),
+				hostInvoke<string>("get_plugins_dir"),
+				hostInvoke<string[]>("get_disabled_plugin_ids").catch(() => [] as string[]),
 			]);
 
 			setPluginsDir(dir);
@@ -129,7 +128,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 
 	const loadRegistry = useCallback(async () => {
 		try {
-			const json = await invoke<string>("fetch_plugin_registry", { url: REGISTRY_URL });
+			const json = await hostInvoke<string>("fetch_plugin_registry", { url: REGISTRY_URL });
 			const data = JSON.parse(json);
 			setRegistry(data.plugins ?? []);
 		} catch {

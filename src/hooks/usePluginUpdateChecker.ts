@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { hostInvoke } from "../plugins/identity";
 import type { RegistryPlugin, ChangelogEntry } from "../plugins/types";
 import { REGISTRY_URL, DEFAULT_PLUGINS } from "../plugins/constants";
 import { hasUpdate, meetsMinVersion } from "../plugins/semver";
@@ -152,8 +152,8 @@ export function usePluginUpdateChecker(
     try {
       // Fetch registry + installed plugins in parallel
       const [registryJson, installedRaw] = await Promise.all([
-        invoke<string>("fetch_plugin_registry", { url: REGISTRY_URL }),
-        invoke<{ id: string; dir_name: string; manifest_json: string }[]>(
+        hostInvoke<string>("fetch_plugin_registry", { url: REGISTRY_URL }),
+        hostInvoke<{ id: string; dir_name: string; manifest_json: string }[]>(
           "list_installed_plugins",
         ),
       ]);

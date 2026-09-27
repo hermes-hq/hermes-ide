@@ -412,7 +412,10 @@ function AppContent() {
   const [pendingUpdatePlugins, setPendingUpdatePlugins] = useState<typeof pluginUpdater.updatesAvailable | null>(null);
 
   useEffect(() => {
-    const loader = new PluginLoader(pluginRuntime);
+    const loader = new PluginLoader(pluginRuntime, {
+      // Fail closed, but never silently: say so when no plugin could load.
+      onNotice: (message) => toastStoreRef.current.addToast({ message, type: "error", duration: null }),
+    });
     // Load external plugins from disk, then activate all startup plugins
     // Expose CodeMirror core on window for language plugins
     import("./editor/codemirrorExports").then(m => m.exposeCodeMirror());

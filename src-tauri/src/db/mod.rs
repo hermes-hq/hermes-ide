@@ -3315,11 +3315,16 @@ pub fn save_plugin_metadata(
     Ok(())
 }
 
+/// Host only: what a plugin was granted is the app's business, not another
+/// plugin's.
 #[tauri::command]
 pub fn get_plugin_permissions(
     plugin_id: String,
+    host_key: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<Vec<String>, String> {
+    identity.require_host(&host_key)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.get_plugin_permissions(&plugin_id)
 }
@@ -3481,8 +3486,14 @@ pub fn get_plugin_settings_batch(
     Ok(map)
 }
 
+/// Host only.
 #[tauri::command]
-pub fn get_disabled_plugin_ids(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub fn get_disabled_plugin_ids(
+    host_key: String,
+    state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
+) -> Result<Vec<String>, String> {
+    identity.require_host(&host_key)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
         .conn

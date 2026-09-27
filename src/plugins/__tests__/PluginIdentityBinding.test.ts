@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Behaviour of the plugin-identity binding across runtime, loader and API:
  * a plugin's calls carry its own token, nothing else; the runtime keeps the
@@ -12,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import { PluginRuntime, type PluginModule } from "../PluginRuntime";
-import { PluginLoader } from "../PluginLoader";
+import { PluginLoader, PLUGINS_NOT_LOADED_MESSAGE } from "../PluginLoader";
 import { createPluginAPI, type HermesPluginAPI, type PluginAPICallbacks } from "../PluginAPI";
 import { _resetPluginIdentityForTests } from "../identity";
 import type { PluginPermission } from "../types";
@@ -256,6 +257,63 @@ describe("loader", () => {
 		expect(callsTo("list_installed_plugins")).toHaveLength(0);
 		expect(runtime.getPluginCount()).toBe(0);
 		expect((globalThis as { __hermesPlugins?: unknown }).__hermesPlugins).toBeUndefined();
+	});
+
+	it("tells a person when plugins were not loaded, and only then", async () => {
+		const notices: string[] = [];
+		const runtime = new PluginRuntime(callbacks());
+
+		mockInvoke.mockImplementation(async (cmd, args) => {
+			if (cmd === "list_installed_plugins") return [];
+			return identityInvoke(cmd, args as Record<string, unknown>);
+		});
+		await new PluginLoader(runtime, { onNotice: (m) => notices.push(m) }).loadAllPlugins();
+		expect(notices).toEqual([]);
+
+		_resetPluginIdentityForTests();
+		mockInvoke.mockImplementation(async (cmd) => {
+			if (cmd === "claim_plugin_host_key") throw new Error("already claimed");
+			return [];
+		});
+		await new PluginLoader(runtime, { onNotice: (m) => notices.push(m) }).loadAllPlugins();
+		expect(notices).toEqual([PLUGINS_NOT_LOADED_MESSAGE]);
+		expect(notices[0]).toMatch(/plugins were not loaded/i);
+	});
+
+	it("lists, reads and checks plugins with the host key, so a plugin cannot do the same without it", async () => {
+		const manifest = plugin("acme.github", ["network"]).manifest;
+		mockInvoke.mockImplementation(async (cmd, rawArgs) => {
+			const args = (rawArgs ?? {}) as Record<string, unknown>;
+			// Behave like the backend: these commands are host-only now.
+			if (["get_disabled_plugin_ids", "list_installed_plugins", "read_plugin_bundle"].includes(cmd) && args.hostKey !== HOST_KEY) {
+				throw new Error("this command is reserved for the app itself (invalid host key)");
+			}
+			if (cmd === "get_disabled_plugin_ids") return ["acme.disabled"];
+			if (cmd === "list_installed_plugins") {
+				return [
+					{ id: "acme.github", dir_name: "acme.github", manifest_json: JSON.stringify(manifest) },
+					{ id: "acme.disabled", dir_name: "acme.disabled", manifest_json: JSON.stringify({ ...manifest, id: "acme.disabled" }) },
+				];
+			}
+			if (cmd === "read_plugin_bundle") {
+				window.__hermesPlugins = { "acme.github": { activate() {} } };
+				return "// bundle";
+			}
+			return identityInvoke(cmd, args);
+		});
+		// No DOM here: the bundle's side effect is registered above instead of
+		// executed from a blob script, and there is no script tag to clean up.
+		const loader = new PluginLoader(new PluginRuntime(callbacks()));
+		const execute = vi.spyOn(loader as unknown as { executeBundle: () => Promise<void> }, "executeBundle").mockResolvedValue(undefined);
+		vi.spyOn(loader, "cleanupPlugin").mockResolvedValue(undefined);
+		await loader.loadAllPlugins();
+
+		expect(callsTo("get_disabled_plugin_ids")).toEqual([["get_disabled_plugin_ids", { hostKey: HOST_KEY }]]);
+		expect(callsTo("list_installed_plugins")).toEqual([["list_installed_plugins", { hostKey: HOST_KEY }]]);
+		expect(callsTo("read_plugin_bundle")).toEqual([["read_plugin_bundle", { pluginDir: "acme.github", hostKey: HOST_KEY }]]);
+		expect(execute).toHaveBeenCalledTimes(1);
+		expect([...loader.getLoadedPlugins()]).toEqual(["acme.github"]);
+		delete window.__hermesPlugins;
 	});
 });
 

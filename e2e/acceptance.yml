@@ -71,6 +71,9 @@ features:
       SEC-plugin-identity-2:
         text: "A well-behaved plugin (storage + network, like the GitHub plugin) keeps working through the plugin API"
         scenarios: [SEC-plugin-identity-two-plugins.mjs]
+      SEC-plugin-identity-3:
+        text: "A plugin cannot list the installed plugins, read their permissions or code, or fetch a URL through the registry check"
+        scenarios: [SEC-plugin-identity-two-plugins.mjs]
   N07:
     name: "Feature flags"
     status: partial

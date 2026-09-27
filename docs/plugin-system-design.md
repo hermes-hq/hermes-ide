@@ -756,6 +756,8 @@ Even if a malicious plugin bypasses the JS API and calls Tauri IPC commands dire
 - With the host key the runtime mints one **plugin token** per plugin when it activates it, and hands it only to that plugin's API object (captured in closures; the runtime does not keep the API object, so it is not reachable through React props). The token is revoked when the plugin is deactivated or unloaded.
 - The plugin-facing commands above take `pluginToken` and resolve the plugin id from it. A call with a missing, guessed or foreign token is refused.
 - Management commands — `save_plugin_metadata`, `set_plugin_enabled`, `cleanup_plugin_data`, `install_plugin`, `download_and_install_plugin`, `uninstall_plugin`, `issue_plugin_token`, `revoke_plugin_token` — take `hostKey`, so a plugin cannot grant itself permissions or install, disable or remove other plugins.
+- The read-only management commands — `list_installed_plugins`, `read_plugin_bundle`, `get_plugins_dir`, `get_disabled_plugin_ids`, `get_plugin_permissions`, `fetch_plugin_registry` — take `hostKey` too: a plugin cannot enumerate its neighbours, their permissions or their code, and `fetch_plugin_registry` is not a way around the `network` permission.
+- If the host key cannot be claimed, no plugin is loaded and the app says so in an error toast (`PLUGINS_NOT_LOADED_MESSAGE`), so plugins never vanish silently.
 
 Nothing changes for plugin authors: the public API (`api.storage`, `api.network`, `api.shell`, ...) is unchanged.
 
@@ -1493,13 +1495,13 @@ CREATE TABLE IF NOT EXISTS plugin_storage (
 
 ```rust
 // Plugin management (src-tauri/src/plugins.rs)
-plugins::list_installed_plugins       // Scan plugins dir, return manifests
-plugins::read_plugin_bundle           // Read JS bundle from disk (path-traversal safe)
-plugins::get_plugins_dir              // Get/create the plugins directory path
+plugins::list_installed_plugins       // Scan plugins dir, return manifests (hostKey)
+plugins::read_plugin_bundle           // Read JS bundle from disk (path-traversal safe; hostKey)
+plugins::get_plugins_dir              // Get/create the plugins directory path (hostKey)
 plugins::install_plugin               // Extract .tgz archive to plugins dir (hostKey)
 plugins::uninstall_plugin             // Remove plugin directory (hostKey)
 plugins::download_and_install_plugin  // Download .tgz from URL and install (hostKey)
-plugins::fetch_plugin_registry        // Fetch registry JSON (bypasses CSP)
+plugins::fetch_plugin_registry        // Fetch registry JSON (bypasses CSP; hostKey)
 plugins::plugin_fetch_url             // Fetch URL for plugins (pluginToken; requires "network")
 plugins::plugin_post_json             // POST JSON for plugins (pluginToken; requires "network")
 plugins::plugin_exec_command          // Execute shell command (pluginToken; requires "shell.exec")
@@ -1515,8 +1517,8 @@ db::set_plugin_setting                // Set value (pluginToken; requires "stora
 db::delete_plugin_setting             // Delete value (pluginToken; requires "storage")
 db::get_plugin_settings_batch         // Get all __setting: keys (pluginToken; requires "storage")
 db::set_plugin_enabled                // Toggle enabled/disabled state (hostKey)
-db::get_disabled_plugin_ids           // List disabled plugin IDs
+db::get_disabled_plugin_ids           // List disabled plugin IDs (hostKey)
 db::cleanup_plugin_data               // Remove all DB records for a plugin (uninstall; hostKey)
 db::save_plugin_metadata              // Upsert plugin metadata + permissions to DB (hostKey)
-db::get_plugin_permissions            // Query granted permissions for a plugin
+db::get_plugin_permissions            // Query granted permissions for a plugin (hostKey)
 ```

@@ -26,11 +26,11 @@ interface IdentityStore {
 }
 
 // Survives a Vite hot update of this module in dev; irrelevant in production.
-const store: IdentityStore = (import.meta.hot?.data.pluginIdentity as IdentityStore | undefined) ?? {
+const store: IdentityStore = (import.meta.hot?.data?.pluginIdentity as IdentityStore | undefined) ?? {
 	hostKey: null,
 	tokens: new Map<string, string>(),
 };
-if (import.meta.hot) import.meta.hot.data.pluginIdentity = store;
+if (import.meta.hot?.data) import.meta.hot.data.pluginIdentity = store;
 
 /**
  * The host key for this page load. Claimed on first use and cached; a

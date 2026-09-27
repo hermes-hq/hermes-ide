@@ -22,8 +22,14 @@ pub struct InstalledPlugin {
 
 /// List all installed plugins by scanning the plugins directory.
 /// Each plugin is a subdirectory containing a `hermes-plugin.json` manifest.
+/// Host only: a plugin has no business enumerating its neighbours.
 #[tauri::command]
-pub fn list_installed_plugins(app: tauri::AppHandle) -> Result<Vec<InstalledPlugin>, String> {
+pub fn list_installed_plugins(
+    app: tauri::AppHandle,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
+) -> Result<Vec<InstalledPlugin>, String> {
+    identity.require_host(&host_key)?;
     let dir = plugins_dir(&app)?;
     if !dir.exists() {
         return Ok(vec![]);
@@ -81,9 +87,15 @@ pub fn list_installed_plugins(app: tauri::AppHandle) -> Result<Vec<InstalledPlug
     Ok(plugins)
 }
 
-/// Read the JavaScript bundle for a plugin.
+/// Read the JavaScript bundle for a plugin. Host only.
 #[tauri::command]
-pub fn read_plugin_bundle(app: tauri::AppHandle, plugin_dir: String) -> Result<String, String> {
+pub fn read_plugin_bundle(
+    app: tauri::AppHandle,
+    plugin_dir: String,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
+) -> Result<String, String> {
+    identity.require_host(&host_key)?;
     let dir = plugins_dir(&app)?;
     let plugin_path = dir.join(&plugin_dir);
 
@@ -124,9 +136,14 @@ pub fn read_plugin_bundle(app: tauri::AppHandle, plugin_dir: String) -> Result<S
         .map_err(|e| format!("Failed to read plugin bundle: {}", e))
 }
 
-/// Get the plugins directory path.
+/// Get the plugins directory path. Host only.
 #[tauri::command]
-pub fn get_plugins_dir(app: tauri::AppHandle) -> Result<String, String> {
+pub fn get_plugins_dir(
+    app: tauri::AppHandle,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
+) -> Result<String, String> {
+    identity.require_host(&host_key)?;
     let dir = plugins_dir(&app)?;
 
     // Create the directory if it doesn't exist
@@ -253,9 +270,15 @@ fn install_plugin_bytes(app: &tauri::AppHandle, data: Vec<u8>) -> Result<String,
 }
 
 /// Fetch the plugin registry JSON from a URL.
-/// Done in Rust to bypass WebView CSP restrictions.
+/// Done in Rust to bypass WebView CSP restrictions. Host only: without the
+/// key this would be a free GET for any plugin, granted "network" or not.
 #[tauri::command]
-pub async fn fetch_plugin_registry(url: String) -> Result<String, String> {
+pub async fn fetch_plugin_registry(
+    url: String,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
+) -> Result<String, String> {
+    identity.require_host(&host_key)?;
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Registry fetch failed: {}", e))?;
