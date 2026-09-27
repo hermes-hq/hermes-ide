@@ -40,6 +40,13 @@ describe("no-source-reading-tests lint rule", () => {
 		['import src from "../components/SplitPane.tsx?raw";\nexport default src;', "?raw import"],
 		['const all = import.meta.glob("../**/*.ts", { query: "?raw", eager: true });\nexport default all;', "raw glob"],
 		['const fs = await import("node:fs");\nexport default fs;', "dynamic import"],
+		['import { promises as fs } from "node:fs";\nawait fs.readFile("src/a.ts", "utf8");', "promises as fs"],
+		['import { promises } from "fs";\nawait promises.readFile("src/a.ts", "utf8");', "promises named import"],
+		['import * as fs from "fs";\nconst f = fs;\nf.readFileSync("src/a.ts", "utf8");', "aliased namespace"],
+		['import fs from "fs";\nconst p = fs.promises;\nawait p.readFile("src/a.ts");', "aliased fs.promises"],
+		['import fs from "fs";\nconst { readFileSync } = fs;\nreadFileSync("src/a.ts");', "destructured read API"],
+		['import fs from "fs";\nconst { promises: p } = fs;\nawait p.readFile("src/a.ts");', "destructured promises"],
+		['const all = import.meta.glob("../**/*.ts", { query: { raw: true }, eager: true });\nexport default all;', "raw glob, object query"],
 	])("flags %#: %s", async (code, _label) => {
 		const messages = await lint(code, "src/components/__tests__/NewThing.test.tsx");
 		expect(messages.length).toBeGreaterThan(0);

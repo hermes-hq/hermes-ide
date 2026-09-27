@@ -8,8 +8,15 @@
 // Flags, in test files:
 //   - fs read APIs: readFileSync, readFile, createReadStream, openSync,
 //     readSync, readdirSync, readdir, opendir, opendirSync — imported
-//     from fs / node:fs / fs/promises, or called as `<fs namespace>.<api>`
-//   - `?raw` / `?url` imports and `import.meta.glob(..., { query: "?raw" })`
+//     from fs / node:fs / fs/promises, or called as `<fs namespace>.<api>`.
+//     A namespace is a default or `* as` import of those modules, the
+//     `promises` named import (`import { promises as fs } from "fs"`), and
+//     plain aliases of either (`const f = fs`, `const { promises } = fs`).
+//   - `?raw` / `?url` imports and `import.meta.glob(..., { query: "?raw" })`,
+//     `{ query: { raw: true } }` or `{ as: "raw" }`
+//
+// Not covered: spawning a process that prints a file (child_process). That is
+// rare in tests and is left to review.
 //
 // Existing offenders are listed in source-reading-tests.allowlist.json. The
 // list only shrinks: src/__tests__/lint-no-source-reading-tests.test.ts
@@ -66,6 +73,19 @@ const rule = {
     const fsNamespaces = new Set();
     const report = (node, what) => context.report({ node, messageId: "noRead", data: { what } });
 
+    // `fs` or `fs.promises` where `fs` is a known namespace.
+    const isFsNamespace = (node) => {
+      if (!node) return false;
+      if (node.type === "Identifier") return fsNamespaces.has(node.name);
+      return (
+        node.type === "MemberExpression" &&
+        node.property.type === "Identifier" &&
+        node.property.name === "promises" &&
+        node.object.type === "Identifier" &&
+        fsNamespaces.has(node.object.name)
+      );
+    };
+
     const checkSource = (node, source) => {
       if (typeof source === "string" && RAW_QUERY.test(source)) report(node, `import "${source}"`);
     };
@@ -79,9 +99,25 @@ const rule = {
           if (spec.type === "ImportSpecifier") {
             const name = spec.imported.type === "Identifier" ? spec.imported.name : spec.imported.value;
             if (READ_APIS.has(name)) report(spec, `${name} from "${source}"`);
+            else if (name === "promises") fsNamespaces.add(spec.local.name);
           } else {
             fsNamespaces.add(spec.local.name);
           }
+        }
+      },
+      // const f = fs; const p = fs.promises; const { promises, readFileSync } = fs;
+      VariableDeclarator(node) {
+        if (!isFsNamespace(node.init)) return;
+        if (node.id.type === "Identifier") {
+          fsNamespaces.add(node.id.name);
+          return;
+        }
+        if (node.id.type !== "ObjectPattern") return;
+        for (const prop of node.id.properties) {
+          if (prop.type !== "Property") continue;
+          const key = prop.key.type === "Identifier" ? prop.key.name : prop.key.value;
+          if (READ_APIS.has(key)) report(prop, `${key} from an fs namespace`);
+          else if (key === "promises" && prop.value.type === "Identifier") fsNamespaces.add(prop.value.name);
         }
       },
       ImportExpression(node) {
@@ -112,8 +148,18 @@ const rule = {
           const opts = node.arguments[1];
           if (opts?.type === "ObjectExpression") {
             for (const prop of opts.properties) {
-              if (prop.type !== "Property" || prop.value.type !== "Literal") continue;
+              if (prop.type !== "Property") continue;
               const key = prop.key.type === "Identifier" ? prop.key.name : prop.key.value;
+              // { query: { raw: true } } — Vite's object form of the query
+              if (key === "query" && prop.value.type === "ObjectExpression") {
+                const flags = prop.value.properties
+                  .filter((q) => q.type === "Property")
+                  .map((q) => (q.key.type === "Identifier" ? q.key.name : q.key.value));
+                const hit = flags.find((f) => f === "raw" || f === "url");
+                if (hit) report(node, `import.meta.glob with query: { ${hit} }`);
+                continue;
+              }
+              if (prop.value.type !== "Literal") continue;
               const value = String(prop.value.value);
               if ((key === "query" && RAW_QUERY.test(value)) || (key === "as" && (value === "raw" || value === "url"))) {
                 report(node, `import.meta.glob with ${key}: "${value}"`);
