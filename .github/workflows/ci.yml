@@ -78,6 +78,8 @@ jobs:
               - 'scripts/privacy-check.mjs'
               - 'scripts/mutation-score.mjs'
               - '.github/privacy-allowlist.json'
+              - 'bundle-budget.json'
+              - 'scripts/bundle-budget.mjs'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -151,6 +153,13 @@ jobs:
         run: npx eslint .
       - name: Unit tests
         run: npx vitest run
+      # Fails when the JavaScript the window must load before it can draw
+      # grows past bundle-budget.json. New views and heavy libraries belong
+      # behind React.lazy / import() so they load when first used.
+      - name: Build the frontend
+        run: npx vite build
+      - name: Startup JS budget
+        run: node scripts/bundle-budget.mjs
 
   # ── Rust Formatting ──────────────────────────────────────────────────
   rust-fmt:
