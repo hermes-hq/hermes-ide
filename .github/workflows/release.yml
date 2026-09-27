@@ -24,7 +24,9 @@ name: Release
 # Tags are never moved: a re-run with an existing tag must point at the same
 # commit or it fails. A failed candidate is fixed by shipping the next version.
 # Trains never overlap: pushes to main queue behind the running train, and a
-# draft is only ever reused by a re-run of the commit that created it.
+# draft is only ever reused by a re-run of the commit that created it. A
+# draft left behind by a failed train is refused by `config`, before anything
+# is built: delete it or bump the version to release again.
 #
 # Dry run: `workflow_dispatch` with a throwaway tag such as v0.0.0-dryrun-3
 # runs the whole train up to and including smoke on a draft that is deleted
@@ -116,6 +118,23 @@ jobs:
               echo "release=false" >> "$GITHUB_OUTPUT"
               echo "::notice::$TAG already exists — nothing to release for this push."
               exit 0
+            fi
+            # A draft left by a failed train belongs to the commit that made
+            # it. Refusing it here, before anything is built, keeps every
+            # later push to main from spending an hour of runners only to
+            # be refused at the draft step. Delete that draft (or bump the
+            # version) to release again; see docs/releasing.md.
+            EXISTING=$(gh release view "$TAG" --json isDraft,targetCommitish 2>/dev/null || true)
+            if [[ -n "$EXISTING" ]]; then
+              IS_DRAFT=$(jq -r '.isDraft' <<<"$EXISTING")
+              TARGET=$(jq -r '.targetCommitish' <<<"$EXISTING")
+              if [[ "$IS_DRAFT" != "true" ]]; then
+                echo "::error::a release named $TAG is already published without its tag — a release is never rebuilt in place"; exit 1
+              fi
+              if [[ "$TARGET" != "$SHA" ]]; then
+                echo "::error::draft $TAG was made by a failed train for $TARGET, not $SHA — delete that draft (gh release delete $TAG) or bump the version; drafts are never reused across commits"; exit 1
+              fi
+              echo "Draft $TAG already exists for $SHA (re-run) — it will be reused"
             fi
             echo "release=true" >> "$GITHUB_OUTPUT"
             echo "Release candidate: $TAG from $SHA"
@@ -635,7 +654,8 @@ jobs:
             fi
             # A draft is only reused by a re-run of the SAME commit. A draft
             # from another commit is never touched: uploading over it would
-            # mix two builds under one tag.
+            # mix two builds under one tag. `config` already refused such a
+            # draft an hour ago; this catches one made since.
             if [[ "$TARGET" != "$SHA" ]]; then
               echo "::error::draft $TAG targets $TARGET but this run built $SHA — another train owns that draft; it is never reused or overwritten"; exit 1
             fi

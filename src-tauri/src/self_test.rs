@@ -177,11 +177,11 @@ fn check_database(app: &AppHandle, db_path: &Path) -> Value {
     match query {
         Ok(_) => json!({
             "ok": db_path.exists(),
-            "path": db_path.display().to_string(),
+            "path": display_path(db_path),
             "exists": db_path.exists(),
             "ms": started.elapsed().as_millis() as u64,
         }),
-        Err(e) => json!({ "ok": false, "error": e, "path": db_path.display().to_string() }),
+        Err(e) => json!({ "ok": false, "error": e, "path": display_path(db_path) }),
     }
 }
 
@@ -202,14 +202,34 @@ fn check_bridge_resources(app: &AppHandle) -> Value {
         .filter(|rel| !dir.join(rel).exists())
         .map(|rel| rel.to_string())
         .collect();
-    let node = crate::agent::which_node().map(|p| p.display().to_string());
+    let node = crate::agent::which_node().map(|p| display_path(&p));
     json!({
         "ok": missing.is_empty(),
-        "bridge": bridge.display().to_string(),
+        "bridge": display_path(&bridge),
         "missing": missing,
         // Informational: node comes from the user's machine, not the bundle.
         "node": node,
     })
+}
+
+/// A path for the report. The report leaves the machine, so the home
+/// folder (which carries the user name) is shown as `~`.
+fn display_path(path: &Path) -> String {
+    shorten_home(path, dirs::home_dir().as_deref())
+}
+
+/// `home` and everything under it is written as `~`; other paths are
+/// unchanged. Only a whole-component match counts: `~testing` is not under
+/// `~test`.
+pub fn shorten_home(path: &Path, home: Option<&Path>) -> String {
+    let Some(home) = home.filter(|h| !h.as_os_str().is_empty()) else {
+        return path.display().to_string();
+    };
+    match path.strip_prefix(home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 /// Ask the main webview whether the app UI rendered. Polls because the page
@@ -716,6 +736,44 @@ mod tests {
         let long = "x".repeat(5000);
         let kept = transcript_excerpt(&long, "hsts-none", false, &[]);
         assert_eq!(kept.chars().count(), 600);
+    }
+
+    #[test]
+    fn report_paths_show_the_home_folder_as_tilde() {
+        let home = PathBuf::from("/srv/homes/test");
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            shorten_home(
+                &home
+                    .join("Library")
+                    .join("Application Support")
+                    .join("app.db"),
+                Some(&home)
+            ),
+            format!("~{sep}Library{sep}Application Support{sep}app.db")
+        );
+        assert_eq!(shorten_home(&home, Some(&home)), "~");
+    }
+
+    #[test]
+    fn paths_outside_the_home_folder_are_kept_whole() {
+        let home = PathBuf::from("/srv/homes/test");
+        let outside = PathBuf::from("/opt/homebrew/bin/node");
+        assert_eq!(
+            shorten_home(&outside, Some(&home)),
+            outside.display().to_string()
+        );
+        // A sibling that merely starts with the same characters is not home.
+        let sibling = PathBuf::from("/srv/homes/testing/app.db");
+        assert_eq!(
+            shorten_home(&sibling, Some(&home)),
+            sibling.display().to_string()
+        );
+        assert_eq!(shorten_home(&sibling, None), sibling.display().to_string());
+        assert_eq!(
+            shorten_home(&sibling, Some(Path::new(""))),
+            sibling.display().to_string()
+        );
     }
 
     #[test]

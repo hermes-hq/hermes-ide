@@ -403,7 +403,7 @@ export const frPack: LanguagePack = {
     "settings.shellSuggestionsHint": "Affiche les suggestions de commandes de Hermes pendant la saisie. Désactivez pour utiliser les suggestions automatiques de votre shell. S'applique aux nouvelles sessions de terminal.",
     "settings.updateChannel": "Canal de mise à jour",
     "settings.updateChannelStable": "Stable",
-    "settings.updateChannelBeta": "Bêta — un jour avant la version stable",
+    "settings.updateChannelBeta": "Bêta — reçoit les versions avant la stable",
     "settings.updateChannelHint": "Les versions bêta ont passé les mêmes vérifications automatiques que les versions stables, mais personne d'autre ne les a encore utilisées. Vous pouvez revenir en arrière à tout moment ; la prochaine version stable vous remet à niveau.",
     "settings.defaultWorkingDirectory": "Dossier de travail par défaut",
     "settings.homeDirectoryPlaceholder": "~ (dossier personnel)",

@@ -30,6 +30,23 @@ On the merge, `.github/workflows/release.yml`:
 Tags are never moved. A re-run that finds `v1.4.1` pointing elsewhere fails.
 A candidate that fails a gate is fixed by shipping the next version.
 
+## When a train fails
+
+Nothing was published and no tag exists, but the draft release `v1.4.1` is
+still there, and it belongs to the commit that made it. The workflow refuses
+to build for that version from any other commit (a later push to main sees
+the draft in its first job and stops, without building anything), so main
+cannot release again until you do one of:
+
+- delete the draft (`gh release delete v1.4.1 --yes`) and re-run the failed
+  workflow run, or push the fix and let the train build `v1.4.1` again from
+  the new commit;
+- or bump to the next version (`npm run bump -- 1.4.2`, new notes) and leave
+  the draft to be deleted whenever.
+
+Re-running the failed run itself (same commit) reuses its draft; that is the
+only case a draft is ever reused.
+
 ## Channels
 
 - **Stable** reads `https://github.com/hermes-hq/hermes-ide/releases/latest/download/latest.json`

@@ -403,7 +403,7 @@ export const dePack: LanguagePack = {
     "settings.shellSuggestionsHint": "Zeigt beim Tippen die Befehlsvorschläge von Hermes an. Deaktivieren, um stattdessen die Autovorschläge deiner Shell zu nutzen. Gilt für neue Terminal-Sitzungen.",
     "settings.updateChannel": "Update-Kanal",
     "settings.updateChannelStable": "Stabil",
-    "settings.updateChannelBeta": "Beta — einen Tag vor Stabil",
+    "settings.updateChannelBeta": "Beta — erhält Versionen vor Stabil",
     "settings.updateChannelHint": "Beta-Builds haben dieselben automatischen Prüfungen bestanden wie stabile, wurden aber noch nicht von anderen genutzt. Du kannst jederzeit zurückwechseln; die nächste stabile Version bringt dich wieder auf den gleichen Stand.",
     "settings.defaultWorkingDirectory": "Standard-Arbeitsverzeichnis",
     "settings.homeDirectoryPlaceholder": "~ (Home-Verzeichnis)",

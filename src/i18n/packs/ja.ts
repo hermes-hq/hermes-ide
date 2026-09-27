@@ -403,7 +403,7 @@ export const jaPack: LanguagePack = {
     "settings.shellSuggestionsHint": "入力中に Hermes のコマンド候補を表示します。オフにするとシェル本来の自動候補を使用します。新しいターミナルセッションに適用されます。",
     "settings.updateChannel": "アップデートチャンネル",
     "settings.updateChannelStable": "安定版",
-    "settings.updateChannelBeta": "ベータ — 安定版より1日早く",
+    "settings.updateChannelBeta": "ベータ — 安定版より先にリリースを受け取る",
     "settings.updateChannelHint": "ベータ版は安定版と同じ自動チェックに合格していますが、まだ他の人には使われていません。いつでも戻せます。次の安定版で再び同じバージョンになります。",
     "settings.defaultWorkingDirectory": "デフォルト作業ディレクトリ",
     "settings.homeDirectoryPlaceholder": "~（ホームディレクトリ）",

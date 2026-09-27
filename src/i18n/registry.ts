@@ -420,7 +420,7 @@ const ENGLISH_PACK: LanguagePack = {
     "settings.shellSuggestionsHint": "Show Hermes's own command suggestions as you type. Turn off to use your shell's own autosuggestions instead. Applies to new terminal sessions.",
     "settings.updateChannel": "Update channel",
     "settings.updateChannelStable": "Stable",
-    "settings.updateChannelBeta": "Beta — a day before stable",
+    "settings.updateChannelBeta": "Beta — gets releases before stable",
     "settings.updateChannelHint": "Beta builds have passed the same automated checks as stable ones but have not been used by other people yet. You can switch back at any time; the next stable release brings you back in line.",
     "settings.defaultWorkingDirectory": "Default Working Directory",
     "settings.homeDirectoryPlaceholder": "~ (home directory)",

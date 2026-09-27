@@ -44,7 +44,7 @@ function cleanEnv() {
 
 /**
  * Run `hermes-ide --self-test=<report>` with a throwaway home folder.
- * Returns { code, report, dataDir, screenshot }.
+ * Returns { code, report, dataDir, home, screenshot }.
  */
 async function runSelfTest(name, extraEnv = {}, { screenshot = false } = {}) {
   const binary = appBinaryPath();
@@ -133,7 +133,7 @@ async function runSelfTest(name, extraEnv = {}, { screenshot = false } = {}) {
   log(`  exited after ${Date.now() - started} ms: ${JSON.stringify(exit)}`);
   const json = existsSync(report) ? JSON.parse(readFileSync(report, "utf8")) : null;
   rmSync(privateTmp, { recursive: true, force: true });
-  return { code: exit.code, report: json, dataDir, appLog, screenshot: shot };
+  return { code: exit.code, report: json, dataDir, home, appLog, screenshot: shot };
 }
 
 let failed = false;
@@ -160,6 +160,13 @@ try {
   const host = hostname().split(".")[0];
   assert(kept.includes(checks.pty_echo.marker) && kept.length < checks.pty_echo.marker.length + 40, `only the shell's answer line is kept from the transcript (${JSON.stringify(kept)})`);
   assert(!kept.includes("@") && (me.length < 2 || !kept.includes(me)) && (host.length < 2 || !kept.includes(host)), "no user or host name in the kept transcript");
+  // Neither do the paths in the report: the home folder is written as "~".
+  const dbPath = String(checks.database.path ?? "");
+  assert(!dbPath.includes(good.home), `the database path does not carry the home folder (${dbPath})`);
+  if (platform() !== "win32") assert(dbPath.startsWith("~/"), `the database path starts with ~ (${dbPath})`);
+  for (const [field, value] of Object.entries({ bridge: checks.bridge_resources.bridge, node: checks.bridge_resources.node })) {
+    if (typeof value === "string") assert(!value.includes(good.home), `the ${field} path does not carry the home folder (${value})`);
+  }
   assert(good.report.identifier === E2E_IDENTIFIER, `the test app identified itself (${good.report.identifier})`);
   assert(good.report.version.length > 0, `version reported: ${good.report.version}`);
   // A picture of the app during the self-test is best effort: the run is

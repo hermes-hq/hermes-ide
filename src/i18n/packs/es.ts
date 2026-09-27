@@ -403,7 +403,7 @@ export const esPack: LanguagePack = {
     "settings.shellSuggestionsHint": "Muestra las sugerencias de comandos de Hermes mientras escribes. Desactívalo para usar las autosugerencias de tu shell. Se aplica a nuevas sesiones de terminal.",
     "settings.updateChannel": "Canal de actualizaciones",
     "settings.updateChannelStable": "Estable",
-    "settings.updateChannelBeta": "Beta — un día antes que estable",
+    "settings.updateChannelBeta": "Beta — recibe versiones antes que estable",
     "settings.updateChannelHint": "Las versiones beta han pasado las mismas comprobaciones automáticas que las estables, pero aún no las ha usado nadie más. Puedes volver cuando quieras; la siguiente versión estable te pone al día.",
     "settings.defaultWorkingDirectory": "Directorio de trabajo predeterminado",
     "settings.homeDirectoryPlaceholder": "~ (directorio personal)",

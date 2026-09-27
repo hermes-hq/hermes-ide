@@ -403,7 +403,7 @@ export const zhCNPack: LanguagePack = {
     "settings.shellSuggestionsHint": "输入时显示 Hermes 自己的命令建议。关闭后改用 Shell 自带的自动建议。对新的终端会话生效。",
     "settings.updateChannel": "更新渠道",
     "settings.updateChannelStable": "稳定版",
-    "settings.updateChannelBeta": "测试版 — 比稳定版早一天",
+    "settings.updateChannelBeta": "测试版 — 比稳定版更早收到发布",
     "settings.updateChannelHint": "测试版通过了与稳定版相同的自动检查，但还没有其他人使用过。你随时可以切换回来；下一个稳定版会让你重新回到同一版本。",
     "settings.defaultWorkingDirectory": "默认工作目录",
     "settings.homeDirectoryPlaceholder": "~（主目录）",
