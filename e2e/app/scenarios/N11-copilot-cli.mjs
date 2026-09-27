@@ -30,7 +30,7 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
   for (const rc of [".zshenv", ".bashrc", ".bash_profile"]) writeFileSync(join(home, rc), pathLine);
 
   log("step 2: launch the test app on that home");
-  const app = await launchApp({ runDir: join(evidenceDir, "run"), log, reuseTmpDir: tmp });
+  const app = await launchApp({ runDir: join(evidenceDir, "run"), log, homeDir: home });
   apps.push(app);
   const { bridge } = app;
   await completeOnboarding(bridge, log);
