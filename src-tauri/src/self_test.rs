@@ -281,6 +281,17 @@ pub fn saw_marker(output: &str, marker: &str) -> bool {
     output.contains(marker)
 }
 
+/// DSR "report cursor position" (`ESC [ 6 n`), which line editors such as
+/// PSReadLine send before they accept input.
+const CURSOR_QUERY: &str = "\x1b[6n";
+/// Our answer: cursor at row 1, column 1.
+const CURSOR_REPLY: &[u8] = b"\x1b[1;1R";
+
+/// How many cursor-position queries the shell has sent so far.
+pub fn count_cursor_queries(output: &str) -> usize {
+    output.matches(CURSOR_QUERY).count()
+}
+
 fn check_pty_echo(timeout: Duration) -> Value {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
@@ -376,10 +387,20 @@ fn check_pty_echo(timeout: Duration) -> Value {
     let typed_ms = started.elapsed().as_millis() as u64;
 
     let mut ok = false;
+    let mut queries_answered = 0usize;
     while Instant::now() < deadline {
-        if saw_marker(&snapshot(), &marker) {
+        let text = snapshot();
+        if saw_marker(&text, &marker) {
             ok = true;
             break;
+        }
+        // A real terminal answers the shell's "where is the cursor?" query;
+        // PowerShell's line editor waits for that answer before it reads
+        // any input. Play the terminal's part.
+        let queries = count_cursor_queries(&text);
+        while queries_answered < queries {
+            let _ = writer.write_all(CURSOR_REPLY).and_then(|_| writer.flush());
+            queries_answered += 1;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -516,6 +537,15 @@ mod tests {
             .unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(saw_marker(&text, marker), "got {text:?}");
+    }
+
+    #[test]
+    fn cursor_position_queries_are_counted_so_each_gets_one_answer() {
+        assert_eq!(count_cursor_queries(""), 0);
+        assert_eq!(count_cursor_queries("prompt> \x1b[6n"), 1);
+        assert_eq!(count_cursor_queries("\x1b[6n\x1b[?25l\x1b[6n"), 2);
+        assert_eq!(count_cursor_queries("\x1b[6c"), 0);
+        assert!(std::str::from_utf8(CURSOR_REPLY).unwrap().ends_with('R'));
     }
 
     #[test]
