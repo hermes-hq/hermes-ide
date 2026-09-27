@@ -10,6 +10,8 @@ import {
 	findPersonalPaths,
 	isForbiddenNewFile,
 	parseAddedLines,
+	parseGrepEmails,
+	parseNewFiles,
 	// @ts-expect-error — plain ESM script without type declarations
 } from "../../scripts/privacy-check.mjs";
 
@@ -34,7 +36,7 @@ const allow = {
 };
 
 function run(input: Partial<Parameters<typeof checkPrivacy>[0]>) {
-	return checkPrivacy({ added: [], newFiles: [], commitMessages: [], existingEmails: new Set(), allow, ...input }) as {
+	return checkPrivacy({ added: [], newFiles: [], commitMessages: [], existingEmails: new Map(), allow, ...input }) as {
 		file?: string;
 		line?: number;
 		message: string;
@@ -72,7 +74,7 @@ describe("privacy check: personal paths", () => {
 });
 
 describe("privacy check: email addresses", () => {
-	const none = new Set<string>();
+	const none = new Map<string, Set<string>>();
 
 	it("flags a real-looking address", () => {
 		expect(findEmails(`contact ${PERSON_EMAIL}`, "README.md", allow, none)).toEqual([PERSON_EMAIL]);
@@ -83,9 +85,22 @@ describe("privacy check: email addresses", () => {
 		expect(findEmails(text, "src/a.ts", allow, none)).toEqual([]);
 	});
 
-	it("allows addresses in allowlisted files and addresses already in the repository", () => {
+	it("allows addresses in allowlisted files and addresses already in that file", () => {
+		const existing = new Map([[PERSON_EMAIL, new Set(["SPONSORS.md"])]]);
 		expect(findEmails(PERSON_EMAIL, "CLA.md", allow, none)).toEqual([]);
-		expect(findEmails(PERSON_EMAIL.toUpperCase(), "SPONSORS.md", allow, new Set([PERSON_EMAIL]))).toEqual([]);
+		expect(findEmails(PERSON_EMAIL.toUpperCase(), "SPONSORS.md", allow, existing)).toEqual([]);
+	});
+
+	it("flags an existing credit address copied into another file", () => {
+		const existing = new Map([[PERSON_EMAIL, new Set(["SPONSORS.md"])]]);
+		expect(findEmails(PERSON_EMAIL, "src/__tests__/fixtures/user.json", allow, existing)).toEqual([PERSON_EMAIL]);
+	});
+
+	it("reads git grep output into address → files", () => {
+		const out = [`abc123:SPONSORS.md:${PERSON_EMAIL}`, `abc123:docs/a:b.md:${PERSON_EMAIL.toUpperCase()}`, "abc123:README.md:x@example.com", ""].join("\n");
+		const map = parseGrepEmails(out, "abc123");
+		expect([...map.get(PERSON_EMAIL)].sort()).toEqual(["SPONSORS.md", "docs/a:b.md"]);
+		expect([...map.get("x@example.com")]).toEqual(["README.md"]);
 	});
 
 	it("does not mistake retina asset names or package versions for addresses", () => {
@@ -104,6 +119,21 @@ describe("privacy check: new binary and data files", () => {
 		for (const f of ["public/logo.png", "src/assets/bg.jpg", "src-tauri/icons/icon.ico", "docs/design-system/x.png", "scripts/release-local.env.example"]) {
 			expect(isForbiddenNewFile(f, false, allow), f).toBe(false);
 		}
+	});
+
+	it("reads added and renamed files, keeping where a moved file came from", () => {
+		const out = ["A", "evidence/shot.png", "R100", "public/logo.png", "tools/logo.png", "A", "src/a.ts", ""].join("\0");
+		expect(parseNewFiles(out, new Set(["evidence/shot.png", "tools/logo.png"]))).toEqual([
+			{ file: "evidence/shot.png", binary: true },
+			{ file: "tools/logo.png", binary: true, from: "public/logo.png" },
+			{ file: "src/a.ts", binary: false },
+		]);
+	});
+
+	it("says a flagged file was moved rather than added", () => {
+		const findings = run({ newFiles: [{ file: "tools/logo.png", binary: true, from: "public/logo.png" }] });
+		expect(findings).toHaveLength(1);
+		expect(findings[0].message).toMatch(/moved here from public\/logo\.png/);
 	});
 
 	it("flags any file git reports as binary, unless explicitly allowlisted", () => {
@@ -144,13 +174,14 @@ describe("privacy check: end to end on a git repository", () => {
 		return execFileSync("git", args, { cwd, encoding: "utf8" });
 	}
 
-	function repoWith(change: (dir: string) => void) {
+	function repoWith(change: (dir: string) => void, base?: (dir: string) => void) {
 		const dir = mkdtempSync(join(tmpdir(), "privacy-check-"));
 		git(dir, "init", "-q", "-b", "main");
 		git(dir, "config", "user.email", "test@example.com");
 		git(dir, "config", "user.name", "test");
 		git(dir, "config", "commit.gpgsign", "false");
 		writeFileSync(join(dir, "README.md"), "hello\n");
+		base?.(dir);
 		git(dir, "add", ".");
 		git(dir, "commit", "-q", "-m", "base");
 		change(dir);
@@ -183,6 +214,36 @@ describe("privacy check: end to end on a git repository", () => {
 		} finally {
 			rmSync(clean, { recursive: true, force: true });
 			rmSync(dirty, { recursive: true, force: true });
+		}
+	});
+
+	it("allows more lines in a file that already credits an address, but not the address in a new file", () => {
+		const credits = (dir: string) => writeFileSync(join(dir, "SPONSORS.md"), `- ${PERSON_EMAIL}\n`);
+		const sameFile = repoWith((dir) => writeFileSync(join(dir, "SPONSORS.md"), `- ${PERSON_EMAIL}\n- thanks ${PERSON_EMAIL}\n`), credits);
+		const newFile = repoWith((dir) => writeFileSync(join(dir, "fixture.json"), `{"email":"${PERSON_EMAIL}"}\n`), credits);
+		const moved = repoWith(
+			(dir) => {
+				mkdirSync(join(dir, "tools"));
+				git(dir, "mv", "public/logo.png", "tools/logo.png");
+			},
+			(dir) => {
+				mkdirSync(join(dir, "public"));
+				writeFileSync(join(dir, "public", "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]));
+			},
+		);
+		try {
+			const ok = check(sameFile);
+			expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+
+			const bad = check(newFile);
+			expect(bad.status).toBe(1);
+			expect(bad.stdout).toMatch(/fixture\.json:1: email address/);
+
+			const mv = check(moved);
+			expect(mv.status).toBe(1);
+			expect(mv.stdout).toMatch(/tools\/logo\.png: binary or data file moved here from public\/logo\.png/);
+		} finally {
+			for (const d of [sameFile, newFile, moved]) rmSync(d, { recursive: true, force: true });
 		}
 	});
 });
