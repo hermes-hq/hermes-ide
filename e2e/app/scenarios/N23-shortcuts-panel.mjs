@@ -166,14 +166,17 @@ try {
     const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.textContent) === "Plugins");
     return tab ? e2e.click(tab) : null;
   `);
-  await bridge.clickWhenReady(`
-    const row = e2e.all(".pm-row").find((el) => e2e.norm(e2e.first(".pm-row-name", el)?.textContent) === "Hermes Language Pack");
-    return row ? e2e.click(row) : null;
-  `, { timeoutMs: 15_000 });
+  // Expand the language pack's row until its settings show. The plugin list
+  // can re-render while it loads (slow on the Linux runner), collapsing a row
+  // expanded too early, so a collapsed row is clicked again.
   await bridge.waitFor("the language picker with pt-BR", `
     const sel = e2e.first("#language-pack-locale");
-    return !!sel && [...sel.options].some((o) => o.value === "pt-BR");
-  `);
+    if (sel) return [...sel.options].some((o) => o.value === "pt-BR");
+    const row = e2e.all(".pm-row").find((el) => e2e.norm(e2e.first(".pm-row-name", el)?.textContent) === "Hermes Language Pack");
+    if (row && !row.classList.contains("pm-row-expanded")) e2e.click(row);
+    return false;
+  `, { timeoutMs: 30_000, intervalMs: 500 });
+  log(`  the language pack's settings are open`);
   await bridge.eval(`
     const sel = e2e.first("#language-pack-locale");
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(sel, "pt-BR");
