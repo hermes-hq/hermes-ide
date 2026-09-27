@@ -803,7 +803,7 @@ export function SessionComposer() {
   const compactModel = (m: string | null): string | null => {
     if (!m) return m;
     const lower = m.toLowerCase();
-    const match = /^claude-(opus|haiku|sonnet)-/.exec(lower);
+    const match = /^claude-(opus|haiku|sonnet|fable)-/.exec(lower);
     return match ? match[1] : m;
   };
 

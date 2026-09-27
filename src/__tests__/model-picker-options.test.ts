@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { isCurrentModel } from "../utils/modelPicker";
-import type { ModelInfo } from "../agent/modelOptions";
+import { CLAUDE_MODEL_OPTIONS, type ModelInfo } from "../agent/modelOptions";
 
 const make = (id: string): ModelInfo => ({ id, label: id, description: "" });
 
@@ -47,5 +47,23 @@ describe("isCurrentModel", () => {
 
   it("does not match `default` when a real model is reported", () => {
     expect(isCurrentModel(make("default"), "claude-sonnet-4-6")).toBe(false);
+  });
+
+  it("matches the Fable 5.1 row only against Fable 5.1", () => {
+    expect(isCurrentModel(make("claude-fable-5-1"), "claude-fable-5-1")).toBe(true);
+    expect(isCurrentModel(make("claude-fable-5-1"), "claude-fable-5")).toBe(false);
+    expect(isCurrentModel(make("opus"), "claude-fable-5-1")).toBe(false);
+  });
+});
+
+describe("CLAUDE_MODEL_OPTIONS", () => {
+  it("offers the family aliases plus Fable 5.1", () => {
+    expect(CLAUDE_MODEL_OPTIONS.map((o) => o.id)).toEqual([
+      "default",
+      "sonnet",
+      "opus",
+      "claude-fable-5-1",
+      "haiku",
+    ]);
   });
 });
