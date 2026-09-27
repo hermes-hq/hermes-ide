@@ -197,7 +197,7 @@ fn node_spawn_paths_with(
     }
 }
 
-fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     // Honor an explicit override even if it's broken — surface the
     // misconfiguration loudly rather than silently falling through.
     if let Ok(p) = std::env::var("HERMES_BRIDGE_PATH") {
@@ -275,7 +275,7 @@ fn fallback_node_dirs() -> Vec<std::path::PathBuf> {
 
 /// Locate `node` on disk.  Checks PATH first, then well-known fallback
 /// directories.  Returns the first existing executable.
-fn which_node() -> Option<std::path::PathBuf> {
+pub(crate) fn which_node() -> Option<std::path::PathBuf> {
     let exe_name = if cfg!(windows) { "node.exe" } else { "node" };
 
     if let Some(path_var) = std::env::var_os("PATH") {

@@ -1,32 +1,59 @@
 name: Release
 
-# Security: only triggers on tags and manual dispatch — forks cannot trigger this workflow.
-# It requires secrets for signing, notarization, and release publishing.
+# The release train. A version bump merged to main starts it:
+#
+#   config ─► proof + tests ─► build (6 targets) ─► draft ─► smoke (6 installs) ─► publish-beta
+#                                                     │                                 │
+#                                                     └─► provenance ───────────────────┘
+#
+#   1. `config` only goes ahead when src-tauri/tauri.conf.json names a version
+#      that has no tag yet AND RELEASE_NOTES.md names that version on its
+#      first line. Anything else is a no-op push to main.
+#      `proof` then requires the commit to have passed CI's `gate` check.
+#   2. Installers are built, signed and notarized from the merged commit.
+#   3. A DRAFT release is created (nobody can see or download it), assets and
+#      manifests are uploaded and linted (every updater bundle must carry a
+#      signature that verifies against the app's public key).
+#   4. Every installer is installed on a clean runner of its own platform and
+#      the app is started with `--self-test`, which must exit 0.
+#   5. Only then is the tag created on the merged commit and the release
+#      published as a PRERELEASE: the beta channel (channels/beta.json) points
+#      at it, while `releases/latest` (stable clients) is untouched.
+#   6. promote.yml flips it to the latest release after the soak period.
+#
+# Tags are never moved: a re-run with an existing tag must point at the same
+# commit or it fails. A failed candidate is fixed by shipping the next version.
+# Trains never overlap: pushes to main queue behind the running train, and a
+# draft is only ever reused by a re-run of the commit that created it. A
+# draft left behind by a failed train is refused by `config`, before anything
+# is built: delete it or bump the version to release again.
+#
+# Dry run: `workflow_dispatch` with a throwaway tag such as v0.0.0-dryrun-3
+# runs the whole train up to and including smoke on a draft that is deleted
+# at the end. Nothing is published and no tag is created.
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
   workflow_dispatch:
     inputs:
+      dry_run_tag:
+        description: "Dry run: throwaway tag name (e.g. v0.0.0-dryrun-3). Builds this ref, drafts, smokes, then deletes the draft."
+        required: true
+        type: string
       platforms:
         description: "Platforms to build (comma-separated: macos,linux,windows or 'all')"
         required: true
         default: "all"
         type: string
-      tag:
-        description: "Release tag (e.g. v0.3.31) — required for manual dispatch"
-        required: true
-        type: string
 
-# Dedup release runs per tag.  Both `push: tags: v*` and a manual
-# `workflow_dispatch` for the same tag end up in the same concurrency
-# group, so accidentally double-triggering (e.g. force-pushing a tag
-# AND firing `gh workflow run`) cancels the older run instead of
-# building twice.  Different tags don't share a group — a v1.1.4
-# release can run in parallel with v1.1.3 if needed.
+# One train at a time. Every push to main queues behind the running train
+# (a later push that finds the tag already created is a no-op), so two runs
+# can never draft, upload or tag the same version from different commits.
+# Dry runs use their own throwaway tag and queue separately.
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: true
+  group: release-${{ inputs.dry_run_tag || 'main' }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -37,50 +64,119 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
+  SOAK_NOTE: "Published to the beta channel first; promoted to stable after the soak period."
 
 jobs:
-  # ── Determine what to build ──────────────────────────────────────────
+  # ── Decide whether this commit is a release ────────────────────────
   config:
     runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
+      release: ${{ steps.decide.outputs.release }}
+      dry_run: ${{ steps.decide.outputs.dry_run }}
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      sha: ${{ steps.decide.outputs.sha }}
       build_macos: ${{ steps.platforms.outputs.macos }}
       build_linux: ${{ steps.platforms.outputs.linux }}
       build_windows: ${{ steps.platforms.outputs.windows }}
+      expect_keys: ${{ steps.platforms.outputs.expect_keys }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
 
-      - id: version
+      - id: decide
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN_TAG: ${{ inputs.dry_run_tag }}
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          if [[ -n "$INPUT_TAG" ]]; then
-            TAG="$INPUT_TAG"
-          else
-            TAG="v${VERSION}"
-          fi
+          SHA="$GITHUB_SHA"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "$DRY_RUN_TAG" ]]; then
+            if [[ ! "$DRY_RUN_TAG" =~ ^v0\.0\.0-dryrun-[0-9A-Za-z.-]+$ ]]; then
+              echo "::error::dry_run_tag must look like v0.0.0-dryrun-N, got '$DRY_RUN_TAG'"; exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$DRY_RUN_TAG" >/dev/null 2>&1; then
+              echo "::error::tag $DRY_RUN_TAG already exists — pick a new N"; exit 1
+            fi
+            if gh release view "$DRY_RUN_TAG" >/dev/null 2>&1; then
+              echo "::error::a release named $DRY_RUN_TAG already exists — delete it or pick a new N"; exit 1
+            fi
+            echo "tag=$DRY_RUN_TAG" >> "$GITHUB_OUTPUT"
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Dry run: building $SHA as $DRY_RUN_TAG (version $VERSION in the app)"
+          else
+            TAG="v$VERSION"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::$TAG already exists — nothing to release for this push."
+              exit 0
+            fi
+            # A draft left by a failed train belongs to the commit that made
+            # it. Refusing it here, before anything is built, keeps every
+            # later push to main from spending an hour of runners only to
+            # be refused at the draft step. Delete that draft (or bump the
+            # version) to release again; see docs/releasing.md.
+            EXISTING=$(gh release view "$TAG" --json isDraft,targetCommitish 2>/dev/null || true)
+            if [[ -n "$EXISTING" ]]; then
+              IS_DRAFT=$(jq -r '.isDraft' <<<"$EXISTING")
+              TARGET=$(jq -r '.targetCommitish' <<<"$EXISTING")
+              if [[ "$IS_DRAFT" != "true" ]]; then
+                echo "::error::a release named $TAG is already published without its tag — a release is never rebuilt in place"; exit 1
+              fi
+              if [[ "$TARGET" != "$SHA" ]]; then
+                echo "::error::draft $TAG was made by a failed train for $TARGET, not $SHA — delete that draft (gh release delete $TAG) or bump the version; drafts are never reused across commits"; exit 1
+              fi
+              echo "Draft $TAG already exists for $SHA (re-run) — it will be reused"
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Release candidate: $TAG from $SHA"
+          fi
+
+      # Hand-written notes are the only source of the release text. The
+      # first line must name the version ("# Hermes IDE 1.4.1").
+      - name: Release notes gate
+        if: steps.decide.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f RELEASE_NOTES.md ]]; then
+            echo "::error::RELEASE_NOTES.md is missing — a release needs hand-written notes"; exit 1
+          fi
+          FIRST=$(head -n 1 RELEASE_NOTES.md)
+          if ! node -e '
+            const [line, v] = process.argv.slice(1);
+            const re = new RegExp("(^|[^0-9.])" + v.replace(/\./g, "\\.") + "([^0-9.]|$)");
+            process.exit(re.test(line) ? 0 : 1);
+          ' "$FIRST" "$VERSION"; then
+            echo "::error::RELEASE_NOTES.md must name $VERSION on its first line (found: '$FIRST')"; exit 1
+          fi
+          echo "Release notes are for $VERSION"
 
       - id: platforms
         env:
           INPUT_PLATFORMS: ${{ inputs.platforms || 'all' }}
         run: |
-          PLATFORMS="$INPUT_PLATFORMS"
-          if [[ "$PLATFORMS" == "all" ]]; then
-            echo "macos=true"   >> "$GITHUB_OUTPUT"
-            echo "linux=true"   >> "$GITHUB_OUTPUT"
-            echo "windows=true" >> "$GITHUB_OUTPUT"
-          else
-            [[ "$PLATFORMS" == *macos* ]]   && echo "macos=true"   >> "$GITHUB_OUTPUT" || echo "macos=false"   >> "$GITHUB_OUTPUT"
-            [[ "$PLATFORMS" == *linux* ]]   && echo "linux=true"   >> "$GITHUB_OUTPUT" || echo "linux=false"   >> "$GITHUB_OUTPUT"
-            [[ "$PLATFORMS" == *windows* ]] && echo "windows=true" >> "$GITHUB_OUTPUT" || echo "windows=false" >> "$GITHUB_OUTPUT"
-          fi
+          P="$INPUT_PLATFORMS"
+          [[ "$P" == "all" || "$P" == *macos* ]]   && M=true || M=false
+          [[ "$P" == "all" || "$P" == *linux* ]]   && L=true || L=false
+          [[ "$P" == "all" || "$P" == *windows* ]] && W=true || W=false
+          echo "macos=$M"   >> "$GITHUB_OUTPUT"
+          echo "linux=$L"   >> "$GITHUB_OUTPUT"
+          echo "windows=$W" >> "$GITHUB_OUTPUT"
+          KEYS=""
+          [[ "$M" == true ]] && KEYS="$KEYS,darwin-aarch64,darwin-x86_64"
+          [[ "$L" == true ]] && KEYS="$KEYS,linux-x86_64-deb,linux-aarch64-deb"
+          [[ "$W" == true ]] && KEYS="$KEYS,windows-x86_64,windows-aarch64"
+          echo "expect_keys=${KEYS#,}" >> "$GITHUB_OUTPUT"
 
   # ── Proof gate ──────────────────────────────────────────────────────
   # A release is only built from a commit that passed CI's `gate` check —
@@ -89,11 +185,11 @@ jobs:
   # check is red, is not released. Waits for a check that is still running.
   proof:
     needs: config
+    if: needs.config.outputs.release == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
@@ -105,31 +201,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --wait-minutes 90
 
-  # ── Frontend Tests ──────────────────────────────────────────────────
+  # ── Frontend tests ─────────────────────────────────────────────────
   test-frontend:
+    needs: config
+    if: needs.config.outputs.release == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
-
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: 22
           cache: npm
-
       - run: npm ci
-
       - name: Type check
         run: npx tsc --noEmit
-
+      - name: Lint
+        run: npx eslint .
       - name: Unit tests
         run: npx vitest run
 
-  # ── Rust Tests (only for selected platforms) ───────────────────────
+  # ── Rust tests on every platform we ship ───────────────────────────
   test-rust:
     needs: config
+    if: needs.config.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -141,7 +237,6 @@ jobs:
           - os: windows-2022
             enabled: ${{ needs.config.outputs.build_windows }}
     runs-on: ${{ matrix.os }}
-    if: always()
     steps:
       - name: Skip if platform not selected
         if: matrix.enabled != 'true'
@@ -150,7 +245,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         if: matrix.enabled == 'true'
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
@@ -187,10 +281,7 @@ jobs:
           fi
 
       # Stages bridge runtime deps into src-tauri/bridge/node_modules/, which
-      # the Tauri build script validates against tauri.conf.json's resources
-      # list whenever cargo compiles the crate.  Without this, `cargo test`
-      # fails with `resource path 'bridge/node_modules' doesn't exist`.
-      # Triggered automatically via the postinstall hook in package.json.
+      # the Tauri build script validates whenever cargo compiles the crate.
       - name: Install npm deps + stage bridge runtime
         if: matrix.enabled == 'true'
         run: npm ci
@@ -203,12 +294,12 @@ jobs:
       - name: Run Rust tests
         if: matrix.enabled == 'true'
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
-  # ── Build (selected platforms) ─────────────────────────────────────
+  # ── Build installers ───────────────────────────────────────────────
   build:
     needs: [config, proof, test-frontend, test-rust]
-    if: always() && needs.proof.result == 'success' && needs.test-frontend.result == 'success' && needs.test-rust.result == 'success'
+    if: needs.config.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -226,7 +317,7 @@ jobs:
             notarize: true
             platform_group: macos
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-22.04
+            runner: ubuntu-22.04 # glibc 2.35 floor for the .deb
             platform_key: linux-x86_64
             sign: false
             notarize: false
@@ -268,7 +359,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         if: steps.check.outputs.enabled == 'true'
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
@@ -294,32 +384,21 @@ jobs:
         if: steps.check.outputs.enabled == 'true' && runner.os == 'Linux'
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libfuse2
+          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
           version: 1.0
 
       # Same guard as in test-rust: an empty apt cache must not break the build.
       - name: Ensure system libraries are installed
         if: steps.check.outputs.enabled == 'true' && runner.os == 'Linux'
         run: |
-          if ! pkg-config --exists glib-2.0 gtk+-3.0 gdk-3.0 webkit2gtk-4.1 libsoup-3.0 javascriptcoregtk-4.1 || ! ldconfig -p | grep -q libfuse.so.2; then
+          if ! pkg-config --exists glib-2.0 gtk+-3.0 gdk-3.0 webkit2gtk-4.1 libsoup-3.0 javascriptcoregtk-4.1; then
             echo "apt cache incomplete, installing packages directly"
             sudo apt-get update
-            sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libfuse2
+            sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
           fi
 
       - run: npm ci
         if: steps.check.outputs.enabled == 'true'
-
-      - name: Validate version matches tag
-        if: steps.check.outputs.enabled == 'true' && startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          CONF_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          if [ "$TAG_VERSION" != "$CONF_VERSION" ]; then
-            echo "::error::Tag v$TAG_VERSION does not match tauri.conf.json version $CONF_VERSION"
-            exit 1
-          fi
 
       - name: Import macOS signing certificate
         if: steps.check.outputs.enabled == 'true' && matrix.sign && runner.os == 'macOS'
@@ -327,6 +406,10 @@ jobs:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          if [ -z "$APPLE_CERTIFICATE_BASE64" ]; then
+            echo "::warning::No signing certificate available — building unsigned (fork or missing secret)"
+            exit 0
+          fi
           CERT_PATH=$RUNNER_TEMP/certificate.p12
           KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -hex 12)
@@ -345,6 +428,22 @@ jobs:
 
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
+      # macOS terminals need the small `hermes-pty-setup` helper next to the
+      # app binary. It goes in as a Tauri external binary so the bundler
+      # puts it (signed) into the .app before the DMG and the updater
+      # archive are made. Copying it in afterwards left the DMG without it.
+      - name: Build PTY helper (macOS)
+        if: steps.check.outputs.enabled == 'true' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --target ${{ matrix.target }} \
+            --manifest-path src-tauri/pty-setup/Cargo.toml --target-dir src-tauri/target
+          mkdir -p src-tauri/binaries
+          cp "src-tauri/target/${{ matrix.target }}/release/hermes-pty-setup" \
+            "src-tauri/binaries/hermes-pty-setup-${{ matrix.target }}"
+          ls -la src-tauri/binaries/
+
       - name: Build and sign
         if: steps.check.outputs.enabled == 'true'
         shell: bash
@@ -353,59 +452,30 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "${{ matrix.sign && secrets.APPLE_SIGNING_IDENTITY || '' }}"
-        # Linux: build only the .deb.  AppImage's `linuxdeploy` step OOMs on
-        # the ~210MB bridge runtime we ship as a resource (added in v1.1.3).
-        # The .deb covers Ubuntu/Debian/Mint/Pop!_OS — the bulk of desktop
-        # Linux.  Re-enable AppImage once the bridge runtime ships as a
-        # tarball-extracted-on-first-launch (tracked for a future release).
+        # Linux: .deb only. AppImage's `linuxdeploy` step OOMs on the bridge
+        # runtime we ship as a resource; the .deb is also the updater bundle.
+        # Windows: NSIS only. The updater installs with NSIS, so an MSI install
+        # would end up with two copies after its first update.
         run: |
           if [[ "${{ matrix.platform_group }}" == 'linux' ]]; then
             npx tauri build --target ${{ matrix.target }} --bundles deb
+          elif [[ "${{ matrix.platform_group }}" == 'windows' ]]; then
+            npx tauri build --target ${{ matrix.target }} --bundles nsis
           else
-            npx tauri build --target ${{ matrix.target }}
+            npx tauri build --target ${{ matrix.target }} \
+              --config '{"bundle":{"externalBin":["binaries/hermes-pty-setup"]}}'
           fi
 
-      - name: Bundle PTY helper into macOS app
+      - name: Check the macOS bundle carries the PTY helper
         if: steps.check.outputs.enabled == 'true' && runner.os == 'macOS'
         shell: bash
-        env:
-          APPLE_SIGNING_IDENTITY: "${{ matrix.sign && secrets.APPLE_SIGNING_IDENTITY || '' }}"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          cd src-tauri/pty-setup
-          cargo build --release --target ${{ matrix.target }} --target-dir ../target
-          HELPER="../target/${{ matrix.target }}/release/hermes-pty-setup"
-          APP_DIR=$(find ../target/${{ matrix.target }}/release/bundle/macos -path "*/Contents/MacOS" -type d | head -1)
-          if [ -f "$HELPER" ] && [ -n "$APP_DIR" ]; then
-            cp "$HELPER" "$APP_DIR/hermes-pty-setup"
-            if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
-              codesign --force -s "$APPLE_SIGNING_IDENTITY" "$APP_DIR/hermes-pty-setup"
-              codesign --force --deep -s "$APPLE_SIGNING_IDENTITY" "$APP_DIR/../.."
-            fi
-            echo "Bundled and signed hermes-pty-setup"
-
-            # Rebuild the updater .app.tar.gz so it includes hermes-pty-setup.
-            # Tauri creates this archive during `tauri build`, before the helper
-            # is injected, so the auto-updater would otherwise ship without it.
-            APP_BUNDLE=$(dirname "$APP_DIR")/..
-            APP_BUNDLE=$(cd "$APP_BUNDLE" && pwd)
-            APP_NAME=$(basename "$APP_BUNDLE")
-            TAR_GZ=$(ls ../target/${{ matrix.target }}/release/bundle/macos/*.tar.gz 2>/dev/null | head -1)
-            if [ -n "$TAR_GZ" ]; then
-              PARENT_DIR=$(dirname "$APP_BUNDLE")
-              tar -czf "$TAR_GZ" -C "$PARENT_DIR" "$APP_NAME"
-              echo "Rebuilt updater archive: $TAR_GZ"
-              # Re-sign the updater archive
-              if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-                SIG_FILE="${TAR_GZ}.sig"
-                if command -v tauri &>/dev/null || npx tauri signer sign --help &>/dev/null 2>&1; then
-                  npx tauri signer sign "$TAR_GZ" --private-key "$TAURI_SIGNING_PRIVATE_KEY" ${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:+--password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
-                  echo "Re-signed updater archive"
-                fi
-              fi
-            fi
-          fi
+          set -euo pipefail
+          APP=$(ls -d src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
+          test -x "$APP/Contents/MacOS/hermes-pty-setup"
+          TAR_GZ=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz | head -1)
+          tar -tzf "$TAR_GZ" | grep -q 'Contents/MacOS/hermes-pty-setup$'
+          echo "hermes-pty-setup is in the app and in the updater archive"
 
       - name: Notarize DMG
         if: steps.check.outputs.enabled == 'true' && matrix.notarize
@@ -416,6 +486,10 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          if [ -z "$APPLE_ID" ]; then
+            echo "::warning::No notarization credentials — skipping (fork or missing secret)"
+            exit 0
+          fi
           DMG_PATH=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
           NOTARIZED=false
           for attempt in 1 2 3; do
@@ -444,32 +518,23 @@ jobs:
         if: steps.check.outputs.enabled == 'true'
         shell: bash
         run: |
-          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          set -euo pipefail
           TARGET_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
-          INSTALLER_DIR="installer-artifacts"
-          mkdir -p "$INSTALLER_DIR"
-
+          mkdir -p installer-artifacts
+          shopt -s nullglob
           # macOS DMG
-          if ls "$TARGET_DIR"/dmg/*.dmg 2>/dev/null; then
-            cp "$TARGET_DIR"/dmg/*.dmg "$INSTALLER_DIR/"
-          fi
-
-          # Linux AppImage and deb
-          if ls "$TARGET_DIR"/appimage/*.AppImage 2>/dev/null; then
-            cp "$TARGET_DIR"/appimage/*.AppImage "$INSTALLER_DIR/"
-          fi
-          if ls "$TARGET_DIR"/deb/*.deb 2>/dev/null; then
-            cp "$TARGET_DIR"/deb/*.deb "$INSTALLER_DIR/"
-          fi
-
-          # Windows NSIS and MSI
-          if ls "$TARGET_DIR"/nsis/*.exe 2>/dev/null; then
-            cp "$TARGET_DIR"/nsis/*.exe "$INSTALLER_DIR/"
-          fi
-          if ls "$TARGET_DIR"/msi/*.msi 2>/dev/null; then
-            cp "$TARGET_DIR"/msi/*.msi "$INSTALLER_DIR/"
-          fi
+          for f in "$TARGET_DIR"/dmg/*.dmg; do cp "$f" installer-artifacts/; done
+          # Linux .deb — Tauri signs it at build time; it is the updater bundle too.
+          for f in "$TARGET_DIR"/deb/*.deb; do
+            cp "$f" installer-artifacts/
+            [ -f "$f.sig" ] && cp "$f.sig" installer-artifacts/
+          done
+          # Windows NSIS
+          for f in "$TARGET_DIR"/nsis/*-setup.exe; do cp "$f" installer-artifacts/; done
+          shopt -u nullglob
+          echo "=== installer artifacts ==="
+          ls -la installer-artifacts/
+          [ "$(ls installer-artifacts | wc -l)" -gt 0 ] || { echo "::error::no installer produced"; exit 1; }
 
       - name: Upload installer artifacts
         if: steps.check.outputs.enabled == 'true'
@@ -480,56 +545,49 @@ jobs:
           retention-days: 7
 
       - name: Collect updater artifacts
-        if: steps.check.outputs.enabled == 'true'
+        if: steps.check.outputs.enabled == 'true' && matrix.platform_group != 'linux'
         shell: bash
         run: |
+          set -euo pipefail
           TARGET_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
-          UPDATER_DIR="updater-artifacts"
-          mkdir -p "$UPDATER_DIR"
-
-          # macOS updater bundle (Tauri 2: .app.tar.gz + .sig)
-          if ls "$TARGET_DIR"/macos/*.tar.gz 2>/dev/null; then
-            cp "$TARGET_DIR"/macos/*.tar.gz "$UPDATER_DIR/"
-            cp "$TARGET_DIR"/macos/*.tar.gz.sig "$UPDATER_DIR/" 2>/dev/null || true
-          fi
-
-          # Linux updater bundle (Tauri 2: .AppImage + .AppImage.sig)
-          for f in "$TARGET_DIR"/appimage/*.AppImage; do
-            if [ -f "$f" ]; then
-              cp "$f" "$UPDATER_DIR/"
-              cp "${f}.sig" "$UPDATER_DIR/" 2>/dev/null || true
-            fi
+          mkdir -p updater-artifacts
+          shopt -s nullglob
+          # macOS updater bundle (.app.tar.gz + .sig)
+          for f in "$TARGET_DIR"/macos/*.tar.gz; do
+            cp "$f" updater-artifacts/
+            cp "$f.sig" updater-artifacts/
           done
-
-          # Windows updater bundle (Tauri 2: .exe + .exe.sig from nsis)
+          # Windows updater bundle (the NSIS installer + .sig)
           for f in "$TARGET_DIR"/nsis/*-setup.exe; do
-            if [ -f "$f" ]; then
-              cp "$f" "$UPDATER_DIR/"
-              cp "${f}.sig" "$UPDATER_DIR/" 2>/dev/null || true
-            fi
+            cp "$f" updater-artifacts/
+            cp "$f.sig" updater-artifacts/
           done
+          shopt -u nullglob
+          echo "=== updater artifacts ==="
+          ls -la updater-artifacts/
 
       - name: Upload updater artifacts
-        if: steps.check.outputs.enabled == 'true'
+        if: steps.check.outputs.enabled == 'true' && matrix.platform_group != 'linux'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hermes-ide-${{ matrix.platform_key }}-updater
           path: updater-artifacts/
           retention-days: 7
 
-  # ── Assemble Release ────────────────────────────────────────────────
-  assemble-release:
+  # ── Draft release: assets + manifests, nothing public ──────────────
+  draft:
     needs: [config, build]
-    if: always() && needs.build.result == 'success'
+    if: needs.config.outputs.release == 'true'
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.config.outputs.version }}
       TAG: ${{ needs.config.outputs.tag }}
+      SHA: ${{ needs.config.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
@@ -540,248 +598,336 @@ jobs:
         with:
           path: artifacts/
 
-      - name: Prepare release files
+      - name: Assemble release files
         run: |
-          RELEASE_DIR="release-files"
-          mkdir -p "$RELEASE_DIR"
-
+          set -euo pipefail
+          mkdir -p release-files
           echo "=== Downloaded artifacts ==="
           find artifacts/ -type f | sort
-
-          # Copy all installer files
+          # Installers keep their names.
           for dir in artifacts/hermes-ide-*-installer; do
-            if [ -d "$dir" ]; then
-              cp "$dir"/* "$RELEASE_DIR/" 2>/dev/null || true
-            fi
+            [ -d "$dir" ] && cp "$dir"/* release-files/
           done
-
-          # Copy updater bundles with platform prefix to avoid name collisions
+          # Updater bundles get the platform key as a prefix: the macOS archive
+          # has the same file name on both architectures.
           for dir in artifacts/hermes-ide-*-updater; do
-            if [ -d "$dir" ]; then
-              PLATFORM_KEY=$(basename "$dir" | sed 's/hermes-ide-//' | sed 's/-updater//')
-              for file in "$dir"/*; do
-                if [ -f "$file" ]; then
-                  BASENAME=$(basename "$file")
-                  cp "$file" "$RELEASE_DIR/${PLATFORM_KEY}-${BASENAME}"
-                fi
-              done
-            fi
+            [ -d "$dir" ] || continue
+            KEY=$(basename "$dir" | sed 's/^hermes-ide-//; s/-updater$//')
+            for f in "$dir"/*; do cp "$f" "release-files/${KEY}-$(basename "$f")"; done
           done
-
           echo "=== Release files ==="
-          ls -la "$RELEASE_DIR/"
+          ls -la release-files/
 
-      - name: Generate SHA256 checksums
+      - name: Build manifests
         run: |
-          cd release-files
-          sha256sum * > SHA256SUMS.txt
-          echo "=== SHA256SUMS ==="
-          cat SHA256SUMS.txt
+          set -euo pipefail
+          node scripts/ci/release-manifests.mjs build release-files \
+            --tag "$TAG" --repo "${{ github.repository }}" \
+            --notes "Hermes IDE $VERSION — https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          (cd release-files && sha256sum -- * > SHA256SUMS.txt)
+          echo "=== latest.json ==="; cat release-files/latest.json
+          echo "=== downloads.json ==="; cat release-files/downloads.json
+
+      - name: Lint manifests
+        run: |
+          node scripts/ci/release-manifests.mjs lint release-files \
+            --tag "$TAG" --expect "${{ needs.config.outputs.expect_keys }}"
 
       - name: Prepare release notes
         run: |
-          VERSION="${{ needs.config.outputs.version }}"
-          # Hand-written notes win when RELEASE_NOTES.md is for this version
-          # (its first line names it, e.g. "# Hermes IDE 1.4.0"). Otherwise
-          # fall back to a changelog generated from commits between tags.
-          NOTES=$(bash scripts/generate-changelog.sh "$TAG" 2>/dev/null || true)
-          if [ -f "RELEASE_NOTES.md" ] && head -n 1 RELEASE_NOTES.md | grep -qF "$VERSION"; then
-            echo "Using RELEASE_NOTES.md"
-            { cat RELEASE_NOTES.md; printf '\n\nSee the full changelog at https://hermes-ide.com/changelog\n'; } > release-notes.txt
-          elif [ -n "$NOTES" ]; then
-            echo "RELEASE_NOTES.md is not for $VERSION; using auto-generated changelog"
-            echo "$NOTES" > release-notes.txt
-          else
-            echo "No changelog available — using default release notes"
-            cat > release-notes.txt << 'NOTES'
-          ## New
-          - Release v${{ needs.config.outputs.version }}
+          set -euo pipefail
+          {
+            cat RELEASE_NOTES.md
+            printf '\n\n---\n%s\n' "$SOAK_NOTE"
+            printf 'Full changelog: https://hermes-ide.com/changelog\n'
+          } > release-notes.txt
 
-          See the full changelog at https://hermes-ide.com/changelog
-          NOTES
-          fi
-
-      - name: Ensure GitHub Release exists
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Create draft release
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — will upload new assets"
+          set -euo pipefail
+          EXISTING=$(gh release view "$TAG" --json isDraft,targetCommitish 2>/dev/null || true)
+          if [[ -n "$EXISTING" ]]; then
+            IS_DRAFT=$(jq -r '.isDraft' <<<"$EXISTING")
+            TARGET=$(jq -r '.targetCommitish' <<<"$EXISTING")
+            if [[ "$IS_DRAFT" != "true" ]]; then
+              echo "::error::$TAG is already published — a release is never rebuilt in place"; exit 1
+            fi
+            # A draft is only reused by a re-run of the SAME commit. A draft
+            # from another commit is never touched: uploading over it would
+            # mix two builds under one tag. `config` already refused such a
+            # draft an hour ago; this catches one made since.
+            if [[ "$TARGET" != "$SHA" ]]; then
+              echo "::error::draft $TAG targets $TARGET but this run built $SHA — another train owns that draft; it is never reused or overwritten"; exit 1
+            fi
+            echo "Draft $TAG already exists for $SHA (re-run) — reusing it"
           else
-            gh release create "$TAG" \
-              --title "Hermes IDE $TAG" \
-              --notes-file release-notes.txt
-            # Give GitHub a moment to propagate the new release before uploading assets
+            # The API occasionally answers a create with a transient 403.
+            for attempt in 1 2 3; do
+              if gh release create "$TAG" --draft --target "$SHA" \
+                   --title "Hermes IDE $TAG" --notes-file release-notes.txt; then
+                break
+              fi
+              [ "$attempt" -eq 3 ] && { echo "::error::could not create the draft release"; exit 1; }
+              echo "create failed (attempt $attempt) — retrying in 20 s"; sleep 20
+            done
             sleep 5
           fi
 
-      - name: Upload build artifacts to release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Upload assets to the draft
         run: |
-          RELEASE_DIR="release-files"
-
+          set -euo pipefail
           shopt -s nullglob
-          FILES=( "$RELEASE_DIR"/* )
-          shopt -u nullglob
-
-          if [ ${#FILES[@]} -eq 0 ]; then
-            echo "No new artifacts to upload"
-          else
-            for attempt in 1 2 3; do
-              echo "Upload attempt $attempt of 3..."
-              if gh release upload "$TAG" \
-                --clobber \
-                "${FILES[@]}"; then
-                echo "Upload succeeded"
-                break
-              fi
-              if [ "$attempt" -lt 3 ]; then
-                echo "Upload failed, retrying in 15s..."
-                sleep 15
-              else
-                echo "::error::All upload attempts failed"
-                exit 1
-              fi
-            done
-          fi
-
-      - name: Regenerate manifests from all release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          RELEASE_DIR="release-files"
-          BASE_URL="https://github.com/${{ github.repository }}/releases/download/$TAG"
-
-          # Download all .sig files from the release (includes previously uploaded ones)
-          SIG_DIR=$(mktemp -d)
-          gh release download "$TAG" \
-            --pattern "*.sig" \
-            --dir "$SIG_DIR" \
-            --clobber 2>/dev/null || true
-
-          # Get full asset list from release
-          ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name')
-
-          # ── latest.json ───────────────────────────────────────────────
-          PLATFORMS_JSON='{}'
-
-          add_platform() {
-            local key="$1" pattern="$2"
-            local bundle_name sig_content=""
-            bundle_name=$(echo "$ASSETS" | grep -E "$pattern" | grep -v '\.sig$' | head -1 || true)
-            [ -z "$bundle_name" ] && return 0
-            if [ -f "$SIG_DIR/${bundle_name}.sig" ]; then
-              sig_content=$(cat "$SIG_DIR/${bundle_name}.sig")
+          FILES=( release-files/* )
+          for attempt in 1 2 3; do
+            echo "Upload attempt $attempt of 3..."
+            if gh release upload "$TAG" --clobber "${FILES[@]}"; then
+              echo "Upload succeeded"; exit 0
             fi
-            PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
-              --arg k "$key" \
-              --arg sig "$sig_content" \
-              --arg url "${BASE_URL}/${bundle_name}" \
-              '.[$k] = {signature: $sig, url: $url}')
-          }
+            [ "$attempt" -lt 3 ] && sleep 15
+          done
+          echo "::error::All upload attempts failed"; exit 1
 
-          add_platform "darwin-aarch64"  "^darwin-aarch64-.*\.tar\.gz$"
-          add_platform "darwin-x86_64"   "^darwin-x86_64-.*\.tar\.gz$"
-          add_platform "linux-x86_64"    "^linux-x86_64-.*\.AppImage$"
-          add_platform "linux-aarch64"   "^linux-aarch64-.*\.AppImage$"
-          add_platform "windows-x86_64"  "^windows-x86_64-.*-setup\.exe$"
-          add_platform "windows-aarch64" "^windows-aarch64-.*-setup\.exe$"
+      - name: Upload release files (for the publish step)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-manifests
+          path: |
+            release-files/latest.json
+            release-files/downloads.json
+            release-files/SHA256SUMS.txt
+          retention-days: 7
 
-          jq -n \
-            --arg version "$VERSION" \
-            --arg notes "See the full changelog at https://hermes-ide.com/changelog" \
-            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --argjson platforms "$PLATFORMS_JSON" \
-            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
-            > "$RELEASE_DIR/latest.json"
-
-          echo "=== latest.json ==="
-          cat "$RELEASE_DIR/latest.json"
-
-          # ── downloads.json ────────────────────────────────────────────
-          DL_JSON='{}'
-
-          add_download() {
-            local platform="$1" arch="$2" format="$3" pattern="$4"
-            local filename
-            filename=$(echo "$ASSETS" | grep -E "$pattern" | head -1 || true)
-            [ -z "$filename" ] && return 0
-            DL_JSON=$(echo "$DL_JSON" | jq \
-              --arg p "$platform" --arg a "$arch" --arg f "$format" --arg n "$filename" \
-              '.[$p][$a][$f] = $n')
-          }
-
-          add_download "macos"   "aarch64" "dmg"      "_aarch64\.dmg$"
-          add_download "macos"   "x86_64"  "dmg"      "_x86_64\.dmg$"
-          add_download "linux"   "x86_64"  "appimage" "_amd64\.AppImage$"
-          add_download "linux"   "x86_64"  "deb"      "_amd64\.deb$"
-          add_download "linux"   "aarch64" "appimage" "_arm64\.AppImage$"
-          add_download "linux"   "aarch64" "deb"      "_arm64\.deb$"
-          add_download "windows" "x86_64"  "exe"      "_x64-setup\.exe$"
-          add_download "windows" "aarch64" "exe"      "_arm64-setup\.exe$"
-
-          jq -n \
-            --arg version "$VERSION" \
-            --argjson platforms "$DL_JSON" \
-            '{version: $version, platforms: $platforms}' \
-            > "$RELEASE_DIR/downloads.json"
-
-          echo "=== downloads.json ==="
-          cat "$RELEASE_DIR/downloads.json"
-
-          # Upload manifests
-          gh release upload "$TAG" \
-            --clobber \
-            "$RELEASE_DIR/latest.json" \
-            "$RELEASE_DIR/downloads.json"
-
-          rm -rf "$SIG_DIR"
-
-      - name: Trigger website rebuild
-        env:
-          DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+  # ── Install every artifact on its platform and run the self-test ───
+  smoke:
+    needs: [config, draft]
+    if: needs.config.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: darwin-aarch64,  os: macos-15,          kind: dmg,  group: macos }
+          - { key: darwin-x86_64,   os: macos-15-intel,    kind: dmg,  group: macos }
+          - { key: linux-x86_64,    os: ubuntu-24.04,      kind: deb,  group: linux }
+          - { key: linux-aarch64,   os: ubuntu-24.04-arm,  kind: deb,  group: linux }
+          - { key: windows-x86_64,  os: windows-2022,      kind: nsis, group: windows }
+          - { key: windows-aarch64, os: windows-11-arm,    kind: nsis, group: windows }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      HERMES_DISABLE_UPDATE_CHECK: "1"
+    steps:
+      - name: Check if this platform is enabled
+        id: check
+        shell: bash
         run: |
-          if [ -n "$DEPLOY_HOOK_URL" ]; then
-            echo "Triggering Cloudflare Pages rebuild..."
-            curl -sf -X POST "$DEPLOY_HOOK_URL" > /dev/null
-            echo "Website rebuild triggered for v$VERSION"
+          case "${{ matrix.group }}" in
+            macos)   E="${{ needs.config.outputs.build_macos }}" ;;
+            linux)   E="${{ needs.config.outputs.build_linux }}" ;;
+            windows) E="${{ needs.config.outputs.build_windows }}" ;;
+          esac
+          echo "enabled=$E" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: steps.check.outputs.enabled == 'true'
+        with:
+          name: hermes-ide-${{ matrix.key }}-installer
+          path: dl
+
+      - name: Install and self-test (macOS)
+        if: steps.check.outputs.enabled == 'true' && matrix.kind == 'dmg'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          DMG=$(ls dl/*.dmg | head -1)
+          echo "Installing $DMG"
+          MOUNT="$RUNNER_TEMP/hermes-dmg"
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT"
+          APPS="$RUNNER_TEMP/Applications"; mkdir -p "$APPS"
+          cp -R "$MOUNT"/*.app "$APPS/"
+          hdiutil detach "$MOUNT"
+          APP=$(ls -d "$APPS"/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            spctl --assess --type execute -vv "$APP"
+            xcrun stapler validate "$DMG"
           else
-            echo "No CLOUDFLARE_DEPLOY_HOOK_URL set — skipping website rebuild"
+            echo "::warning::unsigned build — Gatekeeper assessment skipped"
+          fi
+          test -x "$APP/Contents/MacOS/hermes-pty-setup"
+          "$APP/Contents/MacOS/hermes-ide" --self-test="$RUNNER_TEMP/self-test.json"
+
+      - name: Install and self-test (Linux)
+        if: steps.check.outputs.enabled == 'true' && matrix.kind == 'deb'
+        env:
+          # Runners have no GPU; keep WebKitGTK on the software path.
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+        run: |
+          set -euo pipefail
+          DEB=$(ls dl/*.deb | head -1)
+          echo "Installing $DEB"
+          sudo apt-get update
+          sudo apt-get install -y "./$DEB" xvfb dbus-x11
+          which hermes-ide
+          xvfb-run -a dbus-run-session -- hermes-ide --self-test="$RUNNER_TEMP/self-test.json"
+
+      - name: Install and self-test (Windows)
+        if: steps.check.outputs.enabled == 'true' && matrix.kind == 'nsis'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem dl -Filter *-setup.exe | Select-Object -First 1
+          Write-Host "Installing $($installer.FullName)"
+          $p = Start-Process $installer.FullName -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          $candidates = @("$env:LOCALAPPDATA\HERMES-IDE\hermes-ide.exe", "$env:ProgramFiles\HERMES-IDE\hermes-ide.exe")
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "hermes-ide.exe not found after install (looked in: $($candidates -join ', '))" }
+          Write-Host "Installed at $exe"
+          $report = Join-Path $env:RUNNER_TEMP "self-test.json"
+          # Start-Process -Wait would also wait for every descendant (a shell
+          # left behind by a failed PTY check); wait for the app alone, bounded.
+          $startedAt = Get-Date
+          $app = Start-Process $exe -ArgumentList "--self-test=$report" -PassThru
+          if (-not $app.WaitForExit(240000)) {
+            Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+            throw "the app did not exit within 240 s"
+          }
+          Get-Process -Name pwsh, powershell, cmd -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt $startedAt } | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (Test-Path $report) { Get-Content $report }
+          if ($app.ExitCode -ne 0) { throw "self-test exited with $($app.ExitCode)" }
+
+      - name: Show report
+        if: always() && steps.check.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/self-test.json" ]; then
+            cat "$RUNNER_TEMP/self-test.json"
+            node -e 'const r=require(process.argv[1]); if(!r.ok){console.error("self-test FAILED"); process.exit(1)}' "$RUNNER_TEMP/self-test.json"
+          else
+            echo "::error::no self-test report was written"; exit 1
           fi
 
-  # ── SLSA Provenance Attestation ────────────────────────────────────
+      - name: Upload self-test report
+        if: always() && steps.check.outputs.enabled == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: self-test-${{ matrix.key }}
+          path: ${{ runner.temp }}/self-test.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ── SLSA provenance for the installers ─────────────────────────────
   provenance:
-    needs: [config, assemble-release]
-    if: always() && needs.assemble-release.result == 'success'
+    needs: [config, build]
+    if: needs.config.outputs.release == 'true' && needs.config.outputs.dry_run == 'false'
     runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read
       attestations: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 1
-
-      - name: Download all installer artifacts
+      - name: Download installer artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
+          pattern: hermes-ide-*-installer
           path: provenance-files/
 
       - name: Collect binary files for attestation
         run: |
           mkdir -p attest-files
-          find provenance-files/ -type f \
-            ! -name '*.sig' \
-            ! -name '*.json' \
-            ! -name '*.txt' \
-            -exec cp {} attest-files/ \;
-          echo "=== Files to attest ==="
+          find provenance-files/ -type f ! -name '*.sig' -exec cp {} attest-files/ \;
           ls -la attest-files/
 
       - name: Generate SLSA provenance attestation
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'attest-files/*'
+
+  # ── Tag the merged commit and publish to the beta channel ──────────
+  publish-beta:
+    needs: [config, draft, smoke, provenance]
+    if: needs.config.outputs.release == 'true' && needs.config.outputs.dry_run == 'false'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: channels-branch
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.config.outputs.tag }}
+      SHA: ${{ needs.config.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Create the tag on the merged commit (never moved)
+        run: |
+          set -euo pipefail
+          EXISTING=$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" -q '.object.sha' 2>/dev/null || true)
+          if [ -n "$EXISTING" ]; then
+            if [ "$EXISTING" != "$SHA" ]; then
+              echo "::error::tag $TAG already points at $EXISTING, not $SHA — tags are never moved"; exit 1
+            fi
+            echo "Tag $TAG already points at $SHA"
+          else
+            gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null
+            echo "Created tag $TAG at $SHA"
+          fi
+
+      - name: Publish as prerelease (beta channel)
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          gh release view "$TAG" --json isDraft,isPrerelease,tagName,targetCommitish
+
+      - name: Download manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-manifests
+          path: manifests
+
+      - name: Point the beta channel at this release
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin channels 2>/dev/null; then
+            git worktree add channels-wt origin/channels
+          else
+            git worktree add --detach channels-wt
+            (cd channels-wt && git checkout --orphan channels && git rm -rfq . && printf '# Update channels\n\nWritten by the release workflow. Do not edit by hand.\n' > README.md)
+          fi
+          cp manifests/latest.json channels-wt/beta.json
+          cd channels-wt
+          git add -A
+          git commit -m "beta: $TAG" || echo "beta.json unchanged"
+          git push origin HEAD:channels
+          echo "Beta clients now read $TAG from channels/beta.json"
+
+  # ── Dry runs leave nothing behind ──────────────────────────────────
+  dry-run-cleanup:
+    needs: [config, draft, smoke]
+    if: always() && needs.config.outputs.dry_run == 'true' && needs.draft.result != 'skipped'
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.config.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete the draft release
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json isDraft -q '.isDraft' -R "${{ github.repository }}" 2>/dev/null | grep -q true; then
+            gh release delete "$TAG" --yes -R "${{ github.repository }}"
+            echo "Deleted draft $TAG"
+          else
+            echo "No draft named $TAG to delete"
+          fi
+          if git ls-remote --exit-code --tags "https://github.com/${{ github.repository }}" "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::dry run must not create a tag, but $TAG exists"; exit 1
+          fi
+          echo "Smoke result: ${{ needs.smoke.result }}"

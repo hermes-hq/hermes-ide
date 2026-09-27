@@ -23,7 +23,9 @@ mod project;
 /// Exposed for benchmarks — not part of the public API.
 #[doc(hidden)]
 pub mod pty;
+mod self_test;
 mod transcript;
+mod updater;
 mod workspace;
 
 use std::collections::HashSet;
@@ -621,9 +623,18 @@ pub fn run() {
             #[cfg(feature = "e2e")]
             e2e_bridge::start(app.handle());
 
+            // `--self-test=<report.json>`: prove the essentials, write the
+            // report, exit 0/1. Used by the release train on every installer.
+            if let Some(report) = self_test::requested() {
+                self_test::start(app.handle(), report.to_path_buf(), db_path.clone());
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Update channel (stable/beta) and the update check itself
+            updater::get_update_channel_info,
+            updater::check_for_update,
             // AI provider detection
             pty::check_ai_providers,
             // Session management

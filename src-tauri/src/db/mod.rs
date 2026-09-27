@@ -1862,6 +1862,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     // Behaviour
     "skip_close_confirm",
     "telemetry_enabled",
+    // Updates: "stable" (default) or "beta"
+    "update_channel",
     // Onboarding / What's New (excluded from export — per-install state)
     "onboarding_completed",
     "last_seen_version",

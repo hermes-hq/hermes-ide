@@ -5,7 +5,10 @@ const mockCheck = vi.fn();
 const mockRelaunch = vi.fn();
 
 vi.mock("@tauri-apps/plugin-updater", () => ({
-  check: (...args: unknown[]) => mockCheck(...args),
+  Update: class {},
+}));
+vi.mock("../api/updater", () => ({
+  checkForUpdate: (...args: unknown[]) => mockCheck(...args),
 }));
 
 vi.mock("@tauri-apps/plugin-process", () => ({

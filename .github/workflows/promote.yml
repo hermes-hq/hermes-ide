@@ -1,0 +1,110 @@
+name: Promote release
+
+# Moves a build from the beta channel to stable.
+#
+# Every hour: the newest prerelease that has soaked for 24 hours becomes the
+# latest release (stable clients read `releases/latest/download/latest.json`,
+# which only a non-prerelease can occupy). An open issue labelled
+# `release-hold` stops it: naming a tag in the title holds that tag, naming
+# none holds everything.
+#
+# After the flip a canary reads the public manifest and downloads every asset
+# it points at. If that fails, the previous release is made latest again and
+# the candidate goes back to prerelease — stable clients never see it.
+#
+# Manual: run with a tag to promote it now (the hold still applies).
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Prerelease tag to promote now, skipping the soak (e.g. v1.4.1)"
+        required: false
+        type: string
+      soak_hours:
+        description: "Soak period in hours for automatic promotion"
+        required: false
+        default: "24"
+        type: string
+
+permissions:
+  contents: write
+  issues: read
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Pick the release to promote
+        id: pick
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+          SOAK_HOURS: ${{ inputs.soak_hours || '24' }}
+        run: |
+          set -euo pipefail
+          ARGS=(pick --repo "$REPO" --soak-hours "$SOAK_HOURS")
+          [ -n "$TAG_INPUT" ] && ARGS+=(--tag "$TAG_INPUT")
+          RESULT=$(node scripts/ci/promote.mjs "${ARGS[@]}")
+          echo "$RESULT"
+          node -e '
+            const r = JSON.parse(process.argv[1]);
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `tag=${r.tag ?? ""}\nprevious=${r.previous ?? ""}\nwhy=${r.why ?? ""}\n`);
+          ' "$RESULT"
+          if [ -n "$TAG_INPUT" ] && ! echo "$RESULT" | grep -q '"tag":"v'; then
+            echo "::error::$TAG_INPUT cannot be promoted — see the reason above"; exit 1
+          fi
+
+      - name: Promote to latest
+        if: steps.pick.outputs.tag != ''
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --prerelease=false --latest
+          gh release view "$TAG" --json tagName,isPrerelease,isLatest
+
+      - name: Canary — stable clients see the new version and can download it
+        id: canary
+        if: steps.pick.outputs.tag != ''
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: node scripts/ci/promote.mjs canary --repo "$REPO" --tag "$TAG"
+
+      - name: Halt — put the previous release back as latest
+        if: failure() && steps.canary.outcome == 'failure' && steps.pick.outputs.tag != ''
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+          PREVIOUS: ${{ steps.pick.outputs.previous }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --prerelease
+          if [ -n "$PREVIOUS" ]; then
+            gh release edit "$PREVIOUS" --latest
+            echo "::error::$TAG failed the canary — $PREVIOUS is latest again, $TAG is back on the beta channel"
+          else
+            echo "::error::$TAG failed the canary and there is no previous release to fall back to"
+          fi
+
+      - name: Rebuild the website
+        if: steps.pick.outputs.tag != ''
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$DEPLOY_HOOK_URL" ]; then
+            curl -sf -X POST "$DEPLOY_HOOK_URL" > /dev/null && echo "Website rebuild triggered"
+          else
+            echo "No CLOUDFLARE_DEPLOY_HOOK_URL set — skipping website rebuild"
+          fi

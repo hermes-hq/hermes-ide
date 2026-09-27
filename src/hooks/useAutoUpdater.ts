@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import type { Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { checkForUpdate } from "../api/updater";
 
 export interface UpdateState {
   /** An update is available */
@@ -65,7 +66,8 @@ export function useAutoUpdater() {
     if (downloadingRef.current || installingRef.current) return;
 
     try {
-      const update = await check();
+      // Runs in the backend so the stable/beta channel setting applies.
+      const update = await checkForUpdate();
       if (update) {
         setState((s) => {
           // Don't clobber state during an active download or install

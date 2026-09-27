@@ -5,13 +5,16 @@
 #   The primary release path is the GitHub Actions CI workflow (release.yml).
 #   CI handles all platforms: macOS (signed + notarized), Linux, and Windows.
 #
-#   Local scripts (release-local.sh, release-full.sh) are kept as fallback
-#   for development/testing builds.
+#   Local scripts (release-local.sh, release-full.sh) are DEPRECATED. They
+#   predate the release train (draft -> smoke -> beta -> stable) and upload
+#   straight to a public release; only their manifest step follows the
+#   current rules. Use them for local build debugging, not for shipping.
 #
 # Quick start:
-#   make bump v=0.4.0       # bump version
-#   make release-push        # push tag to remote
-#   make release             # trigger CI release for all platforms
+#   make bump v=1.4.1        # bump version (write RELEASE_NOTES.md first)
+#   make release-push        # push the bump branch; merging its PR to main releases
+#   make release-dry-run n=3 # run the release train on a throwaway tag
+#   make release-promote t=v1.4.1  # promote a beta build to stable now
 #
 # Usage:  make help
 # ────────────────────────────────────────────────────────────────────────────
@@ -23,7 +26,7 @@ PRIVATE_REPO := hermes-hq/hermes-ide
 PUBLIC_REPO := hermes-hq/hermes-ide
 
 .PHONY: help dev build test bump release-push \
-        release release-macos release-linux release-windows \
+        release-dry-run release-promote \
         release-local-full release-local-full-no-windows \
         release-local release-local-macos release-local-macos-fast release-local-linux \
         release-ci-windows release-ci-all \
@@ -54,16 +57,17 @@ help: ## Show this help
 	@echo "  ─────────────────────────────────────────────────"
 	@grep -E '^[a-z].*:.*## MON:' $(MAKEFILE_LIST) | sed 's/:.* ## MON: /\t/' | awk '{printf "  make %-28s %s\n", $$1, substr($$0, index($$0,"\t")+1)}'
 	@echo ""
-	@echo "  Local Builds (fallback)"
+	@echo "  Local Builds (deprecated — not the release path)"
 	@echo "  ─────────────────────────────────────────────────"
 	@grep -E '^[a-z].*:.*## LOCAL:' $(MAKEFILE_LIST) | sed 's/:.* ## LOCAL: /\t/' | awk '{printf "  make %-28s %s\n", $$1, substr($$0, index($$0,"\t")+1)}'
 	@echo ""
 	@echo "  Recommended Workflow"
 	@echo "  ─────────────────────────────────────────────────"
-	@echo "    make bump v=0.4.0"
-	@echo "    make release-push"
-	@echo "    make release                # trigger CI for all platforms"
-	@echo "    make release-watch          # monitor CI progress"
+	@echo "    make bump v=1.4.1           # write RELEASE_NOTES.md first"
+	@echo "    make release-push           # push the bump branch and open its PR"
+	@echo "    (merge the PR)              # the merge to main starts the release train"
+	@echo "    make release-watch          # monitor the train"
+	@echo "    make release-promote t=v1.4.1   # optional: promote beta to stable now"
 	@echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -83,66 +87,69 @@ test: ## DEV: Run all tests (frontend + type check)
 # VERSION BUMP
 # ═══════════════════════════════════════════════════════════════════════════
 
-bump: ## BUMP: Bump version — make bump v=0.4.0
+bump: ## BUMP: Bump version — make bump v=1.4.1 (RELEASE_NOTES.md must name it)
 ifndef v
-	$(error Usage: make bump v=0.4.0)
+	$(error Usage: make bump v=1.4.1)
 endif
 	npm run bump -- $(v)
 	@echo ""
 	@echo "  Version bumped to $(v). Now run:"
-	@echo "    make release-push"
+	@echo "    git switch -c release/$(v) && git commit -am 'Release $(v)' && make release-push"
 	@echo ""
 
-release-push: ## BUMP: Push main + tag to remote
-	git push origin main && git push origin --tags
+release-push: ## BUMP: Push the current branch; open a PR to main (the merge releases)
+	git push -u origin HEAD
 	@echo ""
-	@echo "  Pushed $(TAG)."
+	@echo "  Pushed $$(git branch --show-current). Open a PR to main — when it merges,"
+	@echo "  the release workflow builds, tests, tags $(TAG) and publishes to the beta channel."
 	@echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # RELEASE — CI-driven (primary path)
 # ═══════════════════════════════════════════════════════════════════════════
 
-release: ## REL: Trigger a full release via CI (all platforms)
-	@VERSION=$$(node -p "require('./src-tauri/tauri.conf.json').version"); \
-	echo "Triggering release v$$VERSION for all platforms..."; \
-	gh workflow run release.yml -f platforms=all -f tag="v$$VERSION"
+release-dry-run: ## REL: Run the release train on a throwaway tag — make release-dry-run n=3 [p=macos,linux,windows]
+ifndef n
+	$(error Usage: make release-dry-run n=<number> [p=macos,linux,windows])
+endif
+	gh workflow run release.yml --repo $(PUBLIC_REPO) --ref $$(git branch --show-current) \
+		-f dry_run_tag="v0.0.0-dryrun-$(n)" -f platforms="$(or $(p),all)"
+	@echo "  Dry run v0.0.0-dryrun-$(n) started — make release-watch"
 
-release-macos: ## REL: Trigger macOS-only release via CI
-	@VERSION=$$(node -p "require('./src-tauri/tauri.conf.json').version"); \
-	gh workflow run release.yml -f platforms=macos -f tag="v$$VERSION"
+release-promote: ## REL: Promote a beta (prerelease) build to stable now — make release-promote t=v1.4.1
+ifndef t
+	$(error Usage: make release-promote t=v1.4.1)
+endif
+	gh workflow run promote.yml --repo $(PUBLIC_REPO) -f tag="$(t)"
 
-release-linux: ## REL: Trigger Linux-only release via CI
-	@VERSION=$$(node -p "require('./src-tauri/tauri.conf.json').version"); \
-	gh workflow run release.yml -f platforms=linux -f tag="v$$VERSION"
-
-release-windows: ## REL: Trigger Windows-only release via CI
-	@VERSION=$$(node -p "require('./src-tauri/tauri.conf.json').version"); \
-	gh workflow run release.yml -f platforms=windows -f tag="v$$VERSION"
-
-release-manifests: ## REL: Regenerate latest.json + downloads.json
-	./scripts/release-local.sh --manifests
+release-manifests: ## REL: Build + lint latest.json and downloads.json from a release folder — make release-manifests d=<dir>
+ifndef d
+	$(error Usage: make release-manifests d=<folder with the release files>)
+endif
+	node scripts/ci/release-manifests.mjs build "$(d)" --tag $(TAG) --repo $(PUBLIC_REPO)
+	node scripts/ci/release-manifests.mjs lint "$(d)" --tag $(TAG)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RELEASE — Local builds (fallback for development/testing)
+# RELEASE — Local builds (DEPRECATED: for build debugging only, the release
+# train in release.yml is the only supported way to ship)
 # ═══════════════════════════════════════════════════════════════════════════
 
-release-local-full: ## LOCAL: All 6 platforms — Mac+Linux local, Windows CI (interactive)
+release-local-full: ## LOCAL: (deprecated) All 6 platforms — Mac+Linux local, Windows CI (interactive)
 	./scripts/release-full.sh
 
-release-local-full-no-windows: ## LOCAL: macOS + Linux only (4 platforms, no CI)
+release-local-full-no-windows: ## LOCAL: (deprecated) macOS + Linux only (4 platforms, no CI)
 	./scripts/release-full.sh --skip-windows
 
-release-local: ## LOCAL: Build macOS + Linux locally, sign, notarize, upload
+release-local: ## LOCAL: (deprecated) Build macOS + Linux locally, sign, notarize, upload
 	./scripts/release-local.sh --all
 
-release-local-macos: ## LOCAL: Build macOS only (signed + notarized), upload
+release-local-macos: ## LOCAL: (deprecated) Build macOS only (signed + notarized), upload
 	./scripts/release-local.sh --macos
 
-release-local-macos-fast: ## LOCAL: Build macOS only, skip notarization
+release-local-macos-fast: ## LOCAL: (deprecated) Build macOS only, skip notarization
 	./scripts/release-local.sh --macos --skip-notarize
 
-release-local-linux: ## LOCAL: Build Linux via Docker (x86_64 + aarch64), upload
+release-local-linux: ## LOCAL: (deprecated) Build Linux via Docker (x86_64 + aarch64), upload
 	./scripts/release-local.sh --linux
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -68,6 +68,25 @@ features:
       F03-3:
         text: "A 1.4.0 database migrates and loses only execution_nodes, which its backup keeps"
         scenarios: [F03-retire-autopilot.mjs, N06-db-migrations.mjs]
+  N05:
+    name: "Safe release train with a beta channel"
+    # The train itself (draft, smoke on every OS, beta first, promote later)
+    # runs in GitHub Actions and is exercised by its dry run; the two parts
+    # that live in the app are proven here.
+    status: partial
+    criteria:
+      N05-1:
+        text: "A build whose installed self-test fails on any OS never becomes the latest release"
+        scenarios: [N05-self-test.mjs]
+      N05-2:
+        text: "Beta users get a build at least 24 hours before stable users"
+        scenarios: [N05-update-channel.mjs]
+      N05-3:
+        text: "Re-running a release never moves a tag"
+        scenarios: []
+      N05-4:
+        text: "A release without hand-written notes for its version fails"
+        scenarios: []
   N06:
     name: "Upgrades never lose data"
     status: shipped

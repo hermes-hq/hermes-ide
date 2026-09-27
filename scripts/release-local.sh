@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════════
-# NOTE: This script is for LOCAL development/testing builds only.
+# DEPRECATED — this script is NOT the release path.
 #
-# For production releases, use the GitHub Actions CI workflow (release.yml),
-# which is the primary release path and handles all platforms (macOS signed +
-# notarized, Linux, and Windows):
+# Releases ship through the release train (.github/workflows/release.yml):
+# a version bump merged to main is built, drafted, smoke-tested on every
+# platform, published to the beta channel and promoted to stable later.
 #
-#   gh workflow run release.yml -f platforms=all -f tag=vX.Y.Z
+#   make bump v=X.Y.Z && make release-push   # then merge the PR
 #
-# Or use the Makefile shortcut:
-#
-#   make release            # trigger CI for all platforms
-#   make release-macos      # trigger CI for macOS only
-#   make release-linux      # trigger CI for Linux only
-#   make release-windows    # trigger CI for Windows only
-#
-# This script remains useful as a fallback for local builds and debugging.
+# This script predates the train: it uploads straight to a public release
+# and its Linux path builds AppImages, which the manifest lint rejects (only
+# .deb is shipped and updated on Linux). It is kept for local build
+# debugging only. Its manifest step (--manifests) uses the same tool as CI
+# (scripts/ci/release-manifests.mjs), so the manifests it uploads follow
+# the current rules or the lint stops it.
 # ════════════════════════════════════════════════════════════════════════════
 # ────────────────────────────────────────────────────────────────────────────
 # release-local.sh — Build Hermes IDE locally and upload to GitHub Releases
@@ -296,152 +294,26 @@ upload_artifacts() {
 regenerate_manifests() {
   step "Regenerating manifests from release assets"
 
+  # Same tool and rules as the release train: the manifests are built from
+  # the files themselves (signatures are read from the .sig next to each
+  # bundle and verified against the app's public key by the lint).
   local tmp_dir
   tmp_dir=$(mktemp -d)
   trap "rm -rf '$tmp_dir'" RETURN
 
-  # Download all .sig files from the release
-  info "Downloading signature files..."
-  gh release download "$TAG" \
-    --repo "$RELEASES_REPO" \
-    --pattern "*.sig" \
-    --dir "$tmp_dir" \
-    --clobber 2>/dev/null || true
+  info "Downloading release assets..."
+  gh release download "$TAG" --repo "$RELEASES_REPO" --dir "$tmp_dir" --clobber
+  rm -f "$tmp_dir/latest.json" "$tmp_dir/downloads.json" "$tmp_dir/SHA256SUMS.txt"
 
-  # Get the full list of release assets
-  local assets
-  assets=$(gh release view "$TAG" --repo "$RELEASES_REPO" --json assets -q '.assets[].name')
-  local base_url="https://github.com/$RELEASES_REPO/releases/download/$TAG"
+  node "$PROJECT_DIR/scripts/ci/release-manifests.mjs" build "$tmp_dir" \
+    --tag "$TAG" --repo "$RELEASES_REPO" \
+    --notes "Hermes IDE $VERSION — https://github.com/$RELEASES_REPO/releases/tag/$TAG"
+  node "$PROJECT_DIR/scripts/ci/release-manifests.mjs" lint "$tmp_dir" --tag "$TAG" \
+    || fail "manifest lint failed — nothing uploaded"
 
-  # ── latest.json (updater manifest) ──────────────────────────────────────
-  info "Building latest.json..."
-  local platforms_json='{}'
+  cp "$tmp_dir/latest.json" "$tmp_dir/downloads.json" "$ARTIFACTS_DIR/"
+  info "latest.json platforms: $(jq -r '.platforms | keys | join(", ")' "$ARTIFACTS_DIR/latest.json")"
 
-  add_updater_platform() {
-    local key="$1" pattern="$2"
-    local bundle_name sig_content=""
-
-    # Find the bundle file (not the .sig)
-    bundle_name=$(echo "$assets" | grep -E "$pattern" | grep -v '\.sig$' | head -1 || true)
-    [[ -z "$bundle_name" ]] && return 0
-
-    # Read signature
-    if [[ -f "$tmp_dir/${bundle_name}.sig" ]]; then
-      sig_content=$(cat "$tmp_dir/${bundle_name}.sig")
-    fi
-
-    platforms_json=$(echo "$platforms_json" | jq \
-      --arg k "$key" \
-      --arg sig "$sig_content" \
-      --arg url "${base_url}/${bundle_name}" \
-      '.[$k] = {signature: $sig, url: $url}')
-  }
-
-  add_updater_platform "darwin-aarch64"  "^darwin-aarch64-.*\.tar\.gz$"
-  add_updater_platform "darwin-x86_64"   "^darwin-x86_64-.*\.tar\.gz$"
-  add_updater_platform "linux-x86_64"    "^linux-x86_64-.*\.AppImage$"
-  add_updater_platform "linux-aarch64"   "^linux-aarch64-.*\.AppImage$"
-  add_updater_platform "windows-x86_64"  "^windows-x86_64-.*-setup\.exe$"
-  add_updater_platform "windows-aarch64" "^windows-aarch64-.*-setup\.exe$"
-
-  jq -n \
-    --arg version "$VERSION" \
-    --arg notes "See the full changelog at https://hermes-ide.com/changelog" \
-    --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson platforms "$platforms_json" \
-    '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
-    > "$ARTIFACTS_DIR/latest.json"
-
-  info "latest.json platforms: $(echo "$platforms_json" | jq -r 'keys | join(", ")')"
-
-  # ── downloads.json (website download links) ─────────────────────────────
-  info "Building downloads.json..."
-  local dl_json='{}'
-  local versions_json='{}'
-
-  add_download() {
-    local platform="$1" arch="$2" format="$3" pattern="$4"
-    local filename
-    filename=$(echo "$assets" | grep -E "$pattern" | head -1 || true)
-    [[ -z "$filename" ]] && return 0
-    dl_json=$(echo "$dl_json" | jq \
-      --arg p "$platform" --arg a "$arch" --arg f "$format" --arg n "$filename" \
-      '.[$p][$a][$f] = $n')
-
-    # Extract version from filename (e.g. HERMES-IDE_0.3.37_aarch64.dmg → 0.3.37)
-    local file_version
-    file_version=$(echo "$filename" | sed -E 's/^.*[_-]([0-9]+\.[0-9]+\.[0-9]+)[_\.].*/\1/')
-    # Only store if we actually extracted a version (not the full filename)
-    if [[ "$file_version" != "$filename" && -n "$file_version" ]]; then
-      versions_json=$(echo "$versions_json" | jq --arg p "$platform" --arg v "$file_version" '.[$p] = $v')
-    fi
-  }
-
-  add_download "macos"   "aarch64" "dmg"      "_aarch64\.dmg$"
-  add_download "macos"   "x86_64"  "dmg"      "_(x86_64|x64)\.dmg$"
-  add_download "linux"   "x86_64"  "appimage" "_amd64\.AppImage$"
-  add_download "linux"   "x86_64"  "deb"      "_amd64\.deb$"
-  add_download "linux"   "aarch64" "appimage" "_(arm64|aarch64)\.AppImage$"
-  add_download "linux"   "aarch64" "deb"      "_arm64\.deb$"
-  add_download "windows" "x86_64"  "exe"      "_x64-setup\.exe$"
-  add_download "windows" "aarch64" "exe"      "_arm64-setup\.exe$"
-
-  # Carry forward versions for platforms missing in this release.
-  # Check recent releases (excluding current) to find the last version with each missing platform.
-  info "Checking for fallback versions for missing platforms..."
-  local missing_platforms=()
-  for plat in macos linux windows; do
-    local has_platform
-    has_platform=$(echo "$dl_json" | jq -r --arg p "$plat" 'has($p)')
-    if [[ "$has_platform" == "false" ]]; then
-      missing_platforms+=("$plat")
-    fi
-  done
-
-  if [[ ${#missing_platforms[@]} -gt 0 ]]; then
-    # Get recent release tags (skip current), one per line
-    local recent_tags_file
-    recent_tags_file=$(mktemp)
-    gh release list --repo "$RELEASES_REPO" --limit 10 --json tagName -q '.[].tagName' 2>/dev/null \
-      | grep -v "^${TAG}$" > "$recent_tags_file" || true
-
-    while IFS= read -r prev_tag; do
-      [[ -z "$prev_tag" ]] && continue
-      [[ ${#missing_platforms[@]} -eq 0 ]] && break
-      local prev_dl
-      prev_dl=$(curl -sL "https://github.com/$RELEASES_REPO/releases/download/${prev_tag}/downloads.json" 2>/dev/null || true)
-      [[ -z "$prev_dl" ]] && continue
-
-      local remaining=()
-      for plat in "${missing_platforms[@]}"; do
-        local prev_has
-        prev_has=$(echo "$prev_dl" | jq -r --arg p "$plat" '.platforms | has($p)' 2>/dev/null || true)
-        if [[ "$prev_has" == "true" ]]; then
-          local prev_ver
-          prev_ver=$(echo "$prev_dl" | jq -r --arg p "$plat" '.versions[$p] // .version' 2>/dev/null || true)
-          if [[ "$prev_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            versions_json=$(echo "$versions_json" | jq --arg p "$plat" --arg v "$prev_ver" '.[$p] = $v')
-            # Also carry forward the platform download entries so the site can serve them
-            dl_json=$(echo "$dl_json" | jq --arg p "$plat" --argjson entries "$(echo "$prev_dl" | jq --arg p "$plat" '.platforms[$p]')" '.[$p] = $entries')
-            info "Carried forward $plat → v$prev_ver (from $prev_tag)"
-          fi
-        else
-          remaining+=("$plat")
-        fi
-      done
-      missing_platforms=("${remaining[@]+"${remaining[@]}"}")
-    done < "$recent_tags_file"
-    rm -f "$recent_tags_file"
-  fi
-
-  jq -n \
-    --arg version "$VERSION" \
-    --argjson versions "$versions_json" \
-    --argjson platforms "$dl_json" \
-    '{version: $version, versions: $versions, platforms: $platforms}' \
-    > "$ARTIFACTS_DIR/downloads.json"
-
-  # Upload manifests
   info "Uploading manifests..."
   gh release upload "$TAG" \
     --repo "$RELEASES_REPO" \
@@ -450,11 +322,9 @@ regenerate_manifests() {
     "$ARTIFACTS_DIR/downloads.json"
 
   ok "Manifests uploaded to release"
-
-  ok "Manifests complete"
   echo
-  echo "  latest.json:    ${base_url}/latest.json"
-  echo "  downloads.json: ${base_url}/downloads.json"
+  echo "  latest.json:    https://github.com/$RELEASES_REPO/releases/download/$TAG/latest.json"
+  echo "  downloads.json: https://github.com/$RELEASES_REPO/releases/download/$TAG/downloads.json"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

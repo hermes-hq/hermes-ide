@@ -24,6 +24,7 @@ import {
 } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, deleteSshSavedHost, type SshSavedHost } from "../api/ssh";
 import { setAnalyticsEnabled } from "../utils/analytics";
+import { normalizeUpdateChannel } from "../api/updater";
 import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
 import { PluginManager } from "./PluginManager";
 import { useI18n } from "../i18n/I18nProvider";
@@ -312,6 +313,21 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     {" "}{t("settings.shellSuggestions")}
                   </label>
                   <span className="settings-hint-inline">{t("settings.shellSuggestionsHint")}</span>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label" htmlFor="settings-update-channel">{t("settings.updateChannel")}</label>
+                  <select
+                    id="settings-update-channel"
+                    className="settings-select"
+                    data-setting="update_channel"
+                    value={normalizeUpdateChannel(settings.update_channel)}
+                    onChange={(e) => updateSetting("update_channel", normalizeUpdateChannel(e.target.value))}
+                  >
+                    <option value="stable">{t("settings.updateChannelStable")}</option>
+                    <option value="beta">{t("settings.updateChannelBeta")}</option>
+                  </select>
+                  <span className="settings-hint-inline">{t("settings.updateChannelHint")}</span>
                 </div>
 
                 <div className="settings-group">
