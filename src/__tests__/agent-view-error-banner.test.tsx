@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
  * F07 — the Agent view's typed error panel, rendered: which panel shows for
- * which failure, what Retry and Sign in do, and that the old exit notice is
- * unchanged while the "agentViewErrors" flag is off.
+ * which failure, what Retry, Sign in and Dismiss do, that it names the
+ * session's own agent and follows the interface language, and that the old
+ * exit notice is unchanged while the "agentViewErrors" flag is off.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, act, fireEvent } from "@testing-library/react";
@@ -10,6 +11,11 @@ import "@testing-library/jest-dom/vitest";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => () => {}),
+}));
+
+vi.mock("../api/settings", () => ({
+  getSetting: vi.fn(async () => ""),
+  setSetting: vi.fn(async () => {}),
 }));
 
 const flags = { agentViewErrors: true };
@@ -23,22 +29,21 @@ const respawnAgent = vi.fn(
   () => new Promise<boolean>((resolve) => { resolveRespawn.push(resolve); }),
 );
 const createSession = vi.fn(async () => null);
+const session = { id: SID, ai_provider: "claude", working_directory: "/work/project", mode: "agent" };
 vi.mock("../state/SessionContext", () => ({
   useSession: () => ({
     sendAgentEnvelope: vi.fn(async () => {}),
     respawnAgent,
     createSession,
-    state: {
-      sessions: {
-        [SID]: { id: SID, ai_provider: "claude", working_directory: "/work/project", mode: "agent" },
-      },
-    },
+    state: { sessions: { [SID]: session } },
   }),
 }));
 
 import { AgentSessionView } from "../agent/AgentSessionView";
 import { getOrCreateAgentSessionStore, _resetAgentSessionStoresForTest } from "../agent/agentSessionStore";
 import type { AgentEvent } from "../agent/types";
+import { registerLanguagePack, setLanguage } from "../i18n/registry";
+import { languagePacks } from "../i18n/packs";
 
 function setup() {
   const view = render(<AgentSessionView sessionId={SID} workspacePathCount={1} />);
@@ -59,14 +64,16 @@ const button = (c: HTMLElement, action: string) =>
 
 beforeEach(() => {
   flags.agentViewErrors = true;
+  session.ai_provider = "claude";
   resolveRespawn = [];
   respawnAgent.mockClear();
   createSession.mockClear();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   _resetAgentSessionStoresForTest();
+  await setLanguage("en");
 });
 
 describe("Agent view error panel", () => {
@@ -134,8 +141,44 @@ describe("Agent view error panel", () => {
       aiProvider: "claude",
       mode: "terminal",
       workingDirectory: "/work/project",
+      label: "Sign in to Claude",
     }));
     expect(respawnAgent).not.toHaveBeenCalled();
+  });
+
+  it("names the session's own agent, in the panel and in the Sign in session", () => {
+    session.ai_provider = "codex";
+    const { view, store } = setup();
+    act(() => {
+      store.injectStderr("Error: not logged in\n");
+      store.injectExit({ code: 1, signal: null });
+    });
+    const b = banner(view.container)!;
+    expect(b).toHaveTextContent("Codex is signed out");
+    expect(b).not.toHaveTextContent("Claude");
+    fireEvent.click(button(view.container, "sign-in")!);
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({
+      aiProvider: "codex",
+      label: "Sign in to Codex",
+    }));
+  });
+
+  it("follows the interface language, and switches with it", async () => {
+    const de = languagePacks.find((p) => p.locale === "de")!;
+    const pack = registerLanguagePack(de);
+    try {
+      const { view, store } = setup();
+      act(() => store.injectExit({ code: 3, signal: null }));
+      expect(button(view.container, "retry")).toHaveTextContent("Retry");
+      await act(async () => { await setLanguage("de"); });
+      const b = banner(view.container)!;
+      expect(b).toHaveTextContent("Claude wurde beendet");
+      expect(b).toHaveTextContent("Exit-Code 3");
+      expect(button(view.container, "retry")).toHaveTextContent("Erneut versuchen");
+    } finally {
+      await setLanguage("en");
+      pack.dispose();
+    }
   });
 
   it("unreadable output shows `protocol` while the process is still running", () => {
@@ -158,11 +201,17 @@ describe("Agent view error panel", () => {
     expect(b.querySelector(".agent-error-banner-detail")).toHaveTextContent("non-existent file");
   });
 
-  it("busy shows no action", () => {
+  it("busy offers only Dismiss, which clears the panel without restarting anything", () => {
     const { view, store } = setup();
     act(() => store.injectExit({ code: -1, signal: "spawn-failed", kind: "busy" }));
     expect(banner(view.container)).toHaveAttribute("data-kind", "busy");
-    expect(view.container.querySelector(".agent-error-banner-action")).toBeNull();
+    const actions = Array.from(view.container.querySelectorAll<HTMLElement>(".agent-error-banner-action"))
+      .map((a) => a.dataset.action);
+    expect(actions).toEqual(["dismiss"]);
+    fireEvent.click(button(view.container, "dismiss")!);
+    expect(banner(view.container)).toBeNull();
+    expect(respawnAgent).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("with the flag off, the old exit notice is shown and no panel", () => {

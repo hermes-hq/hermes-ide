@@ -9,16 +9,29 @@
  *   spawn_failed  the agent process could not be started        -> Retry
  *   signed_out    the agent says it is not signed in             -> Sign in
  *   exited        the agent process stopped unexpectedly         -> Retry
- *   busy          the session already has a running process      -> (none)
+ *   busy          the session already has a running process      -> Dismiss
  *   protocol      the agent printed output Hermes cannot read    -> Retry
  *
  * Nothing here is Claude-specific except the sign-in phrases the agent
- * prints; the agent's display name is a parameter.
+ * prints; the agent's display name is a parameter (see agentDisplayName) and
+ * every sentence goes through the i18n registry ("agentError.*" keys).
  */
 import type { AgentErrorKind } from "../api/agent";
+import { translate } from "../i18n/registry";
+import { AI_PROVIDERS } from "../utils/aiProviders";
 import type { AgentViewSnapshot } from "./agentSessionStore";
 
-export type AgentErrorAction = "retry" | "sign-in";
+export type AgentErrorAction = "retry" | "sign-in" | "dismiss";
+
+export type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+/** The name to show for a session's agent: the provider's label ("Claude",
+ *  "Codex", ...), the raw provider id when it is not a known one, and
+ *  "Claude" when the session has no provider yet (Agent view's default). */
+export function agentDisplayName(providerId: string | null | undefined): string {
+  if (!providerId) return "Claude";
+  return AI_PROVIDERS.find((p) => p.id === providerId)?.label ?? providerId;
+}
 
 export interface AgentErrorView {
   kind: AgentErrorKind;
@@ -47,6 +60,11 @@ export function looksSignedOut(text: string | null | undefined): boolean {
   return SIGNED_OUT_PATTERNS.some((re) => re.test(text));
 }
 
+/** Only the last lines of stderr decide "signed out" for an exit: stderr is
+ *  kept for the whole process, so an older warning that happens to mention
+ *  signing in must not turn an unrelated crash into a Sign in panel. */
+const SIGNED_OUT_TAIL_LINES = 5;
+
 /** Last few non-empty lines of stderr, for the Details section. */
 function tail(text: string, lines = 12): string | null {
   const kept = text.split("\n").map((l) => l.trimEnd()).filter((l) => l.length > 0);
@@ -54,10 +72,10 @@ function tail(text: string, lines = 12): string | null {
   return kept.slice(-lines).join("\n");
 }
 
-function exitSuffix(exit: { code: number | null; signal: string | null }): string {
-  if (exit.signal) return ` (signal ${exit.signal})`;
-  if (exit.code !== null) return ` (exit code ${exit.code})`;
-  return "";
+function exitStatus(exit: { code: number | null; signal: string | null }, t: Translate): string | null {
+  if (exit.signal) return t("agentError.exitSignal", { signal: exit.signal });
+  if (exit.code !== null) return t("agentError.exitCode", { code: exit.code });
+  return null;
 }
 
 export type AgentErrorInput = Pick<AgentViewSnapshot, "state" | "stderr" | "exit" | "protocolError">;
@@ -70,8 +88,13 @@ export type AgentErrorInput = Pick<AgentViewSnapshot, "state" | "stderr" | "exit
  * ends the process, and the sign-in hint is the useful one; unreadable output
  * explains the exit that follows it.
  */
-export function classifyAgentError(input: AgentErrorInput, agentName = "Claude"): AgentErrorView | null {
+export function classifyAgentError(
+  input: AgentErrorInput,
+  agentName = "Claude",
+  t: Translate = translate,
+): AgentErrorView | null {
   const { state, stderr, exit, protocolError } = input;
+  const agent = { agent: agentName };
   const resultError =
     state.resultEvent && state.resultEvent.is_error
       ? state.lastError ?? (typeof state.resultEvent.result === "string" ? state.resultEvent.result : null)
@@ -80,28 +103,28 @@ export function classifyAgentError(input: AgentErrorInput, agentName = "Claude")
   if (exit?.kind === "busy") {
     return {
       kind: "busy",
-      title: `${agentName} is already running`,
-      message: `${agentName} is already running in this session. Wait for it to finish, then send your message again.`,
+      title: t("agentError.busy.title", agent),
+      message: t("agentError.busy.message", agent),
       detail: tail(stderr),
-      action: null,
+      action: "dismiss",
     };
   }
 
   if (exit?.kind === "spawn_failed" || exit?.signal === "spawn-failed") {
     return {
       kind: "spawn_failed",
-      title: `Couldn't start ${agentName}`,
-      message: `Hermes couldn't start ${agentName}. Check the details, fix what they point to, then retry.`,
+      title: t("agentError.spawnFailed.title", agent),
+      message: t("agentError.spawnFailed.message", agent),
       detail: tail(stderr),
       action: "retry",
     };
   }
 
-  if (looksSignedOut(resultError) || (exit && looksSignedOut(stderr))) {
+  if (looksSignedOut(resultError) || (exit && looksSignedOut(tail(stderr, SIGNED_OUT_TAIL_LINES)))) {
     return {
       kind: "signed_out",
-      title: `${agentName} is signed out`,
-      message: `Sign in to ${agentName} in the terminal that opens, then send your message again.`,
+      title: t("agentError.signedOut.title", agent),
+      message: t("agentError.signedOut.message", agent),
       detail: resultError ?? tail(stderr),
       action: "sign-in",
     };
@@ -110,8 +133,8 @@ export function classifyAgentError(input: AgentErrorInput, agentName = "Claude")
   if (protocolError) {
     return {
       kind: "protocol",
-      title: `${agentName} sent output Hermes couldn't read`,
-      message: `${agentName} printed something that isn't part of its normal output, so this turn may be incomplete. Retry to restart ${agentName}; the conversation is kept.`,
+      title: t("agentError.protocol.title", agent),
+      message: t("agentError.protocol.message", agent),
       detail: protocolError,
       action: "retry",
     };
@@ -120,10 +143,13 @@ export function classifyAgentError(input: AgentErrorInput, agentName = "Claude")
   // Same rule as the old exit notice: a non-zero code or a signal is a
   // crash; a clean exit only matters before any conversation happened.
   if (exit && (exit.signal || (exit.code !== null && exit.code !== 0) || state.messages.length === 0)) {
+    const status = exitStatus(exit, t);
     return {
       kind: "exited",
-      title: `${agentName} stopped`,
-      message: `${agentName} stopped unexpectedly${exitSuffix(exit)}. Retry to restart it; the conversation is kept.`,
+      title: t("agentError.exited.title", agent),
+      message: status
+        ? t("agentError.exited.messageWithStatus", { agent: agentName, status })
+        : t("agentError.exited.message", agent),
       detail: tail(stderr),
       action: "retry",
     };

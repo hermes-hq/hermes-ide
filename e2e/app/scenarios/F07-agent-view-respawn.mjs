@@ -70,14 +70,22 @@ const setPlan = (mode) => {
   log(`  (fake bridge plan: ${mode})`);
 };
 
-/** A fake `claude` for the Sign in step: prints a line and waits. */
+/** A fake `claude` for the Sign in step: leaves a marker file (proof it ran,
+ *  whatever the terminal shows), prints a line and waits. */
 const fakeBin = join(work, "bin");
 mkdirSync(fakeBin);
 const SIGN_IN_MARK = "fake-claude-sign-in-screen";
+const signInRanFile = join(work, "fake-claude-ran.txt");
 if (onWindows) {
-  writeFileSync(join(fakeBin, "claude.cmd"), `@echo ${SIGN_IN_MARK}\r\n@pause >nul\r\n`);
+  writeFileSync(
+    join(fakeBin, "claude.cmd"),
+    `@echo ${SIGN_IN_MARK}> "${signInRanFile}"\r\n@echo ${SIGN_IN_MARK}\r\n@pause >nul\r\n`,
+  );
 } else {
-  writeFileSync(join(fakeBin, "claude"), `#!/bin/sh\necho ${SIGN_IN_MARK}\nexec sleep 600\n`);
+  writeFileSync(
+    join(fakeBin, "claude"),
+    `#!/bin/sh\necho ${SIGN_IN_MARK} > '${signInRanFile}'\necho ${SIGN_IN_MARK}\nexec sleep 600\n`,
+  );
   chmodSync(join(fakeBin, "claude"), 0o755);
 }
 
@@ -367,13 +375,15 @@ try {
     return e2e.all(".session-item").length === ${sessionsBefore + 1} && ids.length > 0 ? ids[ids.length - 1] : null;
   `, { timeoutMs: 20_000 });
   assert(!!signInSid, `Sign in opened a new terminal session (${signInSid})`);
-  if (onWindows) {
-    log("  (Windows: the fake `claude` output is only logged, not asserted)");
-    await sleep(3_000);
-    log(`  terminal: ${JSON.stringify((await app.bridge.readTerminal(signInSid))?.slice(-6))}`);
-  } else {
+  // The fake `claude` leaves a file when it runs: proof on every OS that the
+  // new terminal session started the agent itself (nothing else runs it).
+  const ranBy = Date.now() + 45_000;
+  while (!existsSync(signInRanFile) && Date.now() < ranBy) await sleep(250);
+  log(`  terminal: ${JSON.stringify((await app.bridge.readTerminal(signInSid))?.slice(-6))}`);
+  assert(existsSync(signInRanFile), "the terminal session ran the agent's own sign-in (the fake `claude` started)");
+  if (!onWindows) {
     await app.bridge.waitForTerminal(signInSid, new RegExp(SIGN_IN_MARK), { timeoutMs: 30_000 });
-    assert(true, "the terminal session runs the agent's own sign-in (the fake `claude` printed its screen)");
+    assert(true, "its sign-in screen shows in the terminal (the fake `claude` printed it)");
   }
   await app.bridge.screenshot(join(evidenceDir, "05-sign-in-terminal.png")).catch((e) => log(`  (screenshot: ${e.message})`));
 

@@ -40,8 +40,8 @@ import {
 } from "../utils/permissionRequest";
 import { extractTodoSnapshot } from "../utils/todoStore";
 import { selectFatalError } from "./errorSelector";
-import { classifyAgentError } from "./agentErrors";
-import { AgentErrorBanner } from "./AgentErrorBanner";
+import { agentDisplayName, classifyAgentError } from "./agentErrors";
+import { AgentErrorBanner, useAgentErrorTranslate } from "./AgentErrorBanner";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import {
   slashReceiptAfterUserMessage,
@@ -223,11 +223,14 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // Typed error panel (feature flag "agentViewErrors"). Flags are read once
   // at startup, so this is stable for the life of the view.
   const typedErrors = isFeatureFlagEnabled("agentViewErrors");
+  const t = useAgentErrorTranslate();
+  const agentName = agentDisplayName(sessionEntryForPerm?.ai_provider);
   const agentError = useMemo(
     () => (typedErrors
-      ? classifyAgentError({ state, stderr, exit: exitInfo, protocolError: snapshot.protocolError })
+      ? classifyAgentError({ state, stderr, exit: exitInfo, protocolError: snapshot.protocolError }, agentName, t)
       : null),
-    [typedErrors, state, stderr, exitInfo, snapshot.protocolError],
+    // `t` changes with the interface language, so the panel follows it.
+    [typedErrors, state, stderr, exitInfo, snapshot.protocolError, agentName, t],
   );
   const [retrying, setRetrying] = useState(false);
   const { respawnAgent, createSession } = sessionCtx;
@@ -251,9 +254,12 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
       aiProvider: s?.ai_provider ?? "claude",
       mode: "terminal",
       workingDirectory: s?.working_directory,
-      label: "Sign in to Claude",
+      label: t("agentError.signInSessionLabel", { agent: agentName }),
     });
   };
+  // Only the "busy" panel offers this: it has nothing to retry, and would
+  // otherwise stay until the agent's next start.
+  const handleDismiss = () => store.clearExitNotice();
 
   if (!hasTimeline) {
     // Claude's `--print --input-format stream-json` mode doesn't emit anything
@@ -392,6 +398,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
               retrying={retrying}
               onRetry={handleRetry}
               onSignIn={handleSignIn}
+              onDismiss={handleDismiss}
             />
           ) : null}
           {!typedErrors && exitInfo && shouldShowExitNotice(exitInfo, state.messages.length) ? (

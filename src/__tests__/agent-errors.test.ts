@@ -14,7 +14,7 @@ import {
   spawnAgentSession,
   toAgentCommandError,
 } from "../api/agent";
-import { classifyAgentError, looksSignedOut, type AgentErrorInput } from "../agent/agentErrors";
+import { agentDisplayName, classifyAgentError, looksSignedOut, type AgentErrorInput } from "../agent/agentErrors";
 import { AgentSessionStore, protocolErrorOf } from "../agent/agentSessionStore";
 import { emptyState, reduceEvent } from "../agent/messageStore";
 import type { AgentEvent } from "../agent/types";
@@ -94,6 +94,24 @@ describe("classifyAgentError", () => {
     expect(e?.kind).toBe("signed_out");
   });
 
+  it("an old sign-in warning higher up in stderr does not turn a later crash into `signed_out`", () => {
+    const e = classifyAgentError(input({
+      state: withConversation(),
+      stderr: [
+        "warning: OAuth token has expired, refreshing",
+        "turn 2 ok",
+        "turn 3 ok",
+        "turn 4 ok",
+        "turn 5 ok",
+        "panic: index out of range",
+        "",
+      ].join("\n"),
+      exit: { code: 2, signal: null },
+    }));
+    expect(e?.kind).toBe("exited");
+    expect(e?.action).toBe("retry");
+  });
+
   it("sign-in text on stderr of a live process is not treated as signed out", () => {
     expect(classifyAgentError(input({ state: withConversation(), stderr: "Invalid API key\n" }))).toBeNull();
   });
@@ -115,9 +133,9 @@ describe("classifyAgentError", () => {
     expect(classifyAgentError(input({ exit: { code: -1, signal: "spawn-failed" } }))?.kind).toBe("spawn_failed");
   });
 
-  it("`busy` has no action", () => {
+  it("`busy` offers only Dismiss", () => {
     const e = classifyAgentError(input({ exit: { code: -1, signal: "spawn-failed", kind: "busy" } }));
-    expect(e).toMatchObject({ kind: "busy", action: null });
+    expect(e).toMatchObject({ kind: "busy", action: "dismiss" });
   });
 
   it("unreadable output is `protocol` and wins over the exit it caused", () => {
@@ -150,6 +168,27 @@ describe("classifyAgentError", () => {
   it("uses the agent's display name", () => {
     const e = classifyAgentError(input({ exit: { code: 0, signal: null } }), "Codex");
     expect(e!.title).toBe("Codex stopped");
+  });
+
+  it("builds every sentence from the translation function it is given", () => {
+    const calls: [string, Record<string, string | number> | undefined][] = [];
+    const t = (key: string, values?: Record<string, string | number>) => {
+      calls.push([key, values]);
+      return `<${key}>`;
+    };
+    const e = classifyAgentError(input({ state: withConversation(), exit: { code: 3, signal: null } }), "Gemini", t);
+    expect(e).toMatchObject({ title: "<agentError.exited.title>", message: "<agentError.exited.messageWithStatus>" });
+    expect(calls).toContainEqual(["agentError.exitCode", { code: 3 }]);
+    expect(calls).toContainEqual(["agentError.exited.messageWithStatus", { agent: "Gemini", status: "<agentError.exitCode>" }]);
+  });
+});
+
+describe("agentDisplayName", () => {
+  it("is the provider's label, the raw id for an unknown provider, and Claude when unset", () => {
+    expect(agentDisplayName("claude")).toBe("Claude");
+    expect(agentDisplayName("codex")).toBe("Codex");
+    expect(agentDisplayName("my-agent")).toBe("my-agent");
+    expect(agentDisplayName(undefined)).toBe("Claude");
   });
 });
 
