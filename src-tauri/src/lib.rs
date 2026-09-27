@@ -526,8 +526,23 @@ pub fn run() {
             if old_db_path.exists() && !db_path.exists() {
                 let _ = std::fs::copy(&old_db_path, &db_path);
             }
-            let database = db::Database::new(&db_path)
-                .map_err(|e| format!("Failed to initialize database: {}", e))?;
+            let database = match db::Database::open(&db_path) {
+                Ok(database) => database,
+                Err(e) => {
+                    // Show the reason in the window and initialise nothing
+                    // else, so nothing can touch the data.
+                    log::error!("Database not opened: {}", e);
+                    // Nothing runs this time, so there is nothing to shut down.
+                    let _ = std::fs::remove_file(&startup_marker);
+                    app.manage(db::startup::StartupProblemState(Some(
+                        db::startup::StartupProblem::from_open_error(&e, &db_path),
+                    )));
+                    #[cfg(feature = "e2e")]
+                    e2e_bridge::start(app.handle());
+                    return Ok(());
+                }
+            };
+            app.manage(db::startup::StartupProblemState(None));
 
             // Clean up stale worktrees from previous sessions that no longer exist
             cleanup_stale_worktrees(app.handle(), &database);
@@ -652,6 +667,7 @@ pub fn run() {
             db::get_all_memory,
             db::delete_memory,
             db::get_settings,
+            db::startup::get_startup_problem,
             db::set_setting,
             db::log_execution,
             db::get_execution_log,

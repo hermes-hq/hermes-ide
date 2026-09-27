@@ -7,6 +7,9 @@ use tauri::{AppHandle, Emitter, State};
 use crate::pty::SessionUpdate;
 use crate::AppState;
 
+pub mod migrations;
+pub mod startup;
+
 // ─── Execution Nodes ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +169,22 @@ pub const EXECUTION_NODES_MAX_PER_SESSION: i64 = 500;
 
 impl Database {
     pub fn new(path: &Path) -> Result<Self, String> {
-        let conn = Connection::open(path).map_err(|e| format!("Failed to open database: {}", e))?;
+        Self::open(path).map_err(|e| e.to_string())
+    }
+
+    /// Open (creating if needed) and migrate the database at `path`.
+    ///
+    /// A database written by a newer Hermes is refused before anything is
+    /// written to it. Before pending migrations run on an existing database,
+    /// a backup is saved next to it (see `migrations`).
+    pub fn open(path: &Path) -> Result<Self, migrations::OpenError> {
+        let conn = Connection::open(path)
+            .map_err(|e| migrations::OpenError::Sqlite(format!("{}: {}", path.display(), e)))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| migrations::OpenError::Sqlite(e.to_string()))?;
+        // Read-only check first: nothing below may touch a newer database.
+        migrations::check_not_newer(&conn, migrations::MIGRATIONS)?;
+
         // Performance PRAGMAs (DB-01).
         // - journal_mode=WAL: concurrent readers + single writer, fewer fsyncs
         // - synchronous=NORMAL: safe under WAL, ~3-5x faster writes than FULL
@@ -184,382 +202,10 @@ impl Database {
              PRAGMA foreign_keys=ON;
              PRAGMA busy_timeout=5000;",
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| migrations::OpenError::Sqlite(e.to_string()))?;
 
-        let db = Self { conn };
-        db.run_migrations()?;
-        Ok(db)
-    }
-
-    fn run_migrations(&self) -> Result<(), String> {
-        self.conn.execute_batch("
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                color TEXT NOT NULL DEFAULT '#58a6ff',
-                group_name TEXT,
-                phase TEXT NOT NULL DEFAULT 'destroyed',
-                working_directory TEXT NOT NULL,
-                shell TEXT NOT NULL,
-                workspace_paths TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT NOT NULL,
-                closed_at TEXT,
-                scrollback_snapshot TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS token_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL DEFAULT 0,
-                output_tokens INTEGER NOT NULL DEFAULT 0,
-                estimated_cost_usd REAL DEFAULT 0.0,
-                recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_token_session ON token_usage(session_id, provider);
-
-            CREATE TABLE IF NOT EXISTS token_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL,
-                cost_usd REAL NOT NULL,
-                recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_token_snap_session ON token_snapshots(session_id);
-            CREATE INDEX IF NOT EXISTS idx_token_snap_date ON token_snapshots(recorded_at);
-
-            CREATE TABLE IF NOT EXISTS cost_daily (
-                date TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                total_input_tokens INTEGER NOT NULL DEFAULT 0,
-                total_output_tokens INTEGER NOT NULL DEFAULT 0,
-                total_cost_usd REAL NOT NULL DEFAULT 0.0,
-                session_count INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (date, provider, model)
-            );
-
-            CREATE TABLE IF NOT EXISTS memory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scope TEXT NOT NULL CHECK(scope IN ('session', 'project', 'global')),
-                scope_id TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'general',
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                source TEXT NOT NULL DEFAULT 'auto',
-                confidence REAL NOT NULL DEFAULT 1.0,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                expires_at TEXT,
-                UNIQUE(scope, scope_id, key)
-            );
-            CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory(scope, scope_id);
-
-            CREATE TABLE IF NOT EXISTS execution_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                content TEXT NOT NULL,
-                exit_code INTEGER,
-                working_directory TEXT,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_exec_session ON execution_log(session_id, timestamp);
-
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                path TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                detected_languages TEXT,
-                detected_frameworks TEXT,
-                file_tree_hash TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_projects_path ON projects(path);
-
-            CREATE TABLE IF NOT EXISTS execution_nodes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                kind TEXT NOT NULL DEFAULT 'command',
-                input TEXT,
-                output_summary TEXT,
-                exit_code INTEGER,
-                working_dir TEXT NOT NULL,
-                duration_ms INTEGER DEFAULT 0,
-                metadata TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_exec_nodes_session ON execution_nodes(session_id, timestamp);
-
-            CREATE TABLE IF NOT EXISTS error_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT,
-                fingerprint TEXT NOT NULL,
-                raw_sample TEXT,
-                occurrence_count INTEGER DEFAULT 1,
-                last_seen INTEGER,
-                resolution TEXT,
-                resolution_verified INTEGER DEFAULT 0,
-                created_at INTEGER DEFAULT (strftime('%s','now'))
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_error_fp ON error_patterns(project_id, fingerprint);
-
-            CREATE TABLE IF NOT EXISTS command_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id TEXT,
-                sequence TEXT NOT NULL,
-                next_command TEXT NOT NULL,
-                frequency INTEGER DEFAULT 1,
-                last_seen INTEGER DEFAULT (strftime('%s','now')),
-                UNIQUE(project_id, sequence, next_command)
-            );
-            CREATE INDEX IF NOT EXISTS idx_cmd_patterns ON command_patterns(project_id, sequence);
-
-            CREATE TABLE IF NOT EXISTS context_pins (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT,
-                project_id TEXT,
-                kind TEXT NOT NULL CHECK(kind IN ('file','memory','text','directory')),
-                target TEXT NOT NULL,
-                label TEXT,
-                priority INTEGER DEFAULT 128,
-                created_at INTEGER DEFAULT (strftime('%s','now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_pins_session ON context_pins(session_id);
-            CREATE INDEX IF NOT EXISTS idx_pins_project ON context_pins(project_id);
-
-            CREATE TABLE IF NOT EXISTS error_sessions (
-                error_pattern_id INTEGER NOT NULL,
-                session_id TEXT NOT NULL,
-                last_seen INTEGER NOT NULL,
-                occurrence_count INTEGER DEFAULT 1,
-                PRIMARY KEY (error_pattern_id, session_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS realms (
-                id TEXT PRIMARY KEY,
-                path TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                languages TEXT NOT NULL DEFAULT '[]',
-                frameworks TEXT NOT NULL DEFAULT '[]',
-                architecture TEXT,
-                conventions TEXT NOT NULL DEFAULT '[]',
-                scan_status TEXT NOT NULL DEFAULT 'pending',
-                last_scanned_at TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_realms_path ON realms(path);
-
-            CREATE TABLE IF NOT EXISTS session_realms (
-                session_id TEXT NOT NULL,
-                realm_id TEXT NOT NULL,
-                attached_at TEXT NOT NULL DEFAULT (datetime('now')),
-                role TEXT NOT NULL DEFAULT 'primary',
-                PRIMARY KEY (session_id, realm_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_session_realms_session ON session_realms(session_id);
-
-            CREATE TABLE IF NOT EXISTS realm_conventions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                realm_id TEXT NOT NULL,
-                rule TEXT NOT NULL,
-                source TEXT NOT NULL DEFAULT 'detected',
-                confidence REAL NOT NULL DEFAULT 0.8,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(realm_id, rule)
-            );
-            CREATE INDEX IF NOT EXISTS idx_conventions_realm ON realm_conventions(realm_id);
-
-            CREATE TABLE IF NOT EXISTS context_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                context_json TEXT NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s','now')),
-                UNIQUE(session_id, version)
-            );
-            CREATE INDEX IF NOT EXISTS idx_ctx_snap_session ON context_snapshots(session_id);
-
-            CREATE TABLE IF NOT EXISTS hermes_project_config (
-                realm_id TEXT PRIMARY KEY,
-                config_json TEXT NOT NULL,
-                config_hash TEXT,
-                loaded_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS session_worktrees (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                realm_id TEXT NOT NULL,
-                worktree_path TEXT NOT NULL,
-                branch_name TEXT,
-                is_main_worktree INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(session_id, realm_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_sw_session ON session_worktrees(session_id);
-            CREATE INDEX IF NOT EXISTS idx_sw_realm ON session_worktrees(realm_id);
-            CREATE INDEX IF NOT EXISTS idx_sw_path ON session_worktrees(worktree_path);
-
-            CREATE TABLE IF NOT EXISTS plugins (
-                id TEXT PRIMARY KEY,
-                version TEXT NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                author TEXT,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                permissions_granted TEXT NOT NULL DEFAULT '[]',
-                installed_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS plugin_storage (
-                plugin_id TEXT NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                PRIMARY KEY (plugin_id, key)
-            );
-            CREATE INDEX IF NOT EXISTS idx_plugin_storage_plugin ON plugin_storage(plugin_id);
-        ").map_err(|e| format!("Migration failed: {}", e))?;
-
-        // Migrate existing workspace projects table → realms table (one-time, idempotent)
-        self.conn.execute_batch("
-            INSERT OR IGNORE INTO realms (id, path, name, languages, frameworks, scan_status, created_at, updated_at)
-            SELECT id, path, name,
-                   COALESCE(detected_languages, '[]'),
-                   COALESCE(detected_frameworks, '[]'),
-                   'surface',
-                   created_at,
-                   updated_at
-            FROM projects;
-        ").map_err(|e| format!("Workspace projects migration failed: {}", e))?;
-
-        // Add description column to sessions (idempotent)
-        let _ = self
-            .conn
-            .execute_batch("ALTER TABLE sessions ADD COLUMN description TEXT NOT NULL DEFAULT '';");
-
-        // Add ssh_info column to sessions (idempotent)
-        let _ = self
-            .conn
-            .execute_batch("ALTER TABLE sessions ADD COLUMN ssh_info TEXT;");
-
-        // SSH saved hosts table (idempotent)
-        let _ = self.conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS ssh_saved_hosts (
-                id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                host TEXT NOT NULL,
-                port INTEGER NOT NULL DEFAULT 22,
-                user TEXT NOT NULL,
-                identity_file TEXT,
-                jump_host TEXT,
-                port_forwards TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-        ",
-        );
-
-        // Add last_activity_at column to session_worktrees (idempotent)
-        let _ = self
-            .conn
-            .execute_batch("ALTER TABLE session_worktrees ADD COLUMN last_activity_at TEXT;");
-
-        // Migration: drop UNIQUE(worktree_path) constraint from session_worktrees
-        // so that shared worktrees (multiple sessions on the same branch) can coexist.
-        // SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table.
-        // We check if the old UNIQUE index exists before attempting the migration.
-        let has_unique_wt_path: bool = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_index_list('session_worktrees') WHERE name = 'sqlite_autoindex_session_worktrees_2'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
-
-        if has_unique_wt_path {
-            self.conn
-                .execute_batch(
-                    "
-                    CREATE TABLE session_worktrees_new (
-                        id TEXT PRIMARY KEY,
-                        session_id TEXT NOT NULL,
-                        realm_id TEXT NOT NULL,
-                        worktree_path TEXT NOT NULL,
-                        branch_name TEXT,
-                        is_main_worktree INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                        last_activity_at TEXT,
-                        UNIQUE(session_id, realm_id)
-                    );
-                    INSERT INTO session_worktrees_new (id, session_id, realm_id, worktree_path, branch_name, is_main_worktree, created_at, last_activity_at)
-                        SELECT id, session_id, realm_id, worktree_path, branch_name, is_main_worktree, created_at, last_activity_at
-                        FROM session_worktrees;
-                    DROP TABLE session_worktrees;
-                    ALTER TABLE session_worktrees_new RENAME TO session_worktrees;
-                    CREATE INDEX IF NOT EXISTS idx_sw_session ON session_worktrees(session_id);
-                    CREATE INDEX IF NOT EXISTS idx_sw_realm ON session_worktrees(realm_id);
-                    CREATE INDEX IF NOT EXISTS idx_sw_path ON session_worktrees(worktree_path);
-                    ",
-                )
-                .map_err(|e| {
-                    format!(
-                        "Migration (drop UNIQUE worktree_path) failed: {}",
-                        e
-                    )
-                })?;
-        }
-
-        // Project usage tracking table (idempotent)
-        let _ = self.conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS project_usage (
-                project_id TEXT PRIMARY KEY,
-                session_count INTEGER NOT NULL DEFAULT 0,
-                last_opened_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-        ",
-        );
-
-        // Performance indexes (DB-08 / DB-09 / DB-10 / DB-11). All idempotent.
-        // - idx_sessions_closed_phase: speeds get_recent_sessions (filter on phase + sort by closed_at).
-        // - idx_token_usage_recorded_at: speeds get_token_usage_today and update_cost_daily_rollup
-        //   (both filter on recorded_at; previously only an index on session_id existed).
-        // - idx_session_realms_realm: speeds get_sessions_for_project and delete_project (WHERE realm_id = ?).
-        // - idx_cmd_patterns_freq: covering index for predict_next_command's
-        //   ORDER BY frequency DESC LIMIT N on the keystroke hot path.
-        let _ = self.conn.execute_batch(
-            "
-            CREATE INDEX IF NOT EXISTS idx_sessions_closed_phase
-                ON sessions(closed_at DESC, phase) WHERE closed_at IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_token_usage_recorded_at
-                ON token_usage(recorded_at);
-            CREATE INDEX IF NOT EXISTS idx_session_realms_realm
-                ON session_realms(realm_id);
-            CREATE INDEX IF NOT EXISTS idx_cmd_patterns_freq
-                ON command_patterns(project_id, sequence, frequency DESC);
-            ",
-        );
-
-        Ok(())
+        migrations::migrate(&conn, Some(path), migrations::MIGRATIONS)?;
+        Ok(Self { conn })
     }
 
     // ─── Project Usage ──────────────────────────────────────────

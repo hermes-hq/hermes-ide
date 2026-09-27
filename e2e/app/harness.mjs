@@ -415,6 +415,9 @@ export async function launchApp({
   startupTimeoutMs = 60_000,
   tmp = "private",
   env: extraEnv = {},
+  // Called with the app's (empty) data folder before the app starts, e.g. to
+  // put a database from an older release there.
+  prepareDataDir,
 } = {}) {
   const binary = appBinaryPath();
   if (!existsSync(binary)) {
@@ -449,6 +452,11 @@ export async function launchApp({
     dataDir = e2eDataDir();
   }
   if (extraEnv.HERMES_DATA_DIR) dataDir = extraEnv.HERMES_DATA_DIR;
+
+  if (prepareDataDir) {
+    mkdirSync(dataDir, { recursive: true });
+    await prepareDataDir(dataDir);
+  }
 
   const appLog = join(runDir, "app.log");
   const fd = openSync(appLog, "w");
@@ -512,7 +520,9 @@ export async function launchApp({
     if (basename(privateTmp).startsWith("hermes-e2e-")) rmSync(privateTmp, { recursive: true, force: true });
   };
 
-  const stop = async () => {
+  // keepFiles: leave the private folders (and the data in them) for the
+  // caller to inspect after the app quit; it then calls cleanup().
+  const stop = async ({ keepFiles = false } = {}) => {
     if (!exited) {
       await bridge.quit();
       const until = Date.now() + 10_000;
@@ -521,14 +531,14 @@ export async function launchApp({
     if (!exited) {
       child.kill("SIGKILL");
       await sleep(300);
-      cleanTmp();
+      if (!keepFiles) cleanTmp();
       return { code: null, signal: "SIGKILL", forced: true };
     }
-    cleanTmp();
+    if (!keepFiles) cleanTmp();
     return exited;
   };
 
-  return { bridge, child, stop, isRunning: () => !exited, appLog, tmpDir: appTmp, dataDir };
+  return { bridge, child, stop, cleanup: cleanTmp, isRunning: () => !exited, appLog, tmpDir: appTmp, dataDir };
 }
 
 // ─── In-page helpers (sent along with every script) ──────────────────

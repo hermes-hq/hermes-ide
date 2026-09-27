@@ -1,6 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { exit } from "@tauri-apps/plugin-process";
 import App from "./App";
+import { getStartupProblem } from "./api/startupProblem";
+import { StartupProblemScreen } from "./components/StartupProblemScreen";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -26,8 +29,14 @@ if (import.meta.env.VITE_HERMES_E2E === "1") {
   void import("./e2e/hooks");
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
+
+// If Hermes could not open its data (for example, it was saved by a newer
+// version), explain that instead of starting the workspace.
+void getStartupProblem().then((problem) => {
+  root.render(
+    <React.StrictMode>
+      {problem ? <StartupProblemScreen problem={problem} onQuit={() => void exit(0)} /> : <App />}
+    </React.StrictMode>,
+  );
+});
