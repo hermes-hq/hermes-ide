@@ -19,6 +19,7 @@
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": [
     "lsappinfo",
+    "reg",
     "sandbox-exec"
   ]
 }
