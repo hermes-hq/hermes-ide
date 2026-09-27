@@ -5,7 +5,9 @@
 //! folder and its own temp files:
 //!
 //! - The data folder is `<platform data dir>/<bundle identifier>`, or the
-//!   absolute path in `HERMES_DATA_DIR` when that is set.
+//!   absolute path in `HERMES_DATA_DIR` when that is set. A released app with
+//!   the production identifier ignores `HERMES_DATA_DIR`, so a stray variable
+//!   in a user's shell cannot start it on an empty data folder.
 //! - Builds that must never touch the installed app's data (e2e builds, debug
 //!   builds, and any build whose identifier is not the production one) refuse
 //!   to start when their data folder resolves to the production folder.
@@ -20,7 +22,8 @@ use std::sync::OnceLock;
 /// every other kind of build.
 pub const PRODUCTION_IDENTIFIER: &str = "com.hermes-ide.terminal";
 
-/// Absolute path that replaces the default data folder.
+/// Absolute path that replaces the default data folder. Ignored by a release
+/// build with the production identifier.
 pub const DATA_DIR_ENV: &str = "HERMES_DATA_DIR";
 
 /// `1` lets a debug build with the production identifier use the production
@@ -47,6 +50,12 @@ pub fn must_avoid_production(
         return true;
     }
     debug_build && !allow_opt_in
+}
+
+/// Whether this build reads `HERMES_DATA_DIR`. Only the released app with the
+/// production identifier does not: it always uses its own data folder.
+pub fn honours_data_dir_override(identifier: &str, e2e_build: bool, debug_build: bool) -> bool {
+    e2e_build || debug_build || identifier != PRODUCTION_IDENTIFIER
 }
 
 /// The data folder: the override when given, else `<base>/<identifier>`.
@@ -187,14 +196,20 @@ pub fn init(identifier: &str) -> Result<&'static Instance, String> {
     if let Some(existing) = INSTANCE.get() {
         return Ok(existing);
     }
-    let override_value = std::env::var_os(DATA_DIR_ENV);
+    let e2e_build = cfg!(feature = "e2e");
+    let debug_build = cfg!(debug_assertions);
+    let mut override_value = std::env::var_os(DATA_DIR_ENV).filter(|v| !v.is_empty());
+    if !honours_data_dir_override(identifier, e2e_build, debug_build) {
+        if let Some(ignored) = override_value.take() {
+            log::warn!(
+                "[instance] ignoring {}={:?}: the released app always uses its own data folder",
+                DATA_DIR_ENV,
+                ignored
+            );
+        }
+    }
     let allow = std::env::var(ALLOW_PRODUCTION_ENV).as_deref() == Ok("1");
-    let strict = must_avoid_production(
-        identifier,
-        cfg!(feature = "e2e"),
-        cfg!(debug_assertions),
-        allow,
-    );
+    let strict = must_avoid_production(identifier, e2e_build, debug_build, allow);
     let platform_data_dir = dirs::data_dir();
     let data_dir = resolve_data_dir(identifier, override_value, platform_data_dir.clone())?;
 
@@ -307,6 +322,39 @@ mod tests {
             PRODUCTION_IDENTIFIER,
             false,
             false,
+            false
+        ));
+    }
+
+    #[test]
+    fn released_production_app_ignores_the_data_dir_override() {
+        assert!(!honours_data_dir_override(
+            PRODUCTION_IDENTIFIER,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn dev_test_and_other_builds_honour_the_data_dir_override() {
+        assert!(honours_data_dir_override(
+            PRODUCTION_IDENTIFIER,
+            true,
+            false
+        ));
+        assert!(honours_data_dir_override(
+            PRODUCTION_IDENTIFIER,
+            false,
+            true
+        ));
+        assert!(honours_data_dir_override(
+            "com.hermes-ide.terminal.beta",
+            false,
+            false
+        ));
+        assert!(honours_data_dir_override(
+            "com.hermes-ide.terminal.e2e",
+            true,
             false
         ));
     }

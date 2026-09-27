@@ -14,6 +14,9 @@
 //   - Every other overlay (tauri.<name>.conf.json) that is not a platform
 //     file Tauri merges automatically must also set its own identifier.
 //   - Platform files (tauri.linux.conf.json, ...) must not change it.
+//   - Tauri replaces the whole `app.windows` list when it merges an overlay,
+//     so the dev and e2e overlays must repeat every window setting of
+//     tauri.conf.json (only `title` may differ, and they may add settings).
 //   - `npm run tauri` goes through scripts/tauri.mjs, which adds the dev
 //     overlay to `tauri dev`.
 
@@ -23,6 +26,26 @@ import { fileURLToPath } from "node:url";
 
 const PLATFORM_OVERLAYS = new Set(["linux", "windows", "macos", "android", "ios"]);
 const REQUIRED_OVERLAYS = ["dev", "e2e"];
+
+/** Problems where an overlay's windows list drifted from the base one. */
+function windowDrift(rel, baseWindows, overlayWindows) {
+  if (!Array.isArray(baseWindows) || overlayWindows === undefined) return [];
+  if (!Array.isArray(overlayWindows) || overlayWindows.length !== baseWindows.length) {
+    return [`${rel}: app.windows must list the same ${baseWindows.length} window(s) as tauri.conf.json`];
+  }
+  const problems = [];
+  baseWindows.forEach((base, i) => {
+    for (const [key, value] of Object.entries(base ?? {})) {
+      if (key === "title") continue;
+      if (JSON.stringify(overlayWindows[i]?.[key]) !== JSON.stringify(value)) {
+        problems.push(
+          `${rel}: window ${i} "${key}" is ${JSON.stringify(overlayWindows[i]?.[key])}, tauri.conf.json has ${JSON.stringify(value)} (the overlay replaces the whole windows list, so copy the change)`,
+        );
+      }
+    }
+  });
+  return problems;
+}
 
 function readJson(file, problems) {
   try {
@@ -85,6 +108,9 @@ export function checkInstanceIdentifiers(root) {
       problems.push(`${rel}: must set its own identifier (it would inherit the production one, "${production}")`);
     } else if (id.toLowerCase() === production.toLowerCase()) {
       problems.push(`${rel}: uses the production identifier "${production}"`);
+    }
+    if (REQUIRED_OVERLAYS.includes(name)) {
+      problems.push(...windowDrift(rel, base.app?.windows, config.app?.windows));
     }
   }
   return problems;

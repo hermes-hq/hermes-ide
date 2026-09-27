@@ -34,11 +34,15 @@ function fakeRepo({
 	},
 	guardId = PROD,
 	tauriScript = "node scripts/tauri.mjs",
-}: { overlays?: Overlays; guardId?: string | null; tauriScript?: string } = {}): string {
+	baseWindows,
+}: { overlays?: Overlays; guardId?: string | null; tauriScript?: string; baseWindows?: unknown[] } = {}): string {
 	const root = tempDir();
 	mkdirSync(join(root, "src-tauri", "src"), { recursive: true });
 	writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { tauri: tauriScript } }));
-	writeFileSync(join(root, "src-tauri", "tauri.conf.json"), JSON.stringify({ identifier: PROD }));
+	writeFileSync(
+		join(root, "src-tauri", "tauri.conf.json"),
+		JSON.stringify(baseWindows ? { identifier: PROD, app: { windows: baseWindows } } : { identifier: PROD }),
+	);
 	if (guardId !== null) {
 		writeFileSync(
 			join(root, "src-tauri", "src", "instance.rs"),
@@ -146,6 +150,43 @@ describe("CI check: dev and test configs never use the production identifier", (
 		const res = runCheck(fakeRepo({ tauriScript: "tauri" }));
 		expect(res.code).toBe(1);
 		expect(res.out).toContain('"tauri" script must run scripts/tauri.mjs');
+	});
+
+	describe("dev and e2e windows stay in step with the base config", () => {
+		const base = { title: "HERMES-IDE", width: 1200, height: 800, titleBarStyle: "Overlay" };
+		const withWindows = (dev: unknown[], e2e: unknown[] = [{ ...base, title: "E2E", focus: false }]) =>
+			fakeRepo({
+				baseWindows: [base],
+				overlays: {
+					dev: { identifier: `${PROD}.dev`, app: { windows: dev } },
+					e2e: { identifier: `${PROD}.e2e`, app: { windows: e2e } },
+				},
+			});
+
+		it("passes when only the title differs and the overlay adds its own settings", () => {
+			const res = runCheck(withWindows([{ ...base, title: "Dev" }]));
+			expect(res.out).toContain("instance identifiers: OK");
+			expect(res.code).toBe(0);
+		});
+
+		it("fails when the base window changes and the dev overlay was not updated", () => {
+			const res = runCheck(withWindows([{ ...base, title: "Dev", width: 1000 }]));
+			expect(res.code).toBe(1);
+			expect(res.out).toContain('tauri.dev.conf.json: window 0 "width" is 1000, tauri.conf.json has 1200');
+		});
+
+		it("fails when an overlay drops a window setting (it would fall back to the Tauri default)", () => {
+			const { titleBarStyle: _dropped, ...rest } = base;
+			const res = runCheck(withWindows([{ ...rest, title: "Dev" }]));
+			expect(res.code).toBe(1);
+			expect(res.out).toContain('tauri.dev.conf.json: window 0 "titleBarStyle"');
+		});
+
+		it("fails when an overlay lists a different number of windows", () => {
+			const res = runCheck(withWindows([{ ...base }], []));
+			expect(res.code).toBe(1);
+			expect(res.out).toContain("tauri.e2e.conf.json: app.windows must list the same 1 window(s)");
+		});
 	});
 
 	it("fails on a config that is not valid JSON", () => {
