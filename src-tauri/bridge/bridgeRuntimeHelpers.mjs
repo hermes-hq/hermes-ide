@@ -151,3 +151,23 @@ export function toSdkUserMessage(next, fallbackSessionId) {
     ...(next.origin && typeof next.origin.kind === "string" ? { origin: next.origin } : {}),
   };
 }
+
+/**
+ * Build the env for the Claude subprocess the SDK spawns.
+ *
+ * Claude Code only loads CLAUDE.md files from `--add-dir` folders when
+ * `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` is set.  Hermes passes
+ * every attached folder as an additional directory, so we turn it on by
+ * default — unless the user already set it (either way) in their env.
+ *
+ * @param {Record<string, string | undefined>} baseEnv
+ * @param {string} clientApp
+ * @returns {Record<string, string | undefined>}
+ */
+export function buildSdkEnv(baseEnv, clientApp) {
+  return {
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1",
+    ...baseEnv,
+    CLAUDE_AGENT_SDK_CLIENT_APP: clientApp,
+  };
+}

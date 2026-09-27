@@ -17,6 +17,7 @@ import {
   createIdempotentLatch,
   createControlOpBuffer,
   toSdkUserMessage,
+  buildSdkEnv,
 } from "../../src-tauri/bridge/bridgeRuntimeHelpers.mjs";
 import { buildUserEnvelope } from "../utils/submitToAgent";
 
@@ -165,5 +166,19 @@ describe("toSdkUserMessage — SDK `origin` provenance", () => {
     const msg = toSdkUserMessage({ type: "user", message: {}, origin }, undefined);
     expect(msg.origin).toEqual(origin);
     expect("session_id" in msg).toBe(false);
+  });
+});
+
+describe("buildSdkEnv", () => {
+  it("enables CLAUDE.md loading from --add-dir folders by default", () => {
+    const env = buildSdkEnv({ PATH: "/usr/bin" }, "hermes-ide/v1");
+    expect(env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD).toBe("1");
+    expect(env.CLAUDE_AGENT_SDK_CLIENT_APP).toBe("hermes-ide/v1");
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  it("respects an explicit user value, including opting out", () => {
+    const env = buildSdkEnv({ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "0" }, "x");
+    expect(env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD).toBe("0");
   });
 });

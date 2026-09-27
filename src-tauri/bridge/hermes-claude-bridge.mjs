@@ -72,6 +72,7 @@ import {
   createIdempotentLatch,
   createControlOpBuffer,
   toSdkUserMessage,
+  buildSdkEnv,
 } from "./bridgeRuntimeHelpers.mjs";
 
 // ─── 1. Parse CLI args ──────────────────────────────────────────────
@@ -557,10 +558,7 @@ const sdkOptions = {
   }),
   // Forward bridge stderr-by-line so SDK panics surface to Rust.
   stderr: (data) => stderr.write(data),
-  env: {
-    ...process.env,
-    CLAUDE_AGENT_SDK_CLIENT_APP: flags.hermesAppId ?? "hermes-ide/v1",
-  },
+  env: buildSdkEnv(process.env, flags.hermesAppId ?? "hermes-ide/v1"),
 };
 
 // ─── 4. Drive the SDK and pump messages to stdout ───────────────────
