@@ -1714,28 +1714,41 @@ pub fn write_to_session(
 ///   3. Windows (no process groups on a pseudo console) and the last Unix
 ///      fallback — the shell is at its prompt when it has no child process.
 ///      A program the shell started, such as an agent CLI, is its child.
+///      Without process groups a background job (`npm run dev &`) cannot be
+///      told apart from a foreground one, so on Windows suggestions also stay
+///      off while the shell has one running. Erring that way never draws over
+///      an agent.
 #[tauri::command]
 pub async fn is_shell_foreground(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<bool, String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    // Hold the PTY manager lock only for what needs the session: its shell
+    // pid and, on Unix, one tcgetpgrp() on the master. Keystrokes are written
+    // under the same lock, so the slower fallbacks below (the Windows one
+    // scans the whole process table) run after it is released.
+    let (shell_pid, from_master) = {
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        let session = mgr
+            .sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+        let shell_pid = session
+            .child
+            .process_id()
+            .ok_or_else(|| "Shell process ID not available".to_string())?;
 
-    let shell_pid = session
-        .child
-        .process_id()
-        .ok_or_else(|| "Shell process ID not available".to_string())?;
+        // ── macOS and Linux: the foreground process group, from the master ──
+        #[cfg(unix)]
+        let from_master = shell_group_is_foreground(session.master.as_ref(), shell_pid);
+        #[cfg(not(unix))]
+        let from_master: Option<bool> = None;
 
-    // ── macOS and Linux: the foreground process group, from the master ──
-    #[cfg(unix)]
-    {
-        if let Some(owns) = shell_group_is_foreground(session.master.as_ref(), shell_pid) {
-            return Ok(owns);
-        }
+        (shell_pid, from_master)
+    };
+
+    if let Some(owns) = from_master {
+        return Ok(owns);
     }
 
     // ── Linux: read tpgid from /proc/{pid}/stat ──
@@ -1765,8 +1778,14 @@ pub async fn is_shell_foreground(
         Ok(children.is_empty())
     }
 
+    // Windows: the process-table scan blocks, so keep it off the async
+    // runtime's worker threads.
     #[cfg(not(unix))]
-    Ok(!has_child_process(shell_pid))
+    {
+        tokio::task::spawn_blocking(move || !has_child_process(shell_pid))
+            .await
+            .map_err(|e| format!("Foreground check failed: {}", e))
+    }
 }
 
 /// Whether the shell's process group is the terminal's foreground process

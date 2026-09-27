@@ -57,6 +57,10 @@ features:
     criteria:
       F03-1:
         text: "No code path writes a predicted command into a terminal: no Manual/Assisted/Auto switch, no Autonomous settings, and a 1.4.0 user's Auto mode types nothing"
+        # The "types nothing" check is a guard only: the 1.4.0 pipeline never
+        # fired in the rig, so it has no failing run against an old build. The
+        # proof that nothing can type is that the code is gone (knip in CI
+        # fails on anything left unused) plus the unit tests.
         scenarios: [F03-retire-autopilot.mjs]
       F03-2:
         text: "With an agent CLI in the foreground no ghost text or suggestion list renders; at a plain shell prompt they still do"

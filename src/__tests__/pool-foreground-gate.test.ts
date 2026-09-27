@@ -10,8 +10,21 @@ const h = vi.hoisted(() => ({
 	isShellForeground: vi.fn((_id: string) => Promise.resolve(true)),
 }));
 
-vi.mock("@xterm/xterm", () => ({ Terminal: class {} }));
-vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
+vi.mock("@xterm/xterm", () => ({
+	Terminal: class {
+		buffer = { active: { type: "normal", cursorX: 0, cursorY: 0, viewportY: 0, baseY: 0, length: 0 } };
+		rows = 24;
+		options = {};
+		loadAddon() {}
+		attachCustomKeyEventHandler() {}
+		onData() {}
+		onScroll() {}
+		getSelection() { return ""; }
+		write() {}
+		dispose() {}
+	},
+}));
+vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {} } }));
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class {} }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -24,6 +37,8 @@ vi.mock("../api/sessions", () => ({
 
 import {
 	pool,
+	createTerminal,
+	shellOwnsTerminal,
 	showGhostText,
 	refreshShellForeground,
 	subscribeSuggestions,
@@ -118,5 +133,49 @@ describe("refreshShellForeground", () => {
 		h.isShellForeground.mockResolvedValueOnce(true);
 		await refreshShellForeground(S);
 		expect(entry.shellIsForeground).toBe(true);
+	});
+});
+
+describe("a new terminal", () => {
+	it("draws nothing until the OS has said the shell owns it", async () => {
+		await createTerminal(S, "#fff", () => {});
+		const entry = pool.get(S)!;
+		expect(entry.shellIsForeground).toBe(false);
+		expect(shellOwnsTerminal(entry)).toBe(false);
+
+		h.isShellForeground.mockResolvedValueOnce(true);
+		await refreshShellForeground(S);
+		expect(shellOwnsTerminal(entry)).toBe(true);
+	});
+});
+
+describe("asking the OS", () => {
+	it("asks once while a question for that session is still open", async () => {
+		addEntry();
+		let answer!: (fg: boolean) => void;
+		h.isShellForeground.mockImplementationOnce(() => new Promise<boolean>((r) => { answer = r; }));
+
+		const poll = refreshShellForeground(S);
+		const beforeSuggesting = refreshShellForeground(S);
+		expect(h.isShellForeground).toHaveBeenCalledTimes(1);
+
+		answer(false);
+		await expect(poll).resolves.toBe(false);
+		await expect(beforeSuggesting).resolves.toBe(false);
+	});
+
+	it("asks again once the last answer is in", async () => {
+		addEntry();
+		h.isShellForeground.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		await expect(refreshShellForeground(S)).resolves.toBe(false);
+		await expect(refreshShellForeground(S)).resolves.toBe(true);
+		expect(h.isShellForeground).toHaveBeenCalledTimes(2);
+	});
+
+	it("asks again after a failed question", async () => {
+		addEntry();
+		h.isShellForeground.mockRejectedValueOnce(new Error("ipc")).mockResolvedValueOnce(true);
+		await expect(refreshShellForeground(S)).rejects.toThrow("ipc");
+		await expect(refreshShellForeground(S)).resolves.toBe(true);
 	});
 });

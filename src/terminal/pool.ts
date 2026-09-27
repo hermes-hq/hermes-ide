@@ -371,7 +371,8 @@ export async function createTerminal(
     historyProvider: createHistoryProvider(),
     sessionPhase: "creating",
     lastStablePhase: "creating",
-    shellIsForeground: true,
+    // Closed until the OS answers: attach() asks right away.
+    shellIsForeground: false,
     shellFgPollTimer: null,
     cwd: "",
   };
@@ -689,11 +690,25 @@ export function shellOwnsTerminal(entry: PoolEntry): boolean {
   return entry.shellIsForeground && entry.terminal.buffer.active.type !== "alternate";
 }
 
+const foregroundChecks = new Map<string, Promise<boolean>>();
+
 /**
  * Ask the OS whether the shell is in the foreground, record the answer, and
  * take down any suggestion or ghost text the moment it is not.
  */
-export async function refreshShellForeground(sessionId: string): Promise<boolean> {
+export function refreshShellForeground(sessionId: string): Promise<boolean> {
+  // One question per session at a time: the poll and the check before each
+  // suggestion share an answer instead of queueing behind one another.
+  const pending = foregroundChecks.get(sessionId);
+  if (pending) return pending;
+  const check = askShellForeground(sessionId).finally(() => {
+    foregroundChecks.delete(sessionId);
+  });
+  foregroundChecks.set(sessionId, check);
+  return check;
+}
+
+async function askShellForeground(sessionId: string): Promise<boolean> {
   const isFg = await isShellForeground(sessionId);
   const entry = pool.get(sessionId);
   if (!entry) return isFg;
