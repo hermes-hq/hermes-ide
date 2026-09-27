@@ -123,6 +123,52 @@
   background: var(--red-dim);
 }
 
+.project-picker-settings-btn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  opacity: 0.4;
+  transition: background 0.1s, color 0.1s, opacity 0.1s;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.project-picker-item:hover .project-picker-settings-btn { opacity: 1; }
+.project-picker-settings-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.project-picker-edit-worktree {
+  margin-top: 4px;
+}
+
+.project-picker-worktree-input {
+  width: 100%;
+  background: var(--bg-0);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 4px 8px;
+  outline: none;
+}
+
+.project-picker-worktree-label {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
 .project-picker-footer {
   display: flex;
   gap: 6px;

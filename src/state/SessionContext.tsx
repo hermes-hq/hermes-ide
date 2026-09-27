@@ -1735,7 +1735,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const sel = opts.branchSelections[projectId];
           if (!sel) continue; // Non-git project or user skipped branches for this project
           try {
-            const wtResult = await createWorktree(preSessionId, projectId, sel.branch, sel.createNew, sel.fromRemote);
+            const wtResult = await createWorktree(preSessionId, projectId, sel.branch, sel.createNew, sel.fromRemote, opts?.worktreeBasePath);
             if (wtResult.isShared) {
               sharedBranches.push(sel.branch);
             }

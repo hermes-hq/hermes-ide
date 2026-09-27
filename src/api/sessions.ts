@@ -26,6 +26,7 @@ export function createSession(opts: {
   sshIdentityFile?: string | null;
   initialRows?: number | null;
   initialCols?: number | null;
+  worktreeBasePath?: string | null;
   /** "terminal" (default) spawns a PTY; "agent" spawns the Claude subprocess
    *  via `agent::spawn_agent_session` instead. */
   mode?: SessionMode | null;

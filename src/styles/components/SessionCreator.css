@@ -686,6 +686,36 @@
 
 /* Assembled-command preview */
 
+.session-creator-worktree-override {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-creator-btn-browse {
+  padding: 4px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-creator-btn-browse:hover {
+  background: var(--bg-hover);
+  color: var(--text-0);
+}
+
+.session-creator-hint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-style: italic;
+  margin-left: 4px;
+}
+
 .session-creator-launch-preview {
   margin-top: var(--space-2);
   padding: 8px 10px;

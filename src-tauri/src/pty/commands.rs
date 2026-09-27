@@ -608,6 +608,7 @@ pub fn create_session(
     ssh_identity_file: Option<String>,
     initial_rows: Option<u16>,
     initial_cols: Option<u16>,
+    worktree_base_path: Option<String>,
     // `mode` is the frontend-chosen runtime mode.  `"terminal"` (default)
     // spawns a PTY; `"agent"` skips PTY spawn and lets the frontend drive
     // the Claude subprocess via `agent::spawn_agent_session` after this
@@ -616,6 +617,11 @@ pub fn create_session(
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    if let Some(ref base) = worktree_base_path {
+        if !base.trim().is_empty() {
+            crate::git::worktree::validate_custom_worktree_base(base, None)?;
+        }
+    }
     let shell = state
         .db
         .lock()
@@ -720,6 +726,7 @@ pub fn create_session(
             identity_file: ssh_identity_file.clone(),
             port_forwards: Vec::new(),
         }),
+        worktree_base_path,
         mode: session_mode,
     };
 
@@ -2142,7 +2149,14 @@ fn remove_owned_worktrees_from_disk(
 
         repos_to_prune.insert(proj.path.clone());
 
-        match crate::git::worktree::remove_worktree(&proj.path, session_id, &wt.worktree_path) {
+        let custom_base = crate::git::resolve_worktree_base(db, Some(session_id), Some(&wt.project_id));
+
+        match crate::git::worktree::remove_worktree(
+            &proj.path,
+            session_id,
+            &wt.worktree_path,
+            custom_base.as_deref(),
+        ) {
             Ok(()) => {
                 if let Err(e) = db.delete_session_worktree(&wt.id) {
                     log::warn!(

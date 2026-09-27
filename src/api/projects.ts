@@ -43,6 +43,10 @@ export function scanProject(id: string, depth: string): Promise<void> {
   return invoke("scan_project", { id, depth });
 }
 
+export function setProjectWorktreePath(id: string, path: string | null): Promise<void> {
+  return invoke("set_project_worktree_path", { id, path });
+}
+
 export function nudgeProjectContext(sessionId: string): Promise<void> {
   return invoke("nudge_project_context", { sessionId });
 }

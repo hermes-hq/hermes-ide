@@ -226,11 +226,11 @@ describe("Bug 4 — restorePreservedWorktrees", () => {
     expect(calls).toEqual([
       {
         cmd: "git_create_worktree",
-        args: { sessionId: "sess-1", projectId: "p1", branchName: "feature-x", createBranch: false, fromRemote: null },
+        args: { sessionId: "sess-1", projectId: "p1", branchName: "feature-x", createBranch: false, fromRemote: null, worktreeBasePath: null },
       },
       {
         cmd: "git_create_worktree",
-        args: { sessionId: "sess-1", projectId: "p2", branchName: "main", createBranch: false, fromRemote: null },
+        args: { sessionId: "sess-1", projectId: "p2", branchName: "main", createBranch: false, fromRemote: null, worktreeBasePath: null },
       },
     ]);
   });

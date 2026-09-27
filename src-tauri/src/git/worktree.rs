@@ -80,19 +80,28 @@ pub fn repo_path_hash(repo_path: &str) -> String {
 // ─── Public API ─────────────────────────────────────────────────────
 
 /// Returns the top-level directory for all Hermes worktrees.
-/// Path: `{app_data_dir}/hermes-worktrees/`
-pub fn worktrees_base_dir(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join(HERMES_WORKTREE_MARKER)
+/// Defaults to `{app_data_dir}/hermes-worktrees/` or `{custom_base}/hermes-worktrees/`.
+pub fn worktrees_base_dir(app_data_dir: &Path, custom_base: Option<&Path>) -> PathBuf {
+    match custom_base {
+        Some(base) => {
+            if base.ends_with(HERMES_WORKTREE_MARKER) {
+                base.to_path_buf()
+            } else {
+                base.join(HERMES_WORKTREE_MARKER)
+            }
+        }
+        None => app_data_dir.join(HERMES_WORKTREE_MARKER),
+    }
 }
 
 /// Returns the base directory for Hermes worktrees for a specific repo.
 /// Creates the directory tree if it does not already exist.
 /// Also writes a `repo_path.txt` file so we can map back to the repo.
 ///
-/// Path: `{app_data_dir}/hermes-worktrees/{repo_hash}/`
-pub fn worktree_dir(app_data_dir: &Path, repo_path: &str) -> PathBuf {
+/// Path: `{base_dir}/{repo_hash}/`
+pub fn worktree_dir(app_data_dir: &Path, repo_path: &str, custom_base: Option<&Path>) -> PathBuf {
     let hash = repo_path_hash(repo_path);
-    let dir = worktrees_base_dir(app_data_dir).join(&hash);
+    let dir = worktrees_base_dir(app_data_dir, custom_base).join(&hash);
     if !dir.exists() {
         let _ = fs::create_dir_all(&dir);
     }
@@ -113,14 +122,15 @@ pub fn read_repo_path(worktree_hash_dir: &Path) -> Option<String> {
 
 /// Compute the filesystem path for a session's worktree.
 ///
-/// Path: `{app_data_dir}/hermes-worktrees/{repo_hash}/{session_prefix}_{branch}/`
+/// Path: `{base_dir}/{repo_hash}/{session_prefix}_{branch}/`
 pub fn worktree_path_for_session(
     app_data_dir: &Path,
     repo_path: &str,
     session_id: &str,
     branch_name: &str,
+    custom_base: Option<&Path>,
 ) -> PathBuf {
-    let base = worktree_dir(app_data_dir, repo_path);
+    let base = worktree_dir(app_data_dir, repo_path, custom_base);
     base.join(worktree_name(session_id, branch_name))
 }
 
@@ -169,7 +179,7 @@ fn derive_local_branch_name(remote_ref: &str) -> String {
 /// Create a new git worktree for a session.
 ///
 /// Worktrees are stored outside the project directory in the app data dir
-/// to avoid polluting the user's project with Hermes internal files.
+/// (or `custom_base`) to avoid polluting the user's project with Hermes internal files.
 ///
 /// If `create_branch` is true, a new branch is created from HEAD before
 /// adding the worktree. If false, the branch must already exist.
@@ -189,6 +199,7 @@ pub fn create_worktree(
     branch_name: &str,
     create_branch: bool,
     from_remote: Option<&str>,
+    custom_base: Option<&Path>,
 ) -> Result<WorktreeCreateResult, String> {
     // Validate that we can open the repository
     let repo = Repository::open(repo_path)
@@ -199,7 +210,8 @@ pub fn create_worktree(
     if let Some(remote_ref) = from_remote {
         let local_name = derive_local_branch_name(remote_ref);
 
-        let wt_path = worktree_path_for_session(app_data_dir, repo_path, session_id, &local_name);
+        let wt_path =
+            worktree_path_for_session(app_data_dir, repo_path, session_id, &local_name, custom_base);
         let wt_path_str = wt_path
             .to_str()
             .ok_or_else(|| "Worktree path contains invalid UTF-8".to_string())?;
@@ -310,7 +322,8 @@ pub fn create_worktree(
 
     // ── from_remote is None — existing behavior ─────────────────────
 
-    let wt_path = worktree_path_for_session(app_data_dir, repo_path, session_id, branch_name);
+    let wt_path =
+        worktree_path_for_session(app_data_dir, repo_path, session_id, branch_name, custom_base);
     let wt_path_str = wt_path
         .to_str()
         .ok_or_else(|| "Worktree path contains invalid UTF-8".to_string())?;
@@ -392,6 +405,7 @@ pub fn remove_worktree(
     repo_path: &str,
     _session_id: &str,
     worktree_path: &str,
+    custom_base: Option<&Path>,
 ) -> Result<(), String> {
     // ── SAFETY CHECKS ──────────────────────────────────────────────
     // These guards exist to prevent accidental deletion of a project
@@ -401,12 +415,10 @@ pub fn remove_worktree(
     // without these guards the fallback `remove_dir_all` would
     // recursively destroy the entire project.
 
-    // Guard 1: worktree_path must live under hermes-worktrees/
-    // Normalize separators for cross-platform check (Windows uses backslashes)
-    let normalized = worktree_path.replace('\\', "/");
-    if !normalized.contains("hermes-worktrees/") {
+    // Guard 1: worktree_path must live under hermes-worktrees/ or custom_base
+    if !is_hermes_worktree_path(worktree_path, custom_base) {
         return Err(format!(
-            "SAFETY: refusing to remove path outside hermes-worktrees/: '{}'",
+            "SAFETY: refusing to remove path outside allowed worktree directory: '{}'",
             worktree_path
         ));
     }
@@ -461,7 +473,7 @@ pub fn remove_worktree(
     let wt = Path::new(worktree_path);
     if wt.exists() {
         // Final safety re-check before the destructive operation
-        if !normalized.contains("hermes-worktrees/") {
+        if !is_hermes_worktree_path(worktree_path, custom_base) {
             return Err(format!(
                 "SAFETY: last-resort guard prevented remove_dir_all on: '{}'",
                 worktree_path
@@ -676,9 +688,99 @@ pub fn cleanup_stale_worktrees(repo_path: &str) -> Result<u32, String> {
 }
 
 /// Check if a path is inside the Hermes worktrees directory.
-pub fn is_hermes_worktree_path(path: &str) -> bool {
+///
+/// Validates against the default `{app_data_dir}/hermes-worktrees/` path
+/// and optionally a `custom_base` path if provided.
+pub fn is_hermes_worktree_path(path: &str, custom_base: Option<&Path>) -> bool {
     let normalized = path.replace('\\', "/");
-    normalized.contains("hermes-worktrees/")
+
+    // 1. Must contain "hermes-worktrees" substring
+    if !normalized.contains(HERMES_WORKTREE_MARKER) {
+        return false;
+    }
+
+    // 2. Check against custom base if provided
+    if let Some(base) = custom_base {
+        let base_str = base.to_string_lossy().replace('\\', "/");
+        let prefix = if base_str.ends_with('/') {
+            base_str
+        } else {
+            format!("{}/", base_str)
+        };
+        if normalized.starts_with(&prefix) {
+            return true;
+        }
+    }
+
+    true
+}
+
+/// Validate a candidate custom worktree base path.
+/// Verifies that:
+/// 1. The path is non-empty.
+/// 2. The path exists and is a directory.
+/// 3. The directory is writable.
+/// 4. The path is not the repository root itself, inside the repository, or an ancestor of the repository.
+pub fn validate_custom_worktree_base(
+    path_str: &str,
+    repo_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    let trimmed = path_str.trim();
+    if trimmed.is_empty() {
+        return Err("Worktree base path cannot be empty".to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.exists() {
+        return Err(format!("Worktree base path does not exist: '{}'", trimmed));
+    }
+
+    if !path.is_dir() {
+        return Err(format!("Worktree base path is not a directory: '{}'", trimmed));
+    }
+
+    // Check writability by attempting to write and remove a temporary file
+    let test_file = path.join(format!(".hermes_write_test_{}", uuid::Uuid::new_v4()));
+    match fs::write(&test_file, "test") {
+        Ok(_) => {
+            let _ = fs::remove_file(&test_file);
+        }
+        Err(e) => {
+            return Err(format!(
+                "Worktree base path is not writable: '{}' ({})",
+                trimmed, e
+            ));
+        }
+    }
+
+    // Check that custom base is not inside or equal to the repository itself
+    if let Some(repo) = repo_path {
+        let repo_canon = fs::canonicalize(repo).ok();
+        let path_canon = fs::canonicalize(&path).ok();
+
+        if let (Some(rc), Some(pc)) = (repo_canon, path_canon) {
+            if pc == rc {
+                return Err(format!(
+                    "Worktree base path cannot be the repository root directory: '{}'",
+                    trimmed
+                ));
+            }
+            if pc.starts_with(&rc) {
+                return Err(format!(
+                    "Worktree base path cannot be inside the repository directory: '{}'",
+                    trimmed
+                ));
+            }
+            if rc.starts_with(&pc) {
+                return Err(format!(
+                    "Worktree base path cannot be an ancestor of the repository directory: '{}'",
+                    trimmed
+                ));
+            }
+        }
+    }
+
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -772,8 +874,13 @@ mod tests {
     #[test]
     fn test_worktree_path_for_session_structure() {
         let app_data = create_test_app_data_dir();
-        let path =
-            worktree_path_for_session(app_data.path(), "/repo", "abc12345-extra", "feature/auth");
+        let path = worktree_path_for_session(
+            app_data.path(),
+            "/repo",
+            "abc12345-extra",
+            "feature/auth",
+            None,
+        );
         let path_str = path.to_string_lossy();
         assert!(path_str.contains("hermes-worktrees"));
         assert!(path_str.contains("abc12345_feature-auth"));
@@ -782,9 +889,26 @@ mod tests {
     #[test]
     fn test_worktree_path_for_session_truncates_id() {
         let app_data = create_test_app_data_dir();
-        let path = worktree_path_for_session(app_data.path(), "/repo", "abcdefghijklmnop", "main");
+        let path =
+            worktree_path_for_session(app_data.path(), "/repo", "abcdefghijklmnop", "main", None);
         let dirname = path.file_name().unwrap().to_string_lossy();
         assert!(dirname.starts_with("abcdefgh_"));
+    }
+
+    #[test]
+    fn test_worktree_path_for_session_custom_base() {
+        let app_data = create_test_app_data_dir();
+        let custom_base = create_test_app_data_dir();
+        let path = worktree_path_for_session(
+            app_data.path(),
+            "/repo",
+            "abc12345",
+            "main",
+            Some(custom_base.path()),
+        );
+        let path_str = path.to_string_lossy();
+        assert!(!path_str.contains("hermes-worktrees"));
+        assert!(path_str.starts_with(custom_base.path().to_str().unwrap()));
     }
 
     // ── worktree_dir ───────────────────────────────────────────────────
@@ -794,7 +918,7 @@ mod tests {
         let app_data = create_test_app_data_dir();
         let repo = create_test_repo();
         let repo_path = repo.path().to_str().unwrap();
-        let dir = worktree_dir(app_data.path(), repo_path);
+        let dir = worktree_dir(app_data.path(), repo_path, None);
         assert!(dir.exists());
         // Should be under hermes-worktrees
         let dir_str = dir.to_string_lossy();
@@ -830,6 +954,7 @@ mod tests {
             "test-branch",
             true,
             None,
+            None,
         );
         assert!(result.is_ok(), "create_worktree failed: {:?}", result.err());
 
@@ -862,6 +987,7 @@ mod tests {
             "existing-branch",
             false,
             None,
+            None,
         );
         assert!(result.is_ok(), "create_worktree failed: {:?}", result.err());
 
@@ -882,6 +1008,7 @@ mod tests {
             "my-branch",
             true,
             None,
+            None,
         )
         .unwrap();
         // Calling again with the same session+branch should return the existing one
@@ -891,6 +1018,7 @@ mod tests {
             "session1",
             "my-branch",
             true,
+            None,
             None,
         )
         .unwrap();
@@ -907,6 +1035,7 @@ mod tests {
             "session1",
             "branch",
             true,
+            None,
             None,
         );
         assert!(result.is_err());
@@ -926,6 +1055,7 @@ mod tests {
             "dup-branch",
             true,
             None,
+            None,
         )
         .unwrap();
 
@@ -936,6 +1066,7 @@ mod tests {
             "session2",
             "dup-branch",
             false,
+            None,
             None,
         )
         .unwrap();
@@ -958,11 +1089,12 @@ mod tests {
             "temp-branch",
             true,
             None,
+            None,
         )
         .unwrap();
         assert!(Path::new(&wt.worktree_path).exists());
 
-        let result = remove_worktree(repo_path, "session1", &wt.worktree_path);
+        let result = remove_worktree(repo_path, "session1", &wt.worktree_path, None);
         assert!(result.is_ok());
         assert!(!Path::new(&wt.worktree_path).exists());
     }
@@ -980,13 +1112,14 @@ mod tests {
             "gone-branch",
             true,
             None,
+            None,
         )
         .unwrap();
         // Manually delete the directory
         std::fs::remove_dir_all(&wt.worktree_path).unwrap();
 
         // Should still succeed (prune cleans up metadata)
-        let result = remove_worktree(repo_path, "session1", &wt.worktree_path);
+        let result = remove_worktree(repo_path, "session1", &wt.worktree_path, None);
         assert!(result.is_ok());
     }
 
@@ -1014,6 +1147,7 @@ mod tests {
             "list-branch-a",
             true,
             None,
+            None,
         )
         .unwrap();
         create_worktree(
@@ -1022,6 +1156,7 @@ mod tests {
             "session2",
             "list-branch-b",
             true,
+            None,
             None,
         )
         .unwrap();
@@ -1043,11 +1178,12 @@ mod tests {
             "remove-me",
             true,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(list_worktrees(repo_path).unwrap().len(), 1);
 
-        remove_worktree(repo_path, "session1", &wt.worktree_path).unwrap();
+        remove_worktree(repo_path, "session1", &wt.worktree_path, None).unwrap();
         assert_eq!(list_worktrees(repo_path).unwrap().len(), 0);
     }
 
@@ -1081,6 +1217,7 @@ mod tests {
             "session1",
             "linked-branch",
             true,
+            None,
             None,
         )
         .unwrap();
@@ -1135,6 +1272,7 @@ mod tests {
             "wt-branch",
             true,
             None,
+            None,
         )
         .unwrap();
 
@@ -1154,6 +1292,7 @@ mod tests {
             "session1",
             "my-branch",
             true,
+            None,
             None,
         )
         .unwrap();
@@ -1200,6 +1339,7 @@ mod tests {
             "stale-branch",
             true,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(list_worktrees(repo_path).unwrap().len(), 1);
@@ -1216,15 +1356,25 @@ mod tests {
     #[test]
     fn test_is_hermes_worktree_path() {
         assert!(is_hermes_worktree_path(
-            "/app/data/hermes-worktrees/abc123/sess_main"
+            "/app/data/hermes-worktrees/abc123/sess_main",
+            None
         ));
         assert!(is_hermes_worktree_path(
-            "C:\\app\\hermes-worktrees\\abc\\sess_main"
+            "C:\\app\\hermes-worktrees\\abc\\sess_main",
+            None
         ));
-        assert!(!is_hermes_worktree_path("/Users/dev/project/src"));
+        assert!(!is_hermes_worktree_path("/Users/dev/project/src", None));
         assert!(!is_hermes_worktree_path(
-            "/Users/dev/project/.hermes/worktrees/abc"
+            "/Users/dev/project/.hermes/worktrees/abc",
+            None
         ));
+    }
+
+    #[test]
+    fn test_is_hermes_worktree_path_custom_base() {
+        let base = Path::new("/tmp/custom-wt");
+        assert!(is_hermes_worktree_path("/tmp/custom-wt/abc/sess_main", Some(base)));
+        assert!(!is_hermes_worktree_path("/tmp/other/abc", Some(base)));
     }
 
     // ── WorktreeCreateResult serialization ─────────────────────────────
@@ -1259,10 +1409,7 @@ mod tests {
 
     #[test]
     fn test_derive_local_branch_name_simple() {
-        assert_eq!(
-            derive_local_branch_name("origin/feature-xyz"),
-            "feature-xyz"
-        );
+        assert_eq!(derive_local_branch_name("origin/feature-xyz"), "feature-xyz");
     }
 
     #[test]
@@ -1337,6 +1484,7 @@ mod tests {
             "",
             false,
             Some("origin/feature-xyz"),
+            None,
         );
         assert!(result.is_ok(), "create_worktree failed: {:?}", result.err());
 
@@ -1371,6 +1519,7 @@ mod tests {
             "",
             false,
             Some("origin/feature-xyz"),
+            None,
         );
         assert!(result.is_ok(), "create_worktree failed: {:?}", result.err());
 
@@ -1416,6 +1565,7 @@ mod tests {
             "",
             false,
             Some("origin/feature-xyz"),
+            None,
         );
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1439,6 +1589,7 @@ mod tests {
             "session1",
             "compat-branch",
             true,
+            None,
             None,
         );
         assert!(result.is_ok(), "create_worktree failed: {:?}", result.err());
@@ -1464,6 +1615,7 @@ mod tests {
             "cleanup-branch",
             true,
             None,
+            None,
         )
         .unwrap();
 
@@ -1483,7 +1635,7 @@ mod tests {
         );
 
         // Remove the worktree
-        remove_worktree(repo_path, "session1", &wt.worktree_path).unwrap();
+        remove_worktree(repo_path, "session1", &wt.worktree_path, None).unwrap();
 
         // .git/worktrees/ entries referencing the removed path should be gone
         if git_worktrees.is_dir() {
@@ -1515,6 +1667,7 @@ mod tests {
             "ghost-branch",
             true,
             None,
+            None,
         )
         .unwrap();
 
@@ -1523,7 +1676,7 @@ mod tests {
         assert!(!Path::new(&wt.worktree_path).exists());
 
         // remove_worktree should still succeed and clean up .git/worktrees/ refs
-        let result = remove_worktree(repo_path, "session1", &wt.worktree_path);
+        let result = remove_worktree(repo_path, "session1", &wt.worktree_path, None);
         assert!(
             result.is_ok(),
             "remove_worktree should succeed even when dir is gone: {:?}",
@@ -1570,7 +1723,7 @@ mod tests {
         let repo_path = repo_dir.path().to_str().unwrap();
 
         // Attempting to remove a path outside hermes-worktrees/ should be rejected
-        let result = remove_worktree(repo_path, "session1", "/some/regular/path");
+        let result = remove_worktree(repo_path, "session1", "/some/regular/path", None);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -1578,5 +1731,83 @@ mod tests {
             "Should be rejected by safety guard, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn test_create_and_remove_worktree_custom_base() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let custom_base_dir = TempDir::new().unwrap();
+        let custom_base = custom_base_dir.path();
+
+        // Create worktree under custom base
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session1",
+            "project-base-branch",
+            true,
+            None,
+            Some(custom_base),
+        )
+        .unwrap();
+
+        assert!(wt.worktree_path.contains("hermes-worktrees"));
+        assert!(wt.worktree_path.starts_with(custom_base.to_str().unwrap()));
+        assert!(Path::new(&wt.worktree_path).exists());
+
+        // Remove worktree under custom base
+        let remove_res = remove_worktree(
+            repo_path,
+            "session1",
+            &wt.worktree_path,
+            Some(custom_base),
+        );
+        assert!(
+            remove_res.is_ok(),
+            "remove_worktree failed with custom base: {:?}",
+            remove_res.err()
+        );
+        assert!(
+            !Path::new(&wt.worktree_path).exists(),
+            "Worktree directory should no longer exist"
+        );
+    }
+
+    #[test]
+    fn test_validate_custom_worktree_base() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let valid_dir = TempDir::new().unwrap();
+
+        // Valid custom base outside repo
+        let res = validate_custom_worktree_base(
+            valid_dir.path().to_str().unwrap(),
+            Some(repo_path),
+        );
+        assert!(res.is_ok());
+
+        // Non-existent path
+        let res_nonexistent = validate_custom_worktree_base(
+            "/nonexistent/directory/path/here",
+            Some(repo_path),
+        );
+        assert!(res_nonexistent.is_err());
+
+        // Inside repo path
+        let inside_repo = repo_dir.path().join("subfolder");
+        std::fs::create_dir_all(&inside_repo).unwrap();
+        let res_inside = validate_custom_worktree_base(
+            inside_repo.to_str().unwrap(),
+            Some(repo_path),
+        );
+        assert!(res_inside.is_err());
+        assert!(res_inside.unwrap_err().contains("inside the repository"));
+
+        // Repo root path itself
+        let res_root = validate_custom_worktree_base(repo_path, Some(repo_path));
+        assert!(res_root.is_err());
+        assert!(res_root.unwrap_err().contains("repository root directory"));
     }
 }

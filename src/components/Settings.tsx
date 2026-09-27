@@ -732,6 +732,35 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
+                  <label className="settings-label">Worktree Base Path</label>
+                  <div className="settings-input-with-btn">
+                    <input
+                      className="settings-input"
+                      placeholder="Default: App Data / hermes-worktrees"
+                      value={settings.worktree_base_path || ""}
+                      onChange={(e) => updateSetting("worktree_base_path", e.target.value)}
+                      onContextMenu={textContextMenu}
+                    />
+                    <button
+                      className="settings-btn-sm"
+                      onClick={async () => {
+                        const selected = await open({
+                          directory: true,
+                          multiple: false,
+                          title: "Select Worktree Base Directory",
+                        });
+                        if (selected && typeof selected === "string") {
+                          updateSetting("worktree_base_path", selected);
+                        }
+                      }}
+                    >
+                      Browse
+                    </button>
+                  </div>
+                  <span className="settings-hint-inline">Redirect git worktrees to another directory. Requires a restart to update existing watchers.</span>
+                </div>
+
+                <div className="settings-group">
                   <label className="settings-label settings-label-row">
                     <input
                       type="checkbox"

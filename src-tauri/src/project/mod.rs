@@ -36,6 +36,7 @@ pub struct Project {
     pub last_scanned_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub worktree_base_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +52,7 @@ pub struct ProjectOrdered {
     pub last_scanned_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub worktree_base_path: Option<String>,
     pub session_count: i64,
     pub last_opened_at: Option<String>,
     pub path_exists: bool,
@@ -200,6 +202,32 @@ pub fn get_projects_ordered(state: State<'_, AppState>) -> Result<Vec<ProjectOrd
 pub fn get_project(state: State<'_, AppState>, id: String) -> Result<Option<Project>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.get_project(&id)
+}
+
+#[tauri::command]
+pub fn set_project_worktree_path(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    id: String,
+    path: Option<String>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let project = db
+        .get_project(&id)?
+        .ok_or_else(|| format!("Project '{}' not found", id))?;
+
+    if let Some(ref p) = path {
+        if !p.trim().is_empty() {
+            crate::git::worktree::validate_custom_worktree_base(p, Some(&project.path))?;
+        }
+    }
+
+    db.set_project_worktree_path(&id, path.as_deref())?;
+
+    if let Ok(Some(updated)) = db.get_project(&id) {
+        let _ = app.emit("project-updated", &updated);
+    }
+    Ok(())
 }
 
 #[tauri::command]
