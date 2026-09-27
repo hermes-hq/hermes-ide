@@ -41,6 +41,7 @@ import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { getComposerTextarea } from "./components/composerTextarea";
 import { SplitLayout } from "./components/SplitLayout";
+import { focusedPaneSnapshot, splitAfterCreateActions } from "./state/splitAfterCreate";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
@@ -1338,26 +1339,19 @@ function AppContent() {
             pendingSplit.current = null;
           }}
           onCreate={async (opts) => {
-            // Which session the pane being split shows right now — read
-            // BEFORE createSession(), which makes the new session active and
-            // swaps it into the focused pane.
-            const splitRequest = pendingSplit.current;
-            const splitPaneSession = splitRequest && state.layout.root
-              ? collectPanes(state.layout.root).find((p) => p.id === splitRequest.paneId)?.sessionId
-              : undefined;
+            // Which session the focused pane shows right now — read BEFORE
+            // createSession(), which makes the new session active and swaps
+            // it into the focused pane.
+            const focusedBefore = focusedPaneSnapshot(state.layout);
             const session = await createSession(opts);
             setSessionCreatorOpen(false);
             if (session) {
               const split = pendingSplit.current;
               pendingSplit.current = null;
               if (split && state.layout.root) {
-                // Split an existing pane. Give the pane its own session back
-                // first, or both panes would show the new one.
-                const original = split.paneId === splitRequest?.paneId ? splitPaneSession : undefined;
-                if (original && original !== session.id) {
-                  dispatch({ type: "SET_PANE_SESSION", paneId: split.paneId, sessionId: original });
-                }
-                dispatch({ type: "SPLIT_PANE", paneId: split.paneId, direction: split.direction, newSessionId: session.id });
+                // Split an existing pane (the focused pane gets its own
+                // session back first, or the new one would show twice).
+                for (const action of splitAfterCreateActions(focusedBefore, split, session.id)) dispatch(action);
               } else if (!state.layout.root) {
                 // First session — init pane
                 dispatch({ type: "INIT_PANE", sessionId: session.id });
