@@ -1,11 +1,9 @@
 import { Suspense, useEffect, useState } from "react";
 import { lazyView } from "../utils/lazyView";
 import { getSetting } from "../api/settings";
+import { ONBOARDING_COMPLETED_SETTING } from "./startupDialogSettings";
 
 const OnboardingWizard = lazyView("OnboardingWizard", () => import("./OnboardingWizard").then((m) => m.OnboardingWizard));
-
-/** Same key the wizard writes when the user finishes it. */
-export const ONBOARDING_COMPLETED_SETTING = "onboarding_completed";
 
 /**
  * Loads the first-launch welcome wizard only when it is going to be shown,

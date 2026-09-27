@@ -1,6 +1,11 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+/** True when at least one session is in Agent view. */
+export function hasAgentSession(sessions: ReadonlyArray<{ mode?: string }>): boolean {
+  return sessions.some((s) => s.mode === "agent");
+}
+
 /**
  * Warms the Claude agent bridge (so the next agent turn starts faster) as
  * soon as an Agent-view session exists — created now or restored from the
@@ -8,11 +13,11 @@ import { invoke } from "@tauri-apps/api/core";
  * at most one warm-up per app run, so asking again is harmless.
  */
 export function useAgentBridgeWarmup(sessions: ReadonlyArray<{ mode?: string }>): void {
-  const hasAgentSession = sessions.some((s) => s.mode === "agent");
+  const needed = hasAgentSession(sessions);
   useEffect(() => {
-    if (!hasAgentSession) return;
+    if (!needed) return;
     invoke<boolean>("warm_agent_bridge").catch((err) => {
       console.warn("[agent] bridge warm-up request failed:", err);
     });
-  }, [hasAgentSession]);
+  }, [needed]);
 }

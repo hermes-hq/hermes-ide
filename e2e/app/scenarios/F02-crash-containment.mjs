@@ -9,7 +9,8 @@
 //
 // Also checked on the real app:
 //   - views nobody has opened yet (Agent view, Settings, plugin manager,
-//     code editor, other languages) are not loaded at startup
+//     code editor, "What's new", other languages) are not loaded at startup;
+//     on first launch the version is still recorded as seen
 //   - Settings, the plugin manager and a language pack load when opened,
 //     and switching to German fetches only the German pack
 //   - the Claude agent bridge is not warmed at startup for terminal-only
@@ -24,9 +25,11 @@
 import { readFileSync, rmSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { createLogger, launchApp, outDir, sleep } from "../harness.mjs";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
-const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", "F02-crash-containment");
+const SCENARIO = "F02-crash-containment";
+const startedAt = Date.now();
+const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
 rmSync(logFile, { force: true });
 const log = createLogger(logFile);
@@ -48,6 +51,7 @@ const ON_DEMAND_VIEWS = [
   "SessionCreator",
   "CommandPalette",
   "ContextPanel",
+  "WhatsNewDialog",
 ];
 const LANGUAGES = ["de", "fr", "es", "ru", "ja", "hi", "pt-BR", "zh-CN"];
 
@@ -145,6 +149,11 @@ function paneState(bridge) {
   `);
 }
 
+async function shot(bridge, name) {
+  const saved = await bridge.screenshot(join(evidenceDir, name));
+  log(`  screenshot saved: ${saved.file} (${saved.bytes} bytes)`);
+}
+
 let app;
 let failed = false;
 
@@ -169,6 +178,13 @@ try {
     "the app log says the agent bridge warm-up is deferred",
   );
   assert(!appLog0.includes("warming the agent bridge"), "the agent bridge is not warmed at startup");
+  const lastSeen = await bridge.eval(`
+    const all = await window.__TAURI_INTERNALS__.invoke("get_settings");
+    return all.last_seen_version ?? null;
+  `);
+  const appVersion = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")).version;
+  log(`  last_seen_version after first launch: ${lastSeen} (app version ${appVersion})`);
+  assert(lastSeen === appVersion, "first launch records this version as seen without loading the What's new dialog");
 
   // ── 2. Two terminals side by side ────────────────────────────────
   log("step 2: first launch welcome, then two plain terminals side by side");
@@ -198,7 +214,7 @@ try {
   log(`  left pane: ${left}; right pane: ${right}`);
   await runInTerminal(bridge, left, "left-before-crash");
   await runInTerminal(bridge, right, "right-before-crash");
-  await bridge.screenshot(join(evidenceDir, "01-two-panes.png"));
+  await shot(bridge, "01-two-panes.png");
 
   // ── 3. Crash the left pane ───────────────────────────────────────
   log("step 3: the left pane crashes while drawing (test-only crash switch)");
@@ -221,7 +237,7 @@ try {
   await runInTerminal(bridge, right, "right-after-crash");
   assert(true, "the right terminal ran a command after the left pane crashed");
   await sleep(300);
-  await bridge.screenshot(join(evidenceDir, "02-left-pane-crashed-right-pane-working.png"));
+  await shot(bridge, "02-left-pane-crashed-right-pane-working.png");
 
   // ── 5. Reload the crashed pane ───────────────────────────────────
   log("step 5: press Reload pane in the left pane");
@@ -240,7 +256,7 @@ try {
   state = await paneState(bridge);
   assert(state.every((p) => p.errorCard === null), "no pane shows an error any more");
   await sleep(300);
-  await bridge.screenshot(join(evidenceDir, "03-left-pane-reloaded.png"));
+  await shot(bridge, "03-left-pane-reloaded.png");
 
   // ── 5b. Open a file in the code editor ──────────────────────────
   log("step 5b: open a TypeScript file in the editor (editor and grammar load on demand)");
@@ -296,7 +312,7 @@ try {
   );
   assert(true, "the TypeScript grammar loaded and highlighted the keyword");
   await sleep(300);
-  await bridge.screenshot(join(evidenceDir, "03b-editor-highlighting.png"));
+  await shot(bridge, "03b-editor-highlighting.png");
   await bridge.click(".file-preview-back");
   await bridge.waitFor("the terminals to be back", `return !e2e.first(".file-preview") && e2e.all(".split-pane").length === 2;`);
 
@@ -351,7 +367,7 @@ try {
   assert(afterSwitch.includes("de"), "the German pack was fetched");
   assert(!LANGUAGES.filter((l) => l !== "de").some((l) => afterSwitch.includes(l)), "no other language pack was fetched");
   await sleep(300);
-  await bridge.screenshot(join(evidenceDir, "04-settings-in-german.png"));
+  await shot(bridge, "04-settings-in-german.png");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
@@ -381,5 +397,4 @@ try {
   }
 }
 
-log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-process.exit(failed ? 1 : 0);
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

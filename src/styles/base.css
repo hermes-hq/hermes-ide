@@ -134,39 +134,6 @@ kbd {
   100% { background-position:  200% 0; }
 }
 
-/* ─── Error Boundary ─────────────────────────────────────── */
-
-.error-boundary {
-  padding: 40px;
-  color: var(--text-0);
-  background: var(--bg-0);
-  height: 100vh;
-  font-family: var(--font-code);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-}
-.error-boundary-title { font-size: var(--text-2xl); color: var(--danger); }
-.error-boundary-stack {
-  font-size: var(--text-md);
-  color: var(--text-2);
-  max-width: 600px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-.error-boundary-retry {
-  padding: var(--space-2) 20px;
-  background: var(--success);
-  color: var(--bg-0);
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: var(--weight-semibold);
-  font-family: var(--font-code);
-}
-
 /* ─── Scrollbar ──────────────────────────────────────────────── */
 
 ::-webkit-scrollbar { width: 6px; }

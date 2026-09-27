@@ -52,7 +52,7 @@ import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
-import { useAgentBridgeWarmup } from "./hooks/useAgentBridgeWarmup";
+import { hasAgentSession, useAgentBridgeWarmup } from "./hooks/useAgentBridgeWarmup";
 import { listen } from "@tauri-apps/api/event";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
@@ -62,6 +62,7 @@ import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { FeatureFlagDummyBanner } from "./components/FeatureFlagDummyBanner";
 import { OnboardingGate } from "./components/OnboardingGate";
+import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
 import { AI_PROVIDERS as AI_PROVIDER_LIST } from "./utils/aiProviders";
 
@@ -91,7 +92,6 @@ const PromptComposer = lazyView("PromptComposer", () => import("./components/Pro
 const ShortcutsPanel = lazyView("ShortcutsPanel", () => import("./components/ShortcutsPanel").then((m) => m.ShortcutsPanel));
 const WorkspacePanel = lazyView("WorkspacePanel", () => import("./components/WorkspacePanel").then((m) => m.WorkspacePanel));
 const CostDashboard = lazyView("CostDashboard", () => import("./components/CostDashboard").then((m) => m.CostDashboard));
-const WhatsNewDialog = lazyView("WhatsNewDialog", () => import("./components/WhatsNewDialog").then((m) => m.WhatsNewDialog));
 
 function AppContent() {
   const { t } = useI18n();
@@ -1041,7 +1041,11 @@ function AppContent() {
               )}
             </div>
             )}
-            {activeSession?.mode === "agent" && (
+            {/* Mounted once any Agent-view session exists (not only while
+                one is active), so unsent image attachments survive a
+                switch to a terminal session and back. The composer renders
+                nothing for non-agent sessions. */}
+            {hasAgentSession(sessions) && (
               <PanelErrorBoundary panelName="Composer">
                 <Suspense fallback={null}>
                   <SessionComposer />
@@ -1334,17 +1338,22 @@ function AppContent() {
             pendingSplit.current = null;
           }}
           onCreate={async (opts) => {
+            // Which session the pane being split shows right now — read
+            // BEFORE createSession(), which makes the new session active and
+            // swaps it into the focused pane.
+            const splitRequest = pendingSplit.current;
+            const splitPaneSession = splitRequest && state.layout.root
+              ? collectPanes(state.layout.root).find((p) => p.id === splitRequest.paneId)?.sessionId
+              : undefined;
             const session = await createSession(opts);
             setSessionCreatorOpen(false);
             if (session) {
               const split = pendingSplit.current;
               pendingSplit.current = null;
               if (split && state.layout.root) {
-                // Split an existing pane. createSession() made the new session
-                // active, which swapped it into the focused pane — give that
-                // pane its own session back first, or both panes would show
-                // the new one.
-                const original = collectPanes(state.layout.root).find((p) => p.id === split.paneId)?.sessionId;
+                // Split an existing pane. Give the pane its own session back
+                // first, or both panes would show the new one.
+                const original = split.paneId === splitRequest?.paneId ? splitPaneSession : undefined;
                 if (original && original !== session.id) {
                   dispatch({ type: "SET_PANE_SESSION", paneId: split.paneId, sessionId: original });
                 }
@@ -1398,9 +1407,7 @@ function AppContent() {
       />
 
       <OnboardingGate />
-      <Suspense fallback={null}>
-        <WhatsNewDialog version={__APP_VERSION__} />
-      </Suspense>
+      <WhatsNewGate version={__APP_VERSION__} />
 
       {state.pendingCloseSessionId && (
         <CloseSessionDialog

@@ -3,6 +3,7 @@
  * Startup diet: work that only some people need is not done at launch.
  *   - the Claude agent bridge is warmed only once an Agent-view session exists
  *   - the first-launch wizard is only downloaded when it will be shown
+ *   - the "What's new" dialog is only downloaded after an update
  *   - the startup bundle budget check measures what the window must load
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,9 +17,10 @@ const invoke = vi.fn((_cmd: string, _args?: unknown) => Promise.resolve(true));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args?: unknown) => invoke(cmd, args) }));
 
 const getSetting = vi.fn<(key: string) => Promise<string | null>>();
+const setSetting = vi.fn((_key: string, _value: string) => Promise.resolve());
 vi.mock("../api/settings", () => ({
   getSetting: (key: string) => getSetting(key),
-  setSetting: vi.fn(() => Promise.resolve()),
+  setSetting: (key: string, value: string) => setSetting(key, value),
 }));
 
 const wizardModuleLoaded = vi.fn();
@@ -27,8 +29,15 @@ vi.mock("../components/OnboardingWizard", () => {
   return { OnboardingWizard: () => <div>welcome wizard</div> };
 });
 
-import { useAgentBridgeWarmup } from "../hooks/useAgentBridgeWarmup";
+import { hasAgentSession, useAgentBridgeWarmup } from "../hooks/useAgentBridgeWarmup";
+const whatsNewModuleLoaded = vi.fn();
+vi.mock("../components/WhatsNewDialog", () => {
+  whatsNewModuleLoaded();
+  return { WhatsNewDialog: ({ version }: { version: string }) => <div>what's new in {version}</div> };
+});
+
 import { OnboardingGate } from "../components/OnboardingGate";
+import { WhatsNewGate } from "../components/WhatsNewGate";
 import { lazyView, loadedViews } from "../utils/lazyView";
 // @ts-expect-error — plain ESM script without type declarations
 import { checkBudget, measureStartupJs, staticImports } from "../../scripts/bundle-budget.mjs";
@@ -37,6 +46,8 @@ afterEach(() => {
   cleanup();
   invoke.mockClear();
   getSetting.mockReset();
+  setSetting.mockClear();
+  window.localStorage.clear();
 });
 
 describe("agent bridge warm-up", () => {
@@ -66,6 +77,20 @@ describe("agent bridge warm-up", () => {
   });
 });
 
+describe("agent composer mounting", () => {
+  // The composer (and its unsent image attachments) stays mounted while any
+  // Agent-view session exists, whichever session is active.
+  it("is needed while any session is in Agent view, even when a terminal is active", () => {
+    expect(hasAgentSession([{ mode: "terminal" }, { mode: "agent" }])).toBe(true);
+    expect(hasAgentSession([{ mode: "agent" }])).toBe(true);
+  });
+
+  it("is not needed for terminal-only use", () => {
+    expect(hasAgentSession([])).toBe(false);
+    expect(hasAgentSession([{ mode: "terminal" }, {}])).toBe(false);
+  });
+});
+
 describe("first-launch wizard gate", () => {
   it("does not load the wizard for someone who already finished it", async () => {
     getSetting.mockResolvedValue("true");
@@ -81,6 +106,52 @@ describe("first-launch wizard gate", () => {
     getSetting.mockRejectedValue(new Error("no such setting"));
     render(<OnboardingGate />);
     expect(await screen.findByText("welcome wizard")).toBeTruthy();
+  });
+});
+
+describe("what's-new gate", () => {
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  it("does not load the dialog on the very first launch, and records the version as seen", async () => {
+    getSetting.mockResolvedValue("");
+    whatsNewModuleLoaded.mockClear();
+    render(<WhatsNewGate version="1.4.1" />);
+    await waitFor(() => expect(setSetting).toHaveBeenCalledWith("last_seen_version", "1.4.1"));
+    await settle();
+    expect(screen.queryByText(/what's new/)).toBeNull();
+    expect(whatsNewModuleLoaded).not.toHaveBeenCalled();
+  });
+
+  it("does not load the dialog when this version was already seen", async () => {
+    getSetting.mockResolvedValue("1.4.1");
+    render(<WhatsNewGate version="1.4.1" />);
+    await waitFor(() => expect(getSetting).toHaveBeenCalledWith("last_seen_version"));
+    await settle();
+    expect(screen.queryByText(/what's new/)).toBeNull();
+    expect(whatsNewModuleLoaded).not.toHaveBeenCalled();
+    expect(setSetting).not.toHaveBeenCalled();
+  });
+
+  it("does not load the dialog when settings cannot be read", async () => {
+    getSetting.mockRejectedValue(new Error("settings unavailable"));
+    render(<WhatsNewGate version="1.4.1" />);
+    await settle();
+    expect(screen.queryByText(/what's new/)).toBeNull();
+    expect(whatsNewModuleLoaded).not.toHaveBeenCalled();
+  });
+
+  it("loads and shows the dialog after an update", async () => {
+    getSetting.mockResolvedValue("1.4.0");
+    render(<WhatsNewGate version="1.4.1" />);
+    expect(await screen.findByText("what's new in 1.4.1")).toBeTruthy();
+    expect(setSetting).not.toHaveBeenCalled();
+  });
+
+  it("loads the dialog when a preview is requested, without reading settings", async () => {
+    window.localStorage.setItem("hermesPreviewWhatsNew", "1.4.0");
+    render(<WhatsNewGate version="1.4.1" />);
+    expect(await screen.findByText("what's new in 1.4.1")).toBeTruthy();
+    expect(getSetting).not.toHaveBeenCalled();
   });
 });
 

@@ -71,3 +71,17 @@ features:
       N07-2:
         text: "Turning a flag off hides the feature on next launch"
         scenarios: [N07-feature-flags.mjs]
+  F02:
+    name: "Crash containment and startup diet"
+    status: partial
+    criteria:
+      F02-1:
+        text: "A crash inside one pane or agent block renders an error card there while the other panes keep rendering"
+        scenarios:
+          - F02-crash-containment.mjs@darwin,linux
+      F02-2:
+        text: "Startup JS is at or under 1.2 MB, enforced by a CI job that fails on regression"
+        scenarios: []
+      F02-3:
+        text: "Cold start and idle RAM are published in the 1.4.1 release notes"
+        scenarios: []
