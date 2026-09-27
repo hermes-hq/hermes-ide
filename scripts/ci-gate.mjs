@@ -22,6 +22,7 @@ export const JOB_TRIGGERS = {
   "rust-clippy": ["rust", "ci"],
   "rust-test": ["rust", "ci"],
   "e2e-app": ["frontend", "rust", "ci"],
+  acceptance: ["frontend", "rust", "ci"],
 };
 
 /** Jobs that run on every change and must always succeed. */

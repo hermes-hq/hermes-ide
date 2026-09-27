@@ -57,12 +57,13 @@ header of that file.
 2. Add the file to the feature's criteria in `e2e/acceptance.yml`. Append
    `@linux`, `@darwin` or `@win32` only when the scenario genuinely cannot run
    elsewhere.
-3. Run it locally, then let the `E2E` workflow prove it on all three runners.
+3. Run it locally, then let CI prove it on all three runners.
 
 ## CI
 
-`.github/workflows/e2e.yml` builds the test app and runs the scenarios on
-`ubuntu-24.04` (under `xvfb`), `windows-2022` and `macos-15`, uploads each
-runner's evidence, and then runs the acceptance gate over the results of all
-three. Pull requests run `terminal-echo` 5 times; `main`, the merge queue and
+The `e2e-app` and `acceptance` jobs in `.github/workflows/ci.yml` build the
+test app and run the scenarios on `ubuntu-24.04` (under `xvfb`),
+`windows-2022` and `macos-15`, upload each runner's evidence, and then run
+the acceptance gate over the results of all three. Both sit under the
+required `gate` check, so a red, cancelled or missing run blocks the merge. Pull requests run `terminal-echo` 5 times; `main`, the merge queue and
 manual runs 20 times.

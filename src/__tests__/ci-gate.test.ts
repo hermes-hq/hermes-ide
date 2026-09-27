@@ -19,6 +19,7 @@ function allJobs(result: string): Needs {
 		"rust-clippy": { result },
 		"rust-test": { result },
 		"e2e-app": { result },
+		acceptance: { result },
 		privacy: { result: "success" },
 	};
 }
@@ -33,6 +34,7 @@ describe("CI gate", () => {
 		const needs = { changes: changes({ frontend: "true" }), ...allJobs("skipped") } as Needs;
 		needs.frontend = { result: "success" };
 		needs["e2e-app"] = { result: "success" };
+		needs.acceptance = { result: "success" };
 		needs["rust-test"] = { result: "cancelled" };
 		const { ok, lines } = evaluateGate(needs);
 		expect(ok).toBe(false);
@@ -45,6 +47,20 @@ describe("CI gate", () => {
 		const { ok, lines } = evaluateGate(needs);
 		expect(ok).toBe(false);
 		expect(lines.join("\n")).toMatch(/rust-clippy: skipped, but its inputs changed/);
+	});
+
+	it("fails when a real-app runner failed or the acceptance ledger was not checked", () => {
+		const failedRunner = { changes: changes({ frontend: "true" }), ...allJobs("success") } as Needs;
+		failedRunner["e2e-app"] = { result: "failure" };
+		expect(evaluateGate(failedRunner).ok).toBe(false);
+
+		for (const result of ["skipped", "cancelled"]) {
+			const needs = { changes: changes({ rust: "true" }), ...allJobs("success") } as Needs;
+			needs.acceptance = { result };
+			const { ok, lines } = evaluateGate(needs);
+			expect(ok, result).toBe(false);
+			expect(lines.join("\n")).toMatch(/acceptance: /);
+		}
 	});
 
 	it("fails when a job failed", () => {
