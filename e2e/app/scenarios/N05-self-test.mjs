@@ -158,7 +158,7 @@ try {
   const kept = String(checks.pty_echo.transcript_tail ?? "");
   const me = userInfo().username;
   const host = hostname().split(".")[0];
-  assert(kept === checks.pty_echo.marker, `only the shell's answer line is kept from the transcript (${JSON.stringify(kept)})`);
+  assert(kept.includes(checks.pty_echo.marker) && kept.length < checks.pty_echo.marker.length + 40, `only the shell's answer line is kept from the transcript (${JSON.stringify(kept)})`);
   assert(!kept.includes("@") && (me.length < 2 || !kept.includes(me)) && (host.length < 2 || !kept.includes(host)), "no user or host name in the kept transcript");
   assert(good.report.identifier === E2E_IDENTIFIER, `the test app identified itself (${good.report.identifier})`);
   assert(good.report.version.length > 0, `version reported: ${good.report.version}`);

@@ -308,7 +308,7 @@ pub fn transcript_excerpt(transcript: &str, marker: &str, ok: bool, names: &[Str
         return transcript
             .lines()
             .find(|l| saw_marker(l, marker))
-            .map(|l| l.trim().to_string())
+            .map(|l| strip_escapes(l).trim().to_string())
             .unwrap_or_default();
     }
     let tail: String = transcript
@@ -682,7 +682,7 @@ mod tests {
     fn success_keeps_only_the_shells_answer_line() {
         let marker = "hsts-cafe";
         let names = vec!["test".to_string(), "test-host".to_string()];
-        let transcript = "test@test-host ~ % echo hsts-'cafe'\r\nhsts-cafe\r\ntest@test-host ~ % ";
+        let transcript = "test@test-host ~ % echo hsts-'cafe'\r\n\x1b[?25lhsts-cafe  \x1b[?25h\r\ntest@test-host ~ % ";
         let kept = transcript_excerpt(transcript, marker, true, &names);
         assert_eq!(kept, "hsts-cafe");
         assert!(!kept.contains("test-host"));
