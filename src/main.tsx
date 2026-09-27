@@ -31,14 +31,6 @@ if (import.meta.env.VITE_HERMES_E2E === "1") {
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
-// Feature flags are read once, before the workspace renders — see
-// src/featureFlags/index.ts. The read starts now, alongside the startup
-// check, so it adds no round-trip of its own before the first paint. It never
-// rejects, and gives up after a short timeout (flags then stay at their
-// stable default for this launch), so a slow backend never leaves a blank
-// window.
-const featureFlagsReady = initFeatureFlags();
-
 // If Hermes could not open its data (for example, it was saved by a newer
 // version), explain that instead of starting the workspace.
 // In that case the backend sets up nothing else (no app state), so any other
@@ -52,7 +44,12 @@ void getStartupProblem().then((problem) => {
     );
     return;
   }
-  void featureFlagsReady.finally(() => {
+  // Feature flags are read once, here, before the workspace renders — see
+  // src/featureFlags/index.ts. Not earlier: the check above must resolve
+  // before any other backend call. It never rejects, and gives up after a
+  // short timeout (flags then stay at their stable default for this launch),
+  // so a slow backend can never leave a blank window.
+  void initFeatureFlags().finally(() => {
     root.render(
       <React.StrictMode>
         <App />
