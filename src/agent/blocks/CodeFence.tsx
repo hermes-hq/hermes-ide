@@ -208,6 +208,11 @@ function MermaidDiagram({ source }: { source: string }) {
           theme: "dark",
           fontFamily: "var(--font-mono)",
           securityLevel: "strict",
+          // mermaid 12 switched the defaults to the ELK layout and the
+          // "neo" look; pin the previous ones so diagrams keep rendering
+          // the way they did (and the ELK chunk is never fetched).
+          layout: "dagre",
+          look: "classic",
         });
         return m;
       });
