@@ -23,10 +23,10 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
 	{
 		id: "gemini",
 		label: "Gemini",
-		description: "Google Gemini CLI",
+		description: "Gemini CLI for API key and Code Assist users. Personal Google accounts: use Antigravity CLI (agy) instead",
 		installUrl: "https://github.com/google-gemini/gemini-cli",
 		installCmd: "npm install -g @google/gemini-cli",
-		authHint: "Run 'gemini' to sign in with Google on first use",
+		authHint: "Set GEMINI_API_KEY or sign in with a Code Assist license; personal Google accounts moved to Antigravity CLI (agy)",
 	},
 	{
 		id: "aider",
@@ -245,7 +245,7 @@ const PROVIDER_BINARY: Record<string, string> = {
 	gemini: "gemini",
 	aider: "aider",
 	codex: "codex",
-	copilot: "gh copilot",
+	copilot: "copilot",
 	kiro: "kiro-cli chat",
 };
 

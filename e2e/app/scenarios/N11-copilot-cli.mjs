@@ -45,7 +45,7 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
 
   log("step 4: install a synthetic copilot command into ~/.local/bin");
   const fake = join(bin, "copilot");
-  writeFileSync(fake, `#!/bin/sh\necho "${MARKER} args=[$*]"\nsleep 60\n`);
+  writeFileSync(fake, `#!/bin/sh\necho "${MARKER} name=$(basename "$0") args=[$*]"\nsleep 60\n`);
   chmodSync(fake, 0o755);
   const after = await bridge.eval(`return await window.__TAURI_INTERNALS__.invoke("check_ai_providers");`);
   log(`  check_ai_providers: ${JSON.stringify(after)}`);
@@ -67,6 +67,14 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
       (el.querySelector(".session-creator-provider-name")?.innerText ?? "").trim().startsWith("Copilot"));
     return e2e.click(e2e.must(c, "the Copilot card"));
   `);
+  const preview = await bridge.waitFor("the launch preview for Copilot", `
+    const t = e2e.first(".session-creator-launch-preview-cmd")?.innerText.trim();
+    return t ? t : null;
+  `);
+  log(`  launch preview: ${preview}`);
+  const previewShot = await bridge.screenshot(join(evidenceDir, "00-copilot-launch-preview.png"));
+  log(`  screenshot saved: ${previewShot.file}`);
+  assert(preview === "copilot", "the wizard previews the copilot command the app actually runs");
   const idsBefore = await bridge.terminalIds();
   await finishWizard(bridge, log);
   const sessionId = await bridge.waitFor(
@@ -79,6 +87,10 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
   log("step 6: the session runs the copilot command");
   const { line, lines } = await bridge.waitForTerminal(sessionId, new RegExp(MARKER), { timeoutMs: 30_000 });
   log(`  terminal: ${line.trim()}`);
+  const ran = /name=(\S+) args=\[(.*)\]/.exec(line);
+  const ranLine = ran ? [ran[1], ran[2]].filter(Boolean).join(" ") : "";
+  log(`  command the shell ran: ${ranLine}`);
+  assert(ranLine === preview, `the shell ran exactly the previewed line "${preview}"`);
   await sleep(500);
   const shot = await bridge.screenshot(join(evidenceDir, "01-copilot-session-started.png"));
   log(`  screenshot saved: ${shot.file}`);

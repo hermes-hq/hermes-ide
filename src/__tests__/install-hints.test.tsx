@@ -3,7 +3,9 @@
  * The first-launch "AI tools" screen shows install commands for tools that
  * are not installed. Each hint must install the command Hermes checks for
  * and launches: `gemini` from `@google/gemini-cli`, and `copilot` from the
- * npm Copilot CLI (the `gh-copilot` extension is retired).
+ * npm Copilot CLI (the `gh-copilot` extension is retired). Gemini CLI no
+ * longer serves personal Google accounts, so its card sends those users to
+ * Antigravity CLI.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, cleanup, screen, waitFor } from "@testing-library/react";
@@ -34,17 +36,27 @@ async function openAiToolsScreen() {
   await waitFor(() => expect(document.querySelectorAll(".onboarding-ai-install-cmd").length).toBeGreaterThan(0));
 }
 
-function installCommandFor(label: string): string | null {
-  const card = [...document.querySelectorAll(".onboarding-ai-card")].find(
+function cardFor(label: string): Element | undefined {
+  return [...document.querySelectorAll(".onboarding-ai-card")].find(
     (c) => c.querySelector(".onboarding-ai-card-name")?.textContent === label,
   );
-  return card?.querySelector(".onboarding-ai-install-cmd")?.textContent ?? null;
+}
+
+function installCommandFor(label: string): string | null {
+  return cardFor(label)?.querySelector(".onboarding-ai-install-cmd")?.textContent ?? null;
 }
 
 describe("AI tool install hints", () => {
   it("points Gemini users to the Gemini CLI that Hermes launches", async () => {
     await openAiToolsScreen();
     expect(installCommandFor("Gemini")).toBe("npm install -g @google/gemini-cli");
+  });
+
+  it("sends personal Google accounts to Antigravity CLI", async () => {
+    // Gemini CLI no longer serves personal Google accounts; they use Antigravity CLI.
+    await openAiToolsScreen();
+    const desc = cardFor("Gemini")?.querySelector(".onboarding-ai-card-desc")?.textContent ?? "";
+    expect(desc).toMatch(/Personal Google accounts: use Antigravity CLI \(agy\)/);
   });
 
   it("points Copilot users to the npm Copilot CLI", async () => {
