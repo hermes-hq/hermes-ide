@@ -1144,20 +1144,14 @@ pub fn create_session(
                             // is the lightweight field that actually changed.
                             if a.detected_agent.is_some() {
                                 if let Ok(mut s) = session_clone.lock() {
-                                    if s.detected_agent.is_none() {
+                                    if agent_model_needs_emit(&s.detected_agent, &a.detected_agent)
+                                    {
+                                        if s.detected_agent.is_none() {
+                                            s.last_activity_at = now();
+                                        }
                                         s.detected_agent = a.detected_agent.clone();
-                                        s.last_activity_at = now();
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
-                                    } else if let (Some(ref sa), Some(ref aa)) =
-                                        (&s.detected_agent, &a.detected_agent)
-                                    {
-                                        // Model enrichment: agent detected but model was unknown, now resolved
-                                        if sa.model.is_none() && aa.model.is_some() {
-                                            s.detected_agent = a.detected_agent.clone();
-                                            let update = SessionUpdate::from(&*s);
-                                            let _ = app_clone.emit("session-updated", &update);
-                                        }
                                     }
                                 }
                             }
@@ -2038,6 +2032,17 @@ pub fn resize_session(
     }
 
     Ok(())
+}
+
+/// Whether the analyzer's agent info should be pushed to the session and
+/// emitted: first detection, or any model change (None→Some and Some(a)→Some(b),
+/// e.g. `/model sonnet` → `/model opus`).
+fn agent_model_needs_emit(current: &Option<AgentInfo>, detected: &Option<AgentInfo>) -> bool {
+    match (current, detected) {
+        (None, Some(_)) => true,
+        (Some(cur), Some(new)) => new.model.is_some() && cur.model != new.model,
+        _ => false,
+    }
 }
 
 /// Drain the DB-side state for `session_id`: mark the session as
@@ -3645,5 +3650,47 @@ mod tests {
             count, 0,
             "agent-session pin must be cleaned (Bug 1 regression)"
         );
+    }
+
+    // ── #317 — terminal-mode model changes must reach the UI ────────
+
+    fn agent(model: Option<&str>) -> Option<crate::pty::models::AgentInfo> {
+        Some(crate::pty::models::AgentInfo {
+            name: "Claude Code".into(),
+            provider: "anthropic".into(),
+            model: model.map(Into::into),
+            detected_at: String::new(),
+            confidence: 1.0,
+        })
+    }
+
+    #[test]
+    fn agent_model_emit_on_first_detection_and_enrichment() {
+        assert!(super::agent_model_needs_emit(&None, &agent(None)));
+        assert!(super::agent_model_needs_emit(
+            &agent(None),
+            &agent(Some("opus"))
+        ));
+    }
+
+    #[test]
+    fn agent_model_emit_on_some_to_some_change() {
+        assert!(super::agent_model_needs_emit(
+            &agent(Some("sonnet")),
+            &agent(Some("opus"))
+        ));
+    }
+
+    #[test]
+    fn agent_model_no_emit_when_unchanged_or_lost() {
+        assert!(!super::agent_model_needs_emit(
+            &agent(Some("opus")),
+            &agent(Some("opus"))
+        ));
+        assert!(!super::agent_model_needs_emit(
+            &agent(Some("opus")),
+            &agent(None)
+        ));
+        assert!(!super::agent_model_needs_emit(&agent(None), &None));
     }
 }

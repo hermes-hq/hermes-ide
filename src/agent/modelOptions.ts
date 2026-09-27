@@ -26,3 +26,14 @@ export const CLAUDE_MODEL_OPTIONS: ModelInfo[] = [
   { id: "claude-fable-5-1", label: "Fable 5.1", description: "Most capable, for the toughest tasks" },
   { id: "haiku", label: "Haiku", description: "Fastest, lighter weight" },
 ];
+
+/** Collapse a full Claude model id (`claude-opus-4-1-20250805`,
+ *  `claude-fable-5`) to its family alias (`opus`, `fable`).  Anything
+ *  that doesn't match `claude-<family>-…` is returned trimmed; empty and
+ *  `"unknown"` become null so callers can fall back to the provider. */
+export function compactModelName(model: string | null | undefined): string | null {
+  const m = model?.trim();
+  if (!m || m.toLowerCase() === "unknown") return null;
+  const match = /^claude-([a-z]+)-/.exec(m.toLowerCase());
+  return match ? match[1] : m;
+}

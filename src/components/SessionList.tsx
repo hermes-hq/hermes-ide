@@ -15,6 +15,7 @@ import { useRemoteSshInfo } from "../hooks/useRemoteSshInfo";
 import { PortForwardsPanel } from "./PortForwardsPanel";
 import type { PluginSessionActionContribution } from "../plugins/types";
 import { useI18n } from "../i18n/I18nProvider";
+import { useSessionModel } from "../agent/useSessionModel";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -30,6 +31,15 @@ export function sessionCloseTitle(
   t: (key: string) => string,
 ): string {
   return mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm");
+}
+
+/** Session-card agent tag (#317): terminal mode shows the detected agent plus
+ *  its model ("Claude Code · opus"); agent mode shows the active model. */
+export function SessionAgentTag({ session }: { session: SessionData }) {
+  const model = useSessionModel(session);
+  const name = session.detected_agent?.name;
+  const label = name && model ? `${name} · ${model}` : name ?? model;
+  return label ? <span className="session-agent-tag">{label}</span> : null;
 }
 
 export type SessionView = "git" | "files" | "search" | null;
@@ -901,9 +911,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               {session.ssh_info && (
                 <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
-              {session.detected_agent && (
-                <span className="session-agent-tag">{session.detected_agent.name}</span>
-              )}
+              <SessionAgentTag session={session} />
               <span className="session-phase-tag" data-phase={session.phase}>
                 {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
               </span>

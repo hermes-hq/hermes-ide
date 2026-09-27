@@ -6,6 +6,7 @@ import { nudgeProjectContext, scanProject, detachSessionProject } from "../api/p
 import { revealProcessInFinder } from "../api/processes";
 import { ProjectPicker } from "./ProjectPicker";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
+import { useSessionModel } from "../agent/useSessionModel";
 import { useContextMenu, menuItem, separator, subMenu } from "../hooks/useContextMenu";
 import { homeDir } from "@tauri-apps/api/path";
 
@@ -35,6 +36,7 @@ interface ScopeBarProps {
 export function ScopeBar({ sessionId }: ScopeBarProps) {
   const { state, createSession } = useSession();
   const activeSession = state.sessions[sessionId];
+  const model = useSessionModel(activeSession);
   const { projects, detach } = useSessionProjects(sessionId);
   const [pickerOpen, setPickerOpen] = useState(false);
   const { allBranches } = useSessionGitSummary(sessionId, true, activeSession?.working_directory);
@@ -169,8 +171,10 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
             </div>
           );
         })}
-        {activeSession?.ai_provider && (
-          <span className="scope-bar-provider">{activeSession.ai_provider}</span>
+        {(model ?? activeSession?.ai_provider) && (
+          <span className="scope-bar-provider" title={activeSession?.ai_provider ?? undefined}>
+            {model ?? activeSession?.ai_provider}
+          </span>
         )}
         <button className="scope-bar-add" onClick={() => setPickerOpen(true)} title="Attach project">
           +
