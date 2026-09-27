@@ -80,8 +80,14 @@ const DEFAULT_ACTIONS: Record<string, ActionTemplate[]> = {
     { command: "/logout", label: "Logout", description: "Log out of Codex", category: "Setup" },
   ],
   copilot: [
-    { command: "gh copilot suggest", label: "Suggest", description: "Get command suggestions", category: "AI" },
-    { command: "gh copilot explain", label: "Explain", description: "Explain a command", category: "AI" },
+    { command: "/compact", label: "Compact", description: "Summarize conversation to save context", category: "Context" },
+    { command: "/clear", label: "Clear", description: "Clear conversation history", category: "Context" },
+    { command: "/context", label: "Context", description: "Show context window usage", category: "Context" },
+    { command: "/model", label: "Model", description: "Choose the AI model", category: "Setup" },
+    { command: "/mcp", label: "MCP", description: "Manage MCP servers", category: "Setup" },
+    { command: "/login", label: "Login", description: "Sign in to GitHub", category: "Setup" },
+    { command: "/logout", label: "Logout", description: "Sign out of GitHub", category: "Setup" },
+    { command: "/help", label: "Help", description: "Show available commands", category: "Info" },
   ],
 };
 
@@ -91,7 +97,7 @@ const PINNED_DEFAULTS: Record<string, string[]> = {
   gemini: ["/clear", "/help", "/stats", "/tools"],
   aider: ["/add", "/run", "/test", "/commit", "/undo"],
   codex: ["/compact", "/clear", "/diff", "/review", "/status"],
-  copilot: ["gh copilot suggest", "gh copilot explain"],
+  copilot: ["/compact", "/clear", "/context", "/model", "/help"],
 };
 
 const MAX_QUICK_ACTIONS = 5;

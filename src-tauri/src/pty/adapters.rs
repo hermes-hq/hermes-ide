@@ -1181,7 +1181,7 @@ impl ProviderAdapter for CopilotAdapter {
         let now_str = now();
         let lower = line.to_lowercase();
 
-        // Detect suggestions: "Suggestion:" or "Command:" output from gh copilot suggest
+        // Detect suggestions: "Suggestion:" or "Command:" lines in Copilot output
         if lower.starts_with("suggestion:") || lower.starts_with("command:") {
             result.action = Some(ActionEvent {
                 label: "Suggestion".into(),
@@ -1224,20 +1224,35 @@ impl ProviderAdapter for CopilotAdapter {
     }
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
-        vec![
-            ActionTemplate {
-                command: "gh copilot suggest".into(),
-                label: "Suggest".into(),
-                description: "Get command suggestions".into(),
-                category: "AI".into(),
-            },
-            ActionTemplate {
-                command: "gh copilot explain".into(),
-                label: "Explain".into(),
-                description: "Explain a command".into(),
-                category: "AI".into(),
-            },
+        // Slash commands of the standalone `copilot` CLI that Hermes launches.
+        [
+            (
+                "/compact",
+                "Compact",
+                "Summarize conversation to save context",
+                "Context",
+            ),
+            ("/clear", "Clear", "Clear conversation history", "Context"),
+            (
+                "/context",
+                "Context",
+                "Show context window usage",
+                "Context",
+            ),
+            ("/model", "Model", "Choose the AI model", "Setup"),
+            ("/mcp", "MCP", "Manage MCP servers", "Setup"),
+            ("/login", "Login", "Sign in to GitHub", "Setup"),
+            ("/logout", "Logout", "Sign out of GitHub", "Setup"),
+            ("/help", "Help", "Show available commands", "Info"),
         ]
+        .into_iter()
+        .map(|(command, label, description, category)| ActionTemplate {
+            command: command.into(),
+            label: label.into(),
+            description: description.into(),
+            category: category.into(),
+        })
+        .collect()
     }
 }
 
@@ -1946,5 +1961,22 @@ impl ProviderRegistry {
             }
         }
         best
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copilot_actions_are_copilot_cli_slash_commands() {
+        let commands: Vec<String> = CopilotAdapter
+            .known_actions()
+            .into_iter()
+            .map(|a| a.command)
+            .collect();
+        assert!(commands.iter().any(|c| c == "/compact"));
+        assert!(commands.iter().all(|c| c.starts_with('/')), "{commands:?}");
+        assert!(!commands.iter().any(|c| c.contains("gh copilot")));
     }
 }
