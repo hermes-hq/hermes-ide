@@ -21,7 +21,16 @@ import { deriveSessionLabelFromMessage, isDefaultSessionLabel } from "../utils/a
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
 import { autoAttachInsideProject } from "../utils/autoAttach";
 import { hasAddDirDrift } from "../utils/agentDrift";
-import { createWorktree, worktreeHasChanges, stashWorktree, getSessionWorktreeInfo } from "../api/git";
+import {
+  createWorktree, worktreeHasChanges, stashWorktree, getSessionWorktreeInfo,
+  attachWorktree, detachWorktree, removeWorktree, commitWorktree,
+} from "../api/git";
+import { isFeatureFlagEnabled } from "../featureFlags";
+import {
+  createSessionWorktrees, pickRestoreId, closeCommitMessage,
+  type BranchConflictChoice, type BranchInUse,
+} from "./isolation";
+import { BranchConflictDialog } from "../components/BranchConflictDialog";
 import type { SessionWorktree } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
@@ -1268,6 +1277,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ─── Branch-in-use choice (honest isolation) ─────────────────────────
+  // createSession awaits the user's answer; the dialog resolves it.
+  const [pendingBranchConflict, setPendingBranchConflict] = useState<{
+    conflict: BranchInUse & { projectId: string };
+    heldBy: string;
+    resolve: (choice: BranchConflictChoice) => void;
+  } | null>(null);
+
   // ─── Dirty worktree close state ─────────────────────────────────────
   const [pendingDirtyClose, setPendingDirtyClose] = useState<{
     sessionId: string;
@@ -1514,9 +1531,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
           // Re-create each saved session
           const oldToNew = new Map<string, string>();
+          const usedRestoreIds = new Set<string>();
           for (const saved of workspace.sessions) {
-            const restoreId = crypto.randomUUID();
+            // Keep the saved id so the session keeps its worktree link
+            // (session_worktrees rows are keyed by it) and its history.
+            const restoreId = pickRestoreId(saved.id, usedRestoreIds);
+            usedRestoreIds.add(restoreId);
             try {
+              // Read the scrollback BEFORE creating the session: creating it
+              // under the same id rewrites its row, snapshot included.
+              let savedSnapshot: string | null = null;
+              try {
+                savedSnapshot = await getSessionSnapshot(saved.id);
+              } catch {
+                console.warn("[SessionContext] Failed to read scrollback for", saved.label);
+              }
               // Pre-generate ID and set up listener before PTY starts
               // (same race-prevention as createSession above)
               await createTerminal(restoreId, saved.color);
@@ -1603,14 +1632,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               }
               await Promise.all(metaPromises);
 
-              // Restore scrollback from the old session's snapshot
-              try {
-                const snapshot = await getSessionSnapshot(saved.id);
-                if (snapshot) {
-                  writeScrollback(newSession.id, snapshot);
-                }
-              } catch {
-                console.warn("[SessionContext] Failed to restore scrollback for", saved.label);
+              // Restore scrollback from the snapshot read above
+              if (savedSnapshot) {
+                writeScrollback(newSession.id, savedSnapshot);
               }
 
               dispatch({ type: "SESSION_UPDATED", session: newSession });
@@ -1694,28 +1718,46 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
 
       // Create worktrees for each git project with a branch selection
-      const sharedBranches: string[] = [];
-      const worktreeErrors: string[] = [];
+      let sharedBranches: string[] = [];
+      let worktreeErrors: string[] = [];
       // Bug 3 (1.2.x): count successes so we can abort if EVERY worktree
       // failed.  Previously the loop swallowed every error and let
       // `apiCreateSession` proceed; the backend silently used the
       // project root and the agent session booted with no isolation.
       let worktreesSucceeded = 0;
       if (opts?.branchSelections && opts?.projectIds?.length) {
-        for (const projectId of opts.projectIds) {
-          const sel = opts.branchSelections[projectId];
-          if (!sel) continue; // Non-git project or user skipped branches for this project
-          try {
-            const wtResult = await createWorktree(preSessionId, projectId, sel.branch, sel.createNew, sel.fromRemote);
-            if (wtResult.isShared) {
-              sharedBranches.push(sel.branch);
-            }
-            worktreesSucceeded++;
-          } catch (wtErr) {
-            console.warn(`[SessionContext] Failed to create worktree for project ${projectId}:`, wtErr);
-            worktreeErrors.push(`${projectId}: ${wtErr}`);
-          }
+        // A branch that is checked out elsewhere is never shared silently:
+        // the backend refuses, and with honest isolation on the user
+        // chooses (reuse / new branch / cancel). With the flag off, stable
+        // keeps its old behaviour of sharing that checkout — now recorded
+        // as shared, so closing this session can never delete it.
+        const askUser = isFeatureFlagEnabled("honestIsolation");
+        const outcome = await createSessionWorktrees(preSessionId, opts.projectIds, opts.branchSelections, {
+          createWorktree,
+          attachWorktree,
+          removeWorktree,
+          detachWorktree,
+          resolveConflict: (conflict) => {
+            if (!askUser) return Promise.resolve({ kind: "reuse" });
+            const holder = conflict.sessionId ? stateRef.current.sessions[conflict.sessionId] : undefined;
+            const heldBy = conflict.projectFolder
+              ? "the project folder"
+              : holder
+                ? `session "${holder.label}"`
+                : "another checkout";
+            return new Promise<BranchConflictChoice>((resolve) => {
+              setPendingBranchConflict({ conflict, heldBy, resolve });
+            });
+          },
+        });
+        if (outcome.cancelled) {
+          destroyTerminal(preSessionId);
+          return null;
         }
+        worktreesSucceeded = outcome.succeeded;
+        worktreeErrors = outcome.errors;
+        sharedBranches = outcome.sharedBranches;
+        for (const e of worktreeErrors) console.warn(`[SessionContext] Failed to create worktree: ${e}`);
 
         // Hard-abort when every selected worktree failed.  Returning
         // null here surfaces the failure to the caller (command palette
@@ -1918,13 +1960,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const projects = await getSessionProjects(id);
         const dirtyChanges: DirtyWorktreeChange[] = [];
 
+        const honest = isFeatureFlagEnabled("honestIsolation");
         for (const project of projects) {
           try {
+            // Honest isolation: only a session's own worktree is deleted on
+            // close, so only its changes need a decision. A session working
+            // in the project folder (or reusing another checkout) leaves
+            // those files where they are.
+            let wtInfo: SessionWorktree | null = null;
+            if (honest) {
+              wtInfo = await getSessionWorktreeInfo(id, project.id);
+              if (!wtInfo || wtInfo.isMainWorktree) continue;
+            }
             const changes = await worktreeHasChanges(id, project.id);
             if (changes.has_changes) {
               let branchName: string | null = null;
               try {
-                const wtInfo = await getSessionWorktreeInfo(id, project.id);
+                if (!wtInfo) wtInfo = await getSessionWorktreeInfo(id, project.id);
                 branchName = wtInfo?.branchName ?? null;
               } catch {
                 // Worktree info not available — continue without branch name
@@ -1992,6 +2044,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "REQUEST_CLOSE_SESSION", id: sessionId });
     }
   }, [pendingDirtyClose, closeSession, dispatch]);
+
+  /** Honest isolation: commit (or archive) every dirty worktree, then close. */
+  const commitDirtyAndClose = useCallback(async (target: "session" | "archive") => {
+    if (!pendingDirtyClose) return;
+    const { sessionId, label, changes } = pendingDirtyClose;
+    const failures: Array<{ projectName: string; error: string }> = [];
+    const message = closeCommitMessage(label, target);
+    for (const change of changes) {
+      try {
+        await commitWorktree(sessionId, change.projectId, message, target);
+      } catch (e) {
+        const text = e instanceof Error ? e.message : String(e);
+        console.warn(`[SessionContext] Failed to ${target === "archive" ? "archive" : "commit"} worktree:`, e);
+        failures.push({ projectName: change.projectName, error: text });
+      }
+    }
+    if (failures.length > 0) {
+      // Do NOT close — the changes are still on disk; show why.
+      setPendingDirtyClose((prev) => prev ? { ...prev, stashErrors: failures } : null);
+      return;
+    }
+    setPendingDirtyClose(null);
+    if (skipCloseConfirmRef.current) {
+      closeSession(sessionId);
+    } else {
+      dispatch({ type: "REQUEST_CLOSE_SESSION", id: sessionId });
+    }
+  }, [pendingDirtyClose, closeSession, dispatch]);
+
+  const handleDirtyCommitAndClose = useCallback(() => commitDirtyAndClose("session"), [commitDirtyAndClose]);
+  const handleDirtyArchiveAndClose = useCallback(() => commitDirtyAndClose("archive"), [commitDirtyAndClose]);
 
   const handleDirtyCloseAnyway = useCallback(() => {
     if (!pendingDirtyClose) return;
@@ -2583,9 +2666,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           sessionLabel={pendingDirtyClose.label}
           changes={pendingDirtyClose.changes}
           stashErrors={pendingDirtyClose.stashErrors}
+          variant={isFeatureFlagEnabled("honestIsolation") ? "commit" : "stash"}
           onStashAndClose={handleDirtyStashAndClose}
+          onCommitAndClose={handleDirtyCommitAndClose}
+          onArchiveAndClose={handleDirtyArchiveAndClose}
           onCloseAnyway={handleDirtyCloseAnyway}
           onCancel={handleDirtyCancelClose}
+        />
+      )}
+      {pendingBranchConflict && (
+        <BranchConflictDialog
+          key={`${pendingBranchConflict.conflict.projectId}:${pendingBranchConflict.conflict.branch}`}
+          branchName={pendingBranchConflict.conflict.branch}
+          heldBy={pendingBranchConflict.heldBy}
+          path={pendingBranchConflict.conflict.path}
+          onReuse={() => {
+            setPendingBranchConflict(null);
+            pendingBranchConflict.resolve({ kind: "reuse" });
+          }}
+          onCreateNewBranch={(name) => {
+            setPendingBranchConflict(null);
+            pendingBranchConflict.resolve({ kind: "new-branch", name });
+          }}
+          onCancel={() => {
+            setPendingBranchConflict(null);
+            pendingBranchConflict.resolve({ kind: "cancel" });
+          }}
         />
       )}
     </SessionContext.Provider>

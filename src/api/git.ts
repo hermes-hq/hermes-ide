@@ -5,7 +5,7 @@ import type {
   GitStashEntry, GitLogResult, GitCommitDetail, MergeStatus, ConflictContent, ConflictStrategy,
   SearchResponse,
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
-  WorktreeChanges,
+  WorktreeChanges, CommitOutcome,
   WorktreeOverviewEntry, OrphanWorktree, CleanupResult,
   DiskStatus, WorktreeUsage, ReclaimResult, OrphanFolder, SweepResult,
 } from "../types/git";
@@ -244,6 +244,7 @@ export async function createWorktree(
   branchName: string,
   createBranch: boolean = false,
   fromRemote?: string,
+  baseBranch?: string,
 ): Promise<WorktreeCreateResult> {
   return invoke<WorktreeCreateResult>("git_create_worktree", {
     sessionId,
@@ -253,7 +254,37 @@ export async function createWorktree(
     fromRemote: fromRemote ?? null,
     // Disk guard: refuse under 10 GB free (only while the flag is on).
     ...(isFeatureFlagEnabled("diskGuard") ? { enforceDiskGuard: true } : {}),
+    // Omitted unless set: the backend then cuts a new branch from HEAD.
+    ...(baseBranch ? { baseBranch } : {}),
   });
+}
+
+/** Link a session to the checkout that already has `branchName` (the user chose "reuse"). */
+export async function attachWorktree(
+  sessionId: string,
+  projectId: string,
+  branchName: string,
+): Promise<WorktreeCreateResult> {
+  return invoke<WorktreeCreateResult>("git_attach_worktree", { sessionId, projectId, branchName });
+}
+
+/** Drop a session's link to a worktree without touching the disk. */
+export async function detachWorktree(sessionId: string, projectId: string): Promise<void> {
+  return invoke<void>("git_detach_worktree", { sessionId, projectId });
+}
+
+/**
+ * Commit a session worktree's uncommitted changes: on its own branch
+ * ("session") or on a new hermes-archive/<branch> branch ("archive").
+ * Never touches the stash.
+ */
+export async function commitWorktree(
+  sessionId: string,
+  projectId: string,
+  message: string,
+  target: "session" | "archive",
+): Promise<CommitOutcome> {
+  return invoke<CommitOutcome>("git_commit_worktree", { sessionId, projectId, message, target });
 }
 
 export async function removeWorktree(

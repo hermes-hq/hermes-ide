@@ -1,0 +1,222 @@
+// ─── Honest isolation (F09) ───────────────────────────────────────────
+//
+// Pure helpers behind "two tasks never share a checkout by accident":
+//
+//   - new tasks default to their own branch, hermes/<slug>, cut from HEAD;
+//   - a branch that is already checked out elsewhere is never shared
+//     silently: the backend refuses with a BRANCH_IN_USE error and the user
+//     picks reuse / a new branch / cancel;
+//   - a restored session keeps its id (and with it its worktree link).
+//
+// Kept free of React so every decision is unit-tested directly.
+
+import type { WorktreeCreateResult } from "../types/git";
+
+/** Prefix of the backend's "branch already checked out" error (git/worktree.rs). */
+export const BRANCH_IN_USE_PREFIX = "BRANCH_IN_USE:";
+
+/** Where a branch the user asked for is already checked out. */
+export interface BranchInUse {
+  branch: string;
+  path: string;
+  /** Session whose worktree has it, when Hermes made that worktree. */
+  sessionId: string | null;
+  /** True when it is the project folder itself. */
+  projectFolder: boolean;
+}
+
+/** Parse a BRANCH_IN_USE error from `git_create_worktree`; null for any other error. */
+export function parseBranchInUseError(err: unknown): BranchInUse | null {
+  const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const at = text.indexOf(BRANCH_IN_USE_PREFIX);
+  if (at < 0) return null;
+  try {
+    const v = JSON.parse(text.slice(at + BRANCH_IN_USE_PREFIX.length)) as Record<string, unknown>;
+    if (typeof v.branch !== "string" || typeof v.path !== "string") return null;
+    return {
+      branch: v.branch,
+      path: v.path,
+      sessionId: typeof v.sessionId === "string" ? v.sessionId : null,
+      projectFolder: v.projectFolder === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Branch-name-safe slug: lowercase ASCII letters, digits and single dashes. */
+export function slugify(text: string, maxLength = 40): string {
+  return text
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maxLength)
+    .replace(/-+$/g, "");
+}
+
+/** A short random slug for a task that has no name yet, e.g. "task-k3f9". */
+export function randomTaskSlug(random: () => number = Math.random): string {
+  const alphabet = "abcdefghijkmnpqrstuvwxyz23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += alphabet[Math.floor(random() * alphabet.length) % alphabet.length];
+  return `task-${s}`;
+}
+
+/**
+ * The default branch for a new task: `hermes/<slug>`, made unique against
+ * the branches that already exist (`-2`, `-3`, ...).
+ */
+export function defaultTaskBranch(slug: string, existing: Iterable<string>): string {
+  const taken = new Set(existing);
+  const base = `hermes/${slugify(slug) || "task"}`;
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/**
+ * Id to restore a saved session under: its own id, so its worktree link,
+ * notes and history stay attached. A fresh id only when the saved one is
+ * unusable or already taken in this restore.
+ */
+export function pickRestoreId(
+  savedId: unknown,
+  used: ReadonlySet<string>,
+  fresh: () => string = () => crypto.randomUUID(),
+): string {
+  if (typeof savedId === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(savedId) && !used.has(savedId)) {
+    return savedId;
+  }
+  return fresh();
+}
+
+// ─── Creating a session's worktrees ───────────────────────────────────
+
+export type BranchConflictChoice =
+  | { kind: "reuse" }
+  | { kind: "new-branch"; name: string }
+  | { kind: "cancel" };
+
+export interface BranchSelection {
+  branch: string;
+  createNew: boolean;
+  fromRemote?: string;
+}
+
+export interface WorktreeDeps {
+  createWorktree(
+    sessionId: string,
+    projectId: string,
+    branch: string,
+    createNew: boolean,
+    fromRemote?: string,
+    baseBranch?: string,
+  ): Promise<WorktreeCreateResult>;
+  attachWorktree(sessionId: string, projectId: string, branch: string): Promise<WorktreeCreateResult>;
+  /** Undo a worktree this call created (removes it from disk). */
+  removeWorktree(sessionId: string, projectId: string): Promise<unknown>;
+  /** Undo a link to someone else's checkout (never touches the disk). */
+  detachWorktree(sessionId: string, projectId: string): Promise<unknown>;
+  /** Ask the user what to do about a branch that is checked out elsewhere. */
+  resolveConflict(conflict: BranchInUse & { projectId: string }): Promise<BranchConflictChoice>;
+}
+
+export interface WorktreesOutcome {
+  succeeded: number;
+  errors: string[];
+  /** Branches the user chose to share with another checkout. */
+  sharedBranches: string[];
+  /** The user cancelled: everything this call made was undone. */
+  cancelled: boolean;
+}
+
+/** How often one project may bounce between "in use" and a new name. */
+const MAX_CONFLICT_ROUNDS = 5;
+
+/**
+ * Create (or, when the user says so, reuse) a worktree for every project that
+ * has a branch selection. A branch checked out elsewhere is never shared
+ * without `resolveConflict` answering "reuse"; "cancel" undoes every worktree
+ * made so far and reports `cancelled`.
+ */
+export async function createSessionWorktrees(
+  sessionId: string,
+  projectIds: readonly string[],
+  selections: Readonly<Record<string, BranchSelection | undefined>>,
+  deps: WorktreeDeps,
+): Promise<WorktreesOutcome> {
+  const outcome: WorktreesOutcome = { succeeded: 0, errors: [], sharedBranches: [], cancelled: false };
+  const made: Array<{ projectId: string; attached: boolean }> = [];
+
+  const undo = async () => {
+    for (const m of made.reverse()) {
+      try {
+        if (m.attached) await deps.detachWorktree(sessionId, m.projectId);
+        else await deps.removeWorktree(sessionId, m.projectId);
+      } catch (e) {
+        console.warn(`[isolation] could not undo the worktree for project ${m.projectId}:`, e);
+      }
+    }
+  };
+
+  for (const projectId of projectIds) {
+    const sel = selections[projectId];
+    if (!sel) continue;
+    let branch = sel.branch;
+    let createNew = sel.createNew;
+    let fromRemote = sel.fromRemote;
+    let baseBranch: string | undefined;
+
+    for (let round = 0; ; round++) {
+      try {
+        await deps.createWorktree(sessionId, projectId, branch, createNew, fromRemote, baseBranch);
+        made.push({ projectId, attached: false });
+        outcome.succeeded++;
+        break;
+      } catch (err) {
+        const conflict = parseBranchInUseError(err);
+        if (!conflict || round >= MAX_CONFLICT_ROUNDS) {
+          outcome.errors.push(`${projectId}: ${err instanceof Error ? err.message : String(err)}`);
+          break;
+        }
+        const choice = await deps.resolveConflict({ ...conflict, projectId });
+        if (choice.kind === "cancel") {
+          await undo();
+          outcome.cancelled = true;
+          return outcome;
+        }
+        if (choice.kind === "reuse") {
+          try {
+            await deps.attachWorktree(sessionId, projectId, conflict.branch);
+            made.push({ projectId, attached: true });
+            outcome.succeeded++;
+            outcome.sharedBranches.push(conflict.branch);
+          } catch (attachErr) {
+            outcome.errors.push(
+              `${projectId}: ${attachErr instanceof Error ? attachErr.message : String(attachErr)}`,
+            );
+          }
+          break;
+        }
+        // New branch cut from the one that is in use.
+        baseBranch = conflict.branch;
+        branch = choice.name;
+        createNew = true;
+        fromRemote = undefined;
+      }
+    }
+  }
+  return outcome;
+}
+
+/** Commit message for the close dialog's "commit" and "archive" choices. */
+export function closeCommitMessage(sessionLabel: string, kind: "session" | "archive"): string {
+  const label = sessionLabel.trim() || "session";
+  return kind === "archive"
+    ? `Archive uncommitted work from Hermes session "${label}"`
+    : `Work in progress from Hermes session "${label}"`;
+}

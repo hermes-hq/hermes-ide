@@ -1,0 +1,146 @@
+/* ─── Branch Conflict Dialog ───────────────────────────────────────── */
+
+.branch-conflict-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.branch-conflict-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  width: min(90vw, 460px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: branch-conflict-in 0.15s ease-out;
+}
+
+@keyframes branch-conflict-in {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.branch-conflict-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.branch-conflict-icon {
+  color: var(--yellow);
+  font-size: var(--text-lg);
+}
+
+.branch-conflict-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-0);
+  flex: 1;
+}
+
+.branch-conflict-close {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.branch-conflict-close:hover {
+  color: var(--text-0);
+}
+
+.branch-conflict-body {
+  padding: var(--space-3);
+}
+
+.branch-conflict-message {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  margin: 0 0 var(--space-2) 0;
+  line-height: 1.5;
+}
+
+.branch-conflict-branch-name {
+  color: var(--accent);
+}
+
+.branch-conflict-session-name {
+  color: var(--green);
+}
+
+.branch-conflict-hint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  margin: 0 0 var(--space-3) 0;
+  line-height: 1.5;
+}
+
+.branch-conflict-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.branch-conflict-btn-switch {
+  background: var(--bg-2);
+  text-align: left;
+}
+.branch-conflict-btn-switch:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.branch-conflict-btn-create {
+  background: var(--bg-2);
+  text-align: left;
+}
+.branch-conflict-btn-create:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.branch-conflict-btn-cancel {
+  background: none;
+  color: var(--text-3);
+  border-color: var(--border);
+}
+.branch-conflict-btn-cancel:hover:not(:disabled) {
+  color: var(--text-1);
+}
+
+.branch-conflict-create-row {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.branch-conflict-create-input {
+  flex: 1;
+  background: var(--bg-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  outline: none;
+  box-sizing: border-box;
+}
+.branch-conflict-create-input:focus {
+  border-color: var(--accent);
+}

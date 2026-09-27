@@ -2850,7 +2850,7 @@ pub fn search_project(
 // ─── Worktree IPC Commands ──────────────────────────────────────────
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Tauri command: one argument per IPC field
 pub fn git_create_worktree(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -2861,6 +2861,7 @@ pub fn git_create_worktree(
     from_remote: Option<String>,
     // Set by the frontend while the "diskGuard" feature flag is on.
     enforce_disk_guard: Option<bool>,
+    base_branch: Option<String>,
 ) -> Result<worktree::WorktreeCreateResult, String> {
     // Get the app data directory for storing worktrees outside the project
     let app_data_dir = crate::instance::app_data_dir(&app)?;
@@ -2911,15 +2912,18 @@ pub fn git_create_worktree(
         &intended_path.to_string_lossy(),
     );
 
-    // 2. Create the worktree
-    let result = worktree::create_worktree(
+    // 2. Create the worktree. A branch that is checked out elsewhere comes
+    //    back as a BRANCH_IN_USE error, enriched with who holds it.
+    let result = worktree::create_worktree_from(
         &app_data_dir,
         &root_path,
         &session_id,
         &branch_name,
         create_branch,
         from_remote.as_deref(),
-    )?;
+        base_branch.as_deref(),
+    )
+    .map_err(|e| describe_branch_in_use(&state, &root_path, e))?;
 
     // 3. Insert into session_worktrees table — if this fails, roll back the worktree
     let id = uuid::Uuid::new_v4().to_string();
@@ -2958,6 +2962,119 @@ pub fn git_create_worktree(
 
     // 5. Return result
     Ok(result)
+}
+
+/// Add who holds the branch to a `BRANCH_IN_USE:` error: the session whose
+/// worktree has it (if Hermes made that worktree) and whether it is the
+/// project folder itself. Any other error passes through unchanged.
+fn describe_branch_in_use(state: &State<'_, AppState>, root_path: &str, err: String) -> String {
+    let Some((branch, path)) = worktree::parse_branch_in_use_error(&err) else {
+        return err;
+    };
+    let session_id = state.db.lock().ok().and_then(|db| {
+        db.get_all_session_worktrees()
+            .ok()?
+            .into_iter()
+            .find(|row| worktree::same_dir(&row.worktree_path, &path))
+            .map(|row| row.session_id)
+    });
+    format!(
+        "{}{}",
+        worktree::BRANCH_IN_USE_PREFIX,
+        serde_json::json!({
+            "branch": branch,
+            "path": path,
+            "sessionId": session_id,
+            "projectFolder": worktree::same_dir(&path, root_path),
+        })
+    )
+}
+
+/// Link a session to the checkout that already has `branch_name` checked
+/// out. Only called after the user explicitly chose "reuse" in the
+/// branch-in-use dialog; creating a worktree never does this on its own.
+#[tauri::command]
+pub fn git_attach_worktree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    project_id: String,
+    branch_name: String,
+) -> Result<worktree::WorktreeCreateResult, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project = db
+        .get_project(&project_id)
+        .map_err(|e| format!("Failed to look up project: {}", e))?
+        .ok_or_else(|| format!("Project '{}' not found", project_id))?;
+    let result = worktree::attach_existing_worktree(&project.path, &branch_name)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    db.insert_session_worktree(
+        &id,
+        &session_id,
+        &project_id,
+        &result.worktree_path,
+        Some(&result.branch_name),
+        result.is_main_worktree,
+    )
+    .map_err(|e| format!("Failed to record worktree: {}", e))?;
+    drop(db);
+    let _ = app.emit(&format!("worktree-created-{}", project_id), &result);
+    Ok(result)
+}
+
+/// Drop a session's link to a worktree without touching the disk. Undoes a
+/// `git_attach_worktree` when session creation is cancelled: the checkout
+/// belongs to someone else, so it must never be removed.
+#[tauri::command]
+pub fn git_detach_worktree(
+    state: State<'_, AppState>,
+    session_id: String,
+    project_id: String,
+) -> Result<(), String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(row) = db
+        .get_worktree_by_session_and_project(&session_id, &project_id)
+        .map_err(|e| format!("Failed to look up worktree: {}", e))?
+    {
+        db.delete_session_worktree(&row.id)?;
+    }
+    Ok(())
+}
+
+/// Commit a session worktree's uncommitted changes, for the close dialog:
+/// `target = "session"` commits on the session's branch, `"archive"` saves
+/// them on a new `hermes-archive/<branch>` branch and leaves the session
+/// branch alone. Never touches the stash. Refuses sessions that work
+/// directly in the project folder (closing those deletes nothing).
+#[tauri::command]
+pub fn git_commit_worktree(
+    state: State<'_, AppState>,
+    session_id: String,
+    project_id: String,
+    message: String,
+    target: worktree::CommitTarget,
+) -> Result<worktree::CommitOutcome, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let wt = db
+        .get_worktree_by_session_and_project(&session_id, &project_id)
+        .map_err(|e| format!("Failed to look up worktree: {}", e))?
+        .ok_or_else(|| "This session has no worktree of its own".to_string())?;
+    drop(db);
+    if wt.is_main_worktree || !worktree::is_hermes_worktree_path(&wt.worktree_path) {
+        return Err("This session works in the project folder; nothing to commit on close".into());
+    }
+    worktree::commit_worktree_changes(&wt.worktree_path, &message, target, &|p| {
+        is_dirty_close_noise_file(p)
+    })
 }
 
 #[tauri::command]

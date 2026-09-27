@@ -778,6 +778,9 @@ pub fn run() {
             git::git_is_git_repo,
             git::git_worktree_has_changes,
             git::git_stash_worktree,
+            git::git_attach_worktree,
+            git::git_detach_worktree,
+            git::git_commit_worktree,
             // Worktree overview & cleanup
             git::git_list_all_worktrees,
             git::git_detect_orphan_worktrees,

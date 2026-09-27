@@ -32,6 +32,8 @@ import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/ses
 import { isGitRepo as checkIsGitRepo } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector } from "./SessionBranchSelector";
+import { isFeatureFlagEnabled } from "../featureFlags";
+import { randomTaskSlug } from "../state/isolation";
 import { SESSION_COLORS } from "./SessionList";
 import {
   SessionCreatorModeStep,
@@ -199,6 +201,11 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [checkingGit, setCheckingGit] = useState(false);
   const [branchSelections, setBranchSelections] = useState<Record<string, BranchSelection>>({});
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  // Honest isolation: one slug per task, so every project of this task
+  // defaults to the same hermes/<slug> branch.
+  const [defaultTaskSlug] = useState<string | undefined>(() =>
+    isFeatureFlagEnabled("honestIsolation") ? randomTaskSlug() : undefined,
+  );
 
   // Resolve session-mode that gets persisted to the session.  Agent mode is
   // Claude-only; ssh always = terminal (per v1.0.0 — see playbook §8).
@@ -1135,6 +1142,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                           // re-expand, retrigger the auto-advance effect
                           // below, and snap the panel shut).
                           existingBranchName={branchSelections[projectId]?.branch}
+                          defaultTaskSlug={defaultTaskSlug}
                           onBranchSelected={(name, isNew, fromRemote) => {
                             setBranchSelections((prev) => ({
                               ...prev,

@@ -193,8 +193,14 @@ export interface WorktreeCreateResult {
   worktreePath: string;
   branchName: string;
   isMainWorktree: boolean;
-  /** True when the worktree was reused from another session (branch already checked out). */
-  isShared?: boolean;
+}
+
+/** Result of committing a session's uncommitted work on close. */
+export interface CommitOutcome {
+  /** Branch the commit landed on. */
+  branch: string;
+  commit: string;
+  files: number;
 }
 
 // ─── Worktree Changes Types ──────────────────────────────────────────

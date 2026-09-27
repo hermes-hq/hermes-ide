@@ -112,7 +112,9 @@ pub struct CostDailyEntry {
 
 // ─── Session Worktrees ──────────────────────────────────────────────
 
+/// Sent to the frontend in camelCase, which is what `src/types/git.ts` reads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionWorktreeRow {
     pub id: String,
     pub session_id: String,

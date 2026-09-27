@@ -45,6 +45,12 @@ export const FEATURE_FLAGS = [
     description:
       "Shows the agents new in 2.0 (Antigravity CLI, OpenCode, goose, Hermes Agent) and the Custom agent card in the New Session agent step.",
   },
+  {
+    id: "honestIsolation",
+    label: "Honest isolation",
+    description:
+      "New tasks get their own hermes/<name> branch, a branch already in use asks before it is shared, and closing a session with changes commits them to its branch or archives them instead of stashing.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

@@ -18,7 +18,15 @@ interface DirtyWorktreeDialogProps {
   sessionLabel: string;
   changes: DirtyWorktreeChange[];
   stashErrors?: StashError[];
+  /**
+   * "stash" (default): the old Stash & Close. "commit" (flag
+   * `honestIsolation`): Commit to session branch & close, or Archive (keep
+   * branch). Neither of those touches the stash.
+   */
+  variant?: "stash" | "commit";
   onStashAndClose: () => Promise<void> | void;
+  onCommitAndClose?: () => Promise<void> | void;
+  onArchiveAndClose?: () => Promise<void> | void;
   onCloseAnyway: () => void;
   onCancel: () => void;
 }
@@ -75,21 +83,37 @@ export function DirtyWorktreeDialog({
   sessionLabel,
   changes,
   stashErrors,
+  variant = "stash",
   onStashAndClose,
+  onCommitAndClose,
+  onArchiveAndClose,
   onCloseAnyway,
   onCancel,
 }: DirtyWorktreeDialogProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const [stashing, setStashing] = useState(false);
+  const [lastAction, setLastAction] = useState<"commit" | "archive">("commit");
+  const committing = variant === "commit";
 
-  const handleStashAndClose = useCallback(async () => {
+  const runBusy = useCallback(async (action: (() => Promise<void> | void) | undefined) => {
+    if (!action) return;
     setStashing(true);
     try {
-      await onStashAndClose();
+      await action();
     } finally {
       setStashing(false);
     }
-  }, [onStashAndClose]);
+  }, []);
+
+  const handleStashAndClose = useCallback(() => runBusy(onStashAndClose), [runBusy, onStashAndClose]);
+  const handleCommitAndClose = useCallback(() => {
+    setLastAction("commit");
+    return runBusy(onCommitAndClose);
+  }, [runBusy, onCommitAndClose]);
+  const handleArchiveAndClose = useCallback(() => {
+    setLastAction("archive");
+    return runBusy(onArchiveAndClose);
+  }, [runBusy, onArchiveAndClose]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (stashing) {
@@ -171,9 +195,17 @@ export function DirtyWorktreeDialog({
           <p className="dirty-wt-warning">
             Closing this session will permanently delete its working directory and all uncommitted changes.
           </p>
-          <p className="dirty-wt-stash-hint">
-            Stashing saves your changes safely in the main repository. You can recover them later with <code>git stash pop</code>.
-          </p>
+          {committing ? (
+            <p className="dirty-wt-stash-hint">
+              <strong>Commit to session branch</strong> records every change as a commit on this session&rsquo;s branch.{" "}
+              <strong>Archive</strong> leaves that branch as it is and saves the changes on a new <code>hermes-archive/&hellip;</code> branch.
+              Both keep the branch; neither uses <code>git stash</code>.
+            </p>
+          ) : (
+            <p className="dirty-wt-stash-hint">
+              Stashing saves your changes safely in the main repository. You can recover them later with <code>git stash pop</code>.
+            </p>
+          )}
 
           {changes.map((change) => (
             <div key={change.projectId} className="dirty-wt-project">
@@ -205,7 +237,9 @@ export function DirtyWorktreeDialog({
           <div className="dirty-wt-errors">
             {stashErrors.map((err, i) => (
               <div key={i} className="dirty-wt-error-item">
-                <span className="dirty-wt-error-label">Stash failed for {err.projectName}:</span>{" "}
+                <span className="dirty-wt-error-label">
+                  {committing ? (lastAction === "archive" ? "Archive" : "Commit") : "Stash"} failed for {err.projectName}:
+                </span>{" "}
                 <span className="dirty-wt-error-message">{err.error}</span>
                 <p className="dirty-wt-error-hint">Your changes are still in the working directory.</p>
               </div>
@@ -216,7 +250,7 @@ export function DirtyWorktreeDialog({
         {/* Stashing indicator */}
         {stashing && (
           <div className="dirty-wt-stashing" role="status">
-            Stashing changes...
+            {committing ? "Saving changes..." : "Stashing changes..."}
           </div>
         )}
 
@@ -225,7 +259,19 @@ export function DirtyWorktreeDialog({
           <button className="dirty-wt-btn" onClick={onCancel} disabled={stashing}>
             Cancel
           </button>
-          {stashErrors && stashErrors.length > 0 ? (
+          {committing ? (
+            <>
+              <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+                Discard changes and close
+              </button>
+              <button className="dirty-wt-btn dirty-wt-btn--archive" onClick={handleArchiveAndClose} disabled={stashing}>
+                Archive (keep branch)
+              </button>
+              <button className="dirty-wt-btn dirty-wt-btn--stash dirty-wt-btn--commit" onClick={handleCommitAndClose} disabled={stashing}>
+                {stashing ? "Saving changes..." : "Commit to session branch & close"}
+              </button>
+            </>
+          ) : stashErrors && stashErrors.length > 0 ? (
             <>
               <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
                 Discard changes and close

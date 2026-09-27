@@ -151,3 +151,22 @@ features:
       F06-3:
         text: "A custom agent launches in a terminal and shows in the sidebar with its name"
         scenarios: [F06-custom-agent.mjs]
+  F09:
+    # Behind the honestIsolation flag (off on stable until proven); the
+    # scenario turns it on. With the flag off it must fail (negative control:
+    # HERMES_E2E_F09_FLAG=off).
+    name: "Honest isolation: tasks never share a checkout by accident"
+    status: partial
+    criteria:
+      F09-1:
+        text: "Creating a session on a branch already checked out elsewhere shows the blocking choice; no code path returns is_shared: true"
+        scenarios: [F09-honest-isolation.mjs]
+      F09-2:
+        text: "Closing a dirty session offers commit-to-branch, and the stash stack is unchanged afterwards"
+        scenarios: [F09-honest-isolation.mjs]
+      F09-3:
+        text: "Worktree branches default to hermes/<slug>"
+        scenarios: [F09-honest-isolation.mjs]
+      F09-4:
+        text: "A restored session keeps its session id and its worktree link"
+        scenarios: [F09-honest-isolation.mjs]

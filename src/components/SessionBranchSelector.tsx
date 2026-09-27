@@ -2,6 +2,7 @@ import "../styles/components/SessionBranchSelector.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { gitListBranchesForProject, listWorktrees, checkBranchAvailable, fetchRemoteBranches } from "../api/git";
 import { validateBranchName } from "./GitBranchSelector";
+import { defaultTaskBranch } from "../state/isolation";
 import type { GitBranch, WorktreeInfo } from "../types/git";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -25,6 +26,13 @@ interface SessionBranchSelectorProps {
    *      what's currently chosen and can change it.
    */
   existingBranchName?: string;
+  /**
+   * Honest isolation (flag `honestIsolation`): when set, the default is a
+   * NEW branch `hermes/<slug>` cut from HEAD (made unique against the
+   * repo's branches) instead of the current branch, and the "New branch"
+   * tab starts filled in with it so it can be edited.
+   */
+  defaultTaskSlug?: string;
   onBranchSelected: (branchName: string, createNew: boolean, fromRemote?: string) => void;
   onSkip: () => void;
 }
@@ -102,7 +110,7 @@ export function sortBranchesMainFirst<T extends { name: string; is_remote: boole
   });
 }
 
-export function SessionBranchSelector({ projectId, existingBranchName, onBranchSelected, onSkip }: SessionBranchSelectorProps) {
+export function SessionBranchSelector({ projectId, existingBranchName, defaultTaskSlug, onBranchSelected, onSkip }: SessionBranchSelectorProps) {
   const { t } = useI18n();
   // Keep the latest onBranchSelected behind a ref so loadData can read
   // it without including it in the useCallback dependency array.  The
@@ -119,6 +127,8 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
   // at mount time inside loadData.
   const existingBranchNameRef = useRef(existingBranchName);
   existingBranchNameRef.current = existingBranchName;
+  const defaultTaskSlugRef = useRef(defaultTaskSlug);
+  defaultTaskSlugRef.current = defaultTaskSlug;
 
   const [tab, setTab] = useState<Tab>("existing");
   const [branches, setBranches] = useState<GitBranch[]>([]);
@@ -185,7 +195,20 @@ export function SessionBranchSelector({ projectId, existingBranchName, onBranchS
       // "Use Branch", or skip isolation entirely via "Use current
       // branch" (which calls onSkip and clears the selection upstream).
       const priorSelection = existingBranchNameRef.current;
-      if (priorSelection) {
+      const taskSlug = defaultTaskSlugRef.current;
+      if (taskSlug) {
+        // Honest isolation: every task gets its own new branch by default,
+        // so two tasks never land in the same checkout. Editable in the
+        // "New branch" tab, which starts filled in with it.
+        const localNames = branchList.filter((b) => !b.is_remote).map((b) => b.name);
+        const proposed = defaultTaskBranch(taskSlug, localNames);
+        const shown = priorSelection ?? proposed;
+        const priorIsExisting = !!priorSelection && localNames.includes(priorSelection);
+        setNewBranchName(priorIsExisting ? proposed : shown);
+        setTab(priorIsExisting ? "existing" : "new");
+        if (priorSelection) setSelectedBranch(priorSelection);
+        else if (localNames.length > 0 || current) onBranchSelectedRef.current(proposed, true);
+      } else if (priorSelection) {
         // Pre-highlight the user's existing choice so they can see it
         // and either click another row or click "Use Branch" to keep
         // it.  We deliberately do NOT call onBranchSelected here — the

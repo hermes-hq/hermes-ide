@@ -12,7 +12,9 @@ pub const HERMES_WORKTREE_MARKER: &str = "hermes-worktrees";
 
 // ─── Data Models ────────────────────────────────────────────────────
 
+/// Sent to the frontend in camelCase, which is what `src/types/git.ts` reads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorktreeInfo {
     pub session_id: String,
     pub branch_name: Option<String>,
@@ -20,18 +22,67 @@ pub struct WorktreeInfo {
     pub is_main_worktree: bool,
 }
 
+/// Sent to the frontend in camelCase, which is what `src/types/git.ts` reads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorktreeCreateResult {
     pub worktree_path: String,
     pub branch_name: String,
     pub is_main_worktree: bool,
-    /// True when the worktree was reused from another session (branch already checked out).
-    /// The frontend should warn the user about shared file changes.
-    #[serde(default)]
-    pub is_shared: bool,
+}
+
+/// Prefix of the error `create_worktree` returns when the branch is already
+/// checked out somewhere else (another session's worktree or the project
+/// folder itself). The rest of the message is JSON: `{"branch", "path"}`.
+///
+/// Creating a session never falls back to sharing that checkout on its own:
+/// the frontend shows a blocking choice (reuse it on purpose, use a new
+/// branch, or cancel) and, for "reuse", calls `attach_existing_worktree`.
+pub const BRANCH_IN_USE_PREFIX: &str = "BRANCH_IN_USE:";
+
+/// Build the `BRANCH_IN_USE:` error for `branch`, checked out at `path`.
+pub fn branch_in_use_error(branch: &str, path: &str) -> String {
+    format!(
+        "{}{}",
+        BRANCH_IN_USE_PREFIX,
+        serde_json::json!({ "branch": branch, "path": path })
+    )
+}
+
+/// Parse an error built by `branch_in_use_error` back into (branch, path).
+pub fn parse_branch_in_use_error(err: &str) -> Option<(String, String)> {
+    let json = err.strip_prefix(BRANCH_IN_USE_PREFIX)?;
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    Some((
+        v.get("branch")?.as_str()?.to_string(),
+        v.get("path")?.as_str()?.to_string(),
+    ))
+}
+
+/// Which branch `commit_worktree_changes` puts a session's uncommitted work on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CommitTarget {
+    /// Commit on the branch the worktree has checked out.
+    Session,
+    /// Leave the session branch as it is and save the work on a new
+    /// `hermes-archive/<branch>` branch cut from it.
+    Archive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitOutcome {
+    /// Branch the commit landed on.
+    pub branch: String,
+    /// Full id of the new commit.
+    pub commit: String,
+    /// Number of paths the commit recorded (added, changed or deleted).
+    pub files: usize,
+}
+
+/// Sent to the frontend in camelCase, which is what `src/types/git.ts` reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BranchAvailability {
     pub available: bool,
     pub used_by_session: Option<String>,
@@ -210,6 +261,162 @@ fn derive_local_branch_name(remote_ref: &str) -> String {
     }
 }
 
+/// Map `git worktree add` stderr saying the branch is checked out elsewhere
+/// to a `BRANCH_IN_USE:` error naming where it is checked out.
+fn branch_in_use_from_stderr(repo_path: &str, branch_name: &str, stderr: &str) -> Option<String> {
+    if !(stderr.contains("is already used by worktree at")
+        || stderr.contains("is already checked out at"))
+    {
+        return None;
+    }
+    let path = find_existing_worktree_for_branch(repo_path, branch_name)
+        .unwrap_or_else(|| repo_path.to_string());
+    Some(branch_in_use_error(branch_name, &path))
+}
+
+/// Whether two paths name the same directory (after resolving symlinks).
+pub fn same_dir(a: &str, b: &str) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a.trim_end_matches(['/', '\\']) == b.trim_end_matches(['/', '\\']),
+    }
+}
+
+/// Link a session to the checkout that already has `branch_name`, because the
+/// user chose to reuse it. Nothing is created on disk.
+///
+/// When that checkout is the project folder itself, the result says
+/// `is_main_worktree: true`, so closing the session never deletes it.
+pub fn attach_existing_worktree(
+    repo_path: &str,
+    branch_name: &str,
+) -> Result<WorktreeCreateResult, String> {
+    let path = find_existing_worktree_for_branch(repo_path, branch_name)
+        .ok_or_else(|| format!("Branch '{}' is not checked out anywhere", branch_name))?;
+    let is_main = same_dir(&path, repo_path);
+    Ok(WorktreeCreateResult {
+        worktree_path: path,
+        branch_name: branch_name.to_string(),
+        is_main_worktree: is_main,
+    })
+}
+
+/// First free `hermes-archive/<branch>` name (then `-2`, `-3`, ...).
+fn free_archive_branch_name(repo: &Repository, branch: &str) -> String {
+    let stem = branch.strip_prefix("hermes/").unwrap_or(branch);
+    let base = format!("hermes-archive/{}", stem);
+    if repo.find_branch(&base, BranchType::Local).is_err() {
+        return base;
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{}-{}", base, n);
+        if repo.find_branch(&candidate, BranchType::Local).is_err() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Commit every uncommitted change in a worktree (new, changed and deleted
+/// files, respecting .gitignore) without touching the stash.
+///
+/// `CommitTarget::Session` commits on the checked-out branch and leaves the
+/// worktree clean. `CommitTarget::Archive` leaves the branch, index and files
+/// as they are and records the work on a new `hermes-archive/<branch>` branch.
+/// `skip` filters out paths that should never be committed (tool noise).
+pub fn commit_worktree_changes(
+    worktree_path: &str,
+    message: &str,
+    target: CommitTarget,
+    skip: &dyn Fn(&str) -> bool,
+) -> Result<CommitOutcome, String> {
+    let repo = Repository::open(worktree_path)
+        .map_err(|e| format!("Failed to open '{}': {}", worktree_path, e))?;
+    let head = repo
+        .head()
+        .map_err(|e| format!("Failed to read HEAD: {}", e))?;
+    let parent = head
+        .peel_to_commit()
+        .map_err(|e| format!("Failed to resolve HEAD commit: {}", e))?;
+    let branch = if head.is_branch() {
+        head.shorthand().map(|s| s.to_string())
+    } else {
+        None
+    };
+    if target == CommitTarget::Session && branch.is_none() {
+        return Err("This session is not on a branch (detached HEAD); nothing to commit to".into());
+    }
+
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("Failed to read index: {}", e))?;
+    let mut filter = |path: &Path, _spec: &[u8]| -> i32 {
+        if skip(&path.to_string_lossy()) {
+            1
+        } else {
+            0
+        }
+    };
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, Some(&mut filter))
+        .map_err(|e| format!("Failed to add changes: {}", e))?;
+    index
+        .update_all(["*"], Some(&mut filter))
+        .map_err(|e| format!("Failed to record deletions: {}", e))?;
+    let tree_id = index
+        .write_tree()
+        .map_err(|e| format!("Failed to write tree: {}", e))?;
+    let tree = repo
+        .find_tree(tree_id)
+        .map_err(|e| format!("Failed to read tree: {}", e))?;
+    let parent_tree = parent
+        .tree()
+        .map_err(|e| format!("Failed to read HEAD tree: {}", e))?;
+    let files = repo
+        .diff_tree_to_tree(Some(&parent_tree), Some(&tree), None)
+        .map_err(|e| format!("Failed to diff: {}", e))?
+        .deltas()
+        .len();
+    if files == 0 {
+        return Err("There are no changes to commit".into());
+    }
+
+    let sig = repo
+        .signature()
+        .or_else(|_| git2::Signature::now("Hermes", "hermes@localhost"))
+        .map_err(|e| format!("Failed to build commit author: {}", e))?;
+
+    match target {
+        CommitTarget::Session => {
+            let id = repo
+                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+                .map_err(|e| format!("Commit failed: {}", e))?;
+            // Keep the on-disk index in step with the new commit.
+            index
+                .write()
+                .map_err(|e| format!("Failed to write index: {}", e))?;
+            Ok(CommitOutcome {
+                branch: branch.unwrap_or_default(),
+                commit: id.to_string(),
+                files,
+            })
+        }
+        CommitTarget::Archive => {
+            let name = free_archive_branch_name(&repo, branch.as_deref().unwrap_or("detached"));
+            let refname = format!("refs/heads/{}", name);
+            let id = repo
+                .commit(Some(&refname), &sig, &sig, message, &tree, &[&parent])
+                .map_err(|e| format!("Commit failed: {}", e))?;
+            Ok(CommitOutcome {
+                branch: name,
+                commit: id.to_string(),
+                files,
+            })
+        }
+    }
+}
+
 /// Create a new git worktree for a session.
 ///
 /// Worktrees are stored outside the project directory in the app data dir
@@ -226,6 +433,7 @@ fn derive_local_branch_name(remote_ref: &str) -> String {
 ///
 /// Uses `git worktree add` via the CLI because git2-rs does not expose a
 /// reliable worktree-creation API.
+#[cfg(test)]
 pub fn create_worktree(
     app_data_dir: &Path,
     repo_path: &str,
@@ -233,6 +441,32 @@ pub fn create_worktree(
     branch_name: &str,
     create_branch: bool,
     from_remote: Option<&str>,
+) -> Result<WorktreeCreateResult, String> {
+    create_worktree_from(
+        app_data_dir,
+        repo_path,
+        session_id,
+        branch_name,
+        create_branch,
+        from_remote,
+        None,
+    )
+}
+
+/// `create_worktree`, where a newly created branch is cut from `base_branch`
+/// (a local branch) instead of the repository's HEAD.
+///
+/// When the branch is already checked out in another worktree, or in the
+/// project folder itself, this returns a `BRANCH_IN_USE:` error (see
+/// `branch_in_use_error`) instead of handing back that other checkout.
+pub fn create_worktree_from(
+    app_data_dir: &Path,
+    repo_path: &str,
+    session_id: &str,
+    branch_name: &str,
+    create_branch: bool,
+    from_remote: Option<&str>,
+    base_branch: Option<&str>,
 ) -> Result<WorktreeCreateResult, String> {
     // Validate that we can open the repository
     let repo = Repository::open(repo_path)
@@ -254,7 +488,6 @@ pub fn create_worktree(
                 worktree_path: wt_path_str.to_string(),
                 branch_name: local_name,
                 is_main_worktree: false,
-                is_shared: false,
             });
         }
 
@@ -296,19 +529,8 @@ pub fn create_worktree(
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                if stderr.contains("is already used by worktree at")
-                    || stderr.contains("is already checked out at")
-                {
-                    if let Some(existing_path) =
-                        find_existing_worktree_for_branch(repo_path, &local_name)
-                    {
-                        return Ok(WorktreeCreateResult {
-                            worktree_path: existing_path,
-                            branch_name: local_name,
-                            is_main_worktree: false,
-                            is_shared: true,
-                        });
-                    }
+                if let Some(err) = branch_in_use_from_stderr(repo_path, &local_name, &stderr) {
+                    return Err(err);
                 }
 
                 return Err(format!("git worktree add failed: {}", stderr.trim()));
@@ -318,7 +540,6 @@ pub fn create_worktree(
                 worktree_path: wt_path_str.to_string(),
                 branch_name: local_name,
                 is_main_worktree: false,
-                is_shared: false,
             });
         }
 
@@ -348,7 +569,6 @@ pub fn create_worktree(
             worktree_path: wt_path_str.to_string(),
             branch_name: local_name,
             is_main_worktree: false,
-            is_shared: false,
         });
     }
 
@@ -365,19 +585,24 @@ pub fn create_worktree(
             worktree_path: wt_path_str.to_string(),
             branch_name: branch_name.to_string(),
             is_main_worktree: false,
-            is_shared: false,
         });
     }
 
     if create_branch {
         // Ensure the branch does not already exist before creating it
         if repo.find_branch(branch_name, BranchType::Local).is_err() {
-            let head = repo
-                .head()
-                .map_err(|e| format!("Failed to get HEAD: {}", e))?;
-            let commit = head
+            let base = match base_branch {
+                Some(base) => repo
+                    .find_branch(base, BranchType::Local)
+                    .map_err(|e| format!("Base branch '{}' not found: {}", base, e))?
+                    .into_reference(),
+                None => repo
+                    .head()
+                    .map_err(|e| format!("Failed to get HEAD: {}", e))?,
+            };
+            let commit = base
                 .peel_to_commit()
-                .map_err(|e| format!("Failed to resolve HEAD commit: {}", e))?;
+                .map_err(|e| format!("Failed to resolve base commit: {}", e))?;
             repo.branch(branch_name, &commit, false)
                 .map_err(|e| format!("Failed to create branch '{}': {}", branch_name, e))?;
         }
@@ -395,19 +620,10 @@ pub fn create_worktree(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // If the branch is already checked out in another worktree, find and reuse it.
-        // Git error: "'branch' is already used by worktree at '/path/to/worktree'"
-        if stderr.contains("is already used by worktree at")
-            || stderr.contains("is already checked out at")
-        {
-            if let Some(existing_path) = find_existing_worktree_for_branch(repo_path, branch_name) {
-                return Ok(WorktreeCreateResult {
-                    worktree_path: existing_path,
-                    branch_name: branch_name.to_string(),
-                    is_main_worktree: false,
-                    is_shared: true,
-                });
-            }
+        // The branch is already checked out somewhere else. Never hand back
+        // that other checkout: the caller must ask the user what to do.
+        if let Some(err) = branch_in_use_from_stderr(repo_path, branch_name, &stderr) {
+            return Err(err);
         }
 
         return Err(format!("git worktree add failed: {}", stderr.trim()));
@@ -417,7 +633,6 @@ pub fn create_worktree(
         worktree_path: wt_path_str.to_string(),
         branch_name: branch_name.to_string(),
         is_main_worktree: false,
-        is_shared: false,
     })
 }
 
@@ -1067,8 +1282,9 @@ mod tests {
         )
         .unwrap();
 
-        // Creating with a different session reuses the existing worktree (shared)
-        let wt2 = create_worktree(
+        // A second session on the same branch is refused with BRANCH_IN_USE,
+        // naming the first session's worktree — never handed that checkout.
+        let err = create_worktree(
             app_data.path(),
             repo_path,
             "session2",
@@ -1076,9 +1292,213 @@ mod tests {
             false,
             None,
         )
+        .unwrap_err();
+        let (branch, path) = parse_branch_in_use_error(&err).expect("BRANCH_IN_USE error");
+        assert_eq!(branch, "dup-branch");
+        assert!(
+            path.contains("session1"),
+            "names the first worktree: {path}"
+        );
+        // Nothing was created for session2.
+        let wt2_dir =
+            worktree_path_for_session(app_data.path(), repo_path, "session2", "dup-branch");
+        assert!(!wt2_dir.exists());
+    }
+
+    #[test]
+    fn test_create_on_branch_checked_out_in_project_folder_is_refused() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let current = get_worktree_branch(repo_path).unwrap().unwrap();
+
+        let err =
+            create_worktree(app_data.path(), repo_path, "s1", &current, false, None).unwrap_err();
+        let (branch, path) = parse_branch_in_use_error(&err).expect("BRANCH_IN_USE error");
+        assert_eq!(branch, current);
+        assert!(
+            same_dir(&path, repo_path),
+            "names the project folder: {path}"
+        );
+    }
+
+    #[test]
+    fn test_attach_existing_worktree_links_the_checkout_on_purpose() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let first =
+            create_worktree(app_data.path(), repo_path, "s1", "shared-b", true, None).unwrap();
+
+        let linked = attach_existing_worktree(repo_path, "shared-b").unwrap();
+        assert!(same_dir(&linked.worktree_path, &first.worktree_path));
+        assert!(!linked.is_main_worktree);
+
+        // The project folder's own branch attaches as the main worktree, so
+        // closing the session can never delete the project folder.
+        let current = get_worktree_branch(repo_path).unwrap().unwrap();
+        let main = attach_existing_worktree(repo_path, &current).unwrap();
+        assert!(main.is_main_worktree);
+
+        assert!(attach_existing_worktree(repo_path, "no-such-branch").is_err());
+    }
+
+    #[test]
+    fn test_create_worktree_from_base_branch() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = create_worktree(app_data.path(), repo_path, "s1", "feat", true, None).unwrap();
+        std::fs::write(Path::new(&wt.worktree_path).join("feat.txt"), "x").unwrap();
+        commit_worktree_changes(
+            &wt.worktree_path,
+            "feat work",
+            CommitTarget::Session,
+            &|_| false,
+        )
         .unwrap();
-        assert!(wt2.is_shared);
-        assert_eq!(wt2.branch_name, "dup-branch");
+
+        let wt2 = create_worktree_from(
+            app_data.path(),
+            repo_path,
+            "s2",
+            "feat-2",
+            true,
+            None,
+            Some("feat"),
+        )
+        .unwrap();
+        assert!(
+            Path::new(&wt2.worktree_path).join("feat.txt").exists(),
+            "feat-2 starts from feat, not from HEAD"
+        );
+    }
+
+    fn git_out(dir: &str, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn dirty_worktree(app_data: &Path, repo_path: &str) -> WorktreeCreateResult {
+        let wt = create_worktree(app_data, repo_path, "s1", "hermes/task-a", true, None).unwrap();
+        let dir = Path::new(&wt.worktree_path);
+        std::fs::write(dir.join("README.md"), "# changed").unwrap();
+        std::fs::write(dir.join("new.txt"), "new").unwrap();
+        std::fs::write(dir.join(".DS_Store"), "noise").unwrap();
+        wt
+    }
+
+    #[test]
+    fn test_commit_to_session_branch_leaves_stash_alone_and_worktree_clean() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        let stash_before = git_out(repo_path, &["stash", "list"]);
+
+        let out = commit_worktree_changes(
+            &wt.worktree_path,
+            "WIP from Hermes",
+            CommitTarget::Session,
+            &|p| p.ends_with(".DS_Store"),
+        )
+        .unwrap();
+
+        assert_eq!(out.branch, "hermes/task-a");
+        assert_eq!(out.files, 2);
+        assert_eq!(
+            git_out(repo_path, &["rev-parse", "hermes/task-a"]),
+            out.commit
+        );
+        assert_eq!(git_out(repo_path, &["stash", "list"]), stash_before);
+        let files = git_out(
+            repo_path,
+            &["show", "--name-only", "--format=", &out.commit],
+        );
+        assert!(files.contains("README.md") && files.contains("new.txt"));
+        assert!(!files.contains(".DS_Store"), "noise is never committed");
+        // Only the skipped noise is left uncommitted.
+        let status = git_out(&wt.worktree_path, &["status", "--porcelain"]);
+        assert_eq!(status, "?? .DS_Store");
+    }
+
+    #[test]
+    fn test_commit_records_deleted_files() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = create_worktree(app_data.path(), repo_path, "s1", "del", true, None).unwrap();
+        std::fs::remove_file(Path::new(&wt.worktree_path).join("README.md")).unwrap();
+        let out =
+            commit_worktree_changes(&wt.worktree_path, "rm", CommitTarget::Session, &|_| false)
+                .unwrap();
+        assert_eq!(out.files, 1);
+        let tree = git_out(repo_path, &["ls-tree", "--name-only", "del"]);
+        assert!(!tree.contains("README.md"));
+    }
+
+    #[test]
+    fn test_archive_keeps_session_branch_and_saves_work_on_archive_branch() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        let branch_before = git_out(repo_path, &["rev-parse", "hermes/task-a"]);
+        let stash_before = git_out(repo_path, &["stash", "list"]);
+
+        let out =
+            commit_worktree_changes(&wt.worktree_path, "archived", CommitTarget::Archive, &|p| {
+                p.ends_with(".DS_Store")
+            })
+            .unwrap();
+
+        assert_eq!(out.branch, "hermes-archive/task-a");
+        assert_eq!(
+            git_out(repo_path, &["rev-parse", "hermes/task-a"]),
+            branch_before
+        );
+        assert_eq!(git_out(repo_path, &["rev-parse", &out.branch]), out.commit);
+        assert_eq!(
+            git_out(repo_path, &["rev-parse", &format!("{}^", out.commit)]),
+            branch_before
+        );
+        assert_eq!(git_out(repo_path, &["stash", "list"]), stash_before);
+
+        // A second archive of the same branch gets its own name.
+        std::fs::write(Path::new(&wt.worktree_path).join("more.txt"), "m").unwrap();
+        let again =
+            commit_worktree_changes(&wt.worktree_path, "again", CommitTarget::Archive, &|_| {
+                false
+            })
+            .unwrap();
+        assert_eq!(again.branch, "hermes-archive/task-a-2");
+    }
+
+    #[test]
+    fn test_commit_with_nothing_to_commit_is_an_error() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = create_worktree(app_data.path(), repo_path, "s1", "clean", true, None).unwrap();
+        assert!(
+            commit_worktree_changes(&wt.worktree_path, "x", CommitTarget::Session, &|_| false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_branch_in_use_error_round_trips() {
+        let err = branch_in_use_error("a/b \"q\"", "/tmp/hermes-test/x y");
+        assert!(err.starts_with(BRANCH_IN_USE_PREFIX));
+        assert_eq!(
+            parse_branch_in_use_error(&err),
+            Some(("a/b \"q\"".to_string(), "/tmp/hermes-test/x y".to_string()))
+        );
+        assert_eq!(parse_branch_in_use_error("git worktree add failed"), None);
     }
 
     // ── remove_worktree ────────────────────────────────────────────────
@@ -1373,11 +1793,14 @@ mod tests {
             worktree_path: "/app/data/hermes-worktrees/hash/abc_main".to_string(),
             branch_name: "main".to_string(),
             is_main_worktree: false,
-            is_shared: false,
         };
         let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["branch_name"], "main");
-        assert_eq!(json["is_main_worktree"], false);
+        assert_eq!(json["branchName"], "main");
+        assert_eq!(json["isMainWorktree"], false);
+        assert_eq!(
+            json["worktreePath"],
+            "/app/data/hermes-worktrees/hash/abc_main"
+        );
     }
 
     #[test]
@@ -1389,8 +1812,9 @@ mod tests {
             is_main_worktree: true,
         };
         let json = serde_json::to_value(&info).unwrap();
-        assert_eq!(json["session_id"], "sess1");
-        assert_eq!(json["is_main_worktree"], true);
+        assert_eq!(json["sessionId"], "sess1");
+        assert_eq!(json["isMainWorktree"], true);
+        assert_eq!(json["branchName"], "feature");
     }
 
     // ── derive_local_branch_name ─────────────────────────────────────

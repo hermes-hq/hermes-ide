@@ -352,6 +352,7 @@ jobs:
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
             node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
+            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs
           '
 
       - name: Run scenarios
@@ -364,6 +365,7 @@ jobs:
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
           node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
+          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs
 
       - name: Upload evidence
         if: always()
