@@ -583,7 +583,7 @@ const ENGLISH_PACK: LanguagePack = {
     "shortcuts.toggleFlowMode": "Toggle Flow Mode",
     "shortcuts.processes": "Processes",
     "shortcuts.files": "Files",
-    "shortcuts.toggleTimeline": "Toggle Timeline",
+    "shortcuts.newTab": "New Tab",
     "shortcuts.splitHorizontal": "Split Horizontal",
     "shortcuts.splitVertical": "Split Vertical",
     "shortcuts.focusNextPane": "Focus Next Pane",

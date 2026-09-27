@@ -566,7 +566,7 @@ export const zhCNPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "切换 Flow 模式",
     "shortcuts.processes": "进程",
     "shortcuts.files": "文件",
-    "shortcuts.toggleTimeline": "切换时间线",
+    "shortcuts.newTab": "新建标签页",
     "shortcuts.splitHorizontal": "水平拆分",
     "shortcuts.splitVertical": "垂直拆分",
     "shortcuts.focusNextPane": "聚焦下一个窗格",

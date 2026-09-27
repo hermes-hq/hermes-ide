@@ -566,7 +566,7 @@ export const jaPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "Flow モードを切り替え",
     "shortcuts.processes": "プロセス",
     "shortcuts.files": "ファイル",
-    "shortcuts.toggleTimeline": "タイムラインを切り替え",
+    "shortcuts.newTab": "新しいタブ",
     "shortcuts.splitHorizontal": "水平分割",
     "shortcuts.splitVertical": "垂直分割",
     "shortcuts.focusNextPane": "次のペインにフォーカス",

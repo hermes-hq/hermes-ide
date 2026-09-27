@@ -566,7 +566,7 @@ export const esPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "Alternar modo Flow",
     "shortcuts.processes": "Procesos",
     "shortcuts.files": "Archivos",
-    "shortcuts.toggleTimeline": "Alternar línea de tiempo",
+    "shortcuts.newTab": "Nueva pestaña",
     "shortcuts.splitHorizontal": "Dividir horizontalmente",
     "shortcuts.splitVertical": "Dividir verticalmente",
     "shortcuts.focusNextPane": "Enfocar panel siguiente",

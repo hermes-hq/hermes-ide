@@ -40,7 +40,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { action: "view.process-panel", actionKey: "shortcuts.processes" },
       { action: "view.git-panel", actionKey: "shortcuts.git" },
       { action: "file.file-explorer", actionKey: "shortcuts.files" },
-      { action: "file.new-session-tab", actionKey: "shortcuts.toggleTimeline" },
+      { action: "file.new-session-tab", actionKey: "shortcuts.newTab" },
       { action: "view.cost-dashboard", actionKey: "palette.costDashboard" },
     ],
   },

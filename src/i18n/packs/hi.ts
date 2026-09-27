@@ -262,7 +262,7 @@ export const hiPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "फ्लो मोड बदलें",
     "shortcuts.processes": "प्रक्रियाएं",
     "shortcuts.files": "फाइलें",
-    "shortcuts.toggleTimeline": "समयरेखा बदलें",
+    "shortcuts.newTab": "नया टैब",
     "shortcuts.splitHorizontal": "क्षैतिज विभाजन",
     "shortcuts.splitVertical": "ऊर्ध्वाधर विभाजन",
     "shortcuts.focusNextPane": "अगले पैन पर जाएं",

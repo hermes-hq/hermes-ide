@@ -566,7 +566,7 @@ export const ruPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "Переключить flow-режим",
     "shortcuts.processes": "Процессы",
     "shortcuts.files": "Файлы",
-    "shortcuts.toggleTimeline": "Переключить таймлайн",
+    "shortcuts.newTab": "Новая вкладка",
     "shortcuts.splitHorizontal": "Разделить горизонтально",
     "shortcuts.splitVertical": "Разделить вертикально",
     "shortcuts.focusNextPane": "Следующая панель",

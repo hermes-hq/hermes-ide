@@ -566,7 +566,7 @@ export const dePack: LanguagePack = {
     "shortcuts.toggleFlowMode": "Flow-Modus umschalten",
     "shortcuts.processes": "Prozesse",
     "shortcuts.files": "Dateien",
-    "shortcuts.toggleTimeline": "Timeline umschalten",
+    "shortcuts.newTab": "Neuer Tab",
     "shortcuts.splitHorizontal": "Horizontal teilen",
     "shortcuts.splitVertical": "Vertikal teilen",
     "shortcuts.focusNextPane": "Nächstes Pane fokussieren",

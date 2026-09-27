@@ -566,7 +566,7 @@ export const frPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "Basculer le mode Flow",
     "shortcuts.processes": "Processus",
     "shortcuts.files": "Fichiers",
-    "shortcuts.toggleTimeline": "Basculer la chronologie",
+    "shortcuts.newTab": "Nouvel onglet",
     "shortcuts.splitHorizontal": "Diviser horizontalement",
     "shortcuts.splitVertical": "Diviser verticalement",
     "shortcuts.focusNextPane": "Panneau suivant",

@@ -566,7 +566,7 @@ export const ptBRPack: LanguagePack = {
     "shortcuts.toggleFlowMode": "Alternar modo flow",
     "shortcuts.processes": "Processos",
     "shortcuts.files": "Arquivos",
-    "shortcuts.toggleTimeline": "Alternar linha do tempo",
+    "shortcuts.newTab": "Nova aba",
     "shortcuts.splitHorizontal": "Dividir horizontalmente",
     "shortcuts.splitVertical": "Dividir verticalmente",
     "shortcuts.focusNextPane": "Focar próximo painel",
