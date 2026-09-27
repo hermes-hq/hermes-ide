@@ -197,43 +197,37 @@ impl PtyManager {
 
 // ─── Helper Functions ───────────────────────────────────────────────
 
+/// The line typed into the shell to start a session's agent, built from the
+/// agent catalog (`src/catalog/agents.json`): the agent's command, then the
+/// permission-mode arguments, wrapped in the user's prefix and suffix. The
+/// Custom agent uses the command the user typed instead. Unknown agents, and
+/// a Custom agent with no command, return `None` (nothing is launched).
+/// Mirrors `buildLaunchPreview` in `src/catalog/agentCatalog.ts`.
 pub(crate) fn ai_launch_command(
     provider: &str,
     permission_mode: &str,
     custom_prefix: &str,
     custom_suffix: &str,
+    custom_command: &str,
 ) -> Option<String> {
-    let base = match provider {
-        "claude" => "claude",
-        "aider" => "aider",
-        "codex" => "codex",
-        "gemini" => "gemini",
-        "kiro" => "kiro-cli chat",
-        "copilot" => {
-            return Some(wrap_prefix_suffix(
-                "gh copilot",
-                custom_prefix,
-                custom_suffix,
-            ))
+    let agent = crate::agent_catalog::agent(provider)?;
+    if agent.custom {
+        let cmd = sanitize_wrap(custom_command);
+        if cmd.is_empty() {
+            return None;
         }
-        _ => return None,
-    };
-    let mut cmd = base.to_string();
-    let flag = match (provider, permission_mode) {
-        ("claude", "acceptEdits") => " --permission-mode acceptEdits",
-        ("claude", "plan") => " --permission-mode plan",
-        ("claude", "auto") => " --permission-mode auto",
-        ("claude", "dontAsk") => " --permission-mode dontAsk",
-        ("claude", "bypassPermissions") => " --permission-mode bypassPermissions",
-        ("aider", "auto") => " --yes",
-        ("aider", "bypassPermissions") => " --yes-always",
-        ("codex", "auto") => " --full-auto",
-        ("codex", "bypassPermissions") => " --dangerously-bypass-approvals-and-sandbox",
-        ("gemini", "bypassPermissions") => " --yolo",
-        ("kiro", "auto") => " --trust-all-tools",
-        _ => "",
-    };
-    cmd.push_str(flag);
+        return Some(wrap_prefix_suffix(&cmd, custom_prefix, custom_suffix));
+    }
+    if agent.terminal.argv.is_empty() {
+        return None;
+    }
+    let mut cmd = agent.terminal.argv.join(" ");
+    if let Some(flags) = agent.terminal.permission_flags.get(permission_mode) {
+        if !flags.is_empty() {
+            cmd.push(' ');
+            cmd.push_str(&flags.join(" "));
+        }
+    }
     Some(wrap_prefix_suffix(&cmd, custom_prefix, custom_suffix))
 }
 
@@ -679,30 +673,30 @@ mod tests {
         use super::ai_launch_command;
 
         assert_eq!(
-            ai_launch_command("claude", "default", "", ""),
+            ai_launch_command("claude", "default", "", "", ""),
             Some("claude".into())
         );
         assert_eq!(
-            ai_launch_command("aider", "default", "", ""),
+            ai_launch_command("aider", "default", "", "", ""),
             Some("aider".into())
         );
         assert_eq!(
-            ai_launch_command("codex", "default", "", ""),
+            ai_launch_command("codex", "default", "", "", ""),
             Some("codex".into())
         );
         assert_eq!(
-            ai_launch_command("gemini", "default", "", ""),
+            ai_launch_command("gemini", "default", "", "", ""),
             Some("gemini".into())
         );
         assert_eq!(
-            ai_launch_command("copilot", "default", "", ""),
-            Some("gh copilot".into())
+            ai_launch_command("copilot", "default", "", "", ""),
+            Some("copilot".into())
         );
         assert_eq!(
-            ai_launch_command("kiro", "default", "", ""),
+            ai_launch_command("kiro", "default", "", "", ""),
             Some("kiro-cli chat".into())
         );
-        assert_eq!(ai_launch_command("unknown", "default", "", ""), None);
+        assert_eq!(ai_launch_command("unknown", "default", "", "", ""), None);
     }
 
     #[test]
@@ -711,65 +705,65 @@ mod tests {
 
         // Claude supports all modes
         assert_eq!(
-            ai_launch_command("claude", "acceptEdits", "", ""),
+            ai_launch_command("claude", "acceptEdits", "", "", ""),
             Some("claude --permission-mode acceptEdits".into())
         );
         assert_eq!(
-            ai_launch_command("claude", "plan", "", ""),
+            ai_launch_command("claude", "plan", "", "", ""),
             Some("claude --permission-mode plan".into())
         );
         assert_eq!(
-            ai_launch_command("claude", "auto", "", ""),
+            ai_launch_command("claude", "auto", "", "", ""),
             Some("claude --permission-mode auto".into())
         );
         assert_eq!(
-            ai_launch_command("claude", "bypassPermissions", "", ""),
+            ai_launch_command("claude", "bypassPermissions", "", "", ""),
             Some("claude --permission-mode bypassPermissions".into())
         );
 
         // Claude dontAsk mode
         assert_eq!(
-            ai_launch_command("claude", "dontAsk", "", ""),
+            ai_launch_command("claude", "dontAsk", "", "", ""),
             Some("claude --permission-mode dontAsk".into())
         );
 
         // Other providers: auto and bypass modes
         assert_eq!(
-            ai_launch_command("aider", "auto", "", ""),
-            Some("aider --yes".into())
-        );
-        assert_eq!(
-            ai_launch_command("aider", "bypassPermissions", "", ""),
+            ai_launch_command("aider", "auto", "", "", ""),
             Some("aider --yes-always".into())
         );
         assert_eq!(
-            ai_launch_command("codex", "auto", "", ""),
-            Some("codex --full-auto".into())
+            ai_launch_command("aider", "bypassPermissions", "", "", ""),
+            Some("aider --yes-always".into())
         );
         assert_eq!(
-            ai_launch_command("codex", "bypassPermissions", "", ""),
+            ai_launch_command("codex", "auto", "", "", ""),
+            Some("codex --sandbox workspace-write --ask-for-approval on-request".into())
+        );
+        assert_eq!(
+            ai_launch_command("codex", "bypassPermissions", "", "", ""),
             Some("codex --dangerously-bypass-approvals-and-sandbox".into())
         );
         assert_eq!(
-            ai_launch_command("gemini", "bypassPermissions", "", ""),
+            ai_launch_command("gemini", "bypassPermissions", "", "", ""),
             Some("gemini --yolo".into())
         );
 
         // Kiro: trust flags live on the `chat` subcommand; `--trust-tools`
         // requires a tool list, so auto mode uses `--trust-all-tools`.
         assert_eq!(
-            ai_launch_command("kiro", "auto", "", ""),
+            ai_launch_command("kiro", "auto", "", "", ""),
             Some("kiro-cli chat --trust-all-tools".into())
         );
 
         // Unsupported modes fall back to no flag
         assert_eq!(
-            ai_launch_command("aider", "plan", "", ""),
+            ai_launch_command("aider", "plan", "", "", ""),
             Some("aider".into())
         );
         assert_eq!(
-            ai_launch_command("copilot", "bypassPermissions", "", ""),
-            Some("gh copilot".into())
+            ai_launch_command("copilot", "bypassPermissions", "", "", ""),
+            Some("copilot --allow-all".into())
         );
     }
 
@@ -778,21 +772,21 @@ mod tests {
         use super::ai_launch_command;
 
         assert_eq!(
-            ai_launch_command("claude", "default", "", "--model opus"),
+            ai_launch_command("claude", "default", "", "--model opus", ""),
             Some("claude --model opus".into())
         );
         assert_eq!(
-            ai_launch_command("claude", "plan", "", "--verbose"),
+            ai_launch_command("claude", "plan", "", "--verbose", ""),
             Some("claude --permission-mode plan --verbose".into())
         );
         // Suffix is trimmed
         assert_eq!(
-            ai_launch_command("aider", "default", "", "  --dark-mode  "),
+            ai_launch_command("aider", "default", "", "  --dark-mode  ", ""),
             Some("aider --dark-mode".into())
         );
         // Empty suffix
         assert_eq!(
-            ai_launch_command("claude", "default", "", "   "),
+            ai_launch_command("claude", "default", "", "   ", ""),
             Some("claude".into())
         );
     }
@@ -803,43 +797,43 @@ mod tests {
 
         // macOS: caffeinate wrapper
         assert_eq!(
-            ai_launch_command("claude", "default", "caffeinate -i", ""),
+            ai_launch_command("claude", "default", "caffeinate -i", "", ""),
             Some("caffeinate -i claude".into())
         );
         // Prefix + permission flag
         assert_eq!(
-            ai_launch_command("claude", "acceptEdits", "caffeinate -i", ""),
+            ai_launch_command("claude", "acceptEdits", "caffeinate -i", "", ""),
             Some("caffeinate -i claude --permission-mode acceptEdits".into())
         );
         // Windows: wsl wrapper
         assert_eq!(
-            ai_launch_command("claude", "default", "wsl", ""),
+            ai_launch_command("claude", "default", "wsl", "", ""),
             Some("wsl claude".into())
         );
         // Linux: nice wrapper
         assert_eq!(
-            ai_launch_command("gemini", "default", "nice -n 10", ""),
+            ai_launch_command("gemini", "default", "nice -n 10", "", ""),
             Some("nice -n 10 gemini".into())
         );
-        // Copilot (has special wrapping) supports prefix
+        // Copilot supports prefix
         assert_eq!(
-            ai_launch_command("copilot", "default", "caffeinate -i", ""),
-            Some("caffeinate -i gh copilot".into())
+            ai_launch_command("copilot", "default", "caffeinate -i", "", ""),
+            Some("caffeinate -i copilot".into())
         );
         // Prefix is trimmed
         assert_eq!(
-            ai_launch_command("claude", "default", "  caffeinate -i  ", ""),
+            ai_launch_command("claude", "default", "  caffeinate -i  ", "", ""),
             Some("caffeinate -i claude".into())
         );
         // Embedded newlines/CR are stripped (defense against paste-a-second-command)
         assert_eq!(
-            ai_launch_command("claude", "default", "caffeinate -i\nrm -rf /", ""),
+            ai_launch_command("claude", "default", "caffeinate -i\nrm -rf /", "", ""),
             Some("caffeinate -i rm -rf / claude".into())
         );
         // Empty prefix ⇒ byte-identical to no-prefix case
         assert_eq!(
-            ai_launch_command("claude", "default", "   ", ""),
-            ai_launch_command("claude", "default", "", "")
+            ai_launch_command("claude", "default", "   ", "", ""),
+            ai_launch_command("claude", "default", "", "", "")
         );
     }
 
@@ -849,28 +843,96 @@ mod tests {
 
         // Both prefix and suffix: prefix wraps the binary, suffix appends flags
         assert_eq!(
-            ai_launch_command("claude", "acceptEdits", "caffeinate -i", "--model opus"),
+            ai_launch_command("claude", "acceptEdits", "caffeinate -i", "--model opus", ""),
             Some("caffeinate -i claude --permission-mode acceptEdits --model opus".into())
         );
         // Only suffix, no prefix
         assert_eq!(
-            ai_launch_command("claude", "default", "", "--model opus"),
+            ai_launch_command("claude", "default", "", "--model opus", ""),
             Some("claude --model opus".into())
         );
         // Only prefix, no suffix
         assert_eq!(
-            ai_launch_command("claude", "default", "caffeinate -i", ""),
+            ai_launch_command("claude", "default", "caffeinate -i", "", ""),
             Some("caffeinate -i claude".into())
         );
         // Both trimmed
         assert_eq!(
-            ai_launch_command("aider", "default", "  nice -n 10  ", "  --dark-mode  "),
+            ai_launch_command("aider", "default", "  nice -n 10  ", "  --dark-mode  ", ""),
             Some("nice -n 10 aider --dark-mode".into())
         );
         // Copilot with both
         assert_eq!(
-            ai_launch_command("copilot", "default", "wsl", "--debug"),
-            Some("wsl gh copilot --debug".into())
+            ai_launch_command("copilot", "default", "wsl", "--debug", ""),
+            Some("wsl copilot --debug".into())
+        );
+    }
+
+    #[test]
+    fn ai_launch_command_custom_agent() {
+        use super::ai_launch_command;
+
+        // The typed command is launched as is, wrapped in prefix/suffix.
+        assert_eq!(
+            ai_launch_command(
+                "custom",
+                "default",
+                "",
+                "",
+                "node fake-agent.mjs --name demo"
+            ),
+            Some("node fake-agent.mjs --name demo".into())
+        );
+        assert_eq!(
+            ai_launch_command("custom", "default", "nice -n 10", "--verbose", "  aider  "),
+            Some("nice -n 10 aider --verbose".into())
+        );
+        // Permission modes add nothing to a command Hermes does not know.
+        assert_eq!(
+            ai_launch_command("custom", "bypassPermissions", "", "", "aider"),
+            Some("aider".into())
+        );
+        // Line breaks cannot smuggle a second command.
+        assert_eq!(
+            ai_launch_command("custom", "default", "", "", "aider\nrm -rf /"),
+            Some("aider rm -rf /".into())
+        );
+        // No command: nothing is launched.
+        assert_eq!(ai_launch_command("custom", "default", "", "", "   "), None);
+        // A command given to a catalog agent is ignored.
+        assert_eq!(
+            ai_launch_command("claude", "default", "", "", "rm -rf /"),
+            Some("claude".into())
+        );
+    }
+
+    #[test]
+    fn ai_launch_command_new_catalog_agents() {
+        use super::ai_launch_command;
+
+        assert_eq!(
+            ai_launch_command("antigravity", "default", "", "", ""),
+            Some("agy".into())
+        );
+        assert_eq!(
+            ai_launch_command("antigravity", "bypassPermissions", "", "", ""),
+            Some("agy --dangerously-skip-permissions".into())
+        );
+        assert_eq!(
+            ai_launch_command("opencode", "auto", "", "", ""),
+            Some("opencode --auto".into())
+        );
+        assert_eq!(
+            ai_launch_command("goose", "default", "", "", ""),
+            Some("goose session".into())
+        );
+        assert_eq!(
+            ai_launch_command("hermes-agent", "bypassPermissions", "", "", ""),
+            Some("hermes --yolo".into())
+        );
+        assert_eq!(
+            ai_launch_command("gemini", "acceptEdits", "", "", ""),
+            Some("gemini --approval-mode auto_edit".into())
         );
     }
 
@@ -879,10 +941,10 @@ mod tests {
     #[test]
     fn every_ai_cli_provider_has_launch_command() {
         use super::ai_launch_command;
-        use crate::platform::AI_CLI_PROVIDERS;
+        use crate::platform::ai_cli_providers;
 
-        for (provider_id, binary_name) in AI_CLI_PROVIDERS {
-            let result = ai_launch_command(provider_id, "default", "", "");
+        for (provider_id, binary_name) in ai_cli_providers().iter() {
+            let result = ai_launch_command(provider_id, "default", "", "", "");
             assert!(
                 result.is_some(),
                 "AI_CLI_PROVIDERS has '{}' (binary '{}') but ai_launch_command returns None for it. \
@@ -894,10 +956,11 @@ mod tests {
         }
     }
 
+    /// Agents on the stable channel must be recognised in terminal output.
+    /// (Beta entries of the catalog may not have an adapter yet.)
     #[test]
-    fn every_ai_cli_provider_has_adapter_in_registry() {
+    fn every_stable_ai_cli_provider_has_adapter_in_registry() {
         use super::adapters::ProviderRegistry;
-        use crate::platform::AI_CLI_PROVIDERS;
 
         let registry = ProviderRegistry::new();
 
@@ -913,7 +976,12 @@ mod tests {
         .into_iter()
         .collect();
 
-        for (provider_id, _) in AI_CLI_PROVIDERS {
+        let stable = crate::agent_catalog::catalog()
+            .agents
+            .iter()
+            .filter(|a| a.channel == "stable" && a.detect.is_some())
+            .map(|a| a.id.as_str());
+        for provider_id in stable {
             let test_line = detection_lines.get(provider_id).unwrap_or_else(|| {
                 panic!(
                     "No detection test line defined for provider '{}'. \
@@ -964,7 +1032,7 @@ mod tests {
     fn test_full_claude_command_with_prompt_and_channels() {
         use super::{ai_launch_command, channels_suffix};
         // Simulate the call-site pattern: base + prompt + channels
-        let base = ai_launch_command("claude", "bypassPermissions", "", "").unwrap();
+        let base = ai_launch_command("claude", "bypassPermissions", "", "", "").unwrap();
         let prompt = format!("{} \"Read context\"", base);
         let channels = vec!["plugin:telegram@claude-plugins-official".to_string()];
         let full = format!("{}{}", prompt, channels_suffix(&channels));

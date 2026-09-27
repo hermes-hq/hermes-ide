@@ -121,6 +121,10 @@ export interface SessionData {
    *  "wsl", "nice -n 10"). Trimmed. Ignored for SSH sessions. */
   custom_prefix: string;
   custom_suffix: string;
+  /** Custom agent only: the name the user gave it ("" otherwise). */
+  agent_name?: string;
+  /** Custom agent only: the command that starts it ("" otherwise). */
+  agent_command?: string;
   channels: string[];
   context_injected: boolean;
   ssh_info: SshConnectionInfo | null;
@@ -159,6 +163,10 @@ export interface CreateSessionOpts {
   permissionMode?: string;
   customPrefix?: string;
   customSuffix?: string;
+  /** Custom agent only: the name shown for the session. */
+  agentName?: string;
+  /** Custom agent only: the command typed to start it. */
+  agentCommand?: string;
   projectIds?: string[];
   branchName?: string;
   createNewBranch?: boolean;
@@ -189,6 +197,9 @@ export interface SavedSessionInfo {
   permission_mode: string;
   custom_prefix: string;
   custom_suffix: string;
+  /** Custom agent only. Optional: older saves predate it. */
+  agent_name?: string;
+  agent_command?: string;
   project_ids: string[];
   ssh_info?: SshConnectionInfo | null;
   /** Optional for backward compat with 0.6.16 saved workspaces.
@@ -258,6 +269,8 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     }
     if (typeof si.custom_prefix !== "string") si.custom_prefix = "";
     if (typeof si.custom_suffix !== "string") si.custom_suffix = "";
+    if (si.agent_name !== undefined && typeof si.agent_name !== "string") delete si.agent_name;
+    if (si.agent_command !== undefined && typeof si.agent_command !== "string") delete si.agent_command;
     if (!Array.isArray(si.project_ids)) si.project_ids = [];
     // Default missing `mode` to "terminal" so existing 0.6.16 workspaces
     // never silently auto-convert sessions to agent mode on restore.

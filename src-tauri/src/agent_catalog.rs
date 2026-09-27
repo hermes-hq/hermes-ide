@@ -1,0 +1,168 @@
+//! The agent catalog, shared with the frontend.
+//!
+//! Every agent Hermes can start in a terminal is described once, in
+//! `src/catalog/agents.json` (schema: `src/catalog/agents.schema.json`,
+//! validated by `src/__tests__/agent-catalog.test.ts`). The binary embeds
+//! that file, so the launch line (`pty::ai_launch_command`) and the "is it
+//! installed" check (`platform::check_ai_cli_availability`) read the same
+//! data as the New Session screen. Only the fields the backend needs are
+//! deserialised here; the rest is ignored.
+
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+const CATALOG_JSON: &str = include_str!("../../src/catalog/agents.json");
+
+#[derive(Debug, Deserialize)]
+pub struct Catalog {
+    pub agents: Vec<Agent>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Agent {
+    pub id: String,
+    /// `stable` (everyone) or `beta` (behind the agentCatalog flag in the UI).
+    /// The UI does the gating; the backend only reads this in tests.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub channel: String,
+    /// The "Custom agent" entry: the user types the command.
+    #[serde(default)]
+    pub custom: bool,
+    pub terminal: Terminal,
+    pub detect: Option<Detect>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Terminal {
+    /// Starts a new session; every other argument list is appended to it.
+    pub argv: Vec<String>,
+    /// Permission mode (`default`, `acceptEdits`, ...) -> extra arguments.
+    pub permission_flags: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Detect {
+    /// `[binary, args...]`; the binary is what the availability check looks for.
+    pub command: Vec<String>,
+}
+
+fn parse(json: &str) -> Result<Catalog, String> {
+    serde_json::from_str(json).map_err(|e| format!("agent catalog is not valid: {e}"))
+}
+
+/// The embedded catalog. Its validity is enforced by tests (here and in the
+/// frontend schema test), so a broken file never reaches a build.
+pub fn catalog() -> &'static Catalog {
+    static CATALOG: OnceLock<Catalog> = OnceLock::new();
+    CATALOG.get_or_init(|| parse(CATALOG_JSON).expect("embedded agent catalog"))
+}
+
+pub fn agent(id: &str) -> Option<&'static Agent> {
+    catalog().agents.iter().find(|a| a.id == id)
+}
+
+/// `(agent id, binary)` for every agent that has a detect command, in
+/// catalog order.
+pub fn detect_binaries() -> Vec<(&'static str, &'static str)> {
+    catalog()
+        .agents
+        .iter()
+        .filter_map(|a| {
+            let bin = a.detect.as_ref()?.command.first()?;
+            Some((a.id.as_str(), bin.as_str()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_catalog_parses_and_has_the_expected_agents() {
+        let ids: Vec<&str> = catalog().agents.iter().map(|a| a.id.as_str()).collect();
+        for id in [
+            "claude",
+            "codex",
+            "antigravity",
+            "gemini",
+            "copilot",
+            "opencode",
+            "goose",
+            "hermes-agent",
+            "aider",
+            "kiro",
+            "custom",
+        ] {
+            assert!(ids.contains(&id), "catalog is missing {id}: {ids:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_custom_entry_has_no_command() {
+        for a in &catalog().agents {
+            if a.custom {
+                assert!(a.terminal.argv.is_empty());
+                assert!(a.detect.is_none());
+            } else {
+                assert!(!a.terminal.argv.is_empty(), "{} has no argv", a.id);
+                assert!(a.detect.is_some(), "{} has no detect command", a.id);
+            }
+        }
+    }
+
+    #[test]
+    fn detect_binaries_are_safe_to_put_in_a_shell_script() {
+        // platform::build_detection_script interpolates these into `command -v`.
+        let bins = detect_binaries();
+        assert!(bins.len() >= 10);
+        for (id, bin) in bins {
+            assert!(
+                !bin.is_empty()
+                    && bin
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')),
+                "{id}: unsafe binary name {bin:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn copilot_is_the_new_cli_not_the_retired_gh_extension() {
+        let copilot = agent("copilot").unwrap();
+        assert_eq!(copilot.terminal.argv, vec!["copilot".to_string()]);
+        let bins = detect_binaries();
+        assert!(bins.contains(&("copilot", "copilot")));
+        assert!(!bins.iter().any(|(_, b)| *b == "gh"));
+    }
+
+    /// The frontend preview (buildLaunchPreview) runs the same table, so the
+    /// line shown in the New Session screen is the line that gets typed.
+    #[test]
+    fn launch_lines_match_the_shared_cases() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/catalog/launch-cases.json")).unwrap();
+        let cases = cases["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for c in cases {
+            let s = |k: &str| c[k].as_str().unwrap().to_string();
+            let got = crate::pty::ai_launch_command(
+                &s("agent"),
+                &s("mode"),
+                &s("prefix"),
+                &s("suffix"),
+                &s("command"),
+            );
+            let want = c["expected"].as_str().map(str::to_string);
+            assert_eq!(got, want, "case {c}");
+        }
+    }
+
+    #[test]
+    fn a_broken_catalog_is_rejected() {
+        assert!(parse("{}").is_err());
+        assert!(parse(r#"{"agents":[{"id":"x"}]}"#).is_err());
+        assert!(parse(CATALOG_JSON).is_ok());
+    }
+}

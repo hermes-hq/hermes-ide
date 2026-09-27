@@ -7,6 +7,7 @@ import { revealProcessInFinder } from "../api/processes";
 import { ProjectPicker } from "./ProjectPicker";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 import { useSessionModel } from "../agent/useSessionModel";
+import { CUSTOM_AGENT_ID, agentDisplayName } from "../catalog/agentCatalog";
 import { useContextMenu, menuItem, separator, subMenu } from "../hooks/useContextMenu";
 import { homeDir } from "@tauri-apps/api/path";
 
@@ -173,7 +174,7 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
         })}
         {(model ?? activeSession?.ai_provider) && (
           <span className="scope-bar-provider" title={activeSession?.ai_provider ?? undefined}>
-            {model ?? activeSession?.ai_provider}
+            {model ?? (activeSession?.ai_provider === CUSTOM_AGENT_ID ? agentDisplayName(activeSession) : activeSession?.ai_provider)}
           </span>
         )}
         <button className="scope-bar-add" onClick={() => setPickerOpen(true)} title="Attach project">

@@ -8,15 +8,14 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { applyTheme, applyAgentTimelineStyle, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { fmt, PLATFORM } from "../utils/platform";
 import {
-  AI_PROVIDERS,
   AI_AGENT_PREFIXES_KEY,
   PREFIX_EXAMPLES,
   parseAgentPrefixes,
   serializeAgentPrefixes,
   getPrefixPlaceholder,
-  buildLaunchPreview,
   type AgentPrefixMap,
 } from "../utils/aiProviders";
+import { buildLaunchPreview, listAgents } from "../catalog/agentCatalog";
 import { useSession } from "../state/SessionContext";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -944,7 +943,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
 //
 // Displays per-agent prefix + suffix configuration. The prefix is stored as a
 // single JSON blob under `ai_agent_prefixes`, so adding a new provider to
-// AI_PROVIDERS never requires a DB schema or settings-whitelist change.
+// the agent catalog (src/catalog/agents.json) never requires a DB schema or settings-whitelist change.
 
 interface AiAgentSettingsTabProps {
   settings: SettingsMap;
@@ -1008,7 +1007,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
 
       <fieldset className="settings-agent-prefix-grid">
         <legend className="settings-agent-prefix-legend">{t("settings.agents")}</legend>
-        {AI_PROVIDERS.map((p) => {
+        {listAgents().map((p) => {
           const value = prefixes[p.id] ?? "";
           const inputId = `agent-prefix-${p.id}`;
           const hintId = `agent-prefix-hint-${p.id}`;
@@ -1016,7 +1015,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
           return (
             <div key={p.id} className="settings-agent-prefix-row">
               <label htmlFor={inputId} className="settings-agent-prefix-label">
-                {p.label}
+                {p.name}
               </label>
               <input
                 id={inputId}
@@ -1031,7 +1030,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
                 autoCorrect="off"
               />
               {examples.length > 0 && (
-                <div className="settings-agent-prefix-chips" role="group" aria-label={t("settings.prefixExamples", { agent: p.label })}>
+                <div className="settings-agent-prefix-chips" role="group" aria-label={t("settings.prefixExamples", { agent: p.name })}>
                   {examples.map((ex) => (
                     <button
                       key={ex.value}
@@ -1051,7 +1050,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
                 aria-live="polite"
               >
                 <span className="settings-agent-prefix-preview-label">{t("settings.preview")}</span>
-                <code className="settings-agent-prefix-preview-cmd">{preview || p.label}</code>
+                <code className="settings-agent-prefix-preview-cmd">{preview || p.name}</code>
               </div>
             </div>
           );

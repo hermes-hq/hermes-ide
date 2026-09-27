@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildLaunchPreview } from "../utils/aiProviders";
+import { buildLaunchPreview } from "../catalog/agentCatalog";
 
 describe("Kiro launch command (#295)", () => {
 	it("default mode launches the chat subcommand", () => {

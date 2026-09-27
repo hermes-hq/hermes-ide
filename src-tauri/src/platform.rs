@@ -122,15 +122,12 @@ pub fn command_exists(name: &str) -> bool {
     }
 }
 
-/// Provider ID → binary name mapping for AI CLI tools.
-pub const AI_CLI_PROVIDERS: &[(&str, &str)] = &[
-    ("claude", "claude"),
-    ("aider", "aider"),
-    ("codex", "codex"),
-    ("gemini", "gemini"),
-    ("copilot", "gh"),
-    ("kiro", "kiro-cli"),
-];
+/// Agent id → binary name for every agent CLI Hermes looks for, from the
+/// agent catalog (`src/catalog/agents.json`, the `detect` command of each
+/// entry).
+pub fn ai_cli_providers() -> Vec<(&'static str, &'static str)> {
+    crate::agent_catalog::detect_binaries()
+}
 
 /// Check which AI CLI tools are available on the system.
 ///
@@ -160,7 +157,7 @@ pub fn check_ai_cli_availability() -> std::collections::HashMap<String, bool> {
             // sitting in a well-known install directory. Never downgrades a
             // true hit — an empty/misconfigured profile can't mask a real
             // install, but a correct profile can always find the binary.
-            for (id, cmd) in AI_CLI_PROVIDERS {
+            for (id, cmd) in ai_cli_providers().iter() {
                 if results.get(*id).copied() == Some(false) && find_binary_in_well_known_dirs(cmd) {
                     results.insert((*id).to_string(), true);
                 }
@@ -171,7 +168,7 @@ pub fn check_ai_cli_availability() -> std::collections::HashMap<String, bool> {
 
     // Fallback: direct which/where (works when launched from a terminal
     // or on Windows).
-    AI_CLI_PROVIDERS
+    ai_cli_providers()
         .iter()
         .map(|(id, cmd)| (id.to_string(), command_exists(cmd)))
         .collect()
@@ -185,7 +182,7 @@ fn build_detection_script() -> String {
     // prints `id=1` or `id=0` on its own line. The parser only scans stdout
     // for those markers, so prompt/banner noise from interactive init files
     // doesn't affect the result.
-    AI_CLI_PROVIDERS
+    ai_cli_providers()
         .iter()
         .map(|(id, cmd)| {
             format!(
@@ -200,7 +197,7 @@ fn build_detection_script() -> String {
 /// Parse the login-shell stdout into a provider-id → available map.
 #[cfg(unix)]
 fn parse_detection_output(stdout: &str) -> std::collections::HashMap<String, bool> {
-    AI_CLI_PROVIDERS
+    ai_cli_providers()
         .iter()
         .map(|(id, _)| {
             let found = stdout.contains(&format!("{}=1", id));
@@ -309,7 +306,7 @@ mod tests {
     #[test]
     fn check_ai_cli_availability_returns_all_provider_keys() {
         let result = check_ai_cli_availability();
-        for (id, _) in AI_CLI_PROVIDERS {
+        for (id, _) in ai_cli_providers().iter() {
             assert!(result.contains_key(*id), "Missing provider key: {}", id);
         }
     }
@@ -393,7 +390,7 @@ mod tests {
         let map = results.unwrap();
         // We can't assert specific AI CLIs are installed, but all keys must
         // be present.
-        for (id, _) in AI_CLI_PROVIDERS {
+        for (id, _) in ai_cli_providers().iter() {
             assert!(
                 map.contains_key(*id),
                 "Missing key from login shell results: {}",
@@ -587,14 +584,14 @@ mod tests {
         // one entry to true for a guaranteed-missing binary name, and
         // verify that running the well-known-paths upgrade pass against an
         // inert HOME leaves the true value intact.
-        let mut results: std::collections::HashMap<String, bool> = AI_CLI_PROVIDERS
+        let mut results: std::collections::HashMap<String, bool> = ai_cli_providers()
             .iter()
             .map(|(id, _)| ((*id).to_string(), false))
             .collect();
         // Force one provider to pretend-true.
         results.insert("claude".to_string(), true);
 
-        for (id, cmd) in AI_CLI_PROVIDERS {
+        for (id, cmd) in ai_cli_providers().iter() {
             if results.get(*id).copied() == Some(false) && find_binary_in_well_known_dirs(cmd) {
                 results.insert((*id).to_string(), true);
             }
@@ -615,7 +612,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn login_shell_script_is_well_formed() {
-        let script = AI_CLI_PROVIDERS
+        let script = ai_cli_providers()
             .iter()
             .map(|(id, cmd)| {
                 format!(
@@ -627,7 +624,7 @@ mod tests {
             .join("; ");
 
         // No shell metacharacters from provider data
-        for (id, cmd) in AI_CLI_PROVIDERS {
+        for (id, cmd) in ai_cli_providers().iter() {
             assert!(
                 !id.contains('\'') && !id.contains(';') && !id.contains('|'),
                 "Provider ID contains unsafe chars: {}",
@@ -641,7 +638,7 @@ mod tests {
         }
 
         // Script should contain one check per provider
-        for (id, _) in AI_CLI_PROVIDERS {
+        for (id, _) in ai_cli_providers().iter() {
             assert!(script.contains(&format!("{}=1", id)));
             assert!(script.contains(&format!("{}=0", id)));
         }

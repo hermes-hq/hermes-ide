@@ -1,0 +1,588 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/hermes-hq/hermes-ide/src/catalog/agents.schema.json",
+  "title": "Hermes agent catalog",
+  "description": "Every agent Hermes knows how to start in a terminal. Validated by src/__tests__/agent-catalog.test.ts; read by the app (src/catalog/agentCatalog.ts, src-tauri/src/agent_catalog.rs) and by the nightly CLI drift check (scripts/agent-catalog-drift.mjs).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "agents"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/agent"
+      }
+    }
+  },
+  "definitions": {
+    "placeholder": {
+      "description": "Values Hermes fills in at launch.",
+      "enum": [
+        "{session_id}",
+        "{prompt}",
+        "{signals_file}",
+        "{signals_dir}",
+        "{hi}",
+        "{port}",
+        "{secret}"
+      ]
+    },
+    "shellToken": {
+      "description": "One argv item that is also safe to type into any shell unquoted (these are typed today; see ai_launch_command).",
+      "type": "string",
+      "pattern": "^([A-Za-z0-9@%+=:,./_-]+|\\{(session_id|prompt|signals_file|signals_dir|hi|port|secret)\\})$"
+    },
+    "execToken": {
+      "description": "One argv item passed without a shell (exec form). No control characters.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "shellArgs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/shellToken"
+      }
+    },
+    "shellArgsOrNull": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "minItems": 1,
+          "allOf": [
+            {
+              "$ref": "#/definitions/shellArgs"
+            }
+          ],
+          "type": "array"
+        }
+      ]
+    },
+    "binary": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": [
+        {
+          "$ref": "#/definitions/binary"
+        }
+      ],
+      "additionalItems": {
+        "$ref": "#/definitions/shellToken"
+      }
+    },
+    "url": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
+    },
+    "permissionMode": {
+      "enum": [
+        "default",
+        "acceptEdits",
+        "plan",
+        "auto",
+        "dontAsk",
+        "bypassPermissions"
+      ]
+    },
+    "status": {
+      "enum": [
+        "needs_approval",
+        "needs_answer",
+        "plan_ready",
+        "working",
+        "turn_end",
+        "error",
+        "exited",
+        "session_start"
+      ]
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "confidence"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "settings_file",
+            "config_flags",
+            "env_file",
+            "plugin_dir",
+            "worktree_file",
+            "event_stream",
+            "none"
+          ]
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/execToken"
+          }
+        },
+        "env": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/execToken"
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/-]+$"
+          }
+        },
+        "events": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/definitions/status"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "confidence": {
+          "enum": [
+            "exact",
+            "signal",
+            "guessed"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "if": {
+        "properties": {
+          "method": {
+            "const": "none"
+          }
+        },
+        "type": "object"
+      },
+      "then": {
+        "properties": {
+          "confidence": {
+            "const": "guessed"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "args"
+              ],
+              "type": "object"
+            },
+            {
+              "required": [
+                "env"
+              ],
+              "type": "object"
+            },
+            {
+              "required": [
+                "events"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "type": "object"
+      },
+      "else": {
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argv",
+        "resume",
+        "new_session_id",
+        "initial_prompt",
+        "signals",
+        "permission_flags",
+        "min_version"
+      ],
+      "properties": {
+        "argv": {
+          "description": "The command that starts a new session. Every other argument list is appended to it.",
+          "type": "array",
+          "items": [
+            {
+              "$ref": "#/definitions/binary"
+            }
+          ],
+          "additionalItems": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          }
+        },
+        "resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "by_id",
+            "latest"
+          ],
+          "properties": {
+            "by_id": {
+              "$ref": "#/definitions/shellArgsOrNull"
+            },
+            "latest": {
+              "$ref": "#/definitions/shellArgsOrNull"
+            }
+          }
+        },
+        "new_session_id": {
+          "$ref": "#/definitions/shellArgsOrNull"
+        },
+        "initial_prompt": {
+          "$ref": "#/definitions/shellArgsOrNull"
+        },
+        "signals": {
+          "$ref": "#/definitions/signals"
+        },
+        "permission_flags": {
+          "type": "object",
+          "required": [
+            "default"
+          ],
+          "propertyNames": {
+            "$ref": "#/definitions/permissionMode"
+          },
+          "properties": {
+            "default": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "additionalProperties": {
+            "minItems": 1,
+            "allOf": [
+              {
+                "$ref": "#/definitions/shellArgs"
+              }
+            ],
+            "type": "array"
+          }
+        },
+        "min_version": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            }
+          ]
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "vendor",
+        "description",
+        "homepage",
+        "status",
+        "channel",
+        "terminal",
+        "install",
+        "detect",
+        "auth",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "vendor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "homepage": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/url"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "current",
+            "legacy"
+          ]
+        },
+        "status_note": {
+          "type": "string",
+          "minLength": 1
+        },
+        "channel": {
+          "description": "stable: everyone sees it. beta: only with the agentCatalog feature flag.",
+          "enum": [
+            "stable",
+            "beta"
+          ]
+        },
+        "custom": {
+          "const": true
+        },
+        "terminal": {
+          "$ref": "#/definitions/terminal"
+        },
+        "structured": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol"
+          ],
+          "properties": {
+            "protocol": {
+              "enum": [
+                "claude-agent-sdk",
+                "codex-app-server",
+                "acp"
+              ]
+            },
+            "args": {
+              "$ref": "#/definitions/shellArgs"
+            }
+          }
+        },
+        "install": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "command",
+                "url"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "windows": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "url": {
+                  "$ref": "#/definitions/url"
+                },
+                "ci": {
+                  "description": "Non-interactive variant the nightly CLI drift check runs, when the documented command asks questions.",
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        },
+        "detect": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "$ref": "#/definitions/command"
+                }
+              }
+            }
+          ]
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "check",
+                "hint"
+              ],
+              "properties": {
+                "check": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/definitions/command"
+                    }
+                  ]
+                },
+                "hint": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          ]
+        },
+        "evidence": {
+          "description": "How the flags were checked: help = against the CLI's --help at this version; docs = vendor docs only; none = nothing to check.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "level"
+          ],
+          "properties": {
+            "level": {
+              "enum": [
+                "help",
+                "docs",
+                "none"
+              ]
+            },
+            "version": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "legacy"
+              }
+            },
+            "type": "object"
+          },
+          "then": {
+            "required": [
+              "status_note"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "custom"
+            ],
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "install": {
+                "type": "null"
+              },
+              "detect": {
+                "type": "null"
+              },
+              "auth": {
+                "type": "null"
+              },
+              "terminal": {
+                "properties": {
+                  "argv": {
+                    "maxItems": 0,
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "install": {
+                "type": "object"
+              },
+              "detect": {
+                "type": "object"
+              },
+              "auth": {
+                "type": "object"
+              },
+              "homepage": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              },
+              "terminal": {
+                "properties": {
+                  "argv": {
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    }
+  }
+}

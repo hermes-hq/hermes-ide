@@ -212,6 +212,13 @@ pub struct Session {
     #[serde(default)]
     pub custom_prefix: String,
     pub custom_suffix: String,
+    /// Custom agent only: the name the user gave it, shown for the session.
+    #[serde(default)]
+    pub agent_name: String,
+    /// Custom agent only: the command that starts it (same trust as a
+    /// command typed at the prompt; line breaks are stripped at launch).
+    #[serde(default)]
+    pub agent_command: String,
     pub channels: Vec<String>,
     pub context_injected: bool,
     pub has_initial_context: bool,
@@ -257,6 +264,10 @@ pub struct SessionUpdate {
     #[serde(default)]
     pub custom_prefix: String,
     pub custom_suffix: String,
+    #[serde(default)]
+    pub agent_name: String,
+    #[serde(default)]
+    pub agent_command: String,
     pub channels: Vec<String>,
     pub context_injected: bool,
     pub has_initial_context: bool,
@@ -287,6 +298,8 @@ impl From<&Session> for SessionUpdate {
             permission_mode: s.permission_mode.clone(),
             custom_prefix: s.custom_prefix.clone(),
             custom_suffix: s.custom_suffix.clone(),
+            agent_name: s.agent_name.clone(),
+            agent_command: s.agent_command.clone(),
             channels: s.channels.clone(),
             context_injected: s.context_injected,
             has_initial_context: s.has_initial_context,

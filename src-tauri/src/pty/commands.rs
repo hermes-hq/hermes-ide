@@ -699,6 +699,8 @@ pub fn create_session(
     permission_mode: Option<String>,
     custom_prefix: Option<String>,
     custom_suffix: Option<String>,
+    agent_name: Option<String>,
+    agent_command: Option<String>,
     channels: Option<Vec<String>>,
     ssh_host: Option<String>,
     ssh_port: Option<u16>,
@@ -812,6 +814,8 @@ pub fn create_session(
         }),
         custom_prefix: custom_prefix.unwrap_or_default(),
         custom_suffix: custom_suffix.unwrap_or_default(),
+        agent_name: agent_name.unwrap_or_default(),
+        agent_command: agent_command.unwrap_or_default(),
         channels: channels.unwrap_or_default(),
         context_injected: false,
         has_initial_context: ssh_host.is_none()
@@ -1222,6 +1226,7 @@ pub fn create_session(
                                         s.custom_prefix.clone(),
                                         s.custom_suffix.clone(),
                                         s.channels.clone(),
+                                        s.agent_command.clone(),
                                     )
                                 });
                                 if let Some((
@@ -1231,6 +1236,7 @@ pub fn create_session(
                                     ref custom_prefix,
                                     ref custom_suffix,
                                     ref channels,
+                                    ref agent_command,
                                 )) = launch_info
                                 {
                                     // Only launch known/allowed AI providers (reject unknown values)
@@ -1239,6 +1245,7 @@ pub fn create_session(
                                         perm_mode,
                                         custom_prefix,
                                         custom_suffix,
+                                        agent_command,
                                     ) {
                                         // For Claude/Gemini: pass context instruction as CLI argument
                                         // so it's processed immediately without PTY injection timing issues
@@ -1469,6 +1476,7 @@ pub fn create_session(
                                 s.custom_prefix.clone(),
                                 s.custom_suffix.clone(),
                                 s.channels.clone(),
+                                s.agent_command.clone(),
                             )
                         });
                         if let Some((
@@ -1478,11 +1486,16 @@ pub fn create_session(
                             ref custom_prefix,
                             ref custom_suffix,
                             ref channels,
+                            ref agent_command,
                         )) = launch_data
                         {
-                            if let Some(launch_cmd) =
-                                ai_launch_command(provider, perm_mode, custom_prefix, custom_suffix)
-                            {
+                            if let Some(launch_cmd) = ai_launch_command(
+                                provider,
+                                perm_mode,
+                                custom_prefix,
+                                custom_suffix,
+                                agent_command,
+                            ) {
                                 let supports_cli_prompt =
                                     provider == "claude" || provider == "gemini";
                                 let mut cmd = if has_context && supports_cli_prompt {

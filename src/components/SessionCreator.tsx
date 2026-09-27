@@ -8,16 +8,22 @@ import { getProjectsOrdered, createProject, deleteProject } from "../api/project
 import type { ProjectOrdered } from "../types/project";
 import { getSessions, sshListTmuxSessions, checkAiProviders } from "../api/sessions";
 import {
-  AI_PROVIDERS,
-  getProviderInfo,
-  PERMISSION_MODE_FLAGS,
-  getAvailableModes,
   AI_AGENT_PREFIXES_KEY,
   PREFIX_EXAMPLES,
   parseAgentPrefixes,
   getPrefixPlaceholder,
-  buildLaunchPreview,
 } from "../utils/aiProviders";
+import {
+  CUSTOM_AGENT_ID,
+  buildLaunchPreview,
+  customAgent,
+  getAgent,
+  getAvailableModes,
+  installCommand,
+  listAgents,
+  permissionFlagText,
+  sanitizeCommandFragment,
+} from "../catalog/agentCatalog";
 import { PLATFORM } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { LAST_AI_PROVIDER_KEY, resolveDefaultAiProvider } from "../utils/lastAiProvider";
@@ -178,6 +184,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [autoApprove, setAutoApprove] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [customSuffix, setCustomSuffix] = useState("");
+  // Custom agent (any command): the name shown for the session and the command typed to start it.
+  const [customAgentName, setCustomAgentName] = useState("");
+  const [customAgentCommand, setCustomAgentCommand] = useState("");
   const [agentPrefixDefaults, setAgentPrefixDefaults] = useState<Record<string, string>>({});
   const [customPrefix, setCustomPrefix] = useState("");
 
@@ -439,9 +448,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     if (step === "projects") searchRef.current?.focus();
     if (step === "ai") {
       aiStepRef.current?.focus();
-      const allItems = [...AI_PROVIDERS, { id: null }] as const;
-      const currentIdx = allItems.findIndex((p) => p.id === aiProvider);
-      setHighlightedProviderIndex(currentIdx >= 0 ? currentIdx : allItems.length - 1);
+      const currentIdx = enabledProviders.indexOf(aiProvider);
+      setHighlightedProviderIndex(currentIdx >= 0 ? currentIdx : enabledProviders.length - 1);
     }
     if (step === "confirm") {
       labelRef.current?.focus();
@@ -577,6 +585,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
       const isAgent = mode === "agent";
       // Pass aiProvider only for terminal mode; agent mode is implicitly Claude.
       const providerForCreate = isLocal && !isAgent ? aiProvider || undefined : isAgent ? "claude" : undefined;
+      const isCustomAgent = providerForCreate === CUSTOM_AGENT_ID;
 
       await onCreate({
         label: label || (mode === "ssh" ? sshLabel : undefined),
@@ -589,6 +598,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         permissionMode: isLocal && !isAgent && aiProvider ? permissionMode : undefined,
         customPrefix: isLocal && !isAgent && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
         customSuffix: isLocal && !isAgent && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
+        agentName: isCustomAgent ? sanitizeCommandFragment(customAgentName) || undefined : undefined,
+        agentCommand: isCustomAgent ? sanitizeCommandFragment(customAgentCommand) : undefined,
         // Channels still apply in agent mode (Telegram etc).
         channels: isLocal && (isAgent || aiProvider === "claude") && selectedChannels.length > 0 ? selectedChannels : undefined,
         projectIds: isLocal && selectedProjectIds.length > 0 ? selectedProjectIds : undefined,
@@ -634,12 +645,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     }
   };
 
-  const enabledProviders = useMemo(
-    () => [...AI_PROVIDERS.map((p) => p.id), null] as const,
-    []
+  // Agents from the catalog this build shows (beta entries and the Custom
+  // agent only with the agentCatalog flag), then "Plain shell" last.
+  const agents = useMemo(() => listAgents(), []);
+  const customAgentEntry = useMemo(() => customAgent(), []);
+  const enabledProviders = useMemo<(string | null)[]>(
+    () => [...agents.map((p) => p.id), ...(customAgentEntry ? [customAgentEntry.id] : []), null],
+    [agents, customAgentEntry],
   );
 
-  const knownProviderIds = useMemo(() => AI_PROVIDERS.map((p) => p.id), []);
+  const knownProviderIds = useMemo(() => enabledProviders.filter((id): id is string => id !== null), [enabledProviders]);
+  const customCommandMissing = aiProvider === CUSTOM_AGENT_ID && !sanitizeCommandFragment(customAgentCommand);
 
   // Load the persisted default once on mount.
   useEffect(() => {
@@ -686,8 +702,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const selectProviderAndAdvance = (idx: number) => {
     const id = enabledProviders[idx] ?? null;
     chooseAiProvider(id as string | null);
-    if (!id) { setAutoApprove(false); setPermissionMode("default"); }
+    if (!id || id === CUSTOM_AGENT_ID) { setAutoApprove(false); setPermissionMode("default"); }
     if (id !== "claude") setSelectedChannels([]);
+    // The Custom agent needs its command typed first.
+    if (id === CUSTOM_AGENT_ID && !sanitizeCommandFragment(customAgentCommand)) return;
     goNext();
   };
 
@@ -1261,17 +1279,18 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         {step === "ai" && mode === "terminal" && (
           <div className="session-creator-body" ref={aiStepRef} tabIndex={-1} style={{ outline: "none" }}>
             <div className="session-creator-provider-grid">
-              {AI_PROVIDERS.map((p) => {
+              {agents.map((p) => {
                 const providerIdx = enabledProviders.indexOf(p.id);
                 const isAvailable = !availabilityLoaded || providerAvailability[p.id];
                 return (
                   <button
                     key={p.id}
+                    data-agent-id={p.id}
                     className={`session-creator-provider-card ${aiProvider === p.id ? "selected" : ""} ${highlightedProviderIndex === providerIdx ? "selected" : ""} ${availabilityLoaded && !isAvailable ? "session-creator-provider-unavailable" : ""}`}
                     onClick={() => { chooseAiProvider(p.id); setHighlightedProviderIndex(providerIdx); if (p.id !== "claude") setSelectedChannels([]); }}
                   >
                     <span className="session-creator-provider-name">
-                      {p.label}
+                      {p.name}
                       {availabilityLoaded && !isAvailable && (
                         <span className="session-creator-provider-status-badge">{t("session.notDetected")}</span>
                       )}
@@ -1280,7 +1299,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     {availabilityLoaded && !isAvailable && (
                       <a
                         className="session-creator-provider-install-link"
-                        onClick={(e) => { e.stopPropagation(); shellOpen(p.installUrl); }}
+                        onClick={(e) => { e.stopPropagation(); if (p.install) shellOpen(p.install.url); }}
                       >
                         How to install
                       </a>
@@ -1288,6 +1307,22 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   </button>
                 );
               })}
+              {customAgentEntry && (
+                <button
+                  data-agent-id={customAgentEntry.id}
+                  className={`session-creator-provider-card ${aiProvider === customAgentEntry.id ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.indexOf(customAgentEntry.id) ? "selected" : ""}`}
+                  onClick={() => {
+                    chooseAiProvider(customAgentEntry.id);
+                    setHighlightedProviderIndex(enabledProviders.indexOf(customAgentEntry.id));
+                    setPermissionMode("default");
+                    setAutoApprove(false);
+                    setSelectedChannels([]);
+                  }}
+                >
+                  <span className="session-creator-provider-name">{customAgentEntry.name}</span>
+                  <span className="session-creator-provider-desc">{customAgentEntry.description}</span>
+                </button>
+              )}
               <button
                 className={`session-creator-provider-card ${aiProvider === null ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.length - 1 ? "selected" : ""}`}
                 onClick={() => { setAiProvider(null); setAutoApprove(false); setSelectedChannels([]); setHighlightedProviderIndex(enabledProviders.length - 1); }}
@@ -1296,16 +1331,57 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 <span className="session-creator-provider-desc">{t("session.noAiAgent")}</span>
               </button>
             </div>
-            {aiProvider && availabilityLoaded && !providerAvailability[aiProvider] && (
+            {aiProvider && getAgent(aiProvider)?.install && availabilityLoaded && !providerAvailability[aiProvider] && (
               <div className="session-creator-install-hint">
                 <div className="session-creator-install-hint-title">
-                  {t("session.cliNotDetected", { cli: getProviderInfo(aiProvider)?.label ?? aiProvider })}
+                  {t("session.cliNotDetected", { cli: getAgent(aiProvider)?.name ?? aiProvider })}
                 </div>
-                <code className="session-creator-install-hint-cmd">{getProviderInfo(aiProvider)?.installCmd}</code>
-                <div className="session-creator-install-hint-auth">{getProviderInfo(aiProvider)?.authHint}</div>
+                <code className="session-creator-install-hint-cmd">{installCommand(getAgent(aiProvider))}</code>
+                <div className="session-creator-install-hint-auth">{getAgent(aiProvider)?.auth?.hint}</div>
               </div>
             )}
-            {aiProvider && (
+            {aiProvider && getAgent(aiProvider)?.status_note && (
+              <div className="session-creator-install-hint session-creator-agent-note">
+                <div className="session-creator-install-hint-auth">{getAgent(aiProvider)?.status_note}</div>
+              </div>
+            )}
+            {aiProvider === CUSTOM_AGENT_ID && (
+              <div className="session-creator-custom-agent">
+                <div className="session-creator-custom-suffix">
+                  <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-name">Name</label>
+                  <input
+                    id="session-creator-custom-agent-name"
+                    type="text"
+                    className="session-creator-custom-suffix-input"
+                    value={customAgentName}
+                    onChange={(e) => setCustomAgentName(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    placeholder="e.g. My agent"
+                    maxLength={40}
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="session-creator-custom-suffix">
+                  <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-command">Command</label>
+                  <input
+                    id="session-creator-custom-agent-command"
+                    type="text"
+                    className="session-creator-custom-suffix-input"
+                    value={customAgentCommand}
+                    onChange={(e) => setCustomAgentCommand(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    placeholder="e.g. aider --model sonnet"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                  />
+                  <span className="session-creator-custom-suffix-hint">
+                    Hermes starts this command in the session's terminal, as if you typed it.
+                  </span>
+                </div>
+              </div>
+            )}
+            {aiProvider && aiProvider !== CUSTOM_AGENT_ID && (
               <div className="session-creator-permission-mode">
                 <div className="session-creator-permission-mode-label">{t("session.approvalFlow")}</div>
                 <div className="session-creator-permission-mode-pills">
@@ -1327,9 +1403,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   <span className="session-creator-permission-mode-desc">
                     {permissionDescription(permissionMode)}
                   </span>
-                  {PERMISSION_MODE_FLAGS[aiProvider]?.[permissionMode]?.flag && (
+                  {permissionFlagText(aiProvider, permissionMode) && (
                     <code className="session-creator-permission-mode-flag">
-                      {PERMISSION_MODE_FLAGS[aiProvider][permissionMode]!.flag}
+                      {permissionFlagText(aiProvider, permissionMode)}
                     </code>
                   )}
                 </div>
@@ -1396,7 +1472,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               >
                 <span className="session-creator-launch-preview-label">{t("session.preview")}</span>
                 <code className="session-creator-launch-preview-cmd">
-                  {buildLaunchPreview(aiProvider, permissionMode, customPrefix, customSuffix)}
+                  {buildLaunchPreview(aiProvider, permissionMode, customPrefix, customSuffix, customAgentCommand)}
                 </code>
               </div>
             )}
@@ -1436,7 +1512,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <button className="session-creator-btn-secondary" onClick={goBack}>
                 {t("common.back")}
               </button>
-              <button className="session-creator-btn-primary" onClick={goNext}>
+              <button className="session-creator-btn-primary" onClick={goNext} disabled={customCommandMissing}>
                 {t("common.next")}
               </button>
             </div>
@@ -1496,7 +1572,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       {mode === "agent"
                         ? t("mode.agent.label")
                         : aiProvider
-                          ? AI_PROVIDERS.find((p) => p.id === aiProvider)?.label ?? aiProvider
+                          ? (aiProvider === CUSTOM_AGENT_ID ? sanitizeCommandFragment(customAgentName) : "") || getAgent(aiProvider)?.name || aiProvider
                           : t("session.plainShell")}
                       {mode === "terminal" && aiProvider && permissionMode !== "default" && (
                         <span className="session-creator-summary-flag"> ({permissionShortLabel(permissionMode)})</span>

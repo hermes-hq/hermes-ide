@@ -135,3 +135,19 @@ features:
       F07-2:
         text: "A signed-out Claude shows \"signed out\" with a Sign in action"
         scenarios: [F07-agent-view-respawn.mjs]
+  F06:
+    name: "Agent catalog as data"
+    status: partial
+    criteria:
+      # Not app behaviour, so proven outside this ledger:
+      #   "The catalog loads from one file validated by a schema test" and
+      #   "No deprecated install command remains":
+      #     src/__tests__/agent-catalog.test.ts (vitest) and
+      #     src-tauri/src/agent_catalog.rs (cargo test), both in the CI gate.
+      #   "A nightly job installs the latest CLIs and reports any flag the
+      #   catalog uses that no longer exists":
+      #     .github/workflows/agent-cli-drift.yml, with unit tests in
+      #     src/__tests__/agent-catalog-drift.test.ts.
+      F06-3:
+        text: "A custom agent launches in a terminal and shows in the sidebar with its name"
+        scenarios: [F06-custom-agent.mjs]

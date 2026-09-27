@@ -1,0 +1,409 @@
+{
+  "$schema": "./agents.schema.json",
+  "version": 1,
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "vendor": "Anthropic",
+      "description": "Anthropic's coding agent",
+      "homepage": "https://code.claude.com/docs/en/setup",
+      "status": "current",
+      "channel": "stable",
+      "terminal": {
+        "argv": ["claude"],
+        "resume": { "by_id": ["--resume", "{session_id}"], "latest": ["--continue"] },
+        "new_session_id": ["--session-id", "{session_id}"],
+        "initial_prompt": ["{prompt}"],
+        "signals": {
+          "method": "settings_file",
+          "args": ["--settings", "{signals_file}"],
+          "events": {
+            "session_start": ["SessionStart"],
+            "working": ["UserPromptSubmit", "PostToolUse", "PostToolUseFailure"],
+            "needs_approval": ["PermissionRequest"],
+            "needs_answer": ["PreToolUse:AskUserQuestion", "Notification:elicitation_dialog"],
+            "plan_ready": ["PreToolUse:ExitPlanMode"],
+            "turn_end": ["Stop"],
+            "error": ["StopFailure"],
+            "exited": ["SessionEnd"]
+          },
+          "confidence": "exact",
+          "note": "Hook entries merge with the user's own hooks; nothing is written to the user's settings."
+        },
+        "permission_flags": {
+          "default": [],
+          "acceptEdits": ["--permission-mode", "acceptEdits"],
+          "plan": ["--permission-mode", "plan"],
+          "auto": ["--permission-mode", "auto"],
+          "dontAsk": ["--permission-mode", "dontAsk"],
+          "bypassPermissions": ["--permission-mode", "bypassPermissions"]
+        },
+        "min_version": "2.1.0"
+      },
+      "structured": { "protocol": "claude-agent-sdk" },
+      "install": {
+        "command": "curl -fsSL https://claude.ai/install.sh | bash",
+        "windows": "irm https://claude.ai/install.ps1 | iex",
+        "url": "https://code.claude.com/docs/en/setup"
+      },
+      "detect": { "command": ["claude", "--version"] },
+      "auth": { "check": ["claude", "auth", "status"], "hint": "Run 'claude' and sign in on first use" },
+      "evidence": { "level": "help", "version": "2.1.283" }
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "vendor": "OpenAI",
+      "description": "OpenAI's coding agent",
+      "homepage": "https://github.com/openai/codex",
+      "status": "current",
+      "channel": "stable",
+      "terminal": {
+        "argv": ["codex"],
+        "resume": { "by_id": ["resume", "{session_id}"], "latest": ["resume", "--last"] },
+        "new_session_id": null,
+        "initial_prompt": ["{prompt}"],
+        "signals": {
+          "method": "config_flags",
+          "args": [
+            "-c", "tui.notifications=true",
+            "-c", "tui.notification_method=\"osc9\"",
+            "-c", "tui.notification_condition=\"always\"",
+            "-c", "notify=[\"{hi}\",\"signal\",\"--agent\",\"codex\",\"--argv-json\"]"
+          ],
+          "events": {
+            "session_start": ["SessionStart"],
+            "working": ["UserPromptSubmit", "PostToolUse"],
+            "needs_approval": ["PermissionRequest", "osc9:Approval requested"],
+            "needs_answer": ["osc9:Question requested"],
+            "turn_end": ["notify:agent-turn-complete", "Stop"],
+            "exited": ["SessionEnd"]
+          },
+          "confidence": "exact",
+          "note": "No flag assigns a session id up front; it is read from the hook session_id or the notify thread-id."
+        },
+        "permission_flags": {
+          "default": [],
+          "auto": ["--sandbox", "workspace-write", "--ask-for-approval", "on-request"],
+          "bypassPermissions": ["--dangerously-bypass-approvals-and-sandbox"]
+        },
+        "min_version": "0.145.0"
+      },
+      "structured": { "protocol": "codex-app-server", "args": ["app-server"] },
+      "install": {
+        "command": "npm install -g @openai/codex",
+        "url": "https://github.com/openai/codex"
+      },
+      "detect": { "command": ["codex", "--version"] },
+      "auth": { "check": ["codex", "login", "status"], "hint": "Run 'codex' and sign in on first use" },
+      "evidence": { "level": "help", "version": "0.145.0" }
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity CLI",
+      "vendor": "Google",
+      "description": "Google's coding agent (agy)",
+      "homepage": "https://antigravity.google/docs/cli/install/",
+      "status": "current",
+      "channel": "beta",
+      "terminal": {
+        "argv": ["agy"],
+        "resume": { "by_id": ["--conversation", "{session_id}"], "latest": ["--continue"] },
+        "new_session_id": null,
+        "initial_prompt": ["--prompt-interactive", "{prompt}"],
+        "signals": {
+          "method": "worktree_file",
+          "files": [".agents/hooks.json"],
+          "events": {
+            "working": ["PreToolUse", "PostToolUse"],
+            "turn_end": ["Stop:fullyIdle"],
+            "error": ["Stop:error"]
+          },
+          "confidence": "exact",
+          "note": "No per-launch flag exists; the hook file goes into the Hermes-owned worktree and is excluded from git. There is no approval event, so approvals stay guessed."
+        },
+        "permission_flags": {
+          "default": [],
+          "bypassPermissions": ["--dangerously-skip-permissions"]
+        },
+        "min_version": "1.0.6"
+      },
+      "install": {
+        "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        "windows": "irm https://antigravity.google/cli/install.ps1 | iex",
+        "url": "https://antigravity.google/docs/cli/install/"
+      },
+      "detect": { "command": ["agy", "--version"] },
+      "auth": { "check": null, "hint": "Run 'agy' and sign in with Google in the browser, or set GEMINI_API_KEY" },
+      "evidence": { "level": "help", "version": "1.0.6" }
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI (legacy)",
+      "vendor": "Google",
+      "description": "Google's previous coding agent",
+      "homepage": "https://github.com/google-gemini/gemini-cli",
+      "status": "legacy",
+      "status_note": "Retired for personal Google accounts on 2026-06-18; still works with a paid API key or Gemini Code Assist Standard or Enterprise. Antigravity CLI is Google's current agent.",
+      "channel": "stable",
+      "terminal": {
+        "argv": ["gemini"],
+        "resume": { "by_id": ["--resume", "{session_id}"], "latest": ["--resume", "latest"] },
+        "new_session_id": ["--session-id", "{session_id}"],
+        "initial_prompt": ["{prompt}"],
+        "signals": {
+          "method": "env_file",
+          "env": { "GEMINI_CLI_SYSTEM_DEFAULTS_PATH": "{signals_file}" },
+          "events": {
+            "needs_approval": ["Notification:ToolPermission"],
+            "turn_end": ["AfterAgent"],
+            "exited": ["SessionEnd"]
+          },
+          "confidence": "exact",
+          "note": "The lowest-precedence settings layer; hook arrays merge with the user's own."
+        },
+        "permission_flags": {
+          "default": [],
+          "acceptEdits": ["--approval-mode", "auto_edit"],
+          "plan": ["--approval-mode", "plan"],
+          "bypassPermissions": ["--yolo"]
+        },
+        "min_version": "0.45.0"
+      },
+      "structured": { "protocol": "acp", "args": ["--acp"] },
+      "install": {
+        "command": "npm install -g @google/gemini-cli",
+        "url": "https://github.com/google-gemini/gemini-cli"
+      },
+      "detect": { "command": ["gemini", "--version"] },
+      "auth": { "check": null, "hint": "Needs GEMINI_API_KEY or a Gemini Code Assist Standard or Enterprise login" },
+      "evidence": { "level": "help", "version": "0.45.2" }
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot CLI",
+      "vendor": "GitHub",
+      "description": "GitHub's coding agent",
+      "homepage": "https://github.com/github/copilot-cli",
+      "status": "current",
+      "channel": "stable",
+      "terminal": {
+        "argv": ["copilot"],
+        "resume": { "by_id": ["--resume", "{session_id}"], "latest": ["--continue"] },
+        "new_session_id": ["--session-id", "{session_id}"],
+        "initial_prompt": ["--interactive", "{prompt}"],
+        "signals": {
+          "method": "plugin_dir",
+          "args": ["--plugin-dir", "{signals_dir}"],
+          "events": {
+            "needs_approval": ["notification:permission_prompt"],
+            "needs_answer": ["notification:elicitation_dialog"],
+            "turn_end": ["agentStop"],
+            "error": ["errorOccurred"]
+          },
+          "confidence": "signal",
+          "note": "notification can fire for tools that are already approved (github/copilot-cli#2586), so approval is not exact."
+        },
+        "permission_flags": {
+          "default": [],
+          "plan": ["--plan"],
+          "auto": ["--allow-all-tools"],
+          "bypassPermissions": ["--allow-all"]
+        },
+        "min_version": "1.0.0"
+      },
+      "structured": { "protocol": "acp", "args": ["--acp"] },
+      "install": {
+        "command": "npm install -g @github/copilot",
+        "url": "https://github.com/github/copilot-cli"
+      },
+      "detect": { "command": ["copilot", "--version"] },
+      "auth": { "check": null, "hint": "Run 'copilot' and use /login, or set GH_TOKEN" },
+      "evidence": { "level": "help", "version": "1.0.88" }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "vendor": "SST",
+      "description": "Open-source coding agent for any model",
+      "homepage": "https://opencode.ai/docs/cli/",
+      "status": "current",
+      "channel": "beta",
+      "terminal": {
+        "argv": ["opencode"],
+        "resume": { "by_id": ["--session", "{session_id}"], "latest": ["--continue"] },
+        "new_session_id": null,
+        "initial_prompt": ["--prompt", "{prompt}"],
+        "signals": {
+          "method": "event_stream",
+          "args": ["--port", "{port}", "--hostname", "127.0.0.1"],
+          "env": { "OPENCODE_SERVER_PASSWORD": "{secret}" },
+          "events": {
+            "working": ["session.status"],
+            "needs_approval": ["permission.asked"],
+            "turn_end": ["session.idle"],
+            "error": ["session.error"]
+          },
+          "confidence": "exact",
+          "note": "Hermes reads the local event stream (GET /event)."
+        },
+        "permission_flags": {
+          "default": [],
+          "auto": ["--auto"]
+        },
+        "min_version": "1.18.0"
+      },
+      "structured": { "protocol": "acp", "args": ["acp"] },
+      "install": {
+        "command": "npm install -g opencode-ai",
+        "url": "https://opencode.ai/docs/"
+      },
+      "detect": { "command": ["opencode", "--version"] },
+      "auth": { "check": ["opencode", "providers", "list"], "hint": "Run 'opencode providers login' to add a model provider" },
+      "evidence": { "level": "help", "version": "1.18.32" }
+    },
+    {
+      "id": "goose",
+      "name": "goose",
+      "vendor": "AAIF",
+      "description": "Open-source agent for any model",
+      "homepage": "https://goose-docs.ai/docs/getting-started/installation",
+      "status": "current",
+      "channel": "beta",
+      "terminal": {
+        "argv": ["goose", "session"],
+        "resume": { "by_id": ["--resume", "--session-id", "{session_id}"], "latest": ["--resume"] },
+        "new_session_id": null,
+        "initial_prompt": null,
+        "signals": {
+          "method": "worktree_file",
+          "files": [".agents/plugins/hermes-signal/hooks/hooks.json"],
+          "events": { "turn_end": ["Stop"] },
+          "confidence": "guessed",
+          "note": "Hooks only through plugin folders; no approval or notification event."
+        },
+        "permission_flags": { "default": [] },
+        "min_version": null
+      },
+      "install": {
+        "command": "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
+        "url": "https://goose-docs.ai/docs/getting-started/installation"
+      },
+      "detect": { "command": ["goose", "--version"] },
+      "auth": { "check": null, "hint": "Run 'goose configure' to choose a model provider" },
+      "evidence": { "level": "docs" }
+    },
+    {
+      "id": "hermes-agent",
+      "name": "Hermes Agent",
+      "vendor": "Nous Research",
+      "description": "Nous Research's agent (not related to Hermes IDE)",
+      "homepage": "https://github.com/NousResearch/hermes-agent",
+      "status": "current",
+      "channel": "beta",
+      "terminal": {
+        "argv": ["hermes"],
+        "resume": { "by_id": ["--resume", "{session_id}"], "latest": ["--continue"] },
+        "new_session_id": null,
+        "initial_prompt": null,
+        "signals": { "method": "none", "confidence": "guessed" },
+        "permission_flags": {
+          "default": [],
+          "bypassPermissions": ["--yolo"]
+        },
+        "min_version": null
+      },
+      "install": {
+        "command": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+        "windows": "iex (irm https://hermes-agent.nousresearch.com/install.ps1)",
+        "ci": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-browser",
+        "url": "https://github.com/NousResearch/hermes-agent"
+      },
+      "detect": { "command": ["hermes", "--version"] },
+      "auth": { "check": ["hermes", "status"], "hint": "Run 'hermes setup' to choose a model provider" },
+      "evidence": { "level": "docs" }
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "vendor": "Aider",
+      "description": "AI pair programming in your terminal",
+      "homepage": "https://aider.chat/docs/install.html",
+      "status": "current",
+      "channel": "stable",
+      "terminal": {
+        "argv": ["aider"],
+        "resume": { "by_id": null, "latest": ["--restore-chat-history"] },
+        "new_session_id": null,
+        "initial_prompt": null,
+        "signals": { "method": "none", "confidence": "guessed" },
+        "permission_flags": {
+          "default": [],
+          "auto": ["--yes-always"],
+          "bypassPermissions": ["--yes-always"]
+        },
+        "min_version": null
+      },
+      "install": {
+        "command": "python -m pip install aider-install && aider-install",
+        "ci": "python3 -m pip install aider-install && aider-install",
+        "url": "https://aider.chat/docs/install.html"
+      },
+      "detect": { "command": ["aider", "--version"] },
+      "auth": { "check": null, "hint": "Set OPENAI_API_KEY or ANTHROPIC_API_KEY" },
+      "evidence": { "level": "docs" }
+    },
+    {
+      "id": "kiro",
+      "name": "Kiro CLI",
+      "vendor": "AWS",
+      "description": "Kiro's coding agent",
+      "homepage": "https://kiro.dev/docs/cli/",
+      "status": "current",
+      "channel": "stable",
+      "terminal": {
+        "argv": ["kiro-cli", "chat"],
+        "resume": { "by_id": null, "latest": ["--resume"] },
+        "new_session_id": null,
+        "initial_prompt": ["{prompt}"],
+        "signals": { "method": "none", "confidence": "guessed" },
+        "permission_flags": {
+          "default": [],
+          "auto": ["--trust-all-tools"]
+        },
+        "min_version": null
+      },
+      "install": {
+        "command": "curl -fsSL https://cli.kiro.dev/install | bash",
+        "url": "https://kiro.dev/docs/cli/"
+      },
+      "detect": { "command": ["kiro-cli", "--version"] },
+      "auth": { "check": ["kiro-cli", "whoami"], "hint": "Run 'kiro-cli login' to sign in" },
+      "evidence": { "level": "docs" }
+    },
+    {
+      "id": "custom",
+      "name": "Custom agent",
+      "vendor": null,
+      "description": "Any command you type",
+      "homepage": null,
+      "status": "current",
+      "channel": "beta",
+      "custom": true,
+      "terminal": {
+        "argv": [],
+        "resume": { "by_id": null, "latest": null },
+        "new_session_id": null,
+        "initial_prompt": null,
+        "signals": { "method": "none", "confidence": "guessed" },
+        "permission_flags": { "default": [] },
+        "min_version": null
+      },
+      "install": null,
+      "detect": null,
+      "auth": null,
+      "evidence": { "level": "none" }
+    }
+  ]
+}

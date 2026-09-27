@@ -1,4 +1,5 @@
 mod agent;
+mod agent_catalog;
 mod claude_config;
 mod clipboard;
 mod db;
@@ -1032,6 +1033,8 @@ mod tests {
             permission_mode: "default".to_string(),
             custom_prefix: String::new(),
             custom_suffix: String::new(),
+            agent_name: String::new(),
+            agent_command: String::new(),
             channels: vec![],
             context_injected: false,
             has_initial_context: false,

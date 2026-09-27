@@ -1,0 +1,60 @@
+name: Agent CLI drift
+
+# Installs the latest release of every agent CLI in the agent catalog
+# (src/catalog/agents.json) with its documented install command, then fails
+# with a diff when a flag or subcommand the catalog uses no longer exists in
+# that CLI's --help. No credentials: nothing here signs in or starts a model
+# turn. See scripts/agent-catalog-drift.mjs.
+#
+# Runs every night, by hand, and on any push that changes the catalog or the
+# check itself (so a catalog edit is checked against today's CLIs).
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/catalog/agents.json"
+      - "scripts/agent-catalog-drift.mjs"
+      - ".github/workflows/agent-cli-drift.yml"
+
+concurrency:
+  group: agent-cli-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Latest agent CLIs still accept the catalog's flags
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Install the latest CLIs and compare their flags with the catalog
+        env:
+          # The runner's system Python refuses global pip installs (PEP 668);
+          # aider's documented installer needs one.
+          PIP_BREAK_SYSTEM_PACKAGES: "1"
+        run: node scripts/agent-catalog-drift.mjs --install --out "$RUNNER_TEMP/agent-cli-drift"
+      - name: Report
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/agent-cli-drift/report.md" ]; then
+            cat "$RUNNER_TEMP/agent-cli-drift/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: agent-cli-drift
+          path: ${{ runner.temp }}/agent-cli-drift
+          if-no-files-found: ignore
+          retention-days: 14

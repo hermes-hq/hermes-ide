@@ -39,6 +39,12 @@ export const FEATURE_FLAGS = [
     description:
       "In the optional Agent view, say why the agent stopped (could not start, signed out, exited, busy, unreadable output) with a Retry or Sign in button, instead of the one-line exit notice.",
   },
+  {
+    id: "agentCatalog",
+    label: "More agents and Custom agent",
+    description:
+      "Shows the agents new in 2.0 (Antigravity CLI, OpenCode, goose, Hermes Agent) and the Custom agent card in the New Session agent step.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

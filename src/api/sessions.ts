@@ -18,6 +18,10 @@ export function createSession(opts: {
   permissionMode?: string | null;
   customPrefix?: string | null;
   customSuffix?: string | null;
+  /** Custom agent only: the name shown for the session. */
+  agentName?: string | null;
+  /** Custom agent only: the command typed to start it. */
+  agentCommand?: string | null;
   channels?: string[] | null;
   sshHost?: string | null;
   sshPort?: number | null;

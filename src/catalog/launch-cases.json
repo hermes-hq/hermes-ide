@@ -1,0 +1,22 @@
+{
+  "description": "Launch lines both sides must build identically: src/__tests__/agent-catalog.test.ts (buildLaunchPreview) and src-tauri/src/agent_catalog.rs (pty::ai_launch_command). null = nothing is launched.",
+  "cases": [
+    { "agent": "claude", "mode": "default", "prefix": "", "suffix": "", "command": "", "expected": "claude" },
+    { "agent": "claude", "mode": "acceptEdits", "prefix": "caffeinate -i", "suffix": "--model opus", "command": "", "expected": "caffeinate -i claude --permission-mode acceptEdits --model opus" },
+    { "agent": "codex", "mode": "auto", "prefix": "", "suffix": "", "command": "", "expected": "codex --sandbox workspace-write --ask-for-approval on-request" },
+    { "agent": "codex", "mode": "bypassPermissions", "prefix": "", "suffix": "", "command": "", "expected": "codex --dangerously-bypass-approvals-and-sandbox" },
+    { "agent": "antigravity", "mode": "default", "prefix": "", "suffix": "", "command": "", "expected": "agy" },
+    { "agent": "gemini", "mode": "plan", "prefix": "", "suffix": "", "command": "", "expected": "gemini --approval-mode plan" },
+    { "agent": "copilot", "mode": "default", "prefix": "wsl", "suffix": "", "command": "", "expected": "wsl copilot" },
+    { "agent": "copilot", "mode": "auto", "prefix": "", "suffix": "", "command": "", "expected": "copilot --allow-all-tools" },
+    { "agent": "opencode", "mode": "auto", "prefix": "", "suffix": "", "command": "", "expected": "opencode --auto" },
+    { "agent": "goose", "mode": "default", "prefix": "", "suffix": "", "command": "", "expected": "goose session" },
+    { "agent": "hermes-agent", "mode": "default", "prefix": "", "suffix": "", "command": "", "expected": "hermes" },
+    { "agent": "aider", "mode": "plan", "prefix": "", "suffix": "", "command": "", "expected": "aider" },
+    { "agent": "kiro", "mode": "auto", "prefix": "", "suffix": "", "command": "", "expected": "kiro-cli chat --trust-all-tools" },
+    { "agent": "custom", "mode": "default", "prefix": "", "suffix": "", "command": "node fake-agent.mjs", "expected": "node fake-agent.mjs" },
+    { "agent": "custom", "mode": "bypassPermissions", "prefix": "  nice -n 10 ", "suffix": " --x ", "command": " aider\nrm -rf / ", "expected": "nice -n 10 aider rm -rf / --x" },
+    { "agent": "custom", "mode": "default", "prefix": "", "suffix": "", "command": "   ", "expected": null },
+    { "agent": "nope", "mode": "default", "prefix": "", "suffix": "", "command": "", "expected": null }
+  ]
+}

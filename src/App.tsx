@@ -73,11 +73,7 @@ import { WhatsNewDialog } from "./components/WhatsNewDialog";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { FeatureFlagDummyBanner } from "./components/FeatureFlagDummyBanner";
-import { AI_PROVIDERS as AI_PROVIDER_LIST } from "./utils/aiProviders";
-
-const AI_PROVIDER_INFO_MAP: Record<string, { label: string; installCmd: string }> = Object.fromEntries(
-  AI_PROVIDER_LIST.map((p) => [p.id, { label: p.label, installCmd: p.installCmd }])
-);
+import { launchFailedMessage } from "./catalog/agentCatalog";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 
 function AppContent() {
@@ -278,10 +274,8 @@ function AppContent() {
     let unlisten: (() => void) | null = null;
     listen<string>("ai-launch-failed", (event) => {
       if (cancelled) return;
-      const provider = event.payload;
-      const providerInfo = AI_PROVIDER_INFO_MAP[provider];
       toastStoreRef.current.addToast({
-        message: `${providerInfo?.label ?? provider} CLI was not found. Install with: ${providerInfo?.installCmd ?? provider}`,
+        message: launchFailedMessage(event.payload),
         type: "warning",
         duration: 15000,
       });

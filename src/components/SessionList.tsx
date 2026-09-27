@@ -16,6 +16,7 @@ import { PortForwardsPanel } from "./PortForwardsPanel";
 import type { PluginSessionActionContribution } from "../plugins/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionModel } from "../agent/useSessionModel";
+import { agentDisplayName } from "../catalog/agentCatalog";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -34,10 +35,11 @@ export function sessionCloseTitle(
 }
 
 /** Session-card agent tag (#317): terminal mode shows the detected agent plus
- *  its model ("Claude Code · opus"); agent mode shows the active model. */
+ *  its model ("Claude Code · opus"), or the name given to a Custom agent;
+ *  agent mode shows the active model. */
 export function SessionAgentTag({ session }: { session: SessionData }) {
   const model = useSessionModel(session);
-  const name = session.detected_agent?.name;
+  const name = agentDisplayName(session) ?? undefined;
   const label = name && model ? `${name} · ${model}` : name ?? model;
   return label ? <span className="session-agent-tag">{label}</span> : null;
 }

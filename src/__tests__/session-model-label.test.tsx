@@ -112,4 +112,14 @@ describe("SessionAgentTag (#317)", () => {
     rerender(<SessionAgentTag session={session({ mode: "terminal", detected_agent: claudeCode(null) })} />);
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
   });
+
+  it("terminal mode, Custom agent (F06): shows the name the user gave it", () => {
+    const { container, rerender } = render(
+      <SessionAgentTag session={session({ id: "s-custom", mode: "terminal", ai_provider: "custom", agent_name: "Fake Agent" })} />,
+    );
+    expect(screen.getByText("Fake Agent")).toBeInTheDocument();
+    // A plain terminal session gets no tag at all.
+    rerender(<SessionAgentTag session={session({ id: "s-plain", mode: "terminal", ai_provider: null })} />);
+    expect(container.querySelector(".session-agent-tag")).toBeNull();
+  });
 });

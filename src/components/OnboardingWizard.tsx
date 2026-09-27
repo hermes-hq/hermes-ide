@@ -5,7 +5,7 @@ import { getSetting, setSetting, getSettings } from "../api/settings";
 import { checkAiProviders } from "../api/sessions";
 import { applyTheme, applyUiScale, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS, normalizeThemeId, DEFAULT_THEME_ID } from "../utils/themeManager";
 import { setAnalyticsEnabled } from "../utils/analytics";
-import { AI_PROVIDERS } from "../utils/aiProviders";
+import { installCommand, listAgents } from "../catalog/agentCatalog";
 
 type Step = "welcome" | "theme" | "ai_setup" | "privacy";
 
@@ -234,7 +234,7 @@ export function OnboardingWizard() {
             <>
               <div className="onboarding-section-label">Detected AI tools</div>
               <div className="onboarding-ai-grid">
-                {AI_PROVIDERS.map((p) => {
+                {listAgents().map((p) => {
                   const available = providerAvailability[p.id];
                   return (
                     <div
@@ -242,7 +242,7 @@ export function OnboardingWizard() {
                       className={`onboarding-ai-card ${detectionDone && !available ? "missing" : ""}`}
                     >
                       <div className="onboarding-ai-card-header">
-                        <span className="onboarding-ai-card-name">{p.label}</span>
+                        <span className="onboarding-ai-card-name">{p.name}</span>
                         {detectionDone ? (
                           <span className={`onboarding-ai-status ${available ? "installed" : "missing"}`}>
                             {available ? "Detected" : "Not found"}
@@ -253,7 +253,7 @@ export function OnboardingWizard() {
                       </div>
                       <div className="onboarding-ai-card-desc">{p.description}</div>
                       {detectionDone && !available && (
-                        <code className="onboarding-ai-install-cmd">{p.installCmd}</code>
+                        <code className="onboarding-ai-install-cmd">{installCommand(p)}</code>
                       )}
                     </div>
                   );
