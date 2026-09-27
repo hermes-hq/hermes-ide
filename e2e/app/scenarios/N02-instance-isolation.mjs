@@ -2,10 +2,12 @@
 // Scenario N02: Hermes instances never clobber each other.
 //
 // 1. A test build pointed at the installed app's data folder refuses to start
-//    (a stand-in production folder in a throwaway home first, then the real
-//    one), however the path is spelled.
+//    however the path is spelled. The folder is a stand-in in a throwaway
+//    home: a test build is never started on the real one, so a regression
+//    fails this test instead of opening real data.
 // 2. Two builds run side by side in the machine's REAL temp folder, next to
-//    shell-setup files named the way an installed Hermes names them. Starting
+//    shell-setup files named the way an older installed Hermes names them
+//    (fresh and days old: only the installed app itself sweeps old ones). Starting
 //    the second build leaves the installed app's files and the first build's
 //    live terminal files alone, only clears its own leftovers, and never opens
 //    a file in the other build's data folder or in the production one. The
@@ -16,7 +18,7 @@
 //
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/N02-instance-isolation. Nothing is written inside the
-// production data folder; the real one is only ever passed as a path.
+// production data folder, and the real one is never given to a build.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -29,6 +31,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
@@ -216,6 +219,7 @@ const scratch = mkdtempSync(join(tmpdir(), "hermes-n02-"));
 const tag = `n02-${process.pid}`;
 const decoyZsh = join(tmpdir(), `hermes-zsh-${tag}-installed-app`);
 const decoyBash = join(tmpdir(), `hermes-bash-${tag}-installed-app.sh`);
+const decoyOldZsh = join(tmpdir(), `hermes-zsh-${tag}-old-installed-app`);
 const rootsToRemove = [];
 
 try {
@@ -256,34 +260,29 @@ try {
   assert(JSON.stringify(readdirSync(fakeProd).sort()) === JSON.stringify(before), "the stand-in production folder is unchanged");
   assert(readFileSync(join(fakeProd, "hermes_idea_v3.db"), "utf8") === "stand-in database", "its database is untouched");
 
-  // ── 2. Refusal with the real production folder ──────────────────────
-  log("step 2: the same with the real home and the real installed app's data folder (path only)");
+  // The real installed app's data folder is never handed to a test build:
+  // if the refusal ever regressed, that build would open the real database.
+  // Step 1 runs the same check on a stand-in. The real path is only used
+  // below to confirm no build has a file open inside it.
   const realProd = join(platformDataBase(homedir()), PRODUCTION_IDENTIFIER);
-  log(`  production data folder exists: ${existsSync(realProd)}`);
-  const realBefore = existsSync(realProd) ? readdirSync(realProd).sort() : null;
-  await expectRefusal(
-    "real production folder",
-    { HERMES_DATA_DIR: realProd, TMPDIR: fakeHomeEnv.TMPDIR },
-    join(evidenceDir, "refuse-real"),
-  );
-  const realAfter = existsSync(realProd) ? readdirSync(realProd).sort() : null;
-  assert(!realAfter?.includes("e2e-bridge.json"), "the test build wrote nothing into the production folder");
-  if (realBefore) {
-    const added = realAfter.filter((n) => !realBefore.includes(n));
-    log(`  entries added to the production folder while refusing: ${JSON.stringify(added)}`);
-    assert(added.length === 0, "no new entries in the production folder");
-  }
 
-  // ── 3. Files an installed Hermes has in the real temp folder ─────────
-  log("step 3: plant shell-setup files named the way an installed Hermes names them");
+  // ── 2. Files an installed Hermes has in the real temp folder ─────────
+  log("step 2: plant shell-setup files named the way an older installed Hermes names them");
   mkdirSync(decoyZsh, { recursive: true });
   writeFileSync(join(decoyZsh, ".zshrc"), "# installed app's live terminal\n");
   writeFileSync(decoyBash, "# installed app's live terminal\n");
+  // Old enough for the installed app's own legacy sweep; a test build must
+  // still leave it alone.
+  mkdirSync(decoyOldZsh, { recursive: true });
+  writeFileSync(join(decoyOldZsh, ".zshrc"), "# left by an older installed app\n");
+  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+  utimesSync(join(decoyOldZsh, ".zshrc"), threeDaysAgo, threeDaysAgo);
+  utimesSync(decoyOldZsh, threeDaysAgo, threeDaysAgo);
   const liveLegacy = readdirSync(tmpdir()).filter((n) => /^hermes-(zsh|bash)-/.test(n));
   log(`  legacy shell-setup entries in ${tmpdir()} now: ${liveLegacy.length} (${liveLegacy.join(", ")})`);
 
-  // ── 4. First build with a live terminal ──────────────────────────────
-  log("step 4: start build A (own data folder, real temp folder) and open a terminal");
+  // ── 3. First build with a live terminal ──────────────────────────────
+  log("step 3: start build A (own data folder, real temp folder) and open a terminal");
   mkdirSync(join(scratch, "data-a"));
   mkdirSync(join(scratch, "data-b"));
   const dataA = realpathSync.native(join(scratch, "data-a"));
@@ -312,23 +311,24 @@ try {
   assert(filesA.length === 1, `A's live terminal has its shell-setup entry ${filesA[0]} in ${basename(rootA)}`);
   const entryA = join(rootA, filesA[0]);
 
-  // ── 5. Leftovers of an earlier crashed run of B ──────────────────────
+  // ── 4. Leftovers of an earlier crashed run of B ──────────────────────
   const dead = deadPid();
-  log(`step 5: plant leftovers of a crashed earlier run of B (pid ${dead}, not running) in its own temp folder`);
+  log(`step 4: plant leftovers of a crashed earlier run of B (pid ${dead}, not running) in its own temp folder`);
   mkdirSync(join(rootB, `zsh-${dead}-n02-stale`), { recursive: true });
   writeFileSync(join(rootB, `zsh-${dead}-n02-stale`, ".zshrc"), "stale");
   writeFileSync(join(rootB, `bash-${dead}-n02-stale.sh`), "stale");
 
-  // ── 6. Second build starts while A runs ──────────────────────────────
-  log("step 6: start build B next to A (own data folder, same real temp folder)");
+  // ── 5. Second build starts while A runs ──────────────────────────────
+  log("step 5: start build B next to A (own data folder, same real temp folder)");
   appB = await launchApp({ runDir: join(evidenceDir, "run-b"), log, tmp: "shared", env: { HERMES_DATA_DIR: dataB } });
   const pidB = appB.child.pid;
   log(`  B: ${instanceLine(appB.appLog).replace(/^.*\[instance\]/, "[instance]")}`);
   await sleep(1500);
 
-  log("step 7: check what B's startup left alone and what it cleaned");
+  log("step 6: check what B's startup left alone and what it cleaned");
   assert(existsSync(join(decoyZsh, ".zshrc")), `the installed app's zsh folder ${basename(decoyZsh)} is still there`);
   assert(existsSync(decoyBash), `the installed app's bash file ${basename(decoyBash)} is still there`);
+  assert(existsSync(join(decoyOldZsh, ".zshrc")), `the installed app's days-old zsh folder ${basename(decoyOldZsh)} is still there`);
   const stillLegacy = readdirSync(tmpdir()).filter((n) => /^hermes-(zsh|bash)-/.test(n));
   assert(liveLegacy.every((n) => stillLegacy.includes(n)), "every legacy shell-setup entry that existed before B started still exists");
   assert(existsSync(entryA), `A's live terminal entry ${basename(entryA)} is still there`);
@@ -347,7 +347,7 @@ try {
   assert(!openA.some((p) => under(p, dataB)), "A has no file open in B's data folder");
   assert(!openB.some((p) => under(p, realProd)) && !openA.some((p) => under(p, realProd)), "neither build has a file open in the production data folder");
 
-  log("step 8: A's terminal still works after B started");
+  log("step 7: A's terminal still works after B started");
   log(`  A: output: ${await echo(appA.bridge, sessionA, "n02-a-after")}`);
   await sleep(300);
   const shotA = await appA.bridge.screenshot(join(evidenceDir, "01-build-a-terminal-after-b-started.png"));
@@ -376,6 +376,7 @@ try {
   // Only what this run created.
   rmSync(decoyZsh, { recursive: true, force: true });
   rmSync(decoyBash, { force: true });
+  rmSync(decoyOldZsh, { recursive: true, force: true });
   for (const root of rootsToRemove) {
     if (basename(root).startsWith("hermes-shell-")) rmSync(root, { recursive: true, force: true });
   }

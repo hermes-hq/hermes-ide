@@ -326,6 +326,70 @@ pub fn cleanup_stale() {
             root
         );
     }
+    if crate::instance::owns_production_data() {
+        let tmp = std::env::temp_dir();
+        let swept = sweep_legacy_in(&tmp, std::time::SystemTime::now(), LEGACY_MAX_AGE);
+        if swept > 0 {
+            log::info!(
+                "[SHELL-INTEGRATION] Removed {} shell-setup entries left by an older Hermes in {:?}",
+                swept,
+                tmp
+            );
+        }
+    }
+}
+
+/// How old a legacy entry must be before the installed app removes it.
+const LEGACY_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Removes `hermes-zsh-*` folders and `hermes-bash-*.sh` files that older
+/// versions of the installed app left directly in the temp folder, once they
+/// have not been modified for `max_age`. Only the installed app runs this;
+/// dev, beta and test builds never touch these names. Returns how many
+/// entries were removed.
+fn sweep_legacy_in(
+    temp_dir: &Path,
+    now: std::time::SystemTime,
+    max_age: std::time::Duration,
+) -> usize {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let legacy = if file_type.is_dir() {
+            name.starts_with("hermes-zsh-")
+        } else {
+            file_type.is_file() && name.starts_with("hermes-bash-") && name.ends_with(".sh")
+        };
+        if !legacy {
+            continue;
+        }
+        let old_enough = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age >= max_age);
+        if !old_enough {
+            continue;
+        }
+        let path = entry.path();
+        let result = if file_type.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if result.is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Process id that created a temp entry, from its name: `zsh-<pid>-<session>`
@@ -450,6 +514,64 @@ mod tests {
             .join("hermes-shell-other/zsh-111-other/.zshrc")
             .exists());
         assert!(!asked.contains(&333), "never asks about its own pid");
+    }
+
+    #[test]
+    fn legacy_sweep_removes_only_old_legacy_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let mk_dir = |p: &Path| {
+            std::fs::create_dir_all(p).unwrap();
+            std::fs::write(p.join(".zshrc"), "x").unwrap();
+        };
+        mk_dir(&t.join("hermes-zsh-old"));
+        std::fs::write(t.join("hermes-bash-old.sh"), "x").unwrap();
+        // Not legacy shell-setup entries: kept whatever their age.
+        mk_dir(&t.join("hermes-shell-0123456789abcdef").join("zsh-1-x"));
+        std::fs::write(t.join("hermes-bash-old.txt"), "x").unwrap();
+        std::fs::write(t.join("hermes-zsh-file-not-dir"), "x").unwrap();
+        mk_dir(&t.join("hermes-bash-dir-not-file.sh"));
+        mk_dir(&t.join("other-zsh-old"));
+
+        let day = std::time::Duration::from_secs(24 * 60 * 60);
+        // Everything was just written: nothing is old enough yet.
+        assert_eq!(sweep_legacy_in(t, std::time::SystemTime::now(), day), 0);
+        assert!(t.join("hermes-zsh-old/.zshrc").exists());
+        assert!(t.join("hermes-bash-old.sh").exists());
+
+        // Two days later only the legacy zsh folder and bash file go.
+        let later = std::time::SystemTime::now() + 2 * day;
+        assert_eq!(sweep_legacy_in(t, later, day), 2);
+        assert!(!t.join("hermes-zsh-old").exists());
+        assert!(!t.join("hermes-bash-old.sh").exists());
+        assert!(t
+            .join("hermes-shell-0123456789abcdef/zsh-1-x/.zshrc")
+            .exists());
+        assert!(t.join("hermes-bash-old.txt").exists());
+        assert!(t.join("hermes-zsh-file-not-dir").exists());
+        assert!(t.join("hermes-bash-dir-not-file.sh/.zshrc").exists());
+        assert!(t.join("other-zsh-old/.zshrc").exists());
+    }
+
+    #[test]
+    fn legacy_sweep_of_a_missing_folder_is_a_no_op() {
+        let tmp = tempfile::tempdir().unwrap();
+        let day = std::time::Duration::from_secs(24 * 60 * 60);
+        assert_eq!(
+            sweep_legacy_in(
+                &tmp.path().join("absent"),
+                std::time::SystemTime::now(),
+                day
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn only_the_installed_app_sweeps_legacy_entries() {
+        // Unit tests never call `instance::init`, so this process is not the
+        // installed app and `cleanup_stale` must leave legacy names alone.
+        assert!(!crate::instance::owns_production_data());
     }
 
     #[test]

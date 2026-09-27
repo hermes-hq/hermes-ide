@@ -89,6 +89,8 @@ Running the Tauri CLI or Cargo directly (`npx tauri dev`, `cargo run`) builds wi
 - `HERMES_DATA_DIR=/absolute/path` — use that folder for all app data. Honoured by dev, test and beta builds; the released app ignores it.
 - `HERMES_ALLOW_PRODUCTION_DATA=1` — let a debug build with the production identifier use the installed app's data folder. Only do this if you mean to work on your real sessions; it has no effect on test builds.
 
+`HERMES_DATA_DIR` moves the database, worktrees and other app files, but not the web view's own storage (local storage, IndexedDB), which is kept per app identifier. Two runs of the same build with different `HERMES_DATA_DIR` values still share that storage; use a different identifier (as `npm run tauri dev` does) when you need it separate.
+
 ## Finding Good First Issues
 
 If you are new to the project, look for issues labeled [`good-first-issue`](https://github.com/hermes-hq/hermes-ide/labels/good-first-issue). These are intentionally scoped to be approachable for newcomers and usually include enough context to get started without deep codebase knowledge.

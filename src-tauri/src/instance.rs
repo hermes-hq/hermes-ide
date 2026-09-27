@@ -35,6 +35,10 @@ pub struct Instance {
     pub identifier: String,
     pub data_dir: PathBuf,
     pub shell_temp_root: PathBuf,
+    /// True for the installed app itself (and a debug build explicitly let
+    /// into its data): the only instance that may clean up what older
+    /// versions of the installed app left in the shared temp folder.
+    pub owns_production_data: bool,
 }
 
 static INSTANCE: OnceLock<Instance> = OnceLock::new();
@@ -225,11 +229,7 @@ pub fn init(identifier: &str) -> Result<&'static Instance, String> {
             } else {
                 "debug"
             };
-            return Err(format!(
-                "refusing to start: this {} build ({}) would use the installed Hermes app's data folder {:?}. \
-                 Point {} at a separate folder (`npm run tauri dev` uses its own identifier).",
-                kind, identifier, data_dir, DATA_DIR_ENV
-            ));
+            return Err(refusal_message(kind, identifier, &data_dir));
         }
     }
 
@@ -246,7 +246,26 @@ pub fn init(identifier: &str) -> Result<&'static Instance, String> {
         identifier: identifier.to_string(),
         data_dir,
         shell_temp_root,
+        owns_production_data: !strict,
     }))
+}
+
+/// Why a build refuses to start on `data_dir`. The check is deliberately
+/// broad (any folder named after the production identifier counts), so the
+/// message does not claim the folder is the installed app's.
+fn refusal_message(kind: &str, identifier: &str, data_dir: &Path) -> String {
+    format!(
+        "refusing to start: this {} build ({}) would use {:?}, which is, is inside, or is named like \
+         the installed Hermes app's data folder ({}). Point {} at a separate folder \
+         (`npm run tauri dev` uses its own identifier).",
+        kind, identifier, data_dir, PRODUCTION_IDENTIFIER, DATA_DIR_ENV
+    )
+}
+
+/// Whether this process is the installed app (see `Instance::owns_production_data`).
+/// False in unit tests, which never call `init`.
+pub fn owns_production_data() -> bool {
+    INSTANCE.get().is_some_and(|i| i.owns_production_data)
 }
 
 /// This instance's data folder. Use instead of `app.path().app_data_dir()`.
@@ -469,6 +488,19 @@ mod tests {
         let link = base.path().join("link-to-data");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(touches_production(&real.join("x"), &[link]));
+    }
+
+    #[test]
+    fn refusal_names_the_folder_the_fix_and_does_not_overclaim() {
+        let msg = refusal_message(
+            "test (e2e)",
+            PRODUCTION_IDENTIFIER,
+            Path::new("/tmp/com.hermes-ide.terminal/scratch"),
+        );
+        assert!(msg.starts_with("refusing to start"));
+        assert!(msg.contains("\"/tmp/com.hermes-ide.terminal/scratch\""));
+        assert!(msg.contains("named like"));
+        assert!(msg.contains(DATA_DIR_ENV));
     }
 
     #[test]
