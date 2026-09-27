@@ -15,6 +15,7 @@
 //     and switching to German fetches only the German pack
 //   - the Claude agent bridge is not warmed at startup for terminal-only
 //     use; the warm-up request runs once per app run
+//   - with the interface in German, the error card is in German
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F02-crash-containment.mjs
@@ -22,7 +23,7 @@
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/F02-crash-containment.
 
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
@@ -260,13 +261,12 @@ try {
 
   // ── 5b. Open a file in the code editor ──────────────────────────
   log("step 5b: open a TypeScript file in the editor (editor and grammar load on demand)");
-  await bridge.typeInTerminal(left, "mkdir proj\n");
-  await bridge.typeInTerminal(left, "echo const answer = 42 > proj/demo.ts\n");
-  await bridge.typeInTerminal(left, "cat proj/demo.ts\n");
-  await bridge.waitForTerminal(left, /^const answer = 42$/);
-  await bridge.typeInTerminal(left, "pwd\n");
-  const { lines: pwdLines } = await bridge.waitForTerminal(left, /^\/.*\/home$/);
-  const home = pwdLines.filter((l) => /^\/.*\/home$/.test(l)).pop();
+  // A throwaway project folder in the run's private temp folder (the same
+  // on every OS, whatever the shell).
+  const projectDir = join(app.tmpDir, "proj");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, "demo.ts"), "const answer = 42\n");
+  log(`  project folder: ${projectDir}`);
   const before5b = await loadedViews(bridge);
   assert(!before5b.includes("EditorPane") && !before5b.includes("FileExplorerPanel"), "editor and file explorer not loaded yet");
   // Attach the folder as a project: "+ Add Project" in the left pane, type the path, Scan.
@@ -275,7 +275,7 @@ try {
   await bridge.eval(`
     const input = e2e.first(".project-picker-footer .workspace-scan-input");
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    setValue.call(input, ${JSON.stringify(`${home}/proj`)});
+    setValue.call(input, ${JSON.stringify(projectDir)});
     input.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
   `);
@@ -368,6 +368,33 @@ try {
   assert(!LANGUAGES.filter((l) => l !== "de").some((l) => afterSwitch.includes(l)), "no other language pack was fetched");
   await sleep(300);
   await shot(bridge, "04-settings-in-german.png");
+
+  // ── 8. The error card speaks the interface language ──────────────
+  log("step 8: with the interface in German, the right pane crashes");
+  await bridge.click(".settings-close");
+  await bridge.waitFor("Settings to close", `return !e2e.first(".settings-panel");`);
+  await bridge.eval(`window.__HERMES_E2E__.crash(${JSON.stringify(`pane:${right}`)}); return true;`);
+  const german = await bridge.waitFor("an error card in the right pane", `
+    const card = e2e.all(".split-pane")[1]?.querySelector('[data-error-scope="pane"]');
+    return card ? e2e.norm(card.innerText) : null;
+  `);
+  log(`  right pane now shows: "${german}"`);
+  assert(german.includes("Dieses Pane funktioniert nicht mehr"), "the card title is in German");
+  assert(/Pane neu laden/.test(german) && /Pane schließen/.test(german), "Reload and Close are in German");
+  state = await paneState(bridge);
+  assert(state[0].errorCard === null && state[0].terminal === left, "the left pane is unaffected");
+  await sleep(300);
+  await shot(bridge, "05-right-pane-crashed-in-german.png");
+  await bridge.clickWhenReady(`
+    const pane = e2e.all(".split-pane")[1];
+    return e2e.click(e2e.must(pane.querySelector(".contained-error-reload"), "Pane neu laden button"));
+  `);
+  await bridge.waitFor("the right terminal to come back", `
+    const pane = e2e.all(".split-pane")[1];
+    return !pane.querySelector('[data-error-scope]') && pane.querySelector("div[data-session-id]")?.getAttribute("data-session-id") === ${JSON.stringify(right)};
+  `);
+  await runInTerminal(bridge, right, "right-after-reload");
+  assert(true, "the right terminal runs commands again after Reload");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
@@ -387,7 +414,7 @@ try {
   }
 } finally {
   if (app) {
-    log("step 8: quit the app");
+    log("step 9: quit the app");
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
     if (!failed && (exit.forced || exit.code !== 0)) {
