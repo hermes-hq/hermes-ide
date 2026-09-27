@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::AppState;
 
@@ -392,10 +392,7 @@ pub fn assemble_context(
 
 /// Compute the deterministic path for a session's context file (no I/O).
 pub fn session_context_path(app: &AppHandle, session_id: &str) -> Result<PathBuf, String> {
-    let app_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let app_dir = crate::instance::app_data_dir(app)?;
     Ok(app_dir.join("context").join(format!("{}.md", session_id)))
 }
 

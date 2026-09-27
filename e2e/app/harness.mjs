@@ -403,12 +403,18 @@ export function inheritedEnv() {
  *       "real" uses the real home — needed when a scenario must use agent
  *       CLIs that are signed in there; the test app's own data folder is
  *       reset instead.
+ * tmp:  "private" (default) gives the app its own temp folder. "shared" uses
+ *       the machine's real temp folder, like a second build a developer
+ *       starts next to an installed Hermes.
+ * env:  extra environment variables (e.g. HERMES_DATA_DIR).
  */
 export async function launchApp({
   runDir,
   log = () => {},
   home = platform() === "win32" ? "real" : "private",
   startupTimeoutMs = 60_000,
+  tmp = "private",
+  env: extraEnv = {},
 } = {}) {
   const binary = appBinaryPath();
   if (!existsSync(binary)) {
@@ -418,10 +424,11 @@ export async function launchApp({
   const bridgeFile = join(runDir, "bridge.json");
   rmSync(bridgeFile, { force: true });
 
-  // A private temp folder: on startup Hermes clears its leftover shell-setup
-  // files from the temp folder, and a test run must never clear the ones that
-  // belong to an installed Hermes running on the same machine.
+  // A private temp folder by default, so a test run leaves nothing behind in
+  // the real one. Every Hermes only ever cleans up its own shell-setup files,
+  // so "shared" is safe next to an installed Hermes.
   const privateTmp = mkdtempSync(join(tmpdir(), "hermes-e2e-"));
+  const appTmp = tmp === "shared" ? tmpdir() : privateTmp;
 
   const homeEnv = {};
   let dataDir;
@@ -441,6 +448,7 @@ export async function launchApp({
     resetE2eDataDir();
     dataDir = e2eDataDir();
   }
+  if (extraEnv.HERMES_DATA_DIR) dataDir = extraEnv.HERMES_DATA_DIR;
 
   const appLog = join(runDir, "app.log");
   const fd = openSync(appLog, "w");
@@ -452,9 +460,10 @@ export async function launchApp({
       HERMES_E2E: "1",
       HERMES_E2E_BRIDGE_FILE: bridgeFile,
       RUST_LOG: process.env.RUST_LOG || "info",
-      TMPDIR: privateTmp,
-      TMP: privateTmp,
-      TEMP: privateTmp,
+      TMPDIR: appTmp,
+      TMP: appTmp,
+      TEMP: appTmp,
+      ...extraEnv,
     },
     stdio: ["ignore", fd, fd],
     detached: false,
@@ -519,7 +528,7 @@ export async function launchApp({
     return exited;
   };
 
-  return { bridge, child, stop, isRunning: () => !exited, appLog, tmpDir: privateTmp, dataDir };
+  return { bridge, child, stop, isRunning: () => !exited, appLog, tmpDir: appTmp, dataDir };
 }
 
 // ─── In-page helpers (sent along with every script) ──────────────────

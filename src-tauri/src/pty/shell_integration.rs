@@ -11,7 +11,7 @@
 //!   profile/rc files and then applies overrides.
 //! - **fish**: `-C` (init-command) runs after config.fish loads.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ─── Integration Result ──────────────────────────────────────────────
 
@@ -238,7 +238,11 @@ fn bash_init(disable_native_suggestions: bool) -> String {
 }
 
 fn setup_zsh(session_id: &str, disable_native_suggestions: bool) -> ShellIntegration {
-    let dir = std::env::temp_dir().join(format!("hermes-zsh-{}", session_id));
+    let dir = crate::instance::shell_temp_root().join(format!(
+        "zsh-{}-{}",
+        std::process::id(),
+        session_id
+    ));
     log::info!("[SHELL-INTEGRATION] Creating ZDOTDIR at {:?}", dir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         log::warn!("Failed to create ZDOTDIR for session {}: {}", session_id, e);
@@ -266,8 +270,11 @@ fn setup_zsh(session_id: &str, disable_native_suggestions: bool) -> ShellIntegra
 }
 
 fn setup_bash(session_id: &str, disable_native_suggestions: bool) -> ShellIntegration {
-    let path = std::env::temp_dir().join(format!("hermes-bash-{}.sh", session_id));
-    if let Err(e) = std::fs::write(&path, bash_init(disable_native_suggestions)) {
+    let root = crate::instance::shell_temp_root();
+    let path = root.join(format!("bash-{}-{}.sh", std::process::id(), session_id));
+    let written = std::fs::create_dir_all(&root)
+        .and_then(|_| std::fs::write(&path, bash_init(disable_native_suggestions)));
+    if let Err(e) = written {
         log::warn!(
             "Failed to write bash init for session {}: {}",
             session_id,
@@ -298,27 +305,73 @@ pub fn cleanup(integration: &ShellIntegration) {
     }
 }
 
-/// Clean up any stale shell integration temp files from previous sessions
-/// that weren't properly cleaned up (e.g., app crash).
+/// Clean up shell integration temp files left behind by an earlier run of
+/// this same instance (e.g. after a crash).
+///
+/// Only this instance's temp folder is looked at, so another Hermes on the
+/// same machine (installed app, dev, beta or test build) keeps its files. An
+/// entry is removed only when the process that created it is gone.
 pub fn cleanup_stale() {
-    let tmp = std::env::temp_dir();
+    let root = crate::instance::shell_temp_root();
+    let mut sys = sysinfo::System::new();
+    let removed = cleanup_stale_in(&root, std::process::id(), |pid| {
+        let pid = sysinfo::Pid::from_u32(pid);
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        sys.process(pid).is_some()
+    });
+    if removed > 0 {
+        log::info!(
+            "[SHELL-INTEGRATION] Removed {} stale temp entries from {:?}",
+            removed,
+            root
+        );
+    }
+}
 
-    // Clean up hermes-zsh-* directories
-    if let Ok(entries) = std::fs::read_dir(&tmp) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if (name_str.starts_with("hermes-zsh-") && entry.path().is_dir())
-                || (name_str.starts_with("hermes-bash-") && name_str.ends_with(".sh"))
-            {
-                if entry.path().is_dir() {
-                    std::fs::remove_dir_all(entry.path()).ok();
-                } else {
-                    std::fs::remove_file(entry.path()).ok();
-                }
-            }
+/// Process id that created a temp entry, from its name: `zsh-<pid>-<session>`
+/// (folder) or `bash-<pid>-<session>.sh` (file). `None` for anything else.
+fn owner_pid(name: &str, is_dir: bool) -> Option<u32> {
+    let rest = if is_dir {
+        name.strip_prefix("zsh-")?
+    } else {
+        name.strip_prefix("bash-")?.strip_suffix(".sh")?
+    };
+    let (pid, session) = rest.split_once('-')?;
+    if session.is_empty() {
+        return None;
+    }
+    pid.parse().ok()
+}
+
+/// Removes entries in `root` whose creating process is neither `own_pid` nor
+/// alive. Entries it does not recognise are left alone. Returns how many
+/// entries were removed.
+fn cleanup_stale_in(root: &Path, own_pid: u32, mut is_alive: impl FnMut(u32) -> bool) -> usize {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let Some(pid) = owner_pid(&entry.file_name().to_string_lossy(), file_type.is_dir()) else {
+            continue;
+        };
+        if pid == own_pid || is_alive(pid) {
+            continue;
+        }
+        let path = entry.path();
+        let result = if file_type.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if result.is_ok() {
+            removed += 1;
         }
     }
+    removed
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────
@@ -326,6 +379,87 @@ pub fn cleanup_stale() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temp_files_live_in_this_instances_folder_and_name_their_owner() {
+        let root = crate::instance::shell_temp_root();
+        let pid = std::process::id();
+        let zsh = setup_zsh("owner-zsh", true);
+        let bash = setup_bash("owner-bash", true);
+        match (&zsh, &bash) {
+            (ShellIntegration::Zsh { zdotdir }, ShellIntegration::Bash { rcfile }) => {
+                assert_eq!(zdotdir.parent(), Some(root.as_path()));
+                assert_eq!(rcfile.parent(), Some(root.as_path()));
+                let zname = zdotdir.file_name().unwrap().to_string_lossy().to_string();
+                let bname = rcfile.file_name().unwrap().to_string_lossy().to_string();
+                assert_eq!(zname, format!("zsh-{}-owner-zsh", pid));
+                assert_eq!(bname, format!("bash-{}-owner-bash.sh", pid));
+                assert_eq!(owner_pid(&zname, true), Some(pid));
+                assert_eq!(owner_pid(&bname, false), Some(pid));
+            }
+            _ => panic!("expected zsh and bash integrations"),
+        }
+        cleanup(&zsh);
+        cleanup(&bash);
+    }
+
+    #[test]
+    fn stale_cleanup_removes_only_dead_owners_in_its_own_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("hermes-shell-mine");
+        std::fs::create_dir_all(&root).unwrap();
+        let mk_dir = |p: &Path| {
+            std::fs::create_dir_all(p).unwrap();
+            std::fs::write(p.join(".zshrc"), "x").unwrap();
+        };
+        // Leftovers of this instance: pid 111 is dead, 222 is alive, 333 is us.
+        mk_dir(&root.join("zsh-111-dead"));
+        std::fs::write(root.join("bash-111-dead.sh"), "x").unwrap();
+        mk_dir(&root.join("zsh-222-live"));
+        std::fs::write(root.join("bash-222-live.sh"), "x").unwrap();
+        mk_dir(&root.join("zsh-333-own"));
+        // Things it does not recognise stay.
+        mk_dir(&root.join("zsh-notapid-x"));
+        std::fs::write(root.join("notes.txt"), "x").unwrap();
+        std::fs::write(root.join("zsh-111-file-not-dir"), "x").unwrap();
+        // Another Hermes's files next to our folder: legacy names from an
+        // older installed app and another instance's folder.
+        mk_dir(&tmp.path().join("hermes-zsh-installed-app"));
+        std::fs::write(tmp.path().join("hermes-bash-installed-app.sh"), "x").unwrap();
+        mk_dir(&tmp.path().join("hermes-shell-other").join("zsh-111-other"));
+
+        let mut asked = Vec::new();
+        let removed = cleanup_stale_in(&root, 333, |pid| {
+            asked.push(pid);
+            pid == 222
+        });
+
+        assert_eq!(removed, 2);
+        assert!(!root.join("zsh-111-dead").exists());
+        assert!(!root.join("bash-111-dead.sh").exists());
+        assert!(root.join("zsh-222-live").exists());
+        assert!(root.join("bash-222-live.sh").exists());
+        assert!(root.join("zsh-333-own").exists());
+        assert!(root.join("zsh-notapid-x").exists());
+        assert!(root.join("notes.txt").exists());
+        assert!(root.join("zsh-111-file-not-dir").exists());
+        assert!(tmp.path().join("hermes-zsh-installed-app/.zshrc").exists());
+        assert!(tmp.path().join("hermes-bash-installed-app.sh").exists());
+        assert!(tmp
+            .path()
+            .join("hermes-shell-other/zsh-111-other/.zshrc")
+            .exists());
+        assert!(!asked.contains(&333), "never asks about its own pid");
+    }
+
+    #[test]
+    fn stale_cleanup_of_a_missing_folder_is_a_no_op() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            cleanup_stale_in(&tmp.path().join("absent"), 1, |_| false),
+            0
+        );
+    }
 
     #[test]
     fn setup_zsh_creates_all_rc_files() {

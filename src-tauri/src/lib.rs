@@ -12,6 +12,7 @@ mod e2e_evidence;
 mod e2e_protocol;
 mod git;
 mod inline_pty;
+mod instance;
 mod menu;
 mod platform;
 mod plugins;
@@ -86,7 +87,7 @@ static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
 /// crashes. Finally, we run `git worktree prune` on every repo that had
 /// stale entries and emit a cleanup summary event to the frontend.
 fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
-    let app_data_dir = match app.path().app_data_dir() {
+    let app_data_dir = match instance::app_data_dir(app) {
         Ok(dir) => dir,
         Err(e) => {
             log::warn!(
@@ -466,6 +467,23 @@ pub fn run() {
     env_logger::init();
     install_crash_handler();
 
+    // Decide which instance this is before anything touches app data: a dev,
+    // beta or test build must never open the installed app's data folder.
+    let context = tauri::generate_context!();
+    match instance::init(&context.config().identifier) {
+        Ok(i) => log::info!(
+            "[instance] {} — data folder {:?}, shell temp folder {:?}",
+            i.identifier,
+            i.data_dir,
+            i.shell_temp_root
+        ),
+        Err(e) => {
+            log::error!("[instance] {}", e);
+            eprintln!("Hermes: {}", e);
+            std::process::exit(78);
+        }
+    }
+
     // Create a Tokio runtime context for plugins that spawn async tasks during
     // initialization (tauri-plugin-aptabase calls tokio::task::spawn in its init
     // callback, before Tauri's own runtime is active).
@@ -485,10 +503,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_aptabase::Builder::new("A-EU-1922161061").build())
         .setup(|app| {
-            let app_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+            let app_dir = instance::app_data_dir(app.handle())?;
             std::fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
             std::fs::create_dir_all(app_dir.join("context"))
@@ -798,7 +813,7 @@ pub fn run() {
             inline_pty::resize_inline_pty,
             inline_pty::kill_inline_pty,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building HERMES-IDE")
         .run(|app, event| match &event {
             tauri::RunEvent::ExitRequested { .. } => {

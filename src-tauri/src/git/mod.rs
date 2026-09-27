@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Database;
 use crate::AppState;
@@ -2859,10 +2859,7 @@ pub fn git_create_worktree(
     from_remote: Option<String>,
 ) -> Result<worktree::WorktreeCreateResult, String> {
     // Get the app data directory for storing worktrees outside the project
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let app_data_dir = crate::instance::app_data_dir(&app)?;
 
     // 1. Get project path from DB
     let db = state
@@ -2978,10 +2975,7 @@ pub fn git_remove_worktree(
     }
 
     // Get the app data directory for journal storage
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let app_data_dir = crate::instance::app_data_dir(&app)?;
 
     // Journal: log the REMOVE operation before performing it
     let _ = journal::log_operation(
@@ -3587,10 +3581,7 @@ pub fn git_detect_orphan_worktrees(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<OrphanWorktree>, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let app_data_dir = crate::instance::app_data_dir(&app)?;
 
     // 1. Collect all DB data while holding the lock
     let (all_records, projects) = {

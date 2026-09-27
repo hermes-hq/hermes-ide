@@ -2,16 +2,13 @@ use serde::Serialize;
 use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
-use tauri::{Manager, State};
+use tauri::State;
 
 use crate::AppState;
 
 /// Returns the plugins directory path inside the app data directory.
 fn plugins_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let data_dir = crate::instance::app_data_dir(app)?;
     Ok(data_dir.join("plugins"))
 }
 

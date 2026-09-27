@@ -80,6 +80,10 @@ cd src-tauri && cargo check  # Check Rust compilation
 cd src-tauri && cargo test   # Run Rust tests
 ```
 
+### Dev builds and your installed Hermes
+
+`npm run tauri dev` runs as its own app (`com.hermes-ide.terminal.dev`) with its own data folder, so it never touches the database, worktrees or terminals of a Hermes you have installed. Set `HERMES_DATA_DIR=/absolute/path` to use a throwaway data folder instead. Dev and test builds refuse to start if they would use the installed app's data folder, and CI fails if a dev or test config uses the production identifier.
+
 ## Finding Good First Issues
 
 If you are new to the project, look for issues labeled [`good-first-issue`](https://github.com/hermes-hq/hermes-ide/labels/good-first-issue). These are intentionally scoped to be approachable for newcomers and usually include enough context to get started without deep codebase knowledge.

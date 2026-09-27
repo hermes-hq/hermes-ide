@@ -94,8 +94,7 @@ pub fn start(app: &AppHandle) {
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from)
         .or_else(|| {
-            app.path()
-                .app_data_dir()
+            crate::instance::app_data_dir(app)
                 .ok()
                 .map(|d| d.join("e2e-bridge.json"))
         });
