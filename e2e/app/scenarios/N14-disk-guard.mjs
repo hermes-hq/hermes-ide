@@ -187,6 +187,12 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.waitFor("the repo to be added and selected", `
     return e2e.all(".project-picker-item-attached").some((el) => el.innerText.includes(${JSON.stringify(basename(repo))}));
   `);
+  // The wizard checks whether the folder is a git repo; once it knows, a
+  // branch step joins the progress dots (4 -> 5). Continuing earlier skips it.
+  await bridge.waitFor("the wizard to detect the git repo (branch step added)", `
+    const next = e2e.first(".session-creator-actions .session-creator-btn-primary");
+    return e2e.all(".session-creator-step-dot").length === 5 && !!next && !next.disabled;
+  `, { timeoutMs: 20_000 });
   await bridge.click(".session-creator-actions .session-creator-btn-primary");
 
   // Branch step: the current branch is pre-selected; open the project and
@@ -197,9 +203,12 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.waitFor("the current branch to be pre-selected", `
     return !!e2e.first(".session-creator-branch-selected-label");
   `, { timeoutMs: 20_000 });
-  await sleep(300);
-  if (!(await bridge.exists(".branch-selector-body"))) {
-    await bridge.click(".session-creator-branch-project-header");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await sleep(500);
+    if (await bridge.exists(".branch-selector-tabs")) break;
+    if (!(await bridge.exists(".branch-selector-body"))) {
+      await bridge.click(".session-creator-branch-project-header");
+    }
   }
   await bridge.waitFor("the branch tabs", `return e2e.all(".branch-selector-tab").length === 2;`, { timeoutMs: 20_000 });
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".branch-selector-tab")[1], "New branch tab"));`);
