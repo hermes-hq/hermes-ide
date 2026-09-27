@@ -56,7 +56,7 @@
     "@xterm/xterm": "6.0.0",
     "highlight.js": "^11.12.0",
     "lucide-react": "^1.48.0",
-    "mermaid": "^11.14.0",
+    "mermaid": "^12.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
