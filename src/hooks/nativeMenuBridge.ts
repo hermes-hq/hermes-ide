@@ -50,6 +50,12 @@ export function registerMenuBarHandler(handler: ActionHandler): () => void {
   };
 }
 
+/** Run a menu bar action from in-app UI (e.g. a context menu item that
+ *  should behave exactly like its menu bar counterpart). */
+export function triggerMenuBarAction(actionId: string): void {
+  menuBarHandler?.(actionId);
+}
+
 export function registerContextMenuHandler(handler: ActionHandler): void {
   contextMenuHandler = handler;
 }
