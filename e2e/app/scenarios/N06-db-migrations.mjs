@@ -177,8 +177,8 @@ async function partA() {
       JSON.stringify(hostSummary) === JSON.stringify(["Build box test@build.example.test:22", "Staging deploy@staging.example.test:2222"]),
       `both saved SSH hosts are listed: ${hostSummary.join(", ")}`,
     );
-    const disabled = await invoke(bridge, "get_disabled_plugin_ids");
-    assert(disabled.includes("fx.plugin.timer"), `the plugin the user disabled is still disabled (${JSON.stringify(disabled)})`);
+    // The disabled-plugin list is host-only (plugin identity binding), so the
+    // page cannot read it; step A5 checks it in the database after quitting.
     const recent = await invoke(bridge, "get_recent_sessions", { limit: 20 }).catch((e) => ({ error: String(e) }));
     if (Array.isArray(recent)) {
       const ids = recent.map((s) => s.id);
@@ -228,9 +228,11 @@ async function partA() {
     hosts: db.prepare("SELECT COUNT(*) AS n FROM ssh_saved_hosts WHERE id LIKE 'fx-%'").get().n,
     plugins: db.prepare("SELECT COUNT(*) AS n FROM plugins WHERE id LIKE 'fx.%'").get().n,
     storage: db.prepare("SELECT COUNT(*) AS n FROM plugin_storage").get().n,
+    disabled: db.prepare("SELECT id FROM plugins WHERE enabled = 0 ORDER BY id").all().map((r) => r.id),
   }));
   assert(kept.sessions.join(",") === "fx-session-1,fx-session-2,fx-session-3", `the three 1.4.0 sessions are kept (${kept.sessions.join(", ")})`);
   assert(kept.hosts === 2 && kept.plugins === 2 && kept.storage === 2, `saved hosts, plugins and plugin data kept (${JSON.stringify(kept)})`);
+  assert(kept.disabled.includes("fx.plugin.timer"), `the plugin the user disabled is still disabled (${JSON.stringify(kept.disabled)})`);
   assert(filesIn(join(app.dataDir, "backups")).length === 1, "still exactly one backup");
 }
 
