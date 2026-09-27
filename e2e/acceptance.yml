@@ -71,3 +71,13 @@ features:
       N07-2:
         text: "Turning a flag off hides the feature on next launch"
         scenarios: [N07-feature-flags.mjs]
+  F13:
+    name: "Agent view: approvals cannot be accepted by accident"
+    status: shipped
+    criteria:
+      F13-1:
+        text: "Pressing Enter while typing never resolves an approval"
+        scenarios: [F13-approval-safety.mjs]
+      F13-2:
+        text: "An always-allow rule is written to the repo's local settings file"
+        scenarios: [F13-approval-safety.mjs]

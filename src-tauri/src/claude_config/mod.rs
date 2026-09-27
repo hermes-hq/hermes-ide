@@ -3,7 +3,7 @@
 //!
 //!   - `~/.claude.json`              MCP servers
 //!   - `~/.claude/settings.json`     permission rules (user scope)
-//!   - `<project>/.claude/settings.json`  permission rules (project scope)
+//!   - `<project>/.claude/settings.local.json`  permission rules (local scope)
 //!   - `~/.claude/CLAUDE.md` + project CLAUDE.md  memory files
 //!
 //! Per locked decision §0.2 of `docs/internal/v1-tui-parity-plan.md`, all
@@ -373,18 +373,53 @@ fn read_rules_at(path: &Path, source: &str) -> Result<Vec<PermissionRule>, Strin
     Ok(out)
 }
 
-/// Add a rule.  Scope = "user" → ~/.claude/settings.json.  Project
-/// scope is for a future commit (needs cwd discovery from the active
-/// session).  Idempotent — duplicate rules are dropped.
+/// `<project_dir>/.claude/settings.local.json`: Claude Code's per-project
+/// settings that stay on this machine (not shared with the team).  The
+/// folder must be an existing absolute directory.
+fn local_settings_path(project_dir: Option<&str>) -> Result<PathBuf, String> {
+    let dir = project_dir
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .ok_or_else(|| "local-scope rules need a project folder".to_string())?;
+    let dir = Path::new(dir);
+    if !dir.is_absolute() {
+        return Err(format!(
+            "project folder must be an absolute path, got {}",
+            dir.display()
+        ));
+    }
+    if !dir.is_dir() {
+        return Err(format!("project folder not found: {}", dir.display()));
+    }
+    Ok(dir.join(".claude").join("settings.local.json"))
+}
+
+/// Add a rule.  Idempotent — duplicate rules are dropped.
+///
+///   - scope "user"  → ~/.claude/settings.json (every project)
+///   - scope "local" → `<project_dir>/.claude/settings.local.json` (this
+///     project only; what an agent's "Always allow" writes)
+///   - scope "project" (the shared .claude/settings.json) is not
+///     supported yet.
 #[tauri::command]
-pub fn write_permission_rule(pattern: String, kind: String, scope: String) -> Result<(), String> {
+pub fn write_permission_rule(
+    pattern: String,
+    kind: String,
+    scope: String,
+    project_dir: Option<String>,
+) -> Result<(), String> {
     if kind != "allow" && kind != "deny" {
         return Err(format!("kind must be 'allow' or 'deny', got {kind}"));
     }
     let path = match scope.as_str() {
         "user" => home_settings_path()?,
+        "local" => local_settings_path(project_dir.as_deref())?,
         "project" => return Err("project-scope rules not yet supported".into()),
-        _ => return Err(format!("scope must be 'user' or 'project', got {scope}")),
+        _ => {
+            return Err(format!(
+                "scope must be 'user', 'local' or 'project', got {scope}"
+            ))
+        }
     };
     atomic_json_write(&path, |root| {
         let perms = root
@@ -429,6 +464,93 @@ pub fn remove_permission_rule(pattern: String, kind: String, scope: String) -> R
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn allow_rules(path: &Path) -> Vec<String> {
+        read_rules_at(path, "local")
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.kind == "allow")
+            .map(|r| r.pattern)
+            .collect()
+    }
+
+    #[test]
+    fn local_scope_rule_goes_to_project_settings_local_json() {
+        let project = tempdir().unwrap();
+        let dir = project.path().to_string_lossy().into_owned();
+        for _ in 0..2 {
+            // Same rule twice: stored once.
+            write_permission_rule(
+                "Bash(rm -rf build:*)".into(),
+                "allow".into(),
+                "local".into(),
+                Some(dir.clone()),
+            )
+            .unwrap();
+        }
+        let local = project.path().join(".claude").join("settings.local.json");
+        assert_eq!(
+            allow_rules(&local),
+            vec!["Bash(rm -rf build:*)".to_string()]
+        );
+        // The shared project settings file is left alone.
+        assert!(!project
+            .path()
+            .join(".claude")
+            .join("settings.json")
+            .exists());
+    }
+
+    #[test]
+    fn local_scope_rule_keeps_existing_settings() {
+        let project = tempdir().unwrap();
+        let claude_dir = project.path().join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        let local = claude_dir.join("settings.local.json");
+        fs::write(
+            &local,
+            br#"{"model":"keep","permissions":{"allow":["Read(/tmp/a)"]}}"#,
+        )
+        .unwrap();
+        write_permission_rule(
+            "Bash(ls:*)".into(),
+            "allow".into(),
+            "local".into(),
+            Some(project.path().to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        assert_eq!(
+            allow_rules(&local),
+            vec!["Read(/tmp/a)".to_string(), "Bash(ls:*)".to_string()]
+        );
+        let v: Value = serde_json::from_str(&fs::read_to_string(&local).unwrap()).unwrap();
+        assert_eq!(v["model"], Value::String("keep".into()));
+    }
+
+    #[test]
+    fn local_scope_refuses_without_a_real_project_folder() {
+        let write = |dir: Option<String>| {
+            write_permission_rule("Bash(ls:*)".into(), "allow".into(), "local".into(), dir)
+        };
+        assert!(write(None).unwrap_err().contains("need a project folder"));
+        assert!(write(Some("  ".into()))
+            .unwrap_err()
+            .contains("need a project folder"));
+        assert!(write(Some("relative/dir".into()))
+            .unwrap_err()
+            .contains("absolute"));
+        let gone = tempdir().unwrap().path().join("missing");
+        assert!(write(Some(gone.to_string_lossy().into_owned()))
+            .unwrap_err()
+            .contains("not found"));
+    }
+
+    #[test]
+    fn unknown_scope_is_refused() {
+        let err = write_permission_rule("Bash".into(), "allow".into(), "global".into(), None)
+            .unwrap_err();
+        assert!(err.contains("scope must be"));
+    }
 
     #[test]
     fn atomic_json_write_creates_missing_file() {

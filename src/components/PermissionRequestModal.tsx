@@ -6,6 +6,10 @@
  * to the bridge's stdin.
  *
  * Visual: docs/internal/v1-tui-parity-plan.md §8.4.
+ *
+ * The prompt never takes keyboard focus: it can appear while the user is
+ * typing in the composer, and an Enter meant for their message must not
+ * land on a focused approve button.
  */
 import "../styles/components/PermissionRequestModal.css";
 import { useEffect, useMemo, useState } from "react";
@@ -118,7 +122,6 @@ export function PermissionRequestModal({ request, permissionMode, onDecision }: 
                   onDecision({ kind: "allow", updatedInput: parsedEdit });
                 }
               }}
-              autoFocus
             >
               Confirm edit
             </button>
@@ -147,7 +150,7 @@ export function PermissionRequestModal({ request, permissionMode, onDecision }: 
             <button
               type="button"
               className="perm-link"
-              title={`Adds permissions.allow: ['${allowRule}'] to ~/.claude/settings.json`}
+              title={`Adds permissions.allow: ['${allowRule}'] to this project's .claude/settings.local.json`}
               onClick={() => onDecision({ kind: "allow", persist: allowRule })}
             >
               Always allow ({request.toolName})
@@ -156,7 +159,6 @@ export function PermissionRequestModal({ request, permissionMode, onDecision }: 
               type="button"
               className="perm-link perm-link-primary"
               onClick={() => onDecision({ kind: "allow" })}
-              autoFocus
             >
               Approve once
             </button>
