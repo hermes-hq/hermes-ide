@@ -8,7 +8,7 @@ on:
 # Manual builds are never cancelled by a later dispatch; they queue instead.
 concurrency:
   group: build
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
