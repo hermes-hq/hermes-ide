@@ -30,12 +30,17 @@ function refuseUnlessAllowed() {
  * `chords` are xdotool-style names: "ctrl+d", "ctrl+shift+d".
  * Returns diagnostics (which window, whether it had focus).
  */
-export async function pressChords(pid, chords, { delayMs = 150 } = {}) {
+/**
+ * `clickAt` ({ x, y, innerWidth, innerHeight, dpr } in page coordinates):
+ * first click there with the real mouse, like a person clicking into the
+ * terminal, so the webview itself has keyboard focus.
+ */
+export async function pressChords(pid, chords, { delayMs = 150, clickAt = null } = {}) {
   refuseUnlessAllowed();
   for (const c of chords) {
     if (!/^((ctrl|shift|alt)\+)+[a-z]$/.test(c)) throw new Error(`unsupported chord: ${c}`);
   }
-  return platform() === "linux" ? pressLinux(pid, chords, delayMs) : pressWindows(pid, chords, delayMs);
+  return platform() === "linux" ? pressLinux(pid, chords, delayMs, clickAt) : pressWindows(pid, chords, delayMs, clickAt);
 }
 
 // ─── Linux: xdotool ──────────────────────────────────────────────────
@@ -60,21 +65,35 @@ async function linuxWindow(pid) {
   throw new Error(`no visible X window for pid ${pid}`);
 }
 
-async function pressLinux(pid, chords, delayMs) {
+async function pressLinux(pid, chords, delayMs, clickAt) {
   const win = await linuxWindow(pid);
   // No window manager under Xvfb: give the window input focus directly.
   xdotool(["windowfocus", win]);
-  await sleep(300);
+  await sleep(200);
+  let clicked = null;
+  if (clickAt) {
+    // The webview sits below the menu bar: offset page coordinates by the
+    // difference between the window and the page.
+    const geo = Object.fromEntries(
+      xdotool(["getwindowgeometry", "--shell", win]).out.split("\n").map((l) => l.split("=")),
+    );
+    const x = Math.round(clickAt.x * clickAt.dpr + (Number(geo.WIDTH) - clickAt.innerWidth * clickAt.dpr));
+    const y = Math.round(clickAt.y * clickAt.dpr + (Number(geo.HEIGHT) - clickAt.innerHeight * clickAt.dpr));
+    const res = xdotool(["mousemove", "--window", win, String(x), String(y), "click", "1"]);
+    if (res.status !== 0) throw new Error(`xdotool click failed: ${res.err}`);
+    clicked = { x, y, window: `${geo.WIDTH}x${geo.HEIGHT}` };
+    await sleep(300);
+  }
   const focused = xdotool(["getwindowfocus"]).out;
   const res = xdotool(["key", "--clearmodifiers", "--delay", String(delayMs), ...chords], 60_000);
   if (res.status !== 0) throw new Error(`xdotool key failed: ${res.err}`);
-  return { driver: "xdotool", window: win, focusedWindow: focused, sent: chords.length };
+  return { driver: "xdotool", window: win, focusedWindow: focused, clicked, sent: chords.length };
 }
 
 // ─── Windows: SendInput ──────────────────────────────────────────────
 
 const PS_SCRIPT = String.raw`
-param([int]$ProcId, [string]$Chords, [int]$DelayMs = 150)
+param([int]$ProcId, [string]$Chords, [int]$DelayMs = 150, [int]$ClickX = -1, [int]$ClickY = -1)
 $ErrorActionPreference = "Stop"
 Add-Type -TypeDefinition @"
 using System;
@@ -95,6 +114,25 @@ public static class HermesKeys {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+
+  public static string Click(IntPtr h, int x, int y) {
+    var p = new POINT();
+    p.X = x;
+    p.Y = y;
+    ClientToScreen(h, ref p);
+    SetCursorPos(p.X, p.Y);
+    var down = new INPUT();
+    down.type = 0;
+    down.u.mi.dwFlags = 0x0002;
+    var up = new INPUT();
+    up.type = 0;
+    up.u.mi.dwFlags = 0x0004;
+    SendInput(2, new INPUT[] { down, up }, Marshal.SizeOf(typeof(INPUT)));
+    return p.X + "," + p.Y;
+  }
 
   static INPUT Key(ushort vk, bool up) {
     var i = new INPUT();
@@ -144,6 +182,11 @@ for ($i = 0; $i -lt 10 -and -not $focused; $i++) {
 }
 if (-not $focused) { throw "could not bring the app window to the foreground" }
 Start-Sleep -Milliseconds 300
+$clicked = ""
+if ($ClickX -ge 0) {
+  $clicked = [HermesKeys]::Click($h, $ClickX, $ClickY)
+  Start-Sleep -Milliseconds 300
+}
 
 $sent = 0
 foreach ($c in $Chords.Split(',')) {
@@ -162,17 +205,21 @@ foreach ($c in $Chords.Split(',')) {
   $sent++
   Start-Sleep -Milliseconds $DelayMs
 }
-Write-Output ("{""window"":""" + $h + """,""focused"":true,""sent"":" + $sent + "}")
+Write-Output ("{""window"":""" + $h + """,""focused"":true,""clicked"":""" + $clicked + """,""sent"":" + $sent + "}")
 `;
 
-function pressWindows(pid, chords, delayMs) {
+function pressWindows(pid, chords, delayMs, clickAt) {
+  // The webview fills the client area; the menu bar is outside it.
+  const click = clickAt
+    ? ["-ClickX", String(Math.round(clickAt.x * clickAt.dpr)), "-ClickY", String(Math.round(clickAt.y * clickAt.dpr))]
+    : [];
   const dir = mkdtempSync(join(tmpdir(), "hermes-e2e-keys-"));
   const script = join(dir, "press.ps1");
   writeFileSync(script, PS_SCRIPT);
   try {
     const res = spawnSync(
       "powershell",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ProcId", String(pid), "-Chords", chords.join(","), "-DelayMs", String(delayMs)],
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ProcId", String(pid), "-Chords", chords.join(","), "-DelayMs", String(delayMs), ...click],
       { encoding: "utf8", timeout: 120_000 },
     );
     if (res.status !== 0) throw new Error(`SendInput helper failed (status ${res.status}): ${res.stderr || res.stdout}`);

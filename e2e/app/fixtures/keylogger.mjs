@@ -3,18 +3,18 @@
 // and it records every byte the terminal delivers, exactly as a shell or an
 // agent TUI would receive them.
 //
-//   E2E_KEYLOG_OUT=/path/keys.log node e2e/app/fixtures/keylogger.mjs
+//   node e2e/app/fixtures/keylogger.mjs /path/keys.log
 //
 // The terminal is put in raw mode, so Ctrl+C, Ctrl+D, Ctrl+Z ... arrive as
 // plain bytes (0x03, 0x04, 0x1a) instead of signals. Each chunk is appended
-// to E2E_KEYLOG_OUT as one line of hex bytes and echoed on screen as
+// to the output file as one line of hex bytes and echoed on screen as
 // "KEYLOG <hex>". It exits after 10 minutes, or when it reads "\x1b\x1bQ".
 
 import { appendFileSync, writeFileSync } from "node:fs";
 
-const out = process.env.E2E_KEYLOG_OUT;
+const out = process.argv[2];
 if (!out) {
-  console.error("keylogger: set E2E_KEYLOG_OUT to the file to write");
+  console.error("keylogger: pass the file to write as the first argument");
   process.exit(2);
 }
 if (!process.stdin.isTTY) {

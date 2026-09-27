@@ -26,8 +26,8 @@
 //   node e2e/app/scenarios/F05-terminal-keys.mjs
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { platform } from "node:os";
-import { delimiter, join } from "node:path";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 import { osKeysAvailable, pressChords } from "../os-keys.mjs";
 
@@ -54,17 +54,22 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-/** A command named `hermeskeylog` on the terminal's PATH that starts the keylogger. */
-function installKeyloggerCommand(dir) {
-  mkdirSync(dir, { recursive: true });
+/**
+ * A `hermeskeylog` command in the folder a new terminal starts in (the home
+ * folder), so typing "./hermeskeylog" starts the keylogger writing to `out`.
+ * Returns the files it created.
+ */
+function installKeyloggerCommand(dir, out) {
   const script = join(REPO_ROOT, "e2e", "app", "fixtures", "keylogger.mjs");
   if (platform() === "win32") {
-    writeFileSync(join(dir, "hermeskeylog.cmd"), `@"${process.execPath}" "${script}"\r\n`);
-  } else {
-    const file = join(dir, "hermeskeylog");
-    writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${script}"\n`);
-    chmodSync(file, 0o755);
+    const file = join(dir, "hermeskeylog.cmd");
+    writeFileSync(file, `@"${process.execPath}" "${script}" "${out}"\r\n`);
+    return [file];
   }
+  const file = join(dir, "hermeskeylog");
+  writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${script}" "${out}"\n`);
+  chmodSync(file, 0o755);
+  return [file];
 }
 
 /** Bytes the keylogger recorded, as hex strings, in order. */
@@ -140,6 +145,21 @@ async function focusTerminal(bridge, sessionId) {
   `);
 }
 
+/** Where to click to put keyboard focus in the terminal (page coordinates). */
+async function terminalCenter(bridge, sessionId) {
+  return bridge.eval(`
+    const host = document.querySelector('div[data-session-id="' + CSS.escape(${JSON.stringify(sessionId)}) + '"]');
+    const r = host.querySelector(".xterm-screen").getBoundingClientRect();
+    return {
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + Math.min(r.height / 2, 120)),
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      dpr: window.devicePixelRatio || 1,
+    };
+  `);
+}
+
 /** Press chords with DOM key events on the terminal's input element. */
 async function domChords(bridge, sessionId, chords) {
   return bridge.eval(`
@@ -177,6 +197,7 @@ async function domChords(bridge, sessionId, chords) {
 
 let app;
 let failed = false;
+const createdFiles = [];
 const details = { mode: OS_KEYS ? "os-keys" : "dom-keys", platformRules: EFFECTIVE };
 
 try {
@@ -187,16 +208,15 @@ try {
   if (OS_KEYS && EMULATE) throw new Error("HERMES_E2E_PLATFORM cannot be combined with real OS key presses");
 
   // ── 1. Launch with the keylogger command on PATH ─────────────────
-  const binDir = join(evidenceDir, "bin");
-  installKeyloggerCommand(binDir);
+  mkdirSync(evidenceDir, { recursive: true });
   const keylog = join(evidenceDir, "keylog.txt");
   rmSync(keylog, { force: true });
-  process.env.PATH = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
-  process.env.E2E_KEYLOG_OUT = keylog;
 
   log("step 1: launch the test app");
   app = await launchApp({ runDir: join(evidenceDir, "run"), log, home: process.env.HERMES_E2E_HOME || undefined });
   const { bridge } = app;
+  const shellHome = app.tmpDir && existsSync(join(app.tmpDir, "home")) ? join(app.tmpDir, "home") : homedir();
+  createdFiles.push(...installKeyloggerCommand(shellHome, keylog));
 
   if (EMULATE) {
     log(`  switching the frontend to ${EMULATE} keyboard rules and reloading`);
@@ -252,7 +272,7 @@ try {
     return info && info.opened && lines.some((l) => l.trim().length > 0);
   `, { timeoutMs: 30_000 });
   await sleep(1000);
-  await bridge.typeInTerminal(sessionId, "hermeskeylog\n");
+  await bridge.typeInTerminal(sessionId, "./hermeskeylog\n");
   await bridge.waitForTerminal(sessionId, /^KEYLOG READY/, { timeoutMs: 20_000 });
   log("  keylogger is running");
   const start = await bridge.eval(FINGERPRINT);
@@ -269,7 +289,7 @@ try {
     const chord = `ctrl+${letter}`;
     const had = keylogBytes(keylog).length;
     if (OS_KEYS) {
-      const diag = await pressChords(app.child.pid, [chord]);
+      const diag = await pressChords(app.child.pid, [chord], { clickAt: await terminalCenter(bridge, sessionId) });
       if (verdicts.length === 0) log(`  real key presses go to: ${JSON.stringify(diag)}`);
     } else {
       await domChords(bridge, sessionId, [chord]);
@@ -330,7 +350,7 @@ try {
     log("step 6: press Ctrl+Shift+D in the focused terminal — it must split the pane");
     await focusTerminal(bridge, sessionId);
     if (OS_KEYS) {
-      log(`  real key presses sent: ${JSON.stringify(await pressChords(app.child.pid, ["ctrl+shift+d"]))}`);
+      log(`  real key presses sent: ${JSON.stringify(await pressChords(app.child.pid, ["ctrl+shift+d"], { clickAt: await terminalCenter(bridge, sessionId) }))}`);
     } else {
       await domChords(bridge, sessionId, ["ctrl+shift+d"]);
     }
@@ -378,6 +398,7 @@ try {
     log(`  (could not capture failure evidence: ${inner.message})`);
   }
 } finally {
+  for (const f of createdFiles) rmSync(f, { force: true });
   if (app) {
     log("step 7: quit the app");
     const exit = await app.stop();
