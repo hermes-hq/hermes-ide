@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from "react";
 import { lazyView } from "./utils/lazyView";
 import React from "react";
 import ReactDOM from "react-dom";
@@ -50,6 +50,7 @@ import { focusTerminal, refitActive } from "./terminal/TerminalPool";
 import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
 import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
+import { useBusyAgentSessionCount } from "./agent/useBusyAgentSessionCount";
 import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
 import { hasAgentSession, useAgentBridgeWarmup } from "./hooks/useAgentBridgeWarmup";
@@ -138,7 +139,15 @@ function AppContent() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
-  const updater = useAutoUpdater();
+  // An update must never kill a working agent (N10): count agent sessions
+  // mid-turn plus terminal sessions running a command, and have the
+  // updater wait for all of them to go idle before it installs.
+  const busyAgentSessionCount = useBusyAgentSessionCount();
+  const busyTerminalSessionCount = useMemo(
+    () => sessions.filter((s) => s.mode === "terminal" && s.phase === "busy").length,
+    [sessions],
+  );
+  const updater = useAutoUpdater(busyAgentSessionCount + busyTerminalSessionCount);
   const activeGitSummary = useSessionGitSummary(state.activeSessionId, !!activeSession, activeSession?.working_directory);
 
   // Load command palette shortcut setting (reload when settings panel closes)
@@ -1372,6 +1381,9 @@ function AppContent() {
         onCancel={updater.cancelDownload}
         onInstall={() =>
           updater.installAndRelaunch(async () => { await saveWorkspace(); })
+        }
+        onRelaunchNow={() =>
+          updater.installAndRelaunch(async () => { await saveWorkspace(); }, { force: true })
         }
       />
 

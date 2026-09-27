@@ -1,7 +1,52 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Update } from "@tauri-apps/plugin-updater";
+import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { checkForUpdate } from "../api/updater";
+
+/**
+ * Test-only escape hatch for e2e runs. Only read when the frontend is built
+ * with VITE_HERMES_E2E=1 (the same flag that loads `src/e2e/hooks.ts`), so
+ * it is compiled out of normal builds. Lets a scenario force the "update
+ * ready" state without reaching a real update server, and records
+ * install/relaunch attempts instead of tearing the test app down — see
+ * N10's real-app scenario.
+ */
+declare global {
+  interface Window {
+    __HERMES_TEST_UPDATE__?: {
+      forcedUpdate: { version: string; body?: string } | null;
+      installCalls: number;
+      relaunchCalls: number;
+    };
+  }
+}
+
+function testUpdateOverride() {
+  // Dead code outside the e2e build: Vite inlines the flag, so normal
+  // builds never read the global.
+  if (import.meta.env.VITE_HERMES_E2E !== "1") return undefined;
+  return typeof window !== "undefined" ? window.__HERMES_TEST_UPDATE__ : undefined;
+}
+
+/** Builds a fake `Update` from a forced test override — real enough for the
+ *  hook's state machine, but its `download`/`install` never touch the
+ *  network or the real installer. */
+function fakeUpdateFromOverride(
+  forced: { version: string; body?: string },
+  override: NonNullable<Window["__HERMES_TEST_UPDATE__"]>,
+): Update {
+  return {
+    version: forced.version,
+    body: forced.body ?? "",
+    download: async (onEvent?: (event: DownloadEvent) => void) => {
+      onEvent?.({ event: "Started", data: { contentLength: 0 } });
+      onEvent?.({ event: "Finished" });
+    },
+    install: async () => {
+      override.installCalls += 1;
+    },
+  } as unknown as Update;
+}
 
 export interface UpdateState {
   /** An update is available */
@@ -30,6 +75,10 @@ export interface UpdateState {
   stalled: boolean;
   /** Install-and-relaunch in progress (after the user clicks "Install & Relaunch") */
   installing: boolean;
+  /** Count of sessions currently working (agent busy, or a terminal command
+   *  running) — mirrors the `busySessionCount` argument. While this is
+   *  greater than zero the update waits instead of relaunching (N10). */
+  busySessionCount: number;
 }
 
 const INITIAL: UpdateState = {
@@ -46,6 +95,7 @@ const INITIAL: UpdateState = {
   error: false,
   stalled: false,
   installing: false,
+  busySessionCount: 0,
 };
 
 const CHECK_DELAY_MS = 5_000;
@@ -58,7 +108,13 @@ const STALL_TIMEOUT_MS = 15_000;
 // still works, matching how analytics still works if triggered directly.
 const isE2eBuild = import.meta.env.VITE_HERMES_E2E === "1";
 
-export function useAutoUpdater() {
+/**
+ * @param busySessionCount Number of sessions currently working (agent busy,
+ *   or a terminal command running). While greater than zero, installing is
+ *   deferred so an update can never kill a working agent (N10) — the
+ *   dialog shows a waiting message instead, with a "Relaunch now" override.
+ */
+export function useAutoUpdater(busySessionCount = 0) {
   const [state, setState] = useState<UpdateState>(INITIAL);
   const updateRef = useRef<Update | null>(null);
   const downloadingRef = useRef(false);
@@ -66,14 +122,24 @@ export function useAutoUpdater() {
   const cancelledRef = useRef(false);
   const lastProgressRef = useRef(0);
   const stallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const busySessionCountRef = useRef(busySessionCount);
+
+  useEffect(() => {
+    busySessionCountRef.current = busySessionCount;
+    setState((s) => (s.busySessionCount === busySessionCount ? s : { ...s, busySessionCount }));
+  }, [busySessionCount]);
 
   const doCheck = useCallback(async () => {
     // Skip periodic checks while download or install is in progress
     if (downloadingRef.current || installingRef.current) return;
 
     try {
-      // Runs in the backend so the stable/beta channel setting applies.
-      const update = await checkForUpdate();
+      // A test build may force an update; otherwise the check runs in the
+      // backend so the stable/beta channel setting applies.
+      const override = testUpdateOverride();
+      const update = override?.forcedUpdate
+        ? fakeUpdateFromOverride(override.forcedUpdate, override)
+        : await checkForUpdate();
       if (update) {
         setState((s) => {
           // Don't clobber state during an active download or install
@@ -215,11 +281,17 @@ export function useAutoUpdater() {
     downloadingRef.current = false;
   }, [clearStallTimer]);
 
-  const installAndRelaunch = useCallback(async (beforeInstall?: () => Promise<void>) => {
+  const installAndRelaunch = useCallback(async (
+    beforeInstall?: () => Promise<void>,
+    options?: { force?: boolean },
+  ) => {
     const update = updateRef.current;
     if (!update) return;
     // Re-entrancy guard — multiple rapid clicks fire only one install pipeline
     if (installingRef.current) return;
+    // Never kill a working agent (N10): wait for every session to go idle
+    // unless the user explicitly overrides with "Relaunch now".
+    if (busySessionCountRef.current > 0 && !options?.force) return;
     installingRef.current = true;
     // Flip UI to "Installing…" BEFORE any slow pre-step (e.g. saveWorkspace)
     setState((s) => ({ ...s, installing: true, error: false }));
@@ -227,7 +299,13 @@ export function useAutoUpdater() {
     try {
       if (beforeInstall) await beforeInstall();
       await update.install();
-      await relaunch();
+      const override = testUpdateOverride();
+      if (override) {
+        // e2e run: record the attempt instead of tearing the test app down.
+        override.relaunchCalls += 1;
+      } else {
+        await relaunch();
+      }
       // Process is being torn down for relaunch — we don't normally reach here.
     } catch {
       installingRef.current = false;

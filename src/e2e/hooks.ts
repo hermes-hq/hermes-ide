@@ -62,6 +62,23 @@ const hooks = {
       phase: entry.sessionPhase,
     };
   },
+  /**
+   * N10 (updates wait for idle): force `useAutoUpdater` to see an update as
+   * ready, without reaching a real update server. `useAutoUpdater` reads
+   * this override and fabricates a download/install that never touches the
+   * network or the real installer — the real busy-gating logic still runs
+   * for real (a real running session still blocks it).
+   */
+  forceUpdateReady: (version: string, body = ""): void => {
+    window.__HERMES_TEST_UPDATE__ = window.__HERMES_TEST_UPDATE__ ?? {
+      forcedUpdate: null,
+      installCalls: 0,
+      relaunchCalls: 0,
+    };
+    window.__HERMES_TEST_UPDATE__.forcedUpdate = { version, body };
+  },
+  /** Read back how many times the (faked) install/relaunch pipeline ran. */
+  updateTestState: () => window.__HERMES_TEST_UPDATE__ ?? null,
 };
 
 export type HermesE2EHooks = typeof hooks;

@@ -320,3 +320,13 @@ features:
       F13-2:
         text: "An always-allow rule is written to the repo's local settings file"
         scenarios: [F13-approval-safety.mjs]
+  N10:
+    name: "Updates never kill a working agent"
+    status: shipped
+    criteria:
+      N10-1:
+        text: "With an agent working, an available update does not relaunch the app"
+        scenarios: [N10-update-waits-for-idle.mjs]
+      N10-2:
+        text: "When all agents are idle, the update installs as today"
+        scenarios: [N10-update-waits-for-idle.mjs]

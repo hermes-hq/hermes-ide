@@ -362,7 +362,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
             set -e
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
-            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs
+            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs
             node e2e/app/run.mjs F13-approval-safety.mjs
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs
@@ -377,7 +377,7 @@ jobs:
         run: |
           export CARGO_TERM_COLOR=never
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
-          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs
+          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs
           node e2e/app/run.mjs F13-approval-safety.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs
