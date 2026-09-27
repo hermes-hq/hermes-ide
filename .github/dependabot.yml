@@ -15,6 +15,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Pinned to the same version as src-tauri/bridge/package.json; bumping
+      # it here alone breaks CI. Update both files together by hand.
+      - dependency-name: "@anthropic-ai/claude-agent-sdk"
 
   # cargo (Rust dependencies)
   - package-ecosystem: "cargo"
