@@ -131,6 +131,22 @@ Keep the description concise (under 72 characters). Use the commit body for addi
 4. Open a PR with a clear description of what and why.
 5. Link to the issue or discussion that approved the change (for features).
 
+### Checks
+
+The one required check is `gate`. It passes only when every check that had to run succeeded; a failed, cancelled or wrongly skipped check fails it.
+
+On pull requests, checks run only for what the PR touches:
+
+- Frontend (type check, lint, unit tests): `src/`, `package*.json`, lint and build config.
+- Rust (format, clippy, tests on Linux, macOS and Windows): `src-tauri/`, `package*.json`, `rust-toolchain.toml`.
+- Real-app scenarios on all three OSes: frontend or Rust changes.
+- Workflow lint: `.github/workflows/`.
+- Privacy: every PR.
+
+Changing `.github/workflows/ci.yml`, `scripts/ci-gate.mjs` or `e2e/` runs the frontend, Rust and real-app checks.
+
+So a frontend-only PR runs no Rust tests, and the `gate` log shows those jobs as `ok ... skipped`. That means "not needed", not "passed". Every push to `main` and every merge-queue run executes all checks. The Rust security audit runs on `main` only and is not part of the gate.
+
 ### Review Timeline
 
 - Initial feedback within 7 days.
