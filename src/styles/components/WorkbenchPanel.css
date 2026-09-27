@@ -193,8 +193,8 @@
  * land here so we don't have to thread props all the way down.
  *
  * Note: FileExplorerPanel's *outer* class is `.file-explorer` (not
- * `.file-explorer-panel`), and the file's stock width is `var(--sidebar-w)`
- * with a hard `max-width: 400px` for the left-rail use case.  Inside
+ * `.file-explorer-panel`), and the file's stock width is `var(--side-panel-w)`
+ * for the left-rail use case.  Inside
  * the workbench we want it to fill the tab body, so we override
  * both — and the right-border meant for the left-rail case has to go
  * too.  AgentContextPanel uses `.agent-context-panel` and pins itself

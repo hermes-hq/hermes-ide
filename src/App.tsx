@@ -30,6 +30,7 @@ import { UsagePanel } from "./components/UsagePanel";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
 import { WorkbenchPanel } from "./components/WorkbenchPanel";
 import { workbenchPixelWidth } from "./utils/workbenchLayout";
+import { DEFAULT_SIDEBAR_WIDTH_PX, DEFAULT_SIDE_PANEL_WIDTH_PX, leftRailWidth, resizeSidebar, resizeSidePanel } from "./utils/pluginPanelLayout";
 import type { SessionView } from "./components/SessionList";
 
 import { ProcessPanel } from "./components/ProcessPanel";
@@ -155,7 +156,8 @@ function AppContent() {
   const [activeBottomPanel, setActiveBottomPanel] = useState<string | null>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(300);
   const [activityBarOrder, setActivityBarOrder] = useState<string[]>([]);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(240);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(DEFAULT_SIDEBAR_WIDTH_PX);
+  const [sidePanelWidth, setSidePanelWidth] = useState(DEFAULT_SIDE_PANEL_WIDTH_PX);
   const [rightPanelWidth, setRightPanelWidth] = useState(300);
 
   // Right-rail Workbench width tracks the viewport, since its persisted
@@ -174,18 +176,15 @@ function AppContent() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const ACTIVITY_BAR_W = 36; // mirrors --activity-bar-w in tokens.css
-  const sidebarBudget =
-    (ui.flowMode ? 0 : ACTIVITY_BAR_W * 2) +
-    (ui.sessionListCollapsed ? 0 : leftPanelWidth);
-  const chatWorkbenchSpace = Math.max(640, viewportWidth - sidebarBudget);
-  const workbenchWidth = workbenchPixelWidth(chatWorkbenchSpace, ui.workbench.ratio);
   const toastStore = useToastStore();
   const toastStoreRef = useRef(toastStore);
   toastStoreRef.current = toastStore;
 
   const handleLeftResize = useCallback((delta: number) => {
-    setLeftPanelWidth((w) => Math.max(180, Math.min(480, w + delta)));
+    setLeftPanelWidth((w) => resizeSidebar(w, delta));
+  }, []);
+  const handleSidePanelResize = useCallback((delta: number) => {
+    setSidePanelWidth((w) => resizeSidePanel(w, delta));
   }, []);
   const handleRightResize = useCallback((delta: number) => {
     setRightPanelWidth((w) => Math.max(220, Math.min(500, w - delta)));
@@ -374,6 +373,24 @@ function AppContent() {
   });
 
   const { commands: pluginCommands, panels: pluginPanels, pluginsWithSettings, sessionActions: pluginSessionActions } = usePluginRuntime(pluginRuntime);
+
+  // Left-rail visibility (mirrors the render conditions below).  Plugin
+  // panels and the Git / Files sub-views use their own side-panel width.
+  const sessionListVisible = !ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !activePluginPanel;
+  const leftPluginPanelOpen = !ui.flowMode && !!activePluginPanel && pluginPanels.some(p => p.id === activePluginPanel && p.side === "left");
+  const secondPanelOpen = !ui.flowMode && !activePluginPanel && ((ui.gitPanelOpen && !!state.activeSessionId) || ui.fileExplorerOpen);
+  const sidePanelVisible = leftPluginPanelOpen || secondPanelOpen;
+  const ACTIVITY_BAR_W = 36; // mirrors --activity-bar-w in tokens.css
+  const sidebarBudget = leftRailWidth({
+    activityBars: ui.flowMode ? 0 : ACTIVITY_BAR_W * 2,
+    sessionListVisible,
+    sidebarWidth: leftPanelWidth,
+    sidePanelVisible,
+    sidePanelWidth,
+    selfSizedPanelVisible: !ui.flowMode && !activePluginPanel && (ui.processPanelOpen || ui.searchPanelOpen),
+  });
+  const chatWorkbenchSpace = Math.max(640, viewportWidth - sidebarBudget);
+  const workbenchWidth = workbenchPixelWidth(chatWorkbenchSpace, ui.workbench.ratio);
   const pluginUpdater = usePluginUpdateChecker(pluginRuntime);
   const [pendingUpdatePlugins, setPendingUpdatePlugins] = useState<typeof pluginUpdater.updatesAvailable | null>(null);
 
@@ -807,6 +824,7 @@ function AppContent() {
         className="app-body"
         style={{
           "--sidebar-w": `${leftPanelWidth}px`,
+          "--side-panel-w": `${sidePanelWidth}px`,
           // Right-rail width: when an agent session has the workbench
           // open, the panel uses its own viewport-ratio-derived width;
           // otherwise (terminal mode, workbench closed) we fall back to
@@ -904,6 +922,9 @@ function AppContent() {
             />
           </PanelErrorBoundary>
         )}
+        {sessionListVisible && secondPanelOpen && (
+          <PanelResizeHandle direction="horizontal" onResize={handleLeftResize} onResizeEnd={refitActive} />
+        )}
         {ui.gitPanelOpen && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
           <PanelErrorBoundary panelName="Git Panel">
             <SessionGitPanel sessionId={state.activeSessionId} projectId="" />
@@ -926,7 +947,7 @@ function AppContent() {
           const PanelComponent = pluginRuntime.getPanelComponent(activePluginPanel);
           if (!PanelComponent) return null;
           return (
-            <div style={{ width: "var(--sidebar-w)", flexShrink: 0, borderRight: "1px solid var(--border)", background: "var(--bg-1)", overflow: "hidden" }}>
+            <div className="plugin-side-panel">
               <PluginPanelHost pluginId={panelMeta.pluginId} panelId={activePluginPanel} panelName={panelMeta.name}>
                 <PanelComponent pluginId={panelMeta.pluginId} panelId={activePluginPanel} />
               </PluginPanelHost>
@@ -939,7 +960,7 @@ function AppContent() {
           onShowUpdateConfirm={() => setPendingUpdatePlugins([...pluginUpdater.updatesAvailable])}
         />
         {!ui.flowMode && (!ui.sessionListCollapsed || ui.gitPanelOpen || ui.processPanelOpen || ui.fileExplorerOpen || ui.searchPanelOpen || (activePluginPanel && pluginPanels.some(p => p.id === activePluginPanel && p.side === "left"))) && (
-          <PanelResizeHandle direction="horizontal" onResize={handleLeftResize} onResizeEnd={refitActive} />
+          <PanelResizeHandle direction="horizontal" onResize={sidePanelVisible ? handleSidePanelResize : handleLeftResize} onResizeEnd={refitActive} />
         )}
         <div className="main-area">
           <div className="terminal-and-timeline">

@@ -174,6 +174,16 @@
 
 /* ─── Plugin Panel Container ───────────────────────────────── */
 
+/* Left sidebar slot for plugin panels — own resizable width (see
+   utils/pluginPanelLayout.ts), same zone rule so it reads as a sidebar. */
+.plugin-side-panel {
+  width: var(--side-panel-w, var(--sidebar-w));
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-right: 1px solid var(--rule-zone);
+  overflow: hidden;
+}
+
 .plugin-panel-container {
   display: flex;
   flex-direction: column;

@@ -1,13 +1,12 @@
 /* ─── File Explorer Panel ───────────────────────────────────────────── */
 
 .file-explorer {
-  width: var(--sidebar-w);
+  width: var(--side-panel-w, var(--sidebar-w));
   min-width: 200px;
-  max-width: 400px;
   display: flex;
   flex-direction: column;
   background: var(--bg-1);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--rule-zone);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--text-1);

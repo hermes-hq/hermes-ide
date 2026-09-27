@@ -10,12 +10,12 @@
   font-size: var(--text-sm);
   color: var(--text-1);
   overflow: hidden;
-  /* Sidebar dimensions when rendered from App.tsx */
-  width: var(--sidebar-w);
+  /* Second side panel beside the session list: same width and zone
+     rule as plugin side panels (see utils/pluginPanelLayout.ts) */
+  width: var(--side-panel-w, var(--sidebar-w));
   min-width: 200px;
-  max-width: 400px;
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--rule-zone);
 }
 
 .session-git-panel-toolbar {
