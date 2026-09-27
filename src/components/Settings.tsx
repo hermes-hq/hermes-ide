@@ -56,6 +56,10 @@ import {
 // ║                                                                        ║
 // ║  Plugin settings are stored separately (plugin_storage table) and are  ║
 // ║  NOT included in app settings export. Plugins manage their own data.   ║
+// ║                                                                        ║
+// ║  The hidden "Flags" tab (feature-flag overrides, unlocked by clicking  ║
+// ║  the title 7 times) is a developer-only surface and is deliberately    ║
+// ║  NOT localized; every other string here goes through t().              ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 interface SettingsProps {
@@ -98,6 +102,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
       titleClicks.current = 0;
       setFlagsUnlocked(true);
     }
+  }, []);
+  useEffect(() => () => {
+    if (titleClickTimer.current) clearTimeout(titleClickTimer.current);
   }, []);
 
   // Live window size state (separate from DB settings)

@@ -44,8 +44,9 @@ void getStartupProblem().then((problem) => {
     return;
   }
   // Feature flags are read once, here, before the workspace renders — see
-  // src/featureFlags/index.ts. Never rejects (internal fetches are caught),
-  // so this never blocks startup.
+  // src/featureFlags/index.ts. It never rejects, and gives up after a short
+  // timeout (flags then stay at their stable default for this launch), so a
+  // slow backend can never leave a blank window.
   void initFeatureFlags().finally(() => {
     root.render(
       <React.StrictMode>

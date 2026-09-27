@@ -413,12 +413,18 @@ export function inheritedEnv() {
  *          (settings, onboarding state) to prove something that only takes
  *          effect "on next launch", while still never touching the real
  *          home. The caller owns cleanup of this folder.
+ * resetData: only with home: "real" — false keeps the test app's data folder
+ *            from the previous launch instead of wiping it, for the same
+ *            "relaunch against the same data" scenarios on Windows (where
+ *            the app's data lives under %APPDATA%, not HOME, so a private
+ *            home does not isolate it). Default true.
  */
 export async function launchApp({
   runDir,
   log = () => {},
   home = platform() === "win32" ? "real" : "private",
   homeDir,
+  resetData = true,
   startupTimeoutMs = 60_000,
   tmp = "private",
   env: extraEnv = {},
@@ -455,7 +461,7 @@ export async function launchApp({
         ? join(privateHome, "Library", "Application Support", E2E_IDENTIFIER)
         : join(homeEnv.XDG_DATA_HOME, E2E_IDENTIFIER);
   } else {
-    resetE2eDataDir();
+    if (resetData) resetE2eDataDir();
     dataDir = e2eDataDir();
   }
   if (extraEnv.HERMES_DATA_DIR) dataDir = extraEnv.HERMES_DATA_DIR;

@@ -3,7 +3,8 @@
  *
  * Covers:
  * - the registry cap (at most 5 flags alive at once)
- * - release-channel detection from the app version string
+ * - release-channel detection from the `update_channel` setting (the same
+ *   one the updater reads) and from a -beta app version
  * - isFeatureFlagEnabled: off by default on stable, on for beta, and an
  *   override always wins
  * - overrides persist through the settings API and survive a reload
@@ -20,7 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: h.getVersion }));
 
 import { FEATURE_FLAGS } from "../featureFlags/registry";
-import { channelFromVersion } from "../featureFlags/channel";
+import { channelFromVersion, channelFromSetting, detectReleaseChannel } from "../featureFlags/channel";
 import {
   initFeatureFlags,
   isFeatureFlagEnabled,
@@ -31,6 +32,7 @@ import {
   areFeatureFlagsReady,
   __resetFeatureFlagsForTest,
   FEATURE_FLAG_OVERRIDES_KEY,
+  UPDATE_CHANNEL_KEY,
   type FeatureFlagId,
 } from "../featureFlags";
 
@@ -66,6 +68,29 @@ describe("N07 release channel from version string", () => {
     ["2.0.0", "stable"],
   ] as const)("%s -> %s", (version, expected) => {
     expect(channelFromVersion(version)).toBe(expected);
+  });
+});
+
+describe("N07 release channel from the update_channel setting", () => {
+  it.each([
+    ["beta", "beta"],
+    [" Beta ", "beta"],
+    ["BETA", "beta"],
+    ["stable", "stable"],
+    ["", "stable"],
+    ["nightly", "stable"],
+    [undefined, "stable"],
+    [null, "stable"],
+  ] as const)("%j -> %s", (value, expected) => {
+    expect(channelFromSetting(value)).toBe(expected);
+  });
+
+  it("beta when either the setting or the version says beta", () => {
+    expect(detectReleaseChannel("beta", "1.4.0")).toBe("beta");
+    expect(detectReleaseChannel(undefined, "1.4.0-beta.1")).toBe("beta");
+    expect(detectReleaseChannel("stable", "1.4.0-beta.1")).toBe("beta");
+    expect(detectReleaseChannel("stable", "1.4.0")).toBe("stable");
+    expect(detectReleaseChannel(undefined, "1.4.0")).toBe("stable");
   });
 });
 
@@ -119,6 +144,20 @@ describe("N07 isFeatureFlagEnabled", () => {
     await initFeatureFlags({});
     expect(getReleaseChannel()).toBe("beta");
     expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+  });
+
+  it("is on with no override when the person picked the beta update channel (same version number as stable)", async () => {
+    h.getVersion.mockResolvedValue("1.4.0");
+    await initFeatureFlags({ [UPDATE_CHANNEL_KEY]: "beta" });
+    expect(getReleaseChannel()).toBe("beta");
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+  });
+
+  it("is off again when the person switches back to the stable update channel", async () => {
+    h.getVersion.mockResolvedValue("1.4.0");
+    await initFeatureFlags({ [UPDATE_CHANNEL_KEY]: "stable" });
+    expect(getReleaseChannel()).toBe("stable");
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
   });
 
   it("an override forces a flag on for stable", async () => {
@@ -178,5 +217,61 @@ describe("N07 isFeatureFlagEnabled", () => {
     expect(h.invoke).toHaveBeenCalledWith("get_settings");
     expect(getReleaseChannel()).toBe("beta");
     expect(isFeatureFlagEnabled(FLAG)).toBe(false); // overridden off despite beta
+  });
+
+  it("reads the update channel from getSettings() at startup", async () => {
+    h.getVersion.mockResolvedValue("1.4.0");
+    h.invoke.mockResolvedValueOnce({ [UPDATE_CHANNEL_KEY]: "beta" });
+    await initFeatureFlags();
+    expect(getReleaseChannel()).toBe("beta");
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+  });
+
+  it("never rejects: a failing settings read falls back to the stable default", async () => {
+    h.getVersion.mockRejectedValue(new Error("no runtime"));
+    h.invoke.mockRejectedValueOnce(new Error("backend down"));
+    await expect(initFeatureFlags()).resolves.toBeUndefined();
+    expect(areFeatureFlagsReady()).toBe(true);
+    expect(getReleaseChannel()).toBe("stable");
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+  });
+
+  describe("when the backend is slow", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("resolves at the timeout with stable defaults and ignores the late answer", async () => {
+      let answer!: (v: Record<string, string>) => void;
+      h.getVersion.mockResolvedValue("1.4.0");
+      h.invoke.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+      let done = false;
+      const init = initFeatureFlags(undefined, 2000).then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await init;
+      expect(done).toBe(true);
+      expect(areFeatureFlagsReady()).toBe(true);
+      expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+
+      // The real answer arrives later: flags must not change mid-session.
+      answer({ [UPDATE_CHANNEL_KEY]: "beta", [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: true }) });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(getReleaseChannel()).toBe("stable");
+      expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    });
+
+    it("uses the real answer when it arrives before the timeout", async () => {
+      h.getVersion.mockResolvedValue("1.4.0");
+      h.invoke.mockReturnValueOnce(
+        new Promise((resolve) => setTimeout(() => resolve({ [UPDATE_CHANNEL_KEY]: "beta" }), 500)),
+      );
+      const init = initFeatureFlags(undefined, 2000);
+      await vi.advanceTimersByTimeAsync(500);
+      await init;
+      expect(getReleaseChannel()).toBe("beta");
+      expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+    });
   });
 });

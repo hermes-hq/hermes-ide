@@ -1,6 +1,7 @@
 // ─── Feature flags ─────────────────────────────────────────────────────
 //
-// Off by default on stable, on for beta. Overridable per-flag from a hidden
+// Off by default on stable, on for beta (the channel comes from the
+// `update_channel` setting the updater also uses — see ./channel.ts). Overridable per-flag from a hidden
 // section of Settings (Settings.tsx > "flags" tab, unlocked by clicking the
 // panel title 7 times) for testing before a feature ships to everyone.
 //
@@ -17,11 +18,11 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { getSettings, setSetting, type SettingsMap } from "../api/settings";
 import { FEATURE_FLAGS, type FeatureFlagId } from "./registry";
-import { channelFromVersion, type ReleaseChannel } from "./channel";
+import { channelFromVersion, channelFromSetting, detectReleaseChannel, UPDATE_CHANNEL_KEY, type ReleaseChannel } from "./channel";
 
 export { FEATURE_FLAGS };
 export type { FeatureFlagId, ReleaseChannel };
-export { channelFromVersion };
+export { channelFromVersion, channelFromSetting, detectReleaseChannel, UPDATE_CHANNEL_KEY };
 
 /** Settings key: JSON-encoded `Partial<Record<FeatureFlagId, boolean>>`. */
 export const FEATURE_FLAG_OVERRIDES_KEY = "feature_flag_overrides";
@@ -56,20 +57,39 @@ interface FlagState {
 
 let state: FlagState | null = null;
 
+/** How long startup waits for the channel and overrides before giving up. */
+export const FEATURE_FLAG_INIT_TIMEOUT_MS = 2000;
+
 /**
- * Reads the release channel (from the app version) and the persisted
- * overrides once. Call this exactly once, before the app renders anything
- * that depends on a flag (src/main.tsx does this).
+ * Reads the release channel (the `update_channel` setting, or a -beta app
+ * version — see ./channel.ts) and the persisted overrides once. Call this
+ * exactly once, before the app renders anything that depends on a flag
+ * (src/main.tsx does this).
+ *
+ * Never rejects. If the reads take longer than `timeoutMs`, it resolves with
+ * every flag at its stable default and ignores the late answer, so flags
+ * never change mid-session.
  */
-export async function initFeatureFlags(settings?: SettingsMap): Promise<void> {
-  const [map, version] = await Promise.all([
+export async function initFeatureFlags(
+  settings?: SettingsMap,
+  timeoutMs: number = FEATURE_FLAG_INIT_TIMEOUT_MS,
+): Promise<void> {
+  const read = Promise.all([
     settings ? Promise.resolve(settings) : getSettings().catch(() => ({} as SettingsMap)),
     getVersion().catch(() => "0.0.0"),
-  ]);
-  state = {
-    channel: channelFromVersion(version),
+  ]).then(([map, version]): FlagState => ({
+    channel: detectReleaseChannel(map[UPDATE_CHANNEL_KEY], version),
     overrides: parseFeatureFlagOverrides(map[FEATURE_FLAG_OVERRIDES_KEY]),
-  };
+  }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<FlagState>((resolve) => {
+    timer = setTimeout(() => resolve({ channel: "stable", overrides: {} }), timeoutMs);
+  });
+  try {
+    state = await Promise.race([read, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The channel detected at startup. "stable" until initFeatureFlags resolves. */

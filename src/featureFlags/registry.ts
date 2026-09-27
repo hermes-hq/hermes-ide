@@ -12,21 +12,22 @@
 // once at startup from the app version + the `feature_flag_overrides`
 // setting — see src/featureFlags/index.ts).
 
-export type FeatureFlagId = "dummyProofSurface";
-
 export interface FeatureFlagDefinition {
-  readonly id: FeatureFlagId;
+  readonly id: string;
   /** Short label shown in the hidden Settings > Flags section. */
   readonly label: string;
   /** One sentence explaining what the flag gates and why it exists. */
   readonly description: string;
 }
 
-export const FEATURE_FLAGS: readonly FeatureFlagDefinition[] = [
+export const FEATURE_FLAGS = [
   {
     id: "dummyProofSurface",
     label: "Dummy proof surface",
     description:
       "A harmless badge in the top bar used to prove the feature-flag mechanism end to end. Delete this flag once a real flagged feature exists.",
   },
-];
+] as const satisfies readonly FeatureFlagDefinition[];
+
+/** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */
+export type FeatureFlagId = (typeof FEATURE_FLAGS)[number]["id"];
