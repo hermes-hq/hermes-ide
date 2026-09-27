@@ -2777,8 +2777,44 @@ pub fn detect_shell_environment(
         .get(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
     let s = session.session.lock().map_err(|e| e.to_string())?;
+    let home = crate::platform::home_dir().unwrap_or_default();
+    Ok(build_shell_environment(
+        &s.shell,
+        s.ssh_info.is_some(),
+        &home,
+        session.shell_integration.is_active(),
+        session.hermes_suggestions,
+    ))
+}
 
-    let shell = &s.shell;
+/// `shellType` reported for SSH sessions. The shell and its config live on
+/// the remote host, so nothing about the local shell applies: no local
+/// history is loaded and local autosuggest plugins don't suppress Hermes.
+pub(crate) const REMOTE_SHELL_TYPE: &str = "remote";
+
+/// Build the shell environment for a session. `shell` is the local shell
+/// setting; for SSH sessions it is ignored (see `REMOTE_SHELL_TYPE`).
+fn build_shell_environment(
+    shell: &str,
+    is_ssh: bool,
+    home_path: &std::path::Path,
+    integration_active: bool,
+    hermes_suggestions: bool,
+) -> ShellEnvironment {
+    if is_ssh {
+        return ShellEnvironment {
+            shell_type: REMOTE_SHELL_TYPE.to_string(),
+            plugins_detected: Vec::new(),
+            has_native_autosuggest: false,
+            has_oh_my_zsh: false,
+            has_syntax_highlighting: false,
+            has_starship: false,
+            has_powerlevel10k: false,
+            shell_integration_active: false,
+            hermes_suggestions,
+        };
+    }
+
     let shell_type = if shell.contains("zsh") {
         "zsh"
     } else if shell.contains("bash") {
@@ -2793,17 +2829,12 @@ pub fn detect_shell_environment(
         "unknown"
     };
 
-    let home = crate::platform::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
     let mut plugins = Vec::new();
     let mut has_oh_my_zsh = false;
     let mut has_autosuggest = false;
     let mut has_syntax_highlighting = false;
     let mut has_starship = false;
     let mut has_powerlevel10k = false;
-
-    let home_path = std::path::PathBuf::from(&home);
 
     // Check for Oh My Zsh (Unix only)
     if home_path.join(".oh-my-zsh").exists() {
@@ -2849,9 +2880,7 @@ pub fn detect_shell_environment(
         plugins.push("PSReadLine".to_string());
     }
 
-    let integration_active = session.shell_integration.is_active();
-
-    Ok(ShellEnvironment {
+    ShellEnvironment {
         shell_type: shell_type.to_string(),
         plugins_detected: plugins,
         has_native_autosuggest: has_autosuggest,
@@ -2860,12 +2889,17 @@ pub fn detect_shell_environment(
         has_starship,
         has_powerlevel10k,
         shell_integration_active: integration_active,
-        hermes_suggestions: session.hermes_suggestions,
-    })
+        hermes_suggestions,
+    }
 }
 
 #[tauri::command]
 pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, String> {
+    // An SSH session's history lives on the remote host; the local history
+    // file belongs to a different machine.
+    if shell == REMOTE_SHELL_TYPE {
+        return Ok(Vec::new());
+    }
     let home_dir =
         crate::platform::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
 
@@ -2882,23 +2916,15 @@ pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, St
             .to_string_lossy()
             .to_string()
     } else if shell.contains("pwsh") || shell.contains("powershell") {
-        // PowerShell history via PSReadLine
+        // PowerShell history via PSReadLine. On Windows, PowerShell 7+ and
+        // Windows PowerShell 5.1 share this file.
         #[cfg(windows)]
         {
             let appdata = std::env::var("APPDATA").unwrap_or_default();
-            if shell.contains("pwsh") {
-                // PowerShell 7+ (Core)
-                format!(
-                    "{}\\Microsoft\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
-                    appdata
-                )
-            } else {
-                // Windows PowerShell 5.1
-                format!(
-                    "{}\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
-                    appdata
-                )
-            }
+            format!(
+                "{}\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
+                appdata
+            )
         }
         #[cfg(not(windows))]
         {
@@ -2921,8 +2947,11 @@ pub fn read_shell_history(shell: String, limit: usize) -> Result<Vec<String>, St
         }
     };
 
-    let content = std::fs::read_to_string(&history_path)
+    // Lossy: zsh stores non-ASCII bytes "metafied" (not valid UTF-8), which
+    // would otherwise fail the whole read over one entry.
+    let bytes = std::fs::read(&history_path)
         .map_err(|e| format!("Cannot read history file {}: {}", history_path, e))?;
+    let content = String::from_utf8_lossy(&bytes);
 
     let is_fish = shell.contains("fish") || shell == "fish";
     let is_zsh = shell.contains("zsh") || shell == "zsh";
@@ -3915,6 +3944,74 @@ mod tests {
                 "hermesSuggestions": true,
             })
         );
+    }
+
+    // ── SSH sessions: the local shell environment must not apply ──
+
+    /// A home dir whose .zshrc loads zsh-autosuggestions, plus oh-my-zsh.
+    fn home_with_zsh_autosuggestions() -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join(".zshrc"),
+            "plugins=(git zsh-autosuggestions zsh-syntax-highlighting)\n",
+        )
+        .unwrap();
+        std::fs::create_dir(home.path().join(".oh-my-zsh")).unwrap();
+        home
+    }
+
+    #[test]
+    fn ssh_session_ignores_local_shell_config() {
+        let home = home_with_zsh_autosuggestions();
+        for hermes_suggestions in [true, false] {
+            let env = super::build_shell_environment(
+                "/bin/zsh",
+                true,
+                home.path(),
+                false,
+                hermes_suggestions,
+            );
+            assert_eq!(env.shell_type, super::REMOTE_SHELL_TYPE);
+            assert!(!env.has_native_autosuggest);
+            assert!(!env.has_oh_my_zsh);
+            assert!(!env.has_syntax_highlighting);
+            assert!(!env.has_starship);
+            assert!(!env.has_powerlevel10k);
+            assert!(env.plugins_detected.is_empty());
+            assert!(!env.shell_integration_active);
+            // The user's Hermes-suggestions choice still applies over SSH.
+            assert_eq!(env.hermes_suggestions, hermes_suggestions);
+        }
+    }
+
+    #[test]
+    fn local_zsh_session_still_reads_local_shell_config() {
+        let home = home_with_zsh_autosuggestions();
+        let env = super::build_shell_environment("/bin/zsh", false, home.path(), true, true);
+        assert_eq!(env.shell_type, "zsh");
+        assert!(env.has_native_autosuggest);
+        assert!(env.has_oh_my_zsh);
+        assert!(env.has_syntax_highlighting);
+        assert!(env.shell_integration_active);
+        assert!(env
+            .plugins_detected
+            .contains(&"zsh-autosuggestions".to_string()));
+    }
+
+    #[test]
+    fn ssh_session_environment_serializes_remote_shell_type() {
+        let home = tempfile::tempdir().unwrap();
+        let env = super::build_shell_environment("/bin/zsh", true, home.path(), false, true);
+        let json = serde_json::to_value(&env).unwrap();
+        assert_eq!(json["shellType"], serde_json::json!("remote"));
+        assert_eq!(json["hasNativeAutosuggest"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn remote_shell_history_is_empty() {
+        // Never falls back to a local history file for an SSH session.
+        let history = super::read_shell_history(super::REMOTE_SHELL_TYPE.to_string(), 500);
+        assert_eq!(history, Ok(Vec::new()));
     }
 }
 

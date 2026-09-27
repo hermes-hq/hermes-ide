@@ -5,7 +5,9 @@ import { detectShellEnvironment as apiDetectShellEnvironment } from "../../api/i
 export type SuggestionMode = "augment" | "replace" | "off";
 
 export interface ShellEnvironment {
-  shellType: "zsh" | "bash" | "fish" | "powershell" | "cmd" | "unknown";
+  /** "remote" = SSH session: the shell runs on the remote host, so nothing
+   *  about the local shell (history, autosuggest plugins) applies. */
+  shellType: "zsh" | "bash" | "fish" | "powershell" | "cmd" | "remote" | "unknown";
   pluginsDetected: string[];
   hasNativeAutosuggest: boolean;
   hasOhMyZsh: boolean;

@@ -95,7 +95,7 @@ describe("typical zsh user with shell integration (zsh-autosuggestions installed
 	});
 });
 
-describe("no shell integration (e.g. SSH, or a shell Hermes can't hook)", () => {
+describe("no shell integration (a local shell Hermes can't hook)", () => {
 	it("zsh with zsh-autosuggestions left running: no Hermes ghost text, Tab goes to the shell", async () => {
 		await detect({ shellIntegrationActive: false });
 		expect(shouldShowGhostText(S)).toBe(false);
@@ -136,5 +136,49 @@ describe("fish with shell integration", () => {
 		await detect({ shellType: "fish", pluginsDetected: [] });
 		expect(shouldShowGhostText(S)).toBe(true);
 		expect(shouldConsumeTab(S, true)).toBe(true);
+	});
+});
+
+/** What the backend sends for an SSH session: the local shell's config and
+ *  history belong to a different machine, so none of it is reported. */
+const REMOTE = {
+	shellType: "remote",
+	pluginsDetected: [],
+	hasNativeAutosuggest: false,
+	hasOhMyZsh: false,
+	hasSyntaxHighlighting: false,
+	hasStarship: false,
+	hasPowerlevel10k: false,
+	shellIntegrationActive: false,
+};
+
+describe("SSH session (remote shell)", () => {
+	it("local zsh-autosuggestions doesn't suppress Hermes ghost text or Tab on the remote", async () => {
+		await detect(REMOTE);
+		expect(shouldShowGhostText(S)).toBe(true);
+		expect(shouldShowOverlay(S)).toBe(true);
+		expect(shouldConsumeTab(S, true)).toBe(true);
+	});
+
+	it("Hermes suggestions off still applies over SSH", async () => {
+		await detect({ ...REMOTE, hermesSuggestions: false });
+		expect(shouldShowGhostText(S)).toBe(false);
+		expect(shouldShowOverlay(S)).toBe(false);
+		expect(shouldConsumeTab(S, true)).toBe(false);
+	});
+
+	it("local shell history is not loaded; this session's own commands still are", async () => {
+		const env = await detect(REMOTE);
+		const provider = createHistoryProvider();
+		h.invoke.mockImplementation((cmd: string) =>
+			Promise.resolve(
+				cmd === "read_shell_history" ? ["local-only-cmd"] : cmd === "get_session_commands" ? ["uptime"] : [],
+			),
+		);
+		await loadHistory(provider, S, env.shellType);
+		expect(h.invoke).not.toHaveBeenCalledWith("read_shell_history", expect.anything());
+		expect(provider.match("local").map((m) => m.command)).toEqual([]);
+		expect(provider.match("upt").map((m) => m.command)).toEqual(["uptime"]);
+		expect(provider.loaded).toBe(true);
 	});
 });

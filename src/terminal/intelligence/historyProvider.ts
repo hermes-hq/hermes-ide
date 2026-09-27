@@ -85,15 +85,19 @@ export async function loadHistory(
   // Prevent duplicate/concurrent loads — only the first call proceeds
   if (provider.loaded) return;
 
-  try {
-    // Load shell history file (most recent 500)
-    const shellHistory = await readShellHistory(shell, MAX_HISTORY);
-    // Add oldest first so most recent ends up at front
-    for (let i = shellHistory.length - 1; i >= 0; i--) {
-      provider.addCommand(shellHistory[i]);
+  // An SSH session's shell history is on the remote host — the local
+  // history file belongs to a different machine.
+  if (shell !== "remote") {
+    try {
+      // Load shell history file (most recent 500)
+      const shellHistory = await readShellHistory(shell, MAX_HISTORY);
+      // Add oldest first so most recent ends up at front
+      for (let i = shellHistory.length - 1; i >= 0; i--) {
+        provider.addCommand(shellHistory[i]);
+      }
+    } catch {
+      // Shell history not available — not critical
     }
-  } catch {
-    // Shell history not available — not critical
   }
 
   try {
