@@ -415,7 +415,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     setTmuxLoading(true);
     setTmuxError(null);
     setTmuxAvailable(true);
-    sshListTmuxSessions(sshHost.trim(), parseInt(sshPort) || 22, sshUser || undefined)
+    sshListTmuxSessions(sshHost.trim(), parseInt(sshPort) || 22, sshUser || undefined, sshJumpHost.trim() || undefined)
       .then((sessions) => {
         setTmuxSessions(sessions);
         setTmuxLoading(false);
@@ -433,7 +433,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           setTmuxLoading(false);
         }
       });
-  }, [step, sshHost, sshPort, sshUser]);
+  }, [step, sshHost, sshPort, sshUser, sshJumpHost]);
 
   useEffect(() => {
     if (step === "projects") searchRef.current?.focus();
@@ -600,6 +600,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         sshUser: mode === "ssh" ? (sshUser || undefined) : undefined,
         tmuxSession: mode === "ssh" ? (selectedTmuxSession || undefined) : undefined,
         sshIdentityFile: mode === "ssh" ? (sshIdentityFile || undefined) : undefined,
+        sshJumpHost: mode === "ssh" ? (sshJumpHost.trim() || undefined) : undefined,
       });
 
       if (mode === "ssh" && sshHost.trim()) {
@@ -816,6 +817,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                           setSshUser(h.user);
                           setSshPort(String(h.port));
                           setSshIdentityFile(h.identity_file || "");
+                          setSshJumpHost(h.jump_host || "");
                         }}
                       >
                         <span className="session-creator-ssh-history-host">

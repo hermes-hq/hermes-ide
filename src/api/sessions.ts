@@ -24,6 +24,7 @@ export function createSession(opts: {
   sshUser?: string | null;
   tmuxSession?: string | null;
   sshIdentityFile?: string | null;
+  sshJumpHost?: string | null;
   initialRows?: number | null;
   initialCols?: number | null;
   /** "terminal" (default) spawns a PTY; "agent" spawns the Claude subprocess
@@ -37,8 +38,9 @@ export function sshListTmuxSessions(
   host: string,
   port?: number,
   user?: string,
+  jumpHost?: string | null,
 ): Promise<TmuxSessionEntry[]> {
-  return invoke<TmuxSessionEntry[]>("ssh_list_tmux_sessions", { host, port, user });
+  return invoke<TmuxSessionEntry[]>("ssh_list_tmux_sessions", { host, port, user, jumpHost });
 }
 
 export function sshListTmuxWindows(
@@ -46,8 +48,9 @@ export function sshListTmuxWindows(
   tmuxSession: string,
   port?: number,
   user?: string,
+  jumpHost?: string | null,
 ): Promise<TmuxWindowEntry[]> {
-  return invoke<TmuxWindowEntry[]>("ssh_list_tmux_windows", { host, port, user, tmuxSession });
+  return invoke<TmuxWindowEntry[]>("ssh_list_tmux_windows", { host, port, user, jumpHost, tmuxSession });
 }
 
 export function sshTmuxSelectWindow(
@@ -56,8 +59,9 @@ export function sshTmuxSelectWindow(
   windowIndex: number,
   port?: number,
   user?: string,
+  jumpHost?: string | null,
 ): Promise<void> {
-  return invoke("ssh_tmux_select_window", { host, port, user, tmuxSession, windowIndex });
+  return invoke("ssh_tmux_select_window", { host, port, user, jumpHost, tmuxSession, windowIndex });
 }
 
 export function sshTmuxRenameWindow(
@@ -67,8 +71,9 @@ export function sshTmuxRenameWindow(
   newName: string,
   port?: number,
   user?: string,
+  jumpHost?: string | null,
 ): Promise<void> {
-  return invoke("ssh_tmux_rename_window", { host, port, user, tmuxSession, windowIndex, newName });
+  return invoke("ssh_tmux_rename_window", { host, port, user, jumpHost, tmuxSession, windowIndex, newName });
 }
 
 export function sshTmuxNewWindow(
@@ -76,9 +81,10 @@ export function sshTmuxNewWindow(
   tmuxSession: string,
   port?: number,
   user?: string,
+  jumpHost?: string | null,
   windowName?: string,
 ): Promise<void> {
-  return invoke("ssh_tmux_new_window", { host, port, user, tmuxSession, windowName });
+  return invoke("ssh_tmux_new_window", { host, port, user, jumpHost, tmuxSession, windowName });
 }
 
 export function checkAiProviders(): Promise<Record<string, boolean>> {

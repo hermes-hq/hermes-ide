@@ -1580,6 +1580,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sshUser: saved.ssh_info?.user || null,
                 tmuxSession: saved.ssh_info?.tmux_session || null,
                 sshIdentityFile: saved.ssh_info?.identity_file || null,
+                sshJumpHost: saved.ssh_info?.jump_host || null,
                 initialRows: restoreDims.rows,
                 initialCols: restoreDims.cols,
                 mode: restoredMode,
@@ -1827,6 +1828,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sshUser: opts?.sshUser || null,
         tmuxSession: opts?.tmuxSession || null,
         sshIdentityFile: opts?.sshIdentityFile || null,
+        sshJumpHost: opts?.sshJumpHost || null,
         initialRows: initialDims.rows,
         initialCols: initialDims.cols,
         mode,
@@ -2230,6 +2232,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           sshUser: session.ssh_info?.user || null,
           tmuxSession: session.ssh_info?.tmux_session || null,
           sshIdentityFile: session.ssh_info?.identity_file || null,
+          sshJumpHost: session.ssh_info?.jump_host || null,
           mode: "terminal",
         });
       }

@@ -198,7 +198,7 @@ function TmuxWindowTabs({ session }: { session: SessionData }) {
 
     let cancelled = false;
     const refresh = () => {
-      sshListTmuxWindows(info.host, info.tmux_session!, info.port, info.user)
+      sshListTmuxWindows(info.host, info.tmux_session!, info.port, info.user, info.jump_host)
         .then((w) => { if (!cancelled) setWindows(w); })
         .catch(() => {});
     };
@@ -207,20 +207,20 @@ function TmuxWindowTabs({ session }: { session: SessionData }) {
     refresh();
     const interval = setInterval(refresh, 5000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [info?.host, info?.port, info?.user, info?.tmux_session, session.phase]);
+  }, [info?.host, info?.port, info?.user, info?.jump_host, info?.tmux_session, session.phase]);
 
   if (!info?.tmux_session || session.phase === "destroyed" || windows.length === 0) return null;
 
   const handleSelectWindow = (index: number) => {
     // Optimistic: mark the clicked window as active immediately
     setWindows((prev) => prev.map((w) => ({ ...w, active: w.index === index })));
-    sshTmuxSelectWindow(info.host, info.tmux_session!, index, info.port, info.user)
+    sshTmuxSelectWindow(info.host, info.tmux_session!, index, info.port, info.user, info.jump_host)
       .then(() => refreshRef.current?.())
       .catch((err) => { console.warn("[TmuxWindows] select failed:", err); refreshRef.current?.(); });
   };
 
   const handleNewWindow = () => {
-    sshTmuxNewWindow(info.host, info.tmux_session!, info.port, info.user)
+    sshTmuxNewWindow(info.host, info.tmux_session!, info.port, info.user, info.jump_host)
       .then(() => refreshRef.current?.())
       .catch((err) => console.warn("[TmuxWindows] new window failed:", err));
   };
@@ -230,7 +230,7 @@ function TmuxWindowTabs({ session }: { session: SessionData }) {
     // Optimistic update
     setWindows((prev) => prev.map((w) => w.index === index ? { ...w, name: name.trim() } : w));
     setRenamingIndex(null);
-    sshTmuxRenameWindow(info.host, info.tmux_session!, index, name.trim(), info.port, info.user)
+    sshTmuxRenameWindow(info.host, info.tmux_session!, index, name.trim(), info.port, info.user, info.jump_host)
       .then(() => refreshRef.current?.())
       .catch((err) => { console.warn("[TmuxWindows] rename failed:", err); refreshRef.current?.(); });
   };

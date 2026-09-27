@@ -47,7 +47,12 @@ fn ssh_socket_path(user: &str, host: &str, port: u16) -> std::path::PathBuf {
 }
 
 /// Build a base SSH command with common options and connection multiplexing.
-fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
+fn ssh_command(
+    user: &str,
+    host: &str,
+    port: u16,
+    jump_host: Option<&str>,
+) -> std::process::Command {
     let mut cmd = std::process::Command::new("ssh");
     cmd.arg("-o").arg("ConnectTimeout=5");
     cmd.arg("-o").arg("BatchMode=yes");
@@ -59,6 +64,9 @@ fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
     cmd.arg("-o").arg("ControlPersist=300");
     if port != 22 {
         cmd.arg("-p").arg(port.to_string());
+    }
+    if let Some(jump) = normalize_jump_host(jump_host) {
+        cmd.arg("-J").arg(jump);
     }
     // `--` stops option parsing so a host starting with '-' is never read as an option.
     cmd.arg("--");
@@ -89,6 +97,10 @@ fn ssh_pty_command(info: &SshConnectionInfo, cols: u16, rows: u16) -> CommandBui
         c.arg("-i");
         c.arg(id_file);
     }
+    if let Some(jump) = normalize_jump_host(info.jump_host.as_deref()) {
+        c.arg("-J");
+        c.arg(jump);
+    }
     c.arg("--");
     c.arg(ssh_destination(&info.user, &info.host));
     // Attach to tmux session if specified.
@@ -104,14 +116,20 @@ fn ssh_pty_command(info: &SshConnectionInfo, cols: u16, rows: u16) -> CommandBui
     c
 }
 
+/// Trimmed jump host, or `None` when unset/blank.
+fn normalize_jump_host(jump_host: Option<&str>) -> Option<&str> {
+    jump_host.map(str::trim).filter(|j| !j.is_empty())
+}
+
 /// Run a remote SSH command and return (stdout, stderr, success).
 fn ssh_exec(
     user: &str,
     host: &str,
     port: u16,
+    jump_host: Option<&str>,
     remote_cmd: &str,
 ) -> Result<(String, String, bool), String> {
-    let mut cmd = ssh_command(user, host, port);
+    let mut cmd = ssh_command(user, host, port, jump_host);
     cmd.arg(remote_cmd);
     let output = cmd
         .output()
@@ -152,7 +170,7 @@ pub async fn ssh_list_directory(
     path: Option<String>,
 ) -> Result<Vec<SshFileEntry>, String> {
     // Look up SSH connection info from the session
-    let (user, host, port) = {
+    let (user, host, port, jump_host) = {
         let mgr = state
             .pty_manager
             .lock()
@@ -169,7 +187,12 @@ pub async fn ssh_list_directory(
             .ssh_info
             .as_ref()
             .ok_or_else(|| "Not an SSH session".to_string())?;
-        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+        (
+            ssh.user.clone(),
+            ssh.host.clone(),
+            ssh.port,
+            ssh.jump_host.clone(),
+        )
     };
 
     // Use the given path, or detect the remote working directory via pwd
@@ -177,7 +200,8 @@ pub async fn ssh_list_directory(
         Some(p) if !p.is_empty() => p.clone(),
         _ => {
             // Ask the remote host for its home directory (session.working_directory is local)
-            let (pwd_out, _, ok) = ssh_exec(&user, &host, port, "echo $HOME")?;
+            let (pwd_out, _, ok) =
+                ssh_exec(&user, &host, port, jump_host.as_deref(), "echo $HOME")?;
             if ok && !pwd_out.trim().is_empty() {
                 pwd_out.trim().to_string()
             } else {
@@ -194,7 +218,8 @@ pub async fn ssh_list_directory(
         shell_escape(&target), shell_escape(&target), shell_escape(&target), shell_escape(&target), shell_escape(&target)
     );
 
-    let (stdout, _stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    let (stdout, _stderr, success) =
+        ssh_exec(&user, &host, port, jump_host.as_deref(), &remote_cmd)?;
     if !success && stdout.is_empty() {
         return Err(format!("Failed to list directory: {}", target));
     }
@@ -270,7 +295,7 @@ pub async fn ssh_read_file(
     session_id: String,
     file_path: String,
 ) -> Result<SshFileContent, String> {
-    let (user, host, port) = {
+    let (user, host, port, jump_host) = {
         let mgr = state
             .pty_manager
             .lock()
@@ -287,7 +312,12 @@ pub async fn ssh_read_file(
             .ssh_info
             .as_ref()
             .ok_or_else(|| "Not an SSH session".to_string())?;
-        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+        (
+            ssh.user.clone(),
+            ssh.host.clone(),
+            ssh.port,
+            ssh.jump_host.clone(),
+        )
     };
 
     let file_name = file_path
@@ -342,7 +372,7 @@ pub async fn ssh_read_file(
         ),
         f = escaped,
     );
-    let (stdout, _, success) = ssh_exec(&user, &host, port, &combined_cmd)?;
+    let (stdout, _, success) = ssh_exec(&user, &host, port, jump_host.as_deref(), &combined_cmd)?;
     if !success && stdout.is_empty() {
         return Err(format!("Failed to read file: {}", file_path));
     }
@@ -408,7 +438,7 @@ pub async fn ssh_write_file(
     file_path: String,
     content: String,
 ) -> Result<(), String> {
-    let (user, host, port) = {
+    let (user, host, port, jump_host) = {
         let mgr = state
             .pty_manager
             .lock()
@@ -425,12 +455,17 @@ pub async fn ssh_write_file(
             .ssh_info
             .as_ref()
             .ok_or_else(|| "Not an SSH session".to_string())?;
-        (ssh.user.clone(), ssh.host.clone(), ssh.port)
+        (
+            ssh.user.clone(),
+            ssh.host.clone(),
+            ssh.port,
+            ssh.jump_host.clone(),
+        )
     };
 
     let escaped = shell_escape(&file_path);
     let cmd = format!("cat > {}", escaped);
-    let mut child = ssh_command(&user, &host, port)
+    let mut child = ssh_command(&user, &host, port, jump_host.as_deref())
         .arg(cmd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -468,6 +503,7 @@ pub async fn ssh_list_tmux_sessions(
     host: String,
     port: Option<u16>,
     user: Option<String>,
+    jump_host: Option<String>,
 ) -> Result<Vec<TmuxSessionEntry>, String> {
     let user = resolve_ssh_user(user);
     let port = port.unwrap_or(22);
@@ -476,6 +512,7 @@ pub async fn ssh_list_tmux_sessions(
         &user,
         &host,
         port,
+        jump_host.as_deref(),
         "tmux list-sessions -F '#{session_name}|||#{session_windows}|||#{session_attached}'",
     )?;
 
@@ -515,6 +552,7 @@ pub async fn ssh_list_tmux_windows(
     host: String,
     port: Option<u16>,
     user: Option<String>,
+    jump_host: Option<String>,
     tmux_session: String,
 ) -> Result<Vec<TmuxWindowEntry>, String> {
     let user = resolve_ssh_user(user);
@@ -524,7 +562,8 @@ pub async fn ssh_list_tmux_windows(
         "tmux list-windows -t '{}' -F '#{{window_index}}|||#{{window_name}}|||#{{window_active}}'",
         tmux_session.replace('\'', "'\\''")
     );
-    let (stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    let (stdout, stderr, success) =
+        ssh_exec(&user, &host, port, jump_host.as_deref(), &remote_cmd)?;
 
     if !success {
         return Err(format!("Failed to list tmux windows: {}", stderr.trim()));
@@ -556,6 +595,7 @@ pub async fn ssh_tmux_select_window(
     host: String,
     port: Option<u16>,
     user: Option<String>,
+    jump_host: Option<String>,
     tmux_session: String,
     window_index: u32,
 ) -> Result<(), String> {
@@ -567,7 +607,8 @@ pub async fn ssh_tmux_select_window(
         tmux_session.replace('\'', "'\\''"),
         window_index
     );
-    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    let (_stdout, stderr, success) =
+        ssh_exec(&user, &host, port, jump_host.as_deref(), &remote_cmd)?;
 
     if !success {
         return Err(format!("Failed to select tmux window: {}", stderr.trim()));
@@ -580,6 +621,7 @@ pub async fn ssh_tmux_new_window(
     host: String,
     port: Option<u16>,
     user: Option<String>,
+    jump_host: Option<String>,
     tmux_session: String,
     window_name: Option<String>,
 ) -> Result<(), String> {
@@ -598,7 +640,8 @@ pub async fn ssh_tmux_new_window(
             tmux_session.replace('\'', "'\\''")
         )
     };
-    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    let (_stdout, stderr, success) =
+        ssh_exec(&user, &host, port, jump_host.as_deref(), &remote_cmd)?;
 
     if !success {
         return Err(format!("Failed to create tmux window: {}", stderr.trim()));
@@ -611,6 +654,7 @@ pub async fn ssh_tmux_rename_window(
     host: String,
     port: Option<u16>,
     user: Option<String>,
+    jump_host: Option<String>,
     tmux_session: String,
     window_index: u32,
     new_name: String,
@@ -624,7 +668,8 @@ pub async fn ssh_tmux_rename_window(
         window_index,
         new_name.replace('\'', "'\\''")
     );
-    let (_stdout, stderr, success) = ssh_exec(&user, &host, port, &remote_cmd)?;
+    let (_stdout, stderr, success) =
+        ssh_exec(&user, &host, port, jump_host.as_deref(), &remote_cmd)?;
 
     if !success {
         return Err(format!("Failed to rename tmux window: {}", stderr.trim()));
@@ -660,6 +705,7 @@ pub fn create_session(
     ssh_user: Option<String>,
     tmux_session: Option<String>,
     ssh_identity_file: Option<String>,
+    ssh_jump_host: Option<String>,
     initial_rows: Option<u16>,
     initial_cols: Option<u16>,
     // `mode` is the frontend-chosen runtime mode.  `"terminal"` (default)
@@ -768,6 +814,7 @@ pub fn create_session(
             user: resolve_ssh_user(ssh_user),
             tmux_session: tmux_session.clone(),
             identity_file: ssh_identity_file.clone(),
+            jump_host: normalize_jump_host(ssh_jump_host.as_deref()).map(str::to_string),
             port_forwards: Vec::new(),
         }),
         mode: session_mode,
@@ -2029,12 +2076,13 @@ pub fn resize_session(
                     info.user.clone(),
                     info.host.clone(),
                     info.port,
+                    info.jump_host.clone(),
                     tmux_name.clone(),
                 )
             })
         })
     });
-    if let Some((user, host, port, tmux_name)) = ssh_tmux_info {
+    if let Some((user, host, port, jump_host, tmux_name)) = ssh_tmux_info {
         let resize_cols = cols;
         let resize_rows = rows;
         thread::spawn(move || {
@@ -2044,7 +2092,7 @@ pub fn resize_session(
                 resize_cols,
                 resize_rows
             );
-            let _ = ssh_exec(&user, &host, port, &remote_cmd);
+            let _ = ssh_exec(&user, &host, port, jump_host.as_deref(), &remote_cmd);
         });
     }
 
@@ -3052,7 +3100,7 @@ pub async fn ssh_upload_file(
     let local_file = std::fs::File::open(&local_path)
         .map_err(|e| format!("Failed to open local file: {}", e))?;
 
-    let mut cmd = ssh_command(&info.user, &info.host, info.port);
+    let mut cmd = ssh_command(&info.user, &info.host, info.port, info.jump_host.as_deref());
     cmd.arg(format!("cat > {}", shell_escape(&remote_path)));
     cmd.stdin(std::process::Stdio::from(local_file));
 
@@ -3084,7 +3132,7 @@ pub async fn ssh_download_file(
     let local_file = std::fs::File::create(&local_path)
         .map_err(|e| format!("Failed to create local file: {}", e))?;
 
-    let mut cmd = ssh_command(&info.user, &info.host, info.port);
+    let mut cmd = ssh_command(&info.user, &info.host, info.port, info.jump_host.as_deref());
     cmd.arg(format!("cat {}", shell_escape(&remote_path)));
     cmd.stdout(local_file);
     cmd.stderr(std::process::Stdio::piped());
@@ -3265,7 +3313,13 @@ pub fn ssh_get_remote_cwd(
         "pwd".to_string()
     };
 
-    let (stdout, stderr, success) = ssh_exec(&info.user, &info.host, info.port, &remote_cmd)?;
+    let (stdout, stderr, success) = ssh_exec(
+        &info.user,
+        &info.host,
+        info.port,
+        info.jump_host.as_deref(),
+        &remote_cmd,
+    )?;
     if !success {
         return Err(format!("Failed to get remote CWD: {}", stderr.trim()));
     }
@@ -3286,7 +3340,13 @@ pub fn ssh_get_remote_git_info(
         remote_path.replace('\'', "'\\''")
     );
 
-    let (stdout, _stderr, _success) = ssh_exec(&info.user, &info.host, info.port, &remote_cmd)?;
+    let (stdout, _stderr, _success) = ssh_exec(
+        &info.user,
+        &info.host,
+        info.port,
+        info.jump_host.as_deref(),
+        &remote_cmd,
+    )?;
     let lines: Vec<&str> = stdout.lines().collect();
 
     let branch = lines.first().and_then(|l| {
@@ -3712,11 +3772,110 @@ mod tests {
         ));
         assert!(!super::agent_model_needs_emit(&agent(None), &None));
     }
+
+    // ─── SSH command construction ───────────────────────────────────
+
+    fn ssh_info(jump_host: Option<&str>) -> super::SshConnectionInfo {
+        super::SshConnectionInfo {
+            host: "db.internal".to_string(),
+            port: 2222,
+            user: "alice".to_string(),
+            tmux_session: None,
+            identity_file: None,
+            jump_host: jump_host.map(str::to_string),
+            port_forwards: Vec::new(),
+        }
+    }
+
+    fn pty_argv(info: &super::SshConnectionInfo) -> Vec<String> {
+        super::ssh_pty_command(info, 80, 24)
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn exec_argv(jump_host: Option<&str>) -> Vec<String> {
+        super::ssh_command("alice", "db.internal", 2222, jump_host)
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// `-J <jump>` must appear before the destination so ssh treats it as
+    /// an option rather than part of the remote command.
+    fn assert_jump_before_dest(argv: &[String], jump: &str) {
+        let j = argv.iter().position(|a| a == "-J").expect("missing -J");
+        assert_eq!(argv[j + 1], jump);
+        let dest = argv.iter().position(|a| a == "alice@db.internal").unwrap();
+        assert!(j < dest, "-J must precede destination: {:?}", argv);
+    }
+
+    #[test]
+    fn pty_ssh_command_passes_jump_host() {
+        let argv = pty_argv(&ssh_info(Some("bastion.example.com")));
+        assert_jump_before_dest(&argv, "bastion.example.com");
+    }
+
+    #[test]
+    fn pty_ssh_command_without_jump_host_has_no_j_flag() {
+        for jump in [None, Some(""), Some("   ")] {
+            let argv = pty_argv(&ssh_info(jump));
+            assert!(!argv.iter().any(|a| a == "-J"), "{:?}", argv);
+            assert_eq!(argv.last().unwrap(), "alice@db.internal");
+        }
+    }
+
+    #[test]
+    fn exec_ssh_command_passes_jump_host() {
+        let argv = exec_argv(Some(" admin@bastion:2200 "));
+        assert_jump_before_dest(&argv, "admin@bastion:2200");
+    }
+
+    #[test]
+    fn exec_ssh_command_without_jump_host_has_no_j_flag() {
+        for jump in [None, Some("")] {
+            let argv = exec_argv(jump);
+            assert!(!argv.iter().any(|a| a == "-J"), "{:?}", argv);
+            assert_eq!(argv.last().unwrap(), "alice@db.internal");
+        }
+    }
+
+    #[test]
+    fn ssh_info_without_jump_host_deserializes() {
+        // ssh_info rows persisted before jump_host existed must still load.
+        let info: super::SshConnectionInfo =
+            serde_json::from_str(r#"{"host":"h","port":22,"user":"u"}"#).unwrap();
+        assert!(info.jump_host.is_none());
+    }
 }
 
 #[cfg(test)]
 mod ssh_command_tests {
     use super::{resolve_ssh_user, ssh_command, ssh_destination, ssh_pty_command};
+
+    #[test]
+    fn jump_host_goes_before_end_of_options_and_destination() {
+        let args = std_args(&ssh_command("alice", "example.com", 22, Some("bastion")));
+        let j = args.iter().position(|a| a == "-J").expect("-J present");
+        let dd = args.iter().position(|a| a == "--").expect("-- present");
+        assert_eq!(args[j + 1], "bastion");
+        assert!(j < dd);
+        assert_eq!(args[dd + 1], "alice@example.com");
+
+        let mut i = info("", "lima-test-agent");
+        i.jump_host = Some("  bastion  ".to_string());
+        let pty: Vec<String> = ssh_pty_command(&i, 80, 24)
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let j = pty.iter().position(|a| a == "-J").expect("-J present");
+        let dd = pty.iter().position(|a| a == "--").expect("-- present");
+        assert_eq!(pty[j + 1], "bastion");
+        assert!(j < dd);
+        assert_eq!(pty[dd + 1], "lima-test-agent");
+    }
     use crate::pty::models::SshConnectionInfo;
 
     fn info(user: &str, host: &str) -> SshConnectionInfo {
@@ -3727,6 +3886,7 @@ mod ssh_command_tests {
             tmux_session: None,
             identity_file: None,
             port_forwards: Vec::new(),
+            jump_host: None,
         }
     }
 
@@ -3760,14 +3920,14 @@ mod ssh_command_tests {
 
     #[test]
     fn exec_command_passes_bare_alias_when_user_blank() {
-        let args = std_args(&ssh_command("", "lima-test-agent", 22));
+        let args = std_args(&ssh_command("", "lima-test-agent", 22, None));
         assert_eq!(args.last().unwrap(), "lima-test-agent");
         assert!(!args.iter().any(|a| a.contains("@lima-test-agent")));
     }
 
     #[test]
     fn exec_command_keeps_user_at_host_when_user_given() {
-        let args = std_args(&ssh_command("alice", "example.com", 2222));
+        let args = std_args(&ssh_command("alice", "example.com", 2222, None));
         assert_eq!(args.last().unwrap(), "alice@example.com");
         assert!(args.windows(2).any(|w| w[0] == "-p" && w[1] == "2222"));
     }
@@ -3790,7 +3950,7 @@ mod ssh_command_tests {
 
     #[test]
     fn destination_follows_end_of_options_marker() {
-        let exec = std_args(&ssh_command("", "-oProxyCommand=x", 22));
+        let exec = std_args(&ssh_command("", "-oProxyCommand=x", 22, None));
         assert_eq!(exec[exec.len() - 2], "--");
         let mut i = info("", "-oProxyCommand=x");
         i.tmux_session = Some("main".to_string());

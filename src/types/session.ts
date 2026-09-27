@@ -76,6 +76,7 @@ export interface SshConnectionInfo {
   user: string;
   tmux_session?: string | null;
   identity_file?: string | null;
+  jump_host?: string | null;
   port_forwards: PortForward[];
 }
 
@@ -173,6 +174,7 @@ export interface CreateSessionOpts {
   sshUser?: string;
   tmuxSession?: string;
   sshIdentityFile?: string;
+  sshJumpHost?: string;
   /** Frontend-chosen session mode.  Defaults to `agent` for Claude, `terminal` otherwise. */
   mode?: SessionMode;
 }

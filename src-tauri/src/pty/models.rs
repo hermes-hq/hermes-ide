@@ -167,6 +167,9 @@ pub struct SshConnectionInfo {
     pub tmux_session: Option<String>,
     #[serde(default)]
     pub identity_file: Option<String>,
+    /// Optional ProxyJump host (`ssh -J`), e.g. `bastion.example.com`.
+    #[serde(default)]
+    pub jump_host: Option<String>,
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
 }

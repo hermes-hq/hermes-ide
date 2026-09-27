@@ -542,7 +542,7 @@ function AppContent() {
 
   const handleReconnect = useCallback(async (session: import("./types/session").SessionData) => {
     if (!session.ssh_info) return;
-    const { host, port, user, tmux_session, identity_file } = session.ssh_info;
+    const { host, port, user, tmux_session, identity_file, jump_host } = session.ssh_info;
     const oldLabel = session.label;
     // Close the disconnected session first
     await closeSession(session.id);
@@ -554,6 +554,7 @@ function AppContent() {
       sshUser: user,
       tmuxSession: tmux_session ?? undefined,
       sshIdentityFile: identity_file ?? undefined,
+      sshJumpHost: jump_host ?? undefined,
     });
   }, [closeSession, createSession]);
 
