@@ -294,6 +294,9 @@ jobs:
           WEBKIT_DISABLE_COMPOSITING_MODE: "1"
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: |
+          # The toolchain step turns cargo colours on for the job; scenarios
+          # that read cargo's messages need them plain.
+          export CARGO_TERM_COLOR=never
           xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
             set -e
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
@@ -306,6 +309,7 @@ jobs:
         env:
           CI: "true"
         run: |
+          export CARGO_TERM_COLOR=never
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
 
