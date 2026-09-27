@@ -8,6 +8,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { applyTheme, applyAgentTimelineStyle, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { fmt, PLATFORM } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import {
   AI_AGENT_PREFIXES_KEY,
   PREFIX_EXAMPLES,
@@ -352,8 +353,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     value={settings.command_palette_shortcut || "cmd_k"}
                     onChange={(e) => updateSetting("command_palette_shortcut", e.target.value)}
                   >
-                    <option value="cmd_k">{fmt("{mod}K")} ({t("settings.defaultOption")})</option>
-                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} ({t("settings.freesShortcut", { shortcut: fmt("{mod}K") })})</option>
+                    <option value="cmd_k">{shortcutLabel("view.command-palette")} ({t("settings.defaultOption")})</option>
+                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} ({t("settings.freesShortcut", { shortcut: shortcutLabel("view.command-palette") })})</option>
                   </select>
                   <span className="settings-hint-inline">{t("settings.requiresRestartMenu")}</span>
                 </div>

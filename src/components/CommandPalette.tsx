@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { SessionData } from "../state/SessionContext";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
 
 interface CommandPaletteProps {
@@ -47,9 +48,9 @@ export function CommandPalette({
   const { t, currentLanguage } = useI18n();
 
   const commands: Command[] = useMemo(() => [
-    { id: "new", label: t("palette.newSession"), category: t("app.session"), shortcut: fmt("{mod}N"), action: () => { onNewSession(); onClose(); } },
-    { id: "ctx", label: t("palette.toggleContext"), category: t("app.view"), shortcut: fmt("{mod}E"), action: () => { onToggleContext(); onClose(); } },
-    { id: "sidebar", label: t("palette.toggleSidebar"), category: t("app.view"), shortcut: fmt("{mod}B"), action: () => { onToggleSessions(); onClose(); } },
+    { id: "new", label: t("palette.newSession"), category: t("app.session"), shortcut: shortcutLabel("file.new-session"), action: () => { onNewSession(); onClose(); } },
+    { id: "ctx", label: t("palette.toggleContext"), category: t("app.view"), shortcut: shortcutLabel("view.context-panel"), action: () => { onToggleContext(); onClose(); } },
+    { id: "sidebar", label: t("palette.toggleSidebar"), category: t("app.view"), shortcut: shortcutLabel("view.toggle-sidebar"), action: () => { onToggleSessions(); onClose(); } },
     { id: "settings", label: t("app.settings"), category: t("app.app"), shortcut: fmt("{mod},"), action: () => { onOpenSettings(); onClose(); } },
     { id: "settings-general", label: t("palette.settingsGeneral"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("general"); onClose(); } },
     { id: "settings-appearance", label: t("palette.settingsAppearance"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
@@ -70,9 +71,9 @@ export function CommandPalette({
     ...(onToggleFlowMode ? [{ id: "flow-mode", label: t("palette.toggleFlowMode"), category: t("app.view"), shortcut: fmt("{mod}{shift}Z"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
     ...(onAttachProject ? [{ id: "attach-project", label: t("palette.addFolder"), category: t("app.folders"), action: () => { onAttachProject(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: t("palette.scanCurrentDirectory"), category: t("app.folders"), action: () => { onScanCwd(); onClose(); } }] : []),
-    ...(onOpenComposer ? [{ id: "composer", label: t("palette.promptComposer"), category: t("app.tools"), shortcut: fmt("{mod}J"), action: () => { onOpenComposer(); onClose(); } }] : []),
+    ...(onOpenComposer ? [{ id: "composer", label: t("palette.promptComposer"), category: t("app.tools"), shortcut: shortcutLabel("view.prompt-composer"), action: () => { onOpenComposer(); onClose(); } }] : []),
     ...(onOpenShortcuts ? [{ id: "shortcuts", label: t("palette.keyboardShortcuts"), category: t("app.help"), shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
-    ...(onToggleGit ? [{ id: "git", label: t("palette.toggleGitPanel"), category: t("app.view"), shortcut: fmt("{mod}G"), action: () => { onToggleGit(); onClose(); } }] : []),
+    ...(onToggleGit ? [{ id: "git", label: t("palette.toggleGitPanel"), category: t("app.view"), shortcut: shortcutLabel("view.git-panel"), action: () => { onToggleGit(); onClose(); } }] : []),
     ...(onToggleSearch ? [{ id: "search", label: t("palette.searchInFolder"), category: t("app.view"), shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,

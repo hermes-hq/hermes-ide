@@ -43,7 +43,7 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
               <div className="shortcuts-group-label">{t(group.groupKey)}</div>
               <div className="shortcuts-table">
                 {group.shortcuts.map((s) => (
-                  <div key={s.id} className="shortcuts-row">
+                  <div key={s.id} className="shortcuts-row" data-shortcut-id={s.id}>
                     <span className="shortcuts-action">{t(s.labelKey)}</span>
                     <kbd className="shortcuts-kbd">{fmt(s.keys)}</kbd>
                   </div>

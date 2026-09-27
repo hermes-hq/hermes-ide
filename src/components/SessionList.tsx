@@ -9,7 +9,7 @@ import { encodeSessionDrag, setDraggedSession, getDraggedSession } from "./Split
 // We use getCurrentWebview().onDragDropEvent() with position-based hit testing instead.
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useContextMenu, buildSessionMenuItems, buildEmptyAreaMenuItems } from "../hooks/useContextMenu";
-import { fmt } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import { isHermesWorktreePath } from "../utils/worktree";
 import { useSessionGitSummary } from "../hooks/useSessionGitSummary";
 import { useRemoteSshInfo } from "../hooks/useRemoteSshInfo";
@@ -1120,7 +1120,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       </div>
       <div className="session-list-body" onContextMenu={handleEmptyAreaContextMenu}>
         {sessions.length === 0 && (
-          <div className="session-list-empty">{t("sessions.noActive")}<br/><span className="text-muted">{t("sessions.createHint", { shortcut: fmt("{mod}N") })}</span></div>
+          <div className="session-list-empty">{t("sessions.noActive")}<br/><span className="text-muted">{t("sessions.createHint", { shortcut: shortcutLabel("file.new-session") })}</span></div>
         )}
 
         {/* Projects (groups) first */}

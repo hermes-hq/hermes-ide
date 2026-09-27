@@ -1,0 +1,23 @@
+{
+  "_comment": "Single source of truth for app keyboard chords, read by the native menu (src-tauri/src/menu) and the frontend (src/utils/keymap.ts). mac: Cmd chords. pc: Windows/Linux chords; they never use a bare Ctrl+letter, because a terminal owns Ctrl+letter. pcOutsideTerminal: the older Ctrl+letter chord, still honoured when no terminal has keyboard focus.",
+  "chords": [
+    { "action": "hermes.settings", "mac": "{mod},", "pc": "{ctrl}," },
+    { "action": "file.new-session", "mac": "{mod}N", "pc": "{ctrl}{shift}N", "pcOutsideTerminal": "{ctrl}N" },
+    { "action": "file.new-session-tab", "mac": "{mod}T", "pc": "{ctrl}{shift}T", "pcOutsideTerminal": "{ctrl}T" },
+    { "action": "file.close-pane", "mac": "{mod}W", "pc": "{ctrl}{shift}W", "pcOutsideTerminal": "{ctrl}W" },
+    { "action": "file.file-explorer", "mac": "{mod}F", "pc": "{ctrl}{shift}O", "pcOutsideTerminal": "{ctrl}F" },
+    { "action": "view.toggle-sidebar", "mac": "{mod}B", "pc": "{ctrl}{shift}B", "pcOutsideTerminal": "{ctrl}B" },
+    { "action": "view.command-palette", "mac": "{mod}K", "pc": "{ctrl}{shift}K", "pcOutsideTerminal": "{ctrl}K" },
+    { "action": "view.prompt-composer", "mac": "{mod}J", "pc": "{ctrl}{shift}M", "pcOutsideTerminal": "{ctrl}J" },
+    { "action": "view.process-panel", "mac": "{mod}P", "pc": "{ctrl}{shift}L", "pcOutsideTerminal": "{ctrl}P" },
+    { "action": "view.git-panel", "mac": "{mod}G", "pc": "{ctrl}{shift}G", "pcOutsideTerminal": "{ctrl}G" },
+    { "action": "view.context-panel", "mac": "{mod}E", "pc": "{ctrl}{shift}E", "pcOutsideTerminal": "{ctrl}E" },
+    { "action": "view.search-panel", "mac": "{mod}{shift}F", "pc": "{ctrl}{shift}F" },
+    { "action": "view.split-horizontal", "mac": "{mod}D", "pc": "{ctrl}{shift}D", "pcOutsideTerminal": "{ctrl}D" },
+    { "action": "view.split-vertical", "mac": "{mod}{shift}D", "pc": "{ctrl}{shift}S" },
+    { "action": "view.flow-mode", "mac": "{mod}{shift}Z", "pc": "{ctrl}{shift}Z" },
+    { "action": "view.cost-dashboard", "mac": "{mod}$", "pc": "{ctrl}$" },
+    { "action": "view.shortcuts", "mac": "{mod}/", "pc": "{ctrl}/" },
+    { "action": "session.copy-context", "mac": "{mod}{shift}C", "pc": "{ctrl}{shift}C" }
+  ]
+}

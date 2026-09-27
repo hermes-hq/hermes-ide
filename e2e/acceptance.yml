@@ -330,3 +330,18 @@ features:
       N10-2:
         text: "When all agents are idle, the update installs as today"
         scenarios: [N10-update-waits-for-idle.mjs]
+  F05:
+    name: "Terminal-faithful keys on Windows and Linux"
+    status: partial
+    criteria:
+      F05-1:
+        text: "On Windows and Linux, Ctrl+D in a focused terminal sends end-of-input and does not split the pane (real key press on a CI runner)"
+        scenarios:
+          - F05-terminal-keys.mjs@linux,win32
+      F05-2:
+        text: "Ctrl+Shift+D splits the pane from a focused terminal"
+        scenarios:
+          - F05-terminal-keys.mjs@linux,win32
+      F05-3:
+        text: "The keymap scenario runs nightly on all three OSes"
+        scenarios: [F05-terminal-keys.mjs]

@@ -1,6 +1,6 @@
 import "../styles/components/EmptyState.css";
 import { SessionHistoryEntry } from "../state/SessionContext";
-import { fmt } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
 
 interface EmptyStateProps {
@@ -90,7 +90,7 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
                 <span className="es-tile-title">{t("empty.newSessionTitle")}</span>
                 <span className="es-tile-desc">{t("empty.newSessionDesc")}</span>
               </div>
-              <kbd className="es-tile-kbd">{fmt("{mod}N")}</kbd>
+              <kbd className="es-tile-kbd">{shortcutLabel("file.new-session")}</kbd>
             </button>
 
             <button className="es-tile es-tile-secondary" onClick={onOpenPalette} type="button">
@@ -99,7 +99,7 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
                 <span className="es-tile-title">{t("empty.commandPaletteTitle")}</span>
                 <span className="es-tile-desc">{t("empty.commandPaletteDesc")}</span>
               </div>
-              <kbd className="es-tile-kbd">{fmt("{mod}K")}</kbd>
+              <kbd className="es-tile-kbd">{shortcutLabel("view.command-palette")}</kbd>
             </button>
 
             <button className="es-tile es-tile-secondary" onClick={onToggleContext} type="button">
@@ -108,7 +108,7 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
                 <span className="es-tile-title">{t("empty.contextPanelTitle")}</span>
                 <span className="es-tile-desc">{t("empty.contextPanelDesc")}</span>
               </div>
-              <kbd className="es-tile-kbd">{fmt("{mod}E")}</kbd>
+              <kbd className="es-tile-kbd">{shortcutLabel("view.context-panel")}</kbd>
             </button>
           </div>
 

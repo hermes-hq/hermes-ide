@@ -20,8 +20,11 @@ import "./styles/themes.css";
 import "./styles/topbar.css";
 import "./styles/onDemandViewStyles";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { fmt, isMac } from "./utils/platform";
+import { fmt, isMac, PLATFORM } from "./utils/platform";
 import { matchAppShortcut } from "./utils/shortcuts";
+import { shortcutLabel } from "./utils/keymap";
+import { installAppChordListener } from "./hooks/appChordListener";
+import { triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { getSetting } from "./api/settings";
@@ -815,6 +818,9 @@ function AppContent() {
     commandPaletteShortcut: cmdPaletteShortcut,
   });
 
+  // ── Windows/Linux: app chords typed in the webview (terminal keeps Ctrl+letter) ──
+  useEffect(() => installAppChordListener(window, PLATFORM, triggerMenuBarActionFromKeyboard), []);
+
   // ── Sync UI toggle state → native menu checkmarks ──
   useMenuStateSync({
     sidebarVisible: !ui.sessionListCollapsed,
@@ -865,7 +871,7 @@ function AppContent() {
           <ActivityBar
             side="left"
             pinnedTabs={[
-              { id: "sessions", label: `${t("sessions.title")} (${fmt("{mod}B")})`, icon: SessionsIcon, badge: sessions.length || undefined },
+              { id: "sessions", label: `${t("sessions.title")} (${shortcutLabel("view.toggle-sidebar")})`, icon: SessionsIcon, badge: sessions.length || undefined },
             ]}
             tabs={(() => {
               const filtered = pluginPanels
@@ -908,7 +914,7 @@ function AppContent() {
                 }
               }
             }}
-            topAction={{ icon: PlusIcon, label: `${t("session.new")} (${fmt("{mod}N")})`, onClick: () => setSessionCreatorOpen({}) }}
+            topAction={{ icon: PlusIcon, label: `${t("session.new")} (${shortcutLabel("file.new-session")})`, onClick: () => setSessionCreatorOpen({}) }}
             bottomActions={[
               { icon: PluginsIcon, label: t("app.plugins"), onClick: () => setSettingsOpen("plugins") },
               { icon: SettingsIcon, label: t("app.settings"), onClick: () => setSettingsOpen("general") },
@@ -1130,7 +1136,7 @@ function AppContent() {
                     { id: "usage", label: t("app.usage"), icon: UsageIcon },
                   ]
                 : [
-                    { id: "context", label: `${t("app.context")} (${fmt("{mod}E")})`, icon: ContextIcon },
+                    { id: "context", label: `${t("app.context")} (${shortcutLabel("view.context-panel")})`, icon: ContextIcon },
                     { id: "usage", label: t("app.usage"), icon: UsageIcon },
                   ]
             }

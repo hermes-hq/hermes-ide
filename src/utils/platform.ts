@@ -1,9 +1,26 @@
 // ─── Platform Detection ─────────────────────────────────────────────
 // Single source of truth for all OS-specific logic in the frontend.
 
-type Platform = "mac" | "win" | "linux";
+export type Platform = "mac" | "win" | "linux";
+
+/**
+ * Test builds only (VITE_HERMES_E2E=1, stripped from normal builds): a
+ * real-app scenario can run the frontend with another platform's keyboard
+ * rules by setting localStorage "hermes-e2e-platform" and reloading.
+ */
+function e2ePlatformOverride(): Platform | null {
+  if (import.meta.env.VITE_HERMES_E2E !== "1") return null;
+  try {
+    const value = localStorage.getItem("hermes-e2e-platform");
+    return value === "mac" || value === "win" || value === "linux" ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 function detectPlatform(): Platform {
+  const override = e2ePlatformOverride();
+  if (override) return override;
   const ua = (typeof navigator !== "undefined" ? navigator.userAgent ?? "" : "").toLowerCase();
   if (ua.includes("macintosh") || ua.includes("mac os")) return "mac";
   if (ua.includes("windows")) return "win";
@@ -68,7 +85,12 @@ export const PC_SYMBOLS: Record<string, string> = {
  *   fmt("{mod}{shift}C") → "⌘⇧C" (mac) / "Ctrl+Shift+C" (win/linux)
  */
 export function fmt(canonical: string): string {
-  const symbols = isMac ? MAC_SYMBOLS : PC_SYMBOLS;
+  return formatChord(canonical, PLATFORM);
+}
+
+/** Like fmt(), for an explicit platform. */
+export function formatChord(canonical: string, platform: Platform): string {
+  const symbols = platform === "mac" ? MAC_SYMBOLS : PC_SYMBOLS;
   let result = canonical;
   for (const [token, replacement] of Object.entries(symbols)) {
     result = result.replaceAll(token, replacement);

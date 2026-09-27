@@ -77,6 +77,30 @@ macOS and Linux (the scenario owns and deletes that folder), and
 data lives under `%APPDATA%` rather than the home folder.
 `scenarios/N07-feature-flags.mjs` does both.
 
+## Real key presses (F05)
+
+Most scenarios type through the DOM. `F05-terminal-keys.mjs` has to prove
+what the OS keyboard path does (native menu accelerators, the webview's own
+key handling), so it can also press real keys:
+
+- `os-keys.mjs` — real OS key presses into the app window: `xdotool` (XTEST)
+  on Linux under Xvfb, `SendInput` on Windows. It refuses to run on macOS and
+  anywhere without `CI=true`, because it presses keys on the machine.
+- `fixtures/keylogger.mjs` — a program the scenario runs inside a Hermes
+  terminal. It puts the terminal in raw mode and records every byte it
+  receives, so the scenario can check that Ctrl+letter reached the program.
+- `HERMES_E2E_OS_KEYS=1` — use real key presses (CI runners only). Linux
+  needs `xdotool` installed and a virtual display (`xvfb-run`).
+- `HERMES_E2E_PLATFORM=linux|win` — run the frontend with that platform's
+  keyboard rules (test builds only), with DOM key events. This lets a Mac
+  check the Windows/Linux path locally; it cannot be combined with
+  `HERMES_E2E_OS_KEYS`.
+
+```sh
+node e2e/app/scenarios/F05-terminal-keys.mjs                             # native rules
+HERMES_E2E_PLATFORM=linux node e2e/app/scenarios/F05-terminal-keys.mjs   # Windows/Linux rules
+```
+
 ## CI
 
 The `e2e-app` and `acceptance` jobs in `.github/workflows/ci.yml` build the
@@ -85,7 +109,9 @@ test app and run the scenarios on `ubuntu-24.04` (under `xvfb`),
 the acceptance gate over the results of all three. Both sit under the
 required `gate` check, so a red, cancelled or missing run blocks the merge.
 Every run — pull requests included — runs `terminal-echo` 20 times; a
-manual run can choose another count.
+manual run can choose another count. `F05-terminal-keys` runs with real key
+presses on Linux and Windows on every run, and every night (the scheduled
+run of `ci.yml`).
 
 The release workflow (`.github/workflows/release.yml`) starts with
 `node e2e/release-gate.mjs`: it re-checks the ledger and requires the CI

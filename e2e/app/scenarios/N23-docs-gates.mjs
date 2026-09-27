@@ -38,6 +38,7 @@ const APP_JSON = join(REPO_ROOT, "src", "shortcuts", "app-shortcuts.json");
 const README = join(REPO_ROOT, "README.md");
 const DOCS_MD = join(REPO_ROOT, "docs", "shortcuts.md");
 const CLAIMS_YML = join(REPO_ROOT, "docs", "readme-claims.yml");
+const KEYMAP = join(REPO_ROOT, "src", "utils", "keymap.json");
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -63,17 +64,24 @@ try {
   assert(r.status === 0 && r.out.includes("up to date"), "the CI check passes on the repository as committed");
   assert(/^\| New Tab \| ⌘T \| /m.test(readFileSync(DOCS_MD, "utf8")), "docs/shortcuts.md lists New Tab (⌘T in the menu)");
 
-  log("case 2: remove New Tab's accelerator from a copy of the menu");
+  log("case 2: remove New Tab's accelerator from a copy of the menu (and its chord from a copy of keymap.json)");
   const menu = readFileSync(MENU, "utf8");
   const trimmedMenu = menu.replace(/(with_id\("file\.new-session-tab", "New Tab"\)\s*)\.accelerator\([^\r\n]*\)\r?\n/, "$1");
   assert(trimmedMenu !== menu, "the copy no longer binds a key to New Tab");
   const menuCopy = join(work, "mod.rs");
   writeFileSync(menuCopy, trimmedMenu);
-  r = run(GENERATOR, ["--check", "--menu", menuCopy], "generate-shortcuts --check --menu <copy>");
+  // The menu reads its chords from keymap.json; a chord no menu item uses is
+  // an error, so the chord goes too, as it would in a real removal.
+  const realKeymap = JSON.parse(readFileSync(KEYMAP, "utf8"));
+  const trimmedKeymap = { ...realKeymap, chords: realKeymap.chords.filter((c) => c.action !== "file.new-session-tab") };
+  assert(trimmedKeymap.chords.length === realKeymap.chords.length - 1, "the keymap copy drops New Tab's chord");
+  const trimmedKeymapCopy = join(work, "keymap-no-new-tab.json");
+  writeFileSync(trimmedKeymapCopy, JSON.stringify(trimmedKeymap, null, 2));
+  r = run(GENERATOR, ["--check", "--menu", menuCopy, "--keymap", trimmedKeymapCopy], "generate-shortcuts --check --menu <copy> --keymap <copy>");
   assert(r.status === 1 && r.out.includes("STALE"), "the CI check fails: the committed docs no longer match the menu");
   const tsOut = join(work, "shortcuts.ts");
   const mdOut = join(work, "shortcuts.md");
-  r = run(GENERATOR, ["--menu", menuCopy, "--ts-out", tsOut, "--md-out", mdOut], "generate-shortcuts --menu <copy>");
+  r = run(GENERATOR, ["--menu", menuCopy, "--keymap", trimmedKeymapCopy, "--ts-out", tsOut, "--md-out", mdOut], "generate-shortcuts --menu <copy> --keymap <copy>");
   assert(r.status === 0, "regenerating from the changed menu succeeds");
   assert(!readFileSync(mdOut, "utf8").includes("| New Tab |"), "the regenerated table has no New Tab row");
   assert(!readFileSync(tsOut, "utf8").includes('"file.new-session-tab"'), "the regenerated panel data has no New Tab entry");
@@ -90,45 +98,21 @@ try {
   r = run(GENERATOR, ["--app", appCopy, "--ts-out", tsOut, "--md-out", mdOut], "generate-shortcuts --app <copy>");
   assert(r.status === 0 && !readFileSync(mdOut, "utf8").includes("Focus Composer"), "the regenerated table has no Focus Composer row");
 
-  // Every CmdOrCtrl chord moves into the table, the way the menu reads chords
-  // through app_accel("<id>")? once they live in src/utils/keymap.json. The
-  // Windows/Linux chords get their own keys: Ctrl+Shift+Alt+<key> for a plain
-  // Ctrl chord (with the old Ctrl+<key> kept for outside a terminal), and the
-  // same Ctrl+Shift+<key> for one that already has Shift.
-  const keymap = { chords: [] };
-  const keymapMenu = menu.replace(
-    /(with_id\("([^"]+)", "[^"]+"\)\s*)\.accelerator\("CmdOrCtrl\+([^"]+)"\)/g,
-    (_m, head, id, rest) => {
-      const shifted = rest.startsWith("Shift+");
-      const key = shifted ? rest.slice("Shift+".length) : rest;
-      keymap.chords.push(
-        shifted
-          ? { action: id, mac: `{mod}{shift}${key}`, pc: `{ctrl}{shift}${key}` }
-          : { action: id, mac: `{mod}${key}`, pc: `{ctrl}{shift}{alt}${key}`, pcOutsideTerminal: `{ctrl}${key}` },
-      );
-      return `${head}.accelerator(app_accel("${id}")?)`;
-    },
-  );
-  assert(keymap.chords.length >= 10, `the copy reads ${keymap.chords.length} chords through app_accel`);
-  const keymapMenuCopy = join(work, "keymap-mod.rs");
-  const keymapCopy = join(work, "keymap.json");
-  writeFileSync(keymapMenuCopy, keymapMenu);
-  writeFileSync(keymapCopy, JSON.stringify(keymap, null, 2));
-  const baseTs = join(work, "base.ts");
-  const baseMd = join(work, "base.md");
-  r = run(GENERATOR, ["--ts-out", baseTs, "--md-out", baseMd], "generate-shortcuts (repository menu)");
-  assert(r.status === 0, "generating from the repository's menu succeeds");
-  r = run(GENERATOR, ["--menu", keymapMenuCopy, "--keymap", keymapCopy, "--ts-out", tsOut, "--md-out", mdOut], "generate-shortcuts --menu <keymap copy> --keymap <copy>");
-  assert(r.status === 0, "generating from the keymap-driven menu succeeds");
-  const ids = (file) => [...readFileSync(file, "utf8").matchAll(/\{ id: "([^"]+)"/g)].map((m) => m[1]).join(",");
-  assert(ids(tsOut) === ids(baseTs), `the keymap-driven menu keeps every row (${ids(tsOut).split(",").length})`);
+  // The menu reads every CmdOrCtrl chord through app_accel("<id>")? from
+  // src/utils/keymap.json. The Windows/Linux chords get their own keys:
+  // Ctrl+Shift+<key>, with the old Ctrl+<key> kept for outside a terminal.
+  const keymap = JSON.parse(readFileSync(KEYMAP, "utf8"));
+  const accelIds = [...menu.matchAll(/\.accelerator\(app_accel\("([^"]+)"\)\?\)/g)].map((m) => m[1]);
+  assert(accelIds.length >= 10, `the menu reads ${accelIds.length} chords through app_accel`);
+  assert(accelIds.every((id) => keymap.chords.some((c) => c.action === id)), "every app_accel id has a chord in keymap.json");
   assert(
-    /^\| New Tab \| ⌘T \| Ctrl\+Shift\+Alt\+T \| Windows \/ Linux: also Ctrl\+T when no terminal has focus \|$/m.test(readFileSync(mdOut, "utf8")),
+    /^\| New Tab \| ⌘T \| Ctrl\+Shift\+T \| Windows \/ Linux: also Ctrl\+T when no terminal has focus \|$/m.test(readFileSync(DOCS_MD, "utf8")),
     "New Tab shows its Windows/Linux chord from the keymap",
   );
   keymap.chords.pop();
+  const keymapCopy = join(work, "keymap.json");
   writeFileSync(keymapCopy, JSON.stringify(keymap, null, 2));
-  r = run(GENERATOR, ["--menu", keymapMenuCopy, "--keymap", keymapCopy, "--ts-out", tsOut, "--md-out", mdOut], "generate-shortcuts with a chord missing from keymap.json");
+  r = run(GENERATOR, ["--keymap", keymapCopy, "--ts-out", tsOut, "--md-out", mdOut], "generate-shortcuts with a chord missing from keymap.json");
   assert(r.status !== 0 && r.out.includes("keymap.json has no such chord"), "a chord missing from the keymap fails instead of dropping the row");
 
   log("case 4: the repository's README passes the claims gate");

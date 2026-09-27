@@ -18,10 +18,10 @@ their definitions so it can never drift from what the app actually does.
 
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
-| New Session | ⌘N | Ctrl+N |  |
-| New Tab | ⌘T | Ctrl+T |  |
-| Close Pane | ⌘W | Ctrl+W |  |
-| File Explorer | ⌘F | Ctrl+F |  |
+| New Session | ⌘N | Ctrl+Shift+N | Windows / Linux: also Ctrl+N when no terminal has focus |
+| New Tab | ⌘T | Ctrl+Shift+T | Windows / Linux: also Ctrl+T when no terminal has focus |
+| Close Pane | ⌘W | Ctrl+Shift+W | Windows / Linux: also Ctrl+W when no terminal has focus |
+| File Explorer | ⌘F | Ctrl+Shift+O | Windows / Linux: also Ctrl+F when no terminal has focus |
 
 ## Edit
 
@@ -33,16 +33,16 @@ their definitions so it can never drift from what the app actually does.
 
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
-| Sidebar | ⌘B | Ctrl+B |  |
-| Command Palette | ⌘K | Ctrl+K |  |
-| Prompt Composer | ⌘J | Ctrl+J |  |
-| Process Panel | ⌘P | Ctrl+P |  |
-| Git Panel | ⌘G | Ctrl+G |  |
-| Context Panel | ⌘E | Ctrl+E |  |
+| Sidebar | ⌘B | Ctrl+Shift+B | Windows / Linux: also Ctrl+B when no terminal has focus |
+| Command Palette | ⌘K | Ctrl+Shift+K | Windows / Linux: also Ctrl+K when no terminal has focus |
+| Prompt Composer | ⌘J | Ctrl+Shift+M | Windows / Linux: also Ctrl+J when no terminal has focus |
+| Process Panel | ⌘P | Ctrl+Shift+L | Windows / Linux: also Ctrl+P when no terminal has focus |
+| Git Panel | ⌘G | Ctrl+Shift+G | Windows / Linux: also Ctrl+G when no terminal has focus |
+| Context Panel | ⌘E | Ctrl+Shift+E | Windows / Linux: also Ctrl+E when no terminal has focus |
 | Cost Dashboard | ⌘$ | Ctrl+$ |  |
 | Keyboard Shortcuts | ⌘/ | Ctrl+/ |  |
-| Split Right | ⌘D | Ctrl+D |  |
-| Split Down | ⌘⇧D | Ctrl+Shift+D |  |
+| Split Right | ⌘D | Ctrl+Shift+D | Windows / Linux: also Ctrl+D when no terminal has focus |
+| Split Down | ⌘⇧D | Ctrl+Shift+S |  |
 | Flow Mode | ⌘⇧Z | Ctrl+Shift+Z |  |
 | Search Panel | ⌘⇧F | Ctrl+Shift+F |  |
 | Toggle Fullscreen | — | F11 | Windows / Linux only |

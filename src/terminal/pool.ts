@@ -4,7 +4,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { isMac } from "../utils/platform";
+import { isMac, PLATFORM } from "../utils/platform";
+import { isAppChordInTerminal } from "../utils/keymap";
 import { isHermesWorktreePath } from "../utils/worktree";
 import { resizeSession, isShellForeground } from "../api/sessions";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
@@ -240,6 +241,11 @@ export async function createTerminal(
       }
       return false;
     }
+
+    // Windows/Linux: app chords (Ctrl+Shift+letter, see utils/keymap.ts)
+    // are not terminal input — let them reach the app's key listener.
+    // Bare Ctrl+letter is never one of them, so it always reaches the shell.
+    if (isAppChordInTerminal(_event, PLATFORM)) return false;
 
     // macOS: Cmd+Left/Right → Home/End (beginning/end of line)
     // xterm.js doesn't map these like native macOS terminals do.

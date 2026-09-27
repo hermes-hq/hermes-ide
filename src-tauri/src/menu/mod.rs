@@ -59,13 +59,63 @@ fn about_metadata() -> AboutMetadata<'static> {
         .build()
 }
 
+// ─── Keymap ─────────────────────────────────────────────────────────
+//
+// App chords live in one table shared with the frontend (which shows them in
+// the Shortcuts panel and handles them inside the webview). On Windows/Linux
+// a native accelerator can take a key before the webview sees it, so no app
+// chord there is a bare Ctrl+letter: those belong to the terminal.
+
+const KEYMAP_JSON: &str = include_str!("../../../src/utils/keymap.json");
+
+#[derive(Debug, Deserialize)]
+struct KeymapFile {
+    chords: Vec<KeymapChord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KeymapChord {
+    action: String,
+    mac: String,
+    pc: String,
+}
+
+fn keymap() -> &'static KeymapFile {
+    static KEYMAP: std::sync::OnceLock<KeymapFile> = std::sync::OnceLock::new();
+    KEYMAP
+        .get_or_init(|| serde_json::from_str(KEYMAP_JSON).expect("src/utils/keymap.json is valid"))
+}
+
+/// Canonical chord ("{mod}{shift}D") → accelerator string ("CmdOrCtrl+Shift+D").
+fn to_accelerator(canonical: &str) -> String {
+    canonical
+        .replace("{mod}", "CmdOrCtrl+")
+        .replace("{ctrl}", "Ctrl+")
+        .replace("{shift}", "Shift+")
+        .replace("{alt}", "Alt+")
+}
+
+/// Accelerator for a menu action on the given platform.
+fn accelerator_for(action: &str, mac: bool) -> Option<String> {
+    keymap()
+        .chords
+        .iter()
+        .find(|c| c.action == action)
+        .map(|c| to_accelerator(if mac { &c.mac } else { &c.pc }))
+}
+
+fn app_accel(action: &str) -> Result<String, Box<dyn std::error::Error>> {
+    accelerator_for(action, cfg!(target_os = "macos"))
+        .ok_or_else(|| format!("no keyboard chord for menu action {action}").into())
+}
+
 // ─── Build Application Menu Bar ─────────────────────────────────────
 
 pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     // ── Hermes menu (app menu) ──
     let about = PredefinedMenuItem::about(app, Some("About HERMES-IDE"), Some(about_metadata()))?;
     let settings = MenuItemBuilder::with_id("hermes.settings", "Settings...")
-        .accelerator("CmdOrCtrl+,")
+        .accelerator(app_accel("hermes.settings")?)
         .build(app)?;
     let quit = PredefinedMenuItem::quit(app, None)?;
 
@@ -102,16 +152,16 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
 
     // ── File menu ──
     let new_session = MenuItemBuilder::with_id("file.new-session", "New Session")
-        .accelerator("CmdOrCtrl+N")
+        .accelerator(app_accel("file.new-session")?)
         .build(app)?;
     let new_tab = MenuItemBuilder::with_id("file.new-session-tab", "New Tab")
-        .accelerator("CmdOrCtrl+T")
+        .accelerator(app_accel("file.new-session-tab")?)
         .build(app)?;
     let close_pane = MenuItemBuilder::with_id("file.close-pane", "Close Pane")
-        .accelerator("CmdOrCtrl+W")
+        .accelerator(app_accel("file.close-pane")?)
         .build(app)?;
     let open_file_explorer = MenuItemBuilder::with_id("file.file-explorer", "File Explorer")
-        .accelerator("CmdOrCtrl+F")
+        .accelerator(app_accel("file.file-explorer")?)
         .build(app)?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
@@ -162,37 +212,37 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
 
     // ── View menu ──
     let toggle_sidebar = CheckMenuItemBuilder::with_id("view.toggle-sidebar", "Sidebar")
-        .accelerator("CmdOrCtrl+B")
+        .accelerator(app_accel("view.toggle-sidebar")?)
         .checked(true)
         .build(app)?;
     let command_palette = MenuItemBuilder::with_id("view.command-palette", "Command Palette")
-        .accelerator("CmdOrCtrl+K")
+        .accelerator(app_accel("view.command-palette")?)
         .build(app)?;
     let prompt_composer = MenuItemBuilder::with_id("view.prompt-composer", "Prompt Composer")
-        .accelerator("CmdOrCtrl+J")
+        .accelerator(app_accel("view.prompt-composer")?)
         .build(app)?;
     let process_panel = CheckMenuItemBuilder::with_id("view.process-panel", "Process Panel")
-        .accelerator("CmdOrCtrl+P")
+        .accelerator(app_accel("view.process-panel")?)
         .build(app)?;
     let git_panel = CheckMenuItemBuilder::with_id("view.git-panel", "Git Panel")
-        .accelerator("CmdOrCtrl+G")
+        .accelerator(app_accel("view.git-panel")?)
         .build(app)?;
     let context_panel = CheckMenuItemBuilder::with_id("view.context-panel", "Context Panel")
-        .accelerator("CmdOrCtrl+E")
+        .accelerator(app_accel("view.context-panel")?)
         .build(app)?;
     let cost_dashboard = MenuItemBuilder::with_id("view.cost-dashboard", "Cost Dashboard")
-        .accelerator("CmdOrCtrl+$")
+        .accelerator(app_accel("view.cost-dashboard")?)
         .build(app)?;
     let shortcuts = MenuItemBuilder::with_id("view.shortcuts", "Keyboard Shortcuts")
-        .accelerator("CmdOrCtrl+/")
+        .accelerator(app_accel("view.shortcuts")?)
         .build(app)?;
 
     // Split submenu
     let split_horizontal = MenuItemBuilder::with_id("view.split-horizontal", "Split Right")
-        .accelerator("CmdOrCtrl+D")
+        .accelerator(app_accel("view.split-horizontal")?)
         .build(app)?;
     let split_vertical = MenuItemBuilder::with_id("view.split-vertical", "Split Down")
-        .accelerator("CmdOrCtrl+Shift+D")
+        .accelerator(app_accel("view.split-vertical")?)
         .build(app)?;
 
     let split_submenu = SubmenuBuilder::new(app, "Split")
@@ -201,10 +251,10 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .build()?;
 
     let toggle_flow_mode = CheckMenuItemBuilder::with_id("view.flow-mode", "Flow Mode")
-        .accelerator("CmdOrCtrl+Shift+Z")
+        .accelerator(app_accel("view.flow-mode")?)
         .build(app)?;
     let search_panel = CheckMenuItemBuilder::with_id("view.search-panel", "Search Panel")
-        .accelerator("CmdOrCtrl+Shift+F")
+        .accelerator(app_accel("view.search-panel")?)
         .build(app)?;
 
     let mut view_builder = SubmenuBuilder::new(app, "View")
@@ -242,7 +292,7 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
 
     // ── Session menu ──
     let copy_context = MenuItemBuilder::with_id("session.copy-context", "Copy Context")
-        .accelerator("CmdOrCtrl+Shift+C")
+        .accelerator(app_accel("session.copy-context")?)
         .build(app)?;
 
     let session_menu = SubmenuBuilder::new(app, "Session")
@@ -516,5 +566,113 @@ mod tests {
         assert_eq!(meta.comments.as_deref(), Some(NON_AFFILIATION_NOTE));
         assert_eq!(meta.credits.as_deref(), Some(NON_AFFILIATION_NOTE));
         assert!(NON_AFFILIATION_NOTE.contains("Not affiliated with Nous Research"));
+    }
+
+    /// Every menu item that carries an app chord.
+    const MENU_ACTIONS_WITH_CHORDS: &[&str] = &[
+        "hermes.settings",
+        "file.new-session",
+        "file.new-session-tab",
+        "file.close-pane",
+        "file.file-explorer",
+        "view.toggle-sidebar",
+        "view.command-palette",
+        "view.prompt-composer",
+        "view.process-panel",
+        "view.git-panel",
+        "view.context-panel",
+        "view.cost-dashboard",
+        "view.shortcuts",
+        "view.split-horizontal",
+        "view.split-vertical",
+        "view.flow-mode",
+        "view.search-panel",
+        "session.copy-context",
+    ];
+
+    fn is_bare_ctrl_letter(accel: &str) -> bool {
+        let parts: Vec<&str> = accel.split('+').collect();
+        parts.len() == 2
+            && matches!(parts[0], "Ctrl" | "CmdOrCtrl" | "Control")
+            && parts[1].len() == 1
+            && parts[1].chars().all(|c| c.is_ascii_alphabetic())
+    }
+
+    #[test]
+    fn every_menu_action_has_a_chord_on_both_platforms() {
+        for action in MENU_ACTIONS_WITH_CHORDS {
+            assert!(accelerator_for(action, true).is_some(), "{action} (mac)");
+            assert!(accelerator_for(action, false).is_some(), "{action} (pc)");
+        }
+    }
+
+    #[test]
+    fn no_windows_linux_chord_takes_a_bare_ctrl_letter() {
+        for action in MENU_ACTIONS_WITH_CHORDS {
+            let accel = accelerator_for(action, false).unwrap();
+            assert!(
+                !is_bare_ctrl_letter(&accel),
+                "{action} uses {accel}, which a terminal needs"
+            );
+        }
+    }
+
+    #[test]
+    fn chords_are_unique_per_platform() {
+        for mac in [true, false] {
+            let mut seen = std::collections::HashMap::new();
+            for action in MENU_ACTIONS_WITH_CHORDS {
+                let accel = accelerator_for(action, mac).unwrap();
+                if let Some(other) = seen.insert(accel.clone(), *action) {
+                    panic!("{accel} is used by both {other} and {action} (mac={mac})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mac_chords_keep_their_cmd_accelerators() {
+        assert_eq!(
+            accelerator_for("view.split-horizontal", true).unwrap(),
+            "CmdOrCtrl+D"
+        );
+        assert_eq!(
+            accelerator_for("view.split-vertical", true).unwrap(),
+            "CmdOrCtrl+Shift+D"
+        );
+        assert_eq!(
+            accelerator_for("file.close-pane", true).unwrap(),
+            "CmdOrCtrl+W"
+        );
+        assert_eq!(
+            accelerator_for("hermes.settings", true).unwrap(),
+            "CmdOrCtrl+,"
+        );
+    }
+
+    #[test]
+    fn windows_linux_split_is_ctrl_shift_d() {
+        assert_eq!(
+            accelerator_for("view.split-horizontal", false).unwrap(),
+            "Ctrl+Shift+D"
+        );
+        assert_eq!(
+            accelerator_for("file.close-pane", false).unwrap(),
+            "Ctrl+Shift+W"
+        );
+    }
+
+    #[test]
+    fn unknown_action_has_no_chord() {
+        assert!(accelerator_for("view.nope", false).is_none());
+        assert!(app_accel("view.nope").is_err());
+    }
+
+    #[test]
+    fn detects_bare_ctrl_letter() {
+        assert!(is_bare_ctrl_letter("Ctrl+D"));
+        assert!(is_bare_ctrl_letter("CmdOrCtrl+W"));
+        assert!(!is_bare_ctrl_letter("Ctrl+Shift+D"));
+        assert!(!is_bare_ctrl_letter("Ctrl+,"));
     }
 }
