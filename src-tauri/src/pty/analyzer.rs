@@ -711,6 +711,7 @@ impl OutputAnalyzer {
     ///   - `\x1b[?1049h` / `\x1b[?1049l` (xterm-style, modern default)
     ///   - `\x1b[?1047h` / `\x1b[?1047l`
     ///   - `\x1b[?47h`   / `\x1b[?47l`   (older terminals)
+    ///
     /// Only the latest transition in a chunk matters — if a TUI exits and a
     /// new one starts inside the same PTY read, we should land on "in TUI".
     fn update_alt_screen_state(state: &mut bool, raw: &[u8]) {

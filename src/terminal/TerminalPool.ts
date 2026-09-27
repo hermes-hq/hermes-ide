@@ -272,6 +272,19 @@ function sliceLastCodePoint(buf: string): string {
   return buf.slice(0, -1);
 }
 
+/**
+ * Add the typed line to suggestion history — but only when it was typed at
+ * the shell prompt. Input typed inside an interactive program (Claude, vim,
+ * less, etc.) is not a shell command and must not feed suggestions (#172).
+ */
+function recordInputInHistory(entry: PoolEntry): void {
+  const command = entry.inputBuffer.trim();
+  if (!command) return;
+  if (!entry.shellIsForeground) return;
+  if (entry.terminal.buffer.active.type === "alternate") return;
+  entry.historyProvider.addCommand(command);
+}
+
 function updateInputBuffer(entry: PoolEntry, data: string): void {
   // Single-char fast paths (keyboard input — one char per onData call)
   if (data.length === 1) {
@@ -285,9 +298,7 @@ function updateInputBuffer(entry: PoolEntry, data: string): void {
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x0d) {
       // Enter — log to history and clear
-      if (entry.inputBuffer.trim()) {
-        entry.historyProvider.addCommand(entry.inputBuffer.trim());
-      }
+      recordInputInHistory(entry);
       entry.inputBuffer = "";
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x1b) {
@@ -318,9 +329,7 @@ function updateInputBuffer(entry: PoolEntry, data: string): void {
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x0d) {
       // Enter within paste — log to history and clear
-      if (entry.inputBuffer.trim()) {
-        entry.historyProvider.addCommand(entry.inputBuffer.trim());
-      }
+      recordInputInHistory(entry);
       entry.inputBuffer = "";
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x1b) {
