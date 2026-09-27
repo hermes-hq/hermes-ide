@@ -68,4 +68,6 @@ node tools/fake-agents/scrub.mjs --check new.jsonl
 `npx vitest run tools` runs the kit's tests, including the gate that fails on
 anything the scrubber would still remove from a committed fixture. The
 real-app scenario `e2e/app/scenarios/N03-fake-agent.mjs` runs the fake agent
-inside a Hermes terminal.
+inside a Hermes terminal with whatever shell it starts (a POSIX shell,
+PowerShell or cmd.exe). Test cases that depend on POSIX signals are skipped on
+Windows.

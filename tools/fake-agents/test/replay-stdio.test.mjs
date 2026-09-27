@@ -3,6 +3,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { jsonLines, kit, sleep, start, tmpDir } from "./proc.mjs";
 
+// POSIX signals (SIGTERM, SIGHUP, SIGWINCH, a signal-reported SIGKILL) do not
+// exist on Windows; these cases run on macOS and Linux only.
+const posixIt = it.skipIf(process.platform === "win32");
+
 const REPLAY = kit("replay-stdio.mjs");
 const CLAUDE = (name) => kit("cassettes", "claude-bridge", "2.1.283", `${name}.jsonl`);
 const ACP = kit("cassettes", "acp", "1", "edit-approval.jsonl");
@@ -59,7 +63,7 @@ describe("replay-stdio: Claude bridge cassettes", () => {
 		expect((await p.done).code).toBe(0);
 	});
 
-	it("crash path: stderr message, then death by SIGKILL mid-turn", async () => {
+	posixIt("crash path: stderr message, then death by SIGKILL mid-turn", async () => {
 		const p = replay(CLAUDE("crash"));
 		p.writeJson(USER);
 		const r = await p.done;
@@ -68,7 +72,7 @@ describe("replay-stdio: Claude bridge cassettes", () => {
 		expect(jsonLines(r.stdout).at(-1)).toMatchObject({ type: "assistant" });
 	});
 
-	it("hang path: answers once, then stays alive and silent", async () => {
+	posixIt("hang path: answers once, then stays alive and silent", async () => {
 		const p = replay(CLAUDE("hang"));
 		p.writeJson(USER);
 		await p.nextJson((m) => m.type === "assistant");

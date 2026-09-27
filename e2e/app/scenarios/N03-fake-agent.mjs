@@ -8,6 +8,11 @@
 // Three runs in one session: approve (y, exit 0), deny (n, exit 3) and
 // interrupt (Ctrl-C, exit 130).
 //
+// Works with whatever shell the session starts: a POSIX shell (macOS, Linux),
+// PowerShell or cmd.exe (Windows). The scenario asks the shell which kind it
+// is, then quotes paths and reads the exit code the way that shell does
+// (see ../shells.mjs).
+//
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N03-fake-agent.mjs
 //
@@ -17,10 +22,13 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { REPO_ROOT, createLogger, launchApp, outDir, sleep } from "../harness.mjs";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { PROBE_OUTPUT, classifyProbe, commandLine, echoExitCode, probeCommand } from "../shells.mjs";
 
+const SCENARIO = "N03-fake-agent";
+const startedAt = Date.now();
 const FAKE_AGENT = join(REPO_ROOT, "tools", "fake-agents", "fake-agent.mjs");
-const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", "N03-fake-agent");
+const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
 rmSync(logFile, { force: true });
 const log = createLogger(logFile);
@@ -92,6 +100,14 @@ async function createPlainTerminal(bridge) {
 	);
 }
 
+// ── The session's shell ──────────────────────────────────────────────
+
+async function detectShell(bridge, sessionId) {
+	await bridge.typeInTerminal(sessionId, `${probeCommand()}\n`);
+	const { line } = await bridge.waitForTerminal(sessionId, PROBE_OUTPUT, { timeoutMs: 20_000 });
+	return classifyProbe(line);
+}
+
 // ── Session status (the phase tag in the session list) ───────────────
 
 const phaseOf = (bridge) => bridge.eval(`return e2e.first(".session-item")?.getAttribute("data-phase") ?? null;`);
@@ -152,11 +168,11 @@ const readLog = (file) =>
 
 // ── One run of the fake agent ────────────────────────────────────────
 
-async function runFakeAgent(bridge, sessionId, { tag, answer, expectExit, expectLine, expectBusy = false, shot }) {
+async function runFakeAgent(bridge, sessionId, shell, { tag, answer, expectExit, expectLine, expectBusy = false, shot }) {
 	const agentLog = join(evidenceDir, `fake-agent-${tag}.jsonl`);
 	rmSync(agentLog, { force: true });
 	const marker = `fake-agent-${tag}-exit=`;
-	const command = `${process.execPath} ${FAKE_AGENT} --scenario approval --log ${agentLog}\n`;
+	const command = commandLine(shell, process.execPath, [FAKE_AGENT, "--scenario", "approval", "--log", agentLog]) + "\n";
 	log(`run "${tag}": typing the custom command, then answering ${JSON.stringify(answer)}`);
 	await bridge.typeInTerminal(sessionId, command);
 
@@ -195,11 +211,11 @@ async function runFakeAgent(bridge, sessionId, { tag, answer, expectExit, expect
 		await sleep(100);
 	}
 	await sleep(800); // let the shell draw its prompt again
-	await bridge.typeInTerminal(sessionId, `echo ${marker}$?\n`);
-	const done = await bridge.waitForTerminal(sessionId, new RegExp(`^${marker}\\d+$`), { timeoutMs: 20_000 });
+	await bridge.typeInTerminal(sessionId, `${echoExitCode(shell, marker)}\n`);
+	const done = await bridge.waitForTerminal(sessionId, new RegExp(`^${marker}\\d+\\s*$`), { timeoutMs: 20_000 });
 	await sleep(2600); // past Hermes's 2 s silence threshold
 	const seen = await phases.stop();
-	const exitLine = done.lines.filter((l) => l.startsWith(marker)).at(-1);
+	const exitLine = done.lines.filter((l) => l.startsWith(marker)).at(-1)?.trimEnd();
 	assert(exitLine === `${marker}${expectExit}`, `the shell reports exit code ${expectExit} ("${exitLine}")`);
 	// Everything the agent printed on the main screen, up to the exit line.
 	const tail = after(done.lines, "fake-agent 1.0: working on the task");
@@ -251,9 +267,11 @@ try {
 		return info && info.opened && lines.some((l) => l.trim().length > 0);
 	`, { timeoutMs: 30_000 });
 	await sleep(1000);
+	const shell = await detectShell(bridge, sessionId);
+	log(`  the session's shell is ${shell === "posix" ? "a POSIX shell" : shell}`);
 
 	log("step 2: approve");
-	await runFakeAgent(bridge, sessionId, {
+	await runFakeAgent(bridge, sessionId, shell, {
 		tag: "approve",
 		answer: "y",
 		expectExit: 0,
@@ -263,7 +281,7 @@ try {
 	});
 
 	log("step 3: deny");
-	await runFakeAgent(bridge, sessionId, {
+	await runFakeAgent(bridge, sessionId, shell, {
 		tag: "deny",
 		answer: "n",
 		expectExit: 3,
@@ -272,7 +290,7 @@ try {
 	});
 
 	log("step 4: interrupt with Ctrl-C");
-	await runFakeAgent(bridge, sessionId, { tag: "interrupt", answer: "ctrl-c", expectExit: 130, shot: "03" });
+	await runFakeAgent(bridge, sessionId, shell, { tag: "interrupt", answer: "ctrl-c", expectExit: 130, shot: "03" });
 } catch (e) {
 	failed = true;
 	log(`FAILED: ${e?.stack ?? e}`);
@@ -293,5 +311,4 @@ try {
 	}
 }
 
-log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-process.exit(failed ? 1 : 0);
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

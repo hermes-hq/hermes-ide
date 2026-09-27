@@ -113,7 +113,26 @@ describe("scrub", () => {
 	});
 });
 
+// Words the fixtures use on purpose. A machine whose user or host name is one
+// of them (a host called "claude", say) must not turn the gate red: the gate
+// is about leaks, and these words are not.
+const FIXTURE_WORDS = new Set(["claude", "codex", "acp", "bridge", "agent", "fake", "hermes", "node", "bash"]);
+
+/** This machine's identity minus the fixture vocabulary. */
+function gateIdentity(machine = localIdentity()) {
+	const keep = (name) => !FIXTURE_WORDS.has(name.toLowerCase());
+	return { user: keep(machine.user) ? machine.user : "", hosts: machine.hosts.filter(keep) };
+}
+
 describe("committed fixtures", () => {
+	it("a machine named after a fixture word does not trip the gate; other names still do", () => {
+		const machine = { user: "claude", hosts: ["claude.local", "claude", "alice-mbp"] };
+		const id = gateIdentity(machine);
+		expect(id).toEqual({ user: "", hosts: ["claude.local", "alice-mbp"] });
+		expect(findLeaks("claude-bridge spoke", id)).toEqual([]);
+		expect(findLeaks("recorded on alice-mbp", id).map((l) => l.kind)).toEqual(["hostname"]);
+	});
+
 	const files = [];
 	const walk = (d) => {
 		for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -133,7 +152,7 @@ describe("committed fixtures", () => {
 	// machine's user or host name in any committed cassette or scenario.
 	it.each(files.map((f) => [path.relative(kit(), f), f]))("%s has nothing to scrub", (_rel, f) => {
 		const text = fs.readFileSync(f, "utf8");
-		expect(findLeaks(text, localIdentity())).toEqual([]);
-		expect(scrub(text, localIdentity())).toBe(text);
+		expect(findLeaks(text, gateIdentity())).toEqual([]);
+		expect(scrub(text, gateIdentity())).toBe(text);
 	});
 });

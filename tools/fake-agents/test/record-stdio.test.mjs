@@ -5,6 +5,10 @@ import { buildManifest, listCassettes, MANIFEST_FILE, sha256, CASSETTE_DIR } fro
 import { findLeaks } from "../scrub.mjs";
 import { jsonLines, kit, start, tmpDir } from "./proc.mjs";
 
+// POSIX signals (SIGTERM, SIGHUP, SIGWINCH, a signal-reported SIGKILL) do not
+// exist on Windows; these cases run on macOS and Linux only.
+const posixIt = it.skipIf(process.platform === "win32");
+
 const RECORD = kit("record-stdio.mjs");
 const REPLAY = kit("replay-stdio.mjs");
 const APPROVAL = kit("cassettes", "claude-bridge", "2.1.283", "approval-bash.jsonl");
@@ -76,7 +80,7 @@ describe("record-stdio", () => {
 		expect(readCassette(out)[1].line.key).toBe("[REDACTED:anthropic-key]");
 	});
 
-	it("records non-JSON output, stderr, a torn last line and a crash", async () => {
+	posixIt("records non-JSON output, stderr, a torn last line and a crash", async () => {
 		const out = path.join(tmpDir(), "rec.jsonl");
 		const script = [
 			'process.stdout.write("not json\\n");',

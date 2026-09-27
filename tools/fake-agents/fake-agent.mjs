@@ -135,6 +135,8 @@ process.stdin.on("end", () => log({ ev: "stdin-end" }));
 function takeKey() {
 	if (!inbuf) return null;
 	if (inbuf[0] === ESC) {
+		// An unfinished CSI or SS3 sequence: wait for the rest of it.
+		if (/^\x1b(\[[0-9;?]*[ -/]*|O)$/.test(inbuf)) return null;
 		const m = /^\x1b(\[[0-9;?]*[ -/]*[@-~]|O.|.)?/s.exec(inbuf);
 		const k = m[0];
 		inbuf = inbuf.slice(k.length);

@@ -71,3 +71,10 @@ features:
       N07-2:
         text: "Turning a flag off hides the feature on next launch"
         scenarios: [N07-feature-flags.mjs]
+  N03:
+    name: "Fake agents and recorded sessions"
+    status: partial
+    criteria:
+      N03-1:
+        text: "The fake agent approval scenario changes the session status in the real app on all three OSes"
+        scenarios: [N03-fake-agent.mjs]

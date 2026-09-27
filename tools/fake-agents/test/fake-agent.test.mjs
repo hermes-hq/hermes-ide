@@ -3,6 +3,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { kit, sleep, start, tmpDir } from "./proc.mjs";
 
+// POSIX signals (SIGTERM, SIGHUP, SIGWINCH, a signal-reported SIGKILL) do not
+// exist on Windows; these cases run on macOS and Linux only.
+const posixIt = it.skipIf(process.platform === "win32");
+
 const AGENT = kit("fake-agent.mjs");
 const ESC = "\x1b";
 const BEL = "\x07";
@@ -79,7 +83,7 @@ describe("fake-agent: approval scenario", () => {
 		expect(r.text.endsWith(`${ESC}[?1049l${ESC}[?25h${ESC}[?2004l${ESC}[?1004l`)).toBe(true);
 	});
 
-	it("SIGTERM ends it with 143, SIGHUP with 129", async () => {
+	posixIt("SIGTERM ends it with 143, SIGHUP with 129", async () => {
 		for (const [sig, code] of [
 			["SIGTERM", 143],
 			["SIGHUP", 129],
@@ -111,7 +115,7 @@ describe("fake-agent: other scenarios", () => {
 		expect(r.text).toContain("fake-agent: something went wrong");
 	});
 
-	it("crash dies by SIGKILL after its last line reached the terminal", async () => {
+	posixIt("crash dies by SIGKILL after its last line reached the terminal", async () => {
 		const r = await run("crash");
 		expect(r.signal).toBe("SIGKILL");
 		expect(r.text).toContain("fake-agent: about to crash");
@@ -156,7 +160,7 @@ describe("fake-agent: other scenarios", () => {
 		expect(r.text).toContain('pasted 3 chars: "a\\u0003b"');
 	});
 
-	it("resize reports the new size after SIGWINCH", async () => {
+	posixIt("resize reports the new size after SIGWINCH", async () => {
 		const p = start(AGENT, ["--scenario", "resize", "--speed", "0"]);
 		await sleep(150);
 		p.kill("SIGWINCH");
@@ -226,6 +230,26 @@ describe("fake-agent: log and usage", () => {
 		expect(input).toBe("7879");
 		expect(events.filter((e) => e.ev === "waitKey").map((e) => e.got)).toEqual(["x", "y"]);
 		expect(events.at(-1)).toMatchObject({ ev: "exit", code: 0 });
+	});
+
+	it("waits for the rest of an escape sequence that arrives in pieces", async () => {
+		const dir = tmpDir();
+		const logFile = path.join(dir, "run.jsonl");
+		const p = start(AGENT, ["--scenario", "approval", "--speed", "0", "--log", logFile]);
+		await sleep(100);
+		p.write("\x1b[");
+		await sleep(100);
+		p.write("Dy");
+		const r = await p.done;
+		expect(r.code).toBe(0);
+		const keys = fs
+			.readFileSync(logFile, "utf8")
+			.trim()
+			.split("\n")
+			.map((l) => JSON.parse(l))
+			.filter((e) => e.ev === "waitKey")
+			.map((e) => e.got);
+		expect(keys).toEqual(["\x1b[D", "y"]);
 	});
 
 	it("exits 2 with usage on a missing scenario or an unknown step", async () => {
