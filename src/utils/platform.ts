@@ -44,14 +44,14 @@ export function isActionMod(e: { metaKey: boolean; ctrlKey: boolean }): boolean 
 
 // ─── Shortcut Formatting ────────────────────────────────────────────
 
-const MAC_SYMBOLS: Record<string, string> = {
+export const MAC_SYMBOLS: Record<string, string> = {
   "{mod}": "⌘",
   "{shift}": "⇧",
   "{alt}": "⌥",
   "{ctrl}": "⌃",
 };
 
-const PC_SYMBOLS: Record<string, string> = {
+export const PC_SYMBOLS: Record<string, string> = {
   "{mod}": "Ctrl+",
   "{shift}": "Shift+",
   "{alt}": "Alt+",

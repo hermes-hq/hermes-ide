@@ -2,55 +2,16 @@ import "../styles/components/ShortcutsPanel.css";
 import { useEffect } from "react";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
+import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
+import { visibleShortcutGroups } from "../utils/shortcuts";
 
-export interface Shortcut {
-  keys: string;
-  actionKey: string;
-}
-
-export interface ShortcutGroup {
-  labelKey: string;
-  shortcuts: Shortcut[];
-}
-
-export const SHORTCUT_GROUPS: ShortcutGroup[] = [
-  {
-    labelKey: "shortcuts.general",
-    shortcuts: [
-      { keys: "{mod}N", actionKey: "session.new" },
-      { keys: "{mod}W", actionKey: "shortcuts.closePaneSession" },
-      { keys: "{mod}K / {mod}{shift}P", actionKey: "shortcuts.commandPalette" },
-      { keys: "{mod},", actionKey: "settings.title" },
-      { keys: "{mod}/", actionKey: "shortcuts.title" },
-      { keys: "{mod}J", actionKey: "shortcuts.promptComposer" },
-      { keys: "{mod}{shift}C", actionKey: "shortcuts.copyContext" },
-      { keys: "{mod}{shift}F", actionKey: "shortcuts.searchInFolder" },
-      { keys: "{mod}{shift}Z", actionKey: "shortcuts.toggleFlowMode" },
-    ],
-  },
-  {
-    labelKey: "shortcuts.panels",
-    shortcuts: [
-      { keys: "{mod}B", actionKey: "palette.toggleSidebar" },
-      { keys: "{mod}E", actionKey: "palette.toggleContext" },
-      { keys: "{mod}P", actionKey: "shortcuts.processes" },
-      { keys: "{mod}G", actionKey: "shortcuts.git" },
-      { keys: "{mod}F", actionKey: "shortcuts.files" },
-      { keys: "{mod}T", actionKey: "shortcuts.toggleTimeline" },
-      { keys: "{mod}$", actionKey: "palette.costDashboard" },
-    ],
-  },
-  {
-    labelKey: "shortcuts.panesSessions",
-    shortcuts: [
-      { keys: "{mod}D", actionKey: "shortcuts.splitHorizontal" },
-      { keys: "{mod}{shift}D", actionKey: "shortcuts.splitVertical" },
-      { keys: "{mod}{alt}→", actionKey: "shortcuts.focusNextPane" },
-      { keys: "{mod}{alt}←", actionKey: "shortcuts.focusPreviousPane" },
-      { keys: "{mod}1-9", actionKey: "shortcuts.switchToSession" },
-    ],
-  },
-];
+// The shortcuts shown here are generated from src-tauri/src/menu/mod.rs (the
+// app's native menu bar) and src/shortcuts/app-shortcuts.json (the bindings
+// the app handles itself) by `node scripts/generate-shortcuts.mjs` — see
+// src/generated/shortcuts.ts. Regenerate that file instead of editing shortcuts
+// by hand here; a shortcut added, changed or removed in either source is what
+// changes what this panel and docs/shortcuts.md show.
+const VISIBLE_SHORTCUT_GROUPS = visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS);
 
 interface ShortcutsPanelProps {
   onClose: () => void;
@@ -77,13 +38,13 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
           <button className="close-btn shortcuts-close" onClick={onClose} aria-label={t("common.close")}>&times;</button>
         </div>
         <div className="shortcuts-body">
-          {SHORTCUT_GROUPS.map((group) => (
-            <div key={group.labelKey} className="shortcuts-group">
-              <div className="shortcuts-group-label">{t(group.labelKey)}</div>
+          {VISIBLE_SHORTCUT_GROUPS.map((group) => (
+            <div key={group.group} className="shortcuts-group">
+              <div className="shortcuts-group-label">{t(group.groupKey)}</div>
               <div className="shortcuts-table">
                 {group.shortcuts.map((s) => (
-                  <div key={s.keys} className="shortcuts-row">
-                    <span className="shortcuts-action">{t(s.actionKey)}</span>
+                  <div key={s.id} className="shortcuts-row">
+                    <span className="shortcuts-action">{t(s.labelKey)}</span>
                     <kbd className="shortcuts-kbd">{fmt(s.keys)}</kbd>
                   </div>
                 ))}

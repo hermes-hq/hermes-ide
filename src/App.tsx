@@ -20,7 +20,8 @@ import "./styles/themes.css";
 import "./styles/topbar.css";
 import "./styles/onDemandViewStyles";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { fmt, isActionMod, isMac } from "./utils/platform";
+import { fmt, isMac } from "./utils/platform";
+import { matchAppShortcut } from "./utils/shortcuts";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { getSetting } from "./api/settings";
@@ -496,14 +497,17 @@ function AppContent() {
     }
   }, [ui.gitPanelOpen, ui.processPanelOpen, ui.fileExplorerOpen, ui.searchPanelOpen]);
 
-  // Keyboard shortcuts — only those NOT handled by native menu bar
-  // (Cmd+Alt+Arrow for pane nav, Cmd+1-9 for session switch, F1/F3 for overlays)
+  // Keyboard shortcuts — only those NOT handled by native menu bar. Keys are
+  // matched only through src/shortcuts/app-shortcuts.json (matchAppShortcut),
+  // the same list the Shortcuts panel and docs/shortcuts.md are generated
+  // from, so every binding here is listed there and vice versa.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!isActionMod(e)) return;
+      const action = matchAppShortcut(e);
+      if (!action) return;
 
       // Cmd+Shift+P — always toggles command palette (alternative shortcut)
-      if (e.shiftKey && (e.key === "P" || e.key === "p")) {
+      if (action === "app.command-palette-alt") {
         e.preventDefault();
         dispatch({ type: "TOGGLE_PALETTE" });
         return;
@@ -513,14 +517,14 @@ function AppContent() {
       // Workbench (1.1.14).  Only meaningful for agent-mode sessions;
       // for terminal sessions the workbench isn't mounted, so we noop
       // rather than swallow the keystroke.
-      if (e.altKey && (e.key === "B" || e.key === "b")) {
+      if (action === "app.toggle-workbench") {
         const sid = state.activeSessionId;
         const sess = sid ? state.sessions[sid] : null;
         if (sess?.mode === "agent") {
           e.preventDefault();
           dispatch({ type: "TOGGLE_WORKBENCH" });
-          return;
         }
+        return;
       }
 
       // Suppress session-switch shortcuts while any modal/overlay is open
@@ -530,7 +534,7 @@ function AppContent() {
       // Cmd+Shift+J — toggle focus between the active session's pane and
       // the agent composer.  Only meaningful for agent-mode sessions; in
       // terminal mode the composer is not mounted and this is a no-op.
-      if (e.shiftKey && (e.key === "J" || e.key === "j")) {
+      if (action === "app.focus-composer") {
         const sid = state.activeSessionId;
         if (!sid) return;
         const sess = state.sessions[sid];
@@ -550,28 +554,23 @@ function AppContent() {
         return;
       }
 
-      // Alt combos — pane navigation
-      if (e.altKey && state.layout.root) {
+      // Cmd+Alt+Arrow — pane navigation
+      if (action === "app.focus-next-pane" || action === "app.focus-previous-pane") {
+        if (!state.layout.root) return;
         const panes = collectPanes(state.layout.root);
         if (panes.length > 1) {
+          e.preventDefault();
           const currentIdx = panes.findIndex((p) => p.id === state.layout.focusedPaneId);
-          let nextIdx = -1;
-          if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-            e.preventDefault();
-            nextIdx = (currentIdx + 1) % panes.length;
-          } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-            e.preventDefault();
-            nextIdx = (currentIdx - 1 + panes.length) % panes.length;
-          }
-          if (nextIdx >= 0) {
-            dispatch({ type: "FOCUS_PANE", paneId: panes[nextIdx].id });
-          }
+          const nextIdx = action === "app.focus-next-pane"
+            ? (currentIdx + 1) % panes.length
+            : (currentIdx - 1 + panes.length) % panes.length;
+          dispatch({ type: "FOCUS_PANE", paneId: panes[nextIdx].id });
         }
         return;
       }
 
       // Cmd+1-9 — session switch (matches sidebar visual order)
-      if (e.key >= "1" && e.key <= "9") {
+      if (action === "app.switch-session") {
         e.preventDefault();
         const idx = parseInt(e.key) - 1;
         if (idx < sidebarSessions.length) setActive(sidebarSessions[idx].id);

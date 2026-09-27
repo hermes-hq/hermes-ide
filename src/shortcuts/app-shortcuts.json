@@ -1,0 +1,52 @@
+{
+  "//": [
+    "Keyboard shortcuts the app handles itself, with no native menu entry.",
+    "The global keydown handler in src/App.tsx matches keys ONLY through this list",
+    "(matchAppShortcut in src/utils/shortcuts.ts), and scripts/generate-shortcuts.mjs",
+    "merges it with the menu accelerators from src-tauri/src/menu/mod.rs into the",
+    "Shortcuts panel and docs/shortcuts.md. Add, change or remove a binding here,",
+    "then run `npm run generate:shortcuts`.",
+    "accelerators: Tauri-style, first one is the one shown; a key of '1-9' means any digit 1 to 9.",
+    "group: the menu group to list it under (a new name adds a group after the menu's)."
+  ],
+  "shortcuts": [
+    {
+      "id": "app.command-palette-alt",
+      "group": "View",
+      "label": "Command Palette (alternate)",
+      "accelerators": ["CmdOrCtrl+Shift+P"]
+    },
+    {
+      "id": "app.toggle-workbench",
+      "group": "View",
+      "label": "Workbench",
+      "accelerators": ["CmdOrCtrl+Alt+B"],
+      "note": "Agent sessions only"
+    },
+    {
+      "id": "app.focus-composer",
+      "group": "Session",
+      "label": "Focus Composer",
+      "accelerators": ["CmdOrCtrl+Shift+J"],
+      "note": "Agent sessions only"
+    },
+    {
+      "id": "app.switch-session",
+      "group": "Session",
+      "label": "Switch to Session 1–9",
+      "accelerators": ["CmdOrCtrl+1-9"]
+    },
+    {
+      "id": "app.focus-next-pane",
+      "group": "Panes",
+      "label": "Focus Next Pane",
+      "accelerators": ["CmdOrCtrl+Alt+Right", "CmdOrCtrl+Alt+Down"]
+    },
+    {
+      "id": "app.focus-previous-pane",
+      "group": "Panes",
+      "label": "Focus Previous Pane",
+      "accelerators": ["CmdOrCtrl+Alt+Left", "CmdOrCtrl+Alt+Up"]
+    }
+  ]
+}

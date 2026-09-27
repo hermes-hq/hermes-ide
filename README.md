@@ -22,40 +22,39 @@ Hermes IDE is a desktop terminal emulator that deeply integrates AI assistance i
 ## Features
 
 ### Agent mode for Claude (new in 1.0.0)
-- **Real chat for Claude** — Claude sessions open in a rich chat interface by default, with thinking blocks, tool-call cards, and diff previews instead of a TUI in a terminal
-- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels
-- **Persistent conversations** — Claude sessions resume across app restarts
-- **Bring your own auth** — uses your existing `claude` CLI auth (Pro, Max, or API key); Hermes never asks for tokens
+- **Real chat for Claude** — Claude sessions open in a rich chat interface by default, with thinking blocks, tool-call cards, and diff previews instead of a TUI in a terminal <!-- claim:agent-chat -->
+- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels <!-- claim:agent-images -->
+- **Persistent conversations** — Claude sessions resume across app restarts <!-- claim:agent-persistent-conversations -->
+- **Bring your own auth** — uses your existing `claude` CLI auth (Pro, Max, or API key); Hermes never asks for tokens <!-- claim:agent-own-auth -->
 
 ### Terminal
-- **Multi-session management** — create, switch, and organize parallel terminal sessions
-- **Split panes** — horizontal and vertical splits with drag-and-drop reordering
-- **WebGL-accelerated rendering** — fast terminal with web links and auto-fit
-- **Execution timeline** — visual history of every command with exit codes and durations
-- **Still excellent for everything else** — Aider, Codex, Gemini, Copilot, Kiro, plain shells all run in classic Terminal mode, unchanged
+- **Multi-session management** — create, switch, and organize parallel terminal sessions <!-- claim:multi-session -->
+- **Split panes** — horizontal and vertical splits with drag-and-drop reordering <!-- claim:split-panes -->
+- **WebGL-accelerated rendering** — fast terminal with web links and auto-fit <!-- claim:webgl-rendering -->
+- **Still excellent for everything else** — Aider, Codex, Gemini, Copilot, Kiro, plain shells all run in classic Terminal mode, unchanged <!-- claim:terminal-mode-other-tools -->
 
 ### Git Integration
-- **Built-in git panel** — view staged, unstaged, and untracked files per project
-- **Stage / unstage / commit / push / pull** — all from the sidebar
-- **Inline diff viewer** — click any changed file to see a syntax-highlighted diff
-- **Robust authentication** — SSH agent, SSH key files, Git Credential Manager, and token-based auth
+- **Built-in git panel** — view staged, unstaged, and untracked files per project <!-- claim:git-panel -->
+- **Stage / unstage / commit / push / pull** — all from the sidebar <!-- claim:git-actions -->
+- **Inline diff viewer** — click any changed file to see a syntax-highlighted diff <!-- claim:git-diff -->
+- **Robust authentication** — SSH agent, SSH key files, Git Credential Manager, and token-based auth <!-- claim:git-auth -->
 
 ### AI Intelligence
-- **Ghost-text suggestions** — real-time command completions from history and context
-- **Prompt Composer** — write natural-language instructions for autonomous task execution
-- **Error pattern matching** — learns error fingerprints and auto-applies known resolutions
-- **Stuck detection** — monitors for hanging processes and offers interrupts
+- **Ghost-text suggestions** — real-time command completions from history and context <!-- claim:ghost-text -->
+- **Prompt Composer** — write natural-language instructions for autonomous task execution <!-- claim:prompt-composer -->
+- **Error pattern matching** — learns error fingerprints and auto-applies known resolutions <!-- claim:error-patterns -->
+- **Stuck detection** — monitors for hanging processes and offers interrupts <!-- claim:stuck-detection -->
 
 ### Project Awareness
-- **Automatic scanning** — detects languages, frameworks, architecture, and conventions
-- **Context injection** — attaches project knowledge to AI agents via a token budget
-- **Multi-project support** — attach multiple project contexts to a single session
+- **Automatic scanning** — detects languages, frameworks, architecture, and conventions <!-- claim:project-scanning -->
+- **Context injection** — attaches project knowledge to AI agents via a token budget <!-- claim:context-injection -->
+- **Multi-project support** — attach multiple project contexts to a single session <!-- claim:multi-project -->
 
 ### Productivity
-- **Command Palette** — fuzzy search for any action
-- **Cost Dashboard** — track token usage and estimated costs per model and session
-- **Memory & context pins** — persist important facts, files, and patterns across sessions
-- **System notifications** — get notified about long-running command completions
+- **Command Palette** — fuzzy search for any action <!-- claim:command-palette -->
+- **Cost Dashboard** — track token usage and estimated costs per model and session <!-- claim:cost-dashboard -->
+- **Memory & context pins** — persist important facts, files, and patterns across sessions <!-- claim:memory-pins -->
+- **System notifications** — get notified about long-running command completions <!-- claim:notifications -->
 
 ---
 

@@ -228,3 +228,16 @@ features:
       F02-3:
         text: "Cold start and idle RAM are published in the 1.4.1 release notes"
         scenarios: []
+  N23:
+    name: "Docs that stay true"
+    status: partial
+    criteria:
+      N23-1:
+        text: "The Shortcuts panel in the running app lists exactly the generated shortcuts (native menu plus app-handled bindings), localized, with no stale or hand-written entries"
+        scenarios: [N23-shortcuts-panel.mjs]
+      N23-2:
+        text: "Removing a shortcut from the menu changes the generated table"
+        scenarios: [N23-docs-gates.mjs]
+      N23-3:
+        text: "A README claim with no scenario fails CI"
+        scenarios: [N23-docs-gates.mjs]

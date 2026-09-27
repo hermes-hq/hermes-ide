@@ -16,7 +16,7 @@ export default defineConfig(async () => ({
     // New interactive tests (Context Panel, M1+ surfaces) opt in to
     // jsdom per-file with `// @vitest-environment jsdom`.
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "e2e/app/**/*.test.mjs", "tools/**/*.test.mjs"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "e2e/app/**/*.test.mjs", "tools/**/*.test.mjs", "scripts/**/*.test.mjs"],
     setupFiles: ["src/__tests__/setup.ts"],
   },
   build: {

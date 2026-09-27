@@ -20,7 +20,10 @@
     "prepare:bridge": "node scripts/stage-bridge-deps.mjs",
     "bump": "node scripts/bump-version.mjs",
     "changelog": "bash scripts/generate-changelog.sh",
-    "changelog:update": "UPDATE_CHANGELOG=true bash scripts/generate-changelog.sh"
+    "changelog:update": "UPDATE_CHANGELOG=true bash scripts/generate-changelog.sh",
+    "generate:shortcuts": "node scripts/generate-shortcuts.mjs",
+    "check:shortcuts": "node scripts/generate-shortcuts.mjs --check",
+    "check:readme-claims": "node scripts/check-readme-claims.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.283",

@@ -1,0 +1,111 @@
+name: Docs
+
+# The main CI workflow ignores **.md changes, so a docs-only change (README,
+# docs/**) would otherwise never run any check. These two gates are cheap and
+# fast, so they get their own workflow scoped to the files they cover instead
+# of being folded into ci.yml's path filters.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "src/components/ShortcutsPanel.tsx"
+      - "src/components/Settings.tsx"
+      - "src/generated/shortcuts.ts"
+      - "src/utils/shortcuts.ts"
+      - "src/utils/platform.ts"
+      - "src/utils/keymap.json"
+      - "src/shortcuts/**"
+      - "src-tauri/src/menu/mod.rs"
+      - ".github/workflows/docs.yml"
+      - "scripts/generate-shortcuts.mjs"
+      - "scripts/check-readme-claims.mjs"
+      - "e2e/acceptance.yml"
+      - "e2e/app/scenarios/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "src/components/ShortcutsPanel.tsx"
+      - "src/components/Settings.tsx"
+      - "src/generated/shortcuts.ts"
+      - "src/utils/shortcuts.ts"
+      - "src/utils/platform.ts"
+      - "src/utils/keymap.json"
+      - "src/shortcuts/**"
+      - "src-tauri/src/menu/mod.rs"
+      - ".github/workflows/docs.yml"
+      - "scripts/generate-shortcuts.mjs"
+      - "scripts/check-readme-claims.mjs"
+      - "e2e/acceptance.yml"
+      - "e2e/app/scenarios/**"
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── The shortcuts panel and docs/shortcuts.md must match the real menu ──
+  shortcuts:
+    name: Shortcuts stay generated
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Regenerate and compare
+        run: node scripts/generate-shortcuts.mjs --check
+
+  # ── Every tagged README claim must map to a real, tracked scenario ──────
+  # On a pull request the target branch's claims map is the baseline: a claim
+  # that is unproven here but was not there (a new README claim with no
+  # scenario) fails.
+  readme-claims:
+    name: README claims map to scenarios
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Fetch the target branch's claims map
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --depth=1 origin "$BASE_REF"
+          if git show FETCH_HEAD:docs/readme-claims.yml > "$RUNNER_TEMP/base-claims.yml" 2>/dev/null; then
+            echo "BASELINE=--baseline $RUNNER_TEMP/base-claims.yml" >> "$GITHUB_ENV"
+          else
+            echo "::notice::$BASE_REF has no docs/readme-claims.yml yet; no baseline"
+          fi
+      - name: Check README claims
+        run: node scripts/check-readme-claims.mjs $BASELINE
+
+  # ── README claims that still have no scenario ──────────────────────────
+  # The backlog from before the gate existed. Fails on every run so it stays
+  # visible; non-blocking until the backlog is proven or removed.
+  readme-claims-unproven:
+    name: README claims with no scenario yet (non-blocking)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: List every unproven README claim
+        run: node scripts/check-readme-claims.mjs --strict

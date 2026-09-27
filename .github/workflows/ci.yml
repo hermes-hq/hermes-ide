@@ -81,6 +81,9 @@ jobs:
               - '.github/privacy-allowlist.json'
               - 'bundle-budget.json'
               - 'scripts/bundle-budget.mjs'
+              - 'scripts/generate-shortcuts.mjs'
+              - 'scripts/check-readme-claims.mjs'
+              - 'docs/readme-claims.yml'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -361,7 +364,7 @@ jobs:
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
             node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
-            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs
+            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs
           '
 
       - name: Run scenarios
@@ -374,7 +377,7 @@ jobs:
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
           node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
-          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs
+          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs
 
       - name: Upload evidence
         if: always()
