@@ -625,8 +625,15 @@ jobs:
           elif gh release view "$TAG" >/dev/null 2>&1; then
             echo "::error::$TAG is already published — a release is never rebuilt in place"; exit 1
           else
-            gh release create "$TAG" --draft --target "$SHA" \
-              --title "Hermes IDE $TAG" --notes-file release-notes.txt
+            # The API occasionally answers a create with a transient 403.
+            for attempt in 1 2 3; do
+              if gh release create "$TAG" --draft --target "$SHA" \
+                   --title "Hermes IDE $TAG" --notes-file release-notes.txt; then
+                break
+              fi
+              [ "$attempt" -eq 3 ] && { echo "::error::could not create the draft release"; exit 1; }
+              echo "create failed (attempt $attempt) — retrying in 20 s"; sleep 20
+            done
             sleep 5
           fi
 
