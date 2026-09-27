@@ -4,7 +4,7 @@
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { createLogger, outDir, sleep } from "./harness.mjs";
+import { createLogger, finishScenario, outDir, sleep } from "./harness.mjs";
 
 /** Evidence folder + logger + assert for one scenario. */
 export function scenarioContext(name) {
@@ -25,6 +25,7 @@ export function scenarioContext(name) {
  */
 export async function runScenario(name, body) {
   const ctx = scenarioContext(name);
+  const startedAt = Date.now();
   const apps = [];
   const cleanups = [];
   let failed = false;
@@ -59,8 +60,8 @@ export async function runScenario(name, body) {
       }
     }
   }
-  ctx.log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-  process.exit(failed ? 1 : 0);
+  // Writes result.json (read by run.mjs and the acceptance gate) and exits.
+  finishScenario({ scenario: name, evidenceDir: ctx.evidenceDir, failed, startedAt, log: ctx.log });
 }
 
 /**
