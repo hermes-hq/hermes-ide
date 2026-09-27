@@ -70,7 +70,7 @@ describe("scrub", () => {
 	});
 
 	it("replaces e-mail addresses but keeps example.com ones", () => {
-		const out = scrub("from jane.doe@corp.io to user@example.com", NOBODY);
+		const out = scrub("from jane.doe@test.com to user@example.com", NOBODY);
 		expect(out).toBe("from user@example.com to user@example.com");
 	});
 
@@ -90,7 +90,7 @@ describe("scrub", () => {
 	});
 
 	it("is deterministic and idempotent", () => {
-		const input = `${MAC("alice")} ${SAMPLES["anthropic-key"]} 3f2c1b9e-8d7a-4c6b-9e5f-1a2b3c4d5e6f a@b.io alice-mbp`;
+		const input = `${MAC("alice")} ${SAMPLES["anthropic-key"]} 3f2c1b9e-8d7a-4c6b-9e5f-1a2b3c4d5e6f a@test.com alice-mbp`;
 		const once = scrub(input, ALICE);
 		expect(scrub(input, ALICE)).toBe(once);
 		expect(scrub(once, ALICE)).toBe(once);
