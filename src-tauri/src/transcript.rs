@@ -199,16 +199,14 @@ fn parse_jsonl_line(line: &str, session_id: &str) -> Vec<TranscriptEvent> {
                 }
             }
         }
-        "system" => {
-            if record.subtype.as_deref() == Some("turn_duration") {
-                events.push(TranscriptEvent {
-                    event_type: "turn_end".to_string(),
-                    tool_name: None,
-                    tool_input: None,
-                    timestamp,
-                    session_id: session_id.to_string(),
-                });
-            }
+        "system" if record.subtype.as_deref() == Some("turn_duration") => {
+            events.push(TranscriptEvent {
+                event_type: "turn_end".to_string(),
+                tool_name: None,
+                tool_input: None,
+                timestamp,
+                session_id: session_id.to_string(),
+            });
         }
         _ => {}
     }

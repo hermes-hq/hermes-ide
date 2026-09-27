@@ -191,7 +191,7 @@ pub fn get_projects_ordered(state: State<'_, AppState>) -> Result<Vec<ProjectOrd
     }
 
     // Stable sort: existing folders first (preserving score order), missing folders last
-    projects.sort_by(|a, b| b.path_exists.cmp(&a.path_exists));
+    projects.sort_by_key(|a| std::cmp::Reverse(a.path_exists));
 
     Ok(projects)
 }

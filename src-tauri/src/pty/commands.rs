@@ -1766,7 +1766,7 @@ pub fn write_to_session(
             }
 
             if is_enter && !a.input_line_buffer.is_empty() {
-                let line = a.input_line_buffer.drain(..).collect::<String>();
+                let line = std::mem::take(&mut a.input_line_buffer);
                 a.mark_input_line(&line);
                 let cwd = a.current_cwd.clone().unwrap_or_default();
                 a.start_node(&cwd);

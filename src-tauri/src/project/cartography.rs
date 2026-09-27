@@ -437,7 +437,7 @@ pub fn full_scan(path: &str) -> ScanResult {
 
     // Add convention about most-used imports
     let mut top_imports: Vec<_> = import_counts.into_iter().collect();
-    top_imports.sort_by(|a, b| b.1.cmp(&a.1));
+    top_imports.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (module, count) in top_imports.iter().take(5) {
         if *count > 3 {
             result.conventions.push(Convention {

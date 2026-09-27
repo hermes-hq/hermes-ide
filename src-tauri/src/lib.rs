@@ -273,24 +273,22 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                             }
                         }
                     }
-                    "REMOVE" => {
-                        // Incomplete removal — worktree may still exist on disk
-                        if Path::new(&entry.worktree_path).is_dir() {
-                            log::info!(
-                                "Replaying incomplete REMOVE: cleaning up {}",
-                                entry.worktree_path
-                            );
-                            match std::fs::remove_dir_all(&entry.worktree_path) {
-                                Ok(_) => {
-                                    cleanup_count += 1;
-                                }
-                                Err(e) => {
-                                    log::warn!(
-                                        "[worktree-cleanup] Failed to remove {}: {}",
-                                        entry.worktree_path,
-                                        e
-                                    );
-                                }
+                    // Incomplete removal — worktree may still exist on disk
+                    "REMOVE" if Path::new(&entry.worktree_path).is_dir() => {
+                        log::info!(
+                            "Replaying incomplete REMOVE: cleaning up {}",
+                            entry.worktree_path
+                        );
+                        match std::fs::remove_dir_all(&entry.worktree_path) {
+                            Ok(_) => {
+                                cleanup_count += 1;
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[worktree-cleanup] Failed to remove {}: {}",
+                                    entry.worktree_path,
+                                    e
+                                );
                             }
                         }
                     }
