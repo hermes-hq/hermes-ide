@@ -49,6 +49,8 @@ function assert(condition, message) {
 }
 
 const BADGE = ".topbar-flag-badge";
+// The override control of this one flag, not just the first select on the tab.
+const FLAG_SELECT = 'select[data-flag-id="dummyProofSurface"]';
 const DB_FILE = "hermes_idea_v3.db";
 
 // Windows keeps app data under %APPDATA%, which a private HOME does not
@@ -140,10 +142,10 @@ async function setFlagOverride(bridge, value) {
     const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.innerText) === "Flags");
     return e2e.click(e2e.must(tab, "Flags tab"));
   `);
-  await bridge.waitFor("the flag override select", `return !!e2e.first("select.settings-select");`);
+  await bridge.waitFor("the flag override select", `return !!e2e.first(${JSON.stringify(FLAG_SELECT)});`);
 
   const result = await bridge.eval(`
-    const sel = e2e.must(e2e.first("select.settings-select"), "flag override select");
+    const sel = e2e.must(e2e.first(${JSON.stringify(FLAG_SELECT)}), "flag override select");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
     setter.call(sel, ${JSON.stringify(value)});
     sel.dispatchEvent(new Event("change", { bubbles: true }));

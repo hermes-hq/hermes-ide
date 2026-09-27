@@ -395,6 +395,34 @@ export function inheritedEnv() {
 }
 
 /**
+ * Sets up the home folder a launch runs with and says where the test app's
+ * data will be: { homeEnv, dataDir }. See launchApp for `home`, `homeDir`
+ * and `resetData`. A private home is created if missing and never wiped
+ * here; with the real home the test app's data folder is wiped first unless
+ * `resetData` is false. `reset` is injectable for tests.
+ */
+export function prepareAppHome({ home, homeDir, resetData = true, privateTmp, reset = resetE2eDataDir }) {
+  if (home !== "private") {
+    if (resetData) reset();
+    return { homeEnv: {}, dataDir: e2eDataDir() };
+  }
+  const privateHome = homeDir || join(privateTmp, "home");
+  mkdirSync(privateHome, { recursive: true });
+  const homeEnv = {
+    HOME: privateHome,
+    CFFIXED_USER_HOME: privateHome, // macOS system frameworks
+    XDG_DATA_HOME: join(privateHome, ".local", "share"),
+    XDG_CONFIG_HOME: join(privateHome, ".config"),
+    XDG_CACHE_HOME: join(privateHome, ".cache"),
+  };
+  const dataDir =
+    platform() === "darwin"
+      ? join(privateHome, "Library", "Application Support", E2E_IDENTIFIER)
+      : join(homeEnv.XDG_DATA_HOME, E2E_IDENTIFIER);
+  return { homeEnv, dataDir };
+}
+
+/**
  * Start the test app and wait until its UI is ready.
  * Returns { bridge, child, stop }.
  *
@@ -449,24 +477,8 @@ export async function launchApp({
   const privateTmp = mkdtempSync(join(tmpdir(), "hermes-e2e-"));
   const appTmp = tmp === "shared" ? tmpdir() : privateTmp;
 
-  const homeEnv = {};
-  let dataDir;
-  if (home === "private") {
-    const privateHome = homeDir || join(privateTmp, "home");
-    mkdirSync(privateHome, { recursive: true });
-    homeEnv.HOME = privateHome;
-    homeEnv.CFFIXED_USER_HOME = privateHome; // macOS system frameworks
-    homeEnv.XDG_DATA_HOME = join(privateHome, ".local", "share");
-    homeEnv.XDG_CONFIG_HOME = join(privateHome, ".config");
-    homeEnv.XDG_CACHE_HOME = join(privateHome, ".cache");
-    dataDir =
-      platform() === "darwin"
-        ? join(privateHome, "Library", "Application Support", E2E_IDENTIFIER)
-        : join(homeEnv.XDG_DATA_HOME, E2E_IDENTIFIER);
-  } else {
-    if (resetData) resetE2eDataDir();
-    dataDir = e2eDataDir();
-  }
+  const { homeEnv, dataDir: appDataDir } = prepareAppHome({ home, homeDir, resetData, privateTmp });
+  let dataDir = appDataDir;
   if (extraEnv.HERMES_DATA_DIR) dataDir = extraEnv.HERMES_DATA_DIR;
 
   if (prepareDataDir) {

@@ -2,12 +2,12 @@
 // bridge server: the token travels with every request, refusals surface as
 // errors, script failures inside the app become errors, and waits poll.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, E2E_IDENTIFIER } from "./harness.mjs";
+import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
 
 const TOKEN = "t".repeat(64);
 let server;
@@ -239,5 +239,52 @@ describe("test app isolation", () => {
     } finally {
       for (const k of ["HERMES_SESSION_ID", "CLAUDE_CODE_TEST", "CLAUDECODE", "HERMES_E2E_KEEP", "PLAIN_VAR"]) delete process.env[k];
     }
+  });
+});
+
+// Scenarios that prove something "on next launch" relaunch the app against
+// the same data: homeDir (private home) and resetData: false (real home).
+describe("prepareAppHome", () => {
+  let root;
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "hermes-prep-home-"));
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it("gives each launch its own private home inside its temp folder by default", () => {
+    const privateTmp = join(root, "launch-a");
+    const { homeEnv, dataDir } = prepareAppHome({ home: "private", privateTmp });
+    expect(homeEnv.HOME).toBe(join(privateTmp, "home"));
+    expect(existsSync(homeEnv.HOME)).toBe(true);
+    expect(dataDir.startsWith(homeEnv.HOME)).toBe(true);
+    expect(dataDir.endsWith(E2E_IDENTIFIER)).toBe(true);
+  });
+
+  it("reuses a given private home across launches and keeps what the last launch wrote", () => {
+    const homeDir = join(root, "shared-home");
+    const first = prepareAppHome({ home: "private", homeDir, privateTmp: join(root, "launch-1") });
+    mkdirSync(first.dataDir, { recursive: true });
+    writeFileSync(join(first.dataDir, "marker"), "from launch 1");
+
+    const second = prepareAppHome({ home: "private", homeDir, privateTmp: join(root, "launch-2") });
+    expect(second.homeEnv.HOME).toBe(homeDir);
+    expect(second.homeEnv.XDG_DATA_HOME).toBe(join(homeDir, ".local", "share"));
+    expect(second.dataDir).toBe(first.dataDir);
+    expect(readFileSync(join(second.dataDir, "marker"), "utf8")).toBe("from launch 1");
+  });
+
+  it("wipes the test app's data before a real-home launch unless told to keep it", () => {
+    let resets = 0;
+    const reset = () => {
+      resets += 1;
+    };
+    const fresh = prepareAppHome({ home: "real", privateTmp: root, reset });
+    expect(resets).toBe(1);
+    expect(fresh.homeEnv).toEqual({});
+    expect(fresh.dataDir).toBe(e2eDataDir());
+
+    const kept = prepareAppHome({ home: "real", resetData: false, privateTmp: root, reset });
+    expect(resets).toBe(1);
+    expect(kept.dataDir).toBe(e2eDataDir());
   });
 });

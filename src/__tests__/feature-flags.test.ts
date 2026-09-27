@@ -3,8 +3,8 @@
  *
  * Covers:
  * - the registry cap (at most 5 flags alive at once)
- * - release-channel detection from the `update_channel` setting (the same
- *   one the updater reads) and from a -beta app version
+ * - release-channel detection from the `update_channel` setting (which the
+ *   updater's channel picker will write, N05) and from a -beta app version
  * - isFeatureFlagEnabled: off by default on stable, on for beta, and an
  *   override always wins
  * - overrides persist through the settings API and survive a reload

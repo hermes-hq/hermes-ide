@@ -17,7 +17,6 @@ if (import.meta.env.DEV) {
   import("@tauri-apps/api/event").then(({ emit, listen }) => {
     (window as unknown as { __hermes?: unknown }).__hermes = { emit, listen };
     // Console-discoverability: log once on boot so devs know it's there.
-    // eslint-disable-next-line no-console
     console.info(
       "[hermes-dev] window.__hermes = { emit, listen } available for console testing",
     );
@@ -32,6 +31,14 @@ if (import.meta.env.VITE_HERMES_E2E === "1") {
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
+// Feature flags are read once, before the workspace renders — see
+// src/featureFlags/index.ts. The read starts now, alongside the startup
+// check, so it adds no round-trip of its own before the first paint. It never
+// rejects, and gives up after a short timeout (flags then stay at their
+// stable default for this launch), so a slow backend never leaves a blank
+// window.
+const featureFlagsReady = initFeatureFlags();
+
 // If Hermes could not open its data (for example, it was saved by a newer
 // version), explain that instead of starting the workspace.
 // In that case the backend sets up nothing else (no app state), so any other
@@ -45,11 +52,7 @@ void getStartupProblem().then((problem) => {
     );
     return;
   }
-  // Feature flags are read once, here, before the workspace renders — see
-  // src/featureFlags/index.ts. It never rejects, and gives up after a short
-  // timeout (flags then stay at their stable default for this launch), so a
-  // slow backend can never leave a blank window.
-  void initFeatureFlags().finally(() => {
+  void featureFlagsReady.finally(() => {
     root.render(
       <React.StrictMode>
         <App />

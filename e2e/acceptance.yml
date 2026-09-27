@@ -63,7 +63,7 @@ features:
         scenarios: [N06-db-migrations.mjs]
   N07:
     name: "Feature flags"
-    status: partial
+    status: shipped
     criteria:
       N07-1:
         text: "A flagged feature is invisible on stable and visible on beta"
