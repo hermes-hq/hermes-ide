@@ -19,8 +19,11 @@
 //   --only a,b       check only these agent ids
 //   --out <dir>      write report.md, report.json and each --help output
 //   --catalog <file> check another catalog file (used to prove the check fails)
+//   --real-home      read --help with the real HOME (CI: the runner's home is
+//                    throwaway, and some CLIs find their own install via HOME)
 //
-// Help is read with a throwaway HOME so no CLI touches the real one.
+// Help is read with a throwaway HOME (unless --real-home) so no CLI touches
+// the real one.
 // Exit code: 0 all good, 1 drift (or a missing CLI with --require-all),
 // 2 usage error.
 //
@@ -170,7 +173,7 @@ export function formatReport(results, { requireAll = true } = {}) {
 // ─── CLI ──────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-  const opts = { install: false, requireAll: false, only: null, out: null, catalog: CATALOG_PATH };
+  const opts = { install: false, requireAll: false, only: null, out: null, catalog: CATALOG_PATH, realHome: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--install") { opts.install = true; opts.requireAll = true; }
@@ -178,6 +181,7 @@ function parseArgs(argv) {
     else if (a === "--only") opts.only = new Set((argv[++i] ?? "").split(",").filter(Boolean));
     else if (a === "--out") opts.out = resolve(argv[++i] ?? "");
     else if (a === "--catalog") opts.catalog = resolve(argv[++i] ?? "");
+    else if (a === "--real-home") opts.realHome = true;
     else { console.error(`unknown option: ${a}`); process.exit(2); }
   }
   return opts;
@@ -229,7 +233,8 @@ export function main(argv = process.argv.slice(2)) {
   const agents = catalog.agents.filter((a) => !a.custom && (!opts.only || opts.only.has(a.id)));
   const PATH = searchPath(homedir());
   const helpHome = mkdtempSync(join(tmpdir(), "hermes-drift-home-"));
-  const helpEnv = { ...process.env, PATH, HOME: helpHome, USERPROFILE: helpHome, NO_COLOR: "1", TERM: "dumb", CI: "true" };
+  const homeEnv = opts.realHome ? {} : { HOME: helpHome, USERPROFILE: helpHome };
+  const helpEnv = { ...process.env, PATH, ...homeEnv, NO_COLOR: "1", TERM: "dumb", CI: "true" };
   if (opts.out) mkdirSync(opts.out, { recursive: true });
 
   const results = [];

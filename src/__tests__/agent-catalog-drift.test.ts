@@ -54,7 +54,8 @@ describe("drift check: what the catalog needs", () => {
 		const probes = probesFor(agent("kiro")) as Probe[];
 		expect(probes).toContainEqual({ path: ["kiro-cli"], kind: "subcommand", token: "chat", where: "terminal.argv" });
 		expect(probes).toContainEqual({ path: ["kiro-cli", "chat"], kind: "flag", token: "--trust-all-tools", where: "terminal.permission_flags.auto" });
-		expect(probes).toContainEqual({ path: ["kiro-cli"], kind: "subcommand", token: "whoami", where: "auth.check" });
+		expect(probes).toContainEqual({ path: ["kiro-cli", "chat"], kind: "flag", token: "--resume-id", where: "terminal.resume.by_id" });
+		expect(probesFor(agent("codex"))).toContainEqual({ path: ["codex", "login"], kind: "subcommand", token: "status", where: "auth.check" });
 		expect(probesFor(agent("custom"))).toEqual([]);
 	});
 

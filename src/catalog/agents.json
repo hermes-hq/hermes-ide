@@ -292,7 +292,7 @@
       },
       "detect": { "command": ["goose", "--version"] },
       "auth": { "check": null, "hint": "Run 'goose configure' to choose a model provider" },
-      "evidence": { "level": "docs" }
+      "evidence": { "level": "help", "version": "1.52.0" }
     },
     {
       "id": "hermes-agent",
@@ -352,7 +352,7 @@
       },
       "detect": { "command": ["aider", "--version"] },
       "auth": { "check": null, "hint": "Set OPENAI_API_KEY or ANTHROPIC_API_KEY" },
-      "evidence": { "level": "docs" }
+      "evidence": { "level": "help", "version": "0.86.2" }
     },
     {
       "id": "kiro",
@@ -364,7 +364,7 @@
       "channel": "stable",
       "terminal": {
         "argv": ["kiro-cli", "chat"],
-        "resume": { "by_id": null, "latest": ["--resume"] },
+        "resume": { "by_id": ["--resume-id", "{session_id}"], "latest": ["--resume"] },
         "new_session_id": null,
         "initial_prompt": ["{prompt}"],
         "signals": { "method": "none", "confidence": "guessed" },
@@ -379,8 +379,8 @@
         "url": "https://kiro.dev/docs/cli/"
       },
       "detect": { "command": ["kiro-cli", "--version"] },
-      "auth": { "check": ["kiro-cli", "whoami"], "hint": "Run 'kiro-cli login' to sign in" },
-      "evidence": { "level": "docs" }
+      "auth": { "check": null, "hint": "Run 'kiro-cli login' to sign in" },
+      "evidence": { "level": "help", "version": "2.24.1" }
     },
     {
       "id": "custom",
