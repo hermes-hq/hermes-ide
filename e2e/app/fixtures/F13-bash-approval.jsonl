@@ -1,0 +1,13 @@
+{"kind":"header","v":1,"origin":"hand-written","agent":"claude-bridge","recorded_with":{"claude_code":"2.1.283","agent_sdk":"0.3.283"},"scrubbed":true,"scenario":"F13: first prompt, one Bash approval that stays pending while the user keeps typing; allow (success) or deny (error); the agent then stays idle"}
+{"kind":"emit","line":{"type":"system","subtype":"init","cwd":"${CWD}","session_id":"${SESSION_ID}","tools":["Bash","Edit","Read"],"model":"${MODEL}","permissionMode":"default","claude_code_version":"2.1.283","uuid":"00000000-0000-4000-8000-0000000000f1"}}
+{"kind":"expect","match":{"type":"user"},"timeoutMs":120000}
+{"kind":"emit","dt":10,"line":{"type":"assistant","message":{"id":"msg_f13_1","type":"message","role":"assistant","model":"${MODEL}","content":[{"type":"tool_use","id":"toolu_f13_1","name":"Bash","input":{"command":"rm -rf build","description":"Remove the build folder"}}],"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":7}},"session_id":"${SESSION_ID}","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-0000000000f2"}}
+{"kind":"emit","dt":5,"line":{"type":"_hermes_perm_request","id":"perm-f13","toolName":"Bash","input":{"command":"rm -rf build","description":"Remove the build folder"}}}
+// Any other stdin line (a follow-up message typed while waiting) is ignored here.
+{"kind":"expect","match":{"type":"_hermes_perm_response","id":"perm-f13"},"timeoutMs":300000,"branch":[{"when":{"decision.behavior":"deny"},"goto":"denied"}]}
+{"kind":"emit","dt":10,"line":{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_f13_1","content":"F13-TOOL-RAN"}]},"session_id":"${SESSION_ID}","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-0000000000f3"}}
+{"kind":"emit","dt":10,"line":{"type":"result","subtype":"success","is_error":false,"duration_ms":40,"num_turns":1,"result":"Done.","session_id":"${SESSION_ID}","total_cost_usd":0,"usage":{"input_tokens":20,"output_tokens":9},"uuid":"00000000-0000-4000-8000-0000000000f4"}}
+{"kind":"hang"}
+{"kind":"label","label":"denied"}
+{"kind":"emit","dt":10,"line":{"type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":30,"num_turns":1,"session_id":"${SESSION_ID}","total_cost_usd":0,"usage":{"input_tokens":20,"output_tokens":3},"uuid":"00000000-0000-4000-8000-0000000000f5"}}
+{"kind":"hang"}

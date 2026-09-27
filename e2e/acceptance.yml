@@ -310,3 +310,13 @@ features:
       N11-4:
         text: "Gemini and Copilot install hints install the command Hermes checks for and launches"
         scenarios: [N11-install-hints.mjs@darwin, N11-copilot-cli.mjs@darwin]
+  F13:
+    name: "Agent view: approvals cannot be accepted by accident"
+    status: shipped
+    criteria:
+      F13-1:
+        text: "Pressing Enter while typing never resolves an approval"
+        scenarios: [F13-approval-safety.mjs]
+      F13-2:
+        text: "An always-allow rule is written to the repo's local settings file"
+        scenarios: [F13-approval-safety.mjs]

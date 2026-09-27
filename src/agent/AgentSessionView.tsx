@@ -38,6 +38,7 @@ import {
   buildPermResponse,
   type PermissionDecision,
 } from "../utils/permissionRequest";
+import { PERMISSION_RULES_CHANGED_EVENT } from "../utils/permissionsRules";
 import { extractTodoSnapshot } from "../utils/todoStore";
 import { selectFatalError } from "./errorSelector";
 import { agentDisplayName, classifyAgentError } from "./agentErrors";
@@ -445,6 +446,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
           <InteractivePermissionDispatcher
             sessionId={sessionId}
             permissionMode={permissionMode}
+            projectDir={sessionEntryForPerm?.working_directory || null}
             sendAgentEnvelope={sendAgentEnvelope}
           />
         </div>
@@ -490,10 +492,13 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
 function InteractivePermissionDispatcher({
   sessionId,
   permissionMode,
+  projectDir,
   sendAgentEnvelope,
 }: {
   sessionId: string;
   permissionMode: string;
+  /** The session's working directory: where "Always allow" rules go. */
+  projectDir: string | null;
   sendAgentEnvelope: (sessionId: string, envelope: unknown) => Promise<void>;
 }) {
   // Pending perm request lives in the long-lived store now (fix C1)
@@ -639,16 +644,28 @@ function InteractivePermissionDispatcher({
         }
       });
     if (decision.kind === "allow" && decision.persist) {
-      // Persist the rule to ~/.claude/settings.json (TUI parity per
-      // locked decision §0.5).  Best-effort; the in-session allow has
-      // already been wired via the response above.
-      import("@tauri-apps/api/core").then(({ invoke }) =>
-        invoke("write_permission_rule", {
-          pattern: decision.persist,
-          kind: "allow",
-          scope: "user",
-        }).catch((err) => console.warn("[perm] persist failed:", err)),
-      );
+      // Persist the rule to the project's .claude/settings.local.json
+      // (Claude Code's "local" scope), never to the global
+      // ~/.claude/settings.json: approving a command in one project must
+      // not approve it everywhere.  Best-effort; the in-session allow has
+      // already been wired via the response above.  Without a project
+      // folder there is nowhere safe to write: the prompt does not offer
+      // "Always allow" then, and nothing is persisted.
+      if (!projectDir) {
+        console.warn("[perm] no project folder for this session; rule not persisted");
+      } else {
+        const pattern = decision.persist;
+        import("@tauri-apps/api/core").then(({ invoke }) =>
+          invoke("write_permission_rule", {
+            pattern,
+            kind: "allow",
+            scope: "local",
+            projectDir,
+          })
+            .then(() => window.dispatchEvent(new Event(PERMISSION_RULES_CHANGED_EVENT)))
+            .catch((err) => console.warn("[perm] persist failed:", err)),
+        );
+      }
     }
   }
 
@@ -709,6 +726,7 @@ function InteractivePermissionDispatcher({
         request={request}
         permissionMode={permissionMode}
         onDecision={decide}
+        canPersist={!!projectDir}
       />
     </>
   );
