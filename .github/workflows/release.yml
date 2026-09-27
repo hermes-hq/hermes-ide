@@ -557,14 +557,17 @@ jobs:
 
       - name: Prepare release notes
         run: |
-          # Generate changelog from git commits between tags
+          VERSION="${{ needs.config.outputs.version }}"
+          # Hand-written notes win when RELEASE_NOTES.md is for this version
+          # (its first line names it, e.g. "# Hermes IDE 1.4.0"). Otherwise
+          # fall back to a changelog generated from commits between tags.
           NOTES=$(bash scripts/generate-changelog.sh "$TAG" 2>/dev/null || true)
-          if [ -n "$NOTES" ]; then
-            echo "Using auto-generated changelog from git history"
+          if [ -f "RELEASE_NOTES.md" ] && head -n 1 RELEASE_NOTES.md | grep -qF "$VERSION"; then
+            echo "Using RELEASE_NOTES.md"
+            { cat RELEASE_NOTES.md; printf '\n\nSee the full changelog at https://hermes-ide.com/changelog\n'; } > release-notes.txt
+          elif [ -n "$NOTES" ]; then
+            echo "RELEASE_NOTES.md is not for $VERSION; using auto-generated changelog"
             echo "$NOTES" > release-notes.txt
-          elif [ -f "RELEASE_NOTES.md" ]; then
-            echo "Falling back to RELEASE_NOTES.md"
-            cp RELEASE_NOTES.md release-notes.txt
           else
             echo "No changelog available — using default release notes"
             cat > release-notes.txt << 'NOTES'
