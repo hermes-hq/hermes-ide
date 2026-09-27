@@ -7,14 +7,26 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 
 ---
 
-# 1.4.0 (2026-07-19)
+# 1.4.0 (2026-09-27)
 
 ## New
 - Interface translations built in — switch Hermes to Russian, Spanish, French, German, Portuguese (Brazil), Simplified Chinese, Japanese, or Hindi from Plugins → Hermes Language Pack; the switch is instant, needs no restart, and is remembered across launches
 - Language Pack ships as a built-in plugin, visible and manageable in the installed plugins list
 - Localized the start screen, command palette, settings, session creation flow (including the SSH and tmux steps), usage and plan limits, shortcuts, plugin manager, and the prompt composer with roles, styles, and templates
+- Fable 5.1 in the agent-mode model picker; Opus, Sonnet, and Haiku now use the latest version of each model
+- Agent mode runs on the latest Claude tooling
 
 ## Fixed
+- Closed terminal sessions no longer come back as black, unusable "ghost" sessions (often after waking the computer)
+- Switching sessions opens the agent conversation at the latest message instead of the top
+- Split Right / Split Down from the terminal right-click menu open a working new session instead of an empty pane
+- Windows: Hermes no longer opens off-screen or disappears after being minimized or maximized
+- Windows: agent sessions no longer crash on the first message with "EISDIR: lstat 'C:'"
+- Session cards and pane headers show the model in use instead of "claude"
+- A clear message appears when a session's branch workspace can't be created, instead of the session silently not opening
+- Input typed inside full-screen programs no longer pollutes shell history and suggestions
+- Kiro auto mode launches with the correct permission setting
+- The TODO panel keeps updating with the latest Claude tooling
 - Usage panel now counts input tokens from the whole session, including turns from before the panel was opened
 
 ## Improved
