@@ -5,7 +5,9 @@ name: Mutation testing
 # mutants are killed by the tests. Not part of the pull request gate: it is
 # too slow for every push. A red run points at tests that do not test the
 # changed code. Waivers: `exclude_re` in src-tauri/.cargo/mutants.toml, added
-# in a reviewed pull request.
+# in a reviewed pull request. That file does not exist until the first waiver;
+# the pull request with the first waiver creates it (cargo-mutants reads it
+# from there automatically).
 
 on:
   schedule:
