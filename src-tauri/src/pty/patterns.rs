@@ -2,10 +2,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static! {
-    // OSC 7 — shell reports current working directory: \x1b]7;file://hostname/path\x07
-    pub static ref OSC7_RE: Regex = Regex::new(
-        r"\x1b\]7;file://[^/]*(/.+?)(?:\x07|\x1b\\)"
-    ).unwrap();
     // Fallback: detect cd commands
     pub static ref CD_CMD_RE: Regex = Regex::new(
         r"^\$?\s*cd\s+(.+)"
