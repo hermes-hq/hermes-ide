@@ -819,6 +819,7 @@ pub fn run() {
             transcript::stop_transcript_watcher,
             // Agent mode (Claude SDK bridge — see agent/mod.rs)
             agent::spawn_agent_session,
+            agent::restart_agent_session,
             agent::send_agent_input,
             agent::interrupt_agent,
             agent::close_agent_session,

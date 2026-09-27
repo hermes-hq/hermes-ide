@@ -1,0 +1,78 @@
+/* Agent view error panel (src/agent/AgentErrorBanner.tsx). Same visual
+ * family as .agent-result-error: a tinted card with a left rule. Busy is a
+ * wait, not a failure, so it uses the quieter brass tone. */
+
+.agent-error-banner {
+  --agent-error-tone: var(--danger, var(--red, var(--tool-error)));
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--agent-error-tone);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--agent-error-tone) 8%, transparent);
+}
+
+.agent-error-banner[data-kind="busy"] {
+  --agent-error-tone: var(--brass, var(--accent-paper));
+}
+
+.agent-error-banner-title {
+  font: var(--weight-semibold) var(--text-sm) / 1.2 var(--font-ui);
+  color: var(--agent-error-tone);
+  margin-bottom: 6px;
+  letter-spacing: 0.01em;
+}
+
+.agent-error-banner-message {
+  font: var(--text-xs) / 1.5 var(--font-ui);
+  color: var(--text-1);
+}
+
+.agent-error-banner-details {
+  margin-top: 8px;
+  font: var(--text-xs) / 1.4 var(--font-ui);
+  color: var(--text-2);
+}
+
+.agent-error-banner-details summary {
+  cursor: pointer;
+}
+
+.agent-error-banner-detail {
+  margin: 6px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  font: var(--text-xs) / 1.4 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-1);
+}
+
+.agent-error-banner-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.agent-error-banner-action {
+  padding: 3px 12px;
+  background: transparent;
+  border: 1px solid var(--brass, var(--accent-paper));
+  border-radius: 4px;
+  color: var(--brass, var(--accent-paper));
+  font: 11px/1.4 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.agent-error-banner-action:hover {
+  background: var(--brass-dim, color-mix(in srgb, var(--accent-paper) 14%, transparent));
+  color: var(--ink-primary);
+}
+
+.agent-error-banner-action[aria-busy="true"] {
+  opacity: 0.7;
+  cursor: progress;
+}

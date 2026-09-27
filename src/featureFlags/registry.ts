@@ -33,6 +33,12 @@ export const FEATURE_FLAGS = [
     description:
       "Refuses to create a worktree below 10 GB free, shows disk used per worktree, removes build output on request and sweeps orphaned worktree folders in one action (Git panel > Worktrees).",
   },
+  {
+    id: "agentViewErrors",
+    label: "Agent view: clear errors",
+    description:
+      "In the optional Agent view, say why the agent stopped (could not start, signed out, exited, busy, unreadable output) with a Retry or Sign in button, instead of the one-line exit notice.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

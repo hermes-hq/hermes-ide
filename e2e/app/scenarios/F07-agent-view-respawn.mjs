@@ -1,0 +1,467 @@
+#!/usr/bin/env node
+// Scenario: F07 — Agent view: respawn lock and clear errors.
+//
+// Drives the REAL app with a fake Claude bridge (e2e/app/fixtures/
+// fake-claude-bridge.mjs, started through HERMES_BRIDGE_PATH exactly like the
+// real one). No network, no account: the Sign in step runs a fake `claude`
+// placed first on PATH, and every directory holding a real `claude` is taken
+// off the app's PATH.
+//
+//   run 1  fresh install: onboarding; turn on the "agentViewErrors" flag
+//   run 2  (flag on, normal build)
+//          a. new Agent view session; the agent crashes on the first message
+//             -> panel "Claude stopped (exit code 3)" with Retry
+//          b. Retry clicked twice at once -> exactly ONE new agent process
+//             (counted from the app's own spawn log and from the fake's log),
+//             and it answers the next message
+//          c. the agent answers "Not logged in" -> panel "Claude is signed out"
+//             with Sign in; Sign in opens the agent in a terminal session
+//          d. after signing in, the next message works; the agent crashes again
+//             and the bridge file is gone on Retry -> "Couldn't start Claude";
+//             restore it, Retry -> running again
+//          e. the agent prints a line that is not JSON -> "Claude sent output
+//             Hermes couldn't read"; Retry clears it
+//   run 3  NEGATIVE CONTROL: same app, same steps a–b, with the respawn lock
+//          turned off (HERMES_E2E_NO_RESPAWN_LOCK=1, honoured only by test
+//          builds). The double Retry must now show TWO new processes; if it
+//          does not, this scenario cannot tell a locked build from an
+//          unlocked one and fails.
+//
+//   node e2e/app/build.mjs
+//   node e2e/app/scenarios/F07-agent-view-respawn.mjs
+//
+// Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
+// <out dir>/evidence/F07-agent-view-respawn.
+
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { platform, tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+
+const SCENARIO = "F07-agent-view-respawn";
+const startedAt = Date.now();
+const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
+const logFile = join(evidenceDir, "scenario.log");
+rmSync(logFile, { force: true });
+const log = createLogger(logFile);
+
+function assert(condition, message) {
+  if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
+  log(`  ok — ${message}`);
+}
+
+const onWindows = platform() === "win32";
+// Windows keeps app data under %APPDATA%, which a private HOME does not move
+// (see N07-feature-flags.mjs); there the test app's own data folder is used.
+const homeDir = onWindows ? undefined : mkdtempSync(join(tmpdir(), "hermes-e2e-f07-home-"));
+const work = mkdtempSync(join(tmpdir(), "hermes-e2e-f07-"));
+
+// ── Fake agent plumbing ─────────────────────────────────────────────
+const bridgeCopy = join(work, "fake-claude-bridge.mjs");
+const bridgeSource = join(REPO_ROOT, "e2e", "app", "fixtures", "fake-claude-bridge.mjs");
+copyFileSync(bridgeSource, bridgeCopy);
+const planFile = join(work, "plan.json");
+const fakeLog = join(work, "fake-bridge.ndjson");
+const setPlan = (mode) => {
+  writeFileSync(planFile, JSON.stringify({ mode }));
+  log(`  (fake bridge plan: ${mode})`);
+};
+
+/** A fake `claude` for the Sign in step: prints a line and waits. */
+const fakeBin = join(work, "bin");
+mkdirSync(fakeBin);
+const SIGN_IN_MARK = "fake-claude-sign-in-screen";
+if (onWindows) {
+  writeFileSync(join(fakeBin, "claude.cmd"), `@echo ${SIGN_IN_MARK}\r\n@pause >nul\r\n`);
+} else {
+  writeFileSync(join(fakeBin, "claude"), `#!/bin/sh\necho ${SIGN_IN_MARK}\nexec sleep 600\n`);
+  chmodSync(join(fakeBin, "claude"), 0o755);
+}
+
+/** PATH for the app: the fake `claude` first, no directory with a real one. */
+function testPath() {
+  const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") || "PATH";
+  const names = onWindows ? ["claude.exe", "claude.cmd", "claude.ps1", "claude"] : ["claude"];
+  const kept = (process.env[pathKey] || "").split(delimiter).filter((dir) => {
+    if (!dir) return false;
+    try {
+      return !names.some((n) => existsSync(join(dir, n)));
+    } catch {
+      return true;
+    }
+  });
+  return { key: pathKey, value: [fakeBin, ...kept].join(delimiter) };
+}
+
+function appEnv(extra = {}) {
+  const p = testPath();
+  return {
+    HERMES_BRIDGE_PATH: bridgeCopy,
+    HERMES_FAKE_BRIDGE_PLAN: planFile,
+    HERMES_FAKE_BRIDGE_LOG: fakeLog,
+    [p.key]: p.value,
+    ...extra,
+  };
+}
+
+function fakeEvents() {
+  if (!existsSync(fakeLog)) return [];
+  return readFileSync(fakeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+}
+
+/** Agent session id the fake bridge was started for (from its argv). */
+const argvSession = (e) => {
+  const a = e.argv || [];
+  const i = a.indexOf("--session-id") >= 0 ? a.indexOf("--session-id") : a.indexOf("--resume");
+  return i >= 0 ? a[i + 1] : null;
+};
+
+/** Processes the app started for Hermes session `sid`, from its own log. */
+function appSpawns(runDir, sid) {
+  const file = join(runDir, "app.log");
+  if (!existsSync(file)) return 0;
+  const needle = `[agent spawned] sid=${sid} `;
+  return readFileSync(file, "utf8").split("\n").filter((l) => l.includes(needle)).length;
+}
+
+/** Fake bridge processes that started and never exited. */
+function liveFakePids(pids) {
+  const events = fakeEvents();
+  const exited = new Set(events.filter((e) => e.event === "exit").map((e) => e.pid));
+  return pids.filter((pid) => {
+    if (exited.has(pid)) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+// ── App steps ───────────────────────────────────────────────────────
+function launch(run, { first = false, env = appEnv() } = {}) {
+  const runDir = join(evidenceDir, `run-${run}`);
+  const started = onWindows
+    ? launchApp({ runDir, log, home: "real", resetData: first, env })
+    : launchApp({ runDir, log, home: "private", homeDir, env });
+  return started.then((app) => ({ ...app, runDir }));
+}
+
+async function dismissWhatsNew(bridge) {
+  if (await bridge.exists(".whatsnew-backdrop")) {
+    await bridge.click(".whatsnew-footer .whatsnew-btn-primary");
+    await bridge.waitFor("the what's-new dialog to close", `return !e2e.first(".whatsnew-backdrop");`);
+  }
+}
+
+async function completeOnboarding(bridge) {
+  await bridge.waitFor("the welcome dialog", `return !!e2e.first(".onboarding-dialog");`);
+  for (const _screen of ["welcome", "theme", "AI tools"]) {
+    await bridge.click(".onboarding-actions .onboarding-btn-primary");
+    await sleep(150);
+  }
+  await bridge.waitFor("the privacy screen", `return e2e.all(".onboarding-privacy-checkbox input").length === 2;`);
+  await bridge.clickWhenReady(`
+    const [analytics, policy] = e2e.all(".onboarding-privacy-checkbox input");
+    if (analytics.checked) e2e.click(analytics);
+    if (!policy.checked) e2e.click(policy);
+    return true;
+  `);
+  await bridge.waitFor("the Finish button to become enabled", `
+    const b = e2e.first(".onboarding-actions .onboarding-btn-primary");
+    return !!b && !b.disabled;
+  `);
+  await bridge.click(".onboarding-actions .onboarding-btn-primary");
+  await bridge.waitFor("the welcome dialog to close", `return !e2e.first(".onboarding-backdrop");`);
+  await sleep(300);
+  await dismissWhatsNew(bridge);
+}
+
+async function waitForReturningLaunch(bridge) {
+  await bridge.waitFor("the app UI to be ready", `
+    return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop");
+  `);
+  await dismissWhatsNew(bridge);
+}
+
+async function quit(app) {
+  const exit = await app.stop();
+  log(`  app exited: ${JSON.stringify(exit)}`);
+  assert(!exit.forced && exit.code === 0, "the app quit cleanly");
+}
+
+/** New Agent view session through the New Session wizard; returns its id. */
+async function createAgentSession(bridge) {
+  const before = await bridge.eval(`return e2e.all(".agent-session-view").map((e) => e.dataset.sessionId);`);
+  await bridge.clickWhenReady(`
+    const b = e2e.first("button.es-tile-primary") || e2e.byName("New Session");
+    return e2e.click(e2e.must(b, "a New Session button"));
+  `);
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
+    timeoutMs: 20_000,
+  });
+  await bridge.click('.session-creator-mode-card[data-category="native"]');
+  await bridge.waitFor("Agent view to be selected", `
+    return e2e.first('.session-creator-mode-card[data-category="native"]')?.getAttribute("aria-checked") === "true";
+  `);
+  for (let i = 0; i < 8; i++) {
+    if (!(await bridge.exists(".session-creator"))) break;
+    const clicked = await bridge.clickWhenReady(`
+      if (!e2e.first(".session-creator")) return null;
+      const b = e2e.must(
+        e2e.first(".session-creator-actions .session-creator-btn-primary, .session-creator-footer-actions .session-creator-btn-primary"),
+        "the wizard's primary button",
+      );
+      const step = e2e.first(".session-creator-step")?.innerText ?? "";
+      return { step, ...e2e.click(b) };
+    `);
+    if (clicked) log(`  wizard ${clicked.step}: clicked "${clicked.clicked}"`);
+    await sleep(400);
+  }
+  await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 20_000 });
+  const sid = await bridge.waitFor("the Agent view to open", `
+    const ids = e2e.all(".agent-session-view").map((e) => e.dataset.sessionId).filter(Boolean);
+    const fresh = ids.filter((id) => !${JSON.stringify(before)}.includes(id));
+    return fresh.length === 1 ? fresh[0] : null;
+  `, { timeoutMs: 20_000 });
+  log(`  Agent view session: ${sid}`);
+  return sid;
+}
+
+/** Type into the Agent view composer and press Send. */
+async function sendMessage(bridge, text) {
+  await bridge.clickWhenReady(`
+    const ta = e2e.must(e2e.first(".session-composer-input"), "the composer");
+    ta.focus();
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+    setter.call(ta, ${JSON.stringify(text)});
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  `);
+  await bridge.waitFor("the composer to hold the message", `
+    return e2e.first(".session-composer-input")?.value === ${JSON.stringify(text)};
+  `);
+  await bridge.click(".session-composer-send-btn");
+  log(`  sent: "${text}"`);
+}
+
+const panelScript = `
+  const b = e2e.first(".agent-error-banner");
+  if (!b) return null;
+  return {
+    kind: b.dataset.kind,
+    text: e2e.norm(b.innerText),
+    actions: e2e.all(".agent-error-banner-action", b).map((a) => a.dataset.action),
+  };
+`;
+
+async function waitForPanel(bridge, kind, timeoutMs = 20_000) {
+  const panel = await bridge.waitFor(`the "${kind}" error panel`, `
+    const p = (() => { ${panelScript} })();
+    return p && p.kind === ${JSON.stringify(kind)} ? p : null;
+  `, { timeoutMs });
+  log(`  panel: ${JSON.stringify(panel)}`);
+  return panel;
+}
+
+/** Crash the agent, then click Retry twice in the same instant. */
+async function crashThenDoubleRetry(app, sid, { expectPanelToClear }) {
+  const { bridge, runDir } = app;
+  setPlan("crash");
+  await sendMessage(bridge, "hello");
+  const crash = await waitForPanel(bridge, "exited");
+  const spawnsBefore = appSpawns(runDir, sid);
+  const fakeBefore = fakeEvents().filter((e) => e.event === "start").length;
+
+  setPlan("ok");
+  const clicks = await bridge.eval(`
+    const retry = () => e2e.must(e2e.first('.agent-error-banner-action[data-action="retry"]'), "Retry");
+    const first = e2e.click(retry());
+    const second = e2e.click(retry());
+    return [first.clicked, second.clicked];
+  `);
+  log(`  clicked Retry twice in one go: ${JSON.stringify(clicks)}`);
+  if (expectPanelToClear) {
+    await bridge.waitFor("the error panel to clear", `return !e2e.first(".agent-error-banner");`, { timeoutMs: 20_000 });
+  }
+  // Let any second start land (the unlocked build starts it right away).
+  await sleep(2_000);
+  const newSpawns = appSpawns(runDir, sid) - spawnsBefore;
+  const newFake = fakeEvents().filter((e) => e.event === "start").slice(fakeBefore);
+  return { crash, newSpawns, newFake };
+}
+
+let app;
+let failed = false;
+const details = {};
+
+try {
+  log(`scenario: ${SCENARIO}   platform: ${platform()}`);
+  log(`  fake bridge: ${bridgeCopy}; fake claude: ${fakeBin}`);
+
+  // ── run 1 ──────────────────────────────────────────────────────────
+  log("step 1: fresh launch, onboarding, turn on the agentViewErrors flag (read at next launch)");
+  app = await launch(1, { first: true });
+  await completeOnboarding(app.bridge);
+  await app.bridge.eval(`
+    await window.__TAURI_INTERNALS__.invoke("set_setting", {
+      key: "feature_flag_overrides",
+      value: JSON.stringify({ agentViewErrors: true }),
+    });
+    return true;
+  `);
+  await quit(app);
+
+  // ── run 2 ──────────────────────────────────────────────────────────
+  log("step 2: relaunch with the flag on; open an Agent view session");
+  setPlan("ok");
+  app = await launch(2);
+  await waitForReturningLaunch(app.bridge);
+  const sid = await createAgentSession(app.bridge);
+  const firstStart = Date.now();
+  while (appSpawns(app.runDir, sid) < 1 && Date.now() - firstStart < 20_000) await sleep(100);
+  assert(appSpawns(app.runDir, sid) === 1, "opening the session started one agent process");
+
+  log("step 3: the agent crashes -> typed 'exited' panel with Retry; then Retry twice at once");
+  const r = await crashThenDoubleRetry(app, sid, { expectPanelToClear: true });
+  assert(r.crash.text.includes("Claude stopped") && r.crash.text.includes("exit code 3"), `the panel says "Claude stopped … exit code 3"`);
+  assert(r.crash.actions.length === 1 && r.crash.actions[0] === "retry", "the panel offers Retry");
+  assert(!(await app.bridge.exists(".agent-exit-notice")), "the old one-line exit notice is not shown");
+  await app.bridge.screenshot(join(evidenceDir, "02-crash-exited-panel.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+  details.lockedNewProcesses = r.newSpawns;
+  assert(r.newSpawns === 1, `two concurrent restarts started exactly one agent process (app log: ${r.newSpawns})`);
+  assert(r.newFake.length === 1, `the fake bridge saw exactly one new start (${r.newFake.length})`);
+  const live = liveFakePids(r.newFake.map((e) => e.pid));
+  assert(live.length === 1, `exactly one agent process is running for the session (pids ${JSON.stringify(live)})`);
+  assert(argvSession(r.newFake[0]) !== null, `the restart resumed the conversation (${(r.newFake[0].argv || []).join(" ")})`);
+
+  log("step 4: the restarted agent answers");
+  await sendMessage(app.bridge, "after retry");
+  await app.bridge.waitFor("the agent's reply", `
+    return e2e.norm(e2e.first(".agent-session-view")?.innerText).includes("fake reply: after retry");
+  `, { timeoutMs: 20_000 });
+  assert(
+    fakeEvents().some((e) => e.event === "input" && e.type === "user" && e.pid === live[0]),
+    "the message went to that one process",
+  );
+  await app.bridge.screenshot(join(evidenceDir, "03-after-retry-reply.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+
+  log("step 5: the agent is signed out -> 'signed out' panel with Sign in");
+  setPlan("signed-out");
+  await sendMessage(app.bridge, "who am i");
+  const so = await waitForPanel(app.bridge, "signed_out");
+  assert(/signed out/i.test(so.text), `the panel says "signed out" ("${so.text.slice(0, 80)}")`);
+  assert(so.actions.length === 1 && so.actions[0] === "sign-in", "the panel offers Sign in (and no Retry)");
+  assert(!(await app.bridge.exists(".agent-result-error")), "the generic 'couldn't continue' banner is not repeated");
+  await app.bridge.screenshot(join(evidenceDir, "04-signed-out-panel.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+
+  const sessionsBefore = await app.bridge.eval(`return e2e.all(".session-item").length;`);
+  const termsBefore = await app.bridge.terminalIds();
+  await app.bridge.click('.agent-error-banner-action[data-action="sign-in"]');
+  const signInSid = await app.bridge.waitFor("Sign in to open a terminal session", `
+    const ids = window.__HERMES_E2E__.terminalIds().filter((id) => !${JSON.stringify(termsBefore)}.includes(id));
+    return e2e.all(".session-item").length === ${sessionsBefore + 1} && ids.length > 0 ? ids[ids.length - 1] : null;
+  `, { timeoutMs: 20_000 });
+  assert(!!signInSid, `Sign in opened a new terminal session (${signInSid})`);
+  if (onWindows) {
+    log("  (Windows: the fake `claude` output is only logged, not asserted)");
+    await sleep(3_000);
+    log(`  terminal: ${JSON.stringify((await app.bridge.readTerminal(signInSid))?.slice(-6))}`);
+  } else {
+    await app.bridge.waitForTerminal(signInSid, new RegExp(SIGN_IN_MARK), { timeoutMs: 30_000 });
+    assert(true, "the terminal session runs the agent's own sign-in (the fake `claude` printed its screen)");
+  }
+  await app.bridge.screenshot(join(evidenceDir, "05-sign-in-terminal.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+
+  log("step 6: back to the Agent view; after signing in, the next message works and the panel goes");
+  await app.bridge.clickWhenReady(`
+    const item = e2e.all(".session-item").find((el) => !(el.getAttribute("title") || "").startsWith("Sign in to Claude"));
+    return e2e.click(e2e.must(item, "the Agent view session in the list"));
+  `);
+  await app.bridge.waitFor("the Agent view to show again", `
+    return !!e2e.first('.agent-session-view[data-session-id=${JSON.stringify(sid)}]');
+  `);
+  setPlan("ok");
+  await sendMessage(app.bridge, "signed in now");
+  await app.bridge.waitFor("the agent's reply", `
+    return e2e.norm(e2e.first(".agent-session-view")?.innerText).includes("fake reply: signed in now");
+  `, { timeoutMs: 20_000 });
+  await app.bridge.waitFor("the signed-out panel to go", `return !e2e.first(".agent-error-banner");`);
+  assert(true, "a successful turn after signing in clears the signed-out panel");
+
+  log("step 7: crash again, and the bridge file is missing on Retry -> 'Couldn't start Claude'");
+  // The view ignores an exit that lands within 300 ms of the agent's start
+  // event (it assumes the exit belongs to the previous process), so wait
+  // like a person would before the next message.
+  await sleep(1_000);
+  setPlan("crash");
+  await sendMessage(app.bridge, "crash again");
+  await waitForPanel(app.bridge, "exited");
+  rmSync(bridgeCopy);
+  await app.bridge.click('.agent-error-banner-action[data-action="retry"]');
+  const sf = await waitForPanel(app.bridge, "spawn_failed");
+  assert(sf.text.includes("Couldn't start Claude"), `the panel says "Couldn't start Claude"`);
+  assert(sf.actions[0] === "retry", "the panel offers Retry");
+  const sfDetail = await app.bridge.eval(`return document.querySelector(".agent-error-banner-detail")?.textContent ?? "";`);
+  assert(/non-existent file/.test(sfDetail), `Details name the missing file ("${sfDetail.split("\n").pop()?.slice(0, 60)}…")`);
+  await app.bridge.screenshot(join(evidenceDir, "06-spawn-failed-panel.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+  copyFileSync(bridgeSource, bridgeCopy);
+  setPlan("ok");
+  const beforeRecover = appSpawns(app.runDir, sid);
+  await app.bridge.click('.agent-error-banner-action[data-action="retry"]');
+  await app.bridge.waitFor("the error panel to clear", `return !e2e.first(".agent-error-banner");`, { timeoutMs: 20_000 });
+  assert(appSpawns(app.runDir, sid) === beforeRecover + 1, "Retry started the agent again once the file was back");
+
+  log("step 8: the agent prints a line that is not JSON -> 'protocol' panel; Retry clears it");
+  setPlan("garbage");
+  await sendMessage(app.bridge, "say something odd");
+  const pr = await waitForPanel(app.bridge, "protocol");
+  assert(pr.text.includes("couldn't read"), `the panel says Hermes couldn't read the output`);
+  await app.bridge.screenshot(join(evidenceDir, "07-protocol-panel.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+  setPlan("ok");
+  await app.bridge.click('.agent-error-banner-action[data-action="retry"]');
+  await app.bridge.waitFor("the error panel to clear", `return !e2e.first(".agent-error-banner");`, { timeoutMs: 20_000 });
+  await quit(app);
+
+  // ── run 3: negative control ────────────────────────────────────────
+  log("step 9: NEGATIVE CONTROL — same steps with the respawn lock turned off");
+  app = await launch(3, { env: appEnv({ HERMES_E2E_NO_RESPAWN_LOCK: "1" }) });
+  await waitForReturningLaunch(app.bridge);
+  const sid2 = await createAgentSession(app.bridge);
+  const t0 = Date.now();
+  while (appSpawns(app.runDir, sid2) < 1 && Date.now() - t0 < 20_000) await sleep(100);
+  const n = await crashThenDoubleRetry(app, sid2, { expectPanelToClear: false });
+  details.unlockedNewProcesses = n.newSpawns;
+  log(`  without the lock the double Retry started ${n.newSpawns} processes (fake saw ${n.newFake.length})`);
+  assert(n.newSpawns >= 2, "without the lock the same check sees a second process, so the check can fail");
+  await app.bridge.screenshot(join(evidenceDir, "08-negative-control.png")).catch((e) => log(`  (screenshot: ${e.message})`));
+} catch (e) {
+  failed = true;
+  log(`FAILED: ${e?.stack ?? e}`);
+  try {
+    if (app?.isRunning()) {
+      await app.bridge.screenshot(join(evidenceDir, "99-failure.png"));
+      const dump = await app.bridge.eval(`
+        return {
+          buttons: e2e.all("button").map(e2e.nameOf).slice(0, 40),
+          panel: (() => { ${panelScript} })(),
+          dialogs: [...document.querySelectorAll('[class*="backdrop"],[class*="overlay"]')].map((e) => e.className),
+        };
+      `);
+      log(`  what the app showed: ${JSON.stringify(dump)}`);
+    }
+  } catch (inner) {
+    log(`  (could not capture failure evidence: ${inner.message})`);
+  }
+  log(`  fake bridge log: ${existsSync(fakeLog) ? readFileSync(fakeLog, "utf8").split("\n").slice(-20).join("\n    ") : "(none)"}`);
+} finally {
+  if (app?.isRunning()) {
+    const exit = await app.stop();
+    log(`  app exited: ${JSON.stringify(exit)}`);
+  }
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true });
+}
+
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details });

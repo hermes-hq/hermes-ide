@@ -40,6 +40,9 @@ import {
 } from "../utils/permissionRequest";
 import { extractTodoSnapshot } from "../utils/todoStore";
 import { selectFatalError } from "./errorSelector";
+import { classifyAgentError } from "./agentErrors";
+import { AgentErrorBanner } from "./AgentErrorBanner";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import {
   slashReceiptAfterUserMessage,
   slashReceiptForMessage,
@@ -217,6 +220,41 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // surfaced a session entry yet.
   const sessionEntryForPerm = sessionCtx.state.sessions[sessionId];
 
+  // Typed error panel (feature flag "agentViewErrors"). Flags are read once
+  // at startup, so this is stable for the life of the view.
+  const typedErrors = isFeatureFlagEnabled("agentViewErrors");
+  const agentError = useMemo(
+    () => (typedErrors
+      ? classifyAgentError({ state, stderr, exit: exitInfo, protocolError: snapshot.protocolError })
+      : null),
+    [typedErrors, state, stderr, exitInfo, snapshot.protocolError],
+  );
+  const [retrying, setRetrying] = useState(false);
+  const { respawnAgent, createSession } = sessionCtx;
+  const handleRetry = () => {
+    setRetrying(true);
+    // A second click while this runs joins the same restart (backend
+    // spawn lock), so it is safe to leave the button enabled.
+    void respawnAgent(sessionId)
+      .then((ok) => {
+        // Started: the old error no longer describes the session. A failed
+        // restart reports its own typed error through the exit channel.
+        if (ok) store.clearExitNotice();
+      })
+      .finally(() => setRetrying(false));
+  };
+  const handleSignIn = () => {
+    // Open the agent in a normal terminal session, where its own sign-in
+    // flow runs. The person signs in there; Hermes types nothing.
+    const s = sessionCtx.state.sessions[sessionId];
+    void createSession({
+      aiProvider: s?.ai_provider ?? "claude",
+      mode: "terminal",
+      workingDirectory: s?.working_directory,
+      label: "Sign in to Claude",
+    });
+  };
+
   if (!hasTimeline) {
     // Claude's `--print --input-format stream-json` mode doesn't emit anything
     // (not even the init event) until it receives the first user message on
@@ -228,7 +266,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     // message + the live thinking indicator give them feedback during
     // the bridge-spawn → init-arrives gap.
     return (
-      <div className="agent-session-view">
+      <div className="agent-session-view" data-session-id={sessionId}>
         <AgentHeader state={state} sessionId={sessionId} workspacePathCount={workspacePathCount} />
         <div className="agent-session-empty">
           <span className="agent-empty-led" aria-hidden="true" />
@@ -326,6 +364,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
           {(() => {
             const fatal = selectFatalError(state);
             if (!fatal) return null;
+            // The typed panel below already explains a sign-in failure.
+            if (agentError?.kind === "signed_out") return null;
             return (
               <div
                 className="agent-result-error"
@@ -346,7 +386,15 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
               </div>
             );
           })()}
-          {exitInfo && shouldShowExitNotice(exitInfo, state.messages.length) ? (
+          {agentError ? (
+            <AgentErrorBanner
+              error={agentError}
+              retrying={retrying}
+              onRetry={handleRetry}
+              onSignIn={handleSignIn}
+            />
+          ) : null}
+          {!typedErrors && exitInfo && shouldShowExitNotice(exitInfo, state.messages.length) ? (
             <div className="agent-exit-notice">
               {classifyExit(exitInfo, stderr).label}
               {exitInfo.code !== null ? ` (code ${exitInfo.code})` : ""}

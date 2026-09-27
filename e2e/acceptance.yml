@@ -102,3 +102,16 @@ features:
       N14-3:
         text: "Orphaned worktree folders are listed and removable in one action"
         scenarios: [N14-disk-guard.mjs]
+  F07:
+    name: "Agent view: respawn lock and clear errors"
+    status: shipped
+    criteria:
+      F07-1:
+        # Retry is clicked twice at once; the app's own spawn log and the fake
+        # bridge's log must each show one new process. The same scenario then
+        # turns the lock off (test builds only) and must see two.
+        text: "Two concurrent restarts for one session produce exactly one process"
+        scenarios: [F07-agent-view-respawn.mjs]
+      F07-2:
+        text: "A signed-out Claude shows \"signed out\" with a Sign in action"
+        scenarios: [F07-agent-view-respawn.mjs]

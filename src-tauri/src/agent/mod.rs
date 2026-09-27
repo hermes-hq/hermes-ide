@@ -6,7 +6,10 @@
 //! rationale and `wondrous-wishing-quilt` plan for the phase-by-phase build.
 
 mod prewarm;
+mod respawn;
 pub use prewarm::prewarm_bridge_runtime;
+pub use respawn::AgentError;
+use respawn::SpawnGate;
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -37,12 +40,15 @@ type SessionMap = Arc<Mutex<HashMap<String, AgentChild>>>;
 /// tasks can clean themselves up without holding a Tauri `State<'_>` borrow.
 pub struct AgentState {
     sessions: SessionMap,
+    /// Per-session lock around start / restart / close (see `respawn.rs`).
+    gate: Arc<SpawnGate>,
 }
 
 impl Default for AgentState {
     fn default() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            gate: Arc::new(SpawnGate::default()),
         }
     }
 }
@@ -65,6 +71,9 @@ struct AgentChild {
     /// PID of the subprocess (best-effort).
     #[allow(dead_code)]
     pid: Option<u32>,
+    /// Agent (Claude) session id this process runs, returned to a restart
+    /// that joins this process instead of starting another one.
+    agent_session_id: String,
     /// Handles of the per-session reader / waiter tasks so they can be
     /// aborted on close.  Without these, a child whose pipes never close
     /// (rare, but possible if the subprocess hangs after we kill it)
@@ -472,8 +481,49 @@ pub fn build_spawn_args(
 
 // ─── Tauri commands ────────────────────────────────────────────────
 
+/// Everything one agent spawn needs: the arguments of
+/// [`spawn_agent_session`] / [`restart_agent_session`].
+struct SpawnRequest {
+    session_id: String,
+    working_dir: String,
+    prior_uuid: Option<String>,
+    model: Option<String>,
+    permission_mode: Option<String>,
+    effort: Option<String>,
+    add_dirs: Vec<String>,
+    fork: bool,
+}
+
+/// The agent session id of the session's running process, if it has one.
+async fn live_agent_session_id(sessions: &SessionMap, session_id: &str) -> Option<String> {
+    sessions
+        .lock()
+        .await
+        .get(session_id)
+        .map(|entry| entry.agent_session_id.clone())
+}
+
+/// Whether restarts go through the per-session lock. Always true, except in
+/// the test build when a scenario turns it off on purpose (`HERMES_E2E=1` and
+/// `HERMES_E2E_NO_RESPAWN_LOCK=1`) to show that its check catches the double
+/// spawn the lock prevents.
+fn respawn_lock_enabled() -> bool {
+    #[cfg(feature = "e2e")]
+    {
+        let on = |name: &str| std::env::var(name).map(|v| v == "1").unwrap_or(false);
+        if on("HERMES_E2E") && on("HERMES_E2E_NO_RESPAWN_LOCK") {
+            log::warn!("[agent] respawn lock DISABLED for a negative-control test run");
+            return false;
+        }
+    }
+    true
+}
+
 /// Spawn a Claude agent subprocess for `session_id`.  Returns the Claude session
 /// UUID we passed via `--session-id` so the frontend can track it for resume.
+///
+/// Fails with a `busy` error, without starting anything, when the session
+/// already has a running process.
 ///
 /// The argument list mirrors `build_spawn_args` plus the Tauri `State` and
 /// `AppHandle` — same justification: each is a real Claude flag.
@@ -490,17 +540,99 @@ pub async fn spawn_agent_session(
     effort: Option<String>,
     add_dirs: Option<Vec<String>>,
     fork: Option<bool>,
-) -> Result<String, String> {
+) -> Result<String, AgentError> {
+    let sessions = state.handle();
+    let req = SpawnRequest {
+        session_id: session_id.clone(),
+        working_dir,
+        prior_uuid,
+        model,
+        permission_mode,
+        effort,
+        add_dirs: add_dirs.unwrap_or_default(),
+        fork: fork.unwrap_or(false),
+    };
+    state
+        .gate
+        .spawn(
+            &session_id,
+            || live_agent_session_id(&sessions, &session_id),
+            || spawn_child(&app, &sessions, req),
+        )
+        .await
+}
+
+/// Stop the session's agent process (if any) and start a new one, under the
+/// session's lock. Two restarts that overlap start exactly one process: the
+/// one that waited returns the id of the process the other started. A fork
+/// (new model / permission mode / effort) always really restarts, after any
+/// restart already in progress.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn restart_agent_session(
+    state: State<'_, AgentState>,
+    app: AppHandle,
+    session_id: String,
+    working_dir: String,
+    prior_uuid: Option<String>,
+    model: Option<String>,
+    permission_mode: Option<String>,
+    effort: Option<String>,
+    add_dirs: Option<Vec<String>>,
+    fork: Option<bool>,
+) -> Result<String, AgentError> {
+    let sessions = state.handle();
     let fork = fork.unwrap_or(false);
+    let req = SpawnRequest {
+        session_id: session_id.clone(),
+        working_dir,
+        prior_uuid,
+        model,
+        permission_mode,
+        effort,
+        add_dirs: add_dirs.unwrap_or_default(),
+        fork,
+    };
+    if !respawn_lock_enabled() {
+        let _ = close_child(&sessions, &session_id).await;
+        return spawn_child(&app, &sessions, req).await;
+    }
+    state
+        .gate
+        .restart(
+            &session_id,
+            !fork,
+            || live_agent_session_id(&sessions, &session_id),
+            || async {
+                let _ = close_child(&sessions, &session_id).await;
+            },
+            || spawn_child(&app, &sessions, req),
+        )
+        .await
+}
+
+/// Start the agent process for `req` and register it in `sessions_handle`.
+/// Callers hold the session's [`SpawnGate`] lock.
+async fn spawn_child(
+    app: &AppHandle,
+    sessions_handle: &SessionMap,
+    req: SpawnRequest,
+) -> Result<String, AgentError> {
+    let SpawnRequest {
+        session_id,
+        working_dir,
+        prior_uuid,
+        model,
+        permission_mode,
+        effort,
+        add_dirs,
+        fork,
+    } = req;
     let NodeSpawnPaths {
         bridge: bridge_path,
         working_dir,
         add_dirs: dirs,
-    } = node_spawn_paths(
-        &resolve_bridge_path(&app)?,
-        &working_dir,
-        &add_dirs.unwrap_or_default(),
-    );
+    } = node_spawn_paths(&resolve_bridge_path(app)?, &working_dir, &add_dirs);
     let claude_session_id = match (prior_uuid.as_deref(), fork) {
         (Some(uuid), false) => uuid.to_string(),
         (Some(_), true) | (None, _) => uuid::Uuid::new_v4().to_string(),
@@ -609,6 +741,8 @@ pub async fn spawn_agent_session(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn agent runtime: {}", e))?;
+    // One line per started process; the Agent view scenarios count these.
+    eprintln!("[agent spawned] sid={} pid={:?}", session_id, child.id());
 
     let stdin = child
         .stdin
@@ -706,11 +840,12 @@ pub async fn spawn_agent_session(
     // input / interrupt / close.  The waiter task is spawned below and its
     // handle is appended to `task_handles` after insertion so all three
     // tasks get aborted together when the entry is dropped.
-    let sessions_handle = state.handle();
     {
         let mut sessions = sessions_handle.lock().await;
         if sessions.contains_key(&session_id) {
-            return Err(format!("Agent session '{}' already exists", session_id));
+            // Unreachable through the gate; if it ever happens, the new
+            // child is dropped (and killed) rather than orphaned.
+            return Err(AgentError::busy(&session_id));
         }
         sessions.insert(
             session_id.clone(),
@@ -718,6 +853,7 @@ pub async fn spawn_agent_session(
                 child: Some(child),
                 stdin: Some(stdin),
                 pid,
+                agent_session_id: claude_session_id.clone(),
                 task_handles: vec![stdout_task, stderr_task],
             },
         );
@@ -729,7 +865,7 @@ pub async fn spawn_agent_session(
     let waiter_task = {
         let app = app.clone();
         let sid = session_id.clone();
-        let waiter_handle = Arc::clone(&sessions_handle);
+        let waiter_handle = Arc::clone(sessions_handle);
         tokio::spawn(async move {
             await_child_exit(waiter_handle, app, sid).await;
         })
@@ -946,10 +1082,18 @@ pub async fn close_agent_session(
     session_id: String,
 ) -> Result<(), String> {
     let sessions_handle = state.handle();
+    // Under the session's lock, so a close that arrives mid-restart stops
+    // the new process instead of running first and leaving it orphaned.
+    state
+        .gate
+        .exclusive(&session_id, || close_child(&sessions_handle, &session_id))
+        .await
+}
 
+async fn close_child(sessions_handle: &SessionMap, session_id: &str) -> Result<(), String> {
     let entry_opt = {
         let mut sessions = sessions_handle.lock().await;
-        sessions.remove(&session_id)
+        sessions.remove(session_id)
     };
 
     let mut entry = match entry_opt {

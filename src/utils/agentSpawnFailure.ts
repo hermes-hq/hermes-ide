@@ -15,6 +15,7 @@
  */
 
 import { emit } from "@tauri-apps/api/event";
+import { toAgentCommandError } from "../api/agent";
 
 export interface AgentSpawnFailurePayload {
   sessionId: string;
@@ -53,13 +54,15 @@ export async function reportAgentSpawnFailure(
 ): Promise<void> {
   const { sessionId, error, context } = payload;
   const message = formatSpawnError(error);
+  // "spawn_failed" or "busy"; the Agent view picks its message from it.
+  const kind = toAgentCommandError(error).kind;
   const prefix = context ? `[spawn:${context}] ` : "[spawn] ";
   const line = `${prefix}${message}\n`;
   // Emit both events; ignore individual emit failures (we don't want a
   // diagnostic emit failure to mask the original spawn error in logs).
   await Promise.all([
     emitter(`agent-stderr-${sessionId}`, line).catch(() => undefined),
-    emitter(`agent-exit-${sessionId}`, { code: -1, signal: "spawn-failed" }).catch(
+    emitter(`agent-exit-${sessionId}`, { code: -1, signal: "spawn-failed", kind }).catch(
       () => undefined,
     ),
   ]);

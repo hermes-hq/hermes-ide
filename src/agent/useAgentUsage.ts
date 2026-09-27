@@ -37,6 +37,7 @@ const EMPTY_VIEW_SNAPSHOT: AgentViewSnapshot = {
   stderr: "",
   exit: null,
   pendingPermRequest: null,
+  protocolError: null,
 };
 
 /**

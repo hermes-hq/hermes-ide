@@ -59,7 +59,7 @@ import {
   loadNotesMap,
   serializeNotesMap,
 } from "../utils/workbenchLayout";
-import { spawnAgentSession, closeAgentSession, sendAgentInput, updateHermesState, setAgentPermissionMode } from "../api/agent";
+import { spawnAgentSession, restartAgentSession, closeAgentSession, sendAgentInput, updateHermesState, setAgentPermissionMode } from "../api/agent";
 import { reportAgentSpawnFailure } from "../utils/agentSpawnFailure";
 import { destroyAgentSessionStore } from "../agent/agentSessionStore";
 import { cleanupSessionRefs } from "../utils/sessionRefCleanup";
@@ -2318,11 +2318,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       void attachInitListener(sessionId);
 
-      await closeAgentSession(sessionId).catch((err) => {
-        console.warn("[SessionContext] closeAgentSession during respawn:", err);
-      });
-
-      const newUuid = await spawnAgentSession({
+      // One backend call stops the old process and starts the new one under
+      // the session's spawn lock: restarts that overlap (a double-clicked
+      // Retry, a submit racing a card's reply) start a single process.
+      const newUuid = await restartAgentSession({
         sessionId,
         workingDir: session.working_directory,
         priorUuid,

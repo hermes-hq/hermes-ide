@@ -5,20 +5,40 @@ export interface ClaudeCliInfo {
   path: string;
 }
 
-/** Spawn a Claude agent subprocess for this session. Returns the Claude session UUID.
- *
- *  `permissionMode` accepts Claude's published values: "default", "acceptEdits",
- *  "plan", "bypassPermissions". Anything else is dropped server-side.
- *
- *  `fork` controls how a `priorUuid` is treated:
- *    - false (default): plain `--resume` — Claude reloads the session and
- *      keeps the original model/permission mode (new flags are ignored).
- *      Use this for between-turn auto-respawn where nothing has changed.
- *    - true: branches a fresh session from the prior history via
- *      `--session-id <new> --resume <prior> --fork-session`. Required when
- *      the user has actually changed `model` or `permissionMode` mid-
- *      conversation — that's the only flag combination Claude honors. */
-export function spawnAgentSession(opts: {
+/** Why an agent could not run. `spawn_failed` and `busy` come from the spawn
+ *  commands; the others are read from the agent's output and exit (see
+ *  src/agent/agentErrors.ts). */
+export type AgentErrorKind = "spawn_failed" | "signed_out" | "exited" | "busy" | "protocol";
+
+/** A rejected spawn / restart command. `message` is the backend's text, so
+ *  code that only reads `err.message` keeps working. */
+export class AgentCommandError extends Error {
+  readonly kind: AgentErrorKind;
+  constructor(kind: AgentErrorKind, message: string) {
+    super(message);
+    this.name = "AgentCommandError";
+    this.kind = kind;
+  }
+}
+
+const COMMAND_ERROR_KINDS: ReadonlySet<string> = new Set(["spawn_failed", "busy"]);
+
+/** Normalise whatever `invoke` rejected with: the typed `{ kind, message }`
+ *  object the spawn commands return, a plain string, or an Error. Anything
+ *  untyped counts as a failure to start. */
+export function toAgentCommandError(raw: unknown): AgentCommandError {
+  if (raw instanceof AgentCommandError) return raw;
+  if (raw && typeof raw === "object" && !(raw instanceof Error)) {
+    const { kind, message } = raw as { kind?: unknown; message?: unknown };
+    if (typeof kind === "string" && COMMAND_ERROR_KINDS.has(kind) && typeof message === "string") {
+      return new AgentCommandError(kind as AgentErrorKind, message);
+    }
+  }
+  const message = raw instanceof Error ? raw.message : typeof raw === "string" ? raw : JSON.stringify(raw);
+  return new AgentCommandError("spawn_failed", message);
+}
+
+type SpawnOptions = {
   sessionId: string;
   workingDir: string;
   priorUuid?: string;
@@ -32,8 +52,36 @@ export function spawnAgentSession(opts: {
    *  read / edit files in any of these in addition to the primary cwd. */
   addDirs?: string[];
   fork?: boolean;
-}): Promise<string> {
-  return invoke<string>("spawn_agent_session", opts);
+};
+
+/** Spawn a Claude agent subprocess for this session. Returns the Claude session UUID.
+ *
+ *  `permissionMode` accepts Claude's published values: "default", "acceptEdits",
+ *  "plan", "bypassPermissions". Anything else is dropped server-side.
+ *
+ *  `fork` controls how a `priorUuid` is treated:
+ *    - false (default): plain `--resume` — Claude reloads the session and
+ *      keeps the original model/permission mode (new flags are ignored).
+ *      Use this for between-turn auto-respawn where nothing has changed.
+ *    - true: branches a fresh session from the prior history via
+ *      `--session-id <new> --resume <prior> --fork-session`. Required when
+ *      the user has actually changed `model` or `permissionMode` mid-
+ *      conversation — that's the only flag combination Claude honors. */
+export function spawnAgentSession(opts: SpawnOptions): Promise<string> {
+  return invoke<string>("spawn_agent_session", opts).catch((err: unknown) => {
+    throw toAgentCommandError(err);
+  });
+}
+
+/** Stop the session's agent process (if any) and start a new one, holding the
+ *  session's spawn lock. Restarts that overlap start one process between them:
+ *  a plain restart that waited for another returns the process that one
+ *  started. A `fork` (new model / permission mode / effort) always restarts.
+ *  Rejects with an {@link AgentCommandError}. */
+export function restartAgentSession(opts: SpawnOptions): Promise<string> {
+  return invoke<string>("restart_agent_session", opts).catch((err: unknown) => {
+    throw toAgentCommandError(err);
+  });
 }
 
 /** Send one JSON event (typically a user message) to the agent's stdin. */
