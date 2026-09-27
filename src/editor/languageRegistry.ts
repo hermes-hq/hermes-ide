@@ -1,62 +1,63 @@
-import { type LanguageSupport } from "@codemirror/language";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { html } from "@codemirror/lang-html";
-import { css } from "@codemirror/lang-css";
-import { markdown } from "@codemirror/lang-markdown";
-import { rust } from "@codemirror/lang-rust";
-import { python } from "@codemirror/lang-python";
-import { go } from "@codemirror/lang-go";
-import { java } from "@codemirror/lang-java";
-import { cpp } from "@codemirror/lang-cpp";
-import { php } from "@codemirror/lang-php";
-import { sql } from "@codemirror/lang-sql";
-import { yaml } from "@codemirror/lang-yaml";
+import type { LanguageSupport } from "@codemirror/language";
 
 /**
- * Map from language identifier to a factory that produces the CM6 LanguageSupport.
- * Each factory is called once; the result is cached.
+ * Map from language identifier to a loader for its CM6 LanguageSupport.
+ * Each grammar is its own chunk, fetched the first time a file in that
+ * language is opened — none of them are part of the startup bundle.
  */
-const languageFactories: Record<string, () => LanguageSupport> = {
-  javascript: () => javascript({ jsx: true, typescript: false }),
-  typescript: () => javascript({ jsx: true, typescript: true }),
-  rust: () => rust(),
-  python: () => python(),
-  go: () => go(),
-  java: () => java(),
-  cpp: () => cpp(),
-  php: () => php(),
-  sql: () => sql(),
-  yaml: () => yaml(),
-  html: () => html(),
-  css: () => css(),
-  json: () => json(),
-  markdown: () => markdown(),
+const languageLoaders: Record<string, () => Promise<LanguageSupport>> = {
+  javascript: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true, typescript: false })),
+  typescript: () => import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true, typescript: true })),
+  rust: () => import("@codemirror/lang-rust").then((m) => m.rust()),
+  python: () => import("@codemirror/lang-python").then((m) => m.python()),
+  go: () => import("@codemirror/lang-go").then((m) => m.go()),
+  java: () => import("@codemirror/lang-java").then((m) => m.java()),
+  cpp: () => import("@codemirror/lang-cpp").then((m) => m.cpp()),
+  php: () => import("@codemirror/lang-php").then((m) => m.php()),
+  sql: () => import("@codemirror/lang-sql").then((m) => m.sql()),
+  yaml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
+  html: () => import("@codemirror/lang-html").then((m) => m.html()),
+  css: () => import("@codemirror/lang-css").then((m) => m.css()),
+  json: () => import("@codemirror/lang-json").then((m) => m.json()),
+  markdown: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
 };
 
-/** Cache so each language is only instantiated once. */
-const cache = new Map<string, LanguageSupport>();
+/** One load per language: concurrent callers share the same promise. */
+const pending = new Map<string, Promise<LanguageSupport>>();
+/** Languages that finished loading, for synchronous lookups. */
+const loaded = new Map<string, LanguageSupport>();
+
+/** Whether a grammar exists for this language identifier. */
+export function hasLanguageSupport(language: string): boolean {
+  return Object.prototype.hasOwnProperty.call(languageLoaders, language.toLowerCase());
+}
 
 /**
- * Returns the CodeMirror 6 LanguageSupport for a language identifier,
- * or `null` for unsupported / plaintext languages.
+ * Loads (once) and returns the CodeMirror 6 LanguageSupport for a language
+ * identifier, or `null` for unsupported / plaintext languages.
  */
-export function getLanguageSupport(language: string): LanguageSupport | null {
+export function loadLanguageSupport(language: string): Promise<LanguageSupport | null> {
   const id = language.toLowerCase();
-
-  const cached = cache.get(id);
-  if (cached) {
-    return cached;
+  if (!hasLanguageSupport(id)) return Promise.resolve(null);
+  let promise = pending.get(id);
+  if (!promise) {
+    promise = languageLoaders[id]().then((support) => {
+      loaded.set(id, support);
+      return support;
+    });
+    // A failed chunk load must not poison the cache: allow a retry.
+    promise.catch(() => pending.delete(id));
+    pending.set(id, promise);
   }
+  return promise;
+}
 
-  const factory = languageFactories[id];
-  if (!factory) {
-    return null;
-  }
-
-  const support = factory();
-  cache.set(id, support);
-  return support;
+/**
+ * The LanguageSupport for a language if it has already been loaded,
+ * otherwise `null` (use {@link loadLanguageSupport} to fetch it).
+ */
+export function peekLanguageSupport(language: string): LanguageSupport | null {
+  return loaded.get(language.toLowerCase()) ?? null;
 }
 
 /**

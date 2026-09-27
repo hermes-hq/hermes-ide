@@ -17,7 +17,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { getI18nSnapshot, type LanguagePack } from "../i18n/registry";
-import { languagePacks } from "../i18n/packs";
+import { languagePacks as packEntries, loadAllLanguagePacks } from "../i18n/packs";
+
+// Packs load on demand in the app; the gate checks every one of them.
+const languagePacks = await loadAllLanguagePacks();
 
 const english = getI18nSnapshot().languages.find((p) => p.locale === "en");
 if (!english) {
@@ -46,6 +49,17 @@ describe("language pack parity gate", () => {
       "ru",
       "zh-CN",
     ]);
+  });
+
+  it("names each language exactly as its pack does (the picker shows these before loading)", () => {
+    for (const [i, entry] of packEntries.entries()) {
+      const pack = languagePacks[i];
+      expect({ locale: entry.locale, label: entry.label, nativeLabel: entry.nativeLabel }).toEqual({
+        locale: pack.locale,
+        label: pack.label,
+        nativeLabel: pack.nativeLabel,
+      });
+    }
   });
 
   it("has no duplicate locales", () => {

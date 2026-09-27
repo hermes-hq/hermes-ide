@@ -1,0 +1,54 @@
+name: Bundle Budget
+
+# Fails when the JavaScript the window must load before it can draw grows
+# past the budget in bundle-budget.json. New views and heavy libraries
+# belong behind React.lazy / import() so they load when first used.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.ts"
+      - "bundle-budget.json"
+      - "scripts/bundle-budget.mjs"
+      - ".github/workflows/bundle-budget.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.ts"
+      - "bundle-budget.json"
+      - "scripts/bundle-budget.mjs"
+      - ".github/workflows/bundle-budget.yml"
+
+concurrency:
+  group: bundle-budget-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  startup-js:
+    name: Startup JS budget
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the frontend
+        run: npx vite build
+      - name: Check the startup bundle budget
+        run: node scripts/bundle-budget.mjs

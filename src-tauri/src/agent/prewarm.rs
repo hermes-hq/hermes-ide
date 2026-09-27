@@ -14,8 +14,14 @@
 //!
 //! Re-entrancy: harmless if invoked twice.  Each call spawns its own
 //! short-lived Node process and they don't share state.
+//!
+//! When: not at app startup.  The frontend calls `warm_agent_bridge` once
+//! an Agent-view session exists (created or restored), so people who only
+//! use terminals never pay for a Node process at launch.  At most one
+//! warm-up runs per app run.
 
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::AppHandle;
@@ -23,12 +29,33 @@ use tokio::process::Command;
 
 use super::{resolve_bridge_path, which_node};
 
+/// Set once the single warm-up of this app run has been claimed.
+static WARM_UP_CLAIMED: AtomicBool = AtomicBool::new(false);
+
+/// Claims the one warm-up per app run: true for the first caller only.
+fn claim_warm_up(flag: &AtomicBool) -> bool {
+    !flag.swap(true, Ordering::SeqCst)
+}
+
+/// Warm the agent bridge because an Agent-view session now exists.
+/// Returns true when this call started the warm-up, false when an earlier
+/// call already did.
+#[tauri::command]
+pub async fn warm_agent_bridge(app: AppHandle) -> bool {
+    if !claim_warm_up(&WARM_UP_CLAIMED) {
+        return false;
+    }
+    log::info!("[prewarm] an Agent-view session exists — warming the agent bridge");
+    prewarm_bridge_runtime(&app);
+    true
+}
+
 /// Spawn a non-blocking, best-effort prewarm of the bridge runtime.
 ///
 /// Returns immediately; the actual prewarm happens on a background
 /// tokio task.  Safe to call from `setup()` even before the main
 /// window is shown.
-pub fn prewarm_bridge_runtime(app: &AppHandle) {
+fn prewarm_bridge_runtime(app: &AppHandle) {
     let app = app.clone();
     tokio::spawn(async move {
         let bridge_path = match resolve_bridge_path(&app) {
@@ -89,4 +116,31 @@ pub fn prewarm_bridge_runtime(app: &AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_first_claim_starts_a_warm_up() {
+        let flag = AtomicBool::new(false);
+        assert!(claim_warm_up(&flag));
+        assert!(!claim_warm_up(&flag));
+        assert!(!claim_warm_up(&flag));
+    }
+
+    #[test]
+    fn concurrent_claims_start_exactly_one_warm_up() {
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let winners: usize = (0..16)
+            .map(|_| {
+                let flag = flag.clone();
+                std::thread::spawn(move || claim_warm_up(&flag))
+            })
+            .map(|h| h.join().unwrap())
+            .filter(|won| *won)
+            .count();
+        assert_eq!(winners, 1);
+    }
 }

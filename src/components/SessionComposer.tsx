@@ -24,13 +24,10 @@ const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 import { useAgentInit } from "../agent/useAgentInit";
 import { useAgentPrewarm } from "../agent/useAgentPrewarm";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-
-let composerTextarea: HTMLTextAreaElement | null = null;
+import { getComposerTextarea, setComposerTextarea } from "./composerTextarea";
 
 /** Live composer textarea, if mounted. */
-export function getComposerTextarea(): HTMLTextAreaElement | null {
-  return composerTextarea;
-}
+export { getComposerTextarea };
 
 const MIN_HEIGHT = 60;
 const DEFAULT_HEIGHT = 120;
@@ -192,9 +189,10 @@ export function SessionComposer() {
   }, [slash?.query]);
 
   useEffect(() => {
-    composerTextarea = textareaRef.current;
+    const el = textareaRef.current;
+    setComposerTextarea(el);
     return () => {
-      if (composerTextarea === textareaRef.current) composerTextarea = null;
+      if (getComposerTextarea() === el) setComposerTextarea(null);
     };
   }, []);
 

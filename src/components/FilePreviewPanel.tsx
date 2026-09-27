@@ -1,13 +1,16 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
+import { lazyView } from "../utils/lazyView";
 import "../styles/components/FilePreview.css";
 import { readFileContent, openFileInEditor, sshReadFile } from "../api/git";
 import { writeToSession } from "../api/sessions";
 import { getSetting } from "../api/settings";
 import { useSession } from "../state/SessionContext";
 import { useFileEditor } from "../hooks/useFileEditor";
-import { EditorPane } from "../editor/EditorPane";
 import type { CursorInfo, IndentConfig } from "../editor/EditorPane";
 import type { FileContent } from "../types/git";
+
+// The code editor (CodeMirror) loads the first time a file is edited.
+const EditorPane = lazyView("EditorPane", () => import("../editor/EditorPane").then((m) => m.EditorPane));
 
 import type { FileHandlerProps } from "../plugins/types";
 
@@ -386,16 +389,18 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
       ) : editMode ? (
         <>
           <div className="file-preview-content file-editor-content">
-            <EditorPane
-              content={editor.content}
-              language={file.language}
-              onContentChange={editor.setContent}
-              onSave={editor.save}
-              onCursorChange={setCursorInfo}
-              wordWrap={wordWrap}
-              indentConfig={indentConfig}
-              minimap={showMinimap}
-            />
+            <Suspense fallback={null}>
+              <EditorPane
+                content={editor.content}
+                language={file.language}
+                onContentChange={editor.setContent}
+                onSave={editor.save}
+                onCursorChange={setCursorInfo}
+                wordWrap={wordWrap}
+                indentConfig={indentConfig}
+                minimap={showMinimap}
+              />
+            </Suspense>
           </div>
           <div className="editor-statusbar">
             <div className="editor-statusbar-left">

@@ -7,6 +7,7 @@ import {
 	registerLanguagePack,
 	setLanguage,
 	type LanguagePack,
+	type LazyLanguagePack,
 } from "../i18n/registry";
 
 // Props passed to plugin panel components via React context
@@ -69,7 +70,9 @@ export interface HermesPluginAPI {
 	// NOTE: setLanguage is intentionally not permission-gated for now — the
 	// built-in language pack is the intended consumer of this API.
 	i18n: {
-		registerLanguagePack(pack: LanguagePack): Disposable;
+		/** A pack with `load()` instead of `messages` fetches its messages
+		 *  only when the language is picked. */
+		registerLanguagePack(pack: LanguagePack | LazyLanguagePack): Disposable;
 		getCurrentLanguage(): string;
 		setLanguage(locale: string): Promise<void>;
 	};
@@ -439,7 +442,7 @@ export function createPluginAPI(
 			},
 		},
 		i18n: {
-			registerLanguagePack(pack: LanguagePack): Disposable {
+			registerLanguagePack(pack: LanguagePack | LazyLanguagePack): Disposable {
 				const disposable = registerLanguagePack(pack);
 				subscriptions.push(disposable);
 				return disposable;

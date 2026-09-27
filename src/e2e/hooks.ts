@@ -5,8 +5,12 @@
  * builds never contain this file. It exposes READ access to what the terminal
  * is showing — the terminal draws to a canvas, so its text is not in the DOM.
  * Everything else (clicking, typing) goes through the real DOM on purpose.
+ * The one write is a crash switch, used to prove crash containment.
  */
 import { pool, getFocusedSessionId } from "../terminal/pool";
+import { armCrash } from "../components/CrashProbe";
+import { loadedViews } from "../utils/lazyView";
+import { getI18nSnapshot } from "../i18n/registry";
 
 function readLines(sessionId: string): string[] | null {
   const entry = pool.get(sessionId);
@@ -26,6 +30,20 @@ function readLines(sessionId: string): string[] | null {
 }
 
 const hooks = {
+  /**
+   * Make one part of the UI throw on its next render, once — to prove the
+   * crash stays inside it. Targets: "pane:<sessionId>",
+   * "block:<messageId>:<blockIndex>".
+   */
+  crash: (target: string): void => armCrash(target),
+  /** On-demand views whose code has been fetched so far (e.g. "Settings"). */
+  loadedViews: (): string[] => loadedViews(),
+  /** Languages whose translations are in memory ("en" is built in). */
+  loadedLanguages: (): string[] =>
+    getI18nSnapshot()
+      .languages.filter((l) => Object.keys(l.messages).length > 0)
+      .map((l) => l.locale)
+      .sort(),
   /** Session ids that currently have a terminal. */
   terminalIds: (): string[] => [...pool.keys()],
   /** The session whose terminal has keyboard focus inside the app. */
