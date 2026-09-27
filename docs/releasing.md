@@ -14,7 +14,9 @@ A release is a version bump merged to `main`. The workflow does the rest.
 
 On the merge, `.github/workflows/release.yml`:
 
-1. runs the frontend and Rust test suites;
+1. checks that the merged commit passed CI's `gate` check (the real-app
+   scenarios on every OS plus the acceptance ledger; see
+   `e2e/release-gate.mjs`) and runs the frontend and Rust test suites;
 2. builds, signs and notarizes every installer from the merged commit;
 3. creates a **draft** release, uploads the assets and both manifests
    (`latest.json` for the updater, `downloads.json` for the website) and

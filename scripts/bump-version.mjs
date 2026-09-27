@@ -44,10 +44,11 @@ export function bumpPackageLock(lockText, version) {
 }
 
 /**
- * Apply `version` to every file under `root`. Returns the list of files
- * changed. Throws when the notes are stale (unless allowStaleNotes).
+ * Work out what applying `version` under `root` would write, without writing
+ * it. Returns `[{ path, after }]` for every file whose text would change.
+ * Throws when the notes are stale (unless allowStaleNotes).
  */
-export function applyVersion(root, version, { allowStaleNotes = false } = {}) {
+export function planVersion(root, version, { allowStaleNotes = false } = {}) {
   if (!VERSION_RE.test(version)) throw new Error(`version must be X.Y.Z, got ${JSON.stringify(version)}`);
 
   const notesPath = join(root, "RELEASE_NOTES.md");
@@ -72,7 +73,7 @@ export function applyVersion(root, version, { allowStaleNotes = false } = {}) {
     { path: join("src-tauri", "Cargo.lock"), edit: (src) => bumpCargoLock(src, packageName, version), optional: true },
   ];
 
-  const changed = [];
+  const plan = [];
   for (const { path, edit, optional } of edits) {
     const full = join(root, path);
     if (!existsSync(full)) {
@@ -82,12 +83,19 @@ export function applyVersion(root, version, { allowStaleNotes = false } = {}) {
     const before = readFileSync(full, "utf8");
     const after = edit(before);
     if (after === null) throw new Error(`could not find the version to replace in ${path}`);
-    if (after !== before) {
-      writeFileSync(full, after);
-      changed.push(path);
-    }
+    if (after !== before) plan.push({ path, after });
   }
-  return changed;
+  return plan;
+}
+
+/**
+ * Apply `version` to every file under `root`. Returns the list of files
+ * changed. Throws when the notes are stale (unless allowStaleNotes).
+ */
+export function applyVersion(root, version, opts = {}) {
+  const plan = planVersion(root, version, opts);
+  for (const { path, after } of plan) writeFileSync(join(root, path), after);
+  return plan.map((p) => p.path);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

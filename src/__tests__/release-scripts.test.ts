@@ -4,13 +4,13 @@
  * release folder in a temp directory and runs the real functions on it.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { keyPairFromSeed, signBytes, verifyBytes, parsePublicKey, parseSignature } from "../../scripts/ci/minisign.mjs";
 import { buildManifests, lintManifests, versionFromTag } from "../../scripts/ci/release-manifests.mjs";
-import { applyVersion, bumpCargoLock, bumpPackageLock, notesNameVersion } from "../../scripts/bump-version.mjs";
+import { applyVersion, bumpCargoLock, bumpPackageLock, notesNameVersion, planVersion } from "../../scripts/bump-version.mjs";
 
 const TAG = "v1.4.1";
 const REPO = "example-org/example-app";
@@ -18,8 +18,11 @@ const keys = keyPairFromSeed(Buffer.alloc(32, 7));
 const otherKeys = keyPairFromSeed(Buffer.alloc(32, 9), "fedcba9876543210");
 
 let dir: string;
+/** Bytes of every fake asset and signature this test wrote, by file name. */
+let written: Map<string, Buffer | string>;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hermes-release-"));
+  written = new Map();
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -29,9 +32,12 @@ afterEach(() => {
 function asset(name: string, { sign = false, signer = keys, comment }: { sign?: boolean; signer?: typeof keys; comment?: string } = {}) {
   const data = Buffer.concat([Buffer.from(name), randomBytes(64)]);
   writeFileSync(join(dir, name), data);
+  written.set(name, data);
   if (sign) {
     const plain = name.replace(/^(darwin|linux|windows)-(aarch64|x86_64)-/, "");
-    writeFileSync(join(dir, `${name}.sig`), signBytes(signer, data, comment ?? `timestamp:1700000000\tfile:${plain}`));
+    const sig = signBytes(signer, data, comment ?? `timestamp:1700000000\tfile:${plain}`);
+    writeFileSync(join(dir, `${name}.sig`), sig);
+    written.set(`${name}.sig`, sig);
   }
   return data;
 }
@@ -93,7 +99,7 @@ describe("release manifests: build", () => {
     expect(latest.platforms["linux-x86_64-deb"].url).toBe(
       `https://github.com/${REPO}/releases/download/${TAG}/HERMES-IDE_1.4.1_amd64.deb`,
     );
-    expect(latest.platforms["linux-x86_64-deb"].signature).toBe(readFileSync(join(dir, "HERMES-IDE_1.4.1_amd64.deb.sig"), "utf8").trim());
+    expect(latest.platforms["linux-x86_64-deb"].signature).toBe(String(written.get("HERMES-IDE_1.4.1_amd64.deb.sig")).trim());
     expect(latest.platforms["darwin-x86_64"].url.endsWith("/darwin-x86_64-HERMES-IDE.app.tar.gz")).toBe(true);
     // No plain linux key: a .deb client must find the -deb one.
     expect(latest.platforms["linux-x86_64"]).toBeUndefined();
@@ -106,9 +112,11 @@ describe("release manifests: build", () => {
         windows: { x86_64: { exe: "HERMES-IDE_1.4.1_x64-setup.exe" }, aarch64: { exe: "HERMES-IDE_1.4.1_arm64-setup.exe" } },
       },
     });
-    // Files written where the upload step expects them.
-    expect(JSON.parse(readFileSync(join(dir, "latest.json"), "utf8")).version).toBe("1.4.1");
-    expect(JSON.parse(readFileSync(join(dir, "downloads.json"), "utf8")).version).toBe("1.4.1");
+    // Files written where the upload step expects them: the lint reads them
+    // back from disk and is clean.
+    expect(existsSync(join(dir, "latest.json"))).toBe(true);
+    expect(existsSync(join(dir, "downloads.json"))).toBe(true);
+    expect(lintManifests(dir, { tag: TAG, pubkey: keys.pubkeyB64 })).toEqual([]);
   });
 
   it("refuses an updater bundle without its signature file", () => {
@@ -151,9 +159,9 @@ describe("release manifests: lint", () => {
   it("fails when a signature was made with another key or for another file", () => {
     fullRelease();
     // Re-sign one bundle with a foreign key and one with a mismatching trusted comment.
-    const win = readFileSync(join(dir, "windows-x86_64-HERMES-IDE_1.4.1_x64-setup.exe"));
+    const win = written.get("windows-x86_64-HERMES-IDE_1.4.1_x64-setup.exe") as Buffer;
     writeFileSync(join(dir, "windows-x86_64-HERMES-IDE_1.4.1_x64-setup.exe.sig"), signBytes(otherKeys, win));
-    const mac = readFileSync(join(dir, "darwin-aarch64-HERMES-IDE.app.tar.gz"));
+    const mac = written.get("darwin-aarch64-HERMES-IDE.app.tar.gz") as Buffer;
     writeFileSync(join(dir, "darwin-aarch64-HERMES-IDE.app.tar.gz.sig"), signBytes(keys, mac, "timestamp:1\tfile:HERMES-IDE_1.4.0_x64-setup.exe"));
     buildManifests(dir, { tag: TAG, repo: REPO });
     const problems = lintManifests(dir, { tag: TAG, pubkey: keys.pubkeyB64 });
@@ -185,8 +193,7 @@ describe("release manifests: lint", () => {
 
   it("rejects a plain linux key without its -deb twin", () => {
     fullRelease();
-    buildManifests(dir, { tag: TAG, repo: REPO });
-    const latest = JSON.parse(readFileSync(join(dir, "latest.json"), "utf8"));
+    const latest = structuredClone(buildManifests(dir, { tag: TAG, repo: REPO }).latest);
     latest.platforms["linux-x86_64"] = latest.platforms["linux-x86_64-deb"];
     delete latest.platforms["linux-x86_64-deb"];
     writeFileSync(join(dir, "latest.json"), JSON.stringify(latest));
@@ -237,27 +244,36 @@ describe("bump-version", () => {
 
   it("updates every version field and nothing else", () => {
     project();
-    const changed = applyVersion(dir, "1.4.1");
-    expect(changed.sort()).toEqual(["package-lock.json", "package.json", "src-tauri/Cargo.lock", "src-tauri/Cargo.toml", "src-tauri/tauri.conf.json"].sort());
+    const files = new Map(planVersion(dir, "1.4.1").map((p) => [p.path, p.after]));
+    expect([...files.keys()].sort()).toEqual(["package-lock.json", "package.json", "src-tauri/Cargo.lock", "src-tauri/Cargo.toml", "src-tauri/tauri.conf.json"].sort());
 
-    expect(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version).toBe("1.4.1");
-    const lock = JSON.parse(readFileSync(join(dir, "package-lock.json"), "utf8"));
+    expect(JSON.parse(files.get("package.json")!).version).toBe("1.4.1");
+    const lock = JSON.parse(files.get("package-lock.json")!);
     expect(lock.version).toBe("1.4.1");
     expect(lock.packages[""].version).toBe("1.4.1");
     expect(lock.packages["node_modules/react"].version).toBe("19.0.0");
-    expect(JSON.parse(readFileSync(join(dir, "src-tauri", "tauri.conf.json"), "utf8")).version).toBe("1.4.1");
-    expect(readFileSync(join(dir, "src-tauri", "Cargo.toml"), "utf8")).toContain('version = "1.4.1"');
-    expect(readFileSync(join(dir, "src-tauri", "Cargo.toml"), "utf8")).toContain('serde = { version = "1.0.200" }');
-    const cargoLock = readFileSync(join(dir, "src-tauri", "Cargo.lock"), "utf8");
+    expect(JSON.parse(files.get("src-tauri/tauri.conf.json")!).version).toBe("1.4.1");
+    expect(files.get("src-tauri/Cargo.toml")).toContain('version = "1.4.1"');
+    expect(files.get("src-tauri/Cargo.toml")).toContain('serde = { version = "1.0.200" }');
+    const cargoLock = files.get("src-tauri/Cargo.lock")!;
     expect(cargoLock).toContain('name = "hermes-ide"\nversion = "1.4.1"');
     expect(cargoLock).toContain('name = "serde"\nversion = "1.0.200"');
+
+    // Planning wrote nothing; applying writes exactly the plan, after which
+    // the tree is at 1.4.1 and a second apply has nothing left to do.
+    expect(planVersion(dir, "1.4.1").map((p) => p.path).sort()).toEqual([...files.keys()].sort());
+    expect(applyVersion(dir, "1.4.1").sort()).toEqual([...files.keys()].sort());
+    expect(applyVersion(dir, "1.4.1")).toEqual([]);
+    expect(planVersion(dir, "1.4.0", { allowStaleNotes: true }).map((p) => p.path).sort()).toEqual([...files.keys()].sort());
   });
 
   it("refuses when the release notes are not for the new version", () => {
     project("1.4.0", "1.4.0");
     expect(() => applyVersion(dir, "1.4.1")).toThrow(/RELEASE_NOTES.md does not name 1.4.1/);
-    expect(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version).toBe("1.4.0");
+    // Nothing was written: package.json still needs the bump.
+    expect(planVersion(dir, "1.4.1", { allowStaleNotes: true }).map((p) => p.path)).toContain("package.json");
     expect(applyVersion(dir, "1.4.1", { allowStaleNotes: true })).toContain("package.json");
+    expect(applyVersion(dir, "1.4.1", { allowStaleNotes: true })).toEqual([]);
   });
 
   it("rejects versions that are not X.Y.Z", () => {
