@@ -1,0 +1,119 @@
+name: Mutation testing
+
+# Nightly: mutate the Rust lines that changed on main in the last 24 hours
+# (cargo-mutants --in-diff) and fail when fewer than 80% of the viable
+# mutants are killed by the tests. Not part of the pull request gate: it is
+# too slow for every push. A red run points at tests that do not test the
+# changed code. Waivers: `exclude_re` in src-tauri/.cargo/mutants.toml, added
+# in a reviewed pull request.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Commit to diff against (default: the newest commit on main older than 24 hours)"
+        required: false
+        default: ""
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  rust-mutants:
+    name: Rust mutants on changed lines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+      - name: Work out the changed Rust lines
+        id: diff
+        env:
+          BASE_INPUT: ${{ inputs.base }}
+        run: |
+          base="${BASE_INPUT:-$(git rev-list -1 --before='24 hours ago' HEAD)}"
+          if [ -z "$base" ]; then base="$(git rev-list --max-parents=0 HEAD | tail -1)"; fi
+          git -C src-tauri diff --relative "$base" HEAD -- src > "$RUNNER_TEMP/changes.diff"
+          if [ -s "$RUNNER_TEMP/changes.diff" ]; then
+            echo "Rust changes since $base:"
+            git -C src-tauri diff --relative --stat "$base" HEAD -- src
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Rust source changes since $base; nothing to mutate."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Cache apt packages
+        if: steps.diff.outputs.run == 'true'
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          version: 1.0
+      - name: Ensure system libraries are installed
+        if: steps.diff.outputs.run == 'true'
+        run: |
+          if ! pkg-config --exists glib-2.0 gtk+-3.0 webkit2gtk-4.1 libsoup-3.0 javascriptcoregtk-4.1; then
+            sudo apt-get update
+            sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        if: steps.diff.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        if: steps.diff.outputs.run == 'true'
+      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        if: steps.diff.outputs.run == 'true'
+        with:
+          workspaces: src-tauri
+          shared-key: mutation
+      # Stages bridge runtime deps; the Tauri build script checks them.
+      - name: Install npm deps + stage bridge runtime
+        if: steps.diff.outputs.run == 'true'
+        run: npm ci
+      - name: Install cargo-mutants
+        if: steps.diff.outputs.run == 'true'
+        env:
+          MUTANTS_VERSION: 27.1.0
+          MUTANTS_SHA256: dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cargo-mutants.tgz" \
+            "https://github.com/sourcefrog/cargo-mutants/releases/download/v${MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${MUTANTS_SHA256}  $RUNNER_TEMP/cargo-mutants.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-mutants.tgz" -C "$HOME/.cargo/bin" cargo-mutants
+      # --in-place: the Tauri build reads files outside src-tauri (../dist,
+      # bridge resources), so the crate cannot be copied elsewhere to mutate.
+      - name: Run cargo-mutants
+        if: steps.diff.outputs.run == 'true'
+        working-directory: src-tauri
+        run: |
+          set +e
+          cargo mutants --in-place --in-diff "$RUNNER_TEMP/changes.diff" \
+            --cargo-test-arg=--lib --output "$RUNNER_TEMP"
+          code=$?
+          # 0 = all caught, 2 = some missed, 3 = some timed out: scored below.
+          # Anything else (baseline tests failing, usage error) is a failure.
+          case "$code" in 0|2|3) exit 0 ;; *) exit "$code" ;; esac
+      - name: Score (minimum 80% killed)
+        if: steps.diff.outputs.run == 'true'
+        run: node scripts/mutation-score.mjs "$RUNNER_TEMP/mutants.out/outcomes.json" --min 80
+      - name: Upload report
+        if: always() && steps.diff.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutants-out
+          path: ${{ runner.temp }}/mutants.out
+          if-no-files-found: warn
+          retention-days: 14
