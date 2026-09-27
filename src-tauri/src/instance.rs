@@ -367,13 +367,15 @@ mod tests {
 
     #[test]
     fn override_wins_and_empty_override_is_ignored() {
+        // Absolute on every OS ("/elsewhere" is not absolute on Windows).
+        let elsewhere = std::env::temp_dir().join("elsewhere").join("data");
         let dir = resolve_data_dir(
             "com.x.dev",
-            Some(OsString::from("/elsewhere/data")),
+            Some(elsewhere.clone().into_os_string()),
             Some(PathBuf::from("/base")),
         )
         .unwrap();
-        assert_eq!(dir, PathBuf::from("/elsewhere/data"));
+        assert_eq!(dir, elsewhere);
         let dir = resolve_data_dir(
             "com.x.dev",
             Some(OsString::new()),
