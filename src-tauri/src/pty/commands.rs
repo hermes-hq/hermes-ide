@@ -2874,10 +2874,11 @@ fn build_shell_environment(
         has_autosuggest = true;
     }
 
-    // PowerShell has PSReadLine autosuggestions
     if shell_type == "powershell" {
-        has_autosuggest = true;
         plugins.push("PSReadLine".to_string());
+        if powershell_predicts_by_default(shell) {
+            has_autosuggest = true;
+        }
     }
 
     ShellEnvironment {
@@ -4012,6 +4013,30 @@ mod tests {
         // Never falls back to a local history file for an SSH session.
         let history = super::read_shell_history(super::REMOTE_SHELL_TYPE.to_string(), 500);
         assert_eq!(history, Ok(Vec::new()));
+    }
+}
+
+/// PSReadLine inline prediction is on by default only in PowerShell 7
+/// (`pwsh`). Windows PowerShell 5.1 ships an older PSReadLine with
+/// prediction off, so Hermes suggestions must stay on there.
+fn powershell_predicts_by_default(shell: &str) -> bool {
+    shell.to_ascii_lowercase().contains("pwsh")
+}
+
+#[cfg(test)]
+mod powershell_prediction_tests {
+    use super::powershell_predicts_by_default;
+
+    #[test]
+    fn only_pwsh_counts_as_native_autosuggest() {
+        assert!(powershell_predicts_by_default("pwsh"));
+        assert!(powershell_predicts_by_default(
+            r"C:\Program Files\PowerShell\7\pwsh.exe"
+        ));
+        assert!(!powershell_predicts_by_default("powershell"));
+        assert!(!powershell_predicts_by_default(
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        ));
     }
 }
 
