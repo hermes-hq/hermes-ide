@@ -79,9 +79,19 @@ const DEFAULT_ACTIONS: Record<string, ActionTemplate[]> = {
     { command: "/theme", label: "Theme", description: "Choose syntax highlighting theme", category: "Setup" },
     { command: "/logout", label: "Logout", description: "Log out of Codex", category: "Setup" },
   ],
+  // GitHub Copilot CLI (`copilot`), which replaced the retired `gh copilot` extension.
   copilot: [
-    { command: "gh copilot suggest", label: "Suggest", description: "Get command suggestions", category: "AI" },
-    { command: "gh copilot explain", label: "Explain", description: "Explain a command", category: "AI" },
+    { command: "/diff", label: "Diff", description: "Review the changes made in the current directory", category: "Code" },
+    { command: "/review", label: "Review", description: "Run code review on your changes", category: "Code" },
+    { command: "/compact", label: "Compact", description: "Summarize conversation to save context", category: "Context" },
+    { command: "/clear", label: "Clear", description: "Abandon this session and start fresh", category: "Context" },
+    { command: "/context", label: "Context", description: "Show context window token usage", category: "Context" },
+    { command: "/plan", label: "Plan", description: "Create an implementation plan before coding", category: "Context" },
+    { command: "/usage", label: "Usage", description: "Show session usage metrics", category: "Info" },
+    { command: "/help", label: "Help", description: "Show available commands", category: "Info" },
+    { command: "/model", label: "Model", description: "Select the AI model for this session", category: "Setup" },
+    { command: "/mcp", label: "MCP", description: "Manage MCP server configuration", category: "Setup" },
+    { command: "/login", label: "Login", description: "Log in to Copilot", category: "Setup" },
   ],
 };
 
@@ -91,7 +101,7 @@ const PINNED_DEFAULTS: Record<string, string[]> = {
   gemini: ["/clear", "/help", "/stats", "/tools"],
   aider: ["/add", "/run", "/test", "/commit", "/undo"],
   codex: ["/compact", "/clear", "/diff", "/review", "/status"],
-  copilot: ["gh copilot suggest", "gh copilot explain"],
+  copilot: ["/compact", "/clear", "/diff", "/review", "/usage"],
 };
 
 const MAX_QUICK_ACTIONS = 5;

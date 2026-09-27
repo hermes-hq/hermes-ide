@@ -1224,20 +1224,64 @@ impl ProviderAdapter for CopilotAdapter {
     }
 
     fn known_actions(&self) -> Vec<ActionTemplate> {
-        vec![
-            ActionTemplate {
-                command: "gh copilot suggest".into(),
-                label: "Suggest".into(),
-                description: "Get command suggestions".into(),
-                category: "AI".into(),
-            },
-            ActionTemplate {
-                command: "gh copilot explain".into(),
-                label: "Explain".into(),
-                description: "Explain a command".into(),
-                category: "AI".into(),
-            },
+        // Slash commands of the `copilot` CLI, which replaced the retired
+        // `gh copilot suggest` / `gh copilot explain` extension.
+        [
+            (
+                "/diff",
+                "Diff",
+                "Review the changes made in the current directory",
+                "Code",
+            ),
+            (
+                "/review",
+                "Review",
+                "Run code review on your changes",
+                "Code",
+            ),
+            (
+                "/compact",
+                "Compact",
+                "Summarize conversation to save context",
+                "Context",
+            ),
+            (
+                "/clear",
+                "Clear",
+                "Abandon this session and start fresh",
+                "Context",
+            ),
+            (
+                "/context",
+                "Context",
+                "Show context window token usage",
+                "Context",
+            ),
+            (
+                "/plan",
+                "Plan",
+                "Create an implementation plan before coding",
+                "Context",
+            ),
+            ("/usage", "Usage", "Show session usage metrics", "Info"),
+            ("/help", "Help", "Show available commands", "Info"),
+            (
+                "/model",
+                "Model",
+                "Select the AI model for this session",
+                "Setup",
+            ),
+            ("/mcp", "MCP", "Manage MCP server configuration", "Setup"),
+            ("/login", "Login", "Log in to Copilot", "Setup"),
         ]
+        .into_iter()
+        .map(|(command, label, description, category)| ActionTemplate {
+            command: command.into(),
+            label: label.into(),
+            description: description.into(),
+            category: category.into(),
+        })
+        .collect()
     }
 }
 
@@ -1946,5 +1990,26 @@ impl ProviderRegistry {
             }
         }
         best
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copilot_quick_actions_are_copilot_cli_slash_commands() {
+        let actions = CopilotAdapter.known_actions();
+        let commands: Vec<&str> = actions.iter().map(|a| a.command.as_str()).collect();
+        assert!(commands.contains(&"/compact"));
+        assert!(commands.contains(&"/review"));
+        assert!(
+            commands.iter().all(|c| c.starts_with('/')),
+            "every Copilot quick action must be a slash command: {commands:?}"
+        );
+        assert!(
+            !commands.iter().any(|c| c.contains("gh copilot")),
+            "the retired gh copilot extension must not be offered: {commands:?}"
+        );
     }
 }
