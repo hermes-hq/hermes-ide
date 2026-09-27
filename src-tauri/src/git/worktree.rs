@@ -274,11 +274,28 @@ fn branch_in_use_from_stderr(repo_path: &str, branch_name: &str, stderr: &str) -
     Some(branch_in_use_error(branch_name, &path))
 }
 
-/// Whether two paths name the same directory (after resolving symlinks).
+/// Whether two paths name the same directory.
+///
+/// The same checkout is spelled differently depending on who wrote it down:
+/// `git worktree list` prints the resolved path with forward slashes
+/// (`/private/var/...` on macOS, `C:/...` on Windows) while Hermes stores the
+/// path it built (`/var/...`, `C:\...`). Existing directories are compared
+/// after resolving symlinks; otherwise the spelling is normalised (slashes,
+/// trailing separators, and case on Windows).
 pub fn same_dir(a: &str, b: &str) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => a.trim_end_matches(['/', '\\']) == b.trim_end_matches(['/', '\\']),
+    if let (Ok(x), Ok(y)) = (fs::canonicalize(a), fs::canonicalize(b)) {
+        return x == y;
+    }
+    normalize_path_spelling(a) == normalize_path_spelling(b)
+}
+
+fn normalize_path_spelling(p: &str) -> String {
+    let s = p.replace('\\', "/");
+    let s = s.trim_end_matches('/');
+    if cfg!(windows) {
+        s.to_lowercase()
+    } else {
+        s.to_string()
     }
 }
 
@@ -1488,6 +1505,22 @@ mod tests {
             commit_worktree_changes(&wt.worktree_path, "x", CommitTarget::Session, &|_| false)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn test_same_dir_ignores_how_the_path_is_spelled() {
+        // Folders that do not exist are compared by spelling.
+        assert!(same_dir("/tmp/hermes-test/wt", "/tmp/hermes-test/wt/"));
+        assert!(same_dir("C:\\hermes-test\\wt", "C:/hermes-test/wt"));
+        assert!(!same_dir("/tmp/hermes-test/wt", "/tmp/hermes-test/wt2"));
+        if cfg!(windows) {
+            assert!(same_dir("C:\\Hermes-Test\\WT", "c:/hermes-test/wt"));
+        }
+        // Existing folders are compared after resolving symlinks.
+        let dir = TempDir::new().unwrap();
+        let real = dir.path().to_str().unwrap();
+        let canonical = fs::canonicalize(dir.path()).unwrap();
+        assert!(same_dir(real, canonical.to_str().unwrap()));
     }
 
     #[test]

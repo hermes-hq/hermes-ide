@@ -13,6 +13,9 @@
 //              Use new branch  -> main-2 in a worktree of its own
 //              Reuse           -> the session works in the project folder,
 //                                 recorded as such (nothing new on disk)
+//          - task E asks for task A's branch and reuses A's worktree on
+//            purpose; with uncommitted work in it, closing E asks nothing
+//            and leaves A's worktree, its files and its link alone
 //          - task B gets a new file; closing it offers "Commit to session
 //            branch & close" and "Archive (keep branch)" (no Stash & Close);
 //            commit: the file is committed on B's branch, B's folder is
@@ -388,6 +391,45 @@ try {
   await confirmCloseIfAsked(bridge);
   await waitSessionGone(bridge, "F09 task D");
   assert(existsSync(join(repo, "README.md")), "closing task D left the project folder alone");
+
+  log("step 6b: task E reuses task A's worktree (not the project folder), then closes");
+  // The picker greys out branches other sessions hold, so reach A's branch
+  // through the Branch In Use choice: ask for main, then type A's branch
+  // as the new name, which A has checked out.
+  before = await bridge.terminalIds();
+  await startTask(bridge, { label: "F09 task E", pickBranch: "main" });
+  await bridge.waitFor("the Branch In Use choice", `return !!e2e.first(".branch-conflict-modal");`, { timeoutMs: 20_000 });
+  await bridge.eval(setInput(".branch-conflict-create-input", wtA.branchName));
+  await bridge.clickByName("Use new branch", { within: ".branch-conflict-actions" });
+  await bridge.waitFor("a second Branch In Use choice naming task A", `
+    const m = e2e.first(".branch-conflict-modal");
+    return !!m && m.innerText.includes("F09 task A");
+  `, { timeoutMs: 20_000 });
+  await bridge.clickByName("Reuse its checkout", { within: ".branch-conflict-actions" });
+  const idE = await waitForNewSession(bridge, before, "F09 task E");
+  const wtE = await worktreeOf(bridge, idE, pid);
+  const wtAShared = await worktreeOf(bridge, idA, pid);
+  log(`  task E: ${JSON.stringify(wtE)}`);
+  assert(!wtE.isMainWorktree && samePath(wtE.worktreePath, wtA.worktreePath), "task E is linked to task A's worktree, on purpose");
+  assert(wtE.worktreePath === wtA.worktreePath, "both links record the checkout with the same path");
+  assert(wtE.sharedWithOtherSessions === true && wtAShared.sharedWithOtherSessions === true, "both sessions know the checkout is shared");
+  assert(worktrees().length === 4, "reusing task A's checkout created nothing on disk");
+  // Uncommitted work in the shared checkout: closing E must neither ask
+  // about it (it may be A's) nor delete it.
+  const aWork = join(wtA.worktreePath, "f09-a-work.txt");
+  writeFileSync(aWork, "task A's uncommitted work\n");
+  await closeSessionByLabel(bridge, "F09 task E");
+  await sleep(800);
+  assert(!(await bridge.exists(".dirty-wt-modal")), "closing task E does not offer to commit, archive or discard the shared checkout's changes");
+  await confirmCloseIfAsked(bridge);
+  await waitSessionGone(bridge, "F09 task E");
+  await sleep(1500);
+  assert(existsSync(wtA.worktreePath) && existsSync(aWork), "task A's worktree and its uncommitted file are still there");
+  assert(worktrees().some((w) => samePath(w.path, wtA.worktreePath)) && worktrees().length === 4, "git still has task A's worktree");
+  const wtAAfter = await worktreeOf(bridge, idA, pid);
+  assert(wtAAfter && samePath(wtAAfter.worktreePath, wtA.worktreePath) && wtAAfter.sharedWithOtherSessions === false,
+    "task A is still linked to its worktree, now alone");
+  rmSync(aWork);
 
   log("step 7: task B has a new file; close it and commit to its branch");
   writeFileSync(join(wtB.worktreePath, "f09-note.txt"), "work from task B\n");

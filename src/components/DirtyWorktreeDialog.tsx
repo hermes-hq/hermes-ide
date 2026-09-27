@@ -267,7 +267,7 @@ export function DirtyWorktreeDialog({
               <button className="dirty-wt-btn dirty-wt-btn--archive" onClick={handleArchiveAndClose} disabled={stashing}>
                 Archive (keep branch)
               </button>
-              <button className="dirty-wt-btn dirty-wt-btn--stash dirty-wt-btn--commit" onClick={handleCommitAndClose} disabled={stashing}>
+              <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={handleCommitAndClose} disabled={stashing}>
                 {stashing ? "Saving changes..." : "Commit to session branch & close"}
               </button>
             </>

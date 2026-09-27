@@ -124,8 +124,13 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
             wt.worktree_path, wt.session_id
         );
 
-        // Only remove linked worktrees from disk, not main worktrees
-        if !wt.is_main_worktree {
+        // Only remove linked worktrees from disk, not main worktrees, and
+        // never a checkout another session still points at.
+        let shared = database
+            .count_sessions_for_worktree_path(&wt.worktree_path)
+            .map(|n| n > 1)
+            .unwrap_or(true);
+        if !wt.is_main_worktree && !shared {
             if let Ok(Some(project_entry)) = database.get_project(&wt.project_id) {
                 if let Err(e) = git::worktree::remove_worktree(
                     &project_entry.path,

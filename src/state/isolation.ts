@@ -10,7 +10,7 @@
 //
 // Kept free of React so every decision is unit-tested directly.
 
-import type { WorktreeCreateResult } from "../types/git";
+import type { SessionWorktree, WorktreeCreateResult } from "../types/git";
 
 /** Prefix of the backend's "branch already checked out" error (git/worktree.rs). */
 export const BRANCH_IN_USE_PREFIX = "BRANCH_IN_USE:";
@@ -219,4 +219,20 @@ export function closeCommitMessage(sessionLabel: string, kind: "session" | "arch
   return kind === "archive"
     ? `Archive uncommitted work from Hermes session "${label}"`
     : `Work in progress from Hermes session "${label}"`;
+}
+
+/**
+ * Whether closing a session must ask about uncommitted changes in one of its
+ * projects. Closing deletes only a checkout the session owns alone, so:
+ *
+ *   - a checkout shared with another session is never asked about (its
+ *     changes may be that session's work, and it stays on disk);
+ *   - with honest isolation, neither is the project folder or a project
+ *     with no worktree link;
+ *   - without it, everything else is checked as before.
+ */
+export function shouldAskAboutChangesOnClose(wt: SessionWorktree | null, honest: boolean): boolean {
+  if (wt?.sharedWithOtherSessions) return false;
+  if (!honest) return true;
+  return !!wt && !wt.isMainWorktree;
 }

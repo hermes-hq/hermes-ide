@@ -12,10 +12,11 @@ import {
   pickRestoreId,
   createSessionWorktrees,
   closeCommitMessage,
+  shouldAskAboutChangesOnClose,
   type WorktreeDeps,
   type BranchConflictChoice,
 } from "../state/isolation";
-import type { WorktreeCreateResult } from "../types/git";
+import type { SessionWorktree, WorktreeCreateResult } from "../types/git";
 
 const inUse = (branch: string, path: string, extra: Record<string, unknown> = {}) =>
   `${BRANCH_IN_USE_PREFIX}${JSON.stringify({ branch, path, ...extra })}`;
@@ -180,5 +181,38 @@ describe("closeCommitMessage", () => {
   it("names the session", () => {
     expect(closeCommitMessage("Fix login", "session")).toBe('Work in progress from Hermes session "Fix login"');
     expect(closeCommitMessage(" ", "archive")).toBe('Archive uncommitted work from Hermes session "session"');
+  });
+});
+
+describe("shouldAskAboutChangesOnClose", () => {
+  const wt = (over: Partial<SessionWorktree> = {}): SessionWorktree => ({
+    id: "r1",
+    sessionId: "s1",
+    projectId: "p1",
+    worktreePath: "/tmp/hermes-test/wt",
+    branchName: "hermes/task-a",
+    isMainWorktree: false,
+    createdAt: "2026-01-01",
+    ...over,
+  });
+
+  it("asks about a worktree the session owns alone", () => {
+    expect(shouldAskAboutChangesOnClose(wt(), true)).toBe(true);
+    expect(shouldAskAboutChangesOnClose(wt(), false)).toBe(true);
+  });
+
+  it("never asks about a checkout another session also works in", () => {
+    expect(shouldAskAboutChangesOnClose(wt({ sharedWithOtherSessions: true }), true)).toBe(false);
+    expect(shouldAskAboutChangesOnClose(wt({ sharedWithOtherSessions: true }), false)).toBe(false);
+  });
+
+  it("with honest isolation, skips the project folder and projects without a worktree", () => {
+    expect(shouldAskAboutChangesOnClose(wt({ isMainWorktree: true }), true)).toBe(false);
+    expect(shouldAskAboutChangesOnClose(null, true)).toBe(false);
+  });
+
+  it("without it, keeps checking the project folder as before", () => {
+    expect(shouldAskAboutChangesOnClose(wt({ isMainWorktree: true }), false)).toBe(true);
+    expect(shouldAskAboutChangesOnClose(null, false)).toBe(true);
   });
 });

@@ -3009,7 +3009,12 @@ pub fn git_attach_worktree(
         .get_project(&project_id)
         .map_err(|e| format!("Failed to look up project: {}", e))?
         .ok_or_else(|| format!("Project '{}' not found", project_id))?;
-    let result = worktree::attach_existing_worktree(&project.path, &branch_name)?;
+    let mut result = worktree::attach_existing_worktree(&project.path, &branch_name)?;
+    // Record the checkout exactly as its owner did, so every later
+    // comparison (ref-count on close, sharing checks) sees one checkout.
+    if let Some(existing) = known_spelling_of_checkout(&db, &project.path, &result.worktree_path)? {
+        result.worktree_path = existing;
+    }
     let id = uuid::Uuid::new_v4().to_string();
     db.insert_session_worktree(
         &id,
@@ -3023,6 +3028,48 @@ pub fn git_attach_worktree(
     drop(db);
     let _ = app.emit(&format!("worktree-created-{}", project_id), &result);
     Ok(result)
+}
+
+/// The spelling Hermes already uses for the checkout at `path`: the path an
+/// existing session row recorded for it, or the project folder's own path.
+/// `None` when Hermes has never recorded that directory.
+fn known_spelling_of_checkout(
+    db: &Database,
+    project_path: &str,
+    path: &str,
+) -> Result<Option<String>, String> {
+    let rows = db
+        .get_all_session_worktrees()
+        .map_err(|e| format!("Failed to list worktrees: {}", e))?;
+    if let Some(row) = rows
+        .into_iter()
+        .find(|row| worktree::same_dir(&row.worktree_path, path))
+    {
+        return Ok(Some(row.worktree_path));
+    }
+    Ok(worktree::same_dir(project_path, path).then(|| project_path.to_string()))
+}
+
+/// Whether another session also works in the checkout this session row
+/// points at. Closing (or committing from) such a session must leave that
+/// checkout and its changes alone: they belong to the other session too.
+fn checkout_is_shared(db: &Database, wt: &crate::db::SessionWorktreeRow) -> bool {
+    // On a lookup error assume shared: skipping a delete is recoverable,
+    // deleting someone else's work is not.
+    db.count_sessions_for_worktree_path(&wt.worktree_path)
+        .map(|n| n > 1)
+        .unwrap_or(true)
+}
+
+/// A session's worktree link, plus whether another session shares that
+/// checkout (`sharedWithOtherSessions`). The close dialog only asks about
+/// changes in a checkout the session owns alone.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorktreeInfo {
+    #[serde(flatten)]
+    pub row: crate::db::SessionWorktreeRow,
+    pub shared_with_other_sessions: bool,
 }
 
 /// Drop a session's link to a worktree without touching the disk. Undoes a
@@ -3068,9 +3115,15 @@ pub fn git_commit_worktree(
         .get_worktree_by_session_and_project(&session_id, &project_id)
         .map_err(|e| format!("Failed to look up worktree: {}", e))?
         .ok_or_else(|| "This session has no worktree of its own".to_string())?;
+    let shared = checkout_is_shared(&db, &wt);
     drop(db);
     if wt.is_main_worktree || !worktree::is_hermes_worktree_path(&wt.worktree_path) {
         return Err("This session works in the project folder; nothing to commit on close".into());
+    }
+    if shared {
+        return Err(
+            "Another session works in this checkout; its changes are left for that session".into(),
+        );
     }
     worktree::commit_worktree_changes(&wt.worktree_path, &message, target, &|p| {
         is_dirty_close_noise_file(p)
@@ -3107,7 +3160,7 @@ pub fn git_remove_worktree(
     let wt_branch = wt.branch_name.clone();
     let root_path = project.path.clone();
     let is_main = wt.is_main_worktree;
-    drop(db);
+    let shared = checkout_is_shared(&db, &wt);
 
     // SAFETY: never remove the main worktree (it IS the project root)
     if is_main {
@@ -3115,6 +3168,18 @@ pub fn git_remove_worktree(
             "Cannot remove the main worktree — it is the project root directory".to_string(),
         );
     }
+
+    // SAFETY: a checkout another session also works in stays on disk; only
+    // this session's link to it goes.
+    if shared {
+        db.delete_session_worktree(&wt_id)?;
+        return Ok(GitOperationResult {
+            success: true,
+            message: "Unlinked from a checkout another session still uses".to_string(),
+            error: None,
+        });
+    }
+    drop(db);
 
     // Get the app data directory for journal storage
     let app_data_dir = crate::instance::app_data_dir(&app)?;
@@ -3248,13 +3313,18 @@ pub fn git_session_worktree_info(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
-) -> Result<Option<crate::db::SessionWorktreeRow>, String> {
+) -> Result<Option<SessionWorktreeInfo>, String> {
     let db = state
         .db
         .lock()
         .map_err(|e| format!("DB lock error: {}", e))?;
-    db.get_worktree_by_session_and_project(&session_id, &project_id)
-        .map_err(|e| format!("Failed to look up worktree: {}", e))
+    let row = db
+        .get_worktree_by_session_and_project(&session_id, &project_id)
+        .map_err(|e| format!("Failed to look up worktree: {}", e))?;
+    Ok(row.map(|row| SessionWorktreeInfo {
+        shared_with_other_sessions: !row.is_main_worktree && checkout_is_shared(&db, &row),
+        row,
+    }))
 }
 
 #[tauri::command]
@@ -4404,5 +4474,133 @@ mod tests {
             .get_worktree_by_session_and_project("sess1", "proj1")
             .unwrap();
         assert!(wt.is_some(), "Valid worktree record should NOT be deleted");
+    }
+
+    // ── Reusing another session's checkout (F09) ───────────────────────
+
+    /// A second session that reuses the first session's worktree must be
+    /// counted as sharing it, however git spells the path, so closing the
+    /// second session never deletes the first one's checkout. Uses a
+    /// symlinked app-data folder so git's resolved spelling differs from
+    /// the one Hermes stores on every Unix, like /var vs /private/var on macOS.
+    #[cfg(unix)]
+    #[test]
+    fn reusing_another_sessions_worktree_keeps_it_on_close() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let real = tempfile::TempDir::new().unwrap();
+        let holder = tempfile::TempDir::new().unwrap();
+        let app_data = holder.path().join("app-data");
+        std::os::unix::fs::symlink(real.path(), &app_data).unwrap();
+
+        let a =
+            worktree::create_worktree(&app_data, repo_path, "sess-a", "hermes/task-a", true, None)
+                .unwrap();
+        let db = test_db();
+        db.insert_session_worktree(
+            "row-a",
+            "sess-a",
+            "proj",
+            &a.worktree_path,
+            Some("hermes/task-a"),
+            false,
+        )
+        .unwrap();
+
+        let raw = worktree::attach_existing_worktree(repo_path, "hermes/task-a").unwrap();
+        assert_ne!(
+            raw.worktree_path, a.worktree_path,
+            "git spells the checkout differently"
+        );
+        assert!(!raw.is_main_worktree);
+
+        // Attach records the owner's spelling.
+        let stored = known_spelling_of_checkout(&db, repo_path, &raw.worktree_path).unwrap();
+        assert_eq!(stored.as_deref(), Some(a.worktree_path.as_str()));
+
+        // Even a row written with git's spelling is the same checkout.
+        db.insert_session_worktree(
+            "row-e",
+            "sess-e",
+            "proj",
+            &raw.worktree_path,
+            Some("hermes/task-a"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            db.count_sessions_for_worktree_path(&a.worktree_path)
+                .unwrap(),
+            2
+        );
+        let row_e = db
+            .get_worktree_by_session_and_project("sess-e", "proj")
+            .unwrap()
+            .unwrap();
+        assert!(checkout_is_shared(&db, &row_e));
+
+        // Closing the reusing session leaves A's checkout and row alone.
+        let needs_disk = crate::pty::commands::drain_session_db_state(&db, "sess-e");
+        assert!(
+            needs_disk.is_empty(),
+            "must not remove a checkout another session uses"
+        );
+        assert!(std::path::Path::new(&a.worktree_path).is_dir());
+        assert_eq!(db.get_session_worktrees("sess-a").unwrap().len(), 1);
+        assert!(db.get_session_worktrees("sess-e").unwrap().is_empty());
+
+        // With E gone, A owns it alone again: closing A removes it.
+        let row_a = db
+            .get_worktree_by_session_and_project("sess-a", "proj")
+            .unwrap()
+            .unwrap();
+        assert!(!checkout_is_shared(&db, &row_a));
+        assert_eq!(
+            crate::pty::commands::drain_session_db_state(&db, "sess-a").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn known_spelling_of_checkout_falls_back_to_project_folder() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let db = test_db();
+        let with_slash = format!("{}/", repo_path);
+        assert_eq!(
+            known_spelling_of_checkout(&db, repo_path, &with_slash)
+                .unwrap()
+                .as_deref(),
+            Some(repo_path)
+        );
+        let other = tempfile::TempDir::new().unwrap();
+        assert_eq!(
+            known_spelling_of_checkout(&db, repo_path, other.path().to_str().unwrap()).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn session_worktree_info_reports_sharing_in_camel_case() {
+        let db = test_db();
+        db.insert_session_worktree("r1", "s1", "p", "/tmp/hermes-test/wt", Some("b"), false)
+            .unwrap();
+        let row = db
+            .get_worktree_by_session_and_project("s1", "p")
+            .unwrap()
+            .unwrap();
+        let alone = SessionWorktreeInfo {
+            shared_with_other_sessions: checkout_is_shared(&db, &row),
+            row: row.clone(),
+        };
+        let json = serde_json::to_value(&alone).unwrap();
+        assert_eq!(json["sharedWithOtherSessions"], false);
+        assert_eq!(json["worktreePath"], "/tmp/hermes-test/wt");
+        assert_eq!(json["isMainWorktree"], false);
+
+        // Same folder, spelled with a trailing separator.
+        db.insert_session_worktree("r2", "s2", "p", "/tmp/hermes-test/wt/", Some("b"), false)
+            .unwrap();
+        assert!(checkout_is_shared(&db, &row));
     }
 }

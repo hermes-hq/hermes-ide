@@ -27,7 +27,7 @@ import {
 } from "../api/git";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import {
-  createSessionWorktrees, pickRestoreId, closeCommitMessage,
+  createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose,
   type BranchConflictChoice, type BranchInUse,
 } from "./isolation";
 import { BranchConflictDialog } from "../components/BranchConflictDialog";
@@ -1963,28 +1963,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const honest = isFeatureFlagEnabled("honestIsolation");
         for (const project of projects) {
           try {
-            // Honest isolation: only a session's own worktree is deleted on
-            // close, so only its changes need a decision. A session working
-            // in the project folder (or reusing another checkout) leaves
-            // those files where they are.
+            // Only a checkout this session owns alone is deleted on close,
+            // so only its changes need a decision. A checkout shared with
+            // another session (or, with honest isolation, the project
+            // folder) is left as it is, changes included.
             let wtInfo: SessionWorktree | null = null;
-            if (honest) {
+            try {
               wtInfo = await getSessionWorktreeInfo(id, project.id);
-              if (!wtInfo || wtInfo.isMainWorktree) continue;
+            } catch {
+              // Worktree info not available — continue without it
             }
+            if (!shouldAskAboutChangesOnClose(wtInfo, honest)) continue;
             const changes = await worktreeHasChanges(id, project.id);
             if (changes.has_changes) {
-              let branchName: string | null = null;
-              try {
-                if (!wtInfo) wtInfo = await getSessionWorktreeInfo(id, project.id);
-                branchName = wtInfo?.branchName ?? null;
-              } catch {
-                // Worktree info not available — continue without branch name
-              }
               dirtyChanges.push({
                 projectId: project.id,
                 projectName: project.name,
-                branchName,
+                branchName: wtInfo?.branchName ?? null,
                 files: changes.files,
               });
             }

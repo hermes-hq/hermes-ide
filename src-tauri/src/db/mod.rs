@@ -1657,16 +1657,18 @@ impl Database {
         Ok(())
     }
 
-    /// Count how many session_worktrees records reference the same worktree path.
-    /// Used to protect shared worktrees from premature disk deletion.
+    /// Count how many session_worktrees records point at the same checkout as
+    /// `path`. Used to protect shared worktrees from premature disk deletion.
+    ///
+    /// Compares directories, not strings: a checkout linked on purpose may be
+    /// recorded as git prints it (`/private/var/...`, `C:/...`) while its
+    /// creator recorded the path Hermes built (`/var/...`, `C:\...`).
     pub fn count_sessions_for_worktree_path(&self, path: &str) -> Result<i64, String> {
-        self.conn
-            .query_row(
-                "SELECT COUNT(*) FROM session_worktrees WHERE worktree_path = ?1",
-                params![path],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())
+        let rows = self.get_all_session_worktrees()?;
+        Ok(rows
+            .iter()
+            .filter(|row| crate::git::worktree::same_dir(&row.worktree_path, path))
+            .count() as i64)
     }
 
     // ─── SSH Saved Hosts ──────────────────────────────────────────

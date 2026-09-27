@@ -173,6 +173,8 @@ export interface SessionWorktree {
   branchName: string | null;
   isMainWorktree: boolean;
   createdAt: string;
+  /** Another session works in the same checkout (it is not this session's alone). */
+  sharedWithOtherSessions?: boolean;
 }
 
 export interface WorktreeInfo {

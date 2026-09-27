@@ -170,3 +170,6 @@ features:
       F09-4:
         text: "A restored session keeps its session id and its worktree link"
         scenarios: [F09-honest-isolation.mjs]
+      F09-5:
+        text: "Closing a session that reuses another session's worktree asks nothing about it and leaves that worktree, its uncommitted files and its link alone"
+        scenarios: [F09-honest-isolation.mjs]
