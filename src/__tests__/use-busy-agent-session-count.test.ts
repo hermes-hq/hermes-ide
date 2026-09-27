@@ -57,7 +57,7 @@ function makeSession(overrides: Partial<SessionData> & { id: string }): SessionD
     color: "#ff0000",
     group: null,
     phase: "idle",
-    working_directory: "/home/test/project",
+    working_directory: "/tmp/test-project",
     shell: "bash",
     created_at: "2025-01-01T00:00:00Z",
     last_activity_at: "2025-01-01T00:00:00Z",
