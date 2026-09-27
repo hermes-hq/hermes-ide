@@ -1,8 +1,10 @@
-//! Agent-mode subprocess lifecycle.
+//! Agent-view subprocess lifecycle.
 //!
-//! Owns one `claude --print --output-format stream-json --input-format stream-json`
-//! child process per session and bridges its NDJSON stdout / stderr stream to the
-//! frontend via Tauri events.  See `docs/adr/001-agent-mode.md` for the design
+//! Owns one bridge child process per Agent-view session (a Node process running
+//! the Claude Agent SDK, `src-tauri/bridge/hermes-claude-bridge.mjs`, which
+//! speaks the stream-json wire format) and forwards its NDJSON stdout / stderr
+//! stream to the frontend via Tauri events.  The Agent view is optional; new
+//! sessions run in terminal mode (ADR 003).  See `docs/adr/001-agent-mode.md` for the design
 //! rationale and `wondrous-wishing-quilt` plan for the phase-by-phase build.
 
 mod prewarm;

@@ -2,8 +2,9 @@
  * Submit a composer draft + image attachments to an Agent-mode session.
  *
  * Replaces the old `submitToPty` bracketed-paste hack: we now talk to the
- * `claude --print --input-format stream-json` subprocess directly through
- * `sendAgentInput`, which writes one NDJSON `user` envelope to its stdin.
+ * Agent view's bridge subprocess (Claude Agent SDK, stream-json wire format)
+ * directly through `sendAgentInput`, which writes one NDJSON `user` envelope
+ * to its stdin.
  *
  * Wire format mirrors what Claude's stream-json input expects:
  *   { type: "user", message: { role: "user", content: [...blocks] } }

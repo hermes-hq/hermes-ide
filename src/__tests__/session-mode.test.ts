@@ -216,9 +216,13 @@ describe("workspace restore: mode defaulting", () => {
 // resolveSessionMode — default-mode rule for newly-created sessions
 // =====================================================================
 describe("resolveSessionMode", () => {
-  it("createSession with claude provider defaults mode to 'agent'", () => {
+  it("createSession with claude provider defaults mode to 'terminal' (terminal first)", () => {
     const mode: SessionMode = resolveSessionMode(undefined, "claude");
-    expect(mode).toBe("agent");
+    expect(mode).toBe("terminal");
+  });
+
+  it("claude honours an explicit 'agent' request (the optional Agent view)", () => {
+    expect(resolveSessionMode("agent", "claude")).toBe("agent");
   });
 
   it("createSession with non-claude provider locks mode to 'terminal'", () => {
