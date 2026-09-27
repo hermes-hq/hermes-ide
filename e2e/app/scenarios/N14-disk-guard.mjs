@@ -26,6 +26,9 @@
 //
 // Negative control: HERMES_E2E_N14_NEGATIVE=1 skips turning the flag on, so
 // run 2 creates the session anyway and the scenario must end in RESULT: FAIL.
+// Threshold control: HERMES_E2E_N14_LOW_FREE sets run 2's free bytes.
+// 9999999999 (just under 10 GB) must PASS; 10000000000 (exactly 10 GB) is
+// allowed, so run 2 creates the session and the scenario must FAIL.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N14-disk-guard.mjs
@@ -54,7 +57,15 @@ function assert(condition, message) {
 }
 
 const DB_FILE = "hermes_idea_v3.db";
-const LOW_FREE = "4200000000"; // 4.2 GB: under the 10 GB guard
+const LOW_FREE = process.env.HERMES_E2E_N14_LOW_FREE || "4200000000"; // 4.2 GB: under the 10 GB guard
+
+/** The refusal's "N.N GB", rounded down like the app does. */
+function gbText(bytes) {
+  const n = BigInt(bytes);
+  if (n >= 100_000_000_000n) return `${n / 1_000_000_000n} GB`;
+  const tenths = n / 100_000_000n;
+  return `${tenths / 10n}.${tenths % 10n} GB`;
+}
 const ROOMY_FREE = "50000000000"; // 50 GB
 const REFUSED_BRANCH = "n14-refused";
 const TASK_BRANCH = "n14-task";
@@ -350,7 +361,7 @@ try {
   `, { timeoutMs: 15_000 });
   log(`  toast: "${toast}"`);
   assert(toast.includes("Not enough free disk space"), "the toast says why: not enough free disk space");
-  assert(toast.includes("4.2 GB free") && toast.includes("10.0 GB needed"), "the toast gives the free space and what is needed");
+  assert(toast.includes(`${gbText(LOW_FREE)} free`) && toast.includes("10.0 GB needed"), "the toast gives the free space and what is needed");
   assert(toast.startsWith("Session was not created"), "the toast says the session was not created");
   await app.bridge.screenshot(join(evidenceDir, "02-refused-toast.png"));
 

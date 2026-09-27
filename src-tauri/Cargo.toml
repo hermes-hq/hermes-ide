@@ -23,6 +23,10 @@ e2e = [
   "dep:objc2-web-kit",
   "dep:block2",
   "dep:gtk",
+  "windows-sys/Win32_Foundation",
+  "windows-sys/Win32_Graphics_Gdi",
+  "windows-sys/Win32_Storage_Xps",
+  "windows-sys/Win32_UI_WindowsAndMessaging",
 ]
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -52,15 +56,9 @@ objc2-web-kit = { version = "0.3", optional = true, default-features = false, fe
 gtk = { version = "0.18", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Free disk space for the disk guard; the other features are for the e2e
-# bridge's window screenshots.
-windows-sys = { version = "0.61", features = [
-  "Win32_Foundation",
-  "Win32_Graphics_Gdi",
-  "Win32_Storage_FileSystem",
-  "Win32_Storage_Xps",
-  "Win32_UI_WindowsAndMessaging",
-] }
+# Free disk space for the disk guard. The e2e feature adds what the bridge's
+# window screenshots need.
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

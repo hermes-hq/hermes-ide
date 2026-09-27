@@ -2879,16 +2879,17 @@ pub fn git_create_worktree(
 
     // Disk guard: below 10 GB free, create nothing (no folder, branch,
     // journal entry or record) and raise an inbox item. Reusing a worktree
-    // that already exists needs no space, so that is never refused.
+    // that already exists (this session's, or the branch checked out
+    // elsewhere) needs no space, so that is never refused.
     if enforce_disk_guard.unwrap_or(false) {
-        let intended = worktree::intended_worktree_path(
+        let reuses = worktree::would_reuse_existing_worktree(
             &app_data_dir,
             &root_path,
             &session_id,
             &branch_name,
             from_remote.as_deref(),
         );
-        if !intended.exists() {
+        if !reuses {
             if let Err(low) = disk_guard::check_room_for_worktree(&app_data_dir) {
                 log::warn!("[disk-guard] refused a worktree: {}", low.message());
                 let _ = app.emit(disk_guard::INBOX_ITEM_EVENT, low.inbox_item(&project.name));

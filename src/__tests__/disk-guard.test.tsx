@@ -32,7 +32,7 @@ import { initFeatureFlags, __resetFeatureFlagsForTest, FEATURE_FLAG_OVERRIDES_KE
 import { worktreeErrorToastMessage } from "../hooks/useWorktreeErrorToasts";
 import { WorktreeOverviewPanel, formatDiskBytes } from "../components/WorktreeOverviewPanel";
 import { SessionGitPanel } from "../components/SessionGitPanel";
-import type { WorktreeOverviewEntry, WorktreeUsage } from "../types/git";
+import type { OrphanWorktree, WorktreeOverviewEntry, WorktreeUsage } from "../types/git";
 
 async function setDiskGuardFlag(on: boolean) {
   __resetFeatureFlagsForTest();
@@ -59,7 +59,7 @@ function worktreeEntry(): WorktreeOverviewEntry {
 }
 
 /** A fake backend with real state: reclaim and sweep change what later calls return. */
-function fakeBackend() {
+function fakeBackend(detected: OrphanWorktree[] = []) {
   const usage: Record<string, WorktreeUsage> = {
     [WT_PATH]: { path: WT_PATH, total_bytes: 12_400_000, build_output_bytes: 12_000_000 },
     [ORPHAN_A]: { path: ORPHAN_A, total_bytes: 3_000_000, build_output_bytes: 0 },
@@ -78,7 +78,12 @@ function fakeBackend() {
       case "git_list_orphan_folders":
         return orphans;
       case "git_detect_orphan_worktrees":
-        return [];
+        return detected;
+      case "git_cleanup_orphan_worktrees": {
+        const paths = args!.paths as string[];
+        detected = detected.filter((o) => !paths.includes(o.worktree_path));
+        return paths.map((p) => ({ path: p, success: true, error: null }));
+      }
       case "git_disk_status":
         return { free_bytes: 42_100_000_000, required_bytes: 10_000_000_000, below_threshold: false };
       case "git_worktree_usage":
@@ -194,6 +199,32 @@ describe("N14 Worktrees view with the flag on", () => {
     expect((sweepCall![1] as { paths: string[] }).paths.sort()).toEqual([ORPHAN_A, ORPHAN_B].sort());
     await waitFor(() => expect(container.querySelectorAll(".worktree-overview-orphan")).toHaveLength(0));
     expect(calls).not.toContain("git_cleanup_orphan_worktrees");
+  });
+});
+
+describe("N14 Worktrees view lists records whose folder is gone", () => {
+  const RECORD = "/srv/n14/data/hermes-worktrees/0123456789abcdef/dddddddd_lost";
+
+  it("shows them next to the orphaned folders and clears them with the same action", async () => {
+    await setDiskGuardFlag(true);
+    const { calls } = fakeBackend([
+      { worktree_path: RECORD, branch_name: "lost", kind: "record_only", root_path: "/srv/n14/demo", session_id: "dddddddd-4444" },
+      // Already in the folder scan: must not be listed twice.
+      { worktree_path: ORPHAN_A, branch_name: "old", kind: "directory_only", root_path: "/srv/n14/demo", session_id: null },
+    ]);
+    const { container } = render(<WorktreeOverviewPanel />);
+    await screen.findByText("Missing directory");
+    expect(container.querySelectorAll(".worktree-overview-orphan")).toHaveLength(3);
+
+    fireEvent.click(await screen.findByText("Remove all orphans (3, 5.0 MB)"));
+    fireEvent.click(await screen.findByText("Delete 3 working copies"));
+    await screen.findByText("Removed 2 orphaned folders: freed 5.0 MB. Cleared 1 record of working copies already deleted.");
+    const sweepCall = h.invoke.mock.calls.find(([cmd]) => cmd === "git_sweep_orphan_folders");
+    expect((sweepCall![1] as { paths: string[] }).paths.sort()).toEqual([ORPHAN_A, ORPHAN_B].sort());
+    const cleanupCall = h.invoke.mock.calls.find(([cmd]) => cmd === "git_cleanup_orphan_worktrees");
+    expect((cleanupCall![1] as { paths: string[] }).paths).toEqual([RECORD]);
+    await waitFor(() => expect(container.querySelectorAll(".worktree-overview-orphan")).toHaveLength(0));
+    expect(calls).toContain("git_list_orphan_folders");
   });
 });
 

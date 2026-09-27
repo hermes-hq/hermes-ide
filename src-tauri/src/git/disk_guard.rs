@@ -128,13 +128,14 @@ fn parse_free_space_override(e2e: Option<&str>, value: Option<&str>) -> Option<u
     value?.trim().parse().ok()
 }
 
-/// "4.2 GB" — decimal units, one decimal under 100.
+/// "4.2 GB" — decimal units, one decimal under 100. Rounds down, so a disk
+/// just under the guard never reads as having the space it lacks.
 pub fn format_gb(bytes: u64) -> String {
-    let gb = bytes as f64 / 1e9;
-    if gb >= 100.0 {
-        format!("{:.0} GB", gb)
+    if bytes >= 100_000_000_000 {
+        format!("{} GB", bytes / 1_000_000_000)
     } else {
-        format!("{:.1} GB", gb)
+        let tenths = bytes / 100_000_000;
+        format!("{}.{} GB", tenths / 10, tenths % 10)
     }
 }
 
@@ -655,6 +656,10 @@ mod tests {
         assert_eq!(format_gb(0), "0.0 GB");
         assert_eq!(format_gb(10_000_000_000), "10.0 GB");
         assert_eq!(format_gb(250_000_000_000), "250 GB");
+        assert_eq!(format_gb(4_200_000_000), "4.2 GB");
+        // Just under the guard must not read as "10.0 GB".
+        assert_eq!(format_gb(9_999_999_999), "9.9 GB");
+        assert_eq!(format_gb(99_999_999_999), "99.9 GB");
     }
 
     #[test]

@@ -42,6 +42,15 @@ export function orphanFolderToEntry(folder: OrphanFolder): OrphanWorktree {
   };
 }
 
+/**
+ * The flag-on orphan list: every orphaned folder from the disk-guard scan,
+ * plus records whose folder is already gone (only the old detection finds
+ * those; its folder entries are left out, the scan covers them).
+ */
+export function mergeOrphanLists(folders: OrphanFolder[], detected: OrphanWorktree[]): OrphanWorktree[] {
+  return [...folders.map(orphanFolderToEntry), ...detected.filter((o) => o.kind === "record_only")];
+}
+
 /** Sweep results in the shape the results strip renders. */
 export function sweepToCleanupResults(results: SweepResult[]): CleanupResult[] {
   return results.map((r) => ({ path: r.path, success: r.removed, error: r.error }));
@@ -147,7 +156,7 @@ export function WorktreeOverviewPanel() {
   const [usage, setUsage] = useState<Record<string, WorktreeUsage>>({});
   const [reclaiming, setReclaiming] = useState<Set<string>>(new Set());
   const [reclaimNote, setReclaimNote] = useState<string | null>(null);
-  const [freedByCleanup, setFreedByCleanup] = useState<number | null>(null);
+  const [sweepNote, setSweepNote] = useState<{ folders: number; bytes: number; records: number } | null>(null);
 
   // Load data on mount
   useEffect(() => {
@@ -169,7 +178,11 @@ export function WorktreeOverviewPanel() {
     try {
       const [wts, orps] = await Promise.all([
         listAllWorktrees(),
-        diskGuard ? listOrphanFolders().then((f) => f.map(orphanFolderToEntry)) : detectOrphanWorktrees(),
+        diskGuard
+          ? Promise.all([listOrphanFolders(), detectOrphanWorktrees().catch(() => [])]).then(([f, d]) =>
+            mergeOrphanLists(f, d),
+          )
+          : detectOrphanWorktrees(),
       ]);
       setWorktrees(wts);
       setOrphans(orps);
@@ -349,9 +362,20 @@ export function WorktreeOverviewPanel() {
     try {
       let results: CleanupResult[];
       if (diskGuard) {
-        const swept = await sweepOrphanFolders(Array.from(selectedOrphans));
-        results = sweepToCleanupResults(swept);
-        setFreedByCleanup(swept.reduce((sum, r) => sum + r.freed_bytes, 0));
+        // Folders go through the sweep; records whose folder is gone only
+        // need their row removed, which the old cleanup does.
+        const recordOnly = new Set(orphans.filter((o) => o.kind === "record_only").map((o) => o.worktree_path));
+        const selected = Array.from(selectedOrphans);
+        const folderPaths = selected.filter((p) => !recordOnly.has(p));
+        const recordPaths = selected.filter((p) => recordOnly.has(p));
+        const swept = folderPaths.length > 0 ? await sweepOrphanFolders(folderPaths) : [];
+        const cleared = recordPaths.length > 0 ? await cleanupOrphanWorktrees(recordPaths) : [];
+        results = [...sweepToCleanupResults(swept), ...cleared];
+        setSweepNote({
+          folders: swept.filter((r) => r.removed).length,
+          bytes: swept.reduce((sum, r) => sum + r.freed_bytes, 0),
+          records: cleared.filter((r) => r.success).length,
+        });
       } else {
         results = await cleanupOrphanWorktrees(Array.from(selectedOrphans));
       }
@@ -368,7 +392,7 @@ export function WorktreeOverviewPanel() {
     } finally {
       setCleaning(false);
     }
-  }, [selectedOrphans, loadData, diskGuard]);
+  }, [selectedOrphans, loadData, diskGuard, orphans]);
 
   /** Disk guard: one action for every orphan — select them all and ask once. */
   const requestRemoveAllOrphans = useCallback(() => {
@@ -457,9 +481,14 @@ export function WorktreeOverviewPanel() {
         <div className="worktree-reclaim-note" role="status">{reclaimNote}</div>
       )}
 
-      {diskGuard && freedByCleanup !== null && cleanupResults && (
+      {diskGuard && sweepNote && cleanupResults && (
         <div className="worktree-sweep-note" role="status">
-          {`Removed ${cleanupResults.filter((r) => r.success).length} orphaned folder${cleanupResults.filter((r) => r.success).length !== 1 ? "s" : ""}: freed ${formatDiskBytes(freedByCleanup)}.`}
+          {(sweepNote.folders > 0 || sweepNote.records === 0
+            ? `Removed ${sweepNote.folders} orphaned folder${sweepNote.folders !== 1 ? "s" : ""}: freed ${formatDiskBytes(sweepNote.bytes)}.`
+            : "") +
+            (sweepNote.records > 0
+              ? `${sweepNote.folders > 0 ? " " : ""}Cleared ${sweepNote.records} record${sweepNote.records !== 1 ? "s" : ""} of working copies already deleted.`
+              : "")}
         </div>
       )}
 

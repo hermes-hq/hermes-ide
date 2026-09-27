@@ -141,6 +141,33 @@ pub fn intended_worktree_path(
         .join(worktree_name(session_id, &branch))
 }
 
+/// True when `create_worktree` would hand back a worktree that already
+/// exists (this session's folder, or the branch checked out elsewhere)
+/// instead of adding a new one. Such a reuse needs no disk space.
+pub fn would_reuse_existing_worktree(
+    app_data_dir: &Path,
+    repo_path: &str,
+    session_id: &str,
+    branch_name: &str,
+    from_remote: Option<&str>,
+) -> bool {
+    if intended_worktree_path(
+        app_data_dir,
+        repo_path,
+        session_id,
+        branch_name,
+        from_remote,
+    )
+    .exists()
+    {
+        return true;
+    }
+    let branch = from_remote
+        .map(derive_local_branch_name)
+        .unwrap_or_else(|| branch_name.to_string());
+    find_existing_worktree_for_branch(repo_path, &branch).is_some()
+}
+
 /// Find an existing worktree that has the given branch checked out.
 /// Uses `git worktree list --porcelain` to find it.
 fn find_existing_worktree_for_branch(repo_path: &str, branch_name: &str) -> Option<String> {
@@ -891,6 +918,66 @@ mod tests {
             Some("origin/feature-y"),
         );
         assert!(remote.ends_with("session4_feature-y"));
+    }
+
+    #[test]
+    fn would_reuse_existing_worktree_sees_own_folder_and_branch_checked_out_elsewhere() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+
+        assert!(!would_reuse_existing_worktree(
+            app_data.path(),
+            repo_path,
+            "sessionA1",
+            "feat/shared",
+            None
+        ));
+        create_worktree(
+            app_data.path(),
+            repo_path,
+            "sessionA1",
+            "feat/shared",
+            true,
+            None,
+        )
+        .unwrap();
+
+        // Same session: its own folder exists.
+        assert!(would_reuse_existing_worktree(
+            app_data.path(),
+            repo_path,
+            "sessionA1",
+            "feat/shared",
+            None
+        ));
+        // Another session asking for the same branch gets the existing
+        // worktree back, so it needs no space either.
+        assert!(would_reuse_existing_worktree(
+            app_data.path(),
+            repo_path,
+            "sessionB2",
+            "feat/shared",
+            None
+        ));
+        let shared = create_worktree(
+            app_data.path(),
+            repo_path,
+            "sessionB2",
+            "feat/shared",
+            false,
+            None,
+        )
+        .unwrap();
+        assert!(shared.is_shared);
+        // A branch nobody has checked out needs a new folder.
+        assert!(!would_reuse_existing_worktree(
+            app_data.path(),
+            repo_path,
+            "sessionB2",
+            "feat/other",
+            None
+        ));
     }
 
     #[test]
