@@ -48,6 +48,22 @@ features:
         text: "A test build pointed at the installed app's data folder refuses to start; two builds side by side leave each other's and the installed app's files alone"
         scenarios:
           - "N02-instance-isolation.mjs@darwin,linux"
+  F03:
+    name: "Hermes never types into a terminal on its own"
+    status: shipped
+    # "knip runs in CI with zero unused exports or files" is enforced by the
+    # Frontend job in .github/workflows/ci.yml (npx knip); it is not app
+    # behaviour, so no real-app scenario proves it.
+    criteria:
+      F03-1:
+        text: "No code path writes a predicted command into a terminal: no Manual/Assisted/Auto switch, no Autonomous settings, and a 1.4.0 user's Auto mode types nothing"
+        scenarios: [F03-retire-autopilot.mjs]
+      F03-2:
+        text: "With an agent CLI in the foreground no ghost text or suggestion list renders; at a plain shell prompt they still do"
+        scenarios: [F03-retire-autopilot.mjs]
+      F03-3:
+        text: "A 1.4.0 database migrates and loses only execution_nodes, which its backup keeps"
+        scenarios: [F03-retire-autopilot.mjs, N06-db-migrations.mjs]
   N06:
     name: "Upgrades never lose data"
     status: shipped

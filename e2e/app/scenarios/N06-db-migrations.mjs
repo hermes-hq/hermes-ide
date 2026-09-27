@@ -3,7 +3,9 @@
 //
 // Part 0 — the database each captured release wrote (0.6.16, 1.1.3, 1.2.5,
 // 1.3.2, 1.4.0; src-tauri/tests/fixtures/db) opens in the new build, and after
-// it quits every row is still there.
+// it quits every row is still there. The one exception is execution_nodes, a
+// command log nothing read, which schema step 2 drops on purpose (F03; the
+// backup keeps it).
 //
 // Part A — a user updates from 1.4.0. Their data folder holds the database the
 // real 1.4.0 release wrote (src-tauri/tests/fixtures/db/v1.4.0.sql). The new
@@ -41,6 +43,10 @@ const FIXTURES_DIR = join(REPO_ROOT, "src-tauri", "tests", "fixtures", "db");
 const CAPTURED_RELEASES = ["0.6.16", "1.1.3", "1.2.5", "1.3.2", "1.4.0"];
 const PREVIOUS_RELEASE = "1.4.0";
 const NEWER_VERSION = 99;
+/** The schema version this build writes. */
+const SCHEMA_VERSION = 2;
+/** Dropped on purpose by schema step 2 (F03); kept in the backup. */
+const DROPPED = new Set(["execution_nodes"]);
 
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
@@ -132,9 +138,9 @@ async function part0() {
       exit = await app.stop({ keepFiles: true });
     }
     assert(!exit.forced && exit.code === 0, `${release}: the app quit cleanly`);
-    assert(userVersion(dbPath) === 1, `${release}: database now at schema version 1`);
+    assert(userVersion(dbPath) === SCHEMA_VERSION, `${release}: database now at schema version ${SCHEMA_VERSION}`);
     const after = rowCounts(dbPath);
-    const lost = Object.entries(before).filter(([table, n]) => !(after[table] >= n));
+    const lost = Object.entries(before).filter(([table, n]) => !DROPPED.has(table) && !(after[table] >= n));
     assert(lost.length === 0, `${release}: all ${Object.keys(before).length} tables kept their rows (${JSON.stringify(before)})`);
     assert(filesIn(join(app.dataDir, "backups")).length === 1, `${release}: one backup saved before the update`);
   }
@@ -218,9 +224,13 @@ async function partA() {
   assert(!exit.forced && exit.code === 0, "the app quit cleanly");
 
   log("step A5: after quitting, every row is still in the database");
-  assert(userVersion(dbPath) === 1, `database now at schema version ${userVersion(dbPath)}`);
+  assert(userVersion(dbPath) === SCHEMA_VERSION, `database now at schema version ${userVersion(dbPath)}`);
   const after = rowCounts(dbPath);
   for (const [table, n] of Object.entries(before)) {
+    if (DROPPED.has(table)) {
+      assert(!(table in after), `${table}: dropped on purpose (the backup keeps its ${n} rows)`);
+      continue;
+    }
     assert(after[table] >= n, `${table}: ${n} rows before, ${after[table]} after`);
   }
   const kept = readDb(dbPath, (db) => ({
@@ -282,7 +292,7 @@ async function partB() {
     log(`  title: "${shown.title}"`);
     log(`  message: "${shown.message}"`);
     assert(shown.title === "Your data is from a newer version of Hermes", "title says the data is from a newer version");
-    assert(shown.message.includes(`data version ${NEWER_VERSION}`) && shown.message.includes("up to 1"), "message names both versions");
+    assert(shown.message.includes(`data version ${NEWER_VERSION}`) && shown.message.includes(`up to ${SCHEMA_VERSION}`), "message names both versions");
     assert(shown.message.includes("has not opened or changed it"), "message says nothing was changed");
     assert(shown.path.endsWith(DB_FILE), `the data file is named (${shown.path.split(/[\\/]/).pop()})`);
     assert(JSON.stringify(shown.buttons) === JSON.stringify(["Quit Hermes"]), "the only action is Quit Hermes");
@@ -299,7 +309,7 @@ async function partB() {
     const german = await readScreen("the German startup problem screen", "Deine Daten stammen aus einer neueren Version von Hermes");
     log(`  title: "${german.title}"`);
     log(`  message: "${german.message}"`);
-    assert(german.message.includes(`Datenversion ${NEWER_VERSION}`) && german.message.includes("bis 1"), "German message names both versions");
+    assert(german.message.includes(`Datenversion ${NEWER_VERSION}`) && german.message.includes(`bis ${SCHEMA_VERSION}`), "German message names both versions");
     assert(german.message.includes("nicht geöffnet und nicht verändert"), "German message says nothing was changed");
     assert(german.label === "Datendatei" && german.path.endsWith(DB_FILE), `German label for the data file (${german.label})`);
     assert(JSON.stringify(german.buttons) === JSON.stringify(["Hermes beenden"]), "the only action is Hermes beenden (Quit Hermes)");

@@ -1064,16 +1064,11 @@ pub fn create_session(
     // crashes in multi-threaded processes ("multi-threaded process forked").
     // Use posix_spawn() instead which atomically creates the child process.
     // See issue #31 and issue-31-investigation.md.
-    // Save the slave TTY path before spawning — needed later for direct
-    // SIGINT delivery via tcgetpgrp()/kill() when the line discipline
-    // fails to convert \x03 into a signal.
-    #[cfg(target_os = "macos")]
-    let saved_tty_path = pair.master.tty_name();
-
     #[cfg(target_os = "macos")]
     let child = {
-        let tty_path = saved_tty_path
-            .clone()
+        let tty_path = pair
+            .master
+            .tty_name()
             .ok_or_else(|| "Failed to get PTY device path for posix_spawn".to_string())?;
         // Drop the slave end — the child opens the TTY by path via posix_spawn
         // file actions.  CTT assignment is handled by the --pty-setup trampoline.
@@ -1537,8 +1532,6 @@ pub fn create_session(
         session: session_arc,
         analyzer,
         child,
-        #[cfg(target_os = "macos")]
-        tty_path: saved_tty_path,
         shell_integration,
         hermes_suggestions: disable_native_suggestions,
     };
@@ -1713,12 +1706,14 @@ pub fn write_to_session(
 /// vim, htop, etc.) is running in the foreground.
 ///
 /// Strategy:
-///   1. macOS — open the TTY slave device and call `tcgetpgrp()` to get the
-///      foreground PGID, then compare with the shell's own PGID.
-///   2. Linux — read `/proc/{pid}/stat` to obtain `pgrp` and `tpgid`.
-///   3. Windows (no process groups on a pseudo console) and the Unix fallback —
-///      the shell is at its prompt when it has no child process. A program
-///      the shell started, such as an agent CLI, is its child.
+///   1. macOS and Linux — `tcgetpgrp()` on the PTY master gives the
+///      terminal's foreground process group; compare it with the shell's.
+///      (The slave side cannot be used: on macOS `tcgetpgrp()` on a terminal
+///      that is not this process's controlling terminal fails with ENOTTY.)
+///   2. Linux fallback — read `/proc/{pid}/stat` to obtain `pgrp` and `tpgid`.
+///   3. Windows (no process groups on a pseudo console) and the last Unix
+///      fallback — the shell is at its prompt when it has no child process.
+///      A program the shell started, such as an agent CLI, is its child.
 #[tauri::command]
 pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
@@ -1732,23 +1727,11 @@ pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Re
         .process_id()
         .ok_or_else(|| "Shell process ID not available".to_string())?;
 
-    // ── macOS: tcgetpgrp on the TTY slave ──
-    #[cfg(target_os = "macos")]
+    // ── macOS and Linux: the foreground process group, from the master ──
+    #[cfg(unix)]
     {
-        if let Some(ref tty_path) = session.tty_path {
-            if let Ok(tty_cstr) = std::ffi::CString::new(tty_path.to_string_lossy().into_owned()) {
-                let fd = unsafe { libc::open(tty_cstr.as_ptr(), libc::O_RDONLY | libc::O_NOCTTY) };
-                if fd >= 0 {
-                    let fg_pgid = unsafe { libc::tcgetpgrp(fd) };
-                    unsafe { libc::close(fd) };
-                    if fg_pgid > 0 {
-                        let shell_pgid = unsafe { libc::getpgid(shell_pid as i32) };
-                        if shell_pgid > 0 {
-                            return Ok(fg_pgid == shell_pgid);
-                        }
-                    }
-                }
-            }
+        if let Some(owns) = shell_group_is_foreground(session.master.as_ref(), shell_pid) {
+            return Ok(owns);
         }
     }
 
@@ -1781,6 +1764,21 @@ pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Re
 
     #[cfg(not(unix))]
     Ok(!has_child_process(shell_pid))
+}
+
+/// Whether the shell's process group is the terminal's foreground process
+/// group, or `None` when either cannot be read.
+#[cfg(unix)]
+fn shell_group_is_foreground(
+    master: &(dyn portable_pty::MasterPty + Send),
+    shell_pid: u32,
+) -> Option<bool> {
+    let foreground = master.process_group_leader()?;
+    let shell_pgid = unsafe { libc::getpgid(shell_pid as i32) };
+    if shell_pgid <= 0 {
+        return None;
+    }
+    Some(foreground == shell_pgid)
 }
 
 /// Whether any running process has `parent_pid` as its parent. The console
@@ -3965,6 +3963,8 @@ mod ssh_command_tests {
 #[cfg(test)]
 mod foreground_tests {
     use super::has_child_process;
+    #[cfg(unix)]
+    use std::io::Write;
     use std::process::{Child, Command};
     use std::time::{Duration, Instant};
 
@@ -4006,6 +4006,70 @@ mod foreground_tests {
         let _ = shell.kill();
         let _ = shell.wait();
         assert!(seen, "the running child was not found");
+    }
+
+    /// An interactive shell in a PTY, started the way sessions start it.
+    #[cfg(unix)]
+    fn interactive_shell() -> (
+        portable_pty::PtyPair,
+        Box<dyn portable_pty::Child + Send + Sync>,
+        Box<dyn std::io::Write + Send>,
+    ) {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.arg("-i");
+        cmd.env("PS1", "$ ");
+        #[cfg(target_os = "macos")]
+        let child = {
+            let tty = pair.master.tty_name().unwrap();
+            crate::pty::spawn::posix_spawn_in_pty(&cmd, &tty).unwrap()
+        };
+        #[cfg(not(target_os = "macos"))]
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        // Keep the PTY drained so the shell never blocks on output.
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = std::io::Read::read(&mut reader, &mut buf) {
+                if n == 0 {
+                    break;
+                }
+            }
+        });
+        let writer = pair.master.take_writer().unwrap();
+        (pair, child, writer)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_started_at_the_prompt_owns_the_terminal_until_it_exits() {
+        use super::shell_group_is_foreground;
+        let (pair, mut shell, mut input) = interactive_shell();
+        let pid = shell.process_id().unwrap();
+        let owns = || shell_group_is_foreground(pair.master.as_ref(), pid);
+
+        let at_prompt = eventually(|| owns() == Some(true));
+        input.write_all(b"sleep 3\n").unwrap();
+        input.flush().unwrap();
+        let while_running = eventually(|| owns() == Some(false));
+        let after_exit = eventually(|| owns() == Some(true));
+
+        let _ = shell.kill();
+        let _ = shell.wait();
+        assert!(at_prompt, "the shell owns the terminal at its prompt");
+        assert!(while_running, "the program owns the terminal while it runs");
+        assert!(
+            after_exit,
+            "the shell owns the terminal again after it exits"
+        );
     }
 
     #[test]
