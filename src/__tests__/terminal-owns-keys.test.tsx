@@ -1,0 +1,291 @@
+// @vitest-environment jsdom
+/**
+ * Terminal-faithful keys on Windows and Linux.
+ *
+ * A focused terminal owns Ctrl+letter (Ctrl+D end-of-input, Ctrl+W delete
+ * word, Ctrl+E end of line, ...). App chords there are Ctrl+Shift+letter.
+ * Outside a terminal the older Ctrl+letter chords still run their action.
+ * macOS is unchanged (Cmd chords come from the native menu).
+ */
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, cleanup } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+
+import {
+  APP_CHORDS,
+  chordFor,
+  isAppChordInTerminal,
+  isTerminalFocused,
+  matchAppChord,
+  pcLetterChord,
+  shortcutLabel,
+} from "../utils/keymap";
+import { handleAppChordKeydown, installAppChordListener } from "../hooks/appChordListener";
+import { SHORTCUT_GROUPS, shortcutText } from "../components/ShortcutsPanel";
+
+function key(letter: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean } = {}) {
+  const upper = letter.toUpperCase();
+  return {
+    key: mods.shift ? upper : letter.toLowerCase(),
+    code: `Key${upper}`,
+    ctrlKey: !!mods.ctrl,
+    shiftKey: !!mods.shift,
+    altKey: !!mods.alt,
+    metaKey: !!mods.meta,
+  };
+}
+
+const CTRL = { ctrl: true };
+const CTRL_SHIFT = { ctrl: true, shift: true };
+
+afterEach(() => {
+  cleanup();
+  document.body.innerHTML = "";
+});
+
+describe("keymap: Windows/Linux", () => {
+  for (const platform of ["win", "linux"] as const) {
+    it(`${platform}: Ctrl+letter inside a terminal is never an app chord`, () => {
+      for (let c = 65; c <= 90; c++) {
+        const letter = String.fromCharCode(c);
+        expect(matchAppChord(key(letter, CTRL), platform, true)).toBeNull();
+        expect(isAppChordInTerminal(key(letter, CTRL), platform)).toBe(false);
+      }
+    });
+
+    it(`${platform}: Ctrl+Shift+D splits the pane, also from a terminal`, () => {
+      expect(matchAppChord(key("d", CTRL_SHIFT), platform, true)).toBe("view.split-horizontal");
+      expect(isAppChordInTerminal(key("d", CTRL_SHIFT), platform)).toBe(true);
+    });
+
+    it(`${platform}: Ctrl+D outside a terminal still splits the pane`, () => {
+      expect(matchAppChord(key("d", CTRL), platform, false)).toBe("view.split-horizontal");
+    });
+  }
+
+  it("every Ctrl+letter chord from before still works outside a terminal", () => {
+    const legacy: Record<string, string> = {
+      N: "file.new-session",
+      T: "file.new-session-tab",
+      W: "file.close-pane",
+      F: "file.file-explorer",
+      B: "view.toggle-sidebar",
+      K: "view.command-palette",
+      J: "view.prompt-composer",
+      P: "view.process-panel",
+      G: "view.git-panel",
+      E: "view.context-panel",
+      D: "view.split-horizontal",
+    };
+    for (const [letter, action] of Object.entries(legacy)) {
+      expect(matchAppChord(key(letter, CTRL), "linux", false)).toBe(action);
+    }
+  });
+
+  it("the palette's Ctrl+Shift+P and the composer's Ctrl+Shift+J skip the terminal", () => {
+    expect(isAppChordInTerminal(key("p", CTRL_SHIFT), "win")).toBe(true);
+    expect(isAppChordInTerminal(key("j", CTRL_SHIFT), "win")).toBe(true);
+  });
+
+  it("Ctrl+Shift+letter with no app action stays terminal input", () => {
+    expect(isAppChordInTerminal(key("a", CTRL_SHIFT), "linux")).toBe(false);
+    expect(matchAppChord(key("a", CTRL_SHIFT), "linux", true)).toBeNull();
+  });
+
+  it("uses the physical key, so chords work on non-Latin layouts", () => {
+    const russian = { ...key("d", CTRL_SHIFT), key: "В" };
+    expect(matchAppChord(russian, "win", true)).toBe("view.split-horizontal");
+  });
+
+  it("ignores Alt and Meta combinations", () => {
+    expect(pcLetterChord(key("d", { ctrl: true, alt: true }))).toBeNull();
+    expect(pcLetterChord(key("d", { ctrl: true, meta: true }))).toBeNull();
+    expect(pcLetterChord(key("d"))).toBeNull();
+  });
+
+  it("no two actions share a chord on either platform", () => {
+    for (const field of ["mac", "pc"] as const) {
+      const chords = APP_CHORDS.map((c) => c[field]);
+      expect(new Set(chords).size).toBe(chords.length);
+    }
+  });
+
+  it("labels show Ctrl+Shift chords on Windows/Linux and Cmd on macOS", () => {
+    expect(shortcutLabel("view.split-horizontal", "win")).toBe("Ctrl+Shift+D");
+    expect(shortcutLabel("view.split-horizontal", "linux")).toBe("Ctrl+Shift+D");
+    expect(shortcutLabel("view.split-horizontal", "mac")).toBe("⌘D");
+    expect(shortcutLabel("file.close-pane", "win")).toBe("Ctrl+Shift+W");
+    expect(shortcutLabel("hermes.settings", "linux")).toBe("Ctrl+,");
+    expect(shortcutLabel("view.nope", "linux")).toBe("");
+    expect(chordFor("view.nope", "mac")).toBeNull();
+  });
+});
+
+describe("keymap: macOS is unchanged", () => {
+  it("never claims a key in the webview (the native menu owns Cmd chords)", () => {
+    expect(matchAppChord(key("d", CTRL), "mac", false)).toBeNull();
+    expect(matchAppChord(key("d", CTRL_SHIFT), "mac", true)).toBeNull();
+    expect(isAppChordInTerminal(key("d", CTRL_SHIFT), "mac")).toBe(false);
+  });
+
+  it("keeps the Cmd chords", () => {
+    expect(shortcutLabel("view.split-horizontal", "mac")).toBe("⌘D");
+    expect(shortcutLabel("view.split-vertical", "mac")).toBe("⌘⇧D");
+    expect(shortcutLabel("view.command-palette", "mac")).toBe("⌘K");
+  });
+});
+
+describe("app chord listener in the page", () => {
+  function terminalTextarea(): HTMLTextAreaElement {
+    const host = document.createElement("div");
+    host.className = "xterm";
+    const ta = document.createElement("textarea");
+    ta.className = "xterm-helper-textarea";
+    host.appendChild(ta);
+    document.body.appendChild(host);
+    return ta;
+  }
+
+  function press(target: Element, letter: string, mods: { ctrl?: boolean; shift?: boolean }) {
+    const ev = new KeyboardEvent("keydown", {
+      ...key(letter, mods),
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(ev);
+    return ev;
+  }
+
+  it("Ctrl+D typed in a terminal reaches it untouched; Ctrl+Shift+D runs the split", () => {
+    const run = vi.fn();
+    const cleanupListener = installAppChordListener(window, "linux", run);
+    const ta = terminalTextarea();
+    ta.focus();
+    expect(isTerminalFocused(document.activeElement)).toBe(true);
+
+    const plain = press(ta, "d", CTRL);
+    expect(plain.defaultPrevented).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+
+    const shifted = press(ta, "d", CTRL_SHIFT);
+    expect(shifted.defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledExactlyOnceWith("view.split-horizontal");
+    cleanupListener();
+  });
+
+  it("Ctrl+D in a text field (not a terminal) runs the split", () => {
+    const run = vi.fn();
+    const cleanupListener = installAppChordListener(window, "win", run);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    const ev = press(input, "d", CTRL);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledExactlyOnceWith("view.split-horizontal");
+    cleanupListener();
+  });
+
+  it("does nothing on macOS", () => {
+    const run = vi.fn();
+    const cleanupListener = installAppChordListener(window, "mac", run);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    press(input, "d", CTRL);
+    press(input, "d", CTRL_SHIFT);
+    expect(run).not.toHaveBeenCalled();
+    cleanupListener();
+  });
+
+  it("leaves keys another handler already consumed, and key repeats", () => {
+    const run = vi.fn();
+    const consumed = new KeyboardEvent("keydown", { ...key("t", CTRL), cancelable: true });
+    consumed.preventDefault();
+    expect(handleAppChordKeydown(consumed, "linux", run)).toBe(false);
+    const repeat = new KeyboardEvent("keydown", { ...key("d", CTRL_SHIFT), repeat: true, cancelable: true });
+    expect(handleAppChordKeydown(repeat, "linux", run)).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("stops listening after cleanup", () => {
+    const run = vi.fn();
+    installAppChordListener(window, "linux", run)();
+    press(document.body, "d", CTRL_SHIFT);
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("one key press runs the action once", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("@tauri-apps/api/event");
+  });
+
+  async function loadBridge() {
+    let deliver: ((e: { payload: { action: string } }) => void) | null = null;
+    vi.doMock("@tauri-apps/api/event", () => ({
+      listen: vi.fn(async (_name: string, cb: (e: { payload: { action: string } }) => void) => {
+        deliver = cb;
+        return () => {};
+      }),
+    }));
+    const bridge = await import("../hooks/nativeMenuBridge");
+    await bridge.ensureListener();
+    return { bridge, native: (action: string) => deliver!({ payload: { action } }) };
+  }
+
+  it("drops the native menu echo of a chord the page already handled", async () => {
+    const { bridge, native } = await loadBridge();
+    const handler = vi.fn();
+    bridge.registerMenuBarHandler(handler);
+    bridge.triggerMenuBarActionFromKeyboard("view.split-horizontal");
+    native("view.split-horizontal");
+    expect(handler).toHaveBeenCalledTimes(1);
+    // A later, separate menu click still works.
+    native("view.split-horizontal");
+    expect(handler).toHaveBeenCalledTimes(2);
+    bridge.cleanupListener();
+  });
+
+  it("does not drop a different native action", async () => {
+    const { bridge, native } = await loadBridge();
+    const handler = vi.fn();
+    bridge.registerMenuBarHandler(handler);
+    bridge.triggerMenuBarActionFromKeyboard("view.split-horizontal");
+    native("view.git-panel");
+    expect(handler.mock.calls.map((c) => c[0])).toEqual(["view.split-horizontal", "view.git-panel"]);
+    bridge.cleanupListener();
+  });
+});
+
+describe("Shortcuts panel", () => {
+  it("shows platform-correct chords", () => {
+    const split = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts).find((s) => s.action === "view.split-horizontal")!;
+    expect(shortcutText(split, "linux")).toBe("Ctrl+Shift+D");
+    expect(shortcutText(split, "win")).toBe("Ctrl+Shift+D");
+    expect(shortcutText(split, "mac")).toBe("⌘D");
+    const palette = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts).find((s) => s.action === "view.command-palette")!;
+    expect(shortcutText(palette, "win")).toBe("Ctrl+Shift+K / Ctrl+Shift+P");
+    expect(shortcutText(palette, "mac")).toBe("⌘K / ⌘⇧P");
+  });
+
+  it("no Windows/Linux row asks for a bare Ctrl+letter", () => {
+    for (const s of SHORTCUT_GROUPS.flatMap((g) => g.shortcuts)) {
+      for (const platform of ["win", "linux"] as const) {
+        expect(shortcutText(s, platform)).not.toMatch(/(^|\/ )Ctrl\+[A-Z]($| )/);
+      }
+    }
+  });
+
+  it("renders the rows for the current platform", async () => {
+    const { ShortcutsPanel } = await import("../components/ShortcutsPanel");
+    const { I18nProvider } = await import("../i18n/I18nProvider");
+    const { container } = render(
+      <I18nProvider>
+        <ShortcutsPanel onClose={() => {}} />
+      </I18nProvider>,
+    );
+    const kbds = [...container.querySelectorAll("kbd.shortcuts-kbd")].map((k) => k.textContent);
+    const expected = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts).map((s) => shortcutText(s));
+    expect(kbds).toEqual(expected);
+  });
+});

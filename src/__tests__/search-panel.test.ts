@@ -34,7 +34,7 @@ vi.mock("../utils/notifications", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────
 import { sessionReducer, initialState } from "../state/SessionContext";
 import { highlightMatch, formatResultCount, debounce } from "../components/SearchPanel";
-import { SHORTCUT_GROUPS } from "../components/ShortcutsPanel";
+import { SHORTCUT_GROUPS, shortcutText } from "../components/ShortcutsPanel";
 import { translate } from "../i18n/registry";
 import type { SearchMatch, SearchFileResult, SearchResponse } from "../types/git";
 
@@ -392,10 +392,10 @@ describe("Initial state includes search", () => {
 
 describe("ShortcutsPanel accuracy", () => {
   const allShortcuts = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
-  const findShortcut = (keys: string) => allShortcuts.find((s) => s.keys === keys);
+  const findShortcut = (chord: string) => allShortcuts.find((s) => shortcutText(s, "mac") === chord);
 
-  it("{mod}{shift}F is mapped to Search in Folder, not Flow Mode", () => {
-    const s = findShortcut("{mod}{shift}F");
+  it("⌘⇧F is mapped to Search in Folder, not Flow Mode", () => {
+    const s = findShortcut("⌘⇧F");
     expect(s).toBeDefined();
     // Shortcuts carry i18n keys now — assert the key, then resolve it
     // through the English base pack to guard the visible label.
@@ -404,23 +404,25 @@ describe("ShortcutsPanel accuracy", () => {
     expect(translate(s!.actionKey)).not.toContain("Flow");
   });
 
-  it("{mod}{shift}Z is mapped to Toggle Flow Mode", () => {
-    const s = findShortcut("{mod}{shift}Z");
+  it("⌘⇧Z is mapped to Toggle Flow Mode", () => {
+    const s = findShortcut("⌘⇧Z");
     expect(s).toBeDefined();
     expect(s!.actionKey).toBe("shortcuts.toggleFlowMode");
     expect(translate(s!.actionKey)).toBe("Toggle Flow Mode");
   });
 
-  it("left-panel tabs are listed ({mod}P, {mod}G, {mod}F)", () => {
-    expect(findShortcut("{mod}P")).toBeDefined();
-    expect(findShortcut("{mod}G")).toBeDefined();
-    expect(findShortcut("{mod}F")).toBeDefined();
+  it("left-panel tabs are listed (⌘P, ⌘G, ⌘F)", () => {
+    expect(findShortcut("⌘P")).toBeDefined();
+    expect(findShortcut("⌘G")).toBeDefined();
+    expect(findShortcut("⌘F")).toBeDefined();
   });
 
-  it("no duplicate key bindings", () => {
-    const keys = allShortcuts.map((s) => s.keys);
-    const unique = new Set(keys);
-    expect(unique.size).toBe(keys.length);
+  it("no duplicate key bindings on any platform", () => {
+    for (const platform of ["mac", "win", "linux"] as const) {
+      const keys = allShortcuts.map((s) => shortcutText(s, platform));
+      const unique = new Set(keys);
+      expect(unique.size).toBe(keys.length);
+    }
   });
 });
 

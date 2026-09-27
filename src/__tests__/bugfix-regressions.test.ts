@@ -16,6 +16,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { chordFor } from "../utils/keymap";
 
 // ─── Mock Tauri APIs ─────────────────────────────────────────────────
 vi.mock("@tauri-apps/api/core", () => ({
@@ -139,15 +140,9 @@ describe("accelerator uniqueness", () => {
     expect(editFindSection).not.toContain("CmdOrCtrl+Shift+F");
   });
 
-  it("view.search-panel still has CmdOrCtrl+Shift+F", () => {
-    const src = readFileSync(
-      resolve(__dirname, "../../src-tauri/src/menu/mod.rs"),
-      "utf-8",
-    );
-    const searchSection = src.match(
-      /let search_panel = CheckMenuItemBuilder::with_id\("view\.search-panel"[\s\S]*?\.build\(app\)/,
-    )?.[0] || "";
-    expect(searchSection).toContain("CmdOrCtrl+Shift+F");
+  it("view.search-panel still has Cmd/Ctrl+Shift+F", () => {
+    expect(chordFor("view.search-panel", "mac")).toBe("{mod}{shift}F");
+    expect(chordFor("view.search-panel", "win")).toBe("{ctrl}{shift}F");
   });
 });
 

@@ -1,10 +1,14 @@
 import "../styles/components/ShortcutsPanel.css";
 import { useEffect } from "react";
-import { fmt } from "../utils/platform";
+import { PLATFORM, formatChord, type Platform } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
 
 export interface Shortcut {
-  keys: string;
+  /** Menu action whose platform chord is shown (see utils/keymap.ts). */
+  action?: string;
+  /** Canonical chord, for shortcuts that are not menu actions. */
+  keys?: string;
   actionKey: string;
 }
 
@@ -17,40 +21,48 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     labelKey: "shortcuts.general",
     shortcuts: [
-      { keys: "{mod}N", actionKey: "session.new" },
-      { keys: "{mod}W", actionKey: "shortcuts.closePaneSession" },
-      { keys: "{mod}K / {mod}{shift}P", actionKey: "shortcuts.commandPalette" },
-      { keys: "{mod},", actionKey: "settings.title" },
-      { keys: "{mod}/", actionKey: "shortcuts.title" },
-      { keys: "{mod}J", actionKey: "shortcuts.promptComposer" },
-      { keys: "{mod}{shift}C", actionKey: "shortcuts.copyContext" },
-      { keys: "{mod}{shift}F", actionKey: "shortcuts.searchInFolder" },
-      { keys: "{mod}{shift}Z", actionKey: "shortcuts.toggleFlowMode" },
+      { action: "file.new-session", actionKey: "session.new" },
+      { action: "file.close-pane", actionKey: "shortcuts.closePaneSession" },
+      { action: "view.command-palette", keys: "{mod}{shift}P", actionKey: "shortcuts.commandPalette" },
+      { action: "hermes.settings", actionKey: "settings.title" },
+      { action: "view.shortcuts", actionKey: "shortcuts.title" },
+      { action: "view.prompt-composer", actionKey: "shortcuts.promptComposer" },
+      { action: "session.copy-context", actionKey: "shortcuts.copyContext" },
+      { action: "view.search-panel", actionKey: "shortcuts.searchInFolder" },
+      { action: "view.flow-mode", actionKey: "shortcuts.toggleFlowMode" },
     ],
   },
   {
     labelKey: "shortcuts.panels",
     shortcuts: [
-      { keys: "{mod}B", actionKey: "palette.toggleSidebar" },
-      { keys: "{mod}E", actionKey: "palette.toggleContext" },
-      { keys: "{mod}P", actionKey: "shortcuts.processes" },
-      { keys: "{mod}G", actionKey: "shortcuts.git" },
-      { keys: "{mod}F", actionKey: "shortcuts.files" },
-      { keys: "{mod}T", actionKey: "shortcuts.toggleTimeline" },
-      { keys: "{mod}$", actionKey: "palette.costDashboard" },
+      { action: "view.toggle-sidebar", actionKey: "palette.toggleSidebar" },
+      { action: "view.context-panel", actionKey: "palette.toggleContext" },
+      { action: "view.process-panel", actionKey: "shortcuts.processes" },
+      { action: "view.git-panel", actionKey: "shortcuts.git" },
+      { action: "file.file-explorer", actionKey: "shortcuts.files" },
+      { action: "file.new-session-tab", actionKey: "shortcuts.toggleTimeline" },
+      { action: "view.cost-dashboard", actionKey: "palette.costDashboard" },
     ],
   },
   {
     labelKey: "shortcuts.panesSessions",
     shortcuts: [
-      { keys: "{mod}D", actionKey: "shortcuts.splitHorizontal" },
-      { keys: "{mod}{shift}D", actionKey: "shortcuts.splitVertical" },
+      { action: "view.split-horizontal", actionKey: "shortcuts.splitHorizontal" },
+      { action: "view.split-vertical", actionKey: "shortcuts.splitVertical" },
       { keys: "{mod}{alt}→", actionKey: "shortcuts.focusNextPane" },
       { keys: "{mod}{alt}←", actionKey: "shortcuts.focusPreviousPane" },
       { keys: "{mod}1-9", actionKey: "shortcuts.switchToSession" },
     ],
   },
 ];
+
+/** The chord text shown for a shortcut on a platform, e.g. "Ctrl+Shift+D". */
+export function shortcutText(s: Shortcut, platform: Platform = PLATFORM): string {
+  const parts: string[] = [];
+  if (s.action) parts.push(shortcutLabel(s.action, platform));
+  if (s.keys) parts.push(formatChord(s.keys, platform));
+  return parts.filter(Boolean).join(" / ");
+}
 
 interface ShortcutsPanelProps {
   onClose: () => void;
@@ -82,9 +94,9 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
               <div className="shortcuts-group-label">{t(group.labelKey)}</div>
               <div className="shortcuts-table">
                 {group.shortcuts.map((s) => (
-                  <div key={s.keys} className="shortcuts-row">
+                  <div key={s.actionKey} className="shortcuts-row">
                     <span className="shortcuts-action">{t(s.actionKey)}</span>
-                    <kbd className="shortcuts-kbd">{fmt(s.keys)}</kbd>
+                    <kbd className="shortcuts-kbd">{shortcutText(s)}</kbd>
                   </div>
                 ))}
               </div>

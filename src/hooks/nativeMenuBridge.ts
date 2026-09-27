@@ -16,7 +16,21 @@ let contextMenuHandler: ActionHandler | null = null;
 let unlisten: UnlistenFn | null = null;
 let listenerPromise: Promise<void> | null = null;
 
+// An app chord can reach both the webview's key listener and the native
+// menu (depending on the OS webview). The keyboard path runs first; a native
+// event for the same action right after it is the same key press.
+const KEYBOARD_ECHO_WINDOW_MS = 500;
+let lastKeyboardAction: { id: string; at: number } | null = null;
+
 function onMenuAction(payload: { action: string }) {
+  if (
+    lastKeyboardAction &&
+    lastKeyboardAction.id === payload.action &&
+    Date.now() - lastKeyboardAction.at < KEYBOARD_ECHO_WINDOW_MS
+  ) {
+    lastKeyboardAction = null;
+    return;
+  }
   // Context menu handler takes priority (it's the most recently opened)
   if (contextMenuHandler) {
     const handler = contextMenuHandler;
@@ -56,6 +70,12 @@ export function triggerMenuBarAction(actionId: string): void {
   menuBarHandler?.(actionId);
 }
 
+/** Run a menu bar action for a key chord pressed in the webview. */
+export function triggerMenuBarActionFromKeyboard(actionId: string): void {
+  lastKeyboardAction = { id: actionId, at: Date.now() };
+  menuBarHandler?.(actionId);
+}
+
 export function registerContextMenuHandler(handler: ActionHandler): void {
   contextMenuHandler = handler;
 }
@@ -70,4 +90,5 @@ export function cleanupListener(): void {
   listenerPromise = null;
   menuBarHandler = null;
   contextMenuHandler = null;
+  lastKeyboardAction = null;
 }

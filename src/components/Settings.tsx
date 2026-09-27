@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { applyTheme, applyAgentTimelineStyle, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS } from "../utils/themeManager";
 import { fmt, PLATFORM } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import {
   AI_PROVIDERS,
   AI_AGENT_PREFIXES_KEY,
@@ -25,7 +26,7 @@ import {
 } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, deleteSshSavedHost, type SshSavedHost } from "../api/ssh";
 import { setAnalyticsEnabled } from "../utils/analytics";
-import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
+import { SHORTCUT_GROUPS, shortcutText } from "./ShortcutsPanel";
 import { PluginManager } from "./PluginManager";
 import { useI18n } from "../i18n/I18nProvider";
 import {
@@ -350,8 +351,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     value={settings.command_palette_shortcut || "cmd_k"}
                     onChange={(e) => updateSetting("command_palette_shortcut", e.target.value)}
                   >
-                    <option value="cmd_k">{fmt("{mod}K")} ({t("settings.defaultOption")})</option>
-                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} ({t("settings.freesShortcut", { shortcut: fmt("{mod}K") })})</option>
+                    <option value="cmd_k">{shortcutLabel("view.command-palette")} ({t("settings.defaultOption")})</option>
+                    <option value="cmd_shift_p">{fmt("{mod}{shift}P")} ({t("settings.freesShortcut", { shortcut: shortcutLabel("view.command-palette") })})</option>
                   </select>
                   <span className="settings-hint-inline">{t("settings.requiresRestartMenu")}</span>
                 </div>
@@ -572,9 +573,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   <div key={group.labelKey} className="settings-shortcut-group">
                     <div className="settings-shortcut-group-label">{t(group.labelKey)}</div>
                     {group.shortcuts.map((s) => (
-                      <div key={s.keys} className="settings-shortcut-row">
+                      <div key={s.actionKey} className="settings-shortcut-row">
                         <span className="settings-shortcut-action">{t(s.actionKey)}</span>
-                        <kbd className="settings-shortcut-kbd">{fmt(s.keys)}</kbd>
+                        <kbd className="settings-shortcut-kbd">{shortcutText(s)}</kbd>
                       </div>
                     ))}
                   </div>

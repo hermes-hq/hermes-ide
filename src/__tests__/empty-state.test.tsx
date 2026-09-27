@@ -17,7 +17,9 @@ import type { SessionHistoryEntry } from "../state/SessionContext";
 
 // Mock platform helpers so the EmptyState renders without browser/OS sniffing.
 vi.mock("../utils/platform", () => ({
+  PLATFORM: "mac",
   fmt: (s: string) => s.replace("{mod}", "Cmd+"),
+  formatChord: (s: string) => s.replace("{mod}", "Cmd+"),
 }));
 
 // EmptyState requires the palette/context callbacks and reads its copy
