@@ -389,6 +389,8 @@ export const esPack: LanguagePack = {
     "settings.systemDefault": "Predeterminado del sistema",
     "settings.terminalScrollback": "Historial del terminal",
     "settings.lines": "{count} líneas",
+    "settings.shellSuggestions": "Sugerencias en línea de Hermes",
+    "settings.shellSuggestionsHint": "Muestra las sugerencias de comandos de Hermes mientras escribes. Desactívalo para usar las autosugerencias de tu shell. Se aplica a nuevas sesiones de terminal.",
     "settings.defaultWorkingDirectory": "Directorio de trabajo predeterminado",
     "settings.homeDirectoryPlaceholder": "~ (directorio personal)",
     "settings.commandPaletteShortcut": "Atajo de la paleta de comandos",

@@ -389,6 +389,8 @@ export const dePack: LanguagePack = {
     "settings.systemDefault": "Systemstandard",
     "settings.terminalScrollback": "Terminal-Verlauf",
     "settings.lines": "{count} Zeilen",
+    "settings.shellSuggestions": "Hermes-Inline-Vorschläge",
+    "settings.shellSuggestionsHint": "Zeigt beim Tippen die Befehlsvorschläge von Hermes an. Deaktivieren, um stattdessen die Autovorschläge deiner Shell zu nutzen. Gilt für neue Terminal-Sitzungen.",
     "settings.defaultWorkingDirectory": "Standard-Arbeitsverzeichnis",
     "settings.homeDirectoryPlaceholder": "~ (Home-Verzeichnis)",
     "settings.commandPaletteShortcut": "Tastenkürzel für Befehlspalette",

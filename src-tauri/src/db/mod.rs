@@ -2417,6 +2417,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "default_cwd",
     "scrollback",
     "restore_sessions",
+    "shell_suggestions",
     // Workspace (excluded from export — machine-specific)
     "saved_workspace",
     // Behaviour

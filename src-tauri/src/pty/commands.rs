@@ -725,6 +725,16 @@ pub fn create_session(
         .flatten()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(detect_shell);
+    // Hermes inline suggestions on (default) → disable the shell's own
+    // autosuggestion plugins so the two don't overlap.
+    let disable_native_suggestions = crate::pty::shell_integration::hermes_suggestions_enabled(
+        state
+            .db
+            .lock()
+            .ok()
+            .and_then(|db| db.get_setting("shell_suggestions").ok().flatten())
+            .as_deref(),
+    );
     let original_cwd = working_directory.unwrap_or_else(get_working_directory);
 
     // If this session has a linked worktree, use its path as the working directory.
@@ -932,7 +942,7 @@ pub fn create_session(
     // Only for local sessions — SSH sessions run on the remote host where we
     // can't create temp files.
     let shell_integration = if !is_ssh {
-        crate::pty::shell_integration::setup(&shell, &session_id)
+        crate::pty::shell_integration::setup(&shell, &session_id, disable_native_suggestions)
     } else {
         crate::pty::shell_integration::ShellIntegration::None
     };
@@ -966,7 +976,9 @@ pub fn create_session(
                 crate::pty::shell_integration::ShellIntegration::Fish => {
                     c.arg("-l");
                     c.arg("-C");
-                    c.arg(crate::pty::shell_integration::fish_init_command());
+                    c.arg(crate::pty::shell_integration::fish_init_command(
+                        disable_native_suggestions,
+                    ));
                 }
                 _ => {
                     // Zsh, unknown, or no integration — use login shell
@@ -1691,6 +1703,7 @@ pub fn create_session(
         #[cfg(target_os = "macos")]
         tty_path: saved_tty_path,
         shell_integration,
+        hermes_suggestions: disable_native_suggestions,
     };
     mgr.sessions.insert(session_id.clone(), pty_session);
 
@@ -2847,6 +2860,7 @@ pub fn detect_shell_environment(
         has_starship,
         has_powerlevel10k,
         shell_integration_active: integration_active,
+        hermes_suggestions: session.hermes_suggestions,
     })
 }
 
@@ -3847,6 +3861,27 @@ mod tests {
         let info: super::SshConnectionInfo =
             serde_json::from_str(r#"{"host":"h","port":22,"user":"u"}"#).unwrap();
         assert!(info.jump_host.is_none());
+    }
+
+    // ── #117 — per-session Hermes suggestions flag reaches the frontend ──
+    //
+    // The frontend's `ShellEnvironment.hermesSuggestions` gates ghost text,
+    // the suggestion list and Tab per session, so the wire name must match.
+    #[test]
+    fn shell_environment_serializes_hermes_suggestions_for_frontend() {
+        let env = crate::pty::models::ShellEnvironment {
+            shell_type: "zsh".into(),
+            plugins_detected: vec![],
+            has_native_autosuggest: true,
+            has_oh_my_zsh: false,
+            has_syntax_highlighting: false,
+            has_starship: false,
+            has_powerlevel10k: false,
+            shell_integration_active: true,
+            hermes_suggestions: false,
+        };
+        let json = serde_json::to_value(&env).unwrap();
+        assert_eq!(json["hermesSuggestions"], serde_json::json!(false));
     }
 }
 

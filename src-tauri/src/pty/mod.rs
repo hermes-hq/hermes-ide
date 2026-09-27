@@ -37,6 +37,10 @@ pub(crate) struct PtySession {
     pub(crate) tty_path: Option<std::path::PathBuf>,
     /// Shell integration state — tracks temp files for cleanup on session close.
     pub(crate) shell_integration: shell_integration::ShellIntegration,
+    /// Whether Hermes inline suggestions were on when this session was
+    /// spawned (the shell's own autosuggestion plugins were disabled then).
+    /// Fixed for the session's lifetime — the setting applies to new sessions.
+    pub(crate) hermes_suggestions: bool,
 }
 
 pub struct PtyManager {

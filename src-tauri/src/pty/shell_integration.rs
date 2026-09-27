@@ -70,6 +70,16 @@ ZDOTDIR="$_HERMES_ZDOTDIR"
 
 # ── Hermes overrides (run after all user plugins have loaded) ──
 
+# Prevent space-prefixed commands from entering history.
+# Hermes uses this to keep auto-injected commands out of the user's history.
+setopt HIST_IGNORE_SPACE 2>/dev/null
+
+export HERMES_TERMINAL=1
+"#;
+
+/// Appended to the zsh .zshrc when Hermes shows its own inline suggestions:
+/// disables conflicting autosuggestion plugins so the two don't overlap.
+const ZSH_DISABLE_NATIVE_SUGGESTIONS: &str = r#"
 # Disable zsh-autosuggestions — nuclear approach.
 # The plugin may be loaded now or deferred (zinit, zsh-defer, etc.),
 # so we use multiple layers:
@@ -97,12 +107,6 @@ add-zsh-hook precmd _hermes_autosuggest_precmd
 
 # Disable zsh-autocomplete real-time completion menu
 zstyle ':autocomplete:*' min-input 9999 2>/dev/null
-
-# Prevent space-prefixed commands from entering history.
-# Hermes uses this to keep auto-injected commands out of the user's history.
-setopt HIST_IGNORE_SPACE 2>/dev/null
-
-export HERMES_TERMINAL=1
 "#;
 
 /// Zsh .zlogin — last startup file.  Sources user's .zlogin then
@@ -142,21 +146,29 @@ fi
 
 # ── Hermes overrides ──
 
-# Disable ble.sh auto-complete if loaded
-if type ble-bind &>/dev/null 2>&1; then
-  ble-bind -m auto_complete -f '' auto_complete/cancel 2>/dev/null
-fi
-
 export HERMES_TERMINAL=1
 
 # Force terminal size re-read (fixes SIGWINCH race during startup)
 kill -WINCH $$ 2>/dev/null
 "#;
 
+/// Appended to the bash init script when Hermes shows its own inline
+/// suggestions: disables ble.sh auto-complete so the two don't overlap.
+const BASH_DISABLE_NATIVE_SUGGESTIONS: &str = r#"
+# Disable ble.sh auto-complete if loaded
+if type ble-bind &>/dev/null 2>&1; then
+  ble-bind -m auto_complete -f '' auto_complete/cancel 2>/dev/null
+fi
+"#;
+
 /// Fish init-command — passed via `fish -C "..."`.
 /// Runs after config.fish, so built-in autosuggestions are already active.
 const FISH_INIT_CMD: &str =
     "set -g fish_autosuggestion_enabled 0 2>/dev/null; set -gx HERMES_TERMINAL 1";
+
+/// Fish init-command used when Hermes suggestions are off: leaves fish's
+/// built-in autosuggestions alone.
+const FISH_INIT_CMD_NATIVE: &str = "set -gx HERMES_TERMINAL 1";
 
 // ─── Setup Functions ─────────────────────────────────────────────────
 
@@ -167,16 +179,20 @@ const FISH_INIT_CMD: &str =
 /// - `Zsh`: set `HERMES_ORIGINAL_ZDOTDIR` and `ZDOTDIR` env vars
 /// - `Bash`: replace `-l` with `--rcfile <path>`
 /// - `Fish`: add `-C <command>` argument
-pub fn setup(shell: &str, session_id: &str) -> ShellIntegration {
+///
+/// When `disable_native_suggestions` is false (the user turned Hermes's own
+/// suggestions off), the user's shell autosuggestion plugins are left alone.
+pub fn setup(shell: &str, session_id: &str, disable_native_suggestions: bool) -> ShellIntegration {
     log::info!(
-        "[SHELL-INTEGRATION] setup called: shell={:?}, session={}",
+        "[SHELL-INTEGRATION] setup called: shell={:?}, session={}, disable_native_suggestions={}",
         shell,
-        session_id
+        session_id,
+        disable_native_suggestions
     );
     let result = if shell.contains("zsh") {
-        setup_zsh(session_id)
+        setup_zsh(session_id, disable_native_suggestions)
     } else if shell.contains("bash") {
-        setup_bash(session_id)
+        setup_bash(session_id, disable_native_suggestions)
     } else if shell.contains("fish") {
         ShellIntegration::Fish
     } else {
@@ -189,12 +205,39 @@ pub fn setup(shell: &str, session_id: &str) -> ShellIntegration {
     result
 }
 
-/// Get the fish init-command string.
-pub fn fish_init_command() -> &'static str {
-    FISH_INIT_CMD
+/// Whether Hermes shows its own inline suggestions, given the raw
+/// `shell_suggestions` setting. `"native"` turns them off; anything else
+/// (including unset) keeps the default of Hermes suggestions on.
+pub fn hermes_suggestions_enabled(setting: Option<&str>) -> bool {
+    setting != Some("native")
 }
 
-fn setup_zsh(session_id: &str) -> ShellIntegration {
+/// Get the fish init-command string.
+pub fn fish_init_command(disable_native_suggestions: bool) -> &'static str {
+    if disable_native_suggestions {
+        FISH_INIT_CMD
+    } else {
+        FISH_INIT_CMD_NATIVE
+    }
+}
+
+fn zsh_zshrc(disable_native_suggestions: bool) -> String {
+    if disable_native_suggestions {
+        format!("{}{}", ZSH_ZSHRC, ZSH_DISABLE_NATIVE_SUGGESTIONS)
+    } else {
+        ZSH_ZSHRC.to_string()
+    }
+}
+
+fn bash_init(disable_native_suggestions: bool) -> String {
+    if disable_native_suggestions {
+        format!("{}{}", BASH_INIT, BASH_DISABLE_NATIVE_SUGGESTIONS)
+    } else {
+        BASH_INIT.to_string()
+    }
+}
+
+fn setup_zsh(session_id: &str, disable_native_suggestions: bool) -> ShellIntegration {
     let dir = std::env::temp_dir().join(format!("hermes-zsh-{}", session_id));
     log::info!("[SHELL-INTEGRATION] Creating ZDOTDIR at {:?}", dir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -202,10 +245,11 @@ fn setup_zsh(session_id: &str) -> ShellIntegration {
         return ShellIntegration::None;
     }
 
+    let zshrc = zsh_zshrc(disable_native_suggestions);
     let files: &[(&str, &str)] = &[
         (".zshenv", ZSH_ZSHENV),
         (".zprofile", ZSH_ZPROFILE),
-        (".zshrc", ZSH_ZSHRC),
+        (".zshrc", &zshrc),
         (".zlogin", ZSH_ZLOGIN),
     ];
 
@@ -221,9 +265,9 @@ fn setup_zsh(session_id: &str) -> ShellIntegration {
     ShellIntegration::Zsh { zdotdir: dir }
 }
 
-fn setup_bash(session_id: &str) -> ShellIntegration {
+fn setup_bash(session_id: &str, disable_native_suggestions: bool) -> ShellIntegration {
     let path = std::env::temp_dir().join(format!("hermes-bash-{}.sh", session_id));
-    if let Err(e) = std::fs::write(&path, BASH_INIT) {
+    if let Err(e) = std::fs::write(&path, bash_init(disable_native_suggestions)) {
         log::warn!(
             "Failed to write bash init for session {}: {}",
             session_id,
@@ -285,7 +329,7 @@ mod tests {
 
     #[test]
     fn setup_zsh_creates_all_rc_files() {
-        let integration = setup_zsh("test-zsh-001");
+        let integration = setup_zsh("test-zsh-001", true);
         match &integration {
             ShellIntegration::Zsh { zdotdir } => {
                 assert!(zdotdir.join(".zshenv").exists());
@@ -310,7 +354,7 @@ mod tests {
 
     #[test]
     fn setup_bash_creates_rcfile() {
-        let integration = setup_bash("test-bash-001");
+        let integration = setup_bash("test-bash-001", true);
         match &integration {
             ShellIntegration::Bash { rcfile } => {
                 assert!(rcfile.exists());
@@ -327,21 +371,21 @@ mod tests {
 
     #[test]
     fn setup_fish_returns_fish_variant() {
-        let integration = setup("fish", "test-fish-001");
+        let integration = setup("fish", "test-fish-001", true);
         assert!(matches!(integration, ShellIntegration::Fish));
         assert!(integration.is_active());
     }
 
     #[test]
     fn setup_unknown_shell_returns_none() {
-        let integration = setup("powershell", "test-ps-001");
+        let integration = setup("powershell", "test-ps-001", true);
         assert!(matches!(integration, ShellIntegration::None));
         assert!(!integration.is_active());
     }
 
     #[test]
     fn cleanup_removes_zsh_directory() {
-        let integration = setup_zsh("test-cleanup-zsh");
+        let integration = setup_zsh("test-cleanup-zsh", true);
         let path = match &integration {
             ShellIntegration::Zsh { zdotdir } => zdotdir.clone(),
             _ => panic!("Expected Zsh"),
@@ -353,7 +397,7 @@ mod tests {
 
     #[test]
     fn cleanup_removes_bash_file() {
-        let integration = setup_bash("test-cleanup-bash");
+        let integration = setup_bash("test-cleanup-bash", true);
         let path = match &integration {
             ShellIntegration::Bash { rcfile } => rcfile.clone(),
             _ => panic!("Expected Bash"),
@@ -365,9 +409,53 @@ mod tests {
 
     #[test]
     fn fish_init_command_content() {
-        let cmd = fish_init_command();
+        let cmd = fish_init_command(true);
         assert!(cmd.contains("fish_autosuggestion_enabled"));
         assert!(cmd.contains("HERMES_TERMINAL"));
+    }
+
+    #[test]
+    fn hermes_suggestions_setting_defaults_on() {
+        assert!(hermes_suggestions_enabled(None));
+        assert!(hermes_suggestions_enabled(Some("hermes")));
+        assert!(!hermes_suggestions_enabled(Some("native")));
+    }
+
+    #[test]
+    fn native_suggestions_left_alone_when_hermes_suggestions_off() {
+        // zsh
+        let read_zshrc = |integration: &ShellIntegration| match integration {
+            ShellIntegration::Zsh { zdotdir } => {
+                std::fs::read_to_string(zdotdir.join(".zshrc")).unwrap()
+            }
+            _ => panic!("Expected Zsh"),
+        };
+        let on_integration = setup_zsh("test-native-zsh-on", true);
+        let off_integration = setup_zsh("test-native-zsh-off", false);
+        let on = read_zshrc(&on_integration);
+        let off = read_zshrc(&off_integration);
+        cleanup(&on_integration);
+        cleanup(&off_integration);
+        assert!(on.contains("ZSH_AUTOSUGGEST_STRATEGY"));
+        assert!(on.contains("min-input 9999"));
+        assert!(!off.contains("ZSH_AUTOSUGGEST_STRATEGY"));
+        assert!(!off.contains("min-input 9999"));
+        assert!(off.contains("HERMES_TERMINAL=1"));
+        assert!(off.contains("HIST_IGNORE_SPACE"));
+
+        // bash
+        let bash_off = setup_bash("test-native-bash-off", false);
+        let script = match &bash_off {
+            ShellIntegration::Bash { rcfile } => std::fs::read_to_string(rcfile).unwrap(),
+            _ => panic!("Expected Bash"),
+        };
+        assert!(!script.contains("ble-bind"));
+        assert!(script.contains("HERMES_TERMINAL=1"));
+        cleanup(&bash_off);
+
+        // fish
+        assert!(!fish_init_command(false).contains("fish_autosuggestion_enabled"));
+        assert!(fish_init_command(false).contains("HERMES_TERMINAL"));
     }
 
     #[test]
@@ -412,7 +500,8 @@ mod tests {
     fn zsh_zshrc_sources_user_before_overrides() {
         // User's .zshrc must load BEFORE our overrides, so plugins are
         // already loaded when we disable them.
-        let lines: Vec<&str> = ZSH_ZSHRC.lines().collect();
+        let zshrc = zsh_zshrc(true);
+        let lines: Vec<&str> = zshrc.lines().collect();
         let source_line = lines
             .iter()
             .position(|l| l.contains("source \"$_hermes_user/.zshrc\""));

@@ -389,6 +389,8 @@ export const jaPack: LanguagePack = {
     "settings.systemDefault": "システムデフォルト",
     "settings.terminalScrollback": "ターミナルスクロールバック",
     "settings.lines": "{count} 行",
+    "settings.shellSuggestions": "Hermes のインライン候補",
+    "settings.shellSuggestionsHint": "入力中に Hermes のコマンド候補を表示します。オフにするとシェル本来の自動候補を使用します。新しいターミナルセッションに適用されます。",
     "settings.defaultWorkingDirectory": "デフォルト作業ディレクトリ",
     "settings.homeDirectoryPlaceholder": "~（ホームディレクトリ）",
     "settings.commandPaletteShortcut": "コマンドパレットショートカット",

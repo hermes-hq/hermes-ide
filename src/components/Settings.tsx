@@ -149,7 +149,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     setSettings(next);
     if (key === "theme") {
       applyTheme(value, next);
-    } else if (["font_size", "font_family", "scrollback", "ui_scale"].includes(key)) {
+    } else if (["font_size", "font_family", "scrollback", "ui_scale", "shell_suggestions"].includes(key)) {
       applyTheme(next.theme || "frosted-dark", next);
     } else if (key === "agent_timeline_style") {
       applyAgentTimelineStyle(value);
@@ -286,6 +286,18 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="25000">{t("settings.lines", { count: "25,000" })}</option>
                     <option value="50000">{t("settings.lines", { count: "50,000" })}</option>
                   </select>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">
+                    <input
+                      type="checkbox"
+                      checked={settings.shell_suggestions !== "native"}
+                      onChange={(e) => updateSetting("shell_suggestions", e.target.checked ? "hermes" : "native")}
+                    />
+                    {" "}{t("settings.shellSuggestions")}
+                  </label>
+                  <span className="settings-hint-inline">{t("settings.shellSuggestionsHint")}</span>
                 </div>
 
                 <div className="settings-group">

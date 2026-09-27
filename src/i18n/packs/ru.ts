@@ -389,6 +389,8 @@ export const ruPack: LanguagePack = {
     "settings.systemDefault": "Системная по умолчанию",
     "settings.terminalScrollback": "История терминала",
     "settings.lines": "Строк: {count}",
+    "settings.shellSuggestions": "Встроенные подсказки Hermes",
+    "settings.shellSuggestionsHint": "Показывать подсказки команд Hermes при вводе. Отключите, чтобы использовать автоподсказки вашей оболочки. Применяется к новым сессиям терминала.",
     "settings.defaultWorkingDirectory": "Рабочая папка по умолчанию",
     "settings.homeDirectoryPlaceholder": "~ (домашняя папка)",
     "settings.commandPaletteShortcut": "Горячая клавиша палитры команд",

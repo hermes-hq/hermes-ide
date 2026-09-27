@@ -317,6 +317,10 @@ pub struct ShellEnvironment {
     pub has_starship: bool,
     pub has_powerlevel10k: bool,
     pub shell_integration_active: bool,
+    /// Whether Hermes inline suggestions were on when the session was spawned.
+    /// Serialized camelCase to match the frontend `ShellEnvironment` type.
+    #[serde(rename = "hermesSuggestions")]
+    pub hermes_suggestions: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

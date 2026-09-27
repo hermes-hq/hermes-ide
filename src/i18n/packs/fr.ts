@@ -389,6 +389,8 @@ export const frPack: LanguagePack = {
     "settings.systemDefault": "Défaut système",
     "settings.terminalScrollback": "Historique du terminal",
     "settings.lines": "{count} lignes",
+    "settings.shellSuggestions": "Suggestions en ligne de Hermes",
+    "settings.shellSuggestionsHint": "Affiche les suggestions de commandes de Hermes pendant la saisie. Désactivez pour utiliser les suggestions automatiques de votre shell. S'applique aux nouvelles sessions de terminal.",
     "settings.defaultWorkingDirectory": "Dossier de travail par défaut",
     "settings.homeDirectoryPlaceholder": "~ (dossier personnel)",
     "settings.commandPaletteShortcut": "Raccourci de la palette de commandes",

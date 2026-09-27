@@ -406,6 +406,8 @@ const ENGLISH_PACK: LanguagePack = {
     "settings.systemDefault": "System default",
     "settings.terminalScrollback": "Terminal Scrollback",
     "settings.lines": "{count} lines",
+    "settings.shellSuggestions": "Hermes inline suggestions",
+    "settings.shellSuggestionsHint": "Show Hermes's own command suggestions as you type. Turn off to use your shell's own autosuggestions instead. Applies to new terminal sessions.",
     "settings.defaultWorkingDirectory": "Default Working Directory",
     "settings.homeDirectoryPlaceholder": "~ (home directory)",
     "settings.commandPaletteShortcut": "Command Palette Shortcut",

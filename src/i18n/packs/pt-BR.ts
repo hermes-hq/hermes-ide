@@ -389,6 +389,8 @@ export const ptBRPack: LanguagePack = {
     "settings.systemDefault": "Padrão do sistema",
     "settings.terminalScrollback": "Histórico do terminal",
     "settings.lines": "{count} linhas",
+    "settings.shellSuggestions": "Sugestões em linha do Hermes",
+    "settings.shellSuggestionsHint": "Mostra as sugestões de comandos do Hermes enquanto você digita. Desative para usar as sugestões automáticas do seu shell. Aplica-se a novas sessões de terminal.",
     "settings.defaultWorkingDirectory": "Diretório de trabalho padrão",
     "settings.homeDirectoryPlaceholder": "~ (diretório home)",
     "settings.commandPaletteShortcut": "Atalho da paleta de comandos",

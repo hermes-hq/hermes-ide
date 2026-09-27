@@ -13,6 +13,9 @@ export interface ShellEnvironment {
   hasStarship: boolean;
   hasPowerlevel10k: boolean;
   shellIntegrationActive: boolean;
+  /** Whether Hermes inline suggestions were on when this session was spawned.
+   *  Fixed per session; absent until the backend has reported it. */
+  hermesSuggestions?: boolean;
 }
 
 export interface IntelligenceConfig {
@@ -39,6 +42,9 @@ const DEFAULT_CONFIG: IntelligenceConfig = {
 
 const sessionShellEnv = new Map<string, ShellEnvironment>();
 let globalConfig: IntelligenceConfig = { ...DEFAULT_CONFIG };
+/** Current "Hermes inline suggestions" setting (#117). Only used for sessions
+ *  whose spawn-time value isn't known yet — each session keeps its own mode. */
+let hermesSuggestionsSetting = true;
 
 // ─── Shell Environment Detection ─────────────────────────────────────
 
@@ -94,11 +100,26 @@ export function loadConfigFromSettings(settings: Record<string, string>): void {
   };
 }
 
+/** Track the "Hermes inline suggestions" setting ("native" = off). Affects
+ *  only inline suggestions, ghost text and Tab — not intent commands. */
+export function applyShellSuggestionsSetting(settings: Record<string, string>): void {
+  hermesSuggestionsSetting = settings.shell_suggestions !== "native";
+}
+
+/** Whether this session shows Hermes inline suggestions — the value recorded
+ *  when its shell was spawned, so it matches whether the shell's own
+ *  autosuggestion plugins were disabled. */
+function hermesSuggestionsFor(sessionId: string): boolean {
+  const spawned = sessionShellEnv.get(sessionId)?.hermesSuggestions;
+  return typeof spawned === "boolean" ? spawned : hermesSuggestionsSetting;
+}
+
 // ─── Conflict Detection ──────────────────────────────────────────────
 
 /** Determine if ghost text should be shown for this session */
 export function shouldShowGhostText(sessionId: string): boolean {
   if (!globalConfig.enabled || !globalConfig.ghostTextEnabled) return false;
+  if (!hermesSuggestionsFor(sessionId)) return false;
   if (globalConfig.mode === "off") return false;
 
   const env = sessionShellEnv.get(sessionId);
@@ -119,8 +140,9 @@ export function shouldShowGhostText(sessionId: string): boolean {
 }
 
 /** Determine if the overlay panel should be shown */
-export function shouldShowOverlay(_sessionId: string): boolean {
+export function shouldShowOverlay(sessionId: string): boolean {
   if (!globalConfig.enabled || !globalConfig.overlayEnabled) return false;
+  if (!hermesSuggestionsFor(sessionId)) return false;
   if (globalConfig.mode === "off") return false;
   return true;
 }
@@ -128,6 +150,7 @@ export function shouldShowOverlay(_sessionId: string): boolean {
 /** Determine if Tab should be consumed by our overlay or passed to shell */
 export function shouldConsumeTab(sessionId: string, overlayVisible: boolean): boolean {
   if (!globalConfig.enabled || globalConfig.mode === "off") return false;
+  if (!hermesSuggestionsFor(sessionId)) return false;
   if (!overlayVisible) return false;
 
   const env = sessionShellEnv.get(sessionId);

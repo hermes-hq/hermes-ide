@@ -9,6 +9,8 @@ export const hiPack: LanguagePack = {
     "settings.systemDefault": "सिस्टम पूर्वनिर्धारित",
     "settings.terminalScrollback": "टर्मिनल इतिहास",
     "settings.lines": "{count} लाइनें",
+    "settings.shellSuggestions": "Hermes इनलाइन सुझाव",
+    "settings.shellSuggestionsHint": "टाइप करते समय Hermes के अपने कमांड सुझाव दिखाएँ। अपने शेल के स्वतः सुझाव इस्तेमाल करने के लिए बंद करें। नए टर्मिनल सत्रों पर लागू होता है।",
     "settings.defaultWorkingDirectory": "पूर्वनिर्धारित कार्य निर्देशिका",
     "settings.homeDirectoryPlaceholder": "~ (होम निर्देशिका)",
     "settings.commandPaletteShortcut": "कमांड पैलेट शॉर्टकट",

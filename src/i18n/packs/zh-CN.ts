@@ -389,6 +389,8 @@ export const zhCNPack: LanguagePack = {
     "settings.systemDefault": "系统默认",
     "settings.terminalScrollback": "终端回滚",
     "settings.lines": "{count} 行",
+    "settings.shellSuggestions": "Hermes 内联建议",
+    "settings.shellSuggestionsHint": "输入时显示 Hermes 自己的命令建议。关闭后改用 Shell 自带的自动建议。对新的终端会话生效。",
     "settings.defaultWorkingDirectory": "默认工作目录",
     "settings.homeDirectoryPlaceholder": "~（主目录）",
     "settings.commandPaletteShortcut": "命令面板快捷键",

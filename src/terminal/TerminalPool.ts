@@ -17,6 +17,7 @@ import { type ProjectContext, getCachedContext } from "./intelligence/contextAna
 import { type SuggestionState } from "./intelligence/SuggestionOverlay";
 import {
   isIntelligenceDisabled,
+  applyShellSuggestionsSetting,
   shouldShowGhostText,
   shouldShowOverlay,
   shouldConsumeTab,
@@ -68,6 +69,7 @@ const SUGGESTION_DEBOUNCE_MS = 50;
 
 export function updateSettings(settings: Record<string, string>): void {
   setCurrentSettings(settings);
+  applyShellSuggestionsSetting(settings);
   // Apply to all existing terminals
   const themeName = settings.theme || "frosted-dark";
   const theme = THEMES[themeName] || THEMES["frosted-dark"];
