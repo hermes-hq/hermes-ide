@@ -364,6 +364,7 @@ export const jaPack: LanguagePack = {
     "close.terminal.body": "実行中のターミナルセッションを終了します。",
     "close.agent.confirm": "会話を終了",
     "close.terminal.confirm": "セッションを閉じる",
+    "session.deleteData.confirm": "このセッションについて Hermes がキャッシュしたデータを削除しますか？Hermes 内の履歴、トークン使用量、記憶されたコンテキストが消去されます。セッションとそのリポジトリはそのまま残ります。",
     "close.dontAsk": "今後は確認しない",
     "common.cancel": "キャンセル",
     "status.active": "{count} 件アクティブ",

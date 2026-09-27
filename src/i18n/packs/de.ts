@@ -364,6 +364,7 @@ export const dePack: LanguagePack = {
     "close.terminal.body": "Dadurch wird die laufende Terminal-Sitzung beendet.",
     "close.agent.confirm": "Unterhaltung beenden",
     "close.terminal.confirm": "Sitzung schließen",
+    "session.deleteData.confirm": "Die von Hermes zwischengespeicherten Daten dieser Sitzung löschen? Dabei werden Verlauf, Token-Nutzung und gemerkter Kontext in Hermes entfernt. Die Sitzung und ihr Repository bleiben unverändert.",
     "close.dontAsk": "Nicht erneut fragen",
     "common.cancel": "Abbrechen",
     "status.active": "{count} aktiv",

@@ -364,6 +364,7 @@ export const ptBRPack: LanguagePack = {
     "close.terminal.body": "Isso encerrará a sessão de terminal em execução.",
     "close.agent.confirm": "Encerrar conversa",
     "close.terminal.confirm": "Fechar sessão",
+    "session.deleteData.confirm": "Excluir os dados que o Hermes guardou em cache para esta sessão? Isso apaga o histórico, o uso de tokens e o contexto lembrado no Hermes. A sessão e o repositório dela não são alterados.",
     "close.dontAsk": "Não perguntar novamente",
     "common.cancel": "Cancelar",
     "status.active": "{count} ativas",

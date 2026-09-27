@@ -24,3 +24,9 @@ export function applyContext(sessionId: string): Promise<ApplyContextResult> {
   return invoke<ApplyContextResult>("apply_context", { sessionId });
 }
 
+/** Deletes Hermes's own cached data for one session (history, token usage,
+ * context pins/snapshots, session-scoped memory, the on-disk context file).
+ * Leaves the session and the repo it works in untouched. */
+export function deleteSessionData(sessionId: string): Promise<void> {
+  return invoke("delete_session_data", { sessionId });
+}

@@ -571,6 +571,7 @@ export const hiPack: LanguagePack = {
     "close.terminal.body": "इससे चल रहा टर्मिनल सत्र समाप्त हो जाएगा।",
     "close.agent.confirm": "बातचीत समाप्त करें",
     "close.terminal.confirm": "सत्र बंद करें",
+    "session.deleteData.confirm": "इस सत्र के लिए Hermes का कैश किया गया डेटा हटाएँ? इससे Hermes में इसका इतिहास, टोकन उपयोग और याद रखा गया संदर्भ साफ़ हो जाएगा। सत्र और उसकी रिपॉज़िटरी पर कोई असर नहीं पड़ेगा।",
     "close.dontAsk": "फिर न पूछें",
     "status.active": "{count} सक्रिय",
     "status.working": "कार्यरत",

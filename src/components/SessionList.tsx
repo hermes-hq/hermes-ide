@@ -2,6 +2,7 @@ import "../styles/components/SessionList.css";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { SessionData } from "../state/SessionContext";
 import { updateSessionGroup, updateSessionLabel, updateSessionDescription, updateSessionColor, sshListTmuxWindows, sshTmuxSelectWindow, sshTmuxNewWindow, sshTmuxRenameWindow } from "../api/sessions";
+import { deleteSessionData } from "../api/context";
 import type { TmuxWindowEntry } from "../types/session";
 import { encodeSessionDrag, setDraggedSession, getDraggedSession } from "./SplitPane";
 // Note: HTML5 drag events don't fire in Tauri (dragDropEnabled: true intercepts them).
@@ -32,6 +33,19 @@ export function sessionCloseTitle(
   t: (key: string) => string,
 ): string {
   return mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm");
+}
+
+/** "Delete Session Data" confirm + call, pulled out of the context-menu
+ *  handler so the confirm-gating logic is unit-testable without rendering
+ *  the whole session list. Deletes only on an explicit yes. */
+export function confirmAndDeleteSessionData(
+  sessionId: string,
+  message: string,
+  confirm: (message: string) => boolean,
+  deleteSessionData: (sessionId: string) => Promise<void>,
+): void {
+  if (!confirm(message)) return;
+  deleteSessionData(sessionId).catch(console.error);
 }
 
 /** Session-card agent tag (#317): terminal mode shows the detected agent plus
@@ -693,11 +707,13 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       handleMoveToProject(sid, null);
     } else if (actionId === "session.close") {
       onClose(sid);
+    } else if (actionId === "session.delete-data") {
+      confirmAndDeleteSessionData(sid, t("session.deleteData.confirm"), window.confirm.bind(window), deleteSessionData);
     } else if (actionId.startsWith("session.set-group.")) {
       const group = actionId.replace("session.set-group.", "");
       handleMoveToProject(sid, group);
     }
-  }, [onClose, handleMoveToProject]);
+  }, [onClose, handleMoveToProject, t]);
 
   const { showMenu } = useContextMenu(handleContextAction);
 
@@ -880,6 +896,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
         <div
           className={`session-item ${isActive ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
           data-phase={session.phase}
+          data-session-item-id={session.id}
           draggable={session.phase !== "destroyed"}
           onDragStart={(e) => handleDragStart(e, session)}
           onClick={() => onSelect(session.id)}

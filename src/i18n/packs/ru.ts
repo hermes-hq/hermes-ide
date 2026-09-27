@@ -364,6 +364,7 @@ export const ruPack: LanguagePack = {
     "close.terminal.body": "Запущенная терминальная сессия будет остановлена.",
     "close.agent.confirm": "Завершить разговор",
     "close.terminal.confirm": "Закрыть сессию",
+    "session.deleteData.confirm": "Удалить кэшированные Hermes данные этой сессии? Будут очищены её история, расход токенов и запомненный контекст в Hermes. Сама сессия и её репозиторий не изменятся.",
     "close.dontAsk": "Больше не спрашивать",
     "common.cancel": "Отмена",
     "status.active": "Активно: {count}",

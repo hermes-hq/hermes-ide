@@ -315,11 +315,7 @@ pub fn ensure_hermes_state_file(
     add_dirs: &[String],
 ) -> Result<String, String> {
     use std::fs;
-    let home = std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
-    let dir = std::path::PathBuf::from(home)
-        .join(".hermes-ide")
-        .join("sessions")
-        .join(session_id);
+    let dir = hermes_state_root()?.join(session_id);
     fs::create_dir_all(&dir).map_err(|e| format!("create state dir: {}", e))?;
     let path = dir.join("state.json");
 
@@ -339,6 +335,15 @@ pub fn ensure_hermes_state_file(
         .ok_or_else(|| "non-utf8 state path".to_string())
 }
 
+/// Folder holding one `<session_id>/state.json` per agent-mode session:
+/// `~/.hermes-ide/sessions`.
+pub fn hermes_state_root() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
+    Ok(std::path::PathBuf::from(home)
+        .join(".hermes-ide")
+        .join("sessions"))
+}
+
 /// Update the Hermes IDE state file for an active session.  Called from
 /// `update_hermes_state` IPC when the frontend changes attached projects,
 /// active file, etc.  The file is the single source of truth the bridge's
@@ -346,12 +351,7 @@ pub fn ensure_hermes_state_file(
 /// its next tool call (no respawn required).
 pub fn update_hermes_state_file(session_id: &str, state: &serde_json::Value) -> Result<(), String> {
     use std::fs;
-    let home = std::env::var("HOME").map_err(|_| "HOME env var unset".to_string())?;
-    let path = std::path::PathBuf::from(home)
-        .join(".hermes-ide")
-        .join("sessions")
-        .join(session_id)
-        .join("state.json");
+    let path = hermes_state_root()?.join(session_id).join("state.json");
     if !path.parent().map(|p| p.exists()).unwrap_or(false) {
         return Err(format!(
             "state dir for session {} does not exist; spawn the agent first",

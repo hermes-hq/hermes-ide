@@ -57,6 +57,17 @@ impl PtyManager {
         }
     }
 
+    /// Forget the output a live session keeps for its scrollback snapshot, so
+    /// the next workspace save cannot write back what the user just deleted
+    /// with Delete Session Data. The terminal on screen is unchanged.
+    pub fn clear_snapshot_output(&self, session_id: &str) {
+        if let Some(ps) = self.sessions.get(session_id) {
+            if let Ok(mut analyzer) = ps.analyzer.lock() {
+                analyzer.clear_stripped_output();
+            }
+        }
+    }
+
     /// Send a lightweight context nudge to a session's PTY if an AI agent is detected.
     /// Returns true if the nudge was sent.
     /// Send a versioned context nudge to a session's PTY.

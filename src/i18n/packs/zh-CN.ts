@@ -364,6 +364,7 @@ export const zhCNPack: LanguagePack = {
     "close.terminal.body": "这将终止正在运行的终端会话。",
     "close.agent.confirm": "结束对话",
     "close.terminal.confirm": "关闭会话",
+    "session.deleteData.confirm": "删除 Hermes 为此会话缓存的数据？这会清除 Hermes 中该会话的历史记录、令牌用量和已记住的上下文。会话及其仓库保持不变。",
     "close.dontAsk": "不再询问",
     "common.cancel": "取消",
     "status.active": "{count} 个活跃",

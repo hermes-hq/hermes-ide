@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::AppState;
 
@@ -676,6 +676,74 @@ pub fn load_hermes_project_config(
     Ok(Some(config))
 }
 
+/// Session ids are UUIDs; anything that could step outside a folder when
+/// joined into a path is refused before the filesystem is touched.
+fn is_safe_session_id(session_id: &str) -> bool {
+    !session_id.is_empty()
+        && session_id.len() <= 128
+        && session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Removes the session's on-disk Hermes caches: its context file
+/// (`<context_dir>/<id>.md`) and its agent-mode state folder
+/// (`<agent_state_root>/<id>/`). Missing files are fine.
+fn remove_session_cache_files(
+    context_dir: &Path,
+    agent_state_root: Option<&Path>,
+    session_id: &str,
+) -> Result<(), String> {
+    let ignore_missing = |r: std::io::Result<()>| match r {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    };
+    ignore_missing(std::fs::remove_file(
+        context_dir.join(format!("{}.md", session_id)),
+    ))?;
+    if let Some(root) = agent_state_root {
+        ignore_missing(std::fs::remove_dir_all(root.join(session_id)))?;
+    }
+    Ok(())
+}
+
+/// Deletes Hermes-side cached data for one session: execution history,
+/// token usage, context pins/snapshots, session-scoped memory, realm
+/// attachments, recorded error occurrences, the on-disk context file
+/// (`<app data dir>/context/<session_id>.md`) and the agent-mode state
+/// folder (`~/.hermes-ide/sessions/<session_id>/`).
+///
+/// Leaves the session itself and the repo it works in untouched — this is a
+/// cache clear, not a session delete or a git operation.
+#[tauri::command]
+pub fn delete_session_data(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    session_id: String,
+) -> Result<(), String> {
+    if !is_safe_session_id(&session_id) {
+        return Err(format!("invalid session id: {:?}", session_id));
+    }
+    {
+        // Lock order as in save_all_snapshots (PTY manager, then DB), so a
+        // workspace save cannot run between the two steps and write the
+        // live session's output back as its saved scrollback.
+        let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        mgr.clear_snapshot_output(&session_id);
+        db.delete_session_cache_data(&session_id)?;
+    }
+    // Let an open context panel drop the pins it is showing.
+    let _ = app.emit(&format!("context-pins-changed-{}", session_id), ());
+
+    let context_path = session_context_path(&app, &session_id)?;
+    let context_dir = context_path
+        .parent()
+        .ok_or_else(|| "context dir has no parent".to_string())?;
+    let agent_state_root = crate::agent::hermes_state_root().ok();
+    remove_session_cache_files(context_dir, agent_state_root.as_deref(), &session_id)
+}
+
 /// FNV-1a hash for config change detection
 fn fnv1a_hash(input: &str) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -684,4 +752,69 @@ fn fnv1a_hash(input: &str) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SID: &str = "3f2b8c1e-0000-4000-8000-000000000001";
+    const OTHER: &str = "3f2b8c1e-0000-4000-8000-000000000002";
+
+    fn seed(root: &Path, sid: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let context_dir = root.join("context");
+        let state_root = root.join(".hermes-ide").join("sessions");
+        std::fs::create_dir_all(&context_dir).unwrap();
+        std::fs::create_dir_all(state_root.join(sid)).unwrap();
+        std::fs::write(context_dir.join(format!("{}.md", sid)), "# ctx").unwrap();
+        std::fs::write(state_root.join(sid).join("state.json"), "{}").unwrap();
+        (context_dir, state_root)
+    }
+
+    #[test]
+    fn removes_context_file_and_agent_state_for_the_session_only() {
+        let root = tempfile::tempdir().unwrap();
+        let (context_dir, state_root) = seed(root.path(), SID);
+        seed(root.path(), OTHER);
+        // A repo-like folder next to the caches must survive.
+        let repo = root.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(repo.join("main.rs"), "fn main() {}").unwrap();
+
+        remove_session_cache_files(&context_dir, Some(&state_root), SID).unwrap();
+
+        assert!(!context_dir.join(format!("{}.md", SID)).exists());
+        assert!(!state_root.join(SID).exists());
+        assert!(context_dir.join(format!("{}.md", OTHER)).exists());
+        assert!(state_root.join(OTHER).join("state.json").exists());
+        assert!(repo.join("main.rs").exists());
+        assert!(repo.join(".git").exists());
+    }
+
+    #[test]
+    fn missing_caches_are_not_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let context_dir = root.path().join("context");
+        let state_root = root.path().join("sessions");
+        assert!(remove_session_cache_files(&context_dir, Some(&state_root), SID).is_ok());
+        assert!(remove_session_cache_files(&context_dir, None, SID).is_ok());
+    }
+
+    #[test]
+    fn only_plain_session_ids_are_accepted() {
+        assert!(is_safe_session_id(SID));
+        assert!(is_safe_session_id("session_1"));
+        for bad in [
+            "",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            "x.md",
+            "/etc",
+            &"a".repeat(129),
+        ] {
+            assert!(!is_safe_session_id(bad), "{:?} must be refused", bad);
+        }
+    }
 }

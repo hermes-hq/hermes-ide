@@ -199,3 +199,18 @@ features:
       N03-1:
         text: "The fake agent approval scenario changes the session status in the real app on all three OSes"
         scenarios: [N03-fake-agent.mjs]
+  F04:
+    name: "Private by default"
+    # partial: the scenario proves no analytics traffic while off; a full
+    # 10-minute network capture is not automated.
+    status: partial
+    criteria:
+      F04-1:
+        text: "A fresh profile has telemetry_enabled=false"
+        scenarios: [F04-private-by-default.mjs]
+      F04-2:
+        text: "With telemetry off, a network capture during a 10-minute session shows only update-check traffic"
+        scenarios: [F04-private-by-default.mjs]
+      F04-3:
+        text: "Delete session data removes Hermes caches for the chosen session and leaves the repo intact"
+        scenarios: [F04-private-by-default.mjs]

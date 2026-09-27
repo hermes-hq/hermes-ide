@@ -1,5 +1,6 @@
 mod agent;
 mod agent_catalog;
+mod analytics;
 mod claude_config;
 mod clipboard;
 mod db;
@@ -510,7 +511,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_aptabase::Builder::new("A-EU-1922161061").build())
         // Plugin identity is per page: a reload forgets the old keys.
         .on_page_load(plugin_identity::on_page_load)
         .setup(|app| {
@@ -737,6 +737,8 @@ pub fn run() {
             project::attunement::apply_context,
             project::attunement::fork_session_context,
             project::attunement::load_hermes_project_config,
+            project::attunement::delete_session_data,
+            analytics::enable_analytics,
             // Process management
             process::list_processes,
             process::kill_process,

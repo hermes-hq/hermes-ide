@@ -538,6 +538,10 @@ impl OutputAnalyzer {
     pub(crate) fn get_stripped_output(&self) -> String {
         self.stripped_buffer.clone()
     }
+
+    pub(crate) fn clear_stripped_output(&mut self) {
+        self.stripped_buffer.clear();
+    }
 }
 
 // ─── Utility Functions ──────────────────────────────────────────────
@@ -620,6 +624,18 @@ impl OutputAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clearing_the_snapshot_output_forgets_earlier_lines_only() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"secret line\r\n");
+        assert!(a.get_stripped_output().contains("secret line"));
+        a.clear_stripped_output();
+        assert!(a.get_stripped_output().is_empty());
+        a.process(b"after the delete\r\n");
+        let out = a.get_stripped_output();
+        assert!(out.contains("after the delete") && !out.contains("secret line"));
+    }
 
     #[test]
     fn alt_screen_enter_sets_state() {

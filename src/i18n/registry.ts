@@ -381,6 +381,7 @@ const ENGLISH_PACK: LanguagePack = {
     "close.terminal.body": "This will terminate the running terminal session.",
     "close.agent.confirm": "End conversation",
     "close.terminal.confirm": "Close session",
+    "session.deleteData.confirm": "Delete Hermes's cached data for this session? This clears its history, token usage and remembered context in Hermes. The session and its repository are left untouched.",
     "close.dontAsk": "Don't ask again",
     "common.cancel": "Cancel",
     "status.active": "{count} active",

@@ -1,5 +1,2 @@
-import { vi } from "vitest";
-
-vi.mock("@aptabase/tauri", () => ({
-  trackEvent: vi.fn(),
-}));
+// Shared vitest setup (see setupFiles in vite.config.ts). Global mocks go here.
+export {};

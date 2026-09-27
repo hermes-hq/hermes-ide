@@ -364,6 +364,7 @@ export const esPack: LanguagePack = {
     "close.terminal.body": "Esto terminará la sesión de terminal en ejecución.",
     "close.agent.confirm": "Terminar conversación",
     "close.terminal.confirm": "Cerrar sesión",
+    "session.deleteData.confirm": "¿Eliminar los datos que Hermes guarda en caché para esta sesión? Se borran su historial, el uso de tokens y el contexto recordado en Hermes. La sesión y su repositorio no se modifican.",
     "close.dontAsk": "No volver a preguntar",
     "common.cancel": "Cancelar",
     "status.active": "{count} activas",

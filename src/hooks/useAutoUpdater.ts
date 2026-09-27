@@ -52,6 +52,12 @@ const CHECK_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const STALL_TIMEOUT_MS = 15_000;
 
+// e2e/CI builds (`VITE_HERMES_E2E=1`, set by e2e/app/build.mjs) never poll
+// for updates — a proof-rig run or CI job should never talk to the update
+// endpoint on a timer. `manualCheck()` (behind an explicit user action)
+// still works, matching how analytics still works if triggered directly.
+const isE2eBuild = import.meta.env.VITE_HERMES_E2E === "1";
+
 export function useAutoUpdater() {
   const [state, setState] = useState<UpdateState>(INITIAL);
   const updateRef = useRef<Update | null>(null);
@@ -108,8 +114,9 @@ export function useAutoUpdater() {
     }
   }, []);
 
-  // Check on launch (after delay) + periodically
+  // Check on launch (after delay) + periodically. Never in an e2e/CI build.
   useEffect(() => {
+    if (isE2eBuild) return;
     const timeout = setTimeout(doCheck, CHECK_DELAY_MS);
     const interval = setInterval(doCheck, CHECK_INTERVAL_MS);
     return () => {

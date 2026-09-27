@@ -852,7 +852,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       onChange={(e) => {
                         const val = e.target.checked;
                         updateSetting("telemetry_enabled", val ? "true" : "false");
-                        setAnalyticsEnabled(val);
+                        void setAnalyticsEnabled(val);
                       }}
                     />
                     {t("settings.analytics")}
@@ -932,7 +932,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   // Apply theme + UI scale
                   applyTheme(newSettings.theme || "frosted-dark", newSettings);
                   // Sync analytics state
-                  setAnalyticsEnabled(newSettings.telemetry_enabled === "true");
+                  void setAnalyticsEnabled(newSettings.telemetry_enabled === "true");
                   setFooterStatus(t("settings.imported"));
                 } catch (e) {
                   setFooterStatus(t("settings.importFailed", { error: String(e) }));
