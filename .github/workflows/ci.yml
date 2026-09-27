@@ -314,8 +314,8 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
             set -e
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
+            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
-            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs
           '
 
       - name: Run scenarios
@@ -326,8 +326,8 @@ jobs:
         run: |
           export CARGO_TERM_COLOR=never
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
+          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
-          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs
 
       - name: Upload evidence
         if: always()

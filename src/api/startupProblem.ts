@@ -7,6 +7,13 @@ export interface StartupProblem {
 	message: string;
 	/** The database file Hermes tried to open. */
 	dataPath: string;
+	/** Values filled into the translated text; `title`/`message` are the English wording. */
+	found?: number | null;
+	supported?: number | null;
+	/** "<number>: <name>" of the update step that failed. */
+	step?: string | null;
+	/** The underlying error, shown as is. */
+	detail?: string | null;
 }
 
 /**

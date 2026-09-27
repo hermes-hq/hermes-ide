@@ -45,3 +45,16 @@ features:
         text: "A test build pointed at the installed app's data folder refuses to start; two builds side by side leave each other's and the installed app's files alone"
         scenarios:
           - "N02-instance-isolation.mjs@darwin,linux"
+  N06:
+    name: "Upgrades never lose data"
+    status: shipped
+    criteria:
+      N06-1:
+        text: "Every captured database opens in the new build with the same row counts"
+        scenarios: [N06-db-migrations.mjs]
+      N06-2:
+        text: "Updating from the previous release keeps sessions, settings, saved hosts and plugins"
+        scenarios: [N06-db-migrations.mjs]
+      N06-3:
+        text: "Opening a database from a newer version shows a clear message and changes nothing"
+        scenarios: [N06-db-migrations.mjs]

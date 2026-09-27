@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Scenario N06: upgrades never lose data.
 //
+// Part 0 — the database each captured release wrote (0.6.16, 1.1.3, 1.2.5,
+// 1.3.2, 1.4.0; src-tauri/tests/fixtures/db) opens in the new build, and after
+// it quits every row is still there.
+//
 // Part A — a user updates from 1.4.0. Their data folder holds the database the
 // real 1.4.0 release wrote (src-tauri/tests/fixtures/db/v1.4.0.sql). The new
 // build starts normally, still shows their settings, saved SSH hosts and
@@ -8,8 +12,9 @@
 // still there after it quits.
 //
 // Part B — a user goes back to an older Hermes after a newer one updated the
-// data. The app explains that the data is from a newer version, offers Quit,
-// and leaves the database byte for byte as it was.
+// data. The app explains that the data is from a newer version, in the
+// language the user picked, offers Quit, and leaves the database (in WAL mode,
+// like every real 1.4.0 database) byte for byte as it was.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N06-db-migrations.mjs
@@ -22,13 +27,17 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { REPO_ROOT, createLogger, launchApp, outDir, sleep } from "../harness.mjs";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
+const SCENARIO = "N06-db-migrations";
+const startedAt = Date.now();
 const DB_FILE = "hermes_idea_v3.db";
-const FIXTURE = join(REPO_ROOT, "src-tauri", "tests", "fixtures", "db", "v1.4.0.sql");
+const FIXTURES_DIR = join(REPO_ROOT, "src-tauri", "tests", "fixtures", "db");
+const CAPTURED_RELEASES = ["0.6.16", "1.1.3", "1.2.5", "1.3.2", "1.4.0"];
+const PREVIOUS_RELEASE = "1.4.0";
 const NEWER_VERSION = 99;
 
-const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", "N06-db-migrations");
+const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
 rmSync(logFile, { force: true });
 const log = createLogger(logFile);
@@ -38,11 +47,14 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-function loadFixture(dataDir, userVersion = 0) {
+function loadFixture(dataDir, userVersion = 0, { wal = false, release = PREVIOUS_RELEASE } = {}) {
   const path = join(dataDir, DB_FILE);
   const db = new DatabaseSync(path);
-  db.exec(readFileSync(FIXTURE, "utf8"));
+  db.exec(readFileSync(join(FIXTURES_DIR, `v${release}.sql`), "utf8"));
   if (userVersion) db.exec(`PRAGMA user_version = ${userVersion};`);
+  // WAL mode is stored in the file; closing the last connection removes the
+  // -wal/-shm files, as when a real 1.4.0 quits.
+  if (wal) db.exec("PRAGMA journal_mode = WAL;");
   db.close();
   return path;
 }
@@ -84,8 +96,47 @@ function invoke(bridge, command, args = {}) {
   );
 }
 
+/** The data folder's database files: the database, its -wal/-shm/-journal and backups. */
+const dbFilesIn = (dir) => filesIn(dir).filter((f) => f.startsWith(DB_FILE) || f === "backups");
+
+async function part0() {
+  log("PART 0: the database every captured release wrote opens, and keeps every row");
+  for (const release of CAPTURED_RELEASES) {
+    log(`release ${release}`);
+    let dbPath;
+    let before;
+    const app = await launchApp({
+      runDir: join(evidenceDir, `run-v${release}`),
+      log,
+      prepareDataDir: (dataDir) => {
+        dbPath = loadFixture(dataDir, 0, { release });
+        const db = new DatabaseSync(dbPath);
+        db.exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true');");
+        db.close();
+        before = rowCounts(dbPath);
+      },
+    });
+    launched.push(app);
+    let exit;
+    try {
+      await app.bridge.waitFor("the workspace", `return !!document.querySelector(".app-body");`, { timeoutMs: 20_000 });
+      assert(!(await app.bridge.exists(".startup-problem")), `${release}: the app started normally`);
+      const settings = await invoke(app.bridge, "get_settings");
+      assert(settings.fx_marker === "fixture-settings-row", `${release}: the running app reads the old settings`);
+    } finally {
+      exit = await app.stop({ keepFiles: true });
+    }
+    assert(!exit.forced && exit.code === 0, `${release}: the app quit cleanly`);
+    assert(userVersion(dbPath) === 1, `${release}: database now at schema version 1`);
+    const after = rowCounts(dbPath);
+    const lost = Object.entries(before).filter(([table, n]) => !(after[table] >= n));
+    assert(lost.length === 0, `${release}: all ${Object.keys(before).length} tables kept their rows (${JSON.stringify(before)})`);
+    assert(filesIn(join(app.dataDir, "backups")).length === 1, `${release}: one backup saved before the update`);
+  }
+}
+
 async function partA() {
-  log("PART A: update from 1.4.0 keeps sessions, settings, saved hosts and plugins");
+  log(`PART A: update from ${PREVIOUS_RELEASE} keeps sessions, settings, saved hosts and plugins`);
   let dbPath;
   let before;
   const app = await launchApp({
@@ -189,10 +240,14 @@ async function partB() {
     log,
     prepareDataDir: (dir) => {
       dataDir = dir;
-      dbPath = loadFixture(dir, NEWER_VERSION);
+      dbPath = loadFixture(dir, NEWER_VERSION, { wal: true });
+      filesBefore = dbFilesIn(dir);
       hashBefore = sha256(dbPath);
-      filesBefore = filesIn(dir);
-      log(`  put a database marked as schema version ${NEWER_VERSION} in ${dir} (sha256 ${hashBefore.slice(0, 16)}…)`);
+      // Bytes 18/19 of the SQLite header are 2 for a WAL-mode database.
+      const header = readFileSync(dbPath).subarray(18, 20);
+      assert(header[0] === 2 && header[1] === 2, "the database is in WAL mode, like a real 1.4.0 one");
+      log(`  put a WAL-mode database marked as schema version ${NEWER_VERSION} in ${dir} (sha256 ${hashBefore.slice(0, 16)}…)`);
+      log(`  files before: ${filesBefore.join(", ")}`);
     },
   });
   launched.push(app);
@@ -200,19 +255,23 @@ async function partB() {
   let quitByButton = false;
   try {
     const { bridge } = app;
+    const readScreen = (description, titleWanted) =>
+      bridge.waitFor(
+        description,
+        `const el = e2e.first(".startup-problem");
+         const title = e2e.norm(e2e.first(".startup-problem-title")?.innerText);
+         return el && ${titleWanted ? `title === ${JSON.stringify(titleWanted)}` : "true"} ? {
+           title,
+           message: e2e.norm(e2e.first(".startup-problem-message")?.innerText),
+           label: e2e.norm(e2e.first(".startup-problem-path-label")?.textContent), // shown upper-cased by CSS
+           path: e2e.norm(e2e.first(".startup-problem-path code")?.innerText),
+           buttons: e2e.all("button").map(e2e.nameOf),
+           workspace: !!document.querySelector(".app-body"),
+         } : null;`,
+        { timeoutMs: 20_000 },
+      );
     log("step B1: the window explains the problem");
-    const shown = await bridge.waitFor(
-      "the startup problem screen",
-      `const el = e2e.first(".startup-problem");
-       return el ? {
-         title: e2e.norm(e2e.first(".startup-problem-title")?.innerText),
-         message: e2e.norm(e2e.first(".startup-problem-message")?.innerText),
-         path: e2e.norm(e2e.first(".startup-problem-path code")?.innerText),
-         buttons: e2e.all("button").map(e2e.nameOf),
-         workspace: !!document.querySelector(".app-body"),
-       } : null;`,
-      { timeoutMs: 20_000 },
-    );
+    const shown = await readScreen("the startup problem screen");
     log(`  title: "${shown.title}"`);
     log(`  message: "${shown.message}"`);
     assert(shown.title === "Your data is from a newer version of Hermes", "title says the data is from a newer version");
@@ -224,9 +283,30 @@ async function partB() {
     const shot = await bridge.screenshot(join(evidenceDir, "B1-newer-data-refused.png"));
     log(`  screenshot saved: ${shot.file} (${shot.bytes} bytes)`);
 
-    log("step B2: press Quit Hermes");
+    log("step B2: a user who picked German sees the explanation in German");
+    // The settings database is what is refused, so the screen uses the
+    // language choice Hermes also keeps in the webview's local storage.
+    await bridge.eval(
+      `localStorage.setItem("hermes.ui_language", "de"); setTimeout(() => location.reload(), 50); return true;`,
+    );
+    const german = await readScreen("the German startup problem screen", "Deine Daten stammen aus einer neueren Version von Hermes");
+    log(`  title: "${german.title}"`);
+    log(`  message: "${german.message}"`);
+    assert(german.message.includes(`Datenversion ${NEWER_VERSION}`) && german.message.includes("bis 1"), "German message names both versions");
+    assert(german.message.includes("nicht geöffnet und nicht verändert"), "German message says nothing was changed");
+    assert(german.label === "Datendatei" && german.path.endsWith(DB_FILE), `German label for the data file (${german.label})`);
+    assert(JSON.stringify(german.buttons) === JSON.stringify(["Hermes beenden"]), "the only action is Hermes beenden (Quit Hermes)");
+    assert(german.workspace === false, "the workspace still did not start");
+    const shotDe = await bridge.screenshot(join(evidenceDir, "B2-newer-data-refused-de.png"));
+    log(`  screenshot saved: ${shotDe.file} (${shotDe.bytes} bytes)`);
+
+    // Leave the language as it was: on Windows the webview's storage outlives
+    // this run and the next scenario would otherwise start in German.
+    await bridge.eval(`localStorage.removeItem("hermes.ui_language"); return true;`);
+
+    log("step B3: press Hermes beenden (Quit Hermes)");
     try {
-      await bridge.clickByName("Quit Hermes");
+      await bridge.clickByName("Hermes beenden");
     } catch (e) {
       // The app may be gone before the bridge answers the click.
       const until = Date.now() + 3_000;
@@ -243,19 +323,24 @@ async function partB() {
   assert(quitByButton, "the Quit button closed the app");
   assert(exit.code === 0 && !exit.forced, "exit code 0");
 
-  log("step B3: the database is exactly as it was");
-  assert(sha256(dbPath) === hashBefore, "database file is byte-for-byte unchanged");
-  assert(userVersion(dbPath) === NEWER_VERSION, `still schema version ${NEWER_VERSION}`);
-  const filesAfter = filesIn(dataDir).filter((f) => f !== "context");
+  log("step B4: the database is exactly as it was");
+  // List the folder before opening the database below: even a read-only open
+  // of a WAL database creates -wal/-shm files. Only database files count; the
+  // webview may keep its own storage in this folder on some platforms.
+  log(`  files after: ${filesIn(dataDir).join(", ")}`);
+  const filesAfter = dbFilesIn(dataDir);
   assert(
     JSON.stringify(filesAfter) === JSON.stringify(filesBefore),
     `no backup, WAL or other database files were created (${filesAfter.join(", ")})`,
   );
+  assert(sha256(dbPath) === hashBefore, "database file is byte-for-byte unchanged");
+  assert(userVersion(dbPath) === NEWER_VERSION, `still schema version ${NEWER_VERSION}`);
 }
 
 let failed = false;
 try {
-  log(`scenario: N06-db-migrations   platform: ${platform()}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}`);
+  await part0();
   await partA();
   await partB();
 } catch (e) {
@@ -263,5 +348,4 @@ try {
   log(`FAILED: ${e?.stack ?? e}`);
 }
 for (const app of launched) app.cleanup();
-log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-process.exit(failed ? 1 : 0);
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

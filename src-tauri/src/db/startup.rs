@@ -20,6 +20,15 @@ pub struct StartupProblem {
     pub message: String,
     /// The database file Hermes tried to open.
     pub data_path: String,
+    /// Values the window fills into its translated text. `title` and
+    /// `message` above are the English wording, used when no translation
+    /// applies.
+    pub found: Option<i64>,
+    pub supported: Option<i64>,
+    /// "<number>: <name>" of the update step that failed.
+    pub step: Option<String>,
+    /// The underlying error, shown as is (it comes from the OS or SQLite).
+    pub detail: Option<String>,
 }
 
 impl StartupProblem {
@@ -34,11 +43,31 @@ impl StartupProblem {
             }
             OpenError::Sqlite(_) => ("open-failed", "Hermes could not open your data"),
         };
+        let (found, supported, step, detail) = match err {
+            OpenError::NewerSchema { found, supported } => {
+                (Some(*found), Some(*supported), None, None)
+            }
+            OpenError::Backup(e) | OpenError::Sqlite(e) => (None, None, None, Some(e.clone())),
+            OpenError::Migration {
+                version,
+                name,
+                error,
+            } => (
+                None,
+                None,
+                Some(format!("{version}: {name}")),
+                Some(error.clone()),
+            ),
+        };
         Self {
             kind,
             title,
             message: err.to_string(),
             data_path: db_path.display().to_string(),
+            found,
+            supported,
+            step,
+            detail,
         }
     }
 }
@@ -70,6 +99,30 @@ mod tests {
         assert!(p.message.contains("up to 1"));
         assert!(p.message.contains("has not opened or changed it"));
         assert_eq!(p.data_path, "/data/hermes_idea_v3.db");
+        assert_eq!((p.found, p.supported), (Some(7), Some(1)));
+        assert_eq!((p.step, p.detail), (None, None));
+    }
+
+    #[test]
+    fn failed_step_and_error_are_passed_separately_for_translation() {
+        let p = StartupProblem::from_open_error(
+            &OpenError::Migration {
+                version: 2,
+                name: "add_widgets",
+                error: "disk I/O error".into(),
+            },
+            Path::new("x.db"),
+        );
+        assert_eq!(p.step.as_deref(), Some("2: add_widgets"));
+        assert_eq!(p.detail.as_deref(), Some("disk I/O error"));
+        assert_eq!((p.found, p.supported), (None, None));
+
+        let p = StartupProblem::from_open_error(
+            &OpenError::Backup("disk full".into()),
+            Path::new("x.db"),
+        );
+        assert_eq!(p.detail.as_deref(), Some("disk full"));
+        assert_eq!(p.step, None);
     }
 
     #[test]
@@ -100,5 +153,7 @@ mod tests {
         assert_eq!(json["kind"], "open-failed");
         assert_eq!(json["dataPath"], "a.db");
         assert!(json["message"].as_str().unwrap().contains("could not open"));
+        assert_eq!(json["detail"], "x");
+        assert!(json["found"].is_null());
     }
 }

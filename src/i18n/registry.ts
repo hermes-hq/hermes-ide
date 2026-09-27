@@ -168,6 +168,16 @@ const ENGLISH_PACK: LanguagePack = {
     "builder.nothingToImportSkipped": "Nothing new to import ({count} skipped)",
     "session.new": "New session",
     "session.step": "Step {current} of {total}",
+    "startupProblem.newerData.title": "Your data is from a newer version of Hermes",
+    "startupProblem.newerData.message": "This data was saved by a newer version of Hermes (data version {found}; this version understands up to {supported}). Hermes has not opened or changed it. Install the latest version of Hermes to keep using your sessions and settings.",
+    "startupProblem.backupFailed.title": "Hermes could not back up your data",
+    "startupProblem.backupFailed.message": "Hermes needs to update its data, but could not save a backup first, so nothing was changed: {detail}",
+    "startupProblem.migrationFailed.title": "Hermes could not update your data",
+    "startupProblem.migrationFailed.message": "Hermes could not update its data (step {step}). The update was undone and your data is unchanged: {detail}",
+    "startupProblem.openFailed.title": "Hermes could not open your data",
+    "startupProblem.openFailed.message": "Hermes could not open its data: {detail}",
+    "startupProblem.dataFile": "Data file",
+    "startupProblem.quit": "Quit Hermes",
     "common.close": "Close",
     "common.continue": "Continue",
     "common.back": "Back",
@@ -708,6 +718,18 @@ export function getCurrentLanguage(): string {
   return currentLanguage;
 }
 
+/**
+ * The language the user last picked, as mirrored in local storage (the
+ * settings database may be unavailable). "en" when none is stored.
+ */
+export function getStoredUiLanguage(): string {
+  try {
+    return localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || "en";
+  } catch {
+    return "en";
+  }
+}
+
 // Keys already reported as missing, so the dev warning fires once per key.
 const warnedMissingKeys = new Set<string>();
 
@@ -716,14 +738,22 @@ const warnedMissingKeys = new Set<string>();
 // yet. Phrase count-bearing copy so a bare number reads acceptably in every
 // language until that lands.
 export function translate(key: string, values?: Record<string, string | number>): string {
-  const active = packs.get(currentLanguage);
+  return translateIn(packs.get(currentLanguage), key, values);
+}
+
+/**
+ * Like translate(), but with an explicit pack (English when undefined). For
+ * the few screens shown before plugins register their packs, such as the
+ * one shown when Hermes cannot open its data.
+ */
+export function translateIn(active: LanguagePack | undefined, key: string, values?: Record<string, string | number>): string {
   let text = active?.messages[key] ?? ENGLISH_PACK.messages[key];
   if (text === undefined) {
     // Missing from both the active pack and English: render the raw key, and
     // warn once per key in dev so the gap gets fixed instead of shipping.
     if (import.meta.env.DEV && !warnedMissingKeys.has(key)) {
       warnedMissingKeys.add(key);
-      console.warn(`[i18n] Missing translation key "${key}" (locale "${currentLanguage}", no English fallback).`);
+      console.warn(`[i18n] Missing translation key "${key}" (locale "${active?.locale ?? "en"}", no English fallback).`);
     }
     text = key;
   }
