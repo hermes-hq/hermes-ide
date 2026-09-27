@@ -39,6 +39,15 @@ describe("session context menu", () => {
     expect(nonSep[nonSep.length - 1].id).toBe("session.close");
   });
 
+  it("includes Delete Session Data before Close", () => {
+    const items = buildSessionMenuItems({ id: "s1", group: null, phase: "idle" }, []);
+    const nonSep = items.filter((i) => !i.is_separator);
+    const deleteIdx = nonSep.findIndex((i) => i.id === "session.delete-data");
+    const closeIdx = nonSep.findIndex((i) => i.id === "session.close");
+    expect(deleteIdx).toBeGreaterThanOrEqual(0);
+    expect(deleteIdx).toBeLessThan(closeIdx);
+  });
+
   it("group submenu items use 'session.set-group.<name>' ID pattern", () => {
     const items = buildSessionMenuItems({ id: "s1", group: null, phase: "idle" }, ["dev", "staging"]);
     const groupSub = items.find((i) => i.label === "Project");

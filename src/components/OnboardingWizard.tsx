@@ -43,8 +43,10 @@ export function OnboardingWizard() {
   const [providerAvailability, setProviderAvailability] = useState<Record<string, boolean>>({});
   const [detectionDone, setDetectionDone] = useState(false);
 
-  // Privacy step
-  const [analyticsOptIn, setAnalyticsOptIn] = useState(true);
+  // Privacy step — private by default: the box starts unchecked, so
+  // closing the wizard without touching it (or without reaching this step)
+  // never turns analytics on.
+  const [analyticsOptIn, setAnalyticsOptIn] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
 
   useEffect(() => {

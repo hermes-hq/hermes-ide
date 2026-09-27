@@ -31,3 +31,10 @@ export function forkSessionContext(sourceSessionId: string, targetSessionId: str
 export function loadHermesProjectConfig(projectId: string, projectPath: string): Promise<HermesProjectConfig | null> {
   return invoke<HermesProjectConfig | null>("load_hermes_project_config", { projectId, projectPath });
 }
+
+/** Deletes Hermes's own cached data for one session (history, token usage,
+ * context pins/snapshots, session-scoped memory, the on-disk context file).
+ * Leaves the session and the repo it works in untouched. */
+export function deleteSessionData(sessionId: string): Promise<void> {
+  return invoke("delete_session_data", { sessionId });
+}

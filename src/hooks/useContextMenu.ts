@@ -82,6 +82,7 @@ export function buildSessionMenuItems(
   }
 
   items.push(separator());
+  items.push(menuItem("session.delete-data", "Delete Session Data..."));
   items.push(menuItem("session.close", "Close Session"));
 
   return items;
