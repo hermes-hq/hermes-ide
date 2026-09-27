@@ -1,0 +1,10 @@
+{
+	"name": "bracketed-paste",
+	"description": "Turns on bracketed paste, waits for one paste and prints what it received. No paste within 30 s: exit 124.",
+	"steps": [
+		{ "do": "modes", "bracketedPaste": true },
+		{ "do": "print", "text": "fake-agent: paste something\n" },
+		{ "do": "waitPaste", "timeoutMs": 30000 },
+		{ "do": "exit", "code": 0 }
+	]
+}

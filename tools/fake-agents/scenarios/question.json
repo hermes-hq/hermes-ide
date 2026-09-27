@@ -1,0 +1,18 @@
+{
+	"name": "question",
+	"description": "Asks a multiple-choice question and prints the answer. 1 or 2: exit 0; any other key: exit 4; no answer within 30 s: exit 124.",
+	"steps": [
+		{ "do": "print", "text": "fake-agent: which database should I use?\n  [1] postgres\n  [2] sqlite\n> " },
+		{ "do": "osc9", "text": "Question requested" },
+		{
+			"do": "waitKey",
+			"timeoutMs": 30000,
+			"expect": ["1", "2"],
+			"branches": {
+				"1": { "steps": [{ "do": "print", "text": "1\nfake-agent: using postgres\n" }, { "do": "exit", "code": 0 }] },
+				"2": { "steps": [{ "do": "print", "text": "2\nfake-agent: using sqlite\n" }, { "do": "exit", "code": 0 }] }
+			},
+			"onOther": { "steps": [{ "do": "print", "text": "\nfake-agent: please answer 1 or 2\n" }, { "do": "exit", "code": 4 }] }
+		}
+	]
+}

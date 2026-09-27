@@ -1,0 +1,10 @@
+{
+	"name": "alt-screen-left-on",
+	"description": "Enters the alternate screen and exits 0 without leaving it or resetting modes, like a crashed full-screen program.",
+	"steps": [
+		{ "do": "modes", "bracketedPaste": true, "focus": true },
+		{ "do": "altScreen", "on": true },
+		{ "do": "print", "text": "fake-agent: full-screen UI\n" },
+		{ "do": "exit", "code": 0, "restore": false }
+	]
+}

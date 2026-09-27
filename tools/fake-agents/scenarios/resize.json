@@ -1,0 +1,9 @@
+{
+	"name": "resize",
+	"description": "Prints its size, waits for the terminal to be resized and prints the new size. No resize within 30 s: exit 124.",
+	"steps": [
+		{ "do": "size" },
+		{ "do": "waitResize", "timeoutMs": 30000 },
+		{ "do": "exit", "code": 0 }
+	]
+}

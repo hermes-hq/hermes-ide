@@ -1,0 +1,8 @@
+{
+	"name": "crash",
+	"description": "Prints a line, then is killed by SIGKILL (a shell reports exit 137).",
+	"steps": [
+		{ "do": "print", "text": "fake-agent: about to crash\n" },
+		{ "do": "kill", "signal": "SIGKILL" }
+	]
+}

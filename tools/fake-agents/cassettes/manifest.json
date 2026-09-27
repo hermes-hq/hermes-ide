@@ -1,0 +1,65 @@
+{
+	"v": 1,
+	"cassettes": [
+		{
+			"path": "acp/1/edit-approval.jsonl",
+			"agent": "acp",
+			"version": "1",
+			"scenario": "edit-approval",
+			"origin": "hand-written",
+			"date": "2026-09-27",
+			"sha256": "188ad455d545e39028e2f6080482987c3540a400546ffb67fbce86129e9b4eeb",
+			"scrubber": 1
+		},
+		{
+			"path": "claude-bridge/2.1.283/approval-bash.jsonl",
+			"agent": "claude-bridge",
+			"version": "2.1.283",
+			"scenario": "approval-bash",
+			"origin": "hand-written",
+			"date": "2026-09-27",
+			"sha256": "8c0bced6c279f3c50834e3f833ade43182187fab135a76c2ccd73a427e7f8dea",
+			"scrubber": 1
+		},
+		{
+			"path": "claude-bridge/2.1.283/crash.jsonl",
+			"agent": "claude-bridge",
+			"version": "2.1.283",
+			"scenario": "crash",
+			"origin": "hand-written",
+			"date": "2026-09-27",
+			"sha256": "cab72576ef0dceb900660558e245b3814ab49b7931a3d6731af8212f696d524b",
+			"scrubber": 1
+		},
+		{
+			"path": "claude-bridge/2.1.283/hang.jsonl",
+			"agent": "claude-bridge",
+			"version": "2.1.283",
+			"scenario": "hang",
+			"origin": "hand-written",
+			"date": "2026-09-27",
+			"sha256": "93420299bdfd7ac1ed1bde8f5d4ccc88dbf417431dc6897a437466ee0942d6d3",
+			"scrubber": 1
+		},
+		{
+			"path": "claude-bridge/2.1.283/torn-output.jsonl",
+			"agent": "claude-bridge",
+			"version": "2.1.283",
+			"scenario": "torn-output",
+			"origin": "hand-written",
+			"date": "2026-09-27",
+			"sha256": "d0bfdb70f86d590a34d6f4c9d0c3f711210715c8b0524ec4be6054e69c44c148",
+			"scrubber": 1
+		},
+		{
+			"path": "codex-app-server/0.145.0/command-approval.jsonl",
+			"agent": "codex-app-server",
+			"version": "0.145.0",
+			"scenario": "command-approval",
+			"origin": "hand-written",
+			"date": "2026-09-27",
+			"sha256": "cfd1a2ea9e7f43b5b2c2e3e2723bfa3a2dddbc43e29c540edbadd98189825b4d",
+			"scrubber": 1
+		}
+	]
+}

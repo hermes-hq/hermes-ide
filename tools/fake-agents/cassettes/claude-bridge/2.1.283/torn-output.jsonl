@@ -1,0 +1,7 @@
+{"kind":"header","v":1,"origin":"hand-written","agent":"claude-bridge","recorded_with":{"claude_code":"2.1.283","agent_sdk":"0.3.283"},"scrubbed":true,"scenario":"init, then a non-JSON line, a stderr warning, a torn half line, and exit 1"}
+{"kind":"emit","line":{"type":"system","subtype":"init","cwd":"${CWD}","session_id":"${SESSION_ID}","tools":["Bash","Edit","Read"],"model":"${MODEL}","permissionMode":"default","claude_code_version":"2.1.283","uuid":"00000000-0000-4000-8000-000000000001"}}
+{"kind":"expect","match":{"type":"user"},"timeoutMs":10000}
+{"kind":"garbage","dt":5,"text":"Warning: something printed to stdout that is not JSON"}
+{"kind":"stderr","text":"[hermes-bridge] warning: slow network"}
+{"kind":"partial","dt":5,"text":"{\"type\":\"assistant\",\"message\":{\"id\":\"msg_fa"}
+{"kind":"exit","code":1}

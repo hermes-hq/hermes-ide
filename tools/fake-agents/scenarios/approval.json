@@ -1,0 +1,40 @@
+{
+	"name": "approval",
+	"description": "Starts a task, asks to run a command in a full-screen approval box, then works for 1.5 s and finishes (y/a: exit 0) or stops (n: exit 3). No answer within 60 s: exit 124.",
+	"steps": [
+		{ "do": "title", "text": "fake-agent" },
+		{ "do": "modes", "bracketedPaste": true, "focus": true },
+		{ "do": "print", "text": "fake-agent 1.0: working on the task\n" },
+		{ "do": "progress", "state": 3 },
+		{ "do": "sleep", "ms": 50 },
+		{ "do": "altScreen", "on": true },
+		{ "do": "box", "lines": ["Allow Bash: rm -rf node_modules ?", "[y] yes   [n] no   [a] always"] },
+		{ "do": "osc9", "text": "Approval requested: rm -rf node_modules" },
+		{ "do": "osc99", "title": "fake-agent", "body": "Needs your permission" },
+		{ "do": "osc777", "title": "fake-agent", "body": "Needs your permission", "st": true },
+		{
+			"do": "waitKey",
+			"expect": ["y", "n", "a"],
+			"timeoutMs": 60000,
+			"branches": {
+				"n": {
+					"steps": [
+						{ "do": "altScreen", "on": false },
+						{ "do": "print", "text": "fake-agent: approval denied\n" },
+						{ "do": "progress", "state": 2, "pct": 100 },
+						{ "do": "exit", "code": 3 }
+					]
+				}
+			}
+		},
+		{ "do": "altScreen", "on": false },
+		{ "do": "print", "text": "fake-agent: approval granted\n" },
+		{ "do": "progress", "state": 1, "pct": 80 },
+		{ "do": "print", "text": "running...\n" },
+		{ "do": "sleep", "ms": 1500 },
+		{ "do": "print", "text": "fake-agent: task done\n" },
+		{ "do": "progress", "state": 0 },
+		{ "do": "split", "parts": ["1b5d393b41", "67656e74207475726e20636f6d706c657465", "07"], "gapMs": 20 },
+		{ "do": "exit", "code": 0 }
+	]
+}

@@ -1,0 +1,20 @@
+{"kind":"header","v":1,"origin":"hand-written","agent":"acp","recorded_with":{"acp_protocol":1},"scrubbed":true,"scenario":"initialize, new session, prompt, edit tool call with permission: allow-once (completed), reject-once (failed) or cancelled"}
+{"kind":"expect","match":{"method":"initialize"},"capture":{"ID0":"id"}}
+{"kind":"emit","line":{"jsonrpc":"2.0","id":{"$var":"ID0"},"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":false,"audio":false,"embeddedContext":true}},"authMethods":[]}}}
+{"kind":"expect","match":{"method":"session/new"},"capture":{"ID1":"id","CWD":"params.cwd"}}
+{"kind":"emit","line":{"jsonrpc":"2.0","id":{"$var":"ID1"},"result":{"sessionId":"sess_fake_001"}}}
+{"kind":"expect","match":{"method":"session/prompt"},"capture":{"ID2":"id"}}
+{"kind":"emit","dt":5,"line":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess_fake_001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will flip the debug flag."}}}}}
+{"kind":"emit","dt":5,"line":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess_fake_001","update":{"sessionUpdate":"tool_call","toolCallId":"call_001","title":"Edit config.json","kind":"edit","status":"pending","content":[{"type":"diff","path":"${CWD}/config.json","oldText":"{\n  \"debug\": false\n}","newText":"{\n  \"debug\": true\n}"}]}}}}
+{"kind":"emit","dt":5,"line":{"jsonrpc":"2.0","id":9001,"method":"session/request_permission","params":{"sessionId":"sess_fake_001","toolCall":{"toolCallId":"call_001"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"kind":"expect","match":{"id":9001},"timeoutMs":10000,"branch":[{"when":{"result.outcome.optionId":"reject-once"},"goto":"rejected"},{"when":{"result.outcome.outcome":"cancelled"},"goto":"cancelled"}]}
+{"kind":"emit","dt":5,"line":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess_fake_001","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_001","status":"completed"}}}}
+{"kind":"emit","dt":5,"line":{"jsonrpc":"2.0","id":{"$var":"ID2"},"result":{"stopReason":"end_turn"}}}
+{"kind":"hang"}
+{"kind":"label","label":"rejected"}
+{"kind":"emit","line":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess_fake_001","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_001","status":"failed"}}}}
+{"kind":"emit","line":{"jsonrpc":"2.0","id":{"$var":"ID2"},"result":{"stopReason":"end_turn"}}}
+{"kind":"hang"}
+{"kind":"label","label":"cancelled"}
+{"kind":"emit","line":{"jsonrpc":"2.0","id":{"$var":"ID2"},"result":{"stopReason":"cancelled"}}}
+{"kind":"hang"}
