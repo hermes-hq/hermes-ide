@@ -2,21 +2,98 @@
 #
 # `node scripts/check-readme-claims.mjs` reads this file, README.md and
 # e2e/acceptance.yml, and fails when:
+#   - a bullet under README.md's "## Features" heading has no
+#     `<!-- claim:<id> -->` tag (or that heading is gone)
 #   - a line in README.md is tagged `<!-- claim:<id> -->` but has no entry here
 #   - a claim here has no matching tagged line in README.md, or its `text` is
 #     not found in that line (the map has drifted from what README.md says)
-#   - a claim names no scenario, or names one that e2e/acceptance.yml does not
-#     reference from any feature's criteria, or that does not exist under
-#     e2e/app/scenarios/
+#   - a claim names no scenario and is not listed as `unproven`, or names a
+#     scenario that e2e/acceptance.yml does not reference from any feature's
+#     criteria, or that does not exist under e2e/app/scenarios/
 #
-# Not every line in the README needs an entry: only a bullet the maintainer
-# has tagged with `<!-- claim:<id> -->` right after it is checked. That keeps
-# ordinary prose free while making it impossible to add a new tagged claim
-# without deciding, right there, which scenario proves it.
+# Each claim either names the scenario that proves it:
+#     scenario: terminal-echo.mjs          (or scenarios: [a.mjs, b.mjs])
+# or is explicitly, visibly unproven, with the reason:
+#     unproven: "No real-app scenario proves this yet"
+# The gate prints every unproven claim on each run. When a scenario starts
+# proving one, replace `unproven` with `scenario`.
 #
-# To add one: tag the bullet, e.g.
-#   - **Multi-session terminals** — ... <!-- claim:multi-session -->
-# then add an entry below naming the same id, a distinctive substring of the
-# line, and the scenario file that proves it.
+# To add a feature bullet: end it with `<!-- claim:<id> -->`, then add an
+# entry below with the same id, a distinctive substring of the line as
+# `text`, and its scenario (or `unproven` and why).
 
 claims:
+  agent-chat:
+    text: "Real chat for Claude"
+    unproven: "No real-app scenario proves this yet"
+  agent-images:
+    text: "Real images"
+    unproven: "No real-app scenario proves this yet"
+  agent-persistent-conversations:
+    text: "Persistent conversations"
+    unproven: "No real-app scenario proves this yet"
+  agent-own-auth:
+    text: "Bring your own auth"
+    unproven: "No real-app scenario proves this yet"
+  multi-session:
+    text: "Multi-session management"
+    # terminal-echo creates a terminal session, finds it in the session list and
+    # closes it again. Switching between parallel sessions is not covered yet.
+    scenario: terminal-echo.mjs
+  split-panes:
+    text: "Split panes"
+    unproven: "No real-app scenario proves this yet"
+  webgl-rendering:
+    text: "WebGL-accelerated rendering"
+    unproven: "No real-app scenario proves this yet"
+  execution-timeline:
+    text: "Execution timeline"
+    unproven: "The app has no execution timeline; this bullet is slated for removal"
+  terminal-mode-other-tools:
+    text: "Still excellent for everything else"
+    unproven: "No real-app scenario proves this yet"
+  git-panel:
+    text: "Built-in git panel"
+    unproven: "No real-app scenario proves this yet"
+  git-actions:
+    text: "Stage / unstage / commit / push / pull"
+    unproven: "No real-app scenario proves this yet"
+  git-diff:
+    text: "Inline diff viewer"
+    unproven: "No real-app scenario proves this yet"
+  git-auth:
+    text: "Robust authentication"
+    unproven: "No real-app scenario proves this yet"
+  ghost-text:
+    text: "Ghost-text suggestions"
+    unproven: "No real-app scenario proves this yet"
+  prompt-composer:
+    text: "Prompt Composer"
+    unproven: "No real-app scenario proves this yet"
+  error-patterns:
+    text: "Error pattern matching"
+    unproven: "No real-app scenario proves this yet"
+  stuck-detection:
+    text: "Stuck detection"
+    unproven: "No real-app scenario proves this yet"
+  project-scanning:
+    text: "Automatic scanning"
+    unproven: "No real-app scenario proves this yet"
+  context-injection:
+    text: "Context injection"
+    unproven: "No real-app scenario proves this yet"
+  multi-project:
+    text: "Multi-project support"
+    unproven: "No real-app scenario proves this yet"
+  command-palette:
+    text: "Command Palette"
+    unproven: "No real-app scenario proves this yet"
+  cost-dashboard:
+    text: "Cost Dashboard"
+    unproven: "No real-app scenario proves this yet"
+  memory-pins:
+    text: "Memory & context pins"
+    unproven: "No real-app scenario proves this yet"
+  notifications:
+    text: "System notifications"
+    unproven: "No real-app scenario proves this yet"

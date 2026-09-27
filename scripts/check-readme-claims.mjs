@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// The README claims gate. Every feature bullet in README.md that the
-// maintainer has tagged `<!-- claim:<id> -->` must have an entry in
-// docs/readme-claims.yml naming the real-app scenario that proves it, and
-// that scenario must actually be tracked in e2e/acceptance.yml. See
-// docs/readme-claims.yml for the format and how to add a claim.
+// The README claims gate. Every bullet under README.md's "## Features"
+// heading must be tagged `<!-- claim:<id> -->`, and every tagged claim must
+// have an entry in docs/readme-claims.yml that either names the real-app
+// scenario proving it (a scenario e2e/acceptance.yml actually tracks) or is
+// explicitly listed as `unproven` with a reason. A new feature bullet with
+// neither fails CI. See docs/readme-claims.yml for the format.
 //
 //   node scripts/check-readme-claims.mjs
 //
@@ -19,6 +20,26 @@ import { fileURLToPath } from "node:url";
 import { loadLedger, listScenarioFiles, parseYaml } from "../e2e/app/acceptance.mjs";
 
 const TAG_RE = /<!--\s*claim:([A-Za-z0-9_-]+)\s*-->/;
+export const FEATURES_HEADING = "## Features";
+
+/**
+ * Every bullet ("- " or "* ") between the "## Features" heading and the next
+ * level-2 heading, with the claim id it is tagged with (or null).
+ * Returns null when README.md has no "## Features" section at all.
+ */
+export function findFeatureBullets(readme) {
+  const lines = readme.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === FEATURES_HEADING);
+  if (start < 0) return null;
+  const bullets = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^##\s/.test(line)) break;
+    if (!/^\s*[-*]\s+/.test(line)) continue;
+    bullets.push({ line, lineNumber: i + 1, id: TAG_RE.exec(line)?.[1] ?? null });
+  }
+  return bullets;
+}
 
 /** Lines in README.md tagged `<!-- claim:<id> -->`, grouped by id. */
 export function findTaggedLines(readme) {
@@ -49,8 +70,19 @@ export function normaliseClaims(doc, name = "readme-claims.yml") {
       throw new Error(`${where}: "text" must be a non-empty string (a substring of the tagged README line)`);
     }
     const list = raw.scenarios ?? (raw.scenario ? [raw.scenario] : []);
+    const unproven = raw.unproven;
+    if (unproven !== undefined) {
+      if (typeof unproven !== "string" || unproven.trim() === "") {
+        throw new Error(`${where}: "unproven" must say why no scenario proves this claim yet`);
+      }
+      if (Array.isArray(list) && list.length > 0) {
+        throw new Error(`${where}: has both scenarios and "unproven"; drop "unproven" once a scenario proves it`);
+      }
+      claims.push({ id, text: raw.text, scenarios: [], unproven });
+      continue;
+    }
     if (!Array.isArray(list) || list.length === 0) {
-      throw new Error(`${where}: needs at least one scenario ("scenario: <file>.mjs" or "scenarios: [...]")`);
+      throw new Error(`${where}: needs at least one scenario ("scenario: <file>.mjs" or "scenarios: [...]"), or "unproven: <reason>"`);
     }
     claims.push({ id, text: raw.text, scenarios: list.map(String) });
   }
@@ -70,6 +102,19 @@ export function checkClaims({ readme, claims, ledgerScenarios, scenarioFiles }) 
   const tagged = findTaggedLines(readme);
   const claimIds = new Set(claims.map((c) => c.id));
 
+  const bullets = findFeatureBullets(readme);
+  if (bullets === null) {
+    errors.push(`README.md has no "${FEATURES_HEADING}" section; the gate checks every bullet in it, so it must exist`);
+  } else {
+    for (const b of bullets) {
+      if (!b.id) {
+        errors.push(
+          `README.md:${b.lineNumber}: feature bullet has no <!-- claim:<id> --> tag; tag it and add the claim to docs/readme-claims.yml with the scenario that proves it (or "unproven: <reason>")`,
+        );
+      }
+    }
+  }
+
   for (const id of tagged.keys()) {
     if (!claimIds.has(id)) {
       const at = tagged.get(id).map((t) => t.lineNumber).join(", ");
@@ -86,7 +131,7 @@ export function checkClaims({ readme, claims, ledgerScenarios, scenarioFiles }) 
         `docs/readme-claims.yml: claim "${claim.id}"'s text ${JSON.stringify(claim.text)} is not found on its tagged README.md line(s) ${lines.map((l) => l.lineNumber).join(", ")}`,
       );
     }
-    if (claim.scenarios.length === 0) {
+    if (claim.scenarios.length === 0 && !claim.unproven) {
       errors.push(`docs/readme-claims.yml: claim "${claim.id}" has no scenario proving it`);
     }
     for (const file of claim.scenarios) {
@@ -140,7 +185,11 @@ function main() {
 
   const errors = checkClaims({ readme, claims, ledgerScenarios: ledgerScenarioFiles(ledger), scenarioFiles });
 
-  console.log(`README claims: ${claims.length} tagged claim(s) checked against ${opts.ledger}`);
+  const unproven = claims.filter((c) => c.unproven);
+  console.log(
+    `README claims: ${claims.length} tagged claim(s) checked against ${opts.ledger}; ${claims.length - unproven.length} proven by a scenario, ${unproven.length} listed as unproven`,
+  );
+  for (const c of unproven) console.log(`  unproven: ${c.id} — ${c.unproven}`);
   if (errors.length) {
     console.log("");
     for (const e of errors) console.log(`CLAIMS GATE: ${e}`);

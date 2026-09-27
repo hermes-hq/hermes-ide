@@ -6,9 +6,10 @@ import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import { visibleShortcutGroups } from "../utils/shortcuts";
 
 // The shortcuts shown here are generated from src-tauri/src/menu/mod.rs (the
-// app's native menu bar) by `node scripts/generate-shortcuts.mjs` — see
+// app's native menu bar) and src/shortcuts/app-shortcuts.json (the bindings
+// the app handles itself) by `node scripts/generate-shortcuts.mjs` — see
 // src/generated/shortcuts.ts. Regenerate that file instead of editing shortcuts
-// by hand here; a shortcut added, changed or removed from the menu is what
+// by hand here; a shortcut added, changed or removed in either source is what
 // changes what this panel and docs/shortcuts.md show.
 const VISIBLE_SHORTCUT_GROUPS = visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS);
 
@@ -39,11 +40,11 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
         <div className="shortcuts-body">
           {VISIBLE_SHORTCUT_GROUPS.map((group) => (
             <div key={group.group} className="shortcuts-group">
-              <div className="shortcuts-group-label">{group.group}</div>
+              <div className="shortcuts-group-label">{t(group.groupKey)}</div>
               <div className="shortcuts-table">
                 {group.shortcuts.map((s) => (
                   <div key={s.id} className="shortcuts-row">
-                    <span className="shortcuts-action">{s.label}</span>
+                    <span className="shortcuts-action">{t(s.labelKey)}</span>
                     <kbd className="shortcuts-kbd">{fmt(s.keys)}</kbd>
                   </div>
                 ))}

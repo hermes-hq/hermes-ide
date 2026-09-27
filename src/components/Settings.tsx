@@ -571,10 +571,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </p>
                 {visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS).map((group) => (
                   <div key={group.group} className="settings-shortcut-group">
-                    <div className="settings-shortcut-group-label">{group.group}</div>
+                    <div className="settings-shortcut-group-label">{t(group.groupKey)}</div>
                     {group.shortcuts.map((s) => (
                       <div key={s.id} className="settings-shortcut-row">
-                        <span className="settings-shortcut-action">{s.label}</span>
+                        <span className="settings-shortcut-action">{t(s.labelKey)}</span>
                         <kbd className="settings-shortcut-kbd">{fmt(s.keys)}</kbd>
                       </div>
                     ))}

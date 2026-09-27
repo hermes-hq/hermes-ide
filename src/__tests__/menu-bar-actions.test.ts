@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { matchAppShortcut } from "../utils/shortcuts";
 
 // ─── Mock Tauri APIs ─────────────────────────────────────────────────
 vi.mock("@tauri-apps/api/core", () => ({
@@ -100,18 +101,25 @@ describe("keyboard handler migration", () => {
     expect(keyboardSection).not.toMatch(/case\s+"g"/);
   });
 
+  // App.tsx's handler matches keys only through the declared list in
+  // src/shortcuts/app-shortcuts.json (matchAppShortcut), so these check that
+  // list's behaviour rather than the handler's source text.
+  const press = (key: string, mods: { alt?: boolean; shift?: boolean } = {}) => ({
+    key,
+    metaKey: true,
+    ctrlKey: false,
+    shiftKey: !!mods.shift,
+    altKey: !!mods.alt,
+  });
+
   it("App.tsx still handles Cmd+Alt+Arrow for pane navigation", () => {
-    const src = readSrc("App.tsx");
-    expect(src).toContain("ArrowRight");
-    expect(src).toContain("ArrowLeft");
-    expect(src).toContain("FOCUS_PANE");
+    expect(matchAppShortcut(press("ArrowRight", { alt: true }), true)).toBe("app.focus-next-pane");
+    expect(matchAppShortcut(press("ArrowLeft", { alt: true }), true)).toBe("app.focus-previous-pane");
   });
 
   it("App.tsx still handles Cmd+1-9 for session switching", () => {
-    const src = readSrc("App.tsx");
-    const keyboardSection = src.match(/Keyboard shortcuts.*?removeEventListener/s)?.[0] || "";
-    expect(keyboardSection).toContain('"1"');
-    expect(keyboardSection).toContain('"9"');
+    expect(matchAppShortcut(press("1"), true)).toBe("app.switch-session");
+    expect(matchAppShortcut(press("9"), true)).toBe("app.switch-session");
   });
 });
 

@@ -4,17 +4,26 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  APP_SOURCE,
+  combineShortcuts,
   extractShortcuts,
+  groupKeyFor,
   groupShortcuts,
+  labelKeyFor,
+  loadShortcutGroups,
+  MAC_SYMBOLS,
   macKeys,
   MENU_SOURCE,
   MD_OUT,
+  parseAppShortcuts,
+  PC_SYMBOLS,
   pcKeys,
   renderMarkdown,
   renderTsModule,
   toCanonicalKeys,
   TS_OUT,
 } from "./generate-shortcuts.mjs";
+import { MAC_SYMBOLS as APP_MAC_SYMBOLS, PC_SYMBOLS as APP_PC_SYMBOLS } from "../src/utils/platform.ts";
 
 const FIXTURE = `
 use tauri::menu::MenuItemBuilder;
@@ -145,12 +154,77 @@ describe("renderTsModule / renderMarkdown", () => {
   });
 });
 
+describe("app-handled shortcuts (src/shortcuts/app-shortcuts.json)", () => {
+  const APP = {
+    shortcuts: [
+      { id: "app.focus-composer", group: "Session", label: "Focus Composer", accelerators: ["CmdOrCtrl+Shift+J"], note: "Agent sessions only" },
+      { id: "app.focus-next-pane", group: "Panes", label: "Focus Next Pane", accelerators: ["CmdOrCtrl+Alt+Right", "CmdOrCtrl+Alt+Down"] },
+    ],
+  };
+
+  it("are merged into the menu group of the same name, and new groups come after the menu's", () => {
+    const menu = extractShortcuts(FIXTURE.replace("// ── View menu ──", "// ── Session menu ──"));
+    const groups = groupShortcuts(combineShortcuts(menu, parseAppShortcuts(APP)));
+    expect(groups.map((g) => g.group)).toEqual(["File", "Session", "Panes"]);
+    expect(groups[1].shortcuts.map((s) => s.id)).toEqual(["view.toggle-sidebar", "app.focus-composer"]);
+  });
+
+  it("render the first accelerator, and list the rest and the note in the docs", () => {
+    const groups = groupShortcuts(combineShortcuts([], parseAppShortcuts(APP)));
+    const ts = renderTsModule(groups);
+    expect(ts).toContain('keys: "{mod}{alt}→"');
+    const md = renderMarkdown(groups);
+    expect(md).toContain("| Focus Next Pane | ⌘⌥→ | Ctrl+Alt+→ | also ⌘⌥↓ / Ctrl+Alt+↓ |");
+    expect(md).toContain("| Focus Composer | ⌘⇧J | Ctrl+Shift+J | Agent sessions only |");
+  });
+
+  it("removing one changes the generated table", () => {
+    const without = { shortcuts: APP.shortcuts.slice(1) };
+    const md = (doc) => renderMarkdown(groupShortcuts(combineShortcuts([], parseAppShortcuts(doc))));
+    expect(md(APP)).toContain("Focus Composer");
+    expect(md(without)).not.toContain("Focus Composer");
+  });
+
+  it("reject a key combo the menu already binds, and a duplicate id", () => {
+    const menu = extractShortcuts(FIXTURE);
+    const clash = { shortcuts: [{ id: "app.x", group: "View", label: "X", accelerators: ["CmdOrCtrl+N"] }] };
+    expect(() => combineShortcuts(menu, parseAppShortcuts(clash))).toThrow(/CmdOrCtrl\+N is bound twice/);
+    const dup = { shortcuts: [APP.shortcuts[0], APP.shortcuts[0]] };
+    expect(() => parseAppShortcuts(dup)).toThrow(/duplicate id/);
+    expect(() => parseAppShortcuts({ shortcuts: [{ id: "a", group: "G", label: "L", accelerators: [] }] })).toThrow(/accelerators/);
+  });
+});
+
+describe("i18n keys", () => {
+  it("derive a stable key from the id and the group name", () => {
+    expect(labelKeyFor("file.new-session")).toBe("shortcuts.item.file.newSession");
+    expect(labelKeyFor("app.command-palette-alt")).toBe("shortcuts.item.app.commandPaletteAlt");
+    expect(groupKeyFor("File")).toBe("shortcuts.group.file");
+  });
+
+  it("are written into the generated module", () => {
+    const ts = renderTsModule(groupShortcuts(extractShortcuts(FIXTURE)));
+    expect(ts).toContain('labelKey: "shortcuts.item.file.newSession"');
+    expect(ts).toContain('groupKey: "shortcuts.group.file"');
+  });
+});
+
+describe("symbol tables", () => {
+  it("agree with fmt()'s tables in src/utils/platform.ts", () => {
+    expect(MAC_SYMBOLS).toEqual(APP_MAC_SYMBOLS);
+    expect(PC_SYMBOLS).toEqual(APP_PC_SYMBOLS);
+  });
+});
+
 describe("this repository's generated shortcuts", () => {
-  it("src/generated/shortcuts.ts and docs/shortcuts.md match what the menu currently generates", () => {
-    const source = readFileSync(MENU_SOURCE, "utf8");
-    const groups = groupShortcuts(extractShortcuts(source));
+  it("src/generated/shortcuts.ts and docs/shortcuts.md match what the menu and app-shortcuts.json currently generate", () => {
+    const groups = loadShortcutGroups(readFileSync(MENU_SOURCE, "utf8"), readFileSync(APP_SOURCE, "utf8"));
     expect(groups.length).toBeGreaterThan(0);
     expect(readFileSync(TS_OUT, "utf8")).toBe(renderTsModule(groups));
     expect(readFileSync(MD_OUT, "utf8")).toBe(renderMarkdown(groups));
+  });
+
+  it("the generated module has no doubled blank line after its header", () => {
+    expect(readFileSync(TS_OUT, "utf8")).not.toMatch(/\n\n\n/);
   });
 });

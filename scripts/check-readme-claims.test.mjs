@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadLedger, listScenarioFiles, parseYaml } from "../e2e/app/acceptance.mjs";
 import { REPO_ROOT, SCENARIOS_DIR } from "../e2e/app/harness.mjs";
-import { checkClaims, findTaggedLines, ledgerScenarioFiles, loadClaims, normaliseClaims } from "./check-readme-claims.mjs";
+import { checkClaims, findFeatureBullets, findTaggedLines, ledgerScenarioFiles, loadClaims, normaliseClaims } from "./check-readme-claims.mjs";
 
 describe("findTaggedLines", () => {
   it("finds every <!-- claim:id --> line, grouped by id", () => {
@@ -41,10 +41,67 @@ describe("normaliseClaims", () => {
     expect(() => normaliseClaims({ claims: { a: { scenario: "s.mjs" } } })).toThrow(/"text"/);
     expect(() => normaliseClaims({ claims: { a: { text: "x" } } })).toThrow(/at least one scenario/);
   });
+
+  it("accepts an explicit unproven entry with a reason, and nothing vaguer", () => {
+    expect(normaliseClaims({ claims: { a: { text: "x", unproven: "no scenario yet" } } })).toEqual([
+      { id: "a", text: "x", scenarios: [], unproven: "no scenario yet" },
+    ]);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "" } } })).toThrow(/must say why/);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "y", scenario: "s.mjs" } } })).toThrow(/both scenarios and "unproven"/);
+  });
+});
+
+describe("findFeatureBullets", () => {
+  it("returns every bullet between ## Features and the next level-2 heading, with its tag", () => {
+    const readme = [
+      "# Title",
+      "- not a feature bullet",
+      "## Features",
+      "### Terminal",
+      "- **Tagged** — yes <!-- claim:tagged -->",
+      "* **Untagged** — no",
+      "## Download",
+      "- also not a feature bullet",
+    ].join("\n");
+    expect(findFeatureBullets(readme).map((b) => [b.lineNumber, b.id])).toEqual([
+      [5, "tagged"],
+      [6, null],
+    ]);
+  });
+
+  it("returns null when there is no Features section", () => {
+    expect(findFeatureBullets("# Title\n- a bullet\n")).toBeNull();
+  });
 });
 
 describe("checkClaims", () => {
-  const readme = "- **Multi-session** — proves it <!-- claim:multi -->\n";
+  const readme = "## Features\n- **Multi-session** — proves it <!-- claim:multi -->\n";
+
+  it("fails a feature bullet with no claim tag, naming its line", () => {
+    const errors = checkClaims({
+      readme: readme + "- **Shiny new thing** — nobody proved it\n",
+      claims: [{ id: "multi", text: "proves it", scenarios: ["s.mjs"] }],
+      ledgerScenarios: new Set(["s.mjs"]),
+      scenarioFiles: ["s.mjs"],
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/^README\.md:3: feature bullet has no <!-- claim:<id> --> tag/);
+  });
+
+  it("fails when the Features section is gone", () => {
+    const errors = checkClaims({ readme: "# Title\n", claims: [], ledgerScenarios: new Set(), scenarioFiles: [] });
+    expect(errors).toEqual(['README.md has no "## Features" section; the gate checks every bullet in it, so it must exist']);
+  });
+
+  it("passes a tagged claim listed as unproven with a reason", () => {
+    const errors = checkClaims({
+      readme,
+      claims: [{ id: "multi", text: "proves it", scenarios: [], unproven: "no scenario yet" }],
+      ledgerScenarios: new Set(),
+      scenarioFiles: [],
+    });
+    expect(errors).toEqual([]);
+  });
 
   it("passes a claim whose text is on its tagged line and whose scenario is in the ledger and on disk", () => {
     const errors = checkClaims({
@@ -88,19 +145,19 @@ describe("checkClaims", () => {
 
   it("fails a README-tagged claim with no entry in the map", () => {
     const errors = checkClaims({
-      readme: "- untracked claim <!-- claim:untracked -->\n",
+      readme: "## Features\n- untracked claim <!-- claim:untracked -->\n",
       claims: [],
       ledgerScenarios: new Set(),
       scenarioFiles: [],
     });
     expect(errors).toEqual([
-      'README.md:1 tags claim "untracked" with <!-- claim:untracked --> but docs/readme-claims.yml has no entry for it',
+      'README.md:2 tags claim "untracked" with <!-- claim:untracked --> but docs/readme-claims.yml has no entry for it',
     ]);
   });
 
   it("fails a map entry whose tag was removed from README.md (stale)", () => {
     const errors = checkClaims({
-      readme: "no tags here\n",
+      readme: "## Features\nno tags here\n",
       claims: [{ id: "multi", text: "proves it", scenarios: ["s.mjs"] }],
       ledgerScenarios: new Set(["s.mjs"]),
       scenarioFiles: ["s.mjs"],
