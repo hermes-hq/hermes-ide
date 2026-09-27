@@ -1715,7 +1715,10 @@ pub fn write_to_session(
 ///      fallback — the shell is at its prompt when it has no child process.
 ///      A program the shell started, such as an agent CLI, is its child.
 #[tauri::command]
-pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
+pub async fn is_shell_foreground(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<bool, String> {
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
@@ -4027,6 +4030,7 @@ mod foreground_tests {
         let mut cmd = CommandBuilder::new("/bin/sh");
         cmd.arg("-i");
         cmd.env("PS1", "$ ");
+        cmd.cwd(std::env::temp_dir());
         #[cfg(target_os = "macos")]
         let child = {
             let tty = pair.master.tty_name().unwrap();

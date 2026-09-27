@@ -124,6 +124,9 @@ function prepare1_4Data(dataDir, home) {
   setting.run("execution_mode", "autonomous");
   setting.run("auto_command_min_frequency", "2");
   setting.run("auto_cancel_delay_ms", "1000");
+  // The fixture was captured on macOS with zsh as the default shell; this
+  // user keeps the default shell of the machine the test runs on.
+  db.exec("DELETE FROM settings WHERE key = 'default_shell';");
   // What 1.4.0 learned: after FIRST then SECOND, the user runs PREDICTED.
   const learned = db.prepare(
     "INSERT OR REPLACE INTO command_patterns (project_id, sequence, next_command, frequency, last_seen) VALUES (?, ?, ?, 9, 0)",
