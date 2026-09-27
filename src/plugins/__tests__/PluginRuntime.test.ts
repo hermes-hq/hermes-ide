@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PluginRuntime, type PluginModule } from "../PluginRuntime";
 import type { PluginAPICallbacks } from "../PluginAPI";
+import { _resetPluginIdentityForTests } from "../identity";
+import { HOST_KEY, identityInvoke } from "./identityMock";
 
 vi.mock("@tauri-apps/api/core", () => ({
 	invoke: vi.fn(),
@@ -55,7 +57,8 @@ describe("PluginRuntime", () => {
 		callbacks = createMockCallbacks();
 		runtime = new PluginRuntime(callbacks);
 		mockInvoke.mockReset();
-		mockInvoke.mockResolvedValue(undefined);
+		mockInvoke.mockImplementation(identityInvoke);
+		_resetPluginIdentityForTests();
 	});
 
 	describe("register", () => {
@@ -320,11 +323,15 @@ describe("PluginRuntime", () => {
 				version: "1.0.0",
 				name: "Test Plugin",
 				permissions: expect.arrayContaining(["clipboard.read", "clipboard.write"]),
+				hostKey: HOST_KEY,
 			});
 		});
 
 		it("should still activate even if metadata save fails", async () => {
-			mockInvoke.mockRejectedValue(new Error("DB unavailable"));
+			mockInvoke.mockImplementation(async (cmd, args) => {
+				if (cmd === "save_plugin_metadata") throw new Error("DB unavailable");
+				return identityInvoke(cmd, args as Record<string, unknown>);
+			});
 			const activate = vi.fn();
 			const plugin = createTestPlugin({ activate });
 			runtime.register(plugin);

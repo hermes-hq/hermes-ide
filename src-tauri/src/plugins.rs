@@ -4,6 +4,7 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use tauri::State;
 
+use crate::plugin_identity::PluginIdentityState;
 use crate::AppState;
 
 /// Returns the plugins directory path inside the app data directory.
@@ -136,9 +137,15 @@ pub fn get_plugins_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
-/// Uninstall a plugin by removing its directory.
+/// Uninstall a plugin by removing its directory. Host only.
 #[tauri::command]
-pub fn uninstall_plugin(app: tauri::AppHandle, plugin_dir: String) -> Result<(), String> {
+pub fn uninstall_plugin(
+    app: tauri::AppHandle,
+    plugin_dir: String,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
+) -> Result<(), String> {
+    identity.require_host(&host_key)?;
     let dir = plugins_dir(&app)?;
     let plugin_path = dir.join(&plugin_dir);
 
@@ -158,10 +165,20 @@ pub fn uninstall_plugin(app: tauri::AppHandle, plugin_dir: String) -> Result<(),
 }
 
 /// Install a plugin from a .tgz archive (raw bytes from frontend fetch).
-/// Extracts to plugins directory under the plugin's ID.
+/// Extracts to plugins directory under the plugin's ID. Host only.
 #[tauri::command]
-pub fn install_plugin(app: tauri::AppHandle, data: Vec<u8>) -> Result<String, String> {
-    let dir = plugins_dir(&app)?;
+pub fn install_plugin(
+    app: tauri::AppHandle,
+    data: Vec<u8>,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
+) -> Result<String, String> {
+    identity.require_host(&host_key)?;
+    install_plugin_bytes(&app, data)
+}
+
+fn install_plugin_bytes(app: &tauri::AppHandle, data: Vec<u8>) -> Result<String, String> {
+    let dir = plugins_dir(app)?;
     if !dir.exists() {
         fs::create_dir_all(&dir).map_err(|e| format!("Failed to create plugins dir: {}", e))?;
     }
@@ -253,13 +270,16 @@ pub async fn fetch_plugin_registry(url: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read registry: {}", e))
 }
 
-/// Download a plugin .tgz from a URL and install it.
+/// Download a plugin .tgz from a URL and install it. Host only.
 /// The download happens in Rust to bypass WebView CSP restrictions.
 #[tauri::command]
 pub async fn download_and_install_plugin(
     app: tauri::AppHandle,
     url: String,
+    host_key: String,
+    identity: State<'_, PluginIdentityState>,
 ) -> Result<String, String> {
+    identity.require_host(&host_key)?;
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Download failed: {}", e))?;
@@ -273,7 +293,7 @@ pub async fn download_and_install_plugin(
         .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
 
-    install_plugin(app, bytes.to_vec())
+    install_plugin_bytes(&app, bytes.to_vec())
 }
 
 fn find_manifest_in_dir(dir: &std::path::Path) -> Result<(PathBuf, String), String> {
@@ -306,14 +326,17 @@ fn find_manifest_in_dir(dir: &std::path::Path) -> Result<(PathBuf, String), Stri
 }
 
 /// Fetch a URL and return the response body as a string.
-/// Used by plugins with the "network" permission.
+/// Used by plugins with the "network" permission. The caller is identified
+/// by its plugin token, never by a name it supplies.
 #[tauri::command]
 pub async fn plugin_fetch_url(
     url: String,
     headers: Option<std::collections::HashMap<String, String>>,
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, PluginIdentityState>,
 ) -> Result<String, String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         if !db.has_plugin_permission(&plugin_id, "network")? {
@@ -348,15 +371,17 @@ pub async fn plugin_fetch_url(
 }
 
 /// POST JSON to a URL and return the response body as a string.
-/// Used by plugins with the "network" permission.
+/// Used by plugins with the "network" permission. Token-bound.
 #[tauri::command]
 pub async fn plugin_post_json(
     url: String,
     body: String,
     headers: Option<std::collections::HashMap<String, String>>,
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, PluginIdentityState>,
 ) -> Result<String, String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         if !db.has_plugin_permission(&plugin_id, "network")? {
@@ -393,14 +418,16 @@ pub async fn plugin_post_json(
 }
 
 /// Execute a shell command and return its output.
-/// Used by plugins with the "shell.exec" permission.
+/// Used by plugins with the "shell.exec" permission. Token-bound.
 #[tauri::command]
 pub async fn plugin_exec_command(
     command: String,
     args: Vec<String>,
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, PluginIdentityState>,
 ) -> Result<PluginExecResult, String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         if !db.has_plugin_permission(&plugin_id, "shell.exec")? {

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { hostInvoke } from "./identity";
 
 export type InstallPhase = "downloading" | "extracting" | "done";
 
@@ -12,7 +12,7 @@ export async function downloadAndInstallPlugin(
 ): Promise<string> {
     onProgress?.("downloading");
 
-    const pluginId = await invoke<string>("download_and_install_plugin", { url: downloadUrl });
+    const pluginId = await hostInvoke<string>("download_and_install_plugin", { url: downloadUrl });
 
     onProgress?.("done");
 

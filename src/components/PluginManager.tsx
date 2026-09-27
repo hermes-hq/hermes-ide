@@ -5,6 +5,7 @@ import type { PluginManifest, RegistryPlugin, ChangelogEntry } from "../plugins/
 import { downloadAndInstallPlugin, type InstallPhase } from "../plugins/pluginInstaller";
 import { hasUpdate, meetsMinVersion } from "../plugins/semver";
 import { PluginLoader } from "../plugins/PluginLoader";
+import { hostInvoke } from "../plugins/identity";
 import type { PluginRuntime } from "../plugins/PluginRuntime";
 import { PluginSettingsForm } from "./PluginSettingsForm";
 import { REGISTRY_URL, DEFAULT_PLUGINS } from "../plugins/constants";
@@ -164,7 +165,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 		const { pluginId, dirName } = pendingUninstall;
 		setPendingUninstall(null);
 		try {
-			await invoke("uninstall_plugin", { pluginDir: dirName });
+			await hostInvoke("uninstall_plugin", { pluginDir: dirName });
 		} catch (err) {
 			setError(`Failed to uninstall: ${err}`);
 			return;
@@ -178,7 +179,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 		}
 		// Clean up database records (plugin settings, enabled state)
 		try {
-			await invoke("cleanup_plugin_data", { pluginId });
+			await hostInvoke("cleanup_plugin_data", { pluginId });
 		} catch {
 			// DB cleanup is best-effort
 		}
@@ -214,7 +215,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 			await downloadAndInstallPlugin(plugin.downloadUrl, (phase) => setInstallPhase(phase));
 			// Save plugin metadata (permissions) to DB for backend enforcement
 			try {
-				await invoke("save_plugin_metadata", {
+				await hostInvoke("save_plugin_metadata", {
 					pluginId: plugin.id,
 					version: plugin.version,
 					name: plugin.name,
@@ -253,7 +254,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 			await downloadAndInstallPlugin(plugin.downloadUrl, (phase) => setInstallPhase(phase));
 			// Save updated metadata + permissions to DB
 			try {
-				await invoke("save_plugin_metadata", {
+				await hostInvoke("save_plugin_metadata", {
 					pluginId: plugin.id,
 					version: plugin.version,
 					name: plugin.name,
@@ -280,7 +281,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 					await runtime.activate(pluginId);
 				}
 			}
-			await invoke("set_plugin_enabled", { pluginId, enabled: !currentlyEnabled });
+			await hostInvoke("set_plugin_enabled", { pluginId, enabled: !currentlyEnabled });
 			setInstalled(prev => prev.map(p =>
 				p.manifest.id === pluginId ? { ...p, enabled: !currentlyEnabled } : p
 			));

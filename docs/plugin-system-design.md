@@ -727,7 +727,7 @@ function createPluginAPI(pluginId: string, grantedPermissions: Set<string>): Her
         if (!grantedPermissions.has("storage")) {
           throw new PermissionDeniedError(pluginId, "storage");
         }
-        return invoke("get_plugin_setting", { pluginId, key });
+        return invoke("get_plugin_setting", { key, pluginToken });
       },
     },
     network: {
@@ -735,7 +735,7 @@ function createPluginAPI(pluginId: string, grantedPermissions: Set<string>): Her
         if (!grantedPermissions.has("network")) {
           throw new PermissionDeniedError(pluginId, "network");
         }
-        return invoke("plugin_fetch_url", { url, pluginId });
+        return invoke("plugin_fetch_url", { url, pluginToken });
       },
     },
     // ... other namespaces with similar checks
@@ -748,9 +748,20 @@ function createPluginAPI(pluginId: string, grantedPermissions: Set<string>): Her
 Even if a malicious plugin bypasses the JS API and calls Tauri IPC commands directly, the Rust backend independently verifies permissions from the database before executing any operation:
 
 - `get_plugin_setting`, `set_plugin_setting`, `delete_plugin_setting`, `get_plugin_settings_batch` — all require `"storage"` permission in the `plugins.permissions_granted` DB column
-- `plugin_fetch_url` — requires `"network"` permission, and the `pluginId` parameter is mandatory
+- `plugin_fetch_url`, `plugin_post_json` — require `"network"`; `plugin_exec_command` — requires `"shell.exec"`
+
+**Who is calling (`src-tauri/src/plugin_identity.rs`, `src/plugins/identity.ts`).** Plugin bundles run in the host webview, so a caller-supplied plugin id proves nothing: any bundle could name another plugin. The backend therefore identifies the caller by an unguessable per-plugin **token**, not by an id:
+
+- On page load the app frontend claims a random **host key** from the backend, exactly once, before it executes any plugin bundle (`PluginLoader.loadAllPlugins` does this first; if the claim fails, no plugin is loaded). Every later claim on the same page is refused, so a plugin can never obtain it. A reload starts over with fresh keys.
+- With the host key the runtime mints one **plugin token** per plugin when it activates it, and hands it only to that plugin's API object (captured in closures; the runtime does not keep the API object, so it is not reachable through React props). The token is revoked when the plugin is deactivated or unloaded.
+- The plugin-facing commands above take `pluginToken` and resolve the plugin id from it. A call with a missing, guessed or foreign token is refused.
+- Management commands — `save_plugin_metadata`, `set_plugin_enabled`, `cleanup_plugin_data`, `install_plugin`, `download_and_install_plugin`, `uninstall_plugin`, `issue_plugin_token`, `revoke_plugin_token` — take `hostKey`, so a plugin cannot grant itself permissions or install, disable or remove other plugins.
+
+Nothing changes for plugin authors: the public API (`api.storage`, `api.network`, `api.shell`, ...) is unchanged.
 
 On plugin activation, the runtime persists the plugin's permissions from its manifest into the `plugins` table via `save_plugin_metadata`. This ensures the backend always has an authoritative record of what each plugin is allowed to do.
+
+*Known limit:* plugins still share one JavaScript realm with each other and the app. Identity binding stops a plugin from *calling the backend* as another plugin, but a bundle can still tamper with shared globals (for example, wrap another plugin's registration on `window.__hermesPlugins` before it activates). Real isolation needs a separate realm per plugin (iframe or worker), which is a larger change tracked for Plugin API v2.
 
 **Permission migration:** When a plugin is activated for the first time (or after an update), its permissions are automatically saved to the database. This means existing plugins that were installed before backend enforcement was added will have their permissions migrated seamlessly on their next activation.
 
@@ -1485,21 +1496,27 @@ CREATE TABLE IF NOT EXISTS plugin_storage (
 plugins::list_installed_plugins       // Scan plugins dir, return manifests
 plugins::read_plugin_bundle           // Read JS bundle from disk (path-traversal safe)
 plugins::get_plugins_dir              // Get/create the plugins directory path
-plugins::install_plugin               // Extract .tgz archive to plugins dir
-plugins::uninstall_plugin             // Remove plugin directory
-plugins::download_and_install_plugin  // Download .tgz from URL and install
+plugins::install_plugin               // Extract .tgz archive to plugins dir (hostKey)
+plugins::uninstall_plugin             // Remove plugin directory (hostKey)
+plugins::download_and_install_plugin  // Download .tgz from URL and install (hostKey)
 plugins::fetch_plugin_registry        // Fetch registry JSON (bypasses CSP)
-plugins::plugin_fetch_url             // Fetch URL for plugins (requires "network" permission)
-plugins::plugin_exec_command          // Execute shell command (requires "shell.exec" permission)
+plugins::plugin_fetch_url             // Fetch URL for plugins (pluginToken; requires "network")
+plugins::plugin_post_json             // POST JSON for plugins (pluginToken; requires "network")
+plugins::plugin_exec_command          // Execute shell command (pluginToken; requires "shell.exec")
+
+// Plugin identity (src-tauri/src/plugin_identity.rs)
+plugin_identity::claim_plugin_host_key  // The app claims its host key, once per page load
+plugin_identity::issue_plugin_token     // Mint/return a plugin's token (hostKey)
+plugin_identity::revoke_plugin_token    // Invalidate a plugin's token (hostKey)
 
 // Plugin storage & permissions (src-tauri/src/db/mod.rs)
-db::get_plugin_setting                // Get value (requires "storage" permission)
-db::set_plugin_setting                // Set value (requires "storage" permission)
-db::delete_plugin_setting             // Delete value (requires "storage" permission)
-db::get_plugin_settings_batch         // Get all __setting: keys (requires "storage" permission)
-db::set_plugin_enabled                // Toggle enabled/disabled state
+db::get_plugin_setting                // Get value (pluginToken; requires "storage")
+db::set_plugin_setting                // Set value (pluginToken; requires "storage")
+db::delete_plugin_setting             // Delete value (pluginToken; requires "storage")
+db::get_plugin_settings_batch         // Get all __setting: keys (pluginToken; requires "storage")
+db::set_plugin_enabled                // Toggle enabled/disabled state (hostKey)
 db::get_disabled_plugin_ids           // List disabled plugin IDs
-db::cleanup_plugin_data               // Remove all DB records for a plugin (uninstall)
-db::save_plugin_metadata              // Upsert plugin metadata + permissions to DB
+db::cleanup_plugin_data               // Remove all DB records for a plugin (uninstall; hostKey)
+db::save_plugin_metadata              // Upsert plugin metadata + permissions to DB (hostKey)
 db::get_plugin_permissions            // Query granted permissions for a plugin
 ```

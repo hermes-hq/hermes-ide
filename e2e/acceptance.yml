@@ -61,6 +61,16 @@ features:
       N06-3:
         text: "Opening a database from a newer version shows a clear message and changes nothing"
         scenarios: [N06-db-migrations.mjs]
+  SEC-plugin-identity:
+    name: "Plugin commands are bound to the calling plugin"
+    status: shipped
+    criteria:
+      SEC-plugin-identity-1:
+        text: "A plugin that calls the app directly naming another plugin's id, or trying to grant itself permissions, is refused and leaves no trace"
+        scenarios: [SEC-plugin-identity-two-plugins.mjs]
+      SEC-plugin-identity-2:
+        text: "A well-behaved plugin (storage + network, like the GitHub plugin) keeps working through the plugin API"
+        scenarios: [SEC-plugin-identity-two-plugins.mjs]
   N07:
     name: "Feature flags"
     status: partial

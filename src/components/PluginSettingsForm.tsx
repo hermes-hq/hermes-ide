@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeAsPlugin } from "../plugins/identity";
 import type { PluginSettingsSchema, PluginSettingDefinition } from "../plugins/types";
 import type { PluginRuntime } from "../plugins/PluginRuntime";
 
@@ -15,7 +15,7 @@ export function PluginSettingsForm({ pluginId, schema, runtime }: PluginSettings
 
 	useEffect(() => {
 		setLoading(true);
-		invoke<Record<string, string>>("get_plugin_settings_batch", { pluginId })
+		invokeAsPlugin<Record<string, string>>(pluginId, "get_plugin_settings_batch")
 			.then((stored) => {
 				const resolved: Record<string, string | number | boolean> = {};
 				for (const [key, def] of Object.entries(schema)) {
@@ -43,8 +43,7 @@ export function PluginSettingsForm({ pluginId, schema, runtime }: PluginSettings
 		(key: string, value: string | number | boolean) => {
 			setValues((prev) => ({ ...prev, [key]: value }));
 			const storageKey = `__setting:${key}`;
-			invoke("set_plugin_setting", {
-				pluginId,
+			invokeAsPlugin(pluginId, "set_plugin_setting", {
 				key: storageKey,
 				value: String(value),
 			}).catch(console.error);

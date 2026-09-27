@@ -1,6 +1,7 @@
 import type { PluginManifest, PluginCommandContribution, PluginPanelContribution, PluginStatusBarItem, PluginSessionActionContribution, HermesEvent, FileHandlerProps } from "./types";
 import { createPluginAPI, type HermesPluginAPI, type PluginPanelProps, type PluginAPICallbacks } from "./PluginAPI";
-import { invoke } from "@tauri-apps/api/core";
+import type { Disposable } from "./types";
+import { hostInvoke, issuePluginToken, revokePluginToken } from "./identity";
 
 export type PluginActivateFn = (api: HermesPluginAPI) => void | Promise<void>;
 export type PluginDeactivateFn = () => void | Promise<void>;
@@ -13,10 +14,21 @@ export interface PluginModule {
 
 export type PluginStatus = "registered" | "activating" | "active" | "error" | "inactive";
 
+/**
+ * What the runtime keeps of an active plugin's API. Deliberately NOT the API
+ * object itself: that object's closures hold the plugin's identity token,
+ * and this runtime is reachable from React props, so holding the API here
+ * would let one plugin act as another.
+ */
+interface PluginApiHandle {
+	subscriptions: Disposable[];
+	notifySettingChanged: (key: string, value: string | number | boolean) => void;
+}
+
 interface PluginEntry {
 	module: PluginModule;
 	status: PluginStatus;
-	api: HermesPluginAPI | null;
+	api: PluginApiHandle | null;
 	error?: Error;
 }
 
@@ -72,9 +84,13 @@ export class PluginRuntime {
 				permissions.add("storage");
 			}
 
+			// The backend's proof of this plugin's identity. Without it the
+			// plugin cannot run: fail closed rather than activate unbound.
+			const pluginToken = await issuePluginToken(pluginId);
+
 			// Persist plugin metadata + permissions to DB for backend enforcement
 			try {
-				await invoke("save_plugin_metadata", {
+				await hostInvoke("save_plugin_metadata", {
 					pluginId,
 					version: entry.module.manifest.version,
 					name: entry.module.manifest.name,
@@ -96,8 +112,9 @@ export class PluginRuntime {
 					this.notify();
 				},
 			};
-			const api = createPluginAPI(
+			const api: HermesPluginAPI = createPluginAPI(
 				pluginId,
+				pluginToken,
 				permissions,
 				settingsSchema,
 				fullCallbacks,
@@ -105,7 +122,10 @@ export class PluginRuntime {
 				this.panelComponents,
 				this.fileHandlers,
 			);
-			entry.api = api;
+			entry.api = {
+				subscriptions: api.subscriptions,
+				notifySettingChanged: (key, value) => api._notifySettingChanged(key, value),
+			};
 			await entry.module.activate(api);
 			entry.status = "active";
 		} catch (err) {
@@ -128,8 +148,18 @@ export class PluginRuntime {
 				}
 				entry.api = null;
 			}
+			await this.revokeToken(pluginId);
 		}
 		this.notify();
+	}
+
+	/** Best effort: a token that cannot be revoked dies with the page anyway. */
+	private async revokeToken(pluginId: string): Promise<void> {
+		try {
+			await revokePluginToken(pluginId);
+		} catch (err) {
+			console.warn(`[PluginRuntime] Failed to revoke token for "${pluginId}":`, err);
+		}
 	}
 
 	async deactivate(pluginId: string): Promise<void> {
@@ -151,6 +181,8 @@ export class PluginRuntime {
 
 		entry.api = null;
 		entry.status = "inactive";
+		// The API object the plugin still holds must stop working now.
+		await this.revokeToken(pluginId);
 		this.notify();
 	}
 
@@ -194,7 +226,7 @@ export class PluginRuntime {
 	notifySettingChanged(pluginId: string, key: string, value: string | number | boolean): void {
 		const entry = this.plugins.get(pluginId);
 		if (!entry?.api) return;
-		entry.api._notifySettingChanged(key, value);
+		entry.api.notifySettingChanged(key, value);
 	}
 
 	private subscribeEvent(event: HermesEvent, callback: (...args: unknown[]) => void): { dispose(): void } {

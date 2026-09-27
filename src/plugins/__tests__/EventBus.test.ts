@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Activation talks to the backend (plugin identity, metadata); stand it in.
+vi.mock("@tauri-apps/api/core", () => ({
+	invoke: vi.fn(),
+}));
+
+import { invoke } from "@tauri-apps/api/core";
 import { PluginRuntime, type PluginModule } from "../PluginRuntime";
 import { createPluginAPI, type PluginAPICallbacks } from "../PluginAPI";
 import type { HermesEvent } from "../types";
+import { _resetPluginIdentityForTests } from "../identity";
+import { identityInvoke } from "./identityMock";
 
 /**
  * Tests for the event bus system implemented in PluginRuntime.
@@ -41,6 +50,9 @@ describe("EventBus (PluginRuntime event system)", () => {
 	let runtime: PluginRuntime;
 
 	beforeEach(() => {
+		vi.mocked(invoke).mockReset();
+		vi.mocked(invoke).mockImplementation(identityInvoke);
+		_resetPluginIdentityForTests();
 		runtime = new PluginRuntime(createMockCallbacks());
 	});
 
@@ -170,6 +182,7 @@ describe("EventBus (PluginRuntime event system)", () => {
 		// to test the fallback path
 		const api = createPluginAPI(
 			"test",
+			"tok-test",
 			new Set<string>(),
 			undefined,
 			createMockCallbacks(), // no onEventSubscribe

@@ -68,19 +68,19 @@ describe("Plugin Settings", () => {
 	describe("settings.get()", () => {
 		it("should return default from schema when no stored value", async () => {
 			mockInvoke.mockResolvedValue(null);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const fontSize = await api.settings.get<number>("fontSize");
 			expect(fontSize).toBe(14);
 			expect(mockInvoke).toHaveBeenCalledWith("get_plugin_setting", {
-				pluginId: "test",
+				pluginToken: "tok-test",
 				key: "__setting:fontSize",
 			});
 		});
 
 		it("should return stored value when it exists", async () => {
 			mockInvoke.mockResolvedValue("20");
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const fontSize = await api.settings.get<number>("fontSize");
 			expect(fontSize).toBe(20);
@@ -88,7 +88,7 @@ describe("Plugin Settings", () => {
 
 		it("should coerce number values from string", async () => {
 			mockInvoke.mockResolvedValue("3.14");
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const fontSize = await api.settings.get<number>("fontSize");
 			expect(fontSize).toBe(3.14);
@@ -97,7 +97,7 @@ describe("Plugin Settings", () => {
 
 		it("should coerce boolean values from string", async () => {
 			mockInvoke.mockResolvedValue("true");
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const val = await api.settings.get<boolean>("showLineNumbers");
 			expect(val).toBe(true);
@@ -106,7 +106,7 @@ describe("Plugin Settings", () => {
 
 		it("should coerce boolean false from string", async () => {
 			mockInvoke.mockResolvedValue("false");
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const val = await api.settings.get<boolean>("showLineNumbers");
 			expect(val).toBe(false);
@@ -115,14 +115,14 @@ describe("Plugin Settings", () => {
 
 		it("should return string values as-is", async () => {
 			mockInvoke.mockResolvedValue("Howdy");
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const val = await api.settings.get<string>("greeting");
 			expect(val).toBe("Howdy");
 		});
 
 		it("should return undefined for unknown key", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const val = await api.settings.get("nonexistent");
 			expect(val).toBeUndefined();
@@ -130,7 +130,7 @@ describe("Plugin Settings", () => {
 
 		it("should return default when stored value is undefined", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const val = await api.settings.get<boolean>("showLineNumbers");
 			expect(val).toBe(true);
@@ -139,7 +139,7 @@ describe("Plugin Settings", () => {
 
 	describe("settings.update()", () => {
 		it("should validate key exists in schema", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("unknownKey", "value")).rejects.toThrow(
 				'Plugin "test": unknown setting key "unknownKey".',
@@ -147,7 +147,7 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should validate number min", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("fontSize", 2)).rejects.toThrow(
 				'value 2 is below minimum 8',
@@ -155,7 +155,7 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should validate number max", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("fontSize", 100)).rejects.toThrow(
 				'value 100 is above maximum 72',
@@ -163,7 +163,7 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should validate select options", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("theme", "neon")).rejects.toThrow(
 				'value "neon" is not a valid option',
@@ -171,7 +171,7 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should validate type mismatch for number", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("fontSize", "not-a-number")).rejects.toThrow(
 				'expects a number, got string',
@@ -179,7 +179,7 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should validate type mismatch for boolean", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("showLineNumbers", "yes")).rejects.toThrow(
 				'expects a boolean, got string',
@@ -187,7 +187,7 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should validate type mismatch for string", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("greeting", 42)).rejects.toThrow(
 				'expects a string, got number',
@@ -196,11 +196,11 @@ describe("Plugin Settings", () => {
 
 		it("should write to storage with __setting: prefix", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await api.settings.update("fontSize", 16);
 			expect(mockInvoke).toHaveBeenCalledWith("set_plugin_setting", {
-				pluginId: "test",
+				pluginToken: "tok-test",
 				key: "__setting:fontSize",
 				value: "16",
 			});
@@ -208,11 +208,11 @@ describe("Plugin Settings", () => {
 
 		it("should stringify boolean values for storage", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await api.settings.update("showLineNumbers", false);
 			expect(mockInvoke).toHaveBeenCalledWith("set_plugin_setting", {
-				pluginId: "test",
+				pluginToken: "tok-test",
 				key: "__setting:showLineNumbers",
 				value: "false",
 			});
@@ -222,7 +222,7 @@ describe("Plugin Settings", () => {
 			mockInvoke.mockResolvedValue(undefined);
 			const onSettingChanged = vi.fn();
 			callbacks = createMockCallbacks({ onSettingChanged });
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await api.settings.update("fontSize", 18);
 			expect(onSettingChanged).toHaveBeenCalledWith("test", "fontSize", 18);
@@ -230,11 +230,11 @@ describe("Plugin Settings", () => {
 
 		it("should accept valid select option", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await api.settings.update("theme", "light");
 			expect(mockInvoke).toHaveBeenCalledWith("set_plugin_setting", {
-				pluginId: "test",
+				pluginToken: "tok-test",
 				key: "__setting:theme",
 				value: "light",
 			});
@@ -242,11 +242,11 @@ describe("Plugin Settings", () => {
 
 		it("should accept valid number within range", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await api.settings.update("fontSize", 36);
 			expect(mockInvoke).toHaveBeenCalledWith("set_plugin_setting", {
-				pluginId: "test",
+				pluginToken: "tok-test",
 				key: "__setting:fontSize",
 				value: "36",
 			});
@@ -254,7 +254,7 @@ describe("Plugin Settings", () => {
 
 		it("should notify local onDidChange listeners", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const listener = vi.fn();
 			api.settings.onDidChange("fontSize", listener);
@@ -266,7 +266,7 @@ describe("Plugin Settings", () => {
 
 	describe("settings.onDidChange()", () => {
 		it("should return a disposable", () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const disposable = api.settings.onDidChange("fontSize", vi.fn());
 			expect(disposable).toBeDefined();
@@ -275,7 +275,7 @@ describe("Plugin Settings", () => {
 
 		it("should stop receiving updates after dispose", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const listener = vi.fn();
 			const disposable = api.settings.onDidChange("fontSize", listener);
@@ -287,7 +287,7 @@ describe("Plugin Settings", () => {
 
 		it("should support multiple listeners on the same key", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const listener1 = vi.fn();
 			const listener2 = vi.fn();
@@ -301,7 +301,7 @@ describe("Plugin Settings", () => {
 
 		it("disposing one listener should not affect others", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const listener1 = vi.fn();
 			const listener2 = vi.fn();
@@ -325,7 +325,7 @@ describe("Plugin Settings", () => {
 				return Promise.resolve(null);
 			});
 
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const all = await api.settings.getAll();
 			expect(all).toEqual({
@@ -338,7 +338,7 @@ describe("Plugin Settings", () => {
 
 		it("should return all defaults when nothing is stored", async () => {
 			mockInvoke.mockResolvedValue(null);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const all = await api.settings.getAll();
 			expect(all).toEqual({
@@ -357,7 +357,7 @@ describe("Plugin Settings", () => {
 				return Promise.resolve(null);
 			});
 
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const all = await api.settings.getAll();
 			expect(all.fontSize).toBe(24);
@@ -370,7 +370,7 @@ describe("Plugin Settings", () => {
 	describe("storage.__setting: prefix reservation", () => {
 		it("storage.set() should reject keys starting with __setting:", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.storage.set("__setting:fontSize", "20")).rejects.toThrow(
 				'storage key "__setting:fontSize" is reserved',
@@ -379,11 +379,11 @@ describe("Plugin Settings", () => {
 
 		it("storage.set() should allow normal keys", async () => {
 			mockInvoke.mockResolvedValue(undefined);
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			await api.storage.set("myData", "value");
 			expect(mockInvoke).toHaveBeenCalledWith("set_plugin_setting", {
-				pluginId: "test",
+				pluginToken: "tok-test",
 				key: "myData",
 				value: "value",
 			});
@@ -392,7 +392,7 @@ describe("Plugin Settings", () => {
 
 	describe("_notifySettingChanged (external trigger)", () => {
 		it("should notify onDidChange listeners when called externally", () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const listener = vi.fn();
 			api.settings.onDidChange("fontSize", listener);
@@ -402,13 +402,13 @@ describe("Plugin Settings", () => {
 		});
 
 		it("should not throw when no listeners registered for key", () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			expect(() => api._notifySettingChanged("fontSize", 24)).not.toThrow();
 		});
 
 		it("should not call disposed listeners", () => {
-			const api = createPluginAPI("test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), testSchema, callbacks, commandHandlers, panelComponents);
 
 			const listener = vi.fn();
 			const disposable = api.settings.onDidChange("fontSize", listener);
@@ -421,14 +421,14 @@ describe("Plugin Settings", () => {
 
 	describe("settings without schema", () => {
 		it("settings.get() should return undefined when no schema", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
 
 			const val = await api.settings.get("anything");
 			expect(val).toBeUndefined();
 		});
 
 		it("settings.update() should throw for any key when no schema", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
 
 			await expect(api.settings.update("anything", "value")).rejects.toThrow(
 				'unknown setting key "anything"',
@@ -436,14 +436,14 @@ describe("Plugin Settings", () => {
 		});
 
 		it("settings.getAll() should return empty object when no schema", async () => {
-			const api = createPluginAPI("test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
 
 			const all = await api.settings.getAll();
 			expect(all).toEqual({});
 		});
 
 		it("settings.onDidChange() should return a disposable when no schema", () => {
-			const api = createPluginAPI("test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
+			const api = createPluginAPI("test", "tok-test", new Set(["storage"]), undefined, callbacks, commandHandlers, panelComponents);
 
 			const disposable = api.settings.onDidChange("anything", vi.fn());
 			expect(disposable).toBeDefined();

@@ -1,6 +1,7 @@
 import type { Disposable, PluginSettingsSchema, HermesEvent, SessionInfo, TranscriptEvent, AgentsAPI, FileHandlerProps } from "./types";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { bindPluginInvoke } from "./identity";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
 	getCurrentLanguage,
@@ -105,8 +106,15 @@ export interface PluginAPICallbacks {
 	onFileHandlerRegistered?: () => void;
 }
 
+/**
+ * Build the API object handed to one plugin. `pluginToken` is the backend's
+ * proof of this plugin's identity: every token-bound command goes out with
+ * it, and only closures of this object hold it. Never store the returned
+ * object anywhere a plugin could reach (see PluginRuntime).
+ */
 export function createPluginAPI(
 	pluginId: string,
+	pluginToken: string,
 	permissions: Set<string>,
 	settingsSchema: PluginSettingsSchema | undefined,
 	callbacks: PluginAPICallbacks,
@@ -116,6 +124,9 @@ export function createPluginAPI(
 ): HermesPluginAPI {
 	const subscriptions: Disposable[] = [];
 	const schema = settingsSchema ?? {};
+	// Token-bound IPC: the backend learns who calls from the token, never
+	// from a plugin id in the arguments.
+	const call = bindPluginInvoke(pluginToken);
 	const settingsChangeListeners = new Map<string, Set<(value: string | number | boolean) => void>>();
 
 	return {
@@ -209,7 +220,7 @@ export function createPluginAPI(
 				if (!permissions.has("storage")) {
 					throw new PermissionDeniedError(pluginId, "storage");
 				}
-				return invoke<string | null>("get_plugin_setting", { pluginId, key });
+				return call<string | null>("get_plugin_setting", { key });
 			},
 			async set(key: string, value: string) {
 				if (!permissions.has("storage")) {
@@ -218,13 +229,13 @@ export function createPluginAPI(
 				if (key.startsWith("__setting:")) {
 					throw new Error(`Plugin "${pluginId}": storage key "${key}" is reserved. Use api.settings.update() instead.`);
 				}
-				await invoke("set_plugin_setting", { pluginId, key, value });
+				await call("set_plugin_setting", { key, value });
 			},
 			async delete(key: string) {
 				if (!permissions.has("storage")) {
 					throw new PermissionDeniedError(pluginId, "storage");
 				}
-				await invoke("delete_plugin_setting", { pluginId, key });
+				await call("delete_plugin_setting", { key });
 			},
 		},
 		settings: {
@@ -235,8 +246,7 @@ export function createPluginAPI(
 				const def = schema[key];
 				if (!def) return undefined as unknown as T;
 
-				const stored = await invoke<string | null>("get_plugin_setting", {
-					pluginId,
+				const stored = await call<string | null>("get_plugin_setting", {
 					key: `__setting:${key}`,
 				});
 
@@ -282,8 +292,7 @@ export function createPluginAPI(
 					}
 				}
 
-				await invoke("set_plugin_setting", {
-					pluginId,
+				await call("set_plugin_setting", {
 					key: `__setting:${key}`,
 					value: String(value),
 				});
@@ -323,8 +332,7 @@ export function createPluginAPI(
 				}
 				const result: Record<string, string | number | boolean> = {};
 				for (const [key, def] of Object.entries(schema)) {
-					const stored = await invoke<string | null>("get_plugin_setting", {
-						pluginId,
+					const stored = await call<string | null>("get_plugin_setting", {
 						key: `__setting:${key}`,
 					});
 					if (stored === null || stored === undefined) {
@@ -363,13 +371,13 @@ export function createPluginAPI(
 				if (!permissions.has("network")) {
 					throw new PermissionDeniedError(pluginId, "network");
 				}
-				return invoke("plugin_fetch_url", { url, headers: headers ?? null, pluginId });
+				return call("plugin_fetch_url", { url, headers: headers ?? null });
 			},
 			postJson(url: string, body: string, headers?: Record<string, string>): Promise<string> {
 				if (!permissions.has("network")) {
 					throw new PermissionDeniedError(pluginId, "network");
 				}
-				return invoke("plugin_post_json", { url, body, headers: headers ?? null, pluginId });
+				return call("plugin_post_json", { url, body, headers: headers ?? null });
 			},
 		},
 		shell: {
@@ -383,7 +391,7 @@ export function createPluginAPI(
 				if (!permissions.has("shell.exec")) {
 					throw new PermissionDeniedError(pluginId, "shell.exec");
 				}
-				return invoke("plugin_exec_command", { command, args: args ?? [], pluginId });
+				return call("plugin_exec_command", { command, args: args ?? [] });
 			},
 		},
 		sessions: {

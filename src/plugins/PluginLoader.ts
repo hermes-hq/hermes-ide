@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { claimHostKey } from "./identity";
 import type { PluginManifest } from "./types";
 import type { PluginRuntime, PluginModule } from "./PluginRuntime";
 import type { PluginActivateFn, PluginDeactivateFn } from "./PluginRuntime";
@@ -43,6 +44,16 @@ export class PluginLoader {
 	 * Skips plugins that are disabled in the database.
 	 */
 	async loadAllPlugins(): Promise<void> {
+		// The host must hold its key BEFORE any plugin code runs in this
+		// page: a bundle that ran first could claim it and mint tokens for
+		// any plugin. No key, no plugins.
+		try {
+			await claimHostKey();
+		} catch (err) {
+			console.error("[PluginLoader] Not loading plugins: the host could not prove its identity to the backend.", err);
+			return;
+		}
+
 		// Fetch disabled plugin IDs from DB
 		try {
 			const disabled = await invoke<string[]>("get_disabled_plugin_ids");

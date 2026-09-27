@@ -15,6 +15,7 @@ mod inline_pty;
 mod instance;
 mod menu;
 mod platform;
+mod plugin_identity;
 mod plugins;
 mod process;
 mod project;
@@ -502,7 +503,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_aptabase::Builder::new("A-EU-1922161061").build())
+        // Plugin identity is per page: a reload forgets the old keys.
+        .on_page_load(plugin_identity::on_page_load)
         .setup(|app| {
+            // Before anything else: the frontend claims its host key from
+            // this state before it runs any plugin bundle.
+            app.manage(plugin_identity::PluginIdentityState::default());
+
             let app_dir = instance::app_data_dir(app.handle())?;
             std::fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
@@ -795,6 +802,10 @@ pub fn run() {
             plugins::plugin_fetch_url,
             plugins::plugin_post_json,
             plugins::plugin_exec_command,
+            // Plugin identity (host key + per-plugin tokens)
+            plugin_identity::claim_plugin_host_key,
+            plugin_identity::issue_plugin_token,
+            plugin_identity::revoke_plugin_token,
             // Clipboard
             clipboard::copy_image_to_clipboard,
             // Transcript watching

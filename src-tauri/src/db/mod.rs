@@ -3289,14 +3289,19 @@ fn has_plugin_permission(db: &Database, plugin_id: &str, permission: &str) -> Re
     Ok(perms.iter().any(|p| p == permission))
 }
 
+/// Record a plugin and the permissions granted to it. Host only: a plugin
+/// must never be able to grant itself anything.
 #[tauri::command]
 pub fn save_plugin_metadata(
     plugin_id: String,
     version: String,
     name: String,
     permissions: Vec<String>,
+    host_key: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<(), String> {
+    identity.require_host(&host_key)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let perms_json = serde_json::to_string(&permissions)
         .map_err(|e| format!("Failed to serialize permissions: {}", e))?;
@@ -3319,12 +3324,15 @@ pub fn get_plugin_permissions(
     db.get_plugin_permissions(&plugin_id)
 }
 
+/// Token-bound: the plugin is whoever holds the token, not whoever it names.
 #[tauri::command]
 pub fn get_plugin_setting(
     key: String,
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<Option<String>, String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     if !has_plugin_permission(&db, &plugin_id, "storage")? {
         return Err(format!(
@@ -3342,13 +3350,16 @@ pub fn get_plugin_setting(
         .map_err(|e| e.to_string())
 }
 
+/// Token-bound: the plugin is whoever holds the token, not whoever it names.
 #[tauri::command]
 pub fn set_plugin_setting(
     key: String,
     value: String,
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<(), String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     if !has_plugin_permission(&db, &plugin_id, "storage")? {
         return Err(format!(
@@ -3366,12 +3377,15 @@ pub fn set_plugin_setting(
     Ok(())
 }
 
+/// Token-bound: the plugin is whoever holds the token, not whoever it names.
 #[tauri::command]
 pub fn delete_plugin_setting(
     key: String,
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<(), String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     if !has_plugin_permission(&db, &plugin_id, "storage")? {
         return Err(format!(
@@ -3388,12 +3402,16 @@ pub fn delete_plugin_setting(
     Ok(())
 }
 
+/// Host only.
 #[tauri::command]
 pub fn set_plugin_enabled(
     plugin_id: String,
     enabled: bool,
+    host_key: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<(), String> {
+    identity.require_host(&host_key)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let enabled_int: i32 = if enabled { 1 } else { 0 };
     // Upsert into plugins table — insert if not exists, update enabled if exists
@@ -3408,9 +3426,15 @@ pub fn set_plugin_enabled(
 }
 
 /// Remove all database records for a plugin (plugins table + plugin_storage).
-/// Called during uninstall to prevent orphaned data.
+/// Called during uninstall to prevent orphaned data. Host only.
 #[tauri::command]
-pub fn cleanup_plugin_data(plugin_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn cleanup_plugin_data(
+    plugin_id: String,
+    host_key: String,
+    state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
+) -> Result<(), String> {
+    identity.require_host(&host_key)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.conn
         .execute(
@@ -3424,11 +3448,14 @@ pub fn cleanup_plugin_data(plugin_id: String, state: State<'_, AppState>) -> Res
     Ok(())
 }
 
+/// Token-bound: a plugin's settings are readable by that plugin alone.
 #[tauri::command]
 pub fn get_plugin_settings_batch(
-    plugin_id: String,
+    plugin_token: String,
     state: State<'_, AppState>,
+    identity: State<'_, crate::plugin_identity::PluginIdentityState>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
+    let plugin_id = identity.plugin_for(&plugin_token)?;
     let db = state.db.lock().map_err(|e| e.to_string())?;
     if !has_plugin_permission(&db, &plugin_id, "storage")? {
         return Err(format!(
