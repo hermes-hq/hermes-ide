@@ -14,10 +14,6 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@aptabase/tauri", () => ({
-  trackEvent: vi.fn(),
-}));
-
 import { renderToString } from "react-dom/server";
 import { ResultFooter } from "../agent/blocks/ResultFooter";
 import type { ResultEvent } from "../agent/types";

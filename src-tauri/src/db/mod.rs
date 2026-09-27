@@ -1853,9 +1853,10 @@ impl Database {
         Ok(count > 0)
     }
 
-    /// Deletes Hermes-side cached data for one session: execution history,
-    /// token usage, context pins/snapshots, session-scoped memory, realm
-    /// attachments and recorded error occurrences.
+    /// Deletes Hermes-side cached data for one session: the saved terminal
+    /// scrollback, execution history, token usage, context pins/snapshots,
+    /// session-scoped memory, realm attachments and recorded error
+    /// occurrences.
     ///
     /// Deliberately leaves the `sessions` row and `session_worktrees` (the
     /// git worktree Hermes checked the session's repo into) untouched — this
@@ -1872,6 +1873,9 @@ impl Database {
             "DELETE FROM session_realms WHERE session_id = ?1",
             "DELETE FROM error_sessions WHERE session_id = ?1",
             "DELETE FROM memory WHERE scope = 'session' AND scope_id = ?1",
+            // Keep the row itself (the session stays listed); drop only the
+            // raw terminal output saved for it.
+            "UPDATE sessions SET scrollback_snapshot = NULL WHERE id = ?1",
         ] {
             self.conn
                 .execute(sql, params![session_id])
@@ -2688,6 +2692,9 @@ mod tests {
         // Populate every cache table for the target session ("sess1") and a
         // sibling session ("sess2") that must survive untouched.
         for sid in ["sess1", "sess2"] {
+            insert_test_session(&db, sid);
+            db.save_session_snapshot(sid, "$ echo secret\nsecret\n")
+                .unwrap();
             db.log_execution_entry(sid, "command", "echo hi", Some(0), Some("/tmp"))
                 .unwrap();
             db.insert_execution_node(
@@ -2726,8 +2733,21 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(db.get_context_pins(Some("sess1"), None).unwrap().is_empty());
+        assert_eq!(
+            db.get_session_snapshot("sess1").unwrap(),
+            None,
+            "the saved terminal scrollback must be cleared"
+        );
+        assert!(
+            db.session_exists("sess1").unwrap(),
+            "the session row itself must survive a data delete"
+        );
 
         // sess2's caches (a different session) are untouched.
+        assert_eq!(
+            db.get_session_snapshot("sess2").unwrap().as_deref(),
+            Some("$ echo secret\nsecret\n")
+        );
         assert!(!db
             .get_execution_log_entries("sess2", None)
             .unwrap()
