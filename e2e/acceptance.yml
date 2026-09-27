@@ -71,3 +71,13 @@ features:
       N07-2:
         text: "Turning a flag off hides the feature on next launch"
         scenarios: [N07-feature-flags.mjs]
+  N10:
+    name: "Updates never kill a working agent"
+    status: shipped
+    criteria:
+      N10-1:
+        text: "With an agent working, an available update does not relaunch the app"
+        scenarios: [n10-update-waits-for-idle.mjs]
+      N10-2:
+        text: "When all agents are idle, the update installs as today"
+        scenarios: [n10-update-waits-for-idle.mjs]
