@@ -923,6 +923,28 @@ mod tests {
         assert_eq!(a.take_pending_cwd().as_deref(), Some("/"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn osc7_long_percent_encoded_path_is_not_truncated() {
+        // A deep path near PATH_MAX, with every byte except '/' percent-
+        // encoded (as for non-ASCII names), is far longer than 1 KiB. vte
+        // caps OSC data at 1 KiB only with its `no_std` feature, which must
+        // stay off (`default-features = false` in Cargo.toml).
+        let path = format!("/work/{}", "d".repeat(3000));
+        let encoded: String = path
+            .bytes()
+            .map(|b| match b {
+                b'/' => "/".to_string(),
+                _ => format!("%{:02X}", b),
+            })
+            .collect();
+        let report = format!("\x1b]7;file://host{}\x07", encoded);
+        assert!(report.len() > 9000);
+        let mut a = OutputAnalyzer::new();
+        a.process(report.as_bytes());
+        assert_eq!(a.take_pending_cwd().as_deref(), Some(path.as_str()));
+    }
+
     #[test]
     fn other_osc_sequences_do_not_change_cwd() {
         let mut a = OutputAnalyzer::new();

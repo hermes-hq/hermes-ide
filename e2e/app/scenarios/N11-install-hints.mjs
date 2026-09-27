@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Scenario (N11): the first-launch "AI tools" screen tells a user without
-// Gemini or Copilot installed how to get the tools their vendors ship today:
-// Antigravity CLI (Gemini CLI's successor) and the npm Copilot CLI (the
-// gh-copilot extension is retired).
+// Gemini or Copilot installed how to get the command Hermes checks for and
+// launches: `gemini` from the npm Gemini CLI, and `copilot` from the npm
+// Copilot CLI (the gh-copilot extension is retired).
 //
 // The test machine may have these tools installed, so the app's "is it
 // installed?" check is answered with "no" for every tool, the way it answers
@@ -63,14 +63,10 @@ await runScenario("N11-install-hints", async ({ evidenceDir, log, assert, apps }
   const gemini = cards.find((c) => c.name === "Gemini");
   const copilot = cards.find((c) => c.name === "Copilot");
   assert(!!gemini && !!copilot, "the screen lists Gemini and Copilot");
-  assert(
-    gemini.install === "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-    "Gemini's hint installs Antigravity CLI",
-  );
-  assert(/Antigravity/.test(gemini.desc), `Gemini's card names its successor: "${gemini.desc}"`);
+  assert(gemini.install === "npm install -g @google/gemini-cli", "Gemini's hint installs the `gemini` command Hermes launches");
   assert(copilot.install === "npm install -g @github/copilot", "Copilot's hint installs the Copilot CLI from npm");
   assert(
-    !cards.some((c) => /gh extension install|@google\/gemini-cli/.test(c.install ?? "")),
+    !cards.some((c) => /gh extension install|gh-copilot/.test(c.install ?? "")),
     "no card suggests a retired install command",
   );
 });

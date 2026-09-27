@@ -23,10 +23,10 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
 	{
 		id: "gemini",
 		label: "Gemini",
-		description: "Google Gemini CLI (succeeded by Antigravity CLI)",
-		installUrl: "https://antigravity.google/docs/cli/install",
-		installCmd: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-		authHint: "Google has retired Gemini CLI for personal accounts; its successor is Antigravity CLI. Run 'agy' to sign in on first use",
+		description: "Google Gemini CLI",
+		installUrl: "https://github.com/google-gemini/gemini-cli",
+		installCmd: "npm install -g @google/gemini-cli",
+		authHint: "Run 'gemini' to sign in with Google on first use",
 	},
 	{
 		id: "aider",

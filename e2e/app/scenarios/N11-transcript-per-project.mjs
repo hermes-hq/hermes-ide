@@ -4,11 +4,11 @@
 //
 // Two projects (alpha, beta) each have a Claude Code transcript under
 // ~/.claude/projects/, in folders named exactly the way Claude Code names
-// them. Beta's transcript is the newest. A terminal session enters alpha and
-// starts a transcript watch (the call plugins make through
-// `agents.watchTranscript`), then enters beta and starts another. New lines
-// are written to both transcripts; each watch must report only its own
-// project's line.
+// them. Beta's transcript is the newest. Two terminal sessions run side by
+// side: one enters alpha, the other enters beta, and each starts a transcript
+// watch (the call plugins make through `agents.watchTranscript`). New lines
+// are written to both transcripts; each session's watch must report only its
+// own project's line.
 //
 // The shell reports its folder the way common prompts do (OSC 7 from a
 // precmd hook in ~/.zshrc of the private home).
@@ -61,9 +61,6 @@ await runScenario("N11-transcript-per-project", async ({ evidenceDir, log, asser
   const { bridge } = app;
   await completeOnboarding(bridge, log);
 
-  log("step 2: create a plain terminal");
-  const sessionId = await createPlainTerminal(bridge, log);
-
   // Collect transcript events per watch inside the page.
   await bridge.eval(`
     window.__n11 = { events: {} };
@@ -80,9 +77,13 @@ await runScenario("N11-transcript-per-project", async ({ evidenceDir, log, asser
   `);
 
   const watchers = {};
+  const sessions = {};
   for (const project of ["alpha", "beta"]) {
-    log(`step 3.${project}: enter ${project} and start a transcript watch`);
-    await bridge.typeInTerminal(sessionId, `cd ${project === "alpha" ? "alpha" : "../beta"}\n`);
+    log(`step 2.${project}: open a new terminal session for ${project}`);
+    const sessionId = await createPlainTerminal(bridge, log);
+    sessions[project] = sessionId;
+    log(`step 3.${project}: session ${sessionId} enters ${project} and starts a transcript watch`);
+    await bridge.typeInTerminal(sessionId, `cd ${project}\n`);
     const cwd = await bridge.waitFor(
       `the session's folder to become ${project}`,
       `const c = window.__HERMES_E2E__.terminalInfo(${JSON.stringify(sessionId)}).cwd;
@@ -94,6 +95,10 @@ await runScenario("N11-transcript-per-project", async ({ evidenceDir, log, asser
     watchers[project] = await bridge.eval(`return await window.__n11.watch(${JSON.stringify(sessionId)});`);
     log(`  watch started: ${watchers[project]}`);
   }
+
+  assert(sessions.alpha !== sessions.beta, "two separate sessions are running");
+  const running = await bridge.terminalIds();
+  assert(running.includes(sessions.alpha) && running.includes(sessions.beta), "both sessions are still open");
 
   log("step 4: Claude writes a new step to each project's transcript");
   await sleep(1000); // the watches start reading from the end of the file
@@ -119,6 +124,12 @@ await runScenario("N11-transcript-per-project", async ({ evidenceDir, log, asser
   log(`  first reports: ${JSON.stringify(seen)}; after waiting: ${JSON.stringify(final)}`);
   assert(JSON.stringify(final.alpha) === JSON.stringify(["AlphaTool"]), "the alpha watch reports only alpha's step");
   assert(JSON.stringify(final.beta) === JSON.stringify(["BetaTool"]), "the beta watch reports only beta's step");
-  const shot = await bridge.screenshot(join(evidenceDir, "01-terminal-in-beta.png"));
+  const folders = await bridge.eval(`return {
+    alpha: window.__HERMES_E2E__.terminalInfo(${JSON.stringify(sessions.alpha)}).cwd,
+    beta: window.__HERMES_E2E__.terminalInfo(${JSON.stringify(sessions.beta)}).cwd,
+  };`);
+  log(`  session folders at the end: ${JSON.stringify(folders)}`);
+  assert(folders.alpha.endsWith("/alpha") && folders.beta.endsWith("/beta"), "both sessions are still in their own project");
+  const shot = await bridge.screenshot(join(evidenceDir, "01-two-sessions.png"));
   log(`  screenshot saved: ${shot.file}`);
 });

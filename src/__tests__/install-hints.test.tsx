@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
  * The first-launch "AI tools" screen shows install commands for tools that
- * are not installed. Gemini and Copilot must point at what their vendors
- * ship today (Antigravity CLI; the npm Copilot CLI), not the retired
- * `@google/gemini-cli` package or the `gh-copilot` extension.
+ * are not installed. Each hint must install the command Hermes checks for
+ * and launches: `gemini` from `@google/gemini-cli`, and `copilot` from the
+ * npm Copilot CLI (the `gh-copilot` extension is retired).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, cleanup, screen, waitFor } from "@testing-library/react";
@@ -42,10 +42,9 @@ function installCommandFor(label: string): string | null {
 }
 
 describe("AI tool install hints", () => {
-  it("points Gemini users to Antigravity CLI", async () => {
+  it("points Gemini users to the Gemini CLI that Hermes launches", async () => {
     await openAiToolsScreen();
-    expect(installCommandFor("Gemini")).toBe("curl -fsSL https://antigravity.google/cli/install.sh | bash");
-    expect(screen.getByText(/succeeded by Antigravity CLI/)).toBeInTheDocument();
+    expect(installCommandFor("Gemini")).toBe("npm install -g @google/gemini-cli");
   });
 
   it("points Copilot users to the npm Copilot CLI", async () => {
@@ -56,6 +55,8 @@ describe("AI tool install hints", () => {
   it("never suggests a retired install command", async () => {
     await openAiToolsScreen();
     const all = [...document.querySelectorAll(".onboarding-ai-install-cmd")].map((e) => e.textContent ?? "");
-    expect(all.some((c) => /gh extension install|@google\/gemini-cli/.test(c))).toBe(false);
+    expect(all.some((c) => /gh extension install|gh-copilot/.test(c))).toBe(false);
+    // Every hint is a command that runs in any shell, including PowerShell.
+    expect(all.some((c) => /\|\s*(ba)?sh\b/.test(c))).toBe(false);
   });
 });

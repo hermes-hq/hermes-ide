@@ -214,13 +214,7 @@ pub(crate) fn ai_launch_command(
         "codex" => "codex",
         "gemini" => "gemini",
         "kiro" => "kiro-cli chat",
-        "copilot" => {
-            return Some(wrap_prefix_suffix(
-                "gh copilot",
-                custom_prefix,
-                custom_suffix,
-            ))
-        }
+        "copilot" => "copilot",
         _ => return None,
     };
     let mut cmd = base.to_string();
@@ -819,7 +813,7 @@ mod tests {
         );
         assert_eq!(
             ai_launch_command("copilot", "default", "", ""),
-            Some("gh copilot".into())
+            Some("copilot".into())
         );
         assert_eq!(
             ai_launch_command("kiro", "default", "", ""),
@@ -892,7 +886,7 @@ mod tests {
         );
         assert_eq!(
             ai_launch_command("copilot", "bypassPermissions", "", ""),
-            Some("gh copilot".into())
+            Some("copilot".into())
         );
     }
 
@@ -944,10 +938,10 @@ mod tests {
             ai_launch_command("gemini", "default", "nice -n 10", ""),
             Some("nice -n 10 gemini".into())
         );
-        // Copilot (has special wrapping) supports prefix
+        // Copilot supports prefix
         assert_eq!(
             ai_launch_command("copilot", "default", "caffeinate -i", ""),
-            Some("caffeinate -i gh copilot".into())
+            Some("caffeinate -i copilot".into())
         );
         // Prefix is trimmed
         assert_eq!(
@@ -993,7 +987,7 @@ mod tests {
         // Copilot with both
         assert_eq!(
             ai_launch_command("copilot", "default", "wsl", "--debug"),
-            Some("wsl gh copilot --debug".into())
+            Some("wsl copilot --debug".into())
         );
     }
 

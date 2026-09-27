@@ -106,14 +106,12 @@ export async function dismissWhatsNew(bridge, log) {
 }
 
 /** Open the New Session wizard from the empty state or the session list. */
-async function openWizard(bridge) {
+export async function openWizard(bridge) {
   if (await bridge.exists("button.es-tile-primary")) {
     await bridge.click("button.es-tile-primary");
   } else {
-    await bridge.eval(`
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", metaKey: true, bubbles: true }));
-      return true;
-    `);
+    // The "+" (New Session) button at the top of the left activity bar.
+    await bridge.click(".activity-bar-left > .activity-bar-action");
   }
   await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
     timeoutMs: 20_000,
@@ -121,7 +119,7 @@ async function openWizard(bridge) {
 }
 
 /** Click the wizard's primary button until it closes. */
-async function finishWizard(bridge, log) {
+export async function finishWizard(bridge, log) {
   for (let i = 0; i < 6; i++) {
     if (!(await bridge.exists(".session-creator"))) break;
     const clicked = await bridge.clickWhenReady(`
