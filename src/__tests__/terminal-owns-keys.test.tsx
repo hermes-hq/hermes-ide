@@ -246,6 +246,42 @@ describe("one key press runs the action once", () => {
     bridge.cleanupListener();
   });
 
+  it("drops the page's keydown when the native menu already ran the same chord", async () => {
+    const { bridge, native } = await loadBridge();
+    const handler = vi.fn();
+    bridge.registerMenuBarHandler(handler);
+    native("view.split-horizontal");
+    bridge.triggerMenuBarActionFromKeyboard("view.split-horizontal");
+    expect(handler).toHaveBeenCalledTimes(1);
+    // The next key press is a new one and runs again.
+    bridge.triggerMenuBarActionFromKeyboard("view.split-horizontal");
+    expect(handler).toHaveBeenCalledTimes(2);
+    bridge.cleanupListener();
+  });
+
+  it("two separate key presses of the same chord both run", async () => {
+    const { bridge } = await loadBridge();
+    const handler = vi.fn();
+    bridge.registerMenuBarHandler(handler);
+    bridge.triggerMenuBarActionFromKeyboard("view.split-horizontal");
+    bridge.triggerMenuBarActionFromKeyboard("view.split-horizontal");
+    expect(handler).toHaveBeenCalledTimes(2);
+    bridge.cleanupListener();
+  });
+
+  it("an echo more than half a second later is a new press", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const { bridge, native } = await loadBridge();
+    const handler = vi.fn();
+    bridge.registerMenuBarHandler(handler);
+    native("view.git-panel");
+    now.mockReturnValue(1_600);
+    bridge.triggerMenuBarActionFromKeyboard("view.git-panel");
+    expect(handler).toHaveBeenCalledTimes(2);
+    now.mockRestore();
+    bridge.cleanupListener();
+  });
+
   it("does not drop a different native action", async () => {
     const { bridge, native } = await loadBridge();
     const handler = vi.fn();
@@ -274,6 +310,23 @@ describe("Shortcuts panel", () => {
         expect(shortcutText(s, platform)).not.toMatch(/(^|\/ )Ctrl\+[A-Z]($| )/);
       }
     }
+  });
+
+  it("Processes avoids Ctrl+Shift+U, which IBus on Linux takes for Unicode entry", () => {
+    expect(shortcutLabel("view.process-panel", "linux")).toBe("Ctrl+Shift+L");
+    for (const c of APP_CHORDS) expect(c.pc).not.toBe("{ctrl}{shift}U");
+  });
+
+  it("labels the New Tab row as New Tab", async () => {
+    const { ShortcutsPanel } = await import("../components/ShortcutsPanel");
+    const { I18nProvider } = await import("../i18n/I18nProvider");
+    const { getByText } = render(
+      <I18nProvider>
+        <ShortcutsPanel onClose={() => {}} />
+      </I18nProvider>,
+    );
+    const row = getByText("New Tab").closest(".shortcuts-row")!;
+    expect(row.querySelector("kbd")!.textContent).toBe(shortcutLabel("file.new-session-tab"));
   });
 
   it("renders the rows for the current platform", async () => {
