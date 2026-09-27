@@ -278,8 +278,8 @@ const commands: CommandEntry[] = [
   { command: "pbpaste", description: "Paste from clipboard (macOS)", category: "system", contexts: [] },
   { command: "open .", description: "Open current dir in Finder", category: "system", contexts: [] },
   { command: "code .", description: "Open in VS Code", category: "system", contexts: [] },
-  { command: "code tunnel", description: "Create a VS Code tunnel", category: "vscode", contexts: ["vscode"] },
-  { command: "code tunnel --accept-server-license-terms", description: "Create a VS Code tunnel without prompting", category: "vscode", contexts: ["vscode"] },
+  { command: "code tunnel", description: "Create a VS Code tunnel", category: "system", contexts: [] },
+  { command: "code tunnel --accept-server-license-terms", description: "Create a VS Code tunnel (auto-accept license)", category: "system", contexts: [] },
 
   // ─── Homebrew ───────────────────────────────────────────────
   { command: "brew install", description: "Install package", category: "brew", contexts: [] },
