@@ -571,7 +571,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <div key={h.id} className="settings-ssh-host-item">
                         <div className="settings-ssh-host-info">
                           <span className="settings-ssh-host-label">{h.label}</span>
-                          <span className="settings-ssh-host-detail">{h.user}@{h.host}{h.port !== 22 ? `:${h.port}` : ""}</span>
+                          <span className="settings-ssh-host-detail">{h.user ? `${h.user}@` : ""}{h.host}{h.port !== 22 ? `:${h.port}` : ""}</span>
                         </div>
                         <div className="settings-ssh-host-actions">
                           <button

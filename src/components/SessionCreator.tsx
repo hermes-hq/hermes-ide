@@ -567,9 +567,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
       const firstProjectPath = selectedProjectIds.length > 0
         ? allProjects.find((r) => r.id === selectedProjectIds[0])?.path
         : undefined;
+      const sshDest = sshUser.trim() ? `${sshUser.trim()}@${sshHost}` : sshHost;
       const sshLabel = selectedTmuxSession
-        ? `${sshUser || "ssh"}@${sshHost} [${selectedTmuxSession}]`
-        : `${sshUser || "ssh"}@${sshHost}`;
+        ? `${sshDest} [${selectedTmuxSession}]`
+        : sshDest;
 
       // Local path = agent or terminal mode.  SSH path is its own branch.
       const isLocal = mode !== "ssh";
@@ -821,7 +822,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                           {h.label}
                         </span>
                         <span className="session-creator-ssh-history-port" style={{ opacity: 0.6 }}>
-                          {h.user}@{h.host}{h.port !== 22 ? `:${h.port}` : ""}
+                          {h.user ? `${h.user}@` : ""}{h.host}{h.port !== 22 ? `:${h.port}` : ""}
                         </span>
                       </button>
                     ))}
@@ -1453,7 +1454,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   </div>
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">{t("session.host")}</span>
-                    <span className="session-creator-summary-value">{sshUser ? `${sshUser}@` : ""}{sshHost}{sshPort !== "22" ? `:${sshPort}` : ""}</span>
+                    <span className="session-creator-summary-value">{sshUser.trim() ? `${sshUser.trim()}@` : ""}{sshHost}{sshPort !== "22" ? `:${sshPort}` : ""}</span>
                   </div>
                   <div className="session-creator-summary-row">
                     <span className="session-creator-summary-label">tmux:</span>

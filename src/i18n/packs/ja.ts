@@ -214,7 +214,7 @@ export const jaPack: LanguagePack = {
     "session.noAiAgent": "AI エージェントなし",
     "session.sshRemote": "SSH リモート",
     "session.sshHostPlaceholder": "ホスト（例： 192.168.1.100 または myserver.com）",
-    "session.sshUserPlaceholder": "ユーザー（デフォルト： 現在のユーザー）",
+    "session.sshUserPlaceholder": "ユーザー（任意 — ~/.ssh/config を使用）",
     "session.sshPortPlaceholder": "ポート",
     "session.sshIdentityFilePlaceholder": "認証鍵ファイル（任意、例： ~/.ssh/id_rsa）",
     "session.sshJumpHostPlaceholder": "ジャンプホスト（任意、例： bastion.example.com）",

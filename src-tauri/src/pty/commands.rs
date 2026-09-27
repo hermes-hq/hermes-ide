@@ -17,12 +17,21 @@ use crate::AppState;
 
 // ─── SSH / tmux helpers ─────────────────────────────────────────────
 
+/// Normalize the SSH user. Blank or absent means "let ssh decide", so a Host
+/// alias in ~/.ssh/config can supply its own `User` (falls back to the local
+/// user, exactly like plain `ssh host`).
 fn resolve_ssh_user(user: Option<String>) -> String {
-    user.unwrap_or_else(|| {
-        std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "root".to_string())
-    })
+    user.map(|u| u.trim().to_string()).unwrap_or_default()
+}
+
+/// The ssh destination argument: `user@host`, or the bare host/alias when no
+/// user is set.
+fn ssh_destination(user: &str, host: &str) -> String {
+    if user.is_empty() {
+        host.to_string()
+    } else {
+        format!("{}@{}", user, host)
+    }
 }
 
 /// Directory for SSH ControlMaster sockets.
@@ -32,13 +41,18 @@ fn ssh_control_dir() -> std::path::PathBuf {
     dir
 }
 
+/// ControlMaster socket path for a connection.
+fn ssh_socket_path(user: &str, host: &str, port: u16) -> std::path::PathBuf {
+    ssh_control_dir().join(format!("{}:{}", ssh_destination(user, host), port))
+}
+
 /// Build a base SSH command with common options and connection multiplexing.
 fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
     let mut cmd = std::process::Command::new("ssh");
     cmd.arg("-o").arg("ConnectTimeout=5");
     cmd.arg("-o").arg("BatchMode=yes");
     // Reuse existing TCP connection if available, or establish a new persistent one
-    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", user, host, port));
+    let socket_path = ssh_socket_path(user, host, port);
     cmd.arg("-o")
         .arg(format!("ControlPath={}", socket_path.display()));
     cmd.arg("-o").arg("ControlMaster=auto");
@@ -46,8 +60,48 @@ fn ssh_command(user: &str, host: &str, port: u16) -> std::process::Command {
     if port != 22 {
         cmd.arg("-p").arg(port.to_string());
     }
-    cmd.arg(format!("{}@{}", user, host));
+    // `--` stops option parsing so a host starting with '-' is never read as an option.
+    cmd.arg("--");
+    cmd.arg(ssh_destination(user, host));
     cmd
+}
+
+/// Build the interactive `ssh` command for an SSH terminal session.
+fn ssh_pty_command(info: &SshConnectionInfo, cols: u16, rows: u16) -> CommandBuilder {
+    let mut c = CommandBuilder::new("ssh");
+    c.arg("-t"); // Force TTY allocation
+    c.arg("-o");
+    c.arg("ServerAliveInterval=15");
+    c.arg("-o");
+    c.arg("ServerAliveCountMax=3");
+    let socket_path = ssh_socket_path(&info.user, &info.host, info.port);
+    c.arg("-o");
+    c.arg(format!("ControlPath={}", socket_path.display()));
+    c.arg("-o");
+    c.arg("ControlMaster=auto");
+    c.arg("-o");
+    c.arg("ControlPersist=300");
+    if info.port != 22 {
+        c.arg("-p");
+        c.arg(info.port.to_string());
+    }
+    if let Some(ref id_file) = info.identity_file {
+        c.arg("-i");
+        c.arg(id_file);
+    }
+    c.arg("--");
+    c.arg(ssh_destination(&info.user, &info.host));
+    // Attach to tmux session if specified.
+    // `new-session -A` attaches if it exists, creates if it doesn't.
+    if let Some(ref tmux_name) = info.tmux_session {
+        c.arg(format!(
+            "tmux new-session -A -s '{}' -x {} -y {}",
+            tmux_name.replace('\'', "'\\''"),
+            cols,
+            rows
+        ));
+    }
+    c
 }
 
 /// Run a remote SSH command and return (stdout, stderr, success).
@@ -711,11 +765,7 @@ pub fn create_session(
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
             port: ssh_port.unwrap_or(22),
-            user: ssh_user.unwrap_or_else(|| {
-                std::env::var("USER")
-                    .or_else(|_| std::env::var("USERNAME"))
-                    .unwrap_or_else(|_| "root".to_string())
-            }),
+            user: resolve_ssh_user(ssh_user),
             tmux_session: tmux_session.clone(),
             identity_file: ssh_identity_file.clone(),
             port_forwards: Vec::new(),
@@ -841,40 +891,7 @@ pub fn create_session(
     };
 
     let mut cmd = if let Some(ref info) = ssh_info_clone {
-        let mut c = CommandBuilder::new("ssh");
-        c.arg("-t"); // Force TTY allocation
-        c.arg("-o");
-        c.arg("ServerAliveInterval=15");
-        c.arg("-o");
-        c.arg("ServerAliveCountMax=3");
-        let socket_path =
-            ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
-        c.arg("-o");
-        c.arg(format!("ControlPath={}", socket_path.display()));
-        c.arg("-o");
-        c.arg("ControlMaster=auto");
-        c.arg("-o");
-        c.arg("ControlPersist=300");
-        if info.port != 22 {
-            c.arg("-p");
-            c.arg(info.port.to_string());
-        }
-        if let Some(ref id_file) = info.identity_file {
-            c.arg("-i");
-            c.arg(id_file);
-        }
-        c.arg(format!("{}@{}", info.user, info.host));
-        // Attach to tmux session if specified.
-        // `new-session -A` attaches if it exists, creates if it doesn't.
-        if let Some(ref tmux_name) = info.tmux_session {
-            c.arg(format!(
-                "tmux new-session -A -s '{}' -x {} -y {}",
-                tmux_name.replace('\'', "'\\''"),
-                pty_cols,
-                pty_rows
-            ));
-        }
-        c
+        ssh_pty_command(info, pty_cols, pty_rows)
     } else {
         #[cfg(unix)]
         {
@@ -3123,7 +3140,7 @@ pub fn ssh_add_port_forward(
     label: Option<String>,
 ) -> Result<(), String> {
     let info = get_ssh_params(&state, &session_id)?;
-    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
+    let socket_path = ssh_socket_path(&info.user, &info.host, info.port);
 
     let spec = format!("{}:{}:{}", local_port, remote_host, remote_port);
     let output = std::process::Command::new("ssh")
@@ -3133,7 +3150,8 @@ pub fn ssh_add_port_forward(
         .arg(&spec)
         .arg("-S")
         .arg(socket_path.to_string_lossy().as_ref())
-        .arg(format!("{}@{}", info.user, info.host))
+        .arg("--")
+        .arg(ssh_destination(&info.user, &info.host))
         .output()
         .map_err(|e| format!("Failed to add port forward: {}", e))?;
 
@@ -3172,7 +3190,7 @@ pub fn ssh_remove_port_forward(
     local_port: u16,
 ) -> Result<(), String> {
     let info = get_ssh_params(&state, &session_id)?;
-    let socket_path = ssh_control_dir().join(format!("{}@{}:{}", info.user, info.host, info.port));
+    let socket_path = ssh_socket_path(&info.user, &info.host, info.port);
 
     // Find the forward to cancel
     let forward = info
@@ -3192,7 +3210,8 @@ pub fn ssh_remove_port_forward(
         .arg(&spec)
         .arg("-S")
         .arg(socket_path.to_string_lossy().as_ref())
-        .arg(format!("{}@{}", info.user, info.host))
+        .arg("--")
+        .arg(ssh_destination(&info.user, &info.host))
         .output()
         .map_err(|e| format!("Failed to remove port forward: {}", e))?;
 
@@ -3692,5 +3711,91 @@ mod tests {
             &agent(None)
         ));
         assert!(!super::agent_model_needs_emit(&agent(None), &None));
+    }
+}
+
+#[cfg(test)]
+mod ssh_command_tests {
+    use super::{resolve_ssh_user, ssh_command, ssh_destination, ssh_pty_command};
+    use crate::pty::models::SshConnectionInfo;
+
+    fn info(user: &str, host: &str) -> SshConnectionInfo {
+        SshConnectionInfo {
+            host: host.to_string(),
+            port: 22,
+            user: user.to_string(),
+            tmux_session: None,
+            identity_file: None,
+            port_forwards: Vec::new(),
+        }
+    }
+
+    fn std_args(cmd: &std::process::Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn pty_args(info: &SshConnectionInfo) -> Vec<String> {
+        ssh_pty_command(info, 80, 24)
+            .get_argv()
+            .iter()
+            .skip(1) // program name
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn blank_user_is_left_to_ssh_config() {
+        assert_eq!(resolve_ssh_user(None), "");
+        assert_eq!(resolve_ssh_user(Some("   ".to_string())), "");
+        assert_eq!(resolve_ssh_user(Some(" alice ".to_string())), "alice");
+    }
+
+    #[test]
+    fn destination_is_bare_host_without_user() {
+        assert_eq!(ssh_destination("", "lima-test-agent"), "lima-test-agent");
+        assert_eq!(ssh_destination("alice", "example.com"), "alice@example.com");
+    }
+
+    #[test]
+    fn exec_command_passes_bare_alias_when_user_blank() {
+        let args = std_args(&ssh_command("", "lima-test-agent", 22));
+        assert_eq!(args.last().unwrap(), "lima-test-agent");
+        assert!(!args.iter().any(|a| a.contains("@lima-test-agent")));
+    }
+
+    #[test]
+    fn exec_command_keeps_user_at_host_when_user_given() {
+        let args = std_args(&ssh_command("alice", "example.com", 2222));
+        assert_eq!(args.last().unwrap(), "alice@example.com");
+        assert!(args.windows(2).any(|w| w[0] == "-p" && w[1] == "2222"));
+    }
+
+    #[test]
+    fn pty_command_passes_bare_alias_when_user_blank() {
+        let args = pty_args(&info("", "lima-test-agent"));
+        assert_eq!(args.last().unwrap(), "lima-test-agent");
+        assert!(!args.iter().any(|a| a.contains("@lima-test-agent")));
+    }
+
+    #[test]
+    fn pty_command_keeps_user_at_host_and_appends_tmux() {
+        let mut i = info("alice", "example.com");
+        i.tmux_session = Some("main".to_string());
+        let args = pty_args(&i);
+        let dest = args.iter().position(|a| a == "alice@example.com").unwrap();
+        assert_eq!(args[dest + 1], "tmux new-session -A -s 'main' -x 80 -y 24");
+    }
+
+    #[test]
+    fn destination_follows_end_of_options_marker() {
+        let exec = std_args(&ssh_command("", "-oProxyCommand=x", 22));
+        assert_eq!(exec[exec.len() - 2], "--");
+        let mut i = info("", "-oProxyCommand=x");
+        i.tmux_session = Some("main".to_string());
+        let pty = pty_args(&i);
+        let dest = pty.iter().position(|a| a == "-oProxyCommand=x").unwrap();
+        assert_eq!(pty[dest - 1], "--");
     }
 }

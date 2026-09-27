@@ -214,7 +214,7 @@ export const zhCNPack: LanguagePack = {
     "session.noAiAgent": "无 AI 智能体",
     "session.sshRemote": "SSH 远程",
     "session.sshHostPlaceholder": "主机（例如 192.168.1.100 或 myserver.com）",
-    "session.sshUserPlaceholder": "用户（默认：当前用户）",
+    "session.sshUserPlaceholder": "用户（可选 — 使用 ~/.ssh/config）",
     "session.sshPortPlaceholder": "端口",
     "session.sshIdentityFilePlaceholder": "身份标识文件（可选，例如 ~/.ssh/id_rsa）",
     "session.sshJumpHostPlaceholder": "跳板主机（可选，例如 bastion.example.com）",

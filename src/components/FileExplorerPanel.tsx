@@ -684,7 +684,7 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
         {isSSH && state.activeSessionId ? (
           <SshTree
             sessionId={state.activeSessionId}
-            hostLabel={`${activeSession!.ssh_info!.user}@${activeSession!.ssh_info!.host}`}
+            hostLabel={`${activeSession!.ssh_info!.user ? `${activeSession!.ssh_info!.user}@` : ""}${activeSession!.ssh_info!.host}`}
             showHidden={showHidden}
             searchQuery={searchQuery}
             onFilePreview={handleSshFilePreview}

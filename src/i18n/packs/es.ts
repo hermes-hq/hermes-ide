@@ -214,7 +214,7 @@ export const esPack: LanguagePack = {
     "session.noAiAgent": "Sin agente de IA",
     "session.sshRemote": "SSH remoto",
     "session.sshHostPlaceholder": "Host (ej.: 192.168.1.100 o myserver.com)",
-    "session.sshUserPlaceholder": "Usuario (predeterminado: usuario actual)",
+    "session.sshUserPlaceholder": "Usuario (opcional — usa ~/.ssh/config)",
     "session.sshPortPlaceholder": "Puerto",
     "session.sshIdentityFilePlaceholder": "Archivo de identidad (opcional, ej.: ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "Host de salto (opcional, ej.: bastion.example.com)",

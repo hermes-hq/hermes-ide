@@ -214,7 +214,7 @@ export const ptBRPack: LanguagePack = {
     "session.noAiAgent": "Sem agente de IA",
     "session.sshRemote": "SSH remoto",
     "session.sshHostPlaceholder": "Host (ex.: 192.168.1.100 ou meuservidor.com)",
-    "session.sshUserPlaceholder": "Usuário (padrão: usuário atual)",
+    "session.sshUserPlaceholder": "Usuário (opcional — usa ~/.ssh/config)",
     "session.sshPortPlaceholder": "Porta",
     "session.sshIdentityFilePlaceholder": "Arquivo de identidade (opcional, ex.: ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "Jump host (opcional, ex.: bastion.example.com)",

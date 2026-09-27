@@ -231,7 +231,7 @@ const ENGLISH_PACK: LanguagePack = {
     "session.noAiAgent": "No AI agent",
     "session.sshRemote": "SSH Remote",
     "session.sshHostPlaceholder": "Host (e.g. 192.168.1.100 or myserver.com)",
-    "session.sshUserPlaceholder": "User (default: current user)",
+    "session.sshUserPlaceholder": "User (optional — uses ~/.ssh/config)",
     "session.sshPortPlaceholder": "Port",
     "session.sshIdentityFilePlaceholder": "Identity file (optional, e.g. ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "Jump host (optional, e.g. bastion.example.com)",

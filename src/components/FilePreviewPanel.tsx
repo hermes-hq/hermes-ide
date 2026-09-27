@@ -242,14 +242,14 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
 
           if (SSH_GUI_EDITORS.has(cmd) && sshInfo) {
             // GUI editors: run locally with remote connection args
-            const host = sshInfo.port !== 22
-              ? `${sshInfo.user}@${sshInfo.host}:${sshInfo.port}`
-              : `${sshInfo.user}@${sshInfo.host}`;
+            // Blank user → bare host/alias, so ~/.ssh/config decides the user.
+            const dest = sshInfo.user ? `${sshInfo.user}@${sshInfo.host}` : sshInfo.host;
+            const host = sshInfo.port !== 22 ? `${dest}:${sshInfo.port}` : dest;
 
             if (cmd === "zed") {
               // zed ssh://user@host:port/path
               const port = sshInfo.port !== 22 ? `:${sshInfo.port}` : "";
-              return openFileInEditor(sessionId, "__ssh_local__", `ssh://${sshInfo.user}@${sshInfo.host}${port}${filePath}`, "zed");
+              return openFileInEditor(sessionId, "__ssh_local__", `ssh://${dest}${port}${filePath}`, "zed");
             } else {
               // VS Code / Cursor: --remote ssh-remote+user@host:port /path
               return openFileInEditor(sessionId, "__ssh_local__", filePath, `${cmd} --remote ssh-remote+${host}`);

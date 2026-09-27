@@ -214,7 +214,7 @@ export const ruPack: LanguagePack = {
     "session.noAiAgent": "Без AI-агента",
     "session.sshRemote": "Удалённый SSH",
     "session.sshHostPlaceholder": "Хост (напр. 192.168.1.100 или myserver.com)",
-    "session.sshUserPlaceholder": "Пользователь (по умолчанию: текущий)",
+    "session.sshUserPlaceholder": "Пользователь (необязательно — из ~/.ssh/config)",
     "session.sshPortPlaceholder": "Порт",
     "session.sshIdentityFilePlaceholder": "Файл ключа (необязательно, напр. ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "Jump-хост (необязательно, напр. bastion.example.com)",

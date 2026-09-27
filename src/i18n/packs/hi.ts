@@ -475,7 +475,7 @@ export const hiPack: LanguagePack = {
     "session.flagsPlaceholder": "जैसे --model opus --permission-mode plan",
     "session.sshRemote": "SSH रिमोट",
     "session.sshHostPlaceholder": "होस्ट (जैसे 192.168.1.100 या myserver.com)",
-    "session.sshUserPlaceholder": "उपयोगकर्ता (डिफ़ॉल्ट: वर्तमान उपयोगकर्ता)",
+    "session.sshUserPlaceholder": "उपयोगकर्ता (वैकल्पिक — ~/.ssh/config का उपयोग करता है)",
     "session.sshPortPlaceholder": "पोर्ट",
     "session.sshIdentityFilePlaceholder": "पहचान फाइल (वैकल्पिक, जैसे ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "जंप होस्ट (वैकल्पिक, जैसे bastion.example.com)",

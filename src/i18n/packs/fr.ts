@@ -214,7 +214,7 @@ export const frPack: LanguagePack = {
     "session.noAiAgent": "Aucun agent IA",
     "session.sshRemote": "SSH distant",
     "session.sshHostPlaceholder": "Hôte (ex. 192.168.1.100 ou monserveur.com)",
-    "session.sshUserPlaceholder": "Utilisateur (par défaut : utilisateur actuel)",
+    "session.sshUserPlaceholder": "Utilisateur (facultatif — utilise ~/.ssh/config)",
     "session.sshPortPlaceholder": "Port",
     "session.sshIdentityFilePlaceholder": "Fichier d'identité (facultatif, ex. ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "Hôte de rebond (facultatif, ex. bastion.example.com)",

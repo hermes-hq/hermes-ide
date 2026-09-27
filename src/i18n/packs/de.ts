@@ -214,7 +214,7 @@ export const dePack: LanguagePack = {
     "session.noAiAgent": "Kein KI-Agent",
     "session.sshRemote": "SSH-Remote",
     "session.sshHostPlaceholder": "Host (z. B. 192.168.1.100 oder myserver.com)",
-    "session.sshUserPlaceholder": "Benutzer (Standard: aktueller Benutzer)",
+    "session.sshUserPlaceholder": "Benutzer (optional — nutzt ~/.ssh/config)",
     "session.sshPortPlaceholder": "Port",
     "session.sshIdentityFilePlaceholder": "Identitätsdatei (optional, z. B. ~/.ssh/id_rsa)",
     "session.sshJumpHostPlaceholder": "Jump-Host (optional, z. B. bastion.example.com)",
