@@ -20,6 +20,9 @@ let listenerPromise: Promise<void> | null = null;
 // menu (depending on the OS webview), in either order. Whichever arrives
 // first runs the action; the other one, for the same action right after it,
 // is the same key press and is dropped.
+// Side effect, accepted: a mouse click on the same menu item within 500 ms
+// of pressing its chord is also taken for the echo and dropped. Nobody runs
+// the same action twice that fast on purpose, and the chord already ran it.
 const ECHO_WINDOW_MS = 500;
 type ActionSource = "keyboard" | "native";
 let lastAction: { id: string; at: number; source: ActionSource } | null = null;
