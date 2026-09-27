@@ -76,9 +76,8 @@ export function compilePromptLegacy(fields: LegacyComposerFields): string {
 
 // ── Re-exports for convenience ──
 
-export { BUILT_IN_TEMPLATES, TEMPLATE_CATEGORIES } from "./templates";
-export type { PromptTemplate, TemplateCategory } from "./templates";
-export { BUILT_IN_ROLES, mergeRoles, validateCustomRole } from "./roles";
+export { BUILT_IN_TEMPLATES } from "./templates";
+export { BUILT_IN_ROLES } from "./roles";
 export type { RoleDefinition } from "./roles";
-export { BUILT_IN_STYLES, mergeStyles, validateCustomStyle } from "./styles";
+export { BUILT_IN_STYLES } from "./styles";
 export type { StyleDefinition, SelectedStyle } from "./styles";

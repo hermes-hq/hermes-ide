@@ -90,37 +90,6 @@ describe("SESSION_REMOVED comprehensive cleanup", () => {
     expect(state.injectionLocks["s1"]).toBeUndefined();
   });
 
-  it("cleans up execution mode on session removal", () => {
-    let state = initialState;
-    state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "s1" }) });
-    state = sessionReducer(state, { type: "SET_EXECUTION_MODE", sessionId: "s1", mode: "autonomous" });
-    expect(state.executionModes["s1"]).toBe("autonomous");
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.executionModes["s1"]).toBeUndefined();
-  });
-
-  it("clears auto toast when its session is removed", () => {
-    let state = initialState;
-    state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "s1" }) });
-    state = sessionReducer(state, { type: "SHOW_AUTO_TOAST", command: "npm test", reason: "prediction", sessionId: "s1" });
-    expect(state.ui.autoToast).not.toBeNull();
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.ui.autoToast).toBeNull();
-  });
-
-  it("preserves auto toast when a different session is removed", () => {
-    let state = initialState;
-    state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "s1" }) });
-    state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "s2" }) });
-    state = sessionReducer(state, { type: "SHOW_AUTO_TOAST", command: "npm test", reason: "prediction", sessionId: "s1" });
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s2" });
-    expect(state.ui.autoToast).not.toBeNull();
-    expect(state.ui.autoToast!.sessionId).toBe("s1");
-  });
-
   it("removing session A does not disturb session B injection lock", () => {
     let state = initialState;
     state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "A" }) });
@@ -273,34 +242,6 @@ describe("Layout cleanup on SESSION_REMOVED", () => {
 });
 
 // =====================================================================
-// Suite 7: Execution mode defaults and per-session override
-// =====================================================================
-
-describe("Execution mode isolation", () => {
-  it("sessions without explicit mode use default", () => {
-    const state = initialState;
-    expect(state.executionModes["nonexistent"]).toBeUndefined();
-    expect(state.defaultMode).toBe("manual");
-  });
-
-  it("SET_DEFAULT_MODE changes the default for all unset sessions", () => {
-    let state = initialState;
-    state = sessionReducer(state, { type: "SET_DEFAULT_MODE", mode: "assisted" });
-    expect(state.defaultMode).toBe("assisted");
-    // Per-session modes are still independent
-    expect(state.executionModes).toEqual({});
-  });
-
-  it("per-session mode overrides default", () => {
-    let state = initialState;
-    state = sessionReducer(state, { type: "SET_DEFAULT_MODE", mode: "manual" });
-    state = sessionReducer(state, { type: "SET_EXECUTION_MODE", sessionId: "s1", mode: "autonomous" });
-    expect(state.defaultMode).toBe("manual");
-    expect(state.executionModes["s1"]).toBe("autonomous");
-  });
-});
-
-// =====================================================================
 // Suite 8: Auto-apply toggle state
 // =====================================================================
 
@@ -361,10 +302,6 @@ describe("Multi-session state isolation (comprehensive)", () => {
     state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "s2", phase: "busy" }) });
     state = sessionReducer(state, { type: "SESSION_UPDATED", session: makeSession({ id: "s3", phase: "idle" }) });
 
-    // Set different modes
-    state = sessionReducer(state, { type: "SET_EXECUTION_MODE", sessionId: "s1", mode: "manual" });
-    state = sessionReducer(state, { type: "SET_EXECUTION_MODE", sessionId: "s2", mode: "autonomous" });
-    state = sessionReducer(state, { type: "SET_EXECUTION_MODE", sessionId: "s3", mode: "assisted" });
 
     // Lock s1 and s2
     state = sessionReducer(state, { type: "ACQUIRE_INJECTION_LOCK", sessionId: "s1" });
@@ -374,9 +311,6 @@ describe("Multi-session state isolation (comprehensive)", () => {
     expect(state.sessions["s1"].phase).toBe("idle");
     expect(state.sessions["s2"].phase).toBe("busy");
     expect(state.sessions["s3"].phase).toBe("idle");
-    expect(state.executionModes["s1"]).toBe("manual");
-    expect(state.executionModes["s2"]).toBe("autonomous");
-    expect(state.executionModes["s3"]).toBe("assisted");
     expect(state.injectionLocks["s1"]).toBe(true);
     expect(state.injectionLocks["s2"]).toBe(true);
     expect(state.injectionLocks["s3"]).toBeUndefined();
@@ -384,13 +318,10 @@ describe("Multi-session state isolation (comprehensive)", () => {
     // Remove s2 — only s2 state should be cleaned
     state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s2" });
     expect(state.sessions["s2"]).toBeUndefined();
-    expect(state.executionModes["s2"]).toBeUndefined();
     expect(state.injectionLocks["s2"]).toBeUndefined();
     // s1 and s3 unchanged
     expect(state.sessions["s1"]).toBeDefined();
     expect(state.sessions["s3"]).toBeDefined();
-    expect(state.executionModes["s1"]).toBe("manual");
-    expect(state.executionModes["s3"]).toBe("assisted");
     expect(state.injectionLocks["s1"]).toBe(true);
   });
 });

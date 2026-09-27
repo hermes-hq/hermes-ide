@@ -57,7 +57,6 @@ export function buildTerminalMenuItems(hasSelection: boolean): ContextMenuItem[]
 export function buildSessionMenuItems(
   session: { id: string; group: string | null; phase: string },
   groups: string[],
-  _executionMode?: string,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
     menuItem("session.rename", "Rename..."),

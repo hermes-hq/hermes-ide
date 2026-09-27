@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
-use crate::db::{Database, ExecutionNode, SessionWorktreeRow};
+use crate::db::{Database, SessionWorktreeRow};
 use crate::pty::adapters::now;
-use crate::pty::analyzer::{CommandPredictionEvent, OutputAnalyzer};
+use crate::pty::analyzer::OutputAnalyzer;
 use crate::pty::models::*;
 use crate::pty::{
     ai_launch_command, channels_suffix, detect_shell, get_working_directory, PtySession,
@@ -1160,12 +1160,6 @@ pub fn create_session(
                         }
                         let data = &buf[..n];
 
-                        // Declare outside analyzer lock scope so DB work can
-                        // access them after the lock is released.
-                        let mut completed = Vec::new();
-                        let mut recent_cmds_snapshot: Option<std::collections::VecDeque<String>> =
-                            None;
-
                         if let Ok(mut a) = analyzer_clone.lock() {
                             a.process(data);
 
@@ -1177,16 +1171,6 @@ pub fn create_session(
                                 let _ = app_clone
                                     .emit(&format!("cwd-changed-{}", event_session_id), &new_cwd);
                             }
-
-                            // Drain completed nodes — processed OUTSIDE the analyzer
-                            // lock to prevent AB-BA deadlock with do_save_workspace
-                            // (which acquires db → analyzer; here we'd be analyzer → db).
-                            completed = a.drain_completed_nodes();
-                            recent_cmds_snapshot = if !completed.is_empty() {
-                                Some(a.recent_commands.clone())
-                            } else {
-                                None
-                            };
 
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_clone.lock() {
@@ -1351,153 +1335,6 @@ pub fn create_session(
                                     // Phase-change paths already set it on real activity.
                                     let update = SessionUpdate::from(&*s);
                                     let _ = app_clone.emit("session-updated", &update);
-                                }
-                            }
-                        }
-
-                        // ─── DB work: analyzer lock is NOT held ──────────
-                        // Process completed execution nodes with the DB lock.
-                        // This runs after releasing the analyzer lock to maintain
-                        // consistent lock ordering (db before analyzer) and prevent
-                        // deadlocks with save_workspace_state / save_all_snapshots.
-                        if !completed.is_empty() {
-                            if let Some(mut recent_cmds) = recent_cmds_snapshot {
-                                if let Ok(db) = app_clone.state::<AppState>().db.lock() {
-                                    for node in &completed {
-                                        let node_id = db
-                                            .insert_execution_node(
-                                                &event_session_id,
-                                                node.timestamp,
-                                                &node.kind,
-                                                node.input.as_deref(),
-                                                node.output_summary.as_deref(),
-                                                node.exit_code,
-                                                &node.working_dir,
-                                                node.duration_ms,
-                                                None,
-                                            )
-                                            .ok();
-
-                                        // Emit execution-node event
-                                        if let Some(id) = node_id {
-                                            let exec_node = ExecutionNode {
-                                                id,
-                                                session_id: event_session_id.clone(),
-                                                timestamp: node.timestamp,
-                                                kind: node.kind.clone(),
-                                                input: node.input.clone(),
-                                                output_summary: node.output_summary.clone(),
-                                                exit_code: node.exit_code,
-                                                working_dir: node.working_dir.clone(),
-                                                duration_ms: node.duration_ms,
-                                                metadata: None,
-                                            };
-                                            let _ = app_clone.emit(
-                                                &format!("execution-node-{}", event_session_id),
-                                                &exec_node,
-                                            );
-                                        }
-
-                                        let project_id: Option<String> =
-                                            Some(node.working_dir.clone());
-
-                                        // Command sequence tracking — push FIRST then record
-                                        if node.kind == "command" {
-                                            if let Some(ref input) = node.input {
-                                                let normalized = input
-                                                    .trim()
-                                                    .trim_start_matches('$')
-                                                    .trim()
-                                                    .to_string();
-                                                if !normalized.is_empty() {
-                                                    recent_cmds.push_back(normalized.clone());
-                                                    if recent_cmds.len() > 5 {
-                                                        recent_cmds.pop_front();
-                                                    }
-
-                                                    let cmds: Vec<String> =
-                                                        recent_cmds.iter().cloned().collect();
-                                                    if cmds.len() >= 2 {
-                                                        let prev: Vec<&str> = cmds
-                                                            [..cmds.len() - 1]
-                                                            .iter()
-                                                            .rev()
-                                                            .take(2)
-                                                            .map(|s| s.as_str())
-                                                            .collect::<Vec<_>>()
-                                                            .into_iter()
-                                                            .rev()
-                                                            .collect();
-                                                        let seq_json = serde_json::to_string(&prev)
-                                                            .unwrap_or_default();
-                                                        db.record_command_sequence(
-                                                            project_id.as_deref(),
-                                                            &seq_json,
-                                                            &normalized,
-                                                        )
-                                                        .ok();
-                                                    }
-                                                    if cmds.len() >= 3 {
-                                                        let prev: Vec<&str> = cmds
-                                                            [..cmds.len() - 1]
-                                                            .iter()
-                                                            .rev()
-                                                            .take(3)
-                                                            .map(|s| s.as_str())
-                                                            .collect::<Vec<_>>()
-                                                            .into_iter()
-                                                            .rev()
-                                                            .collect();
-                                                        let seq_json = serde_json::to_string(&prev)
-                                                            .unwrap_or_default();
-                                                        db.record_command_sequence(
-                                                            project_id.as_deref(),
-                                                            &seq_json,
-                                                            &normalized,
-                                                        )
-                                                        .ok();
-                                                    }
-
-                                                    // Query predictions and emit
-                                                    let seq: Vec<&str> = cmds
-                                                        .iter()
-                                                        .rev()
-                                                        .take(2)
-                                                        .collect::<Vec<_>>()
-                                                        .into_iter()
-                                                        .rev()
-                                                        .map(|s| s.as_str())
-                                                        .collect();
-                                                    let seq_json = serde_json::to_string(&seq)
-                                                        .unwrap_or_default();
-                                                    if let Ok(predictions) = db
-                                                        .predict_next_command(
-                                                            project_id.as_deref(),
-                                                            &seq_json,
-                                                            3,
-                                                        )
-                                                    {
-                                                        if !predictions.is_empty() {
-                                                            let evt = CommandPredictionEvent {
-                                                                predictions,
-                                                            };
-                                                            let _ = app_clone.emit(
-                                                                &format!(
-                                                                    "command-prediction-{}",
-                                                                    event_session_id
-                                                                ),
-                                                                &evt,
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // Write back updated recent_commands to analyzer
-                                if let Ok(mut a) = analyzer_clone.lock() {
-                                    a.recent_commands = recent_cmds;
                                 }
                             }
                         }
@@ -1816,49 +1653,6 @@ pub fn write_to_session(
 
     if let Ok(mut a) = session.analyzer.lock() {
         a.mark_input_sent();
-
-        // While a TUI owns the screen (vim, less, htop, claude, etc.) the
-        // line buffer must stay quiescent. Keystrokes typed at a TUI are
-        // application input, not shell commands, and recording them would
-        // pollute the execution-node stream and feed garbage into the
-        // command-prediction system (issue #172).
-        if !a.in_alternate_screen {
-            let text = String::from_utf8_lossy(&bytes);
-            let is_enter = text.contains('\r') || text.contains('\n');
-
-            // Accumulate printable chars into the line buffer
-            for ch in text.chars() {
-                if ch == '\r' || ch == '\n' {
-                    // Enter pressed — commit the accumulated line
-                    continue;
-                } else if ch == '\x7f' || ch == '\x08' {
-                    // Backspace — pop last char
-                    a.input_line_buffer.pop();
-                } else if ch == '\x03' {
-                    // Ctrl+C — clear buffer
-                    a.input_line_buffer.clear();
-                } else if !ch.is_control() {
-                    a.input_line_buffer.push(ch);
-                }
-            }
-
-            if is_enter && !a.input_line_buffer.is_empty() {
-                let line = std::mem::take(&mut a.input_line_buffer);
-                a.mark_input_line(&line);
-                let cwd = a.current_cwd.clone().unwrap_or_default();
-                a.start_node(&cwd);
-            } else if is_enter {
-                // Enter with empty buffer — still mark activity
-                a.input_line_buffer.clear();
-            }
-        } else {
-            // Defensive: a TUI may launch mid-line. Any half-typed shell
-            // command in the buffer at that point isn't a real command —
-            // drop it so we don't commit it on the next post-TUI Enter.
-            if !a.input_line_buffer.is_empty() {
-                a.input_line_buffer.clear();
-            }
-        }
     }
 
     {
@@ -1922,8 +1716,9 @@ pub fn write_to_session(
 ///   1. macOS — open the TTY slave device and call `tcgetpgrp()` to get the
 ///      foreground PGID, then compare with the shell's own PGID.
 ///   2. Linux — read `/proc/{pid}/stat` to obtain `pgrp` and `tpgid`.
-///   3. Fallback — enumerate the shell's direct children; if none exist the
-///      shell is assumed to be at its prompt.
+///   3. Windows (no process groups on a pseudo console) and the Unix fallback —
+///      the shell is at its prompt when it has no child process. A program
+///      the shell started, such as an agent CLI, is its child.
 #[tauri::command]
 pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Result<bool, String> {
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
@@ -1985,7 +1780,24 @@ pub fn is_shell_foreground(state: State<'_, AppState>, session_id: String) -> Re
     }
 
     #[cfg(not(unix))]
-    Ok(true)
+    Ok(!has_child_process(shell_pid))
+}
+
+/// Whether any running process has `parent_pid` as its parent. The console
+/// host Windows may start for a console program is not a program the user
+/// ran, so it does not count.
+#[cfg(any(not(unix), test))]
+fn has_child_process(parent_pid: u32) -> bool {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    let parent = Pid::from_u32(parent_pid);
+    sys.processes().values().any(|p| {
+        p.parent() == Some(parent) && {
+            let name = p.name().to_string_lossy().to_ascii_lowercase();
+            name != "conhost.exe" && name != "openconsole.exe"
+        }
+    })
 }
 
 #[tauri::command]
@@ -4147,5 +3959,63 @@ mod ssh_command_tests {
         let pty = pty_args(&i);
         let dest = pty.iter().position(|a| a == "-oProxyCommand=x").unwrap();
         assert_eq!(pty[dest - 1], "--");
+    }
+}
+
+#[cfg(test)]
+mod foreground_tests {
+    use super::has_child_process;
+    use std::process::{Child, Command};
+    use std::time::{Duration, Instant};
+
+    /// A process that starts a child of its own and waits for it.
+    fn parent_with_child() -> Child {
+        #[cfg(windows)]
+        let child = Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1 >NUL"])
+            .spawn();
+        #[cfg(not(windows))]
+        let child = Command::new("sh").args(["-c", "sleep 30; true"]).spawn();
+        child.unwrap()
+    }
+
+    /// A process that starts nothing.
+    fn lone_process() -> Child {
+        #[cfg(windows)]
+        let child = Command::new("ping").args(["-n", "30", "127.0.0.1"]).spawn();
+        #[cfg(not(windows))]
+        let child = Command::new("sleep").arg("30").spawn();
+        child.unwrap()
+    }
+
+    fn eventually(mut check: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if check() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    #[test]
+    fn a_program_the_shell_started_is_seen_as_its_child() {
+        let mut shell = parent_with_child();
+        let seen = eventually(|| has_child_process(shell.id()));
+        let _ = shell.kill();
+        let _ = shell.wait();
+        assert!(seen, "the running child was not found");
+    }
+
+    #[test]
+    fn a_process_with_nothing_running_has_no_child() {
+        let mut lone = lone_process();
+        // Give it time to start; it never gains a child.
+        std::thread::sleep(Duration::from_millis(300));
+        let found = has_child_process(lone.id());
+        let _ = lone.kill();
+        let _ = lone.wait();
+        assert!(!found, "found a child that does not exist");
     }
 }

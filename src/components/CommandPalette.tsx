@@ -54,7 +54,6 @@ export function CommandPalette({
     { id: "settings-general", label: t("palette.settingsGeneral"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("general"); onClose(); } },
     { id: "settings-appearance", label: t("palette.settingsAppearance"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
     { id: "settings-theme", label: t("palette.settingsTheme"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("appearance"); onClose(); } },
-    { id: "settings-autonomous", label: t("palette.settingsAutonomous"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("autonomous"); onClose(); } },
     { id: "settings-git", label: t("palette.settingsGit"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("git"); onClose(); } },
     { id: "settings-privacy", label: t("palette.settingsPrivacy"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("privacy"); onClose(); } },
     { id: "settings-shortcuts", label: t("palette.settingsShortcuts"), category: t("app.settings"), hidden: true, action: () => { onOpenSettings("shortcuts"); onClose(); } },

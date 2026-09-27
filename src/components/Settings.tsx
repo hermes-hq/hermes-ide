@@ -169,11 +169,6 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     };
   }, []);
 
-  const AUTONOMOUS_KEYS: Record<string, string> = {
-    auto_command_min_frequency: "commandMinFrequency",
-    auto_cancel_delay_ms: "cancelDelayMs",
-  };
-
   const updateSetting = useCallback((key: string, value: string) => {
     const next = { ...settings, [key]: value };
     setSettings(next);
@@ -185,14 +180,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
       applyAgentTimelineStyle(value);
     }
     setSetting(key, value).catch(console.error);
-    // Sync autonomous settings to live state
-    if (key in AUTONOMOUS_KEYS) {
-      dispatch({
-        type: "SET_AUTONOMOUS_SETTINGS",
-        settings: { [AUTONOMOUS_KEYS[key]]: parseInt(value, 10) || 0 },
-      });
-    }
-  }, [settings, dispatch]);
+  }, [settings]);
 
   const applyWindowSize = useCallback((widthStr: string, heightStr: string, immediate = false) => {
     if (applyTimer.current) clearTimeout(applyTimer.current);
@@ -251,7 +239,6 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     { id: "appearance", label: t("settings.appearance") },
     { id: "ssh", label: t("settings.ssh") },
     { id: "git", label: t("settings.git") },
-    { id: "autonomous", label: t("settings.autonomous") },
     { id: "ai-agent", label: t("settings.aiAgent") },
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
@@ -800,38 +787,6 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             )}
 
 
-            {activeTab === "autonomous" && (
-              <div className="settings-section">
-                <p className="settings-hint">
-                  {t("settings.autonomousHint")}
-                </p>
-                <div className="settings-group">
-                  <label className="settings-label">
-                    {t("settings.autoCommandFrequency", { value: settings.auto_command_min_frequency || "5" })}
-                  </label>
-                  <input
-                    type="range"
-                    className="settings-range"
-                    min="2" max="20" step="1"
-                    value={settings.auto_command_min_frequency || "5"}
-                    onChange={(e) => updateSetting("auto_command_min_frequency", e.target.value)}
-                  />
-                </div>
-                <div className="settings-group">
-                  <label className="settings-label">
-                    {t("settings.cancelDelay", { value: settings.auto_cancel_delay_ms ? `${parseInt(settings.auto_cancel_delay_ms) / 1000}s` : "3s" })}
-                  </label>
-                  <input
-                    type="range"
-                    className="settings-range"
-                    min="1000" max="10000" step="1000"
-                    value={settings.auto_cancel_delay_ms || "3000"}
-                    onChange={(e) => updateSetting("auto_cancel_delay_ms", e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-
             {activeTab === "ai-agent" && (
               <AiAgentSettingsTab
                 settings={settings}
@@ -969,15 +924,6 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   applyTheme(newSettings.theme || "frosted-dark", newSettings);
                   // Sync analytics state
                   setAnalyticsEnabled(newSettings.telemetry_enabled === "true");
-                  // Sync autonomous settings to live state
-                  for (const [settingKey, stateKey] of Object.entries(AUTONOMOUS_KEYS)) {
-                    if (newSettings[settingKey]) {
-                      dispatch({
-                        type: "SET_AUTONOMOUS_SETTINGS",
-                        settings: { [stateKey]: parseInt(newSettings[settingKey], 10) || 0 },
-                      });
-                    }
-                  }
                   setFooterStatus(t("settings.imported"));
                 } catch (e) {
                   setFooterStatus(t("settings.importFailed", { error: String(e) }));

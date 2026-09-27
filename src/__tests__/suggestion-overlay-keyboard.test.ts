@@ -235,21 +235,6 @@ describe("Overlay: Esc dismisses without accepting", () => {
 });
 
 // =============================================================================
-// TYPING RESETS SELECTION
-// =============================================================================
-
-describe("Overlay: Typing resets selection to null", () => {
-  it("computeSuggestions sets selectedIndex to null (not 0)", () => {
-    const computeFn = TERMINAL_POOL_SRC.match(
-      /function computeSuggestions[\s\S]*?\n\}/,
-    );
-    expect(computeFn).not.toBeNull();
-    expect(computeFn![0]).toContain("selectedIndex: null");
-    expect(computeFn![0]).not.toContain("selectedIndex: 0");
-  });
-});
-
-// =============================================================================
 // TAB TESTS
 // =============================================================================
 
@@ -426,16 +411,6 @@ describe("Overlay: Public functions for mouse interaction", () => {
 // =============================================================================
 
 describe("Overlay: Suppressed when phase is not shell-interactive", () => {
-  it("computeSuggestions uses lastStablePhase (immune to echo-flicker)", () => {
-    const computeFn = TERMINAL_POOL_SRC.match(
-      /function computeSuggestions[\s\S]*?\n\}/,
-    );
-    expect(computeFn).not.toBeNull();
-    // Must use lastStablePhase (not sessionPhase) to avoid echo-flicker
-    expect(computeFn![0]).toContain("lastStablePhase");
-    expect(computeFn![0]).toContain('lastStablePhase !== "idle"');
-    expect(computeFn![0]).toContain('lastStablePhase !== "shell_ready"');
-  });
 
   it("setSessionPhase tracks lastStablePhase (excludes 'busy')", () => {
     // pool.ts must update lastStablePhase for all phases except "busy"
@@ -445,13 +420,6 @@ describe("Overlay: Suppressed when phase is not shell-interactive", () => {
 });
 
 describe("Overlay: Suppressed during alternate screen buffer", () => {
-  it("computeSuggestions checks for alternate buffer and returns early", () => {
-    const computeFn = TERMINAL_POOL_SRC.match(
-      /function computeSuggestions[\s\S]*?\n\}/,
-    );
-    expect(computeFn).not.toBeNull();
-    expect(computeFn![0]).toContain('buffer.active.type === "alternate"');
-  });
 
   it("handleTerminalInput dismisses overlay when alternate buffer is active", () => {
     // When the terminal switches to alternate buffer (interactive CLI tool starts),
@@ -468,34 +436,7 @@ describe("Overlay: Suppressed during alternate screen buffer", () => {
   });
 });
 
-describe("Overlay: Suppressed when user scrolled up", () => {
-  it("computeSuggestions checks userScrolledUp flag", () => {
-    const computeFn = TERMINAL_POOL_SRC.match(
-      /function computeSuggestions[\s\S]*?\n\}/,
-    );
-    expect(computeFn).not.toBeNull();
-    expect(computeFn![0]).toContain("userScrolledUp");
-  });
-});
-
-describe("Overlay: OS-level foreground process check (synchronous cached poll)", () => {
-  it("computeSuggestions checks entry.shellIsForeground synchronously", () => {
-    const computeFn = TERMINAL_POOL_SRC.match(
-      /function computeSuggestions[\s\S]*?\n\}/,
-    );
-    expect(computeFn).not.toBeNull();
-    expect(computeFn![0]).toContain("shellIsForeground");
-  });
-
-  it("computeSuggestions is synchronous (no async IPC in hot path)", () => {
-    // Must NOT be async — uses cached poll value instead
-    expect(TERMINAL_POOL_SRC).not.toContain(
-      "async function computeSuggestions(",
-    );
-    expect(TERMINAL_POOL_SRC).toContain(
-      "function computeSuggestions(",
-    );
-  });
+describe("Overlay: OS-level foreground process check (cached poll)", () => {
 
   it("pool.ts sets up a polling interval for isShellForeground", () => {
     // The polling timer is started in createTerminal

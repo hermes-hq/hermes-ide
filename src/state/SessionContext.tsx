@@ -40,13 +40,12 @@ import type { DirtyWorktreeChange } from "../components/DirtyWorktreeDialog";
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
-  AgentInfo, ToolCall, ProviderTokens, ActionEvent, ActionTemplate,
-  MemoryFact, SessionMetrics, SessionData, SessionHistoryEntry,
-  ExecutionMode, CreateSessionOpts, SessionAction, SessionMode,
+  ActionEvent, ActionTemplate, SessionData, SessionHistoryEntry,
+  CreateSessionOpts, SessionAction, SessionMode,
 } from "../types/session";
 
 import type {
-  SessionData, SessionHistoryEntry, ExecutionMode, CreateSessionOpts, SessionAction,
+  SessionData, SessionHistoryEntry, CreateSessionOpts, SessionAction,
   SavedWorkspace, SavedSessionInfo, SessionMode,
 } from "../types/session";
 import { SAVED_WORKSPACE_VERSION, validateSavedWorkspace } from "../types/session";
@@ -323,12 +322,6 @@ interface SessionState {
   sessions: Record<string, SessionData>;
   activeSessionId: string | null;
   recentSessions: SessionHistoryEntry[];
-  defaultMode: ExecutionMode;
-  executionModes: Record<string, ExecutionMode>;
-  autonomousSettings: {
-    commandMinFrequency: number;
-    cancelDelayMs: number;
-  };
   autoApplyEnabled: boolean;
   injectionLocks: Record<string, boolean>;
   composers: Record<string, { draft: string; height: number; expanded: boolean }>;
@@ -348,7 +341,6 @@ interface SessionState {
     sessionListCollapsed: boolean;
     commandPaletteOpen: boolean;
     flowMode: boolean;
-    autoToast: { command: string; reason: string; sessionId: string } | null;
     processPanelOpen: boolean;
     gitPanelOpen: boolean;
     fileExplorerOpen: boolean;
@@ -473,8 +465,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         : (state.activeSessionId === action.id
           ? (ids.length > 0 ? ids[ids.length - 1] : null)
           : state.activeSessionId);
-      // Clean per-session execution mode and injection lock
-      const { [action.id]: _mode, ...restModes } = state.executionModes;
+      // Clean per-session injection lock
       const { [action.id]: _lock, ...restLocks } = state.injectionLocks;
       const { [action.id]: _composer, ...restComposers } = state.composers;
       // Drop the closed session's notes — keeps saved_workspace.json
@@ -483,10 +474,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       // strings, but that path only fires when the user clears a note;
       // SESSION_REMOVED is the canonical "this id no longer exists").
       const { [action.id]: _note, ...restNotes } = state.notes;
-      // Clear autoToast if it references the removed session
-      const newAutoToast = state.ui.autoToast?.sessionId === action.id
-        ? null
-        : state.ui.autoToast;
       // Clear pending close dialog if the removed session is the one being confirmed
       const newPendingClose = state.pendingCloseSessionId === action.id
         ? null
@@ -497,7 +484,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ...state,
         sessions: rest,
         activeSessionId: newActive,
-        executionModes: restModes,
         injectionLocks: restLocks,
         composers: restComposers,
         notes: restNotes,
@@ -505,7 +491,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         layout: { root: newRoot, focusedPaneId: newFocused },
         ui: {
           ...state.ui,
-          autoToast: newAutoToast,
           ...(noSessionsLeft && {
             sessionListCollapsed: true,
             contextPanelOpen: false,
@@ -593,10 +578,6 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return state.ui.commandPaletteOpen
         ? { ...state, ui: { ...state.ui, commandPaletteOpen: false } }
         : state;
-    case "SET_EXECUTION_MODE":
-      return { ...state, executionModes: { ...state.executionModes, [action.sessionId]: action.mode } };
-    case "SET_DEFAULT_MODE":
-      return { ...state, defaultMode: action.mode };
     case "SET_SESSION_MODE": {
       const existing = state.sessions[action.sessionId];
       if (!existing || existing.mode === action.mode) return state;
@@ -611,14 +592,8 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     }
     case "TOGGLE_FLOW_MODE":
       return { ...state, ui: { ...state.ui, flowMode: !state.ui.flowMode } };
-    case "SHOW_AUTO_TOAST":
-      return { ...state, ui: { ...state.ui, autoToast: { command: action.command, reason: action.reason, sessionId: action.sessionId } } };
-    case "DISMISS_AUTO_TOAST":
-      return { ...state, ui: { ...state.ui, autoToast: null } };
     case "TOGGLE_AUTO_APPLY":
       return { ...state, autoApplyEnabled: !state.autoApplyEnabled };
-    case "SET_AUTONOMOUS_SETTINGS":
-      return { ...state, autonomousSettings: { ...state.autonomousSettings, ...action.settings } };
     case "ACQUIRE_INJECTION_LOCK": {
       if (state.injectionLocks[action.sessionId]) return state; // Already locked
       return { ...state, injectionLocks: { ...state.injectionLocks, [action.sessionId]: true } };
@@ -1038,12 +1013,6 @@ export const initialState: SessionState = {
   sessions: {},
   activeSessionId: null,
   recentSessions: [],
-  defaultMode: "manual" as ExecutionMode,
-  executionModes: {},
-  autonomousSettings: {
-    commandMinFrequency: 5,
-    cancelDelayMs: 3000,
-  },
   autoApplyEnabled: true,
   injectionLocks: {},
   composers: {},
@@ -1066,7 +1035,6 @@ export const initialState: SessionState = {
     sessionListCollapsed: false,
     commandPaletteOpen: false,
     flowMode: false,
-    autoToast: null,
     processPanelOpen: false,
     gitPanelOpen: false,
     fileExplorerOpen: false,
@@ -1497,16 +1465,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         applyTheme(theme, s);
         applyAgentTimelineStyle(s.agent_timeline_style);
         restoreWindowState(s).catch(console.error);
-        if (s.execution_mode === "assisted" || s.execution_mode === "autonomous") {
-          dispatch({ type: "SET_DEFAULT_MODE", mode: s.execution_mode as ExecutionMode });
-        }
-        dispatch({
-          type: "SET_AUTONOMOUS_SETTINGS",
-          settings: {
-            commandMinFrequency: s.auto_command_min_frequency ? parseInt(s.auto_command_min_frequency, 10) || 5 : 5,
-            cancelDelayMs: s.auto_cancel_delay_ms ? parseInt(s.auto_cancel_delay_ms, 10) || 3000 : 3000,
-          },
-        });
 
         // Now load sessions after settings are applied
         return getSessions().then((arr) => ({ arr, settings: s }));
@@ -1894,7 +1852,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SESSION_UPDATED", session });
       dispatch({ type: "SET_ACTIVE", id: session.id });
       trackSessionCreated({
-        execution_mode: defaultModeRef.current,
         has_ai_provider: !!opts?.aiProvider,
       });
 
@@ -1946,9 +1903,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       closeTimers.current.set(id, timer);
     }
   }, [dispatch]);
-
-  const defaultModeRef = useRef(state.defaultMode);
-  defaultModeRef.current = state.defaultMode;
 
   const skipCloseConfirmRef = useRef(state.skipCloseConfirm);
   skipCloseConfirmRef.current = state.skipCloseConfirm;
@@ -2716,12 +2670,6 @@ export function useTotalTokens(): { input: number; output: number } {
   }, [state.sessions]);
 }
 
-export function useExecutionMode(sessionId: string | null): ExecutionMode {
-  const { state } = useSession();
-  if (!sessionId) return state.defaultMode;
-  return state.executionModes[sessionId] || state.defaultMode;
-}
-
 /**
  * Read this session's composer draft + height + expanded flag. Returns
  * sensible defaults (empty draft, 120px height, collapsed) when the session
@@ -2741,7 +2689,3 @@ export function useComposer(sessionId: string): { draft: string; height: number;
   return { draft: "", height: 120, expanded: expandedDefault };
 }
 
-export function useAutonomousSettings() {
-  const { state } = useSession();
-  return state.autonomousSettings;
-}

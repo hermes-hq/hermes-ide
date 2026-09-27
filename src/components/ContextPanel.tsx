@@ -3,7 +3,7 @@ import React, { useState, useCallback, useMemo, useEffect, useRef, memo } from "
 import { fmt } from "../utils/platform";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { SessionData, useExecutionMode, useSession } from "../state/SessionContext";
+import { SessionData, useSession } from "../state/SessionContext";
 import { addWorkspacePath as apiAddWorkspacePath, removeWorkspacePath as apiRemoveWorkspacePath } from "../api/sessions";
 import { getSessionProjects } from "../api/projects";
 import { addContextPin, removeContextPin } from "../api/context";
@@ -276,9 +276,8 @@ function WorkspaceCompact({ cwd, extraPaths, workspaceInput, setWorkspaceInput, 
 const COPY_FEEDBACK_MS = 2000;
 export function ContextPanel({ session }: ContextPanelProps) {
   const { metrics, detected_agent } = session;
-  const mode = useExecutionMode(session.id);
   const { state: sessionState, dispatch } = useSession();
-  const contextManager = useContextState(session, mode);
+  const contextManager = useContextState(session);
   const [workspaceInput, setWorkspaceInput] = useState("");
   const [persistedMemory, setPersistedMemory] = useState<PersistedMemory[]>([]);
   const [memoryKeyInput, setMemoryKeyInput] = useState("");

@@ -1003,20 +1003,20 @@ describe("Context formatContextMarkdown edge cases", () => {
   }
 
   it("no agent produces no Provider line", () => {
-    const output = formatContextMarkdown(makeCtx(), 0, "manual");
+    const output = formatContextMarkdown(makeCtx(), 0);
     expect(output).not.toContain("Provider:");
   });
 
   it("agent with model produces Provider with model", () => {
     const output = formatContextMarkdown(
-      makeCtx({ agent: "anthropic", model: "claude-sonnet" }), 0, "manual"
+      makeCtx({ agent: "anthropic", model: "claude-sonnet" }), 0
     );
     expect(output).toContain("Provider: anthropic (claude-sonnet)");
   });
 
   it("agent without model produces Provider without parens", () => {
     const output = formatContextMarkdown(
-      makeCtx({ agent: "openai", model: null }), 0, "manual"
+      makeCtx({ agent: "openai", model: null }), 0
     );
     expect(output).toContain("Provider: openai");
     expect(output).not.toMatch(/Provider:.*\(/);
@@ -1029,16 +1029,15 @@ describe("Context formatContextMarkdown edge cases", () => {
         memoryFacts: [{ key: "db", value: "dev", source: "agent", confidence: 0.5 }],
       }),
       0,
-      "manual",
     );
     expect(output).toContain("db = prod");
     expect(output).not.toContain("db = dev");
   });
 
   it("empty context produces minimal output with workspace", () => {
-    const output = formatContextMarkdown(makeCtx(), 0, "manual");
+    const output = formatContextMarkdown(makeCtx(), 0);
     expect(output).toContain("# Session Context (v0)");
-    expect(output).toContain("- Mode: manual");
+    expect(output).not.toContain("- Mode:");
     expect(output).toContain("## Workspace");
     expect(output).not.toContain("## Projects");
     expect(output).not.toContain("## Pinned Context");

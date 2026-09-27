@@ -9,7 +9,6 @@
  * - Injection formatting
  * - Idempotency
  * - Multi-session isolation
- * - Execution mode propagation
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -225,81 +224,6 @@ describe("Suite 2: Dirty Detection", () => {
 });
 
 // =====================================================================
-// Suite 3: Apply Behavior (via sessionReducer)
-// =====================================================================
-
-describe("Suite 3: Apply Behavior", () => {
-  it("SET_EXECUTION_MODE sets mode for a specific session", () => {
-    const state = sessionReducer(initialState, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    expect(state.executionModes["s1"]).toBe("autonomous");
-  });
-
-  it("SET_EXECUTION_MODE can change mode from autonomous to manual", () => {
-    let state = sessionReducer(initialState, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "manual",
-    });
-    expect(state.executionModes["s1"]).toBe("manual");
-  });
-
-  it("SET_EXECUTION_MODE for one session does not affect another", () => {
-    let state = sessionReducer(initialState, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s2",
-      mode: "assisted",
-    });
-    expect(state.executionModes["s1"]).toBe("autonomous");
-    expect(state.executionModes["s2"]).toBe("assisted");
-  });
-
-  it("SET_DEFAULT_MODE changes the default execution mode", () => {
-    const state = sessionReducer(initialState, {
-      type: "SET_DEFAULT_MODE",
-      mode: "autonomous",
-    });
-    expect(state.defaultMode).toBe("autonomous");
-  });
-
-  it("SET_DEFAULT_MODE does not affect per-session overrides", () => {
-    let state = sessionReducer(initialState, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "assisted",
-    });
-    state = sessionReducer(state, { type: "SET_DEFAULT_MODE", mode: "autonomous" });
-    expect(state.defaultMode).toBe("autonomous");
-    expect(state.executionModes["s1"]).toBe("assisted");
-  });
-
-  it("SET_AUTONOMOUS_SETTINGS updates autonomous thresholds", () => {
-    const state = sessionReducer(initialState, {
-      type: "SET_AUTONOMOUS_SETTINGS",
-      settings: { cancelDelayMs: 5000 },
-    });
-    expect(state.autonomousSettings.cancelDelayMs).toBe(5000);
-    // Unmodified setting is preserved
-    expect(state.autonomousSettings.commandMinFrequency).toBe(
-      initialState.autonomousSettings.commandMinFrequency
-    );
-  });
-});
-
-// =====================================================================
 // Suite 4: Auto-Apply Behavior (via sessionReducer)
 // =====================================================================
 
@@ -325,7 +249,6 @@ describe("Suite 4: Auto-Apply Behavior", () => {
     const after = { ...toggled, autoApplyEnabled: undefined };
 
     expect(before.activeSessionId).toBe(after.activeSessionId);
-    expect(before.defaultMode).toBe(after.defaultMode);
     expect(Object.keys(before.sessions)).toEqual(Object.keys(after.sessions));
   });
 
@@ -362,11 +285,6 @@ describe("Suite 4: Auto-Apply Behavior", () => {
 // =====================================================================
 
 describe("Suite 5: Injection Formatting", () => {
-  it("formatContextMarkdown includes execution mode", () => {
-    const ctx = makeBaseContext();
-    const output = formatContextMarkdown(ctx, 1, "autonomous");
-    expect(output).toContain("- Mode: autonomous");
-  });
 
   it("formatContextMarkdown includes pins", () => {
     const ctx = makeBaseContext({
@@ -376,7 +294,7 @@ describe("Suite 5: Injection Formatting", () => {
         priority: 128, created_at: 1000,
       }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Pinned Context");
     expect(output).toContain("[file] Main entry");
   });
@@ -385,7 +303,7 @@ describe("Suite 5: Injection Formatting", () => {
     const ctx = makeBaseContext({
       persistedMemory: [{ key: "db_host", value: "localhost", source: "user" }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Memory");
     expect(output).toContain("db_host = localhost");
   });
@@ -399,7 +317,7 @@ describe("Suite 5: Injection Formatting", () => {
         conventions: ["Use camelCase"], scan_status: "deep",
       }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Projects");
     expect(output).toContain("### my-project (/home/user/my-project)");
     expect(output).toContain("Languages: TypeScript, Python");
@@ -410,7 +328,7 @@ describe("Suite 5: Injection Formatting", () => {
 
   it("formatContextMarkdown includes version header", () => {
     const ctx = makeBaseContext();
-    const output = formatContextMarkdown(ctx, 42, "manual");
+    const output = formatContextMarkdown(ctx, 42);
     expect(output).toContain("# Session Context (v42)");
   });
 
@@ -418,7 +336,7 @@ describe("Suite 5: Injection Formatting", () => {
     const ctx = makeBaseContext({
       workspacePaths: ["/extra/path"],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Workspace");
     expect(output).toContain("Dir: /home/user/project");
     expect(output).toContain("+ /extra/path");
@@ -451,32 +369,19 @@ describe("Suite 6: Idempotency", () => {
 
   it("formatContextMarkdown produces identical output for identical input", () => {
     const ctx = makeBaseContext();
-    const output1 = formatContextMarkdown(ctx, 1, "manual");
-    const output2 = formatContextMarkdown(ctx, 1, "manual");
+    const output1 = formatContextMarkdown(ctx, 1);
+    const output2 = formatContextMarkdown(ctx, 1);
     expect(output1).toBe(output2);
   });
 
   it("formatContextMarkdown produces different output when context changes", () => {
     const ctx1 = makeBaseContext({ agent: "anthropic" });
     const ctx2 = makeBaseContext({ agent: "openai" });
-    const output1 = formatContextMarkdown(ctx1, 1, "manual");
-    const output2 = formatContextMarkdown(ctx2, 1, "manual");
+    const output1 = formatContextMarkdown(ctx1, 1);
+    const output2 = formatContextMarkdown(ctx2, 1);
     expect(output1).not.toBe(output2);
   });
 
-  it("SET_EXECUTION_MODE to same mode is idempotent", () => {
-    const s1 = sessionReducer(initialState, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    const s2 = sessionReducer(s1, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    expect(s2.executionModes["s1"]).toBe(s1.executionModes["s1"]);
-  });
 });
 
 // =====================================================================
@@ -484,20 +389,6 @@ describe("Suite 6: Idempotency", () => {
 // =====================================================================
 
 describe("Suite 7: Multi-Session Isolation", () => {
-  it("Execution modes are independent per session", () => {
-    let state = sessionReducer(initialState, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s2",
-      mode: "manual",
-    });
-    expect(state.executionModes["s1"]).toBe("autonomous");
-    expect(state.executionModes["s2"]).toBe("manual");
-  });
 
   it("Removing one session does not affect another session's data", () => {
     let state = sessionReducer(initialState, {
@@ -537,8 +428,8 @@ describe("Suite 7: Multi-Session Isolation", () => {
     const ctxA = makeBaseContext({ workingDirectory: "/project-a", agent: "anthropic" });
     const ctxB = makeBaseContext({ workingDirectory: "/project-b", agent: "openai" });
 
-    const outputA = formatContextMarkdown(ctxA, 1, "manual");
-    const outputB = formatContextMarkdown(ctxB, 1, "manual");
+    const outputA = formatContextMarkdown(ctxA, 1);
+    const outputB = formatContextMarkdown(ctxB, 1);
 
     expect(outputA).toContain("Dir: /project-a");
     expect(outputA).toContain("Provider: anthropic");
@@ -547,41 +438,5 @@ describe("Suite 7: Multi-Session Isolation", () => {
     expect(outputB).toContain("Dir: /project-b");
     expect(outputB).toContain("Provider: openai");
     expect(outputB).not.toContain("/project-a");
-  });
-});
-
-// =====================================================================
-// Suite 8: ExecutionMode Propagation
-// =====================================================================
-
-describe("Suite 8: ExecutionMode Propagation", () => {
-  it("Execution mode appears in formatted context", () => {
-    const ctx = makeBaseContext();
-    const output = formatContextMarkdown(ctx, 1, "assisted");
-    expect(output).toContain("- Mode: assisted");
-  });
-
-  it("Mode change produces different formatted output", () => {
-    const ctx = makeBaseContext();
-    const manual = formatContextMarkdown(ctx, 1, "manual");
-    const autonomous = formatContextMarkdown(ctx, 1, "autonomous");
-    expect(manual).not.toBe(autonomous);
-    expect(manual).toContain("- Mode: manual");
-    expect(autonomous).toContain("- Mode: autonomous");
-  });
-
-  it("Mode is included even without agent", () => {
-    const ctx = makeBaseContext({ agent: null, model: null });
-    const output = formatContextMarkdown(ctx, 1, "autonomous");
-    expect(output).toContain("- Mode: autonomous");
-    expect(output).not.toContain("Provider:");
-  });
-
-  it("All three modes render correctly", () => {
-    const ctx = makeBaseContext();
-    for (const mode of ["manual", "assisted", "autonomous"]) {
-      const output = formatContextMarkdown(ctx, 1, mode);
-      expect(output).toContain(`- Mode: ${mode}`);
-    }
   });
 });

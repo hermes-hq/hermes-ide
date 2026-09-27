@@ -149,7 +149,7 @@ describe("Suite 1: Project-Scoped Pins", () => {
         makeSessionPin("sess-1", "/tmp/debug.log", "Debug log"),
       ],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("[file] Main entry (project)");
     expect(output).toContain("[file] Debug log");
     // Session pin should NOT have "(project)" suffix
@@ -165,8 +165,8 @@ describe("Suite 1: Project-Scoped Pins", () => {
       pinnedItems: [makeProjectPin("/src/config.ts", "Config")],
     });
 
-    const output1 = formatContextMarkdown(ctx1, 1, "manual");
-    const output2 = formatContextMarkdown(ctx2, 1, "manual");
+    const output1 = formatContextMarkdown(ctx1, 1);
+    const output2 = formatContextMarkdown(ctx2, 1);
     expect(output1).toBe(output2);
   });
 
@@ -177,7 +177,7 @@ describe("Suite 1: Project-Scoped Pins", () => {
       makeProjectPin("/README.md", "README"),
     ];
     const ctx = makeBaseContext({ pinnedItems: pins });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Pinned Context");
     expect(output).toContain("Index (project)");
     expect(output).toContain("Notes");
@@ -199,7 +199,7 @@ describe("Suite 2: Project-Scoped Memory", () => {
         { key: "db_host", value: "session-detected", source: "agent", confidence: 0.5 },
       ],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("db_host = project-db.local");
     expect(output).not.toContain("db_host = session-detected");
   });
@@ -211,7 +211,7 @@ describe("Suite 2: Project-Scoped Memory", () => {
         { key: "global_key", value: "global_val", source: "user" },
       ],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("project_key = project_val");
     expect(output).toContain("global_key = global_val");
   });
@@ -222,7 +222,7 @@ describe("Suite 2: Project-Scoped Memory", () => {
         { key: "global_only", value: "gval", source: "user" },
       ],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Memory");
     expect(output).toContain("global_only = gval");
   });
@@ -285,8 +285,8 @@ describe("Suite 4: Context Fork Semantics", () => {
     const ctx1 = makeBaseContext({ projects: [sharedProject] });
     const ctx2 = makeBaseContext({ projects: [sharedProject] });
 
-    const out1 = formatContextMarkdown(ctx1, 1, "manual");
-    const out2 = formatContextMarkdown(ctx2, 2, "manual");
+    const out1 = formatContextMarkdown(ctx1, 1);
+    const out2 = formatContextMarkdown(ctx2, 2);
 
     // Same project data should produce identical project sections
     expect(out1).toContain("### my-project");
@@ -307,8 +307,8 @@ describe("Suite 4: Context Fork Semantics", () => {
       workingDirectory: "/home/user/project",
     });
 
-    const out1 = formatContextMarkdown(ctx1, 1, "manual");
-    const out2 = formatContextMarkdown(ctx2, 1, "manual");
+    const out1 = formatContextMarkdown(ctx1, 1);
+    const out2 = formatContextMarkdown(ctx2, 1);
 
     // Shared pin appears in both
     expect(out1).toContain("Main (project)");
@@ -416,26 +416,13 @@ describe("Suite 6: HermesProjectConfig Schema", () => {
 describe("Suite 7: Session Cleanup Preserves Project Data", () => {
   it("SESSION_REMOVED does not affect project-level state", () => {
     let state = initialState;
-
-    // Create sessions with per-session modes
     state = sessionReducer(state, {
       type: "SESSION_UPDATED",
       session: makeSession({ id: "s1" }),
     });
     state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-
-    state = sessionReducer(state, {
       type: "SESSION_UPDATED",
       session: makeSession({ id: "s2" }),
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s2",
-      mode: "assisted",
     });
 
     // Remove s1
@@ -443,12 +430,9 @@ describe("Suite 7: Session Cleanup Preserves Project Data", () => {
 
     // s2 fully intact
     expect(state.sessions["s2"]).toBeDefined();
-    expect(state.executionModes["s2"]).toBe("assisted");
     // s1 cleaned up
     expect(state.sessions["s1"]).toBeUndefined();
-    expect(state.executionModes["s1"]).toBeUndefined();
     // Global settings untouched
-    expect(state.defaultMode).toBe(initialState.defaultMode);
     expect(state.autoApplyEnabled).toBe(initialState.autoApplyEnabled);
   });
 });
@@ -483,11 +467,11 @@ describe("Suite 8: Full Scoped Context Lifecycle", () => {
       workspacePaths: ["/extra"],
     });
 
-    const output = formatContextMarkdown(ctx, 5, "assisted");
+    const output = formatContextMarkdown(ctx, 5);
 
-    // Version and mode
+    // Version; no execution-mode line (the modes are retired)
     expect(output).toContain("# Session Context (v5)");
-    expect(output).toContain("- Mode: assisted");
+    expect(output).not.toContain("- Mode:");
     expect(output).toContain("- Provider: anthropic (claude-sonnet)");
 
     // Project info
@@ -516,9 +500,9 @@ describe("Suite 8: Full Scoped Context Lifecycle", () => {
     const ctx = makeBaseContext({
       agent: null, model: null,
     });
-    const output = formatContextMarkdown(ctx, 0, "manual");
+    const output = formatContextMarkdown(ctx, 0);
     expect(output).toContain("# Session Context (v0)");
-    expect(output).toContain("- Mode: manual");
+    expect(output).not.toContain("- Mode:");
     expect(output).toContain("## Workspace");
     expect(output).not.toContain("## Projects");
     expect(output).not.toContain("## Pinned Context");

@@ -27,11 +27,9 @@ export function trackAppStarted(): void {
 }
 
 export function trackSessionCreated(props: {
-  execution_mode: string;
   has_ai_provider: boolean;
 }): void {
   track("session_created", {
-    execution_mode: props.execution_mode,
     has_ai_provider: props.has_ai_provider ? 1 : 0,
   });
 }

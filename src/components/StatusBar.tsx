@@ -1,8 +1,7 @@
 import "../styles/components/StatusBar.css";
 import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import { setSetting } from "../api/settings";
-import { useActiveSession, useSessionList, useTotalCost, useTotalTokens, useExecutionMode, useSession, ExecutionMode } from "../state/SessionContext";
+import { useActiveSession, useSessionList, useTotalCost, useTotalTokens } from "../state/SessionContext";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
@@ -42,8 +41,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   const totalCost = useTotalCost();
   const totalTokens = useTotalTokens();
   const hasTokens = totalTokens.input + totalTokens.output > 0;
-  const { dispatch } = useSession();
-  const mode = useExecutionMode(active?.id ?? null);
   const [, setTick] = useState(0);
 
   const handleStatusBarAction = useCallback((actionId: string) => {
@@ -72,18 +69,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
     return () => clearInterval(interval);
   }, [active?.id]);
 
-  const setMode = (next: ExecutionMode) => {
-    if (!active) return;
-    if (next === mode) return;
-    dispatch({ type: "SET_EXECUTION_MODE", sessionId: active.id, mode: next });
-    dispatch({ type: "SET_DEFAULT_MODE", mode: next });
-    setSetting("execution_mode", next).catch(console.error);
-  };
-  const modeTooltip: Record<ExecutionMode, string> = {
-    manual: t("status.manualTooltip"),
-    assisted: t("status.assistedTooltip"),
-    autonomous: t("status.autonomousTooltip"),
-  };
   // Version chip state — collapses idle / checking / available / downloading
   // into a single visual element (see docs/design-system/06-components.md).
   const versionState: "idle" | "available" | "downloading" =
@@ -101,25 +86,6 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
           <span className={`status-dot ${sessions.length > 0 ? "status-dot-on" : ""}`} />
           {t("status.active", { count: sessions.length })}
         </span>
-        {active && active.mode !== "agent" && (
-          <>
-            <span className="status-bar-divider" />
-            <div className="status-mode-segmented" role="radiogroup" aria-label={t("statusbar.executionMode")}>
-              {(["manual", "assisted", "autonomous"] as const).map((m) => (
-                <button
-                  key={m}
-                  role="radio"
-                  aria-checked={mode === m}
-                  className={`status-mode-seg status-mode-seg-${m}${mode === m ? " is-active" : ""}`}
-                  onClick={() => setMode(m)}
-                  title={modeTooltip[m]}
-                >
-                  {m === "manual" ? t("status.manual") : m === "assisted" ? t("status.assisted") : t("status.auto")}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
         {active?.detected_agent && (
           <>
             <span className="status-bar-divider" />

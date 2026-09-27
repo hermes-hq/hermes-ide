@@ -3,13 +3,13 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { detectProject } from "../api/projects";
 import {
-  attach, detach, has, showGhostText, clearGhostText,
+  attach, detach, has, clearGhostText,
   subscribeSuggestions, setSessionPhase, setSessionCwd,
   getHistoryProvider, refitActive, detectBranchMismatch,
   acceptSuggestionAtIndex, selectSuggestion,
 } from "../terminal/TerminalPool";
 import { BranchMismatchAlert } from "./BranchMismatchAlert";
-import { useExecutionMode, useAutonomousSettings, useSession, useSessionList } from "../state/SessionContext";
+import { useSessionList } from "../state/SessionContext";
 import { SuggestionOverlay, type SuggestionState } from "../terminal/intelligence/SuggestionOverlay";
 import { detectProjectContext, invalidateContext } from "../terminal/intelligence/contextAnalyzer";
 import { loadHistory } from "../terminal/intelligence/historyProvider";
@@ -22,14 +22,9 @@ interface TerminalPaneProps {
   color: string;
 }
 
-import type { CommandPredictionEvent } from "../types";
-
 export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
-  const mode = useExecutionMode(sessionId);
-  const autoSettings = useAutonomousSettings();
-  const { dispatch } = useSession();
   const [suggestionState, setSuggestionState] = useState<SuggestionState | null>(null);
   const [branchMismatch, setBranchMismatch] = useState<{ branch: string; sessionLabel: string } | null>(null);
   const dismissBranchMismatch = useCallback(() => setBranchMismatch(null), []);
@@ -161,33 +156,6 @@ export function TerminalPane({ sessionId, phase, color }: TerminalPaneProps) {
     });
     return () => { cancelled = true; unlisten?.(); };
   }, [sessionId]);
-
-  // Listen for command predictions — ghost text in assisted mode, auto-execute in autonomous mode
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | null = null;
-    listen<CommandPredictionEvent>(`command-prediction-${sessionId}`, (event) => {
-      const predictions = event.payload.predictions;
-      if (predictions.length === 0 || phase !== "idle") return;
-
-      if (mode === "assisted") {
-        showGhostText(sessionId, predictions[0].next_command);
-      } else if (mode === "autonomous" && predictions[0].frequency >= autoSettings.commandMinFrequency) {
-        dispatch({
-          type: "SHOW_AUTO_TOAST",
-          command: predictions[0].next_command,
-          reason: "prediction",
-          sessionId,
-        });
-      }
-    }).then((u) => {
-      if (cancelled) { u(); } else { unlisten = u; }
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [sessionId, mode, phase, dispatch, autoSettings.commandMinFrequency]);
 
   // Clear ghost text when phase changes to busy
   useEffect(() => {

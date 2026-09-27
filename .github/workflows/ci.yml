@@ -74,6 +74,7 @@ jobs:
               - 'index.html'
               - 'eslint.config.js'
               - 'eslint-rules/**'
+              - 'knip.json'
               # Scripts whose unit tests live in src/__tests__
               - 'scripts/privacy-check.mjs'
               - 'scripts/mutation-score.mjs'
@@ -149,6 +150,9 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint
         run: npx eslint .
+      # Unused files, exports and dependencies (config: knip.json).
+      - name: Unused code (knip)
+        run: npx knip
       - name: Unit tests
         run: npx vitest run
 

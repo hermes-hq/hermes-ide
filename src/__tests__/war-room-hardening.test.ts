@@ -232,8 +232,8 @@ describe("Injection lock (ACQUIRE/RELEASE)", () => {
 describe("Version lifecycle — formatContextMarkdown stability", () => {
   it("identical context produces identical output (no false diff)", () => {
     const ctx = makeContext({ agent: "anthropic", model: "claude" });
-    const output1 = formatContextMarkdown(ctx, 1, "manual");
-    const output2 = formatContextMarkdown(ctx, 1, "manual");
+    const output1 = formatContextMarkdown(ctx, 1);
+    const output2 = formatContextMarkdown(ctx, 1);
     expect(output1).toBe(output2);
   });
 
@@ -320,22 +320,6 @@ describe("Multi-session state isolation", () => {
 
     expect(state.sessions["s1"]).toBeUndefined();
     expect(state.sessions["s2"]).toBeDefined();
-  });
-
-  it("execution modes are independent per session", () => {
-    let state = initialState;
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s2",
-      mode: "manual",
-    });
-    expect(state.executionModes["s1"]).toBe("autonomous");
-    expect(state.executionModes["s2"]).toBe("manual");
   });
 
   it("injection locks are independent per session", () => {

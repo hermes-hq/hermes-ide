@@ -51,6 +51,7 @@ import {
   cleanSelection,
   estimateInitialDimensions,
   getFocusedSessionId,
+  refreshShellForeground,
   type PoolEntry,
 } from "./pool";
 
@@ -383,36 +384,59 @@ function updateInputBuffer(entry: PoolEntry, data: string): void {
   }
 }
 
-function computeSuggestions(sessionId: string): void {
-  const entry = pool.get(sessionId);
-  if (!entry || !entry.inputBuffer.trim()) return;
-  if (isIntelligenceDisabled()) return;
+/**
+ * Whether suggestions may be drawn for what is typed now: only on the
+ * shell's own prompt, never while a program the shell started (an agent
+ * CLI, an editor, a pager) is reading the keys.
+ */
+function maySuggest(entry: PoolEntry): boolean {
+  if (!entry.inputBuffer.trim()) return false;
+  if (isIntelligenceDisabled()) return false;
 
   // Only show suggestions when the shell is at an interactive prompt.
   // Use lastStablePhase instead of sessionPhase — the current phase can
   // be "busy" from echo-flicker (both shell AND AI agent echo trigger it).
   // lastStablePhase tracks the real state: "idle"/"shell_ready" = shell
   // prompt, "needs_input" = AI agent, "creating"/etc. = lifecycle.
-  if (entry.lastStablePhase !== "idle" && entry.lastStablePhase !== "shell_ready") return;
+  if (entry.lastStablePhase !== "idle" && entry.lastStablePhase !== "shell_ready") return false;
 
   // Don't show suggestions when the alternate screen buffer is active.
   // Interactive CLI tools (Claude Code, vim, htop, etc.) use the alternate
   // buffer — cursor coordinates in that buffer don't correspond to the shell
   // prompt, and our input buffer tracking doesn't reflect the tool's input.
-  if (entry.terminal.buffer.active.type === "alternate") return;
+  if (entry.terminal.buffer.active.type === "alternate") return false;
 
   // Don't show suggestions when the user has scrolled up — the cursor is
   // off-screen and the overlay would appear at a misleading position.
-  if (entry.userScrolledUp) return;
+  if (entry.userScrolledUp) return false;
 
-  // OS-level foreground process check — uses a cached value updated by a
-  // 300ms polling interval (see pool.ts createTerminal). Synchronous access
-  // avoids async gaps where state can change between the check and usage.
-  // This is the most reliable guard: tcgetpgrp() / /proc/stat tells us
-  // whether the shell or a child program (AI tools, editors, etc.) owns
-  // the terminal foreground process group.
-  if (!entry.shellIsForeground) return;
+  // OS-level foreground process check — the value cached by the poll in
+  // pool.ts attach(); computeSuggestions asks again before drawing. This is
+  // the most reliable guard: tcgetpgrp() / /proc/stat (on Windows, whether
+  // the shell has a child process) tells us whether the shell or a program
+  // it started (agent CLIs, editors, etc.) owns the terminal.
+  return entry.shellIsForeground;
+}
 
+function computeSuggestions(sessionId: string): void {
+  const entry = pool.get(sessionId);
+  if (!entry || !maySuggest(entry)) return;
+
+  // The cached foreground value can be up to one poll old: long enough for
+  // an agent CLI started a moment ago to be reading these keys. Ask the OS
+  // again and draw nothing unless the shell still owns the terminal and the
+  // input is what it was (a newer keystroke schedules its own computation).
+  const typed = entry.inputBuffer;
+  refreshShellForeground(sessionId)
+    .then((isFg) => {
+      if (!isFg || pool.get(sessionId) !== entry) return;
+      if (entry.inputBuffer !== typed || !maySuggest(entry)) return;
+      showSuggestions(sessionId, entry);
+    })
+    .catch(() => { /* cannot tell who owns the terminal: draw nothing */ });
+}
+
+function showSuggestions(sessionId: string, entry: PoolEntry): void {
   // Intent suggestions (colon-prefixed commands)
   if (entry.inputBuffer.trimStart().startsWith(":")) {
     const intentResults = getIntentSuggestions(entry.inputBuffer.trim());

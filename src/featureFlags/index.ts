@@ -18,11 +18,11 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { getSettings, setSetting, type SettingsMap } from "../api/settings";
 import { FEATURE_FLAGS, type FeatureFlagId } from "./registry";
-import { channelFromVersion, channelFromSetting, detectReleaseChannel, UPDATE_CHANNEL_KEY, type ReleaseChannel } from "./channel";
+import { detectReleaseChannel, UPDATE_CHANNEL_KEY, type ReleaseChannel } from "./channel";
 
 export { FEATURE_FLAGS };
 export type { FeatureFlagId, ReleaseChannel };
-export { channelFromVersion, channelFromSetting, detectReleaseChannel, UPDATE_CHANNEL_KEY };
+export { detectReleaseChannel, UPDATE_CHANNEL_KEY };
 
 /** Settings key: JSON-encoded `Partial<Record<FeatureFlagId, boolean>>`. */
 export const FEATURE_FLAG_OVERRIDES_KEY = "feature_flag_overrides";

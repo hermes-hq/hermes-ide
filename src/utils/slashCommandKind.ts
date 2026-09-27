@@ -165,17 +165,6 @@ export function stripSlash(command: string): string {
   return command.startsWith("/") ? command.slice(1) : command;
 }
 
-/** Extract the bare verb (no leading slash, no trailing arguments,
- *  lowercased) from a slash-command input.  Mirrors the normalization
- *  done inside `classifySlashCommand` so the composer can use the
- *  same key when deciding whether to route to an embedded PTY. */
-export function slashCommandVerb(command: string): string {
-  return command
-    .replace(/^\//, "")
-    .split(/\s+/, 1)[0]!
-    .toLowerCase();
-}
-
 /** Curated catalog of Claude Code's well-known interactive built-ins
  *  with one-line descriptions.  Each entry is implicitly `kind: "cli"`
  *  — they're all interactive TUIs by definition.  Descriptions are

@@ -37,8 +37,9 @@ export interface PoolEntry {
   /** Last phase that wasn't "busy" — immune to echo-flicker.
    *  "busy" is transient (shell/agent echo); this tracks the real state. */
   lastStablePhase: string;
-  /** Cached OS-level check: is the shell the foreground process?
-   *  Updated by a periodic poll — checked synchronously in computeSuggestions. */
+  /** Cached OS-level check: is the shell the foreground process (and not a
+   *  program it started, such as an agent CLI)? Updated by a poll while the
+   *  terminal is focused and re-checked right before suggestions are drawn. */
   shellIsForeground: boolean;
   shellFgPollTimer: ReturnType<typeof setInterval> | null;
   cwd: string;
@@ -436,10 +437,11 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
   }
   _focusedSessionId = sessionId;
   if (!entry.shellFgPollTimer) {
+    // Check now, not only 300 ms from now: the value may be stale from the
+    // last time this terminal was focused.
+    refreshShellForeground(sessionId).catch(() => { /* keep last known value */ });
     entry.shellFgPollTimer = setInterval(() => {
-      isShellForeground(sessionId)
-        .then((isFg) => { entry.shellIsForeground = isFg; })
-        .catch(() => { /* IPC failure — keep last known value */ });
+      refreshShellForeground(sessionId).catch(() => { /* IPC failure — keep last known value */ });
     }, 300);
   }
 
@@ -676,6 +678,33 @@ export function getHistoryProvider(sessionId: string): HistoryProvider | null {
   return pool.get(sessionId)?.historyProvider ?? null;
 }
 
+// ─── Who owns the terminal ───────────────────────────────────────────
+
+/**
+ * Whether the shell itself owns the terminal: no program it started (an
+ * agent CLI, an editor, a pager) is in the foreground and no full-screen
+ * program has the screen. Hermes draws suggestions and ghost text only then.
+ */
+export function shellOwnsTerminal(entry: PoolEntry): boolean {
+  return entry.shellIsForeground && entry.terminal.buffer.active.type !== "alternate";
+}
+
+/**
+ * Ask the OS whether the shell is in the foreground, record the answer, and
+ * take down any suggestion or ghost text the moment it is not.
+ */
+export async function refreshShellForeground(sessionId: string): Promise<boolean> {
+  const isFg = await isShellForeground(sessionId);
+  const entry = pool.get(sessionId);
+  if (!entry) return isFg;
+  entry.shellIsForeground = isFg;
+  if (!isFg && (entry.suggestionState || entry.ghostText)) {
+    dismissSuggestions(sessionId);
+    clearGhostText(sessionId);
+  }
+  return isFg;
+}
+
 // ─── Ghost Text Public API ───────────────────────────────────────────
 
 import { renderGhostText } from "./ghostText";
@@ -684,6 +713,8 @@ export function showGhostText(sessionId: string, text: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
   clearGhostOverlay(entry);
+  // Never over a program the shell started (an agent CLI's own input box).
+  if (!shellOwnsTerminal(entry)) return;
   renderGhostText(entry, text);
 }
 

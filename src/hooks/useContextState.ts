@@ -33,19 +33,16 @@ function emptyContext(): ContextState {
 }
 
 /** Format ContextState as markdown for AI injection — exported for testing */
-export function formatContextMarkdown(ctx: ContextState, version: number, executionMode: string): string {
+export function formatContextMarkdown(ctx: ContextState, version: number): string {
   const lines: string[] = [];
   lines.push(`# Session Context (v${version})`);
   lines.push("");
 
-  // Execution Mode (always shown — affects behavior regardless of agent)
-  lines.push(`- Mode: ${executionMode}`);
-
   // Agent
   if (ctx.agent) {
     lines.push(`- Provider: ${ctx.agent}${ctx.model ? ` (${ctx.model})` : ""}`);
+    lines.push("");
   }
-  lines.push("");
 
   // Projects
   if (ctx.projects.length > 0) {
@@ -102,7 +99,7 @@ export const formatContext = formatContextMarkdown;
 
 // ─── Hook ────────────────────────────────────────────────────────────
 
-export function useContextState(session: SessionData | null, executionMode?: string): ContextManager {
+export function useContextState(session: SessionData | null): ContextManager {
   const [context, setContext] = useState<ContextState>(emptyContext);
   const [currentVersion, setCurrentVersion] = useState(0);
   const [injectedVersion, setInjectedVersion] = useState(0);
@@ -309,8 +306,6 @@ export function useContextState(session: SessionData | null, executionMode?: str
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  const liveMode = executionMode || "manual";
-
   const applyContext = useCallback(async () => {
     const sess = sessionRef.current;
     if (!sess) return;
@@ -331,7 +326,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
     try {
       const APPLY_TIMEOUT_MS = 15_000;
       const result = await Promise.race([
-        apiApplyContext(sess.id, liveMode),
+        apiApplyContext(sess.id),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('Context apply timed out after 15s')), APPLY_TIMEOUT_MS)
         ),
@@ -364,7 +359,7 @@ export function useContextState(session: SessionData | null, executionMode?: str
       setLifecycle('apply_failed');
       setLastError(err instanceof Error ? err.message : String(err));
     }
-  }, [liveMode]);
+  }, []);
 
   // ── Acknowledge injection (startup command already handled context) ──
   const acknowledgeInjection = useCallback(() => {
@@ -381,8 +376,8 @@ export function useContextState(session: SessionData | null, executionMode?: str
 
   // ── Format context for preview ──
   const formatContextPreview = useCallback(() => {
-    return formatContextMarkdown(context, currentVersion, liveMode);
-  }, [context, currentVersion, liveMode]);
+    return formatContextMarkdown(context, currentVersion);
+  }, [context, currentVersion]);
 
   // ── Copy context to clipboard ──
   const copyToClipboard = useCallback(async () => {

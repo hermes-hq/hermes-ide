@@ -52,11 +52,6 @@ const TERMINAL_PANE: string = readFileSync(
   "utf-8",
 );
 
-const APP: string = readFileSync(
-  new URL("../App.tsx", import.meta.url),
-  "utf-8",
-);
-
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INVARIANT 1: Single authoritative input path — no dual echo
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -237,9 +232,6 @@ describe("Invariant 4: All UI shortcut callers use sendShortcutCommand", () => {
     expect(PROVIDER_ACTIONS).not.toContain("writeToSession");
   });
 
-  it("App auto-execute uses sendShortcutCommand", () => {
-    expect(APP).toContain("sendShortcutCommand");
-  });
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

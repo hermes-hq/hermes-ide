@@ -140,10 +140,6 @@ export interface SessionHistoryEntry {
   scrollback_preview: string | null;
 }
 
-// ─── Execution Mode ──────────────────────────────────────────────────
-
-export type ExecutionMode = "manual" | "assisted" | "autonomous";
-
 // ─── Permission Mode ────────────────────────────────────────────────
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
@@ -307,17 +303,12 @@ export type SessionAction =
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "TOGGLE_PALETTE" }
   | { type: "CLOSE_PALETTE" }
-  | { type: "SET_EXECUTION_MODE"; sessionId: string; mode: ExecutionMode }
-  | { type: "SET_DEFAULT_MODE"; mode: ExecutionMode }
   /** Convert an existing session to a different runtime mode (terminal ↔ agent).
    *  The caller is responsible for tearing down the previous-mode subprocess
    *  and spawning the new one before/after dispatching this action. */
   | { type: "SET_SESSION_MODE"; sessionId: string; mode: SessionMode }
   | { type: "TOGGLE_FLOW_MODE" }
-  | { type: "SHOW_AUTO_TOAST"; command: string; reason: string; sessionId: string }
-  | { type: "DISMISS_AUTO_TOAST" }
   | { type: "TOGGLE_AUTO_APPLY" }
-  | { type: "SET_AUTONOMOUS_SETTINGS"; settings: Partial<{ commandMinFrequency: number; cancelDelayMs: number }> }
   // Injection lock actions
   | { type: "ACQUIRE_INJECTION_LOCK"; sessionId: string }
   | { type: "RELEASE_INJECTION_LOCK"; sessionId: string }

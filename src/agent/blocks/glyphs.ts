@@ -22,5 +22,3 @@ export const GLYPHS = {
   /** U+00B9 superscript one — web citation. Also `²` U+00B2, `³` U+00B3. */
   citation: "¹",
 } as const;
-
-export type GlyphKey = keyof typeof GLYPHS;

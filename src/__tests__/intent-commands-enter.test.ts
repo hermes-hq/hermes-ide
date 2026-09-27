@@ -39,6 +39,10 @@ vi.mock("../terminal/pool", () => ({
 	getCursorPixelPosition: vi.fn(() => ({ x: 0, y: 0, cellHeight: 16 })),
 	getFocusedSessionId: vi.fn(() => null),
 	setCurrentSettings: vi.fn(),
+	// The OS agrees with the cached foreground value.
+	refreshShellForeground: vi.fn((id: string) =>
+		Promise.resolve((h.pool.get(id) as { shellIsForeground: boolean }).shellIsForeground),
+	),
 }));
 
 import { createTerminal, updateSettings } from "../terminal/TerminalPool";
@@ -202,7 +206,7 @@ describe("the ':' list", () => {
 			it("appears when ':' is typed", async () => {
 				const entry = await spawn(hermesSuggestions);
 				type(":sta");
-				vi.advanceTimersByTime(100);
+				await vi.advanceTimersByTimeAsync(100);
 				expect(entry.suggestionState?.visible).toBe(true);
 				expect(entry.suggestionState?.suggestions.map((s) => s.text)).toContain(":status");
 				expect(h.notifySubscribers).toHaveBeenLastCalledWith(S, entry.suggestionState);
@@ -211,7 +215,7 @@ describe("the ':' list", () => {
 			it("Enter on a highlighted intent runs its command, not the raw ':' text", async () => {
 				const entry = await spawn(hermesSuggestions);
 				type(":sta");
-				vi.advanceTimersByTime(100);
+				await vi.advanceTimersByTimeAsync(100);
 				expect(entry.suggestionState?.suggestions[0].text).toBe(":status");
 				type([DOWN]);
 				h.writeToSession.mockClear();
@@ -225,7 +229,7 @@ describe("the ':' list", () => {
 			it("Tab on a highlighted intent completes it; Enter then runs it", async () => {
 				const entry = await spawn(hermesSuggestions);
 				type(":sta");
-				vi.advanceTimersByTime(100);
+				await vi.advanceTimersByTimeAsync(100);
 				type([DOWN]);
 				h.writeToSession.mockClear();
 				type("\t");
@@ -242,7 +246,7 @@ describe("the ':' list", () => {
 		const entry = await spawn(false);
 		entry.historyProvider.match = () => [];
 		type("git st");
-		vi.advanceTimersByTime(100);
+		await vi.advanceTimersByTimeAsync(100);
 		expect(entry.suggestionState).toBeNull();
 		expect(h.notifySubscribers).not.toHaveBeenCalled();
 	});

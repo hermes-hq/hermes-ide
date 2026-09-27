@@ -1,9 +1,7 @@
 /**
  * Tests for bugs found in sessions and context management.
  *
- * Bug 1:  SESSION_REMOVED didn't clean up executionModes (memory leak)
- * Bug 2:  SESSION_REMOVED didn't clean up autoToast referencing removed session
- * Bug 3:  copyContextToClipboard hardcoded version=0 and mode="manual"
+ * Bug 3:  copyContextToClipboard hardcoded version=0
  * Bug 5:  useContextState listen effects leaked listeners on rapid session switches
  * Bug 6:  formatContextMarkdown memory dedup favored ephemeral memoryFacts over persistedMemory
  * Bug 7:  Context cache never invalidated on CWD change (stale suggestions)
@@ -107,160 +105,30 @@ function makeBaseContext(overrides?: Partial<ContextState>): ContextState {
 }
 
 // =====================================================================
-// Bug 1: SESSION_REMOVED should clean up executionModes
+// Bug 3: copyContextToClipboard should accept version
 // =====================================================================
 
-describe("Bug 1: SESSION_REMOVED cleans up executionModes", () => {
-  it("removes per-session execution mode when session is removed", () => {
-    let state = sessionReducer(initialState, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1" }),
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    expect(state.executionModes["s1"]).toBe("autonomous");
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.executionModes["s1"]).toBeUndefined();
-    expect("s1" in state.executionModes).toBe(false);
-  });
-
-  it("does not leak execution modes after many sessions are created and removed", () => {
-    let state = initialState;
-    for (let i = 0; i < 50; i++) {
-      const id = `session-${i}`;
-      state = sessionReducer(state, {
-        type: "SESSION_UPDATED",
-        session: makeSession({ id }),
-      });
-      state = sessionReducer(state, {
-        type: "SET_EXECUTION_MODE",
-        sessionId: id,
-        mode: "assisted",
-      });
-      state = sessionReducer(state, { type: "SESSION_REMOVED", id });
-    }
-    expect(Object.keys(state.executionModes)).toHaveLength(0);
-  });
-
-  it("preserves other sessions' execution modes when one is removed", () => {
-    let state = initialState;
-    state = sessionReducer(state, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1" }),
-    });
-    state = sessionReducer(state, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s2" }),
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s2",
-      mode: "assisted",
-    });
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.executionModes["s1"]).toBeUndefined();
-    expect(state.executionModes["s2"]).toBe("assisted");
-  });
-});
-
-// =====================================================================
-// Bug 2: SESSION_REMOVED should clean up autoToast
-// =====================================================================
-
-describe("Bug 2: SESSION_REMOVED cleans up autoToast", () => {
-  it("clears autoToast when the referenced session is removed", () => {
-    let state = sessionReducer(initialState, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1" }),
-    });
-    state = sessionReducer(state, {
-      type: "SHOW_AUTO_TOAST",
-      command: "npm test",
-      reason: "frequent command",
-      sessionId: "s1",
-    });
-    expect(state.ui.autoToast).not.toBeNull();
-    expect(state.ui.autoToast!.sessionId).toBe("s1");
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.ui.autoToast).toBeNull();
-  });
-
-  it("preserves autoToast when a different session is removed", () => {
-    let state = sessionReducer(initialState, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1" }),
-    });
-    state = sessionReducer(state, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s2" }),
-    });
-    state = sessionReducer(state, {
-      type: "SHOW_AUTO_TOAST",
-      command: "npm test",
-      reason: "frequent command",
-      sessionId: "s1",
-    });
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s2" });
-    expect(state.ui.autoToast).not.toBeNull();
-    expect(state.ui.autoToast!.sessionId).toBe("s1");
-  });
-
-  it("handles SESSION_REMOVED when autoToast is already null", () => {
-    let state = sessionReducer(initialState, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1" }),
-    });
-    expect(state.ui.autoToast).toBeNull();
-
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.ui.autoToast).toBeNull();
-  });
-});
-
-// =====================================================================
-// Bug 3: copyContextToClipboard should accept version and mode
-// =====================================================================
-
-describe("Bug 3: copyContextToClipboard accepts version and execution mode", () => {
+describe("Bug 3: copyContextToClipboard accepts version", () => {
   // We test the underlying formatContextMarkdown since copyContextToClipboard
   // uses it, and it now passes through the parameters.
 
   it("formatContextMarkdown renders the actual version, not hardcoded 0", () => {
     const ctx = makeBaseContext();
-    const output = formatContextMarkdown(ctx, 42, "manual");
+    const output = formatContextMarkdown(ctx, 42);
     expect(output).toContain("# Session Context (v42)");
     expect(output).not.toContain("(v0)");
   });
 
-  it("formatContextMarkdown renders the actual mode, not hardcoded 'manual'", () => {
-    const ctx = makeBaseContext();
-    const output = formatContextMarkdown(ctx, 1, "autonomous");
-    expect(output).toContain("- Mode: autonomous");
-    expect(output).not.toContain("- Mode: manual");
-  });
-
   it("version 0 is still valid when explicitly passed", () => {
     const ctx = makeBaseContext();
-    const output = formatContextMarkdown(ctx, 0, "manual");
+    const output = formatContextMarkdown(ctx, 0);
     expect(output).toContain("# Session Context (v0)");
   });
 
   it("different versions produce different output", () => {
     const ctx = makeBaseContext();
-    const v1 = formatContextMarkdown(ctx, 1, "manual");
-    const v2 = formatContextMarkdown(ctx, 2, "manual");
+    const v1 = formatContextMarkdown(ctx, 1);
+    const v2 = formatContextMarkdown(ctx, 2);
     expect(v1).not.toBe(v2);
     expect(v1).toContain("(v1)");
     expect(v2).toContain("(v2)");
@@ -325,7 +193,7 @@ describe("Bug 6: formatContextMarkdown memory dedup precedence", () => {
       memoryFacts: [{ key: "db_host", value: "session-value", source: "agent", confidence: 0.5 }],
       persistedMemory: [{ key: "db_host", value: "user-saved-value", source: "user" }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("db_host = user-saved-value");
     expect(output).not.toContain("db_host = session-value");
   });
@@ -335,7 +203,7 @@ describe("Bug 6: formatContextMarkdown memory dedup precedence", () => {
       memoryFacts: [{ key: "db_host", value: "v1", source: "agent", confidence: 0.5 }],
       persistedMemory: [{ key: "db_host", value: "v2", source: "user" }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     const matches = output.match(/db_host/g) || [];
     expect(matches.length).toBe(1);
   });
@@ -345,7 +213,7 @@ describe("Bug 6: formatContextMarkdown memory dedup precedence", () => {
       memoryFacts: [{ key: "session_key", value: "session_val", source: "agent", confidence: 0.8 }],
       persistedMemory: [{ key: "persisted_key", value: "persisted_val", source: "user" }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("session_key = session_val");
     expect(output).toContain("persisted_key = persisted_val");
   });
@@ -355,7 +223,7 @@ describe("Bug 6: formatContextMarkdown memory dedup precedence", () => {
       memoryFacts: [],
       persistedMemory: [{ key: "only_persisted", value: "val", source: "user" }],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Memory");
     expect(output).toContain("only_persisted = val");
   });
@@ -365,7 +233,7 @@ describe("Bug 6: formatContextMarkdown memory dedup precedence", () => {
       memoryFacts: [{ key: "only_session", value: "val", source: "agent", confidence: 0.5 }],
       persistedMemory: [],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).toContain("## Memory");
     expect(output).toContain("only_session = val");
   });
@@ -381,7 +249,7 @@ describe("Bug 6: formatContextMarkdown memory dedup precedence", () => {
         { key: "key3", value: "persisted-3", source: "user" },
       ],
     });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     // key1: persisted wins
     expect(output).toContain("key1 = persisted-1");
     expect(output).not.toContain("key1 = session-1");
@@ -575,92 +443,6 @@ describe("Bug 10: Shell environment cleanup on destroy", () => {
 });
 
 // =====================================================================
-// Integration: Multiple bugs interacting correctly
-// =====================================================================
-
-describe("Integration: Multi-bug session lifecycle", () => {
-  it("full session lifecycle cleans up all per-session state", () => {
-    let state = initialState;
-
-    // Create session
-    state = sessionReducer(state, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1" }),
-    });
-
-    // Set per-session execution mode
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-
-    // Show auto toast for this session
-    state = sessionReducer(state, {
-      type: "SHOW_AUTO_TOAST",
-      command: "npm test",
-      reason: "frequent command",
-      sessionId: "s1",
-    });
-
-    // Verify all per-session state exists
-    expect(state.executionModes["s1"]).toBe("autonomous");
-    expect(state.ui.autoToast).not.toBeNull();
-
-    // Remove session — all per-session state should be cleaned up
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-
-    expect(state.sessions["s1"]).toBeUndefined();
-    expect(state.executionModes["s1"]).toBeUndefined();
-    expect(state.ui.autoToast).toBeNull();
-  });
-
-  it("removing one session preserves all state for other sessions", () => {
-    let state = initialState;
-
-    // Create two sessions
-    state = sessionReducer(state, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s1", label: "Session 1" }),
-    });
-    state = sessionReducer(state, {
-      type: "SESSION_UPDATED",
-      session: makeSession({ id: "s2", label: "Session 2" }),
-    });
-
-    // Set modes for both
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s1",
-      mode: "autonomous",
-    });
-    state = sessionReducer(state, {
-      type: "SET_EXECUTION_MODE",
-      sessionId: "s2",
-      mode: "assisted",
-    });
-
-    // Show toast for s2
-    state = sessionReducer(state, {
-      type: "SHOW_AUTO_TOAST",
-      command: "cargo test",
-      reason: "frequent",
-      sessionId: "s2",
-    });
-
-    // Remove s1
-    state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-
-    // s2 state should be fully preserved
-    expect(state.sessions["s2"]).toBeDefined();
-    expect(state.sessions["s2"].label).toBe("Session 2");
-    expect(state.executionModes["s2"]).toBe("assisted");
-    expect(state.ui.autoToast).not.toBeNull();
-    expect(state.ui.autoToast!.sessionId).toBe("s2");
-  });
-});
-
-// =====================================================================
 // Regression: Existing behavior unchanged
 // =====================================================================
 
@@ -682,10 +464,10 @@ describe("Regression: formatContextMarkdown still works correctly", () => {
       workspacePaths: ["/extra"],
     });
 
-    const output = formatContextMarkdown(ctx, 5, "assisted");
+    const output = formatContextMarkdown(ctx, 5);
 
     expect(output).toContain("# Session Context (v5)");
-    expect(output).toContain("- Mode: assisted");
+    expect(output).not.toContain("- Mode:");
     expect(output).toContain("- Provider: anthropic (claude-sonnet)");
     expect(output).toContain("## Projects");
     expect(output).toContain("## Pinned Context");
@@ -695,7 +477,7 @@ describe("Regression: formatContextMarkdown still works correctly", () => {
 
   it("empty sections are omitted", () => {
     const ctx = makeBaseContext({ agent: null, model: null });
-    const output = formatContextMarkdown(ctx, 1, "manual");
+    const output = formatContextMarkdown(ctx, 1);
     expect(output).not.toContain("Provider:");
     expect(output).not.toContain("## Projects");
     expect(output).not.toContain("## Pinned Context");

@@ -20,21 +20,3 @@ export function getAllMemory(scope: string, scopeId: string): Promise<PersistedM
 export function deleteMemory(scope: string, scopeId: string, key: string): Promise<void> {
   return invoke("delete_memory", { scope, scopeId, key });
 }
-
-/** Save memory at project scope for a given project */
-export function saveProjectMemory(projectId: string, key: string, value: string, source: string = "user"): Promise<void> {
-  return saveMemory({
-    scope: "project",
-    scopeId: projectId,
-    key,
-    value,
-    source,
-    category: "general",
-    confidence: 1.0,
-  });
-}
-
-/** Get project-scoped memory for a given project */
-export function getProjectMemory(projectId: string): Promise<PersistedMemory[]> {
-  return getAllMemory("project", projectId);
-}

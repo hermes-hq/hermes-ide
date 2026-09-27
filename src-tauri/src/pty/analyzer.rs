@@ -4,71 +4,6 @@ use crate::pty::adapters::*;
 use crate::pty::models::*;
 use crate::pty::patterns::*;
 
-// ─── Node Builder (tracks command→output cycles) ────────────────────
-
-pub(crate) struct NodeBuilder {
-    started_at: std::time::Instant,
-    timestamp: i64,
-    kind: String,
-    input: Option<String>,
-    output_lines: Vec<String>,
-    working_dir: String,
-}
-
-impl NodeBuilder {
-    pub fn new(kind: &str, input: Option<String>, working_dir: &str) -> Self {
-        Self {
-            started_at: std::time::Instant::now(),
-            timestamp: chrono::Utc::now().timestamp(),
-            kind: kind.to_string(),
-            input,
-            output_lines: Vec::new(),
-            working_dir: working_dir.to_string(),
-        }
-    }
-
-    pub fn push_output(&mut self, line: &str) {
-        if self.output_lines.len() < 50 {
-            self.output_lines.push(line.to_string());
-        }
-    }
-
-    pub fn finalize(self, exit_code: Option<i32>) -> CompletedNode {
-        let duration_ms = self.started_at.elapsed().as_millis() as i64;
-        let summary: String = self.output_lines.join("\n").chars().take(500).collect();
-        CompletedNode {
-            timestamp: self.timestamp,
-            kind: self.kind,
-            input: self.input,
-            output_summary: if summary.is_empty() {
-                None
-            } else {
-                Some(summary)
-            },
-            exit_code,
-            working_dir: self.working_dir,
-            duration_ms,
-        }
-    }
-}
-
-pub(crate) struct CompletedNode {
-    pub timestamp: i64,
-    pub kind: String,
-    pub input: Option<String>,
-    pub output_summary: Option<String>,
-    pub exit_code: Option<i32>,
-    pub working_dir: String,
-    pub duration_ms: i64,
-}
-
-// ─── Command Prediction Event Payload ───────────────────────────────
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(crate) struct CommandPredictionEvent {
-    pub predictions: Vec<crate::db::CommandPrediction>,
-}
-
 // ─── Output Analyzer (uses Provider Registry) ───────────────────────
 
 pub struct OutputAnalyzer {
@@ -100,14 +35,6 @@ pub struct OutputAnalyzer {
     // CWD tracking
     pub current_cwd: Option<String>,
     pending_cwd: Option<String>,
-    // Node builder (execution tracking)
-    node_builder: Option<NodeBuilder>,
-    completed_nodes: VecDeque<CompletedNode>,
-    last_input_line: Option<String>,
-    // Command sequence tracking
-    pub recent_commands: VecDeque<String>,
-    // Input line accumulation buffer
-    pub input_line_buffer: String,
     // Idle timeout tracking
     pub last_output_at: Option<std::time::Instant>,
     // Auto-launch / auto-inject tracking
@@ -160,11 +87,6 @@ impl OutputAnalyzer {
             latency_samples: VecDeque::new(),
             current_cwd: None,
             pending_cwd: None,
-            node_builder: None,
-            completed_nodes: VecDeque::new(),
-            last_input_line: None,
-            recent_commands: VecDeque::new(),
-            input_line_buffer: String::new(),
             last_output_at: None,
             shell_ready: false,
             pending_ai_launch: false,
@@ -180,35 +102,6 @@ impl OutputAnalyzer {
 
     pub fn mark_input_sent(&mut self) {
         self.last_input_at = Some(std::time::Instant::now());
-    }
-
-    pub fn mark_input_line(&mut self, line: &str) {
-        self.last_input_line = Some(line.to_string());
-    }
-
-    pub fn start_node(&mut self, working_dir: &str) {
-        let input = self.last_input_line.take();
-        let kind = if self.detected_agent.is_some() {
-            "ai_interaction"
-        } else {
-            "command"
-        };
-        self.node_builder = Some(NodeBuilder::new(kind, input, working_dir));
-    }
-
-    pub fn finalize_node(&mut self, exit_code: Option<i32>) {
-        if let Some(builder) = self.node_builder.take() {
-            let completed = builder.finalize(exit_code);
-            self.completed_nodes.push_back(completed);
-            if self.completed_nodes.len() > 20 {
-                self.completed_nodes.pop_front();
-            }
-        }
-    }
-
-    #[allow(private_interfaces)]
-    pub fn drain_completed_nodes(&mut self) -> Vec<CompletedNode> {
-        self.completed_nodes.drain(..).collect()
     }
 
     pub fn process(&mut self, raw: &[u8]) {
@@ -388,11 +281,6 @@ impl OutputAnalyzer {
                 }
             }
 
-            // Feed output to node builder
-            if let Some(ref mut builder) = self.node_builder {
-                builder.push_output(trimmed);
-            }
-
             // Check for "command not found" after AI launch attempt
             if self.ai_launch_check_remaining > 0 {
                 self.ai_launch_check_remaining -= 1;
@@ -460,10 +348,6 @@ impl OutputAnalyzer {
         if let Some(hint) = analysis.phase_hint {
             match hint {
                 PhaseHint::PromptDetected => {
-                    // Going idle — finalize current node if any
-                    if self.node_builder.is_some() {
-                        self.finalize_node(None);
-                    }
                     self.is_busy = false;
 
                     // Auto-launch / auto-inject logic
@@ -485,19 +369,11 @@ impl OutputAnalyzer {
                     }
                 }
                 PhaseHint::WorkStarted => {
-                    // Starting work — if we don't have a node yet, start one
-                    if self.node_builder.is_none() {
-                        let cwd = self.current_cwd.clone().unwrap_or_default();
-                        self.start_node(&cwd);
-                    }
                     self.is_busy = true;
                     self.pending_phase = Some(SessionPhase::Busy);
                 }
                 PhaseHint::InputNeeded => {
                     // Agent is asking for confirmation or input
-                    if self.node_builder.is_some() {
-                        self.finalize_node(None);
-                    }
                     self.is_busy = false;
                     self.pending_phase = Some(SessionPhase::NeedsInput);
                 }
@@ -606,9 +482,6 @@ impl OutputAnalyzer {
             self.pending_ai_launch = true;
             self.is_busy = false;
             self.pending_phase = Some(SessionPhase::ShellReady);
-            if self.node_builder.is_some() {
-                self.finalize_node(None);
-            }
             return;
         }
 
@@ -625,9 +498,6 @@ impl OutputAnalyzer {
             }
         });
 
-        if self.node_builder.is_some() {
-            self.finalize_node(None);
-        }
         self.is_busy = false;
 
         if has_prompt {

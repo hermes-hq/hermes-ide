@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import "../styles/components/WhatsNewDialog.css";
 import {
   changelog,
-  type ChangelogEntry,
   type ChangelogPreviewKind,
   type ChangelogSection,
 } from "../data/changelog";
@@ -353,6 +352,3 @@ function SectionPreview({ kind }: { kind: ChangelogPreviewKind }) {
     </div>
   );
 }
-
-// Re-export for tests
-export type { ChangelogEntry };

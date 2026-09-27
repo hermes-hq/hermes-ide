@@ -12,7 +12,6 @@ import { getAllMemory } from "../api/memory";
 export async function copyContextToClipboard(
   session: SessionData | null,
   version: number = 0,
-  executionMode: string = "manual",
 ): Promise<void> {
   if (!session) return;
 
@@ -37,7 +36,7 @@ export async function copyContextToClipboard(
     model: session.detected_agent?.model ?? null,
   };
 
-  const text = formatContextMarkdown(ctx, version, executionMode);
+  const text = formatContextMarkdown(ctx, version);
   if (text) {
     await navigator.clipboard.writeText(text);
   }

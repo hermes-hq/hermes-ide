@@ -1,4 +1,4 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 
 // ─── Singleton Menu Event Bridge ────────────────────────────────────
 //
@@ -13,7 +13,6 @@ type ActionHandler = (actionId: string) => void;
 
 let menuBarHandler: ActionHandler | null = null;
 let contextMenuHandler: ActionHandler | null = null;
-let unlisten: UnlistenFn | null = null;
 let listenerPromise: Promise<void> | null = null;
 
 function onMenuAction(payload: { action: string }) {
@@ -34,9 +33,7 @@ export function ensureListener(): Promise<void> {
   if (listenerPromise) return listenerPromise;
   listenerPromise = listen<{ action: string }>("menu-action", (event) => {
     onMenuAction(event.payload);
-  }).then((u) => {
-    unlisten = u;
-  }).catch((err) => {
+  }).then(() => undefined).catch((err) => {
     listenerPromise = null;
     throw err;
   });
@@ -64,10 +61,3 @@ export function clearContextMenuHandler(): void {
   contextMenuHandler = null;
 }
 
-export function cleanupListener(): void {
-  unlisten?.();
-  unlisten = null;
-  listenerPromise = null;
-  menuBarHandler = null;
-  contextMenuHandler = null;
-}

@@ -10,30 +10,6 @@ use crate::AppState;
 pub mod migrations;
 pub mod startup;
 
-// ─── Execution Nodes ─────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionNode {
-    pub id: i64,
-    pub session_id: String,
-    pub timestamp: i64,
-    pub kind: String,
-    pub input: Option<String>,
-    pub output_summary: Option<String>,
-    pub exit_code: Option<i32>,
-    pub working_dir: String,
-    pub duration_ms: i64,
-    pub metadata: Option<String>,
-}
-
-// ─── Command Patterns ────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandPrediction {
-    pub next_command: String,
-    pub frequency: i64,
-}
-
 // ─── Context Pins ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,10 +138,6 @@ pub struct SshSavedHost {
     pub created_at: String,
     pub updated_at: String,
 }
-
-/// Maximum execution_nodes rows retained per session.  Rows beyond this cap
-/// (oldest by timestamp) are deleted immediately after each insert.
-pub const EXECUTION_NODES_MAX_PER_SESSION: i64 = 500;
 
 impl Database {
     pub fn new(path: &Path) -> Result<Self, String> {
@@ -750,182 +722,6 @@ impl Database {
         Ok(projects)
     }
 
-    // ─── Execution Nodes ─────────────────────────────────────────
-
-    // DB insert with many columns — keeping flat signature
-    #[allow(clippy::too_many_arguments)]
-    pub fn insert_execution_node(
-        &self,
-        session_id: &str,
-        timestamp: i64,
-        kind: &str,
-        input: Option<&str>,
-        output_summary: Option<&str>,
-        exit_code: Option<i32>,
-        working_dir: &str,
-        duration_ms: i64,
-        metadata: Option<&str>,
-    ) -> Result<i64, String> {
-        self.conn.execute(
-            "INSERT INTO execution_nodes (session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata],
-        ).map_err(|e| e.to_string())?;
-        let rowid = self.conn.last_insert_rowid();
-        // Keep the per-session row count bounded; silently ignore prune errors
-        // so they never fail an otherwise-successful insert.
-        self.prune_execution_nodes(session_id, EXECUTION_NODES_MAX_PER_SESSION)
-            .ok();
-        Ok(rowid)
-    }
-
-    /// Delete all but the `keep` most-recent rows (by timestamp, then id) for one session.
-    pub fn prune_execution_nodes(&self, session_id: &str, keep: i64) -> Result<(), String> {
-        self.conn
-            .execute(
-                "DELETE FROM execution_nodes
-             WHERE session_id = ?1
-               AND id NOT IN (
-                   SELECT id FROM execution_nodes
-                   WHERE session_id = ?1
-                   ORDER BY timestamp DESC, id DESC
-                   LIMIT ?2
-               )",
-                params![session_id, keep],
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Prune execution_nodes for every session — used at startup to clear
-    /// pre-existing bloat.
-    pub fn prune_all_execution_nodes(&self, keep: i64) -> Result<(), String> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT DISTINCT session_id FROM execution_nodes")
-            .map_err(|e| e.to_string())?;
-        let session_ids: Vec<String> = stmt
-            .query_map([], |row| row.get(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-        for sid in &session_ids {
-            self.prune_execution_nodes(sid, keep)?;
-        }
-        Ok(())
-    }
-
-    pub fn get_execution_nodes(
-        &self,
-        session_id: &str,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<ExecutionNode>, String> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata
-             FROM execution_nodes WHERE session_id = ?1 ORDER BY timestamp DESC LIMIT ?2 OFFSET ?3"
-        ).map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map(params![session_id, limit, offset], |row| {
-                Ok(ExecutionNode {
-                    id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    timestamp: row.get(2)?,
-                    kind: row.get(3)?,
-                    input: row.get(4)?,
-                    output_summary: row.get(5)?,
-                    exit_code: row.get(6)?,
-                    working_dir: row.get(7)?,
-                    duration_ms: row.get(8)?,
-                    metadata: row.get(9)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-
-        let mut entries = Vec::new();
-        for row in rows {
-            entries.push(row.map_err(|e| e.to_string())?);
-        }
-        Ok(entries)
-    }
-
-    pub fn get_execution_node(&self, id: i64) -> Result<Option<ExecutionNode>, String> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata
-             FROM execution_nodes WHERE id = ?1"
-        ).map_err(|e| e.to_string())?;
-
-        let result = stmt
-            .query_row(params![id], |row| {
-                Ok(ExecutionNode {
-                    id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    timestamp: row.get(2)?,
-                    kind: row.get(3)?,
-                    input: row.get(4)?,
-                    output_summary: row.get(5)?,
-                    exit_code: row.get(6)?,
-                    working_dir: row.get(7)?,
-                    duration_ms: row.get(8)?,
-                    metadata: row.get(9)?,
-                })
-            })
-            .ok();
-        Ok(result)
-    }
-
-    // ─── Command Patterns ────────────────────────────────────────
-
-    pub fn record_command_sequence(
-        &self,
-        project_id: Option<&str>,
-        sequence_json: &str,
-        next_command: &str,
-    ) -> Result<(), String> {
-        let now_ts = chrono::Utc::now().timestamp();
-        self.conn.execute(
-            "INSERT INTO command_patterns (project_id, sequence, next_command, frequency, last_seen)
-             VALUES (?1, ?2, ?3, 1, ?4)
-             ON CONFLICT(project_id, sequence, next_command) DO UPDATE SET
-                frequency = frequency + 1, last_seen = ?4",
-            params![project_id, sequence_json, next_command, now_ts],
-        ).map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    pub fn predict_next_command(
-        &self,
-        project_id: Option<&str>,
-        sequence_json: &str,
-        limit: i64,
-    ) -> Result<Vec<CommandPrediction>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT next_command, frequency FROM command_patterns
-             WHERE (project_id = ?1 OR (project_id IS NULL AND ?1 IS NULL)) AND sequence = ?2
-             ORDER BY frequency DESC LIMIT ?3",
-            )
-            .map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map(params![project_id, sequence_json, limit], |row| {
-                Ok(CommandPrediction {
-                    next_command: row.get(0)?,
-                    frequency: row.get(1)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-
-        let mut entries = Vec::new();
-        for row in rows {
-            entries.push(row.map_err(|e| e.to_string())?);
-        }
-        Ok(entries)
-    }
-
     // ─── Context Pins ────────────────────────────────────────────
 
     pub fn add_context_pin(
@@ -1282,17 +1078,6 @@ impl Database {
             )
             .map_err(|e| e.to_string())?;
         Ok(())
-    }
-
-    // ─── Execution Nodes Count ───────────────────────────────────
-
-    pub fn get_execution_nodes_count(&self, session_id: &str) -> Result<i64, String> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT COUNT(*) FROM execution_nodes WHERE session_id = ?1")
-            .map_err(|e| e.to_string())?;
-        stmt.query_row(params![session_id], |row| row.get(0))
-            .map_err(|e| e.to_string())
     }
 
     // ─── Project Operations ────────────────────────────────────────
@@ -2072,7 +1857,6 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "saved_workspace",
     // Behaviour
     "skip_close_confirm",
-    "execution_mode",
     "telemetry_enabled",
     // Onboarding / What's New (excluded from export — per-install state)
     "onboarding_completed",
@@ -2090,9 +1874,6 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "git_author_email",
     "git_auto_stage",
     "git_show_untracked",
-    // Autonomous mode
-    "auto_command_min_frequency",
-    "auto_cancel_delay_ms",
     // AI agent defaults
     "default_permission_mode",
     "custom_command_suffix",
@@ -2916,133 +2697,6 @@ mod tests {
             "expected idx_token_usage_recorded_at in plan, got: {}",
             plan
         );
-    }
-
-    // ── execution_nodes pruning ────────────────────────────────────────
-
-    /// Helper: insert `count` execution nodes for `session_id` with sequential
-    /// timestamps 0..count so ordering is deterministic.
-    fn insert_exec_nodes(db: &Database, session_id: &str, count: i64) {
-        for i in 0..count {
-            // Bypass the auto-prune inside insert_execution_node by calling the
-            // SQL directly — we need predictable row counts for the prune tests.
-            db.conn.execute(
-                "INSERT INTO execution_nodes
-                 (session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata)
-                 VALUES (?1, ?2, 'command', NULL, NULL, NULL, '/tmp', 0, NULL)",
-                params![session_id, i],
-            ).unwrap();
-        }
-    }
-
-    #[test]
-    fn test_prune_execution_nodes_keeps_most_recent() {
-        let db = test_db();
-        let sid = "sess-prune-1";
-        insert_exec_nodes(&db, sid, 10);
-        db.prune_execution_nodes(sid, 3).unwrap();
-        assert_eq!(db.get_execution_nodes_count(sid).unwrap(), 3);
-        // The three kept rows must be the most recent (timestamps 7, 8, 9)
-        let kept = db.get_execution_nodes(sid, 10, 0).unwrap();
-        let timestamps: Vec<i64> = kept.iter().map(|n| n.timestamp).collect();
-        assert!(
-            timestamps.iter().all(|&t| t >= 7),
-            "kept rows should be most recent: {:?}",
-            timestamps
-        );
-    }
-
-    #[test]
-    fn test_prune_execution_nodes_same_timestamp_keeps_highest_ids() {
-        // Run with the real schema and with the (session_id, timestamp) index
-        // dropped: without the index SQLite sorts ties in rowid-ascending
-        // order, so an ORDER BY with no id tiebreaker keeps the oldest rows.
-        for drop_index in [false, true] {
-            assert_same_timestamp_prune_keeps_highest_ids(drop_index);
-        }
-    }
-
-    fn assert_same_timestamp_prune_keeps_highest_ids(drop_index: bool) {
-        let db = test_db();
-        if drop_index {
-            db.conn
-                .execute("DROP INDEX idx_exec_nodes_session", [])
-                .unwrap();
-        }
-        let sid = "sess-prune-ties";
-        // All rows share one timestamp (whole seconds make ties common).
-        for _ in 0..10 {
-            db.conn.execute(
-                "INSERT INTO execution_nodes
-                 (session_id, timestamp, kind, input, output_summary, exit_code, working_dir, duration_ms, metadata)
-                 VALUES (?1, 42, 'command', NULL, NULL, NULL, '/tmp', 0, NULL)",
-                params![sid],
-            ).unwrap();
-        }
-        let mut all_ids: Vec<i64> = db
-            .get_execution_nodes(sid, 100, 0)
-            .unwrap()
-            .iter()
-            .map(|n| n.id)
-            .collect();
-        all_ids.sort_unstable();
-        let expected: Vec<i64> = all_ids[all_ids.len() - 3..].to_vec();
-
-        db.prune_execution_nodes(sid, 3).unwrap();
-
-        let mut kept: Vec<i64> = db
-            .get_execution_nodes(sid, 100, 0)
-            .unwrap()
-            .iter()
-            .map(|n| n.id)
-            .collect();
-        kept.sort_unstable();
-        assert_eq!(
-            kept, expected,
-            "newest (highest id) rows must survive a timestamp tie (drop_index={})",
-            drop_index
-        );
-    }
-
-    #[test]
-    fn test_prune_execution_nodes_noop_when_under_limit() {
-        let db = test_db();
-        let sid = "sess-prune-2";
-        insert_exec_nodes(&db, sid, 5);
-        db.prune_execution_nodes(sid, 10).unwrap();
-        assert_eq!(db.get_execution_nodes_count(sid).unwrap(), 5);
-    }
-
-    #[test]
-    fn test_insert_execution_node_auto_prunes() {
-        let db = test_db();
-        let sid = "sess-auto-prune";
-        // Insert more than the cap using the public API (which auto-prunes)
-        for i in 0..(EXECUTION_NODES_MAX_PER_SESSION + 10) {
-            db.insert_execution_node(sid, i, "ai_interaction", None, None, None, "/tmp", 0, None)
-                .unwrap();
-        }
-        let count = db.get_execution_nodes_count(sid).unwrap();
-        assert_eq!(
-            count, EXECUTION_NODES_MAX_PER_SESSION,
-            "table should be capped at {}",
-            EXECUTION_NODES_MAX_PER_SESSION
-        );
-    }
-
-    #[test]
-    fn test_prune_all_execution_nodes() {
-        let db = test_db();
-        // Two sessions, each with 10 rows inserted directly (bypass auto-prune)
-        for sid in &["sess-all-a", "sess-all-b"] {
-            insert_exec_nodes(&db, sid, 10);
-        }
-        assert_eq!(db.get_execution_nodes_count("sess-all-a").unwrap(), 10);
-        assert_eq!(db.get_execution_nodes_count("sess-all-b").unwrap(), 10);
-        // Prune both down to 3
-        db.prune_all_execution_nodes(3).unwrap();
-        assert_eq!(db.get_execution_nodes_count("sess-all-a").unwrap(), 3);
-        assert_eq!(db.get_execution_nodes_count("sess-all-b").unwrap(), 3);
     }
 }
 

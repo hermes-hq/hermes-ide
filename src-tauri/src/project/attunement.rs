@@ -397,17 +397,12 @@ pub fn session_context_path(app: &AppHandle, session_id: &str) -> Result<PathBuf
 }
 
 /// Format a SessionContext as a markdown string for AI agents to read.
-fn format_context_markdown(context: &SessionContext, execution_mode: Option<&str>) -> String {
+fn format_context_markdown(context: &SessionContext) -> String {
     let mut md = String::new();
     md.push_str(&format!(
         "# Session Context (v{})\n\n",
         context.context_version
     ));
-
-    // Execution Mode
-    if let Some(mode) = execution_mode {
-        md.push_str(&format!("- Mode: {}\n", mode));
-    }
 
     // Token budget info
     md.push_str(&format!(
@@ -524,7 +519,7 @@ pub fn write_session_context_file(
             .map_err(|e| format!("Failed to create context dir: {}", e))?;
     }
 
-    let markdown = format_context_markdown(&context, None);
+    let markdown = format_context_markdown(&context);
 
     let tmp_path = path.with_extension("md.tmp");
     std::fs::write(&tmp_path, markdown.as_bytes())
@@ -563,7 +558,6 @@ pub fn apply_context(
     state: State<'_, AppState>,
     app: AppHandle,
     session_id: String,
-    execution_mode: Option<String>,
 ) -> Result<ApplyContextResult, String> {
     // 1. Assemble context from DB
     let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -574,8 +568,8 @@ pub fn apply_context(
     let new_version = snapshots.first().map(|s| s.version).unwrap_or(0) + 1;
     context.context_version = new_version;
 
-    // 3. Format markdown with execution mode
-    let markdown = format_context_markdown(&context, execution_mode.as_deref());
+    // 3. Format markdown
+    let markdown = format_context_markdown(&context);
     let estimated_tokens = context.estimated_tokens;
     let budget = context.token_budget;
 

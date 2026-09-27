@@ -23,12 +23,6 @@ export interface ProjectContextInfo {
   scan_status: string;
 }
 
-export interface ErrorResolution {
-  fingerprint: string;
-  resolution: string;
-  occurrence_count: number;
-}
-
 export interface PersistedMemory {
   id: number;
   scope: string;
@@ -82,10 +76,3 @@ export interface ApplyContextResult {
   token_budget: number;
 }
 
-/** .hermes/context.json schema as returned from the backend */
-export interface HermesProjectConfig {
-  pins: { kind: string; target: string; label?: string }[];
-  memory: { key: string; value: string }[];
-  conventions: string[];
-  token_budget?: number;
-}

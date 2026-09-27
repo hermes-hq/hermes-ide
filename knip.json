@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "e2e/**/*.mjs",
+    "e2e/harness/main.ts",
+    "e2e/harness/vite.config.ts",
+    "scripts/**/*.mjs",
+    "src-tauri/bridge/hermes-claude-bridge.mjs",
+    "src-tauri/tests/fixtures/db/capture.mjs",
+    "packages/plugin-sdk/src/index.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "e2e/**/*.{mjs,ts}",
+    "scripts/**/*.mjs",
+    "src-tauri/bridge/*.mjs",
+    "packages/plugin-sdk/src/**/*.ts"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "ignoreBinaries": [
+    "lsappinfo",
+    "sandbox-exec"
+  ]
+}

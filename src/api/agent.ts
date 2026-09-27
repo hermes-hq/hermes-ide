@@ -1,10 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export interface ClaudeCliInfo {
-  version: string;
-  path: string;
-}
-
 /** Why an agent could not run. `spawn_failed` and `busy` come from the spawn
  *  commands; the others are read from the agent's output and exit (see
  *  src/agent/agentErrors.ts). */
@@ -89,12 +84,6 @@ export function sendAgentInput(sessionId: string, payload: unknown): Promise<voi
   return invoke("send_agent_input", { sessionId, payload });
 }
 
-/** Interrupt the in-flight turn without tearing down the subprocess.
- *  Hard path — sends SIGINT.  Used when the bridge has gone unresponsive. */
-export function interruptAgent(sessionId: string): Promise<void> {
-  return invoke("interrupt_agent", { sessionId });
-}
-
 /** Soft interrupt — asks the bridge (politely) to call `query.interrupt()`
  *  without killing the process.  Bridge keeps running, ready for the
  *  next user message.  Use this from the user-facing Stop button. */
@@ -119,11 +108,6 @@ export async function setAgentPermissionMode(
 /** Graceful shutdown: drop stdin, wait briefly, kill if still alive. */
 export function closeAgentSession(sessionId: string): Promise<void> {
   return invoke("close_agent_session", { sessionId });
-}
-
-/** Check whether `claude` is installed and return version + resolved path. */
-export function checkClaudeCli(): Promise<ClaudeCliInfo> {
-  return invoke<ClaudeCliInfo>("check_claude_cli");
 }
 
 /**

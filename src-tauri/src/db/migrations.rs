@@ -27,11 +27,18 @@ pub struct Migration {
 }
 
 /// Every schema step, oldest first. Versions start at 1 and have no gaps.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "baseline schema (all releases up to 1.4)",
-    apply: baseline,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "baseline schema (all releases up to 1.4)",
+        apply: baseline,
+    },
+    Migration {
+        version: 2,
+        name: "drop execution_nodes",
+        apply: drop_execution_nodes,
+    },
+];
 
 /// The schema version this build writes.
 #[cfg(test)]
@@ -699,6 +706,21 @@ fn baseline(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+// ─── Step 2: drop execution_nodes ────────────────────────────────────
+
+/// Releases up to 1.4 logged every shell command and its output to
+/// `execution_nodes`, and nothing ever read it back. Hermes 2.0 no longer
+/// writes it; the rows go with the table (the pre-migration backup keeps
+/// them).
+fn drop_execution_nodes(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "
+        DROP INDEX IF EXISTS idx_exec_nodes_session;
+        DROP TABLE IF EXISTS execution_nodes;
+        ",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,8 +900,20 @@ mod tests {
             assert_eq!(version_of(&path), SCHEMA_VERSION, "{release}");
             let after = row_counts(&path);
             for (table, n) in &before {
+                if table == "execution_nodes" {
+                    continue;
+                }
                 assert_eq!(after.get(table), Some(n), "{release}: rows in {table}");
             }
+            assert!(
+                !after.contains_key("execution_nodes"),
+                "{release}: execution_nodes is dropped"
+            );
+            assert_eq!(
+                after.len(),
+                before.len() - usize::from(before.contains_key("execution_nodes")),
+                "{release}: no other table added or removed: {after:?}"
+            );
             assert_eq!(
                 schema_of(&path),
                 fresh,
@@ -1064,6 +1098,20 @@ mod tests {
         Ok(())
     }
 
+    /// The shipped ladder plus `extra` as the next step.
+    fn ladder_plus(extra: Migration) -> Vec<Migration> {
+        let mut ladder: Vec<Migration> = MIGRATIONS
+            .iter()
+            .map(|m| Migration {
+                version: m.version,
+                name: m.name,
+                apply: m.apply,
+            })
+            .collect();
+        ladder.push(extra);
+        ladder
+    }
+
     #[test]
     fn a_failing_step_is_rolled_back_completely() {
         let dir = TempDir::new().unwrap();
@@ -1072,27 +1120,20 @@ mod tests {
         migrate(&conn, Some(&path), MIGRATIONS).unwrap();
         let before = row_counts(&path);
 
-        let ladder = [
-            Migration {
-                version: 1,
-                name: "baseline",
-                apply: baseline,
-            },
-            Migration {
-                version: 2,
-                name: "breaks halfway",
-                apply: create_then_fail,
-            },
-        ];
+        let ladder = ladder_plus(Migration {
+            version: SCHEMA_VERSION + 1,
+            name: "breaks halfway",
+            apply: create_then_fail,
+        });
         let err = migrate(&conn, Some(&path), &ladder).unwrap_err();
         match &err {
             OpenError::Migration { version, name, .. } => {
-                assert_eq!((*version, *name), (2, "breaks halfway"))
+                assert_eq!((*version, *name), (SCHEMA_VERSION + 1, "breaks halfway"))
             }
             other => panic!("unexpected error: {other:?}"),
         }
         assert!(err.to_string().contains("your data is unchanged"));
-        assert_eq!(user_version(&conn).unwrap(), 1);
+        assert_eq!(user_version(&conn).unwrap(), SCHEMA_VERSION);
         assert_eq!(row_counts(&path), before);
         assert_eq!(setting(&path, "half"), None);
     }
@@ -1199,6 +1240,59 @@ mod tests {
         assert_eq!(setting(&path, "only_in_wal").as_deref(), Some("yes"));
         let backup = &list_backups(&path)[0];
         assert_eq!(setting(backup, "only_in_wal").as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn a_1_4_database_loses_only_execution_nodes_and_the_backup_keeps_them() {
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let before = row_counts(&path);
+        assert!(before["execution_nodes"] > 0, "fixture has command history");
+
+        drop(Database::open(&path).unwrap());
+
+        let after = row_counts(&path);
+        let mut expected = before.clone();
+        expected.remove("execution_nodes");
+        assert_eq!(after, expected, "every other table and row is kept");
+        let conn = Connection::open(&path).unwrap();
+        let leftovers: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN \
+                 ('execution_nodes', 'idx_exec_nodes_session')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(leftovers, 0, "table and index are gone");
+        drop(conn);
+
+        let backups = list_backups(&path);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(row_counts(&backups[0]), before, "the backup has the rows");
+    }
+
+    #[test]
+    fn a_database_already_at_v1_drops_execution_nodes_with_a_backup_first() {
+        // A 2.0 pre-release (schema v1) that has already been migrated once.
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let conn = Connection::open(&path).unwrap();
+        migrate(&conn, None, &MIGRATIONS[..1]).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), 1);
+        let before = row_counts(&path);
+
+        let report = migrate(&conn, Some(&path), MIGRATIONS).unwrap();
+        assert_eq!((report.from, report.to), (1, 2));
+        let backup = report.backup.expect("a backup before dropping data");
+        assert!(backup.to_string_lossy().ends_with("-from-v1.db"));
+        assert_eq!(row_counts(&backup), before);
+        assert!(!row_counts(&path).contains_key("execution_nodes"));
+    }
+
+    #[test]
+    fn a_new_database_has_no_execution_nodes_table() {
+        assert!(!fresh_schema().0.contains_key("execution_nodes"));
     }
 
     #[test]

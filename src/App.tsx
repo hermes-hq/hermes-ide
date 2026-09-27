@@ -18,10 +18,9 @@ import "./styles/layout.css";
 import "./styles/themes.css";
 import "./styles/topbar.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { sendShortcutCommand } from "./terminal/TerminalPool";
 import { fmt, isActionMod, isMac } from "./utils/platform";
 import { createProject } from "./api/projects";
-import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions, useAutonomousSettings } from "./state/SessionContext";
+import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { getSetting } from "./api/settings";
 import { SessionList } from "./components/SessionList";
 import { ContextPanel } from "./components/ContextPanel";
@@ -46,7 +45,6 @@ import { ShortcutsPanel } from "./components/ShortcutsPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { CostDashboard } from "./components/CostDashboard";
 import { FlowToast } from "./components/FlowToast";
-import { AutoToast } from "./components/AutoToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { SessionCreator } from "./components/SessionCreator";
@@ -89,7 +87,6 @@ function AppContent() {
   const sessions = useSessionList();
   const sidebarSessions = useSidebarOrderedSessions();
   const { ui } = state;
-  const autoSettings = useAutonomousSettings();
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [costDashboardOpen, setCostDashboardOpen] = useState(false);
@@ -594,13 +591,6 @@ function AppContent() {
       sshJumpHost: jump_host ?? undefined,
     });
   }, [closeSession, createSession]);
-
-  const handleAutoExecute = useCallback(() => {
-    if (!ui.autoToast) return;
-    const { command, sessionId } = ui.autoToast;
-    sendShortcutCommand(sessionId, command);
-    dispatch({ type: "DISMISS_AUTO_TOAST" });
-  }, [ui.autoToast, dispatch]);
 
   // Re-focus the active terminal when the app window regains focus
   // (e.g. after a system dialog, Cmd+Tab, or notification steals focus).
@@ -1320,17 +1310,6 @@ function AppContent() {
 
       {ui.flowMode && activeSession && (
         <FlowToast sessionId={activeSession.id} />
-      )}
-
-      {/* Auto Toast (F3) */}
-      {ui.autoToast && (
-        <AutoToast
-          command={ui.autoToast.command}
-          reason={ui.autoToast.reason as "prediction"}
-          delayMs={autoSettings.cancelDelayMs}
-          onCancel={() => dispatch({ type: "DISMISS_AUTO_TOAST" })}
-          onExecute={handleAutoExecute}
-        />
       )}
 
       <UpdateDialog

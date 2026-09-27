@@ -62,47 +62,6 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
 	},
 ];
 
-// ─── Permission Mode Metadata ────────────────────────────────────────
-
-export interface PermissionModeInfo {
-	label: string;
-	shortLabel: string;
-	description: string;
-}
-
-export const PERMISSION_MODES: Record<PermissionMode, PermissionModeInfo> = {
-	default: {
-		label: "Ask Permissions",
-		shortLabel: "Default",
-		description: "The AI asks before editing files or running commands.",
-	},
-	acceptEdits: {
-		label: "Accept Edits",
-		shortLabel: "Accept Edits",
-		description: "Auto-accept file edits, still ask for shell commands.",
-	},
-	plan: {
-		label: "Plan Mode",
-		shortLabel: "Plan",
-		description: "Read-only exploration and planning — no edits allowed.",
-	},
-	auto: {
-		label: "Auto Mode",
-		shortLabel: "Auto",
-		description: "Background classifier handles approvals automatically.",
-	},
-	dontAsk: {
-		label: "Don't Ask",
-		shortLabel: "Don't Ask",
-		description: "Execute all actions without asking. Still applies safety guardrails.",
-	},
-	bypassPermissions: {
-		label: "Bypass Permissions",
-		shortLabel: "Bypass",
-		description: "No permission checks at all. Use with caution.",
-	},
-};
-
 // ─── Provider → Permission Mode Flag Mapping ─────────────────────────
 
 export interface PermissionModeFlag {
@@ -148,14 +107,6 @@ export function getAvailableModes(providerId: string): PermissionMode[] {
 	if (!flags) return ["default"];
 	return Object.keys(flags) as PermissionMode[];
 }
-
-/** @deprecated Use PERMISSION_MODE_FLAGS instead. */
-export const AUTO_APPROVE_FLAGS: Record<string, { flag: string; description: string }> = {
-	claude: { flag: "--dangerously-skip-permissions", description: "The AI agent can read, write, and execute without asking for confirmation." },
-	gemini: { flag: "--yolo", description: "The AI agent can execute shell commands and write files without permission prompts." },
-	aider: { flag: "--yes-always", description: "The AI agent will apply all suggested changes without asking for confirmation." },
-	codex: { flag: "--dangerously-bypass-approvals-and-sandbox", description: "The AI agent runs without approvals or sandboxing." },
-};
 
 export function getProviderInfo(id: string): AiProviderInfo | undefined {
 	return AI_PROVIDERS.find((p) => p.id === id);
