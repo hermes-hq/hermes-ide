@@ -71,3 +71,50 @@ features:
       N07-2:
         text: "Turning a flag off hides the feature on next launch"
         scenarios: [N07-feature-flags.mjs]
+  N09:
+    name: "Terminal mode first, for every agent"
+    status: shipped
+    criteria:
+      N09-1:
+        text: "A new Claude session opens the Claude terminal interface"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+      N09-2:
+        text: "Choosing Agent view for Claude once makes it the preselected choice for Claude next time"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+      N09-3:
+        text: "A saved Agent-view session restores in Agent view"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+  F17:
+    name: "ADR 003: terminal first, vendor-neutral"
+    status: shipped
+    criteria:
+      # Documents; the scenario proves the behaviour they describe.
+      F17-1:
+        text: "ADR 003 is merged and the design principles match it"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+      F17-2:
+        text: "The README lists every agent under Terminal, with Agent view marked optional for Claude"
+        scenarios:
+          - "N09-terminal-first.mjs@darwin,linux"
+  F01:
+    name: "Honest copy and the Nous line"
+    # README, CLAUDE.md and ADR 001 are documents, and the About dialog is a
+    # native window the bridge cannot read (a Rust unit test covers its text).
+    status: partial
+    criteria:
+      F01-1:
+        text: "README has no 'Execution timeline' string and includes the non-affiliation line"
+        scenarios: []
+      F01-2:
+        text: "The About dialog shows the non-affiliation line"
+        scenarios: []
+      F01-3:
+        text: "CLAUDE.md and ADR 001 describe the SDK bridge, not claude --print"
+        scenarios: []
+      F01-4:
+        text: "The ShortcutsPanel lists every accelerator in menu/mod.rs, and none are stale"
+        scenarios: [F01-shortcuts-panel.mjs]

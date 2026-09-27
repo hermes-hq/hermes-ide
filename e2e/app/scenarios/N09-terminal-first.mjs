@@ -14,14 +14,19 @@
 //
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/N09-terminal-first.
+//
+// macOS and Linux only (see e2e/acceptance.yml): the fake claude is a POSIX
+// shell script.
 
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { createLogger, launchApp, outDir, sleep } from "../harness.mjs";
+import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
+const SCENARIO = "N09-terminal-first";
+const startedAt = Date.now();
 const FAKE_BANNER = "FAKE-CLAUDE-TUI ready";
-const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", "N09-terminal-first");
+const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
 rmSync(logFile, { force: true });
 const log = createLogger(logFile);
@@ -33,8 +38,8 @@ function assert(condition, message) {
 
 // ─── Fake `claude` and a home folder that survives a relaunch ────────
 if (platform() === "win32") {
-  console.log("RESULT: SKIP (the fake claude is a POSIX shell script)");
-  process.exit(0);
+  log("the fake claude is a POSIX shell script; this scenario runs on macOS and Linux only");
+  finishScenario({ scenario: SCENARIO, evidenceDir, failed: true, startedAt, log });
 }
 const work = mkdtempSync(join(tmpdir(), "hermes-e2e-n09-"));
 const fakeBin = join(work, "bin");
@@ -113,6 +118,8 @@ function agentStep(bridge) {
       modeStep: !!document.querySelector(".session-creator-mode-step, .session-creator-mode-card"),
       providers: e2e.all(".session-creator-provider-card").map((c) => c.innerText.trim().split("\\n")[0]),
       claudeSelected: !!claude && claude.classList.contains("selected"),
+      // Cards that look selected (chosen or keyboard-highlighted).
+      selectedCards: e2e.all(".session-creator-provider-card.selected").map((c) => c.innerText.trim().split("\\n")[0]),
       claudeNotDetected: !!claude && /not detected/i.test(claude.innerText),
       agentView: box ? { checked: box.checked, label: e2e.nameOf(box.closest("label")) } : null,
     };
@@ -161,7 +168,7 @@ let failed = false;
 let terminalSid;
 
 try {
-  log(`scenario: N09-terminal-first   platform: ${platform()}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}`);
   log(`fake claude: ${fakeClaude}`);
 
   // ── 1. Claude via the wizard → a terminal session ─────────────────
@@ -214,6 +221,7 @@ try {
     return claude && claude.classList.contains("selected") && ${AGENT_VIEW_BOX} ? true : null;
   `).then(() => agentStep(bridge));
   assert(s.claudeSelected && s.agentView?.checked === false, "Claude is preselected, still in terminal mode");
+  assert(s.selectedCards.length === 1, `only the Claude card looks selected (${s.selectedCards.join(", ")})`);
   await bridge.clickWhenReady(`return e2e.click(e2e.must(${AGENT_VIEW_BOX}, "the Agent view checkbox"));`);
   await bridge.waitFor("the Agent view box to be ticked", `return ${AGENT_VIEW_BOX}?.checked === true;`);
   await bridge.screenshot(join(evidenceDir, "04-wizard-agent-view-ticked.png"));
@@ -240,6 +248,16 @@ try {
   `).then(() => agentStep(bridge));
   assert(s.agentView?.checked === true, "'Agent view for Claude' is now preselected for Claude");
   await bridge.screenshot(join(evidenceDir, "06-wizard-remembers-agent-view.png"));
+  // Opening the SSH form and going Back keeps that choice.
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(".session-creator-ssh-link"), "Connect over SSH"));`);
+  await bridge.waitFor("the SSH form", `return !e2e.first(".session-creator-provider-card");`);
+  await bridge.clickWhenReady(`
+    const back = e2e.all(".session-creator-btn-secondary").find((b) => b.innerText.trim() === "Back");
+    return e2e.click(e2e.must(back, "the Back button"));
+  `);
+  await bridge.waitFor("the agent step again", `return e2e.all(".session-creator-provider-card").length > 0;`);
+  s = await agentStep(bridge);
+  assert(s.claudeSelected && s.agentView?.checked === true, "Back from the SSH form keeps Claude with the Agent view ticked");
   // Another agent is not affected by Claude's choice.
   await bridge.clickWhenReady(`
     const c = e2e.all(".session-creator-provider-card").find((x) => x.innerText.trim().startsWith("Codex"));
@@ -337,5 +355,4 @@ try {
   rmSync(work, { recursive: true, force: true });
 }
 
-log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-process.exit(failed ? 1 : 0);
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
