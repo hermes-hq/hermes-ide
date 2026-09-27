@@ -69,12 +69,15 @@ jobs:
             name: macos
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    env:
-      HERMES_E2E_OUT: ${{ runner.temp }}/hermes-e2e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 1
+
+      # Where the test app and the evidence go on this runner.
+      - name: Choose the output folder
+        shell: bash
+        run: echo "HERMES_E2E_OUT=$RUNNER_TEMP/hermes-e2e" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
