@@ -38,7 +38,17 @@ export function subMenu(label: string, children: ContextMenuItem[]): ContextMenu
 
 // ─── Tauri Commands ─────────────────────────────────────────────────
 
+/** Test builds only (VITE_HERMES_E2E=1): a script cannot click a native
+ *  popup, so the real-app test rig may install this to receive the menu
+ *  instead and answer with the same "menu-action" event the popup emits.
+ *  Normal builds replace the flag at build time and drop this path. */
+type E2eMenuHook = (items: ContextMenuItem[]) => Promise<void>;
+
 export function showContextMenu(items: ContextMenuItem[]): Promise<void> {
+  if (import.meta.env.VITE_HERMES_E2E === "1") {
+    const hook = (window as unknown as { __HERMES_E2E_MENU__?: E2eMenuHook }).__HERMES_E2E_MENU__;
+    if (hook) return hook(items);
+  }
   return invoke<void>("show_context_menu", { items });
 }
 

@@ -894,6 +894,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
         <div
           className={`session-item ${isActive ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
           data-phase={session.phase}
+          data-session-item-id={session.id}
           draggable={session.phase !== "destroyed"}
           onDragStart={(e) => handleDragStart(e, session)}
           onClick={() => onSelect(session.id)}

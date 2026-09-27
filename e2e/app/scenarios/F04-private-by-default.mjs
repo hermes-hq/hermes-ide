@@ -12,10 +12,12 @@
 //   3. Turning analytics on in Settings > Privacy takes effect right away:
 //      the next session the user creates reaches the analytics server.
 //   4. Turning it off again stops it right away.
-//   5. "Delete session data" removes Hermes's caches for the chosen session
-//      (context pins, the context file, the agent-mode state folder) and
-//      leaves the session, another session's caches and a repository folder
-//      alone. A path-like session id is refused.
+//   5. "Delete Session Data..." in the session's right-click menu asks for
+//      confirmation (cancel keeps everything), then removes Hermes's caches
+//      for the chosen session (saved terminal scrollback, context pins, the
+//      context file, the agent-mode state folder) and leaves the session,
+//      another session's caches and a repository folder alone. A path-like
+//      session id is refused by the backend.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F04-private-by-default.mjs
@@ -155,6 +157,49 @@ async function setAnalyticsInSettings(bridge, on, shot) {
   await bridge.waitFor("the Settings panel to close", `return !e2e.first(".settings-panel");`);
 }
 
+/** Stands in for the native popup (a script cannot click one) and for
+ *  window.confirm. Test builds hand the menu to window.__HERMES_E2E_MENU__
+ *  when it is set; it records the items and stays open until the scenario
+ *  picks an item. The pick travels the same "menu-action" event the native
+ *  menu emits, so the app's own handler runs. */
+async function installMenuAndConfirmStubs(bridge) {
+  return bridge.eval(`
+    window.__f04 = { menus: [], confirms: [], answer: false, release: null };
+    window.__HERMES_E2E_MENU__ = (items) => {
+      window.__f04.menus.push(items);
+      return new Promise((resolve) => { window.__f04.release = resolve; });
+    };
+    window.confirm = (message) => { window.__f04.confirms.push(String(message)); return window.__f04.answer; };
+    return true;
+  `);
+}
+
+/** Right-clicks the session's card in the session list, then picks the menu
+ *  item with the given id, answering the confirmation with `answer`. */
+async function pickSessionMenuItem(bridge, sessionId, actionId, answer) {
+  await bridge.eval(`window.__f04.answer = ${answer}; window.__f04.menus = []; return true;`);
+  await bridge.clickWhenReady(`
+    const card = e2e.must(e2e.first('[data-session-item-id="${sessionId}"]'), "the session card");
+    const r = card.getBoundingClientRect();
+    card.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, button: 2,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+    }));
+    return true;
+  `);
+  const items = await bridge.waitFor("the session context menu", `
+    const m = window.__f04.menus[0];
+    return m ? m : null;
+  `);
+  const item = items.find((i) => i.id === actionId);
+  assert(!!item && item.enabled !== false, `the session menu offers "${item?.label}"`);
+  const emitted = await rawInvoke(bridge, "plugin:event|emit", { event: "menu-action", payload: { action: actionId } });
+  assert(emitted.ok, "the menu pick was delivered");
+  await sleep(300);
+  await bridge.eval(`window.__f04.release?.(); window.__f04.release = null; return true;`);
+  return item;
+}
+
 let app;
 let failed = false;
 
@@ -249,7 +294,24 @@ try {
   );
 
   // ── 6. Delete session data ────────────────────────────────────────
-  log("step 6: seed caches for sessions A and B, then delete session data for A");
+  log("step 6: seed caches for sessions A and B, then delete session data for A from its menu");
+  const marks = {};
+  for (const sid of [sessionA, sessionB]) {
+    marks[sid] = `F04-SCROLLBACK-${sid.slice(0, 8)}`;
+    await bridge.click(`[data-session-item-id="${sid}"]`); // bring the session to the front
+    await sleep(300);
+    await bridge.typeInTerminal(sid, `echo ${marks[sid]}\n`);
+    await bridge.waitForTerminal(sid, new RegExp(`^${marks[sid]}\\s*$`), { timeoutMs: 20_000 });
+  }
+  const saved = await rawInvoke(bridge, "save_all_snapshots");
+  assert(saved.ok, `saved the terminal scrollback of the open sessions: ${JSON.stringify(saved)}`);
+  for (const sid of [sessionA, sessionB]) {
+    const snap = await rawInvoke(bridge, "get_session_snapshot", { sessionId: sid });
+    assert(
+      snap.ok && typeof snap.value === "string" && snap.value.includes(marks[sid]),
+      `session ${sid.slice(0, 8)} has saved scrollback holding its output`,
+    );
+  }
   for (const sid of [sessionA, sessionB]) {
     const pin = await rawInvoke(bridge, "add_context_pin", {
       sessionId: sid,
@@ -288,11 +350,30 @@ try {
   const refused = await rawInvoke(bridge, "delete_session_data", { sessionId: "../escape" });
   assert(refused.ok === false, `a path-like session id is refused (${refused.error})`);
 
-  const del = await rawInvoke(bridge, "delete_session_data", { sessionId: sessionA });
-  assert(del.ok, `delete_session_data resolved: ${JSON.stringify(del)}`);
+  assert(await installMenuAndConfirmStubs(bridge), "stood in for the native popup menu and the confirm dialog");
 
-  const pinsA = await rawInvoke(bridge, "get_context_pins", { sessionId: sessionA, projectId: null });
-  assert(pinsA.ok && pinsA.value.length === 0, "session A's pins are gone");
+  // Cancel first: nothing may change.
+  await pickSessionMenuItem(bridge, sessionA, "session.delete-data", false);
+  const asked = await bridge.eval(`return window.__f04.confirms.slice();`);
+  assert(asked.length === 1 && /delete/i.test(asked[0]), `the user was asked to confirm: ${JSON.stringify(asked[0])}`);
+  await sleep(800);
+  const pinsKept = await rawInvoke(bridge, "get_context_pins", { sessionId: sessionA, projectId: null });
+  assert(pinsKept.ok && pinsKept.value.length === 1, "cancelling keeps session A's pin");
+  const snapKept = await rawInvoke(bridge, "get_session_snapshot", { sessionId: sessionA });
+  assert(snapKept.ok && snapKept.value?.includes(marks[sessionA]), "cancelling keeps session A's scrollback");
+
+  // Confirm: session A's caches go.
+  await pickSessionMenuItem(bridge, sessionA, "session.delete-data", true);
+  await bridge.screenshot(join(evidenceDir, "05-delete-session-data-confirmed.png"));
+  const pinsA = await bridge.waitFor("session A's pins to be deleted", `
+    const pins = await window.__TAURI_INTERNALS__.invoke("get_context_pins", { sessionId: ${JSON.stringify(sessionA)}, projectId: null });
+    return pins.length === 0 ? pins : null;
+  `);
+  assert(pinsA.length === 0, "session A's pins are gone");
+  const snapA = await rawInvoke(bridge, "get_session_snapshot", { sessionId: sessionA });
+  assert(snapA.ok && snapA.value === null, `session A's saved scrollback is gone (got ${JSON.stringify(snapA)})`);
+  const snapB = await rawInvoke(bridge, "get_session_snapshot", { sessionId: sessionB });
+  assert(snapB.ok && snapB.value?.includes(marks[sessionB]), "session B's saved scrollback is untouched");
   assert(!existsSync(contextFileA), "session A's context file is gone");
   if (stateRoot) assert(!existsSync(join(stateRoot, sessionA)), "session A's agent-mode state folder is gone");
 
@@ -301,7 +382,7 @@ try {
   if (stateRoot) assert(existsSync(join(stateRoot, sessionB, "state.json")), "session B's state folder is untouched");
   assert(existsSync(join(repo, "README.md")) && existsSync(join(repo, ".git")), "the repository folder is untouched");
   assert((await bridge.terminalIds()).includes(sessionA), "session A is still open");
-  await bridge.screenshot(join(evidenceDir, "05-after-delete-session-data.png"));
+  await bridge.screenshot(join(evidenceDir, "06-after-delete-session-data.png"));
 
   if (stateRoot) rmSync(join(stateRoot, sessionB), { recursive: true, force: true });
 } catch (e) {
