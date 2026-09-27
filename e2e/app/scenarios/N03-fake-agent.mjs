@@ -211,8 +211,24 @@ async function runFakeAgent(bridge, sessionId, shell, { tag, answer, expectExit,
 		await sleep(100);
 	}
 	await sleep(800); // let the shell draw its prompt again
-	await bridge.typeInTerminal(sessionId, `${echoExitCode(shell, marker)}\n`);
-	const done = await bridge.waitForTerminal(sessionId, new RegExp(`^${marker}\\d+\\s*$`), { timeoutMs: 20_000 });
+	const exitPattern = new RegExp(`^${marker}\\d+\\s*$`);
+	let done;
+	for (let attempt = 1; ; attempt++) {
+		await bridge.typeInTerminal(sessionId, `${echoExitCode(shell, marker)}\n`);
+		try {
+			done = await bridge.waitForTerminal(sessionId, exitPattern, { timeoutMs: shellMayMisreport ? 8_000 : 20_000 });
+			break;
+		} catch (e) {
+			// Same known Hermes behaviour as below: the extra SIGINT Hermes
+			// sends on Ctrl-C can reach the shell late, and bash's line editor
+			// then throws away what it has read of the next line (seen on
+			// Linux as `cho: command not found`). The line is typed once more;
+			// the shell's number is then not the agent's, which is why the
+			// agent's own exit code is asserted from its log.
+			if (!shellMayMisreport || attempt >= 2) throw e;
+			log("  KNOWN ISSUE: the shell dropped the start of the next typed line after Ctrl-C; typing it again");
+		}
+	}
 	await sleep(2600); // past Hermes's 2 s silence threshold
 	const seen = await phases.stop();
 	const exitLine = done.lines.filter((l) => l.startsWith(marker)).at(-1)?.trimEnd();
