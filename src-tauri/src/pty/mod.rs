@@ -277,6 +277,30 @@ pub(crate) fn channels_suffix(channels: &[String]) -> String {
     suffix
 }
 
+/// The quoted prompt put on an agent's launch line to point it at the
+/// session's context file. The shell running the line expands the variable,
+/// so it is written in that shell's syntax: PowerShell reads a bare
+/// `$HERMES_CONTEXT` as its own (empty) variable, and cmd.exe never expands
+/// `$` at all.
+pub(crate) fn context_prompt_arg(shell: &str) -> String {
+    let name = shell
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    let var = if name.contains("pwsh") || name.contains("powershell") {
+        "$env:HERMES_CONTEXT"
+    } else if name == "cmd" || name == "cmd.exe" {
+        "%HERMES_CONTEXT%"
+    } else {
+        "$HERMES_CONTEXT"
+    };
+    format!(
+        "\"Read the file at {} for project context about the attached workspaces.\"",
+        var
+    )
+}
+
 pub(crate) fn detect_shell() -> String {
     #[cfg(unix)]
     {
@@ -675,6 +699,100 @@ mod tests {
         // No prompt seen → no auto-launch
         assert!(!analyzer.shell_ready);
         assert!(!analyzer.pending_ai_launch);
+    }
+
+    // ── Context prompt on the launch line ──
+
+    #[test]
+    fn context_prompt_uses_each_shells_variable_syntax() {
+        use super::context_prompt_arg;
+        let posix = "\"Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\"";
+        assert_eq!(context_prompt_arg("/bin/zsh"), posix);
+        assert_eq!(context_prompt_arg("/usr/bin/bash"), posix);
+        assert_eq!(context_prompt_arg("/opt/homebrew/bin/fish"), posix);
+
+        let ps = "\"Read the file at $env:HERMES_CONTEXT for project context about the attached workspaces.\"";
+        assert_eq!(context_prompt_arg("pwsh"), ps);
+        assert_eq!(context_prompt_arg("powershell"), ps);
+        assert_eq!(
+            context_prompt_arg(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            ps
+        );
+        assert_eq!(
+            context_prompt_arg(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            ps
+        );
+
+        let cmd = "\"Read the file at %HERMES_CONTEXT% for project context about the attached workspaces.\"";
+        assert_eq!(context_prompt_arg("cmd.exe"), cmd);
+        assert_eq!(context_prompt_arg(r"C:\Windows\System32\CMD.EXE"), cmd);
+    }
+
+    /// Runs the launch-line prompt through a real shell and checks what the
+    /// agent would receive as its argument.
+    #[cfg(unix)]
+    #[test]
+    fn context_prompt_expands_to_the_context_path_in_a_real_shell() {
+        use super::context_prompt_arg;
+        let script = format!("printf '%s' {}", context_prompt_arg("/bin/sh"));
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .env("HERMES_CONTEXT", "/tmp/test/context.md")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "Read the file at /tmp/test/context.md for project context about the attached workspaces."
+        );
+    }
+
+    /// Same check through PowerShell when it is installed (it is on Windows
+    /// runners; skipped where it is not).
+    #[test]
+    fn context_prompt_expands_to_the_context_path_in_powershell() {
+        use super::context_prompt_arg;
+        let exe = ["pwsh", "powershell"].into_iter().find(|exe| {
+            std::process::Command::new(exe)
+                .args(["-NoProfile", "-Command", "exit 0"])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        });
+        let Some(exe) = exe else {
+            eprintln!("PowerShell not installed; skipping");
+            return;
+        };
+        let script = format!("Write-Output {}", context_prompt_arg(exe));
+        let out = std::process::Command::new(exe)
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .env("HERMES_CONTEXT", "/tmp/test/context.md")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Read the file at /tmp/test/context.md for project context about the attached workspaces."
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn context_prompt_expands_to_the_context_path_in_cmd() {
+        use super::context_prompt_arg;
+        use std::os::windows::process::CommandExt;
+        let script = format!("echo {}", context_prompt_arg("cmd.exe"));
+        // raw_arg: cmd.exe parses its own command line; Rust's argument
+        // quoting would escape the quotes it needs to see.
+        let out = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C"])
+            .raw_arg(&script)
+            .env("HERMES_CONTEXT", r"C:\test\context.md")
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(r"Read the file at C:\test\context.md for project context"),
+            "cmd.exe printed: {text}"
+        );
     }
 
     // ── AI launch command coverage ──
