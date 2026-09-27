@@ -1,0 +1,94 @@
+name: F05 keys (dev)
+
+# Temporary: proves the F05 scenario with real OS key presses while the
+# feature branch is developed. The permanent run lives in e2e.yml.
+
+on:
+  push:
+    branches: [feat/terminal-owns-keys]
+  workflow_dispatch:
+
+concurrency:
+  group: f05-keys-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  keys:
+    name: Real key presses on ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+          - os: windows-2022
+            name: windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Choose the output folder
+        shell: bash
+        run: echo "HERMES_E2E_OUT=$RUNNER_TEMP/hermes-e2e" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb xdotool
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+          shared-key: f05-keys-${{ matrix.name }}
+
+      - run: npm ci
+
+      - name: Build the test app
+        shell: bash
+        run: node e2e/app/build.mjs
+
+      - name: Terminal keys, real key presses (Linux, virtual display)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CI: "true"
+          HERMES_E2E_OS_KEYS: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs F05-terminal-keys.mjs
+
+      - name: Terminal keys, real key presses (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          CI: "true"
+          HERMES_E2E_OS_KEYS: "1"
+        run: node e2e/app/run.mjs F05-terminal-keys.mjs
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: f05-keys-evidence-${{ matrix.name }}
+          path: ${{ runner.temp }}/hermes-e2e/evidence
+          if-no-files-found: warn
+          retention-days: 7
