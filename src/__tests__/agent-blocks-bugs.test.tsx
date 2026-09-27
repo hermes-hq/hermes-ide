@@ -2,7 +2,7 @@
  * Agent block renderer bug audit — failing tests proving concrete bugs.
  *
  * Each `describe` block proves one bug found by inspection of
- * /Users/gabrielanhaia/WebstormProjects/h-ide/src/agent/blocks/*. These
+ * src/agent/blocks/*. These
  * tests are intentionally written to FAIL on `main` so the bugs are visible
  * in CI; once fixed they should pass.
  *
