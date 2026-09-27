@@ -60,9 +60,7 @@ features:
         scenarios: [N06-db-migrations.mjs]
   N07:
     name: "Feature flags"
-    # Proven locally on macOS; stays "planned" until the E2E workflow runs
-    # the scenario on all three runners.
-    status: planned
+    status: partial
     criteria:
       N07-1:
         text: "A flagged feature is invisible on stable and visible on beta"
