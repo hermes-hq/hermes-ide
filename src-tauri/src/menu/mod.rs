@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::menu::{
-    AboutMetadataBuilder, CheckMenuItemBuilder, Menu, MenuBuilder, MenuEvent, MenuItemBuilder,
-    PredefinedMenuItem, SubmenuBuilder,
+    AboutMetadata, AboutMetadataBuilder, CheckMenuItemBuilder, Menu, MenuBuilder, MenuEvent,
+    MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
 };
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
@@ -41,20 +41,29 @@ pub struct MenuActionPayload {
     pub action: String,
 }
 
+// ─── About dialog ───────────────────────────────────────────────────
+
+/// Shown in the About dialog so nobody mistakes this app for a different
+/// project that shares the Hermes name.
+pub const NON_AFFILIATION_NOTE: &str = "Not affiliated with Nous Research or its Hermes Agent.";
+
+/// Metadata for the native About dialog.  The non-affiliation note goes in
+/// both `comments` (shown on Windows and Linux) and `credits` (shown on
+/// macOS), because each platform shows only one of them.
+fn about_metadata() -> AboutMetadata<'static> {
+    AboutMetadataBuilder::new()
+        .name(Some("HERMES-IDE"))
+        .version(Some(env!("CARGO_PKG_VERSION")))
+        .comments(Some(NON_AFFILIATION_NOTE))
+        .credits(Some(NON_AFFILIATION_NOTE))
+        .build()
+}
+
 // ─── Build Application Menu Bar ─────────────────────────────────────
 
 pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     // ── Hermes menu (app menu) ──
-    let about = PredefinedMenuItem::about(
-        app,
-        Some("About HERMES-IDE"),
-        Some(
-            AboutMetadataBuilder::new()
-                .name(Some("HERMES-IDE"))
-                .version(Some(env!("CARGO_PKG_VERSION")))
-                .build(),
-        ),
-    )?;
+    let about = PredefinedMenuItem::about(app, Some("About HERMES-IDE"), Some(about_metadata()))?;
     let settings = MenuItemBuilder::with_id("hermes.settings", "Settings...")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
@@ -492,4 +501,20 @@ fn find_in_submenu(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn about_dialog_says_not_affiliated_on_every_platform() {
+        let meta = about_metadata();
+        assert_eq!(meta.name.as_deref(), Some("HERMES-IDE"));
+        assert_eq!(meta.version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
+        // Windows and Linux show `comments`; macOS shows `credits`.
+        assert_eq!(meta.comments.as_deref(), Some(NON_AFFILIATION_NOTE));
+        assert_eq!(meta.credits.as_deref(), Some(NON_AFFILIATION_NOTE));
+        assert!(NON_AFFILIATION_NOTE.contains("Not affiliated with Nous Research"));
+    }
 }

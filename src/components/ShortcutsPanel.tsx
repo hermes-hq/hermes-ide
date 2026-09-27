@@ -1,6 +1,6 @@
 import "../styles/components/ShortcutsPanel.css";
 import { useEffect } from "react";
-import { fmt } from "../utils/platform";
+import { fmt, isMac } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
 
 export interface Shortcut {
@@ -18,6 +18,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     labelKey: "shortcuts.general",
     shortcuts: [
       { keys: "{mod}N", actionKey: "session.new" },
+      { keys: "{mod}T", actionKey: "shortcuts.newTabShell" },
       { keys: "{mod}W", actionKey: "shortcuts.closePaneSession" },
       { keys: "{mod}K / {mod}{shift}P", actionKey: "shortcuts.commandPalette" },
       { keys: "{mod},", actionKey: "settings.title" },
@@ -26,6 +27,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "{mod}{shift}C", actionKey: "shortcuts.copyContext" },
       { keys: "{mod}{shift}F", actionKey: "shortcuts.searchInFolder" },
       { keys: "{mod}{shift}Z", actionKey: "shortcuts.toggleFlowMode" },
+      // The menu binds Send Interrupt on macOS only; elsewhere the terminal handles Ctrl+C itself.
+      ...(isMac ? [{ keys: "{ctrl}C", actionKey: "shortcuts.sendInterrupt" }] : []),
+      // macOS uses the system Enter Full Screen item; elsewhere the menu binds F11.
+      { keys: isMac ? "{ctrl}{mod}F" : "F11", actionKey: "shortcuts.toggleFullscreen" },
     ],
   },
   {
@@ -36,7 +41,6 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "{mod}P", actionKey: "shortcuts.processes" },
       { keys: "{mod}G", actionKey: "shortcuts.git" },
       { keys: "{mod}F", actionKey: "shortcuts.files" },
-      { keys: "{mod}T", actionKey: "shortcuts.toggleTimeline" },
       { keys: "{mod}$", actionKey: "palette.costDashboard" },
     ],
   },
@@ -48,6 +52,14 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "{mod}{alt}→", actionKey: "shortcuts.focusNextPane" },
       { keys: "{mod}{alt}←", actionKey: "shortcuts.focusPreviousPane" },
       { keys: "{mod}1-9", actionKey: "shortcuts.switchToSession" },
+    ],
+  },
+  {
+    // Only active in sessions that use the optional Agent view.
+    labelKey: "shortcuts.agentView",
+    shortcuts: [
+      { keys: "{mod}{shift}J", actionKey: "shortcuts.focusComposer" },
+      { keys: "{mod}{alt}B", actionKey: "shortcuts.toggleWorkbench" },
     ],
   },
 ];
