@@ -39,14 +39,11 @@ export function sessionCloseTitle(
  *  the whole session list. Deletes only on an explicit yes. */
 export function confirmAndDeleteSessionData(
   sessionId: string,
+  message: string,
   confirm: (message: string) => boolean,
   deleteSessionData: (sessionId: string) => Promise<void>,
 ): void {
-  const confirmed = confirm(
-    "Delete Hermes's cached data for this session? This clears its history, " +
-    "token usage, and remembered context here — the session and its repo are untouched.",
-  );
-  if (!confirmed) return;
+  if (!confirm(message)) return;
   deleteSessionData(sessionId).catch(console.error);
 }
 
@@ -709,12 +706,12 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     } else if (actionId === "session.close") {
       onClose(sid);
     } else if (actionId === "session.delete-data") {
-      confirmAndDeleteSessionData(sid, window.confirm.bind(window), deleteSessionData);
+      confirmAndDeleteSessionData(sid, t("session.deleteData.confirm"), window.confirm.bind(window), deleteSessionData);
     } else if (actionId.startsWith("session.set-group.")) {
       const group = actionId.replace("session.set-group.", "");
       handleMoveToProject(sid, group);
     }
-  }, [onClose, handleMoveToProject]);
+  }, [onClose, handleMoveToProject, t]);
 
   const { showMenu } = useContextMenu(handleContextAction);
 

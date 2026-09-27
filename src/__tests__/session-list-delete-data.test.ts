@@ -13,9 +13,9 @@ describe("confirmAndDeleteSessionData", () => {
     const confirm = vi.fn(() => true);
     const deleteSessionData = vi.fn(() => Promise.resolve());
 
-    confirmAndDeleteSessionData("sess-1", confirm, deleteSessionData);
+    confirmAndDeleteSessionData("sess-1", "Delete it?", confirm, deleteSessionData);
 
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith("Delete it?");
     expect(deleteSessionData).toHaveBeenCalledTimes(1);
     expect(deleteSessionData).toHaveBeenCalledWith("sess-1");
   });
@@ -24,7 +24,7 @@ describe("confirmAndDeleteSessionData", () => {
     const confirm = vi.fn(() => false);
     const deleteSessionData = vi.fn(() => Promise.resolve());
 
-    confirmAndDeleteSessionData("sess-1", confirm, deleteSessionData);
+    confirmAndDeleteSessionData("sess-1", "Delete it?", confirm, deleteSessionData);
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(deleteSessionData).not.toHaveBeenCalled();
@@ -36,7 +36,7 @@ describe("confirmAndDeleteSessionData", () => {
     const deleteSessionData = vi.fn(() => Promise.reject(error));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(() => confirmAndDeleteSessionData("sess-1", confirm, deleteSessionData)).not.toThrow();
+    expect(() => confirmAndDeleteSessionData("sess-1", "Delete it?", confirm, deleteSessionData)).not.toThrow();
 
     // Let the rejected promise's .catch() run.
     await Promise.resolve();
