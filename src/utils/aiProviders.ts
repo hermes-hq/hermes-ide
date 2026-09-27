@@ -23,10 +23,10 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
 	{
 		id: "gemini",
 		label: "Gemini",
-		description: "Google Gemini CLI",
-		installUrl: "https://github.com/google-gemini/gemini-cli",
-		installCmd: "npm install -g @google/gemini-cli",
-		authHint: "Run 'gemini' to sign in with Google on first use",
+		description: "Google Gemini CLI (succeeded by Antigravity CLI)",
+		installUrl: "https://antigravity.google/docs/cli/install",
+		installCmd: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+		authHint: "Google has retired Gemini CLI for personal accounts; its successor is Antigravity CLI. Run 'agy' to sign in on first use",
 	},
 	{
 		id: "aider",
@@ -48,9 +48,9 @@ export const AI_PROVIDERS: AiProviderInfo[] = [
 		id: "copilot",
 		label: "Copilot",
 		description: "GitHub Copilot CLI",
-		installUrl: "https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line",
-		installCmd: "gh extension install github/gh-copilot",
-		authHint: "Run 'gh auth login' first, then install the extension",
+		installUrl: "https://github.com/features/copilot/cli",
+		installCmd: "npm install -g @github/copilot",
+		authHint: "Run 'copilot' and sign in with /login on first use",
 	},
 	{
 		id: "kiro",
