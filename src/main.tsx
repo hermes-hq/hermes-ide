@@ -20,6 +20,12 @@ if (import.meta.env.DEV) {
   });
 }
 
+// Test-only hooks for the automation bridge.  The flag is replaced at build
+// time, so normal builds drop this import and the file behind it entirely.
+if (import.meta.env.VITE_HERMES_E2E === "1") {
+  void import("./e2e/hooks");
+}
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App />

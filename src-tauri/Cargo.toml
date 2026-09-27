@@ -12,6 +12,11 @@ crate-type = ["lib", "cdylib", "staticlib"]
 name = "hermes-ide"
 path = "src/main.rs"
 
+[features]
+# Test-only automation bridge (src/e2e_bridge.rs). Off by default and refuses
+# to compile in a release build.
+e2e = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

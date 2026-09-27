@@ -2,6 +2,8 @@ mod agent;
 mod claude_config;
 mod clipboard;
 mod db;
+#[cfg(feature = "e2e")]
+mod e2e_bridge;
 mod git;
 mod inline_pty;
 mod menu;
@@ -464,7 +466,12 @@ pub fn run() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = rt.enter();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Test runs must not take keyboard focus away from whoever is working.
+    #[cfg(feature = "e2e")]
+    let builder = e2e_bridge::configure(builder);
+
+    builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -566,6 +573,10 @@ pub fn run() {
                     log::error!("Failed to build app menu: {}", e);
                 }
             }
+
+            // Test-only automation bridge; compiled out unless `--features e2e`.
+            #[cfg(feature = "e2e")]
+            e2e_bridge::start(app.handle());
 
             Ok(())
         })
