@@ -92,9 +92,23 @@ describe("keymap: Windows/Linux", () => {
     expect(matchAppChord(key("a", CTRL_SHIFT), "linux", true)).toBeNull();
   });
 
-  it("uses the physical key, so chords work on non-Latin layouts", () => {
+  it("uses the physical key only when the layout gives no Latin letter", () => {
     const russian = { ...key("d", CTRL_SHIFT), key: "В" };
     expect(matchAppChord(russian, "win", true)).toBe("view.split-horizontal");
+  });
+
+  it("follows the layout's letter on AZERTY, like the native menu does", () => {
+    // AZERTY: the key printed W sits where QWERTY has Z (code KeyZ).
+    const azertyW = { ...key("w", CTRL_SHIFT), code: "KeyZ" };
+    expect(pcLetterChord(azertyW)).toBe("{ctrl}{shift}W");
+    expect(matchAppChord(azertyW, "linux", true)).toBe("file.close-pane");
+    // And the key printed Z (code KeyW) is Flow Mode, not Close Pane.
+    const azertyZ = { ...key("z", CTRL_SHIFT), code: "KeyW" };
+    expect(matchAppChord(azertyZ, "linux", true)).toBe("view.flow-mode");
+    // Dvorak: plain Ctrl+E typed on the physical D key stays terminal input.
+    const dvorakCtrlE = { ...key("e", CTRL), code: "KeyD" };
+    expect(matchAppChord(dvorakCtrlE, "win", true)).toBeNull();
+    expect(isAppChordInTerminal(dvorakCtrlE, "win")).toBe(false);
   });
 
   it("ignores Alt and Meta combinations", () => {

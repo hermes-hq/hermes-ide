@@ -59,14 +59,16 @@ interface KeyLike {
 
 /**
  * Canonical Windows/Linux chord for a key event with a letter key, e.g.
- * "{ctrl}{shift}D". Letters come from the physical key, so the chord works on
- * any keyboard layout, like the native menu accelerators do.
+ * "{ctrl}{shift}D". The letter is the one the keyboard layout produces
+ * (`key`), like the native menu accelerators, so on AZERTY or Dvorak the
+ * chord sits where its letter is printed. Only when the layout produces no
+ * Latin letter (Cyrillic, Greek, ...) does the physical key (`code`) decide.
  * Returns null for anything that is not Ctrl(+Shift)+letter.
  */
 export function pcLetterChord(e: KeyLike): string | null {
   if (!e.ctrlKey || e.altKey || e.metaKey) return null;
-  const fromCode = e.code ? /^Key([A-Z])$/.exec(e.code)?.[1] : undefined;
-  const letter = fromCode ?? (/^[a-z]$/i.test(e.key) ? e.key.toUpperCase() : undefined);
+  const fromKey = /^[a-z]$/i.test(e.key) ? e.key.toUpperCase() : undefined;
+  const letter = fromKey ?? (e.code ? /^Key([A-Z])$/.exec(e.code)?.[1] : undefined);
   if (!letter) return null;
   return `{ctrl}${e.shiftKey ? "{shift}" : ""}${letter}`;
 }
