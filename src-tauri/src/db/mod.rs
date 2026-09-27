@@ -1853,6 +1853,33 @@ impl Database {
         Ok(count > 0)
     }
 
+    /// Deletes Hermes-side cached data for one session: execution history,
+    /// token usage, context pins/snapshots, session-scoped memory, realm
+    /// attachments and recorded error occurrences.
+    ///
+    /// Deliberately leaves the `sessions` row and `session_worktrees` (the
+    /// git worktree Hermes checked the session's repo into) untouched — this
+    /// clears Hermes's own caches about the session, never the repo it
+    /// points at.
+    pub fn delete_session_cache_data(&self, session_id: &str) -> Result<(), String> {
+        for sql in [
+            "DELETE FROM execution_log WHERE session_id = ?1",
+            "DELETE FROM execution_nodes WHERE session_id = ?1",
+            "DELETE FROM token_usage WHERE session_id = ?1",
+            "DELETE FROM token_snapshots WHERE session_id = ?1",
+            "DELETE FROM context_pins WHERE session_id = ?1",
+            "DELETE FROM context_snapshots WHERE session_id = ?1",
+            "DELETE FROM session_realms WHERE session_id = ?1",
+            "DELETE FROM error_sessions WHERE session_id = ?1",
+            "DELETE FROM memory WHERE scope = 'session' AND scope_id = ?1",
+        ] {
+            self.conn
+                .execute(sql, params![session_id])
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     pub fn delete_session_worktree(&self, id: &str) -> Result<(), String> {
         self.conn
             .execute("DELETE FROM session_worktrees WHERE id = ?1", params![id])
@@ -2650,6 +2677,79 @@ mod tests {
         let db = test_db();
         let result = db.delete_worktrees_for_session("no-such-session");
         assert!(result.is_ok());
+    }
+
+    // ── delete_session_cache_data ────────────────────────────────────────
+
+    #[test]
+    fn test_delete_session_cache_data_clears_only_target_session() {
+        let db = test_db();
+
+        // Populate every cache table for the target session ("sess1") and a
+        // sibling session ("sess2") that must survive untouched.
+        for sid in ["sess1", "sess2"] {
+            db.log_execution_entry(sid, "command", "echo hi", Some(0), Some("/tmp"))
+                .unwrap();
+            db.insert_execution_node(
+                sid,
+                1,
+                "command",
+                Some("echo hi"),
+                None,
+                Some(0),
+                "/tmp",
+                5,
+                None,
+            )
+            .unwrap();
+            db.record_token_usage(sid, "anthropic", "claude", 10, 20, 0.01)
+                .unwrap();
+            db.add_context_pin(Some(sid), None, "file", "src/main.rs", None, None)
+                .unwrap();
+            db.save_context_snapshot(sid, 1, "{}").unwrap();
+            db.save_memory_entry("session", sid, "fact", "value", "user", "general", 1.0)
+                .unwrap();
+        }
+
+        db.insert_session_worktree("wt1", "sess1", "project1", "/path/wt1", Some("a"), false)
+            .unwrap();
+
+        db.delete_session_cache_data("sess1").unwrap();
+
+        // sess1's caches are gone.
+        assert!(db
+            .get_execution_log_entries("sess1", None)
+            .unwrap()
+            .is_empty());
+        assert!(db
+            .get_all_memory_entries("session", "sess1")
+            .unwrap()
+            .is_empty());
+        assert!(db.get_context_pins(Some("sess1"), None).unwrap().is_empty());
+
+        // sess2's caches (a different session) are untouched.
+        assert!(!db
+            .get_execution_log_entries("sess2", None)
+            .unwrap()
+            .is_empty());
+        assert!(!db
+            .get_all_memory_entries("session", "sess2")
+            .unwrap()
+            .is_empty());
+
+        // The repo Hermes checked the session's worktree into is left intact.
+        let worktrees = db.get_session_worktrees("sess1").unwrap();
+        assert_eq!(
+            worktrees.len(),
+            1,
+            "session_worktrees must survive a data delete"
+        );
+    }
+
+    #[test]
+    fn test_delete_session_cache_data_nonexistent_session_is_ok() {
+        let db = test_db();
+        assert!(db.delete_session_cache_data("no-such-session").is_ok());
     }
 
     // ── Unique constraints ─────────────────────────────────────────────

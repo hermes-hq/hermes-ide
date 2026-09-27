@@ -462,6 +462,45 @@ fn save_workspace_state(app: &tauri::AppHandle) {
     }
 }
 
+/// Whether analytics telemetry should be enabled for this run.
+///
+/// Private by default: a fresh profile and an existing profile that never
+/// opted in both come back `false`, since the persisted `telemetry_enabled`
+/// setting is absent until the user turns it on from Settings > Privacy (the
+/// onboarding checkbox that also writes this setting is unchecked by
+/// default).
+///
+/// `HERMES_E2E=1` — the same switch the real-app test rig and CI use to
+/// launch the app (see `e2e_bridge.rs`) — always forces this `false`,
+/// regardless of the persisted setting, so proof-rig scenarios and CI runs
+/// never talk to Aptabase.
+///
+/// The result decides whether `tauri_plugin_aptabase` is registered at all
+/// (see `run()` below): when this is `false` the plugin is never added to
+/// the builder, so its `reqwest` client and background flush loop are never
+/// constructed, and nothing can be sent even if some call site forgets to
+/// check the setting.
+fn analytics_enabled(app_identifier: &str) -> bool {
+    if std::env::var("HERMES_E2E").as_deref() == Ok("1") {
+        return false;
+    }
+
+    let Some(data_dir) = dirs::data_dir() else {
+        return false;
+    };
+    let db_path = data_dir.join(app_identifier).join("hermes_idea_v3.db");
+    if !db_path.exists() {
+        // Fresh profile — nothing has been persisted, so no opt-in happened.
+        return false;
+    }
+
+    db::Database::new(&db_path)
+        .ok()
+        .and_then(|database| database.get_setting("telemetry_enabled").ok().flatten())
+        .as_deref()
+        == Some("true")
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::init();
@@ -490,10 +529,22 @@ pub fn run() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = rt.enter();
 
-    let builder = tauri::Builder::default();
+    let context = tauri::generate_context!();
+    let analytics_enabled = analytics_enabled(&context.config().identifier);
+
+    let mut builder = tauri::Builder::default();
     // Test runs must not take keyboard focus away from whoever is working.
     #[cfg(feature = "e2e")]
-    let builder = e2e_bridge::configure(builder);
+    {
+        builder = e2e_bridge::configure(builder);
+    }
+    // Gated, not just left unused when off: an app with telemetry off (or an
+    // e2e/CI run) never registers the plugin, so no Aptabase network client
+    // is ever constructed for it. See `analytics_enabled` above and the
+    // `no_analytics_client_when_disabled` test in this module.
+    if analytics_enabled {
+        builder = builder.plugin(tauri_plugin_aptabase::Builder::new("A-EU-1922161061").build());
+    }
 
     builder
         .plugin(tauri_plugin_shell::init())
@@ -501,7 +552,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_aptabase::Builder::new("A-EU-1922161061").build())
         .setup(|app| {
             let app_dir = instance::app_data_dir(app.handle())?;
             std::fs::create_dir_all(&app_dir)
@@ -719,6 +769,7 @@ pub fn run() {
             project::attunement::apply_context,
             project::attunement::fork_session_context,
             project::attunement::load_hermes_project_config,
+            project::attunement::delete_session_data,
             // Process management
             process::list_processes,
             process::kill_process,
@@ -1108,5 +1159,122 @@ mod tests {
         // Journal should still have entries
         let remaining = git::journal::get_incomplete_operations(app_data_dir.path(), repo_path);
         assert_eq!(remaining.len(), 1);
+    }
+
+    // ── analytics_enabled: proves no analytics network client is ever
+    //    constructed for a fresh profile, an opted-out profile, or an
+    //    e2e/CI run — this is the sole gate on whether `run()` registers
+    //    `tauri_plugin_aptabase` (and therefore whether its `reqwest`
+    //    client and background flush loop are ever built). ─────────────
+
+    /// Run `f` with `$HOME` (and therefore `dirs::data_dir()` on this
+    /// platform) pointed at `home`, restoring the previous value
+    /// afterwards. Mirrors the pattern already used in `platform.rs`'s
+    /// tests: setting env vars at runtime needs `unsafe`, and the test
+    /// is serial with respect to this key.
+    fn with_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
+        let prev_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home);
+        }
+        let result = f();
+        unsafe {
+            match &prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        result
+    }
+
+    /// Run `f` with `HERMES_E2E` set to `value` (or unset), restoring the
+    /// previous value afterwards.
+    fn with_hermes_e2e<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let prev = std::env::var_os("HERMES_E2E");
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var("HERMES_E2E", v),
+                None => std::env::remove_var("HERMES_E2E"),
+            }
+        }
+        let result = f();
+        unsafe {
+            match &prev {
+                Some(v) => std::env::set_var("HERMES_E2E", v),
+                None => std::env::remove_var("HERMES_E2E"),
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn analytics_disabled_for_a_fresh_profile() {
+        let home = tempfile::tempdir().unwrap();
+        // No app data dir, no database — exactly a fresh profile.
+        let enabled = with_home(home.path(), || {
+            with_hermes_e2e(None, || analytics_enabled("com.hermes-ide.test"))
+        });
+        assert!(!enabled, "a fresh profile must never enable analytics");
+    }
+
+    #[test]
+    fn analytics_disabled_when_never_opted_in() {
+        let home = tempfile::tempdir().unwrap();
+        let app_dir = home
+            .path()
+            .join("Library/Application Support/com.hermes-ide.test");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let db = db::Database::new(&app_dir.join("hermes_idea_v3.db")).unwrap();
+        // Never touched the setting — same as an existing install that
+        // never opted in.
+        drop(db);
+
+        let enabled = with_home(home.path(), || {
+            with_hermes_e2e(None, || analytics_enabled("com.hermes-ide.test"))
+        });
+        assert!(
+            !enabled,
+            "no persisted opt-in must mean analytics stays off"
+        );
+    }
+
+    #[test]
+    fn analytics_enabled_only_after_explicit_opt_in() {
+        let home = tempfile::tempdir().unwrap();
+        let app_dir = home
+            .path()
+            .join("Library/Application Support/com.hermes-ide.test");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let db = db::Database::new(&app_dir.join("hermes_idea_v3.db")).unwrap();
+        db.set_setting("telemetry_enabled", "true").unwrap();
+        drop(db);
+
+        let enabled = with_home(home.path(), || {
+            with_hermes_e2e(None, || analytics_enabled("com.hermes-ide.test"))
+        });
+        assert!(enabled, "an explicit opt-in must be honored");
+    }
+
+    #[test]
+    fn analytics_forced_off_under_hermes_e2e_even_if_opted_in() {
+        let home = tempfile::tempdir().unwrap();
+        let app_dir = home
+            .path()
+            .join("Library/Application Support/com.hermes-ide.test");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let db = db::Database::new(&app_dir.join("hermes_idea_v3.db")).unwrap();
+        db.set_setting("telemetry_enabled", "true").unwrap();
+        drop(db);
+
+        // Even with an opted-in profile, HERMES_E2E=1 (how the proof rig and
+        // CI launch the app) must still win — e2e/CI runs never send
+        // analytics.
+        let enabled = with_home(home.path(), || {
+            with_hermes_e2e(Some("1"), || analytics_enabled("com.hermes-ide.test"))
+        });
+        assert!(
+            !enabled,
+            "HERMES_E2E=1 must force analytics off regardless of the setting"
+        );
     }
 }

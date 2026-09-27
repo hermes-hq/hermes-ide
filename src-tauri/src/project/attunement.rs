@@ -682,6 +682,32 @@ pub fn load_hermes_project_config(
     Ok(Some(config))
 }
 
+/// Deletes Hermes-side cached data for one session: execution history,
+/// token usage, context pins/snapshots, session-scoped memory, realm
+/// attachments, recorded error occurrences, and the on-disk context file
+/// (`<app data dir>/context/<session_id>.md`).
+///
+/// Leaves the session itself and the repo it works in untouched — this is a
+/// cache clear, not a session delete or a git operation.
+#[tauri::command]
+pub fn delete_session_data(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    session_id: String,
+) -> Result<(), String> {
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.delete_session_cache_data(&session_id)?;
+    }
+
+    if let Ok(path) = session_context_path(&app, &session_id) {
+        // Fine if the file was never written for this session.
+        let _ = std::fs::remove_file(path);
+    }
+
+    Ok(())
+}
+
 /// FNV-1a hash for config change detection
 fn fnv1a_hash(input: &str) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
