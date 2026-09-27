@@ -42,9 +42,14 @@ Users choose in Settings → General → Update channel. The choice is the
 `update_channel` setting; the check runs in the backend so the setting applies
 to the scheduled checks as well as "Check for Updates".
 
-For test rigs: `HERMES_UPDATE_ENDPOINT=<https url>` reads that manifest instead,
-`HERMES_DISABLE_UPDATE_CHECK=1` never checks (the installed-artifact smoke sets
-it so CI launches do not count as installs).
+Two environment variables exist for test rigs, and production builds honour
+them too (there is no test-only build of the updater):
+`HERMES_UPDATE_ENDPOINT=<https url>` reads that manifest instead of the
+channel's, `HERMES_DISABLE_UPDATE_CHECK=1` never checks (the installed-artifact
+smoke sets it so CI launches do not count as installs). An override endpoint
+cannot install anything the app's public key did not sign: the updater still
+requires https and a valid signature, so pointing a production build at a
+foreign manifest fails the check rather than installing it.
 
 ## Promotion to stable
 

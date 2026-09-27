@@ -12,7 +12,10 @@
 import { rmSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { createLogger, launchApp, outDir, sleep } from "../harness.mjs";
+import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+
+const SCENARIO = "N05-update-channel";
+const startedAt = Date.now();
 
 const STABLE_ENDPOINT = "https://github.com/hermes-hq/hermes-ide/releases/latest/download/latest.json";
 const BETA_ENDPOINT = "https://raw.githubusercontent.com/hermes-hq/hermes-ide/channels/beta.json";
@@ -151,5 +154,4 @@ try {
   }
 }
 
-log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-process.exit(failed ? 1 : 0);
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

@@ -281,6 +281,97 @@ pub fn saw_marker(output: &str, marker: &str) -> bool {
     output.contains(marker)
 }
 
+/// Names this machine would print in a shell prompt: the user and host
+/// names the environment reports, plus the home folder's last component.
+fn local_names() -> Vec<String> {
+    let mut names: Vec<String> = ["USER", "USERNAME", "LOGNAME", "HOSTNAME", "COMPUTERNAME"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .collect();
+    if let Some(home) = dirs::home_dir() {
+        if let Some(last) = home.file_name().and_then(|n| n.to_str()) {
+            names.push(last.to_string());
+        }
+    }
+    names
+}
+
+/// What the report keeps of the shell transcript. The report leaves the
+/// machine (CI uploads it, users are asked to send it in), so the shell
+/// prompt must not travel with it. On success only the line that carried
+/// the marker (the shell's own answer) is kept. On failure the tail is
+/// kept for diagnosis, with terminal escapes removed, every `user@host`
+/// token blanked and the names in `names` (user, host, home folder)
+/// blanked wherever they appear.
+pub fn transcript_excerpt(transcript: &str, marker: &str, ok: bool, names: &[String]) -> String {
+    if ok {
+        return transcript
+            .lines()
+            .find(|l| saw_marker(l, marker))
+            .map(|l| l.trim().to_string())
+            .unwrap_or_default();
+    }
+    let tail: String = transcript
+        .chars()
+        .rev()
+        .take(600)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let mut out = strip_escapes(&tail)
+        .split_inclusive(char::is_whitespace)
+        .map(|tok| {
+            if tok.trim_end().contains('@') {
+                let ws: String = tok.chars().skip_while(|c| !c.is_whitespace()).collect();
+                format!("<user@host>{ws}")
+            } else {
+                tok.to_string()
+            }
+        })
+        .collect::<String>();
+    for name in names {
+        if name.len() >= 2 {
+            out = out.replace(name.as_str(), "<redacted>");
+        }
+    }
+    out
+}
+
+/// Drop ANSI/OSC escape sequences so prompt decorations cannot hide names.
+fn strip_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            // CSI: ESC [ ... final byte in 0x40..=0x7e
+            Some('[') => {
+                for n in chars.by_ref() {
+                    if ('@'..='~').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            // OSC: ESC ] ... BEL or ESC \
+            Some(']') => {
+                let mut prev = '\0';
+                for n in chars.by_ref() {
+                    if n == '\x07' || (prev == '\x1b' && n == '\\') {
+                        break;
+                    }
+                    prev = n;
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// DSR "report cursor position" (`ESC [ 6 n`), which line editors such as
 /// PSReadLine send before they accept input.
 const CURSOR_QUERY: &str = "\x1b[6n";
@@ -475,14 +566,7 @@ fn check_pty_echo(timeout: Duration, stage: &Mutex<String>) -> Value {
     drop(pair.master);
 
     let transcript = snapshot();
-    let tail: String = transcript
-        .chars()
-        .rev()
-        .take(600)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let tail = transcript_excerpt(&transcript, &marker, ok, &local_names());
     json!({
         "ok": ok,
         "shell": shell,
@@ -592,6 +676,46 @@ mod tests {
         assert_eq!(count_cursor_queries("\x1b[6n\x1b[?25l\x1b[6n"), 2);
         assert_eq!(count_cursor_queries("\x1b[6c"), 0);
         assert!(std::str::from_utf8(CURSOR_REPLY).unwrap().ends_with('R'));
+    }
+
+    #[test]
+    fn success_keeps_only_the_shells_answer_line() {
+        let marker = "hsts-cafe";
+        let names = vec!["test".to_string(), "test-host".to_string()];
+        let transcript = "test@test-host ~ % echo hsts-'cafe'\r\nhsts-cafe\r\ntest@test-host ~ % ";
+        let kept = transcript_excerpt(transcript, marker, true, &names);
+        assert_eq!(kept, "hsts-cafe");
+        assert!(!kept.contains("test-host"));
+    }
+
+    #[test]
+    fn failure_tail_carries_no_user_or_host_name() {
+        let marker = "hsts-cafe";
+        let names = vec![
+            "test".to_string(),
+            "test-host".to_string(),
+            "test".to_string(),
+        ];
+        let transcript = "\x1b]0;test@test-host:~\x07\x1b[32mtest@test-host\x1b[0m:~$ echo hsts-'cafe'\r\nzsh: command not found\r\n[test@test-host ~]$ ";
+        let kept = transcript_excerpt(transcript, marker, false, &names);
+        assert!(!kept.contains("test-host"), "host leaked: {kept:?}");
+        assert!(!kept.contains("test@"), "user leaked: {kept:?}");
+        assert!(!kept.contains('\x1b'), "escapes kept: {kept:?}");
+        assert!(
+            kept.contains("command not found"),
+            "diagnostic lost: {kept:?}"
+        );
+        assert!(
+            kept.contains("<user@host>"),
+            "prompt token not blanked: {kept:?}"
+        );
+    }
+
+    #[test]
+    fn failure_tail_is_bounded() {
+        let long = "x".repeat(5000);
+        let kept = transcript_excerpt(&long, "hsts-none", false, &[]);
+        assert_eq!(kept.chars().count(), 600);
     }
 
     #[test]

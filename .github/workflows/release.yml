@@ -23,6 +23,8 @@ name: Release
 #
 # Tags are never moved: a re-run with an existing tag must point at the same
 # commit or it fails. A failed candidate is fixed by shipping the next version.
+# Trains never overlap: pushes to main queue behind the running train, and a
+# draft is only ever reused by a re-run of the commit that created it.
 #
 # Dry run: `workflow_dispatch` with a throwaway tag such as v0.0.0-dryrun-3
 # runs the whole train up to and including smoke on a draft that is deleted
@@ -43,8 +45,12 @@ on:
         default: "all"
         type: string
 
+# One train at a time. Every push to main queues behind the running train
+# (a later push that finds the tag already created is a no-op), so two runs
+# can never draft, upload or tag the same version from different commits.
+# Dry runs use their own throwaway tag and queue separately.
 concurrency:
-  group: release-${{ inputs.dry_run_tag || github.sha }}
+  group: release-${{ inputs.dry_run_tag || 'main' }}
   cancel-in-progress: false
 
 permissions:
@@ -620,10 +626,20 @@ jobs:
       - name: Create draft release
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --json isDraft -q '.isDraft' 2>/dev/null | grep -q true; then
-            echo "Draft $TAG already exists (re-run) — reusing it"
-          elif gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::$TAG is already published — a release is never rebuilt in place"; exit 1
+          EXISTING=$(gh release view "$TAG" --json isDraft,targetCommitish 2>/dev/null || true)
+          if [[ -n "$EXISTING" ]]; then
+            IS_DRAFT=$(jq -r '.isDraft' <<<"$EXISTING")
+            TARGET=$(jq -r '.targetCommitish' <<<"$EXISTING")
+            if [[ "$IS_DRAFT" != "true" ]]; then
+              echo "::error::$TAG is already published — a release is never rebuilt in place"; exit 1
+            fi
+            # A draft is only reused by a re-run of the SAME commit. A draft
+            # from another commit is never touched: uploading over it would
+            # mix two builds under one tag.
+            if [[ "$TARGET" != "$SHA" ]]; then
+              echo "::error::draft $TAG targets $TARGET but this run built $SHA — another train owns that draft; it is never reused or overwritten"; exit 1
+            fi
+            echo "Draft $TAG already exists for $SHA (re-run) — reusing it"
           else
             # The API occasionally answers a create with a transient 403.
             for attempt in 1 2 3; do

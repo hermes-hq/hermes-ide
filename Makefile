@@ -5,8 +5,10 @@
 #   The primary release path is the GitHub Actions CI workflow (release.yml).
 #   CI handles all platforms: macOS (signed + notarized), Linux, and Windows.
 #
-#   Local scripts (release-local.sh, release-full.sh) are kept as fallback
-#   for development/testing builds.
+#   Local scripts (release-local.sh, release-full.sh) are DEPRECATED. They
+#   predate the release train (draft -> smoke -> beta -> stable) and upload
+#   straight to a public release; only their manifest step follows the
+#   current rules. Use them for local build debugging, not for shipping.
 #
 # Quick start:
 #   make bump v=1.4.1        # bump version (write RELEASE_NOTES.md first)
@@ -55,16 +57,17 @@ help: ## Show this help
 	@echo "  ─────────────────────────────────────────────────"
 	@grep -E '^[a-z].*:.*## MON:' $(MAKEFILE_LIST) | sed 's/:.* ## MON: /\t/' | awk '{printf "  make %-28s %s\n", $$1, substr($$0, index($$0,"\t")+1)}'
 	@echo ""
-	@echo "  Local Builds (fallback)"
+	@echo "  Local Builds (deprecated — not the release path)"
 	@echo "  ─────────────────────────────────────────────────"
 	@grep -E '^[a-z].*:.*## LOCAL:' $(MAKEFILE_LIST) | sed 's/:.* ## LOCAL: /\t/' | awk '{printf "  make %-28s %s\n", $$1, substr($$0, index($$0,"\t")+1)}'
 	@echo ""
 	@echo "  Recommended Workflow"
 	@echo "  ─────────────────────────────────────────────────"
-	@echo "    make bump v=1.4.1"
-	@echo "    make release-push"
-	@echo "    make release                # trigger CI for all platforms"
-	@echo "    make release-watch          # monitor CI progress"
+	@echo "    make bump v=1.4.1           # write RELEASE_NOTES.md first"
+	@echo "    make release-push           # push the bump branch and open its PR"
+	@echo "    (merge the PR)              # the merge to main starts the release train"
+	@echo "    make release-watch          # monitor the train"
+	@echo "    make release-promote t=v1.4.1   # optional: promote beta to stable now"
 	@echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -127,25 +130,26 @@ endif
 	node scripts/ci/release-manifests.mjs lint "$(d)" --tag $(TAG)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RELEASE — Local builds (fallback for development/testing)
+# RELEASE — Local builds (DEPRECATED: for build debugging only, the release
+# train in release.yml is the only supported way to ship)
 # ═══════════════════════════════════════════════════════════════════════════
 
-release-local-full: ## LOCAL: All 6 platforms — Mac+Linux local, Windows CI (interactive)
+release-local-full: ## LOCAL: (deprecated) All 6 platforms — Mac+Linux local, Windows CI (interactive)
 	./scripts/release-full.sh
 
-release-local-full-no-windows: ## LOCAL: macOS + Linux only (4 platforms, no CI)
+release-local-full-no-windows: ## LOCAL: (deprecated) macOS + Linux only (4 platforms, no CI)
 	./scripts/release-full.sh --skip-windows
 
-release-local: ## LOCAL: Build macOS + Linux locally, sign, notarize, upload
+release-local: ## LOCAL: (deprecated) Build macOS + Linux locally, sign, notarize, upload
 	./scripts/release-local.sh --all
 
-release-local-macos: ## LOCAL: Build macOS only (signed + notarized), upload
+release-local-macos: ## LOCAL: (deprecated) Build macOS only (signed + notarized), upload
 	./scripts/release-local.sh --macos
 
-release-local-macos-fast: ## LOCAL: Build macOS only, skip notarization
+release-local-macos-fast: ## LOCAL: (deprecated) Build macOS only, skip notarization
 	./scripts/release-local.sh --macos --skip-notarize
 
-release-local-linux: ## LOCAL: Build Linux via Docker (x86_64 + aarch64), upload
+release-local-linux: ## LOCAL: (deprecated) Build Linux via Docker (x86_64 + aarch64), upload
 	./scripts/release-local.sh --linux
 
 # ═══════════════════════════════════════════════════════════════════════════

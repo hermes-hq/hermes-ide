@@ -7,7 +7,8 @@
 //! flag flip on the same release, so beta is always at or ahead of stable.
 //!
 //! The channel is the `update_channel` setting (`stable` | `beta`). Two
-//! environment variables exist for test rigs only:
+//! environment variables exist for test rigs; production builds honour them
+//! as well, and the plugin's https and signature checks still apply:
 //!   HERMES_UPDATE_ENDPOINT=<https url>   read this manifest instead
 //!   HERMES_DISABLE_UPDATE_CHECK=1        never check (installed-artifact smoke)
 

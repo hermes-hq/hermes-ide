@@ -6,14 +6,11 @@
 # which is the primary release path and handles all platforms (macOS signed +
 # notarized, Linux, and Windows):
 #
-#   gh workflow run release.yml -f platforms=all -f tag=vX.Y.Z
+#   (a version bump merged to main starts the release train)
 #
-# Or use the Makefile shortcut:
+# Or with the Makefile:
 #
-#   make release            # trigger CI for all platforms
-#   make release-macos      # trigger CI for macOS only
-#   make release-linux      # trigger CI for Linux only
-#   make release-windows    # trigger CI for Windows only
+#   make bump v=X.Y.Z && make release-push   # merging the PR to main releases
 #
 # This script remains useful as a fallback for local builds and debugging.
 # ════════════════════════════════════════════════════════════════════════════
