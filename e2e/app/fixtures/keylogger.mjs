@@ -23,6 +23,10 @@ if (!process.stdin.isTTY) {
 }
 
 writeFileSync(out, "");
+// Hermes also sends SIGINT to the terminal's programs when Ctrl+C is typed
+// (a fallback for shells that miss it). This program wants the byte, so it
+// stays alive and only notes the signal on screen.
+process.on("SIGINT", () => process.stdout.write("KEYLOG (SIGINT)\r\n"));
 process.stdin.setRawMode(true);
 process.stdin.resume();
 
