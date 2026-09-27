@@ -44,6 +44,12 @@ from sleep — as a black, unusable entry in the sidebar that no amount
 of closing would remove. Closed sessions now stay gone, and whatever
 was still running inside them is shut down with them.
 
+## Sessions name themselves
+
+Agent sessions you didn't name are now named after your first message,
+so the sidebar reads like a list of what you're working on instead of
+"Session 1", "Session 2". Rename any of them whenever you like.
+
 ## Fixes
 
 - Switching to another session and back now opens the conversation at

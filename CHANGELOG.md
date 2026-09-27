@@ -15,6 +15,7 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 - Localized the start screen, command palette, settings, session creation flow (including the SSH and tmux steps), usage and plan limits, shortcuts, plugin manager, and the prompt composer with roles, styles, and templates
 - Fable 5.1 in the agent-mode model picker; Opus, Sonnet, and Haiku now use the latest version of each model
 - Agent mode runs on the latest Claude tooling
+- Unnamed agent sessions are named after your first message
 
 ## Fixed
 - Closed terminal sessions no longer come back as black, unusable "ghost" sessions (often after waking the computer)
