@@ -13,6 +13,13 @@
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
+import { readFileSync } from "node:fs";
+import noSourceReadingTests from "./eslint-rules/no-source-reading-tests.js";
+
+// Existing tests that read files. The list may only shrink.
+const sourceReadingAllowlist = JSON.parse(
+  readFileSync(new URL("./eslint-rules/source-reading-tests.allowlist.json", import.meta.url), "utf8"),
+).files;
 
 export default [
   {
@@ -54,6 +61,16 @@ export default [
       // Stale-deps warnings.  Kept at warn so a missed dependency
       // doesn't block the build, but it surfaces in PR review.
       "react-hooks/exhaustive-deps": "warn",
+    },
+  },
+  {
+    // Tests must exercise code, not read source text.
+    files: ["src/**/*.test.{ts,tsx}", "src/**/__tests__/**/*.{ts,tsx}"],
+    plugins: {
+      hermes: { rules: { "no-source-reading-tests": noSourceReadingTests } },
+    },
+    rules: {
+      "hermes/no-source-reading-tests": ["error", { allowlist: sourceReadingAllowlist }],
     },
   },
 ];

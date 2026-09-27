@@ -5,9 +5,10 @@ name: Build & Test
 on:
   workflow_dispatch:
 
+# Manual builds are never cancelled by a later dispatch; they queue instead.
 concurrency:
   group: build
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -40,7 +41,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -56,7 +57,7 @@ jobs:
       - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           workspaces: src-tauri
-          shared-key: build-macos-14
+          shared-key: build-macos-15
 
       - run: npm ci
 

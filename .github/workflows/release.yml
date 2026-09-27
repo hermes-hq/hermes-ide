@@ -111,7 +111,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             enabled: ${{ needs.config.outputs.build_macos }}
           - os: ubuntu-22.04
             enabled: ${{ needs.config.outputs.build_linux }}
@@ -191,13 +191,13 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             platform_key: darwin-aarch64
             sign: true
             notarize: true
             platform_group: macos
           - target: x86_64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             platform_key: darwin-x86_64
             sign: true
             notarize: true

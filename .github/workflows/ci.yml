@@ -12,22 +12,18 @@ on:
       - "SPONSORS.md"
       - "scripts/release-*.sh"
       - "scripts/generate-changelog.sh"
+  # No paths-ignore on pull_request / merge_group: the required `gate` check
+  # must always report, or a docs-only PR would wait on it forever. The
+  # `changes` job decides which jobs run; the gate knows which may be skipped.
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".github/RELEASE_TEMPLATE.md"
-      - ".github/dependabot.yml"
-      - ".github/FUNDING.yml"
-      - "SPONSORS.md"
-      - "scripts/release-*.sh"
-      - "scripts/generate-changelog.sh"
+  merge_group:
 
-# Cancel in-progress runs for the same branch/PR — no point running stale commits
+# Superseded PR pushes are cancelled. Runs on main and in the merge queue are
+# never cancelled: each of those commits must finish its checks.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -42,15 +38,18 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-24.04
+    # Only pull requests are filtered by path. Pushes to main and merge-queue
+    # commits run every job.
     outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
-      rust: ${{ steps.filter.outputs.rust }}
-      ci: ${{ steps.filter.outputs.ci }}
+      frontend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.frontend == 'true' }}
+      rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
+      ci: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ci == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        if: github.event_name == 'pull_request'
         id: filter
         with:
           filters: |
@@ -58,13 +57,22 @@ jobs:
               - 'src/**'
               - 'package.json'
               - 'package-lock.json'
+              - 'patches/**'
               - 'tsconfig.json'
               - 'vite.config.ts'
               - 'index.html'
+              - 'eslint.config.js'
+              - 'eslint-rules/**'
             rust:
               - 'src-tauri/**'
+              - 'rust-toolchain.toml'
+              - 'package.json'
+              - 'package-lock.json'
             ci:
               - '.github/workflows/ci.yml'
+              - 'scripts/ci-gate.mjs'
+              - 'scripts/stage-bridge-deps.mjs'
+              - 'e2e/app/**'
 
   # ── Frontend: TypeScript + Tests (merged into one job) ───────────────
   frontend:
@@ -83,6 +91,8 @@ jobs:
       - run: npm ci
       - name: Type check
         run: npx tsc --noEmit
+      - name: Lint
+        run: npx eslint .
       - name: Unit tests
         run: npx vitest run
 
@@ -143,7 +153,137 @@ jobs:
       - name: Install npm deps + stage bridge runtime
         run: npm ci
       - name: Run clippy
-        run: cd src-tauri && cargo clippy -- -D warnings
+        run: cd src-tauri && cargo clippy --locked --all-targets -- -D warnings
+
+  # ── Rust Tests (all three OSes) ──────────────────────────────────────
+  rust-test:
+    name: Rust Tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - name: Cache apt packages
+        if: runner.os == 'Linux'
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          version: 1.0
+      - name: Ensure system libraries are installed
+        if: runner.os == 'Linux'
+        run: |
+          if ! pkg-config --exists glib-2.0 gtk+-3.0 webkit2gtk-4.1 libsoup-3.0 javascriptcoregtk-4.1; then
+            echo "apt cache incomplete, installing packages directly"
+            sudo apt-get update
+            sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+          shared-key: ci-test-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Stages bridge runtime deps; the Tauri build script checks them.
+      - name: Install npm deps + stage bridge runtime
+        run: npm ci
+      - name: Build PTY helper (needed by tests on macOS)
+        if: runner.os == 'macOS'
+        working-directory: src-tauri/pty-setup
+        run: cargo build --target-dir ../target
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+  # ── Real-app scenarios ───────────────────────────────────────────────
+  # Builds the test-only app (cargo feature `e2e`) and runs every scenario
+  # in e2e/app/scenarios against it. macOS only for now: the harness takes
+  # screenshots with macOS tooling.
+  e2e-app:
+    name: Real-app scenarios (macos-15)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      HERMES_E2E_OUT: ${{ github.workspace }}/.e2e-out
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+          shared-key: ci-e2e-macos-15
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: npm ci
+      - name: Build test app
+        run: node e2e/app/build.mjs
+      - name: Run scenarios
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          shopt -s nullglob
+          scenarios=(e2e/app/scenarios/*.mjs)
+          if [ ${#scenarios[@]} -eq 0 ]; then
+            echo "::error::no scenarios found in e2e/app/scenarios"
+            exit 1
+          fi
+          for scenario in "${scenarios[@]}"; do
+            echo "::group::$scenario"
+            if node "$scenario"; then
+              echo "PASS $scenario"
+            else
+              echo "::error::scenario failed: $scenario"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $status
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-evidence-macos-15
+          path: .e2e-out/evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ── Gate: the one required check ─────────────────────────────────────
+  # Always runs. Fails when any job it needs failed, was cancelled, or was
+  # skipped although its inputs changed. Make only this check required.
+  gate:
+    name: gate
+    if: always()
+    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+          sparse-checkout: scripts/ci-gate.mjs
+          sparse-checkout-cone-mode: false
+      - name: Check every required job
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci-gate.mjs
 
   # ── Rust Security Audit (main only) ─────────────────────────────────
   rust-audit:
