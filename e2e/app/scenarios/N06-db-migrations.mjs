@@ -16,6 +16,11 @@
 // language the user picked, offers Quit, and leaves the database (in WAL mode,
 // like every real 1.4.0 database) byte for byte as it was.
 //
+// Part C — the newer Hermes stopped mid-write (a crash or power loss), so some
+// of its data is still only in the -wal file next to the database. The older
+// build refuses it the same way and leaves both the database and the -wal
+// byte for byte as they were, so the newer version still finds that data.
+//
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N06-db-migrations.mjs
 //
@@ -23,8 +28,8 @@
 // <out dir>/evidence/N06-db-migrations.
 
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { platform } from "node:os";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
@@ -337,12 +342,87 @@ async function partB() {
   assert(userVersion(dbPath) === NEWER_VERSION, `still schema version ${NEWER_VERSION}`);
 }
 
+async function partC() {
+  log(`PART C: newer data (schema version ${NEWER_VERSION}) left mid-write by a crash is refused and left untouched`);
+  let dbPath;
+  let walPath;
+  let dataDir;
+  let filesBefore;
+  let dbHash;
+  let walHash;
+  const scratch = mkdtempSync(join(tmpdir(), "n06-crash-"));
+  const app = await launchApp({
+    runDir: join(evidenceDir, "run-newer-crashed"),
+    log,
+    prepareDataDir: (dir) => {
+      dataDir = dir;
+      // A "newer Hermes" writes, with its last changes still only in the WAL.
+      const live = loadFixture(scratch, 0, { wal: true });
+      const writer = new DatabaseSync(live);
+      writer.exec(`PRAGMA wal_autocheckpoint = 0;
+        PRAGMA user_version = ${NEWER_VERSION};
+        INSERT OR REPLACE INTO settings (key, value) VALUES ('written_by_newer', 'only-in-wal');`);
+      // Copy the files while it is still open: what a crash leaves behind.
+      dbPath = join(dir, DB_FILE);
+      walPath = `${dbPath}-wal`;
+      copyFileSync(live, dbPath);
+      copyFileSync(`${live}-wal`, walPath);
+      writer.close();
+      rmSync(scratch, { recursive: true, force: true });
+      filesBefore = dbFilesIn(dir);
+      dbHash = sha256(dbPath);
+      walHash = sha256(walPath);
+      log(`  files before: ${filesBefore.join(", ")}`);
+    },
+  });
+  launched.push(app);
+  let exit;
+  try {
+    const { bridge } = app;
+    log("step C1: the window explains the problem");
+    const shown = await bridge.waitFor(
+      "the startup problem screen",
+      `const t = e2e.first(".startup-problem-title");
+       return t ? { title: e2e.norm(t.innerText), message: e2e.norm(e2e.first(".startup-problem-message")?.innerText),
+                    workspace: !!document.querySelector(".app-body") } : null;`,
+      { timeoutMs: 20_000 },
+    );
+    log(`  title: "${shown.title}"`);
+    assert(shown.title === "Your data is from a newer version of Hermes", "title says the data is from a newer version");
+    assert(shown.message.includes(`data version ${NEWER_VERSION}`), "the version still only in the WAL was read");
+    assert(shown.workspace === false, "the workspace did not start");
+    const shot = await bridge.screenshot(join(evidenceDir, "C1-newer-crashed-data-refused.png"));
+    log(`  screenshot saved: ${shot.file} (${shot.bytes} bytes)`);
+  } finally {
+    log("step C2: quit");
+    exit = await app.stop({ keepFiles: true });
+    log(`  app exited: ${JSON.stringify(exit)}`);
+  }
+
+  log("step C3: the database and its WAL are exactly as they were");
+  log(`  files after: ${filesIn(dataDir).join(", ")}`);
+  // SQLite's -shm index holds no data (any reader rebuilds it from the WAL).
+  const filesAfter = dbFilesIn(dataDir).filter((f) => !f.endsWith("-shm"));
+  assert(
+    JSON.stringify(filesAfter) === JSON.stringify(filesBefore),
+    `no backup or other data files were created or removed (${filesAfter.join(", ")})`,
+  );
+  assert(sha256(dbPath) === dbHash, "database file is byte-for-byte unchanged");
+  assert(sha256(walPath) === walHash, "the WAL is byte-for-byte unchanged (not folded into the database)");
+  const seen = readDb(dbPath, (db) => ({
+    version: db.prepare("PRAGMA user_version").get().user_version,
+    row: db.prepare("SELECT value FROM settings WHERE key = 'written_by_newer'").get()?.value,
+  }));
+  assert(seen.version === NEWER_VERSION && seen.row === "only-in-wal", "the newer version still finds its last changes");
+}
+
 let failed = false;
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}`);
   await part0();
   await partA();
   await partB();
+  await partC();
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

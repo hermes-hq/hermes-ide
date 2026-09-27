@@ -34,6 +34,8 @@ const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement)
 
 // If Hermes could not open its data (for example, it was saved by a newer
 // version), explain that instead of starting the workspace.
+// In that case the backend sets up nothing else (no app state), so any other
+// command would fail: do not call the backend before this check resolves.
 void getStartupProblem().then((problem) => {
   if (problem) {
     root.render(

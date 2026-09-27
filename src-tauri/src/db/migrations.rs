@@ -14,7 +14,7 @@
 //! Adding a migration: append a `Migration` with the next version number.
 //! Never edit or reorder a step that has shipped.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -116,6 +116,43 @@ pub fn check_not_newer(conn: &Connection, ladder: &[Migration]) -> Result<i64, O
         return Err(OpenError::NewerSchema { found, supported });
     }
     Ok(found)
+}
+
+/// Refuse a database written by a newer schema that a crash left with a WAL
+/// next to it, reading it through a read-only connection. A read-write
+/// connection, even one that only reads, folds that WAL into the main file
+/// when it closes; a read-only one cannot, so the newer data stays exactly as
+/// it was.
+///
+/// Without a WAL there is nothing to fold, and the normal connection's check
+/// is used instead: a read-only connection would leave -wal/-shm files behind
+/// for a WAL-mode database, where a read-write one removes them on close. If
+/// the file cannot be read read-only, the check is also left to the normal
+/// connection, which reports the real error.
+pub fn check_file_not_newer(path: &Path, ladder: &[Migration]) -> Result<(), OpenError> {
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    if !path.exists() || !Path::new(&wal).exists() {
+        return Ok(());
+    }
+    let conn = match Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("[db] read-only version check skipped: {e}");
+            return Ok(());
+        }
+    };
+    match check_not_newer(&conn, ladder) {
+        Err(e @ OpenError::NewerSchema { .. }) => Err(e),
+        Err(e) => {
+            log::warn!("[db] read-only version check skipped: {e}");
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+    }
 }
 
 /// Bring the database up to the newest version in `ladder`.
@@ -921,6 +958,94 @@ mod tests {
             !dir.path().join(format!("{DB_FILE}-wal")).exists(),
             "not even switched to WAL"
         );
+    }
+
+    #[test]
+    fn newer_wal_mode_database_closed_cleanly_gets_no_wal_or_shm_files() {
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&format!(
+                "PRAGMA journal_mode=WAL; PRAGMA user_version = {};",
+                SCHEMA_VERSION + 5
+            ))
+            .unwrap();
+        }
+        let bytes_before = std::fs::read(&path).unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        assert!(matches!(
+            Database::open(&path),
+            Err(OpenError::NewerSchema { .. })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes_before, "file changed");
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec![DB_FILE.to_string()],
+            "only the database is there"
+        );
+    }
+
+    #[test]
+    fn newer_database_left_mid_write_by_a_crash_is_refused_and_left_untouched() {
+        // A newer Hermes wrote rows that are still only in the WAL when it
+        // stopped. Refusing it must not fold that WAL into the main file.
+        let dir = TempDir::new().unwrap();
+        let live = load_fixture(dir.path(), FIXTURES[4].1);
+        let writer = Connection::open(&live).unwrap();
+        writer
+            .execute_batch(&format!(
+                "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+                 PRAGMA user_version = {};
+                 INSERT INTO settings (key, value) VALUES ('only_in_wal', 'yes');",
+                SCHEMA_VERSION + 5
+            ))
+            .unwrap();
+        let crashed = TempDir::new().unwrap();
+        let path = crashed.path().join(DB_FILE);
+        let wal = crashed.path().join(format!("{DB_FILE}-wal"));
+        std::fs::copy(&live, &path).unwrap();
+        std::fs::copy(dir.path().join(format!("{DB_FILE}-wal")), &wal).unwrap();
+        drop(writer);
+        let names = || -> Vec<String> {
+            let mut n: Vec<String> = std::fs::read_dir(crashed.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                // SQLite's shared-memory index holds no data; any reader
+                // rebuilds it from the WAL.
+                .filter(|n| !n.ends_with("-shm"))
+                .collect();
+            n.sort();
+            n
+        };
+        let files_before = names();
+        let (db_before, wal_before) = (std::fs::read(&path).unwrap(), std::fs::read(&wal).unwrap());
+
+        let err = match Database::open(&path) {
+            Err(e) => e,
+            Ok(_) => panic!("a newer database must not open"),
+        };
+        assert_eq!(
+            err,
+            OpenError::NewerSchema {
+                found: SCHEMA_VERSION + 5,
+                supported: SCHEMA_VERSION
+            }
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            db_before,
+            "main file changed"
+        );
+        assert_eq!(std::fs::read(&wal).unwrap(), wal_before, "WAL changed");
+        assert_eq!(names(), files_before, "no data file added or removed");
+        // The newer version still finds its rows.
+        assert_eq!(setting(&path, "only_in_wal").as_deref(), Some("yes"));
     }
 
     fn create_marker(conn: &Connection) -> rusqlite::Result<()> {

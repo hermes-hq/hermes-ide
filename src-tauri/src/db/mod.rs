@@ -178,11 +178,15 @@ impl Database {
     /// written to it. Before pending migrations run on an existing database,
     /// a backup is saved next to it (see `migrations`).
     pub fn open(path: &Path) -> Result<Self, migrations::OpenError> {
+        // Nothing below may touch a newer database, not even a WAL a crash
+        // left next to it (that one is checked through a read-only connection).
+        migrations::check_file_not_newer(path, migrations::MIGRATIONS)?;
         let conn = Connection::open(path)
             .map_err(|e| migrations::OpenError::Sqlite(format!("{}: {}", path.display(), e)))?;
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| migrations::OpenError::Sqlite(e.to_string()))?;
-        // Read-only check first: nothing below may touch a newer database.
+        // Only reads; closing this connection on a cleanly closed database
+        // changes nothing and removes any -wal/-shm it created.
         migrations::check_not_newer(&conn, migrations::MIGRATIONS)?;
 
         // Performance PRAGMAs (DB-01).
