@@ -12,15 +12,30 @@ const ESC = "\x1b";
 const BEL = "\x07";
 const ST = `${ESC}\\`;
 
-/** Run a scenario, feed `input` (after an optional delay), wait for the end. */
-async function run(scenario, { input, delayMs = 0, args = [], env } = {}) {
+/** Run a scenario, feed `input` (once `waitFor` has been printed, if given), wait for the end. */
+async function run(scenario, { input, waitFor, args = [], env } = {}) {
 	const p = start(AGENT, ["--scenario", scenario, "--speed", "0", ...args], { env });
 	if (input !== undefined) {
-		if (delayMs) await sleep(delayMs);
+		if (waitFor) await printed(p, waitFor);
 		p.write(input);
 	}
 	const r = await p.done;
 	return { ...r, text: r.stdout.toString("latin1") };
+}
+
+/** Resolve once the agent's stdout so far contains `text`. */
+function printed(p, text) {
+	return new Promise((resolve) => {
+		let seen = "";
+		const onData = (b) => {
+			seen += b.toString("latin1");
+			if (seen.includes(text)) {
+				p.child.stdout.off("data", onData);
+				resolve();
+			}
+		};
+		p.child.stdout.on("data", onData);
+	});
 }
 
 function scenarioFile(dir, steps) {
@@ -76,7 +91,7 @@ describe("fake-agent: approval scenario", () => {
 	});
 
 	it("Ctrl-C interrupts with exit 130 and restores the terminal", async () => {
-		const r = await run("approval", { input: "\x03", delayMs: 50 });
+		const r = await run("approval", { input: "\x03", waitFor: "[a] always" });
 		expect(r.code).toBe(130);
 		expect(r.text).not.toContain("approval granted");
 		// Leaves the alternate screen and turns bracketed paste back off.
@@ -89,7 +104,7 @@ describe("fake-agent: approval scenario", () => {
 			["SIGHUP", 129],
 		]) {
 			const p = start(AGENT, ["--scenario", "approval", "--speed", "0"]);
-			await sleep(150);
+			await printed(p, "[a] always");
 			p.kill(sig);
 			expect((await p.done).code).toBe(code);
 		}
@@ -123,7 +138,9 @@ describe("fake-agent: other scenarios", () => {
 
 	it("hang never ends by itself; Ctrl-C ends it with 130", async () => {
 		const p = start(AGENT, ["--scenario", "hang", "--speed", "0"]);
+		const shown = printed(p, "thinking forever");
 		await sleep(400);
+		await shown;
 		expect(p.isRunning()).toBe(true);
 		p.write("\x03");
 		const r = await p.done;
