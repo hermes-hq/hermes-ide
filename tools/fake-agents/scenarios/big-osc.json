@@ -1,0 +1,9 @@
+{
+	"name": "big-osc",
+	"description": "Emits a 64 KB OSC 9 notification, then a normal line, then exits 0.",
+	"steps": [
+		{ "do": "bigOsc", "bytes": 65536 },
+		{ "do": "print", "text": "fake-agent: after big osc\n" },
+		{ "do": "exit", "code": 0 }
+	]
+}

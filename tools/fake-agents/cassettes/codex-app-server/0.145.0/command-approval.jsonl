@@ -1,0 +1,18 @@
+{"kind":"header","v":1,"origin":"hand-written","agent":"codex-app-server","recorded_with":{"codex":"0.145.0"},"scrubbed":true,"note":"written from the method names and required fields of the codex 0.145.0 generated app-server schema; not a recording","scenario":"initialize, thread/start, turn/start, command approval: accept (turn completed) or decline (turn failed)"}
+{"kind":"expect","match":{"method":"initialize"},"capture":{"ID0":"id"}}
+{"kind":"emit","line":{"id":{"$var":"ID0"},"result":{"userAgent":"codex_cli_rs/0.145.0 (fake)"}}}
+{"kind":"expect","match":{"method":"thread/start"},"capture":{"ID1":"id"}}
+{"kind":"emit","line":{"id":{"$var":"ID1"},"result":{"approvalPolicy":"on-request","approvalsReviewer":"user","cwd":"${CWD}","model":"${MODEL}","modelProvider":"openai","sandbox":{"type":"workspaceWrite"},"thread":{"id":"thr_fake_001","sessionId":"${SESSION_ID}","cliVersion":"0.145.0","createdAt":0,"updatedAt":0,"cwd":"${CWD}","ephemeral":false,"modelProvider":"openai","preview":"","source":"appServer","status":{"type":"idle"},"turns":[]}}}}
+{"kind":"emit","line":{"method":"thread/started","params":{"thread":{"id":"thr_fake_001"}}}}
+{"kind":"expect","match":{"method":"turn/start"},"capture":{"ID2":"id"}}
+{"kind":"emit","dt":5,"line":{"id":{"$var":"ID2"},"result":{"turn":{"id":"turn_fake_001","items":[],"status":"inProgress"}}}}
+{"kind":"emit","dt":5,"line":{"method":"turn/started","params":{"threadId":"thr_fake_001","turn":{"id":"turn_fake_001","items":[],"status":"inProgress"}}}}
+{"kind":"emit","dt":5,"line":{"method":"thread/status/changed","params":{"threadId":"thr_fake_001","status":{"type":"active","activeFlags":["waitingOnApproval"]}}}}
+{"kind":"emit","dt":5,"line":{"id":7001,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr_fake_001","turnId":"turn_fake_001","itemId":"item_fake_001","startedAtMs":0,"command":"touch canary.txt","cwd":"${CWD}"}}}
+{"kind":"expect","match":{"id":7001},"timeoutMs":10000,"branch":[{"when":{"result.decision":"decline"},"goto":"declined"},{"when":{"result.decision":"cancel"},"goto":"declined"}]}
+{"kind":"emit","dt":5,"line":{"method":"thread/status/changed","params":{"threadId":"thr_fake_001","status":{"type":"active","activeFlags":[]}}}}
+{"kind":"emit","dt":5,"line":{"method":"turn/completed","params":{"threadId":"thr_fake_001","turn":{"id":"turn_fake_001","items":[],"status":"completed"}}}}
+{"kind":"hang"}
+{"kind":"label","label":"declined"}
+{"kind":"emit","line":{"method":"turn/completed","params":{"threadId":"thr_fake_001","turn":{"id":"turn_fake_001","items":[],"status":"failed"}}}}
+{"kind":"hang"}

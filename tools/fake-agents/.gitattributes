@@ -1,0 +1,3 @@
+# Cassette hashes in cassettes/manifest.json are over the exact bytes; keep LF on every OS.
+*.jsonl text eol=lf
+cassettes/manifest.json text eol=lf

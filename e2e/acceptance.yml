@@ -173,3 +173,10 @@ features:
       F09-5:
         text: "Closing a session that reuses another session's worktree asks nothing about it and leaves that worktree, its uncommitted files and its link alone"
         scenarios: [F09-honest-isolation.mjs]
+  N03:
+    name: "Fake agents and recorded sessions"
+    status: partial
+    criteria:
+      N03-1:
+        text: "The fake agent approval scenario changes the session status in the real app on all three OSes"
+        scenarios: [N03-fake-agent.mjs]

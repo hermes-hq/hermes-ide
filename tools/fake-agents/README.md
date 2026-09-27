@@ -1,0 +1,73 @@
+# Fake agents and recorded sessions
+
+Deterministic stand-ins for real coding agents, so tests need no accounts, no
+network and no particular CLI version. Plain Node, no dependencies.
+
+| File | What it is |
+|---|---|
+| `fake-agent.mjs` | A fake **terminal** agent. Plays a scenario from `scenarios/`: prints a TUI, sends notifications (OSC 2, 9, 9;4, 99, 777, BEL), asks for approval and exits with the code the scenario picks. `--log` writes every input byte, resize and signal it received, plus the environment it saw. |
+| `replay-stdio.mjs` | Replays a **cassette** over stdin/stdout. One replayer for every line-delimited JSON protocol: the Claude bridge (`HERMES_BRIDGE_PATH`), ACP and the Codex app-server (JSON-RPC). Covers faults: non-JSON output, torn lines, stderr, hangs, crashes. |
+| `record-stdio.mjs` | Records a real session as a cassette. A transparent tee between host and agent; the result is scrubbed. |
+| `scrub.mjs` | Deterministic scrubber: home folders, user and host names, e-mails, UUIDs and credential-shaped tokens. `--check` fails on anything left over. |
+| `manifest.mjs` | Keeps `cassettes/manifest.json` (agent, version, sha256, scrubber version) in step with the files. |
+
+## Fake terminal agent
+
+```sh
+node tools/fake-agents/fake-agent.mjs --scenario approval [--log run.jsonl] [--speed 0]
+```
+
+`--scenario` takes a file or a name from `scenarios/`. `--speed 0` skips
+sleeps. Exit codes: the scenario's own, 124 when a wait times out, 130 on
+Ctrl-C, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
+
+| Scenario | Behaviour |
+|---|---|
+| `approval` | Full-screen approval box: `y`/`a` exit 0, `n` exit 3 |
+| `question` | Multiple choice: `1`/`2` exit 0, other keys exit 4 |
+| `exit-error` | Exit 1 |
+| `crash` | Killed by SIGKILL (a shell reports 137) |
+| `hang` | Never returns |
+| `big-osc` | A 64 KB OSC 9 |
+| `invalid-utf8` | Bytes that are not UTF-8 |
+| `alt-screen-left-on` | Exits inside the alternate screen |
+| `bracketed-paste` | Reports one bracketed paste |
+| `resize` | Reports a resize |
+
+Steps: `print, sleep, title, osc9, progress, osc99, osc777, bigOsc, bell, raw,
+split, altScreen, modes, box, size, waitKey, waitPaste, waitResize, hang, kill,
+exit`.
+
+## Replaying a cassette
+
+```sh
+HERMES_BRIDGE_PATH=tools/fake-agents/replay-stdio.mjs \
+HERMES_FAKE_CASSETTE=tools/fake-agents/cassettes/claude-bridge/2.1.283/approval-bash.jsonl \
+HERMES_FAKE_SPEED=0
+```
+
+A cassette is JSON lines: `header`, `emit`, `expect` (with `branch` and
+`capture`), `label`, `goto`, `stderr`, `garbage`, `partial`, `hang`, `crash`,
+`exit`. See the top of `replay-stdio.mjs`. Exit 97 means an expected input
+never came; 98 means the cassette is broken.
+
+Layout: `cassettes/<agent>/<agent version>/<scenario>.jsonl`. After adding or
+changing one, run `node tools/fake-agents/manifest.mjs --write`.
+
+## Recording
+
+Record only in a throwaway folder with made-up content.
+
+```sh
+node tools/fake-agents/record-stdio.mjs --out new.jsonl --agent <name> --agent-version <v> -- <command> [args...]
+node tools/fake-agents/scrub.mjs --check new.jsonl
+```
+
+## Tests
+
+`npx vitest run tools` runs the kit's tests, including the gate that fails on
+anything the scrubber would still remove from a committed fixture. The
+real-app scenario `e2e/app/scenarios/N03-fake-agent.mjs` runs the fake agent
+inside a Hermes terminal with whatever shell it starts (a POSIX shell,
+PowerShell or cmd.exe). Test cases that depend on POSIX signals are skipped on
+Windows.

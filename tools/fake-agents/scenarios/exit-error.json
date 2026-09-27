@@ -1,0 +1,8 @@
+{
+	"name": "exit-error",
+	"description": "Prints an error and exits with code 1.",
+	"steps": [
+		{ "do": "print", "text": "fake-agent: something went wrong\n" },
+		{ "do": "exit", "code": 1 }
+	]
+}

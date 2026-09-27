@@ -1,0 +1,10 @@
+{
+	"name": "invalid-utf8",
+	"description": "Writes bytes that are not valid UTF-8 between two normal lines, then exits 0.",
+	"steps": [
+		{ "do": "print", "text": "fake-agent: before\n" },
+		{ "do": "raw", "hex": "c328a0a1e228a1f0288c28fffe0d0a" },
+		{ "do": "print", "text": "fake-agent: after\n" },
+		{ "do": "exit", "code": 0 }
+	]
+}
