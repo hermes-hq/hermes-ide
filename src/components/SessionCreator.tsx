@@ -1348,7 +1348,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {aiProvider === CUSTOM_AGENT_ID && (
               <div className="session-creator-custom-agent">
                 <div className="session-creator-custom-suffix">
-                  <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-name">Name</label>
+                  <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-name">{t("session.customAgentName")}</label>
                   <input
                     id="session-creator-custom-agent-name"
                     type="text"
@@ -1356,13 +1356,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     value={customAgentName}
                     onChange={(e) => setCustomAgentName(e.target.value)}
                     onKeyDown={(e) => e.stopPropagation()}
-                    placeholder="e.g. My agent"
+                    placeholder={t("session.customAgentNamePlaceholder")}
                     maxLength={40}
                     spellCheck={false}
                   />
                 </div>
                 <div className="session-creator-custom-suffix">
-                  <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-command">Command</label>
+                  <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-command">{t("session.customAgentCommand")}</label>
                   <input
                     id="session-creator-custom-agent-command"
                     type="text"
@@ -1370,13 +1370,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     value={customAgentCommand}
                     onChange={(e) => setCustomAgentCommand(e.target.value)}
                     onKeyDown={(e) => e.stopPropagation()}
-                    placeholder="e.g. aider --model sonnet"
+                    placeholder={t("session.customAgentCommandPlaceholder")}
                     spellCheck={false}
                     autoCapitalize="off"
                     autoCorrect="off"
                   />
                   <span className="session-creator-custom-suffix-hint">
-                    Hermes starts this command in the session's terminal, as if you typed it.
+                    {t("session.customAgentCommandHint")}
                   </span>
                 </div>
               </div>

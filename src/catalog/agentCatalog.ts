@@ -14,6 +14,7 @@
 import catalogJson from "./agents.json";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { PLATFORM } from "../utils/platform";
+import { translate } from "../i18n/registry";
 import type { PermissionMode } from "../types/session";
 
 export type AgentArgs = readonly string[];
@@ -169,7 +170,9 @@ export function installCommand(agent: AgentEntry | undefined, platform: "mac" | 
 /** The warning shown when the shell reports the agent's command as not found. */
 export function launchFailedMessage(agentId: string, platform: "mac" | "win" | "linux" = PLATFORM): string {
 	const agent = getAgent(agentId);
-	if (!agent) return `${agentId} was not found.`;
-	if (agent.custom) return "The custom agent's command was not found. Check the command in a new session.";
-	return `${agent.name} was not found. Install with: ${installCommand(agent, platform)}`;
+	if (!agent) return translate("session.agentLaunchFailedNoInstall", { agent: agentId });
+	if (agent.custom) return translate("session.customAgentLaunchFailed");
+	const command = installCommand(agent, platform);
+	if (!command) return translate("session.agentLaunchFailedNoInstall", { agent: agent.name });
+	return translate("session.agentLaunchFailed", { agent: agent.name, command });
 }

@@ -234,6 +234,18 @@ try {
     (await bridge.eval(`return e2e.first(".session-creator-actions .session-creator-btn-primary").disabled;`)) === true,
     "Next is disabled while the command is empty",
   );
+  const fieldText = await bridge.eval(`
+    return {
+      nameLabel: e2e.norm(e2e.first('label[for="session-creator-custom-agent-name"]')?.textContent ?? ""),
+      commandLabel: e2e.norm(e2e.first('label[for="session-creator-custom-agent-command"]')?.textContent ?? ""),
+      hint: e2e.norm(e2e.first(".session-creator-custom-agent .session-creator-custom-suffix-hint")?.textContent ?? ""),
+    };
+  `);
+  log(`  custom agent fields: ${JSON.stringify(fieldText)}`);
+  assert(
+    fieldText.nameLabel === "Name" && fieldText.commandLabel === "Command" && fieldText.hint.startsWith("Hermes starts this command"),
+    "the custom agent fields show their translated labels (not raw keys)",
+  );
   await setInput(bridge, "#session-creator-custom-agent-name", AGENT_NAME);
   const typed = await setInput(bridge, "#session-creator-custom-agent-command", COMMAND);
   assert(typed === COMMAND, "the command field holds the fake agent command");
