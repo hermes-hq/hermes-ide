@@ -31,7 +31,6 @@ Hermes IDE is a desktop terminal emulator that deeply integrates AI assistance i
 - **Multi-session management** — create, switch, and organize parallel terminal sessions <!-- claim:multi-session -->
 - **Split panes** — horizontal and vertical splits with drag-and-drop reordering <!-- claim:split-panes -->
 - **WebGL-accelerated rendering** — fast terminal with web links and auto-fit <!-- claim:webgl-rendering -->
-- **Execution timeline** — visual history of every command with exit codes and durations <!-- claim:execution-timeline -->
 - **Still excellent for everything else** — Aider, Codex, Gemini, Copilot, Kiro, plain shells all run in classic Terminal mode, unchanged <!-- claim:terminal-mode-other-tools -->
 
 ### Git Integration

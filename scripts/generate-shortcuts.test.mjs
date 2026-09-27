@@ -16,10 +16,12 @@ import {
   MENU_SOURCE,
   MD_OUT,
   parseAppShortcuts,
+  parseKeymap,
   PC_SYMBOLS,
   pcKeys,
   renderMarkdown,
   renderTsModule,
+  sameText,
   toCanonicalKeys,
   TS_OUT,
 } from "./generate-shortcuts.mjs";
@@ -106,9 +108,81 @@ describe("extractShortcuts", () => {
 
   it("changing an accelerator in the menu changes the rendered keys", () => {
     const changed = FIXTURE.replace('"CmdOrCtrl+N"', '"CmdOrCtrl+Shift+N"');
-    const before = extractShortcuts(FIXTURE).find((i) => i.id === "file.new-session").accelerator;
-    const after = extractShortcuts(changed).find((i) => i.id === "file.new-session").accelerator;
-    expect(before).not.toBe(after);
+    expect(extractShortcuts(FIXTURE).find((i) => i.id === "file.new-session").keys).toBe("{mod}N");
+    expect(extractShortcuts(changed).find((i) => i.id === "file.new-session").keys).toBe("{mod}{shift}N");
+  });
+});
+
+// The same menu once its chords move into src/utils/keymap.json: the menu
+// reads each through app_accel("<id>")?, and Windows/Linux chords differ.
+const KEYMAP_FIXTURE = FIXTURE.replace('.accelerator("CmdOrCtrl+N")', '.accelerator(app_accel("file.new-session")?)').replace(
+  '.accelerator("CmdOrCtrl+Shift+D")',
+  '.accelerator(app_accel("view.toggle-sidebar")?)',
+);
+const KEYMAP = parseKeymap({
+  chords: [
+    { action: "file.new-session", mac: "{mod}N", pc: "{ctrl}{shift}N", pcOutsideTerminal: "{ctrl}N" },
+    { action: "view.toggle-sidebar", mac: "{mod}{shift}D", pc: "{ctrl}{shift}D" },
+  ],
+});
+
+describe("chords read from keymap.json", () => {
+  it("keeps every row, with the per-platform chords", () => {
+    const literal = extractShortcuts(FIXTURE).map((i) => i.id);
+    const items = extractShortcuts(KEYMAP_FIXTURE, KEYMAP);
+    expect(items.map((i) => i.id)).toEqual(literal);
+    const newSession = items.find((i) => i.id === "file.new-session");
+    expect(newSession).toMatchObject({ keys: "{mod}N", pcKeys: "{ctrl}{shift}N", pcOutsideTerminal: "{ctrl}N", group: "File" });
+    expect(items.find((i) => i.id === "view.toggle-sidebar").pcKeys).toBe("{ctrl}{shift}D");
+  });
+
+  it("renders the macOS and Windows/Linux chords in their own columns", () => {
+    const md = renderMarkdown(groupShortcuts(extractShortcuts(KEYMAP_FIXTURE, KEYMAP)));
+    expect(md).toContain("| New Session | ⌘N | Ctrl+Shift+N | Windows / Linux: also Ctrl+N when no terminal has focus |");
+    const ts = renderTsModule(groupShortcuts(extractShortcuts(KEYMAP_FIXTURE, KEYMAP)));
+    expect(ts).toContain('keys: "{mod}N", pcKeys: "{ctrl}{shift}N"');
+  });
+
+  it("fails instead of dropping a row when a chord is missing or unreadable", () => {
+    expect(() => extractShortcuts(KEYMAP_FIXTURE)).toThrow(/reads its chord from keymap.json as "file.new-session"/);
+    const partial = parseKeymap({ chords: [{ action: "file.new-session", mac: "{mod}N", pc: "{ctrl}{shift}N" }] });
+    expect(() => extractShortcuts(KEYMAP_FIXTURE, partial)).toThrow(/"view.toggle-sidebar"/);
+    const odd = FIXTURE.replace('.accelerator("F11")', ".accelerator(fullscreen_key())");
+    expect(() => extractShortcuts(odd)).toThrow(/view.fullscreen" has an accelerator the shortcuts generator cannot read/);
+  });
+
+  it("fails when keymap.json has a chord no menu item uses", () => {
+    const extra = parseKeymap({
+      chords: [
+        { action: "file.new-session", mac: "{mod}N", pc: "{ctrl}{shift}N" },
+        { action: "view.toggle-sidebar", mac: "{mod}{shift}D", pc: "{ctrl}{shift}D" },
+        { action: "view.gone", mac: "{mod}Y", pc: "{ctrl}{shift}Y" },
+      ],
+    });
+    expect(() => extractShortcuts(KEYMAP_FIXTURE, extra)).toThrow(/"view.gone", but no menu item uses it/);
+  });
+
+  it("rejects a malformed keymap", () => {
+    expect(() => parseKeymap({})).toThrow(/chords/);
+    expect(() => parseKeymap({ chords: [{ action: "a", mac: "", pc: "{ctrl}A" }] })).toThrow(/"mac"/);
+    expect(() => parseKeymap({ chords: [{ action: "a", mac: "{mod}A", pc: "{ctrl}A" }, { action: "a", mac: "{mod}B", pc: "{ctrl}B" }] })).toThrow(/duplicate/);
+  });
+
+  it("an app shortcut that clashes with a Windows/Linux chord is rejected", () => {
+    const menu = extractShortcuts(KEYMAP_FIXTURE, KEYMAP);
+    const clash = { shortcuts: [{ id: "app.z", group: "View", label: "Z", accelerators: ["Ctrl+Shift+N"] }] };
+    expect(() => combineShortcuts(menu, parseAppShortcuts(clash))).toThrow(/Ctrl\+Shift\+N \(Windows \/ Linux\) is bound twice/);
+    // A legacy outside-terminal chord still occupies its key.
+    const legacy = { shortcuts: [{ id: "app.w", group: "View", label: "W", accelerators: ["Ctrl+N"] }] };
+    expect(() => combineShortcuts(menu, parseAppShortcuts(legacy))).toThrow(/Ctrl\+N \(Windows \/ Linux\)/);
+  });
+});
+
+describe("check mode line endings", () => {
+  it("treats a CRLF checkout of the generated files as up to date", () => {
+    expect(sameText("a\r\nb\r\n", "a\nb\n")).toBe(true);
+    expect(sameText("a\nb\n", "a\nc\n")).toBe(false);
+    expect(sameText(null, "a")).toBe(false);
   });
 });
 
@@ -188,7 +262,10 @@ describe("app-handled shortcuts (src/shortcuts/app-shortcuts.json)", () => {
   it("reject a key combo the menu already binds, and a duplicate id", () => {
     const menu = extractShortcuts(FIXTURE);
     const clash = { shortcuts: [{ id: "app.x", group: "View", label: "X", accelerators: ["CmdOrCtrl+N"] }] };
-    expect(() => combineShortcuts(menu, parseAppShortcuts(clash))).toThrow(/CmdOrCtrl\+N is bound twice/);
+    expect(() => combineShortcuts(menu, parseAppShortcuts(clash))).toThrow(/⌘N \(macOS\) is bound twice: "file.new-session" and "app.x"/);
+    // Ctrl+N and CmdOrCtrl+N are different keys on macOS, the same key elsewhere.
+    const pcClash = { shortcuts: [{ id: "app.y", group: "View", label: "Y", accelerators: ["Ctrl+N"] }] };
+    expect(() => combineShortcuts(menu, parseAppShortcuts(pcClash))).toThrow(/Ctrl\+N \(Windows \/ Linux\) is bound twice/);
     const dup = { shortcuts: [APP.shortcuts[0], APP.shortcuts[0]] };
     expect(() => parseAppShortcuts(dup)).toThrow(/duplicate id/);
     expect(() => parseAppShortcuts({ shortcuts: [{ id: "a", group: "G", label: "L", accelerators: [] }] })).toThrow(/accelerators/);

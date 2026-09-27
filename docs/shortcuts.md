@@ -1,7 +1,8 @@
 # Keyboard shortcuts
 
 <!-- GENERATED FILE — do not edit by hand. Run `node scripts/generate-shortcuts.mjs`
-     to regenerate from src-tauri/src/menu/mod.rs and src/shortcuts/app-shortcuts.json. -->
+     to regenerate from src-tauri/src/menu/mod.rs (with src/utils/keymap.json, if present)
+     and src/shortcuts/app-shortcuts.json. -->
 
 This is every keyboard shortcut Hermes has: the accelerators its menu bar
 registers plus the ones the app handles itself, generated directly from

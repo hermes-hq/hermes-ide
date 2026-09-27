@@ -42,12 +42,15 @@ describe("normaliseClaims", () => {
     expect(() => normaliseClaims({ claims: { a: { text: "x" } } })).toThrow(/at least one scenario/);
   });
 
-  it("accepts an explicit unproven entry with a reason, and nothing vaguer", () => {
-    expect(normaliseClaims({ claims: { a: { text: "x", unproven: "no scenario yet" } } })).toEqual([
-      { id: "a", text: "x", scenarios: [], unproven: "no scenario yet" },
+  it("accepts an explicit unproven entry with a reason and a planned scenario, and nothing vaguer", () => {
+    expect(normaliseClaims({ claims: { a: { text: "x", unproven: "no scenario yet", planned: "p.mjs" } } })).toEqual([
+      { id: "a", text: "x", scenarios: [], unproven: "no scenario yet", planned: "p.mjs" },
     ]);
-    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "" } } })).toThrow(/must say why/);
-    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "y", scenario: "s.mjs" } } })).toThrow(/both scenarios and "unproven"/);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "", planned: "p.mjs" } } })).toThrow(/must say why/);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "y", planned: "p.mjs", scenario: "s.mjs" } } })).toThrow(/both scenarios and "unproven"/);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "y" } } })).toThrow(/planned: <file>\.mjs/);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", unproven: "y", planned: "not a file" } } })).toThrow(/planned: <file>\.mjs/);
+    expect(() => normaliseClaims({ claims: { a: { text: "x", scenario: "s.mjs", planned: "p.mjs" } } })).toThrow(/only goes with "unproven"/);
   });
 });
 
@@ -93,14 +96,37 @@ describe("checkClaims", () => {
     expect(errors).toEqual(['README.md has no "## Features" section; the gate checks every bullet in it, so it must exist']);
   });
 
-  it("passes a tagged claim listed as unproven with a reason", () => {
-    const errors = checkClaims({
-      readme,
-      claims: [{ id: "multi", text: "proves it", scenarios: [], unproven: "no scenario yet" }],
-      ledgerScenarios: new Set(),
-      scenarioFiles: [],
-    });
+  const unprovenMulti = { id: "multi", text: "proves it", scenarios: [], unproven: "no scenario yet", planned: "p.mjs" };
+
+  it("passes a backlog claim listed as unproven with a planned scenario that has not landed", () => {
+    const errors = checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(), scenarioFiles: [] });
     expect(errors).toEqual([]);
+    // Still fine when the baseline already had it as unproven.
+    expect(checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(), scenarioFiles: [], baseline: [unprovenMulti] })).toEqual([]);
+  });
+
+  it("fails an unproven claim once its planned scenario has landed", () => {
+    const onDiskOnly = checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(), scenarioFiles: ["p.mjs"] });
+    expect(onDiskOnly).toEqual([]);
+    const errors = checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(["p.mjs"]), scenarioFiles: ["p.mjs"] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/claim "multi" is still unproven, but its planned scenario p\.mjs has landed; replace .* with "scenario: p\.mjs"/);
+  });
+
+  it("with a baseline, fails a new claim with no scenario", () => {
+    const errors = checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(), scenarioFiles: [], baseline: [] });
+    expect(errors).toEqual(['docs/readme-claims.yml: claim "multi" is new and has no scenario; a new README claim needs a real-app scenario that proves it']);
+  });
+
+  it("with a baseline, fails a claim that lost its scenario", () => {
+    const proven = { id: "multi", text: "proves it", scenarios: ["s.mjs"] };
+    const errors = checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(), scenarioFiles: [], baseline: [proven] });
+    expect(errors).toEqual(['docs/readme-claims.yml: claim "multi" was proven by s.mjs and is now unproven; keep its scenario']);
+  });
+
+  it("strict mode fails every unproven claim", () => {
+    const errors = checkClaims({ readme, claims: [unprovenMulti], ledgerScenarios: new Set(), scenarioFiles: [], strict: true });
+    expect(errors).toEqual(['docs/readme-claims.yml: claim "multi" has no scenario yet (planned: p.mjs)']);
   });
 
   it("passes a claim whose text is on its tagged line and whose scenario is in the ledger and on disk", () => {

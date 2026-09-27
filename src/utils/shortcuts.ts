@@ -11,11 +11,18 @@ import { isMac } from "./platform";
 import type { GeneratedShortcutGroup } from "../generated/shortcuts";
 import appShortcuts from "../shortcuts/app-shortcuts.json";
 
-export function visibleShortcutGroups(groups: GeneratedShortcutGroup[]): GeneratedShortcutGroup[] {
+/**
+ * The generated groups as this platform sees them: shortcuts that only exist
+ * on the other platform family are dropped, and `keys` is this platform's
+ * chord (the Windows/Linux one can differ from the macOS one).
+ */
+export function visibleShortcutGroups(groups: GeneratedShortcutGroup[], mac: boolean = isMac): GeneratedShortcutGroup[] {
   return groups
     .map((group) => ({
       ...group,
-      shortcuts: group.shortcuts.filter((s) => !s.platform || (s.platform === "macos" ? isMac : !isMac)),
+      shortcuts: group.shortcuts
+        .filter((s) => !s.platform || (s.platform === "macos" ? mac : !mac))
+        .map((s) => (!mac && s.pcKeys ? { ...s, keys: s.pcKeys } : s)),
     }))
     .filter((group) => group.shortcuts.length > 0);
 }

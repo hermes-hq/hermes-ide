@@ -82,6 +82,69 @@ describe("ShortcutsPanel", () => {
   });
 });
 
+describe("generated shortcut table", () => {
+  // Generated from src-tauri/src/menu/mod.rs (see scripts/generate-shortcuts.mjs),
+  // so these guard the real menu definition, not a hand-maintained list.
+  const find = (keys: string, mac = true) =>
+    visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS, mac)
+      .flatMap((g) => g.shortcuts)
+      .find((s) => s.keys === keys);
+
+  it("{mod}{shift}F is Search Panel, not Flow Mode", () => {
+    expect(find("{mod}{shift}F")?.label).toBe("Search Panel");
+  });
+
+  it("{mod}{shift}Z is Flow Mode", () => {
+    expect(find("{mod}{shift}Z")?.label).toBe("Flow Mode");
+  });
+
+  it("lists the left-panel tabs ({mod}P, {mod}G, {mod}F)", () => {
+    expect(find("{mod}P")).toBeDefined();
+    expect(find("{mod}G")).toBeDefined();
+    expect(find("{mod}F")).toBeDefined();
+  });
+
+  it("binds no key twice on either platform", () => {
+    for (const mac of [true, false]) {
+      const keys = visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS, mac).flatMap((g) => g.shortcuts.map((s) => s.keys));
+      expect(new Set(keys).size, mac ? "macOS" : "Windows / Linux").toBe(keys.length);
+    }
+  });
+});
+
+describe("visibleShortcutGroups", () => {
+  const groups = [
+    {
+      group: "View",
+      groupKey: "shortcuts.group.view",
+      shortcuts: [
+        { id: "a", label: "A", labelKey: "k.a", keys: "{mod}N", pcKeys: "{ctrl}{shift}N" },
+        { id: "b", label: "B", labelKey: "k.b", keys: "{mod}B" },
+        { id: "c", label: "C", labelKey: "k.c", keys: "{ctrl}C", platform: "macos" as const },
+        { id: "d", label: "D", labelKey: "k.d", keys: "F11", platform: "not-macos" as const },
+      ],
+    },
+  ];
+
+  it("shows the macOS chord and the macOS-only rows on macOS", () => {
+    const rows = visibleShortcutGroups(groups, true)[0].shortcuts.map((s) => [s.id, s.keys]);
+    expect(rows).toEqual([
+      ["a", "{mod}N"],
+      ["b", "{mod}B"],
+      ["c", "{ctrl}C"],
+    ]);
+  });
+
+  it("shows the Windows/Linux chord where it differs, and the Windows/Linux-only rows", () => {
+    const rows = visibleShortcutGroups(groups, false)[0].shortcuts.map((s) => [s.id, s.keys]);
+    expect(rows).toEqual([
+      ["a", "{ctrl}{shift}N"],
+      ["b", "{mod}B"],
+      ["d", "F11"],
+    ]);
+  });
+});
+
 describe("generated shortcut i18n keys", () => {
   it("English text of every row and group key equals the defined label", () => {
     for (const g of GENERATED_SHORTCUT_GROUPS) {

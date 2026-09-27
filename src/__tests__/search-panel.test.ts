@@ -7,7 +7,6 @@
  * - Mutual-exclusion tests (search closes other panels, other panels close search)
  * - Race condition guard (sequence counter logic)
  * - UI state guards (min chars, no session)
- * - ShortcutsPanel accuracy
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -34,7 +33,6 @@ vi.mock("../utils/notifications", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────
 import { sessionReducer, initialState } from "../state/SessionContext";
 import { highlightMatch, formatResultCount, debounce } from "../components/SearchPanel";
-import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import type { SearchMatch, SearchFileResult, SearchResponse } from "../types/git";
 
 // ─── highlightMatch ──────────────────────────────────────────────────
@@ -384,41 +382,6 @@ describe("UI state guards", () => {
 describe("Initial state includes search", () => {
   it("has searchPanelOpen=false", () => {
     expect(initialState.ui.searchPanelOpen).toBe(false);
-  });
-});
-
-// ─── ShortcutsPanel accuracy ─────────────────────────────────────────
-
-describe("ShortcutsPanel accuracy", () => {
-  // The panel's data is generated from src-tauri/src/menu/mod.rs (see
-  // scripts/generate-shortcuts.mjs) — these checks guard the real menu
-  // definition, not a hand-maintained list that can drift from it.
-  const allShortcuts = GENERATED_SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
-  const findShortcut = (keys: string) => allShortcuts.find((s) => s.keys === keys);
-
-  it("{mod}{shift}F is mapped to Search Panel, not Flow Mode", () => {
-    const s = findShortcut("{mod}{shift}F");
-    expect(s).toBeDefined();
-    expect(s!.label).toBe("Search Panel");
-    expect(s!.label).not.toContain("Flow");
-  });
-
-  it("{mod}{shift}Z is mapped to Flow Mode", () => {
-    const s = findShortcut("{mod}{shift}Z");
-    expect(s).toBeDefined();
-    expect(s!.label).toBe("Flow Mode");
-  });
-
-  it("left-panel tabs are listed ({mod}P, {mod}G, {mod}F)", () => {
-    expect(findShortcut("{mod}P")).toBeDefined();
-    expect(findShortcut("{mod}G")).toBeDefined();
-    expect(findShortcut("{mod}F")).toBeDefined();
-  });
-
-  it("no duplicate key bindings", () => {
-    const keys = allShortcuts.map((s) => s.keys);
-    const unique = new Set(keys);
-    expect(unique.size).toBe(keys.length);
   });
 });
 

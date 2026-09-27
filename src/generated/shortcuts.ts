@@ -1,6 +1,7 @@
 // GENERATED FILE — do not edit by hand.
 // Run `node scripts/generate-shortcuts.mjs` to regenerate from
-// src-tauri/src/menu/mod.rs and src/shortcuts/app-shortcuts.json.
+// src-tauri/src/menu/mod.rs (with src/utils/keymap.json, if present) and
+// src/shortcuts/app-shortcuts.json.
 
 export interface GeneratedShortcut {
   id: string;
@@ -10,6 +11,8 @@ export interface GeneratedShortcut {
   labelKey: string;
   /** Canonical key string for `fmt()` in ../utils/platform, e.g. "{mod}N". */
   keys: string;
+  /** Windows/Linux key string, set only when it differs from `keys`. */
+  pcKeys?: string;
   /** Set only when the menu only registers this accelerator on one platform family. */
   platform?: "macos" | "not-macos";
 }

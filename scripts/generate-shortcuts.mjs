@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Generates the Shortcuts panel data (src/generated/shortcuts.ts) and the
-// shortcuts reference (docs/shortcuts.md) from the two places keyboard
-// shortcuts are actually defined:
-//   - the native menu bar (src-tauri/src/menu/mod.rs), and
+// shortcuts reference (docs/shortcuts.md) from the places keyboard shortcuts
+// are actually defined:
+//   - the native menu bar (src-tauri/src/menu/mod.rs),
+//   - src/utils/keymap.json, when it exists: a per-platform chord table the
+//     menu reads through `.accelerator(app_accel("<id>")?)`, and
 //   - src/shortcuts/app-shortcuts.json, the declared list of bindings the app
 //     handles itself (App.tsx's keydown handler matches keys only through it).
 // Nothing here is hand-maintained, so the panel and the docs can never list a
@@ -12,14 +14,16 @@
 //   node scripts/generate-shortcuts.mjs          # write both output files
 //   node scripts/generate-shortcuts.mjs --check  # fail if they're stale (CI)
 //
-// --menu, --app, --ts-out and --md-out point it at other files (used by the
-// N23-docs-gates scenario to prove a menu change makes the docs stale).
+// --menu, --keymap, --app, --ts-out and --md-out point it at other files (used
+// by the N23-docs-gates scenario to prove a menu change makes the docs stale).
 //
 // Only items built with `MenuItemBuilder::with_id` / `CheckMenuItemBuilder::with_id`
-// AND an explicit `.accelerator("...")` are shortcuts; everything else in the
-// menu (predefined items, unbound entries) is not a keyboard shortcut.
+// AND an `.accelerator(...)` are shortcuts; everything else in the menu
+// (predefined items, unbound entries) is not a keyboard shortcut. An
+// accelerator the generator cannot read is an error, never a silently dropped
+// row.
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +31,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, "..");
 export const MENU_SOURCE = join(REPO_ROOT, "src-tauri", "src", "menu", "mod.rs");
 export const APP_SOURCE = join(REPO_ROOT, "src", "shortcuts", "app-shortcuts.json");
+export const KEYMAP_SOURCE = join(REPO_ROOT, "src", "utils", "keymap.json");
 export const TS_OUT = join(REPO_ROOT, "src", "generated", "shortcuts.ts");
 export const MD_OUT = join(REPO_ROOT, "docs", "shortcuts.md");
 
@@ -61,12 +66,57 @@ function platformOf(lines, letLineIndex) {
   return undefined;
 }
 
+// ─── Parse src/utils/keymap.json (optional) ─────────────────────────────
+
+const CHORD_RE = /^(\{(mod|ctrl|shift|alt)\})*[^{}\s]+$/;
+
 /**
- * @returns {{ group: string, id: string, label: string, accelerator: string, platform?: string }[]}
- *   in the order they appear in the source, one entry per menu item that has
- *   both an id/label and an explicit accelerator.
+ * The per-platform chord table, keyed by menu action id. `mac` and `pc` are
+ * canonical key strings ("{mod}N", "{ctrl}{shift}N"); `pcOutsideTerminal` is an
+ * extra Windows/Linux chord that only works while no terminal has focus.
  */
-export function extractShortcuts(source) {
+export function parseKeymap(doc) {
+  const list = doc?.chords;
+  if (!Array.isArray(list)) throw new Error('keymap.json: expected a "chords" array');
+  const map = new Map();
+  list.forEach((raw, i) => {
+    const where = `keymap.json: chords[${i}]`;
+    if (typeof raw?.action !== "string" || !raw.action) throw new Error(`${where}: "action" must be a non-empty string`);
+    for (const field of ["mac", "pc"]) {
+      if (typeof raw[field] !== "string" || !CHORD_RE.test(raw[field])) throw new Error(`${where} (${raw.action}): "${field}" must be a chord like "{mod}N"`);
+    }
+    if (raw.pcOutsideTerminal !== undefined && (typeof raw.pcOutsideTerminal !== "string" || !CHORD_RE.test(raw.pcOutsideTerminal))) {
+      throw new Error(`${where} (${raw.action}): "pcOutsideTerminal" must be a chord like "{ctrl}N"`);
+    }
+    if (map.has(raw.action)) throw new Error(`${where}: duplicate action "${raw.action}"`);
+    map.set(raw.action, { mac: raw.mac, pc: raw.pc, pcOutsideTerminal: raw.pcOutsideTerminal });
+  });
+  return map;
+}
+
+/** The text inside `.accelerator( ... )` in a builder chain, or null. */
+function acceleratorArgument(body) {
+  const start = body.indexOf(".accelerator(");
+  if (start < 0) return null;
+  let depth = 0;
+  for (let i = start + ".accelerator".length; i < body.length; i++) {
+    const c = body[i];
+    if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return body.slice(start + ".accelerator(".length, i).trim();
+  }
+  return body.slice(start + ".accelerator(".length).trim();
+}
+
+/**
+ * @returns {{ group: string, id: string, label: string, keys: string, pcKeys?: string,
+ *   pcOutsideTerminal?: string, platform?: string }[]}
+ *   in the order they appear in the source, one entry per menu item that has
+ *   both an id/label and an accelerator. `keys` is the macOS chord (and the
+ *   Windows/Linux one too unless `pcKeys` is set), as a canonical key string.
+ * @param keymap the parsed keymap.json (see parseKeymap), needed when the menu
+ *   reads chords through `app_accel("<id>")`.
+ */
+export function extractShortcuts(source, keymap = null) {
   const lines = source.split(/\r?\n/);
   const lineStarts = [];
   let offset = 0;
@@ -104,17 +154,31 @@ export function extractShortcuts(source) {
   let m;
   while ((m = itemRe.exec(source))) {
     const [, id, label, body] = m;
-    const accel = /\.accelerator\(\s*"([^"]+)"\s*\)/.exec(body);
-    if (!accel) continue;
-    const lineIndex = lineIndexAt(m.index);
-    items.push({
-      group: groupAt(m.index),
-      id,
-      label,
-      accelerator: accel[1],
-      platform: platformOf(lines, lineIndex),
-      source: "menu",
-    });
+    const arg = acceleratorArgument(body);
+    if (arg === null) continue;
+    const item = { group: groupAt(m.index), id, label, platform: platformOf(lines, lineIndexAt(m.index)), source: "menu" };
+    const literal = /^"([^"]+)"$/.exec(arg);
+    const fromKeymap = /^app_accel\(\s*"([^"]+)"\s*\)\??$/.exec(arg);
+    if (literal) {
+      item.keys = toCanonicalKeys(literal[1]);
+    } else if (fromKeymap) {
+      const chord = keymap?.get(fromKeymap[1]);
+      if (!chord) {
+        throw new Error(`menu item "${id}" reads its chord from keymap.json as "${fromKeymap[1]}", but keymap.json has no such chord`);
+      }
+      item.keys = chord.mac;
+      if (chord.pc !== chord.mac) item.pcKeys = chord.pc;
+      if (chord.pcOutsideTerminal) item.pcOutsideTerminal = chord.pcOutsideTerminal;
+    } else {
+      throw new Error(`menu item "${id}" has an accelerator the shortcuts generator cannot read: .accelerator(${arg}); use a string literal or app_accel("<id>")?`);
+    }
+    items.push(item);
+  }
+  if (keymap) {
+    const used = new Set(items.map((i) => i.id));
+    for (const action of keymap.keys()) {
+      if (!used.has(action)) throw new Error(`keymap.json has a chord for "${action}", but no menu item uses it (app_accel("${action}"))`);
+    }
   }
   return items;
 }
@@ -143,8 +207,8 @@ export function parseAppShortcuts(doc) {
       group: raw.group,
       id: raw.id,
       label: raw.label,
-      accelerator: raw.accelerators[0],
-      accelerators: [...raw.accelerators],
+      keys: toCanonicalKeys(raw.accelerators[0]),
+      alsoKeys: raw.accelerators.slice(1).map(toCanonicalKeys),
       note: typeof raw.note === "string" && raw.note ? raw.note : undefined,
       source: "app",
     };
@@ -159,26 +223,55 @@ export function parseAppShortcuts(doc) {
 export function combineShortcuts(menuItems, appItems) {
   const all = [...menuItems, ...appItems];
   const ids = new Set();
-  const combos = new Map();
   for (const item of all) {
     if (ids.has(item.id)) throw new Error(`shortcut id "${item.id}" is defined twice`);
     ids.add(item.id);
-    for (const acc of item.accelerators ?? [item.accelerator]) {
-      const canonical = toCanonicalKeys(acc);
-      const other = combos.get(canonical);
-      // A macOS-only and a Windows/Linux-only item never exist at the same time.
-      if (other && !(other.platform && item.platform && other.platform !== item.platform)) {
-        throw new Error(`${acc} is bound twice: "${other.id}" and "${item.id}"`);
+  }
+  // Checked per platform: ⌘N and Ctrl+N are different keys on macOS but the
+  // same key on Windows/Linux, and a macOS-only item never meets a
+  // Windows/Linux-only one.
+  for (const [mac, name, symbols] of [
+    [true, "macOS", MAC_SYMBOLS],
+    [false, "Windows / Linux", PC_SYMBOLS],
+  ]) {
+    const combos = new Map();
+    for (const item of all) {
+      if (item.platform === (mac ? "not-macos" : "macos")) continue;
+      for (const keys of platformKeys(item, mac)) {
+        const combo = comboId(keys, mac);
+        const other = combos.get(combo);
+        if (other) throw new Error(`${renderKeys(keys, symbols)} (${name}) is bound twice: "${other.id}" and "${item.id}"`);
+        combos.set(combo, item);
       }
-      combos.set(canonical, item);
     }
   }
   return all;
 }
 
-/** Read both sources and return the grouped list the outputs are rendered from. */
-export function loadShortcutGroups(menuSource = readFileSync(MENU_SOURCE, "utf8"), appJson = readFileSync(APP_SOURCE, "utf8")) {
-  return groupShortcuts(combineShortcuts(extractShortcuts(menuSource), parseAppShortcuts(JSON.parse(appJson))));
+/** Every canonical key string that triggers the item on one platform family. */
+function platformKeys(item, mac) {
+  if (mac) return [item.keys, ...(item.alsoKeys ?? [])];
+  return [item.pcKeys ?? item.keys, ...(item.pcOutsideTerminal ? [item.pcOutsideTerminal] : []), ...(item.alsoKeys ?? [])];
+}
+
+/** A comparable id for the physical key combo a canonical key string means. */
+function comboId(keys, mac) {
+  const mods = [];
+  const key = keys.replace(/\{(\w+)\}/g, (_m, t) => {
+    mods.push(t === "mod" ? (mac ? "cmd" : "ctrl") : t);
+    return "";
+  });
+  return [...new Set(mods)].sort().join("+") + "+" + key.toUpperCase();
+}
+
+/** Read every source and return the grouped list the outputs are rendered from. */
+export function loadShortcutGroups(
+  menuSource = readFileSync(MENU_SOURCE, "utf8"),
+  appJson = readFileSync(APP_SOURCE, "utf8"),
+  keymapJson = existsSync(KEYMAP_SOURCE) ? readFileSync(KEYMAP_SOURCE, "utf8") : null,
+) {
+  const keymap = keymapJson === null ? null : parseKeymap(JSON.parse(keymapJson));
+  return groupShortcuts(combineShortcuts(extractShortcuts(menuSource, keymap), parseAppShortcuts(JSON.parse(appJson))));
 }
 
 // ─── i18n keys ──────────────────────────────────────────────────────────
@@ -238,12 +331,16 @@ export function renderKeys(canonical, symbols) {
 export const macKeys = (accelerator) => renderKeys(toCanonicalKeys(accelerator), MAC_SYMBOLS);
 export const pcKeys = (accelerator) => renderKeys(toCanonicalKeys(accelerator), PC_SYMBOLS);
 
+/** Normalise line endings, so a checkout with CRLF endings is not "stale". */
+export const sameText = (a, b) => a !== null && b !== null && a.replace(/\r\n/g, "\n") === b.replace(/\r\n/g, "\n");
+
 // ─── Render the generated files ─────────────────────────────────────────
 
 const HEADER =
   "// GENERATED FILE — do not edit by hand.\n" +
   "// Run `node scripts/generate-shortcuts.mjs` to regenerate from\n" +
-  "// src-tauri/src/menu/mod.rs and src/shortcuts/app-shortcuts.json.\n";
+  "// src-tauri/src/menu/mod.rs (with src/utils/keymap.json, if present) and\n" +
+  "// src/shortcuts/app-shortcuts.json.\n";
 
 export function renderTsModule(groups) {
   const lines = [HEADER];
@@ -255,6 +352,8 @@ export function renderTsModule(groups) {
   lines.push("  labelKey: string;");
   lines.push("  /** Canonical key string for `fmt()` in ../utils/platform, e.g. \"{mod}N\". */");
   lines.push("  keys: string;");
+  lines.push("  /** Windows/Linux key string, set only when it differs from `keys`. */");
+  lines.push("  pcKeys?: string;");
   lines.push("  /** Set only when the menu only registers this accelerator on one platform family. */");
   lines.push('  platform?: "macos" | "not-macos";');
   lines.push("}");
@@ -272,9 +371,10 @@ export function renderTsModule(groups) {
     lines.push(`    groupKey: ${JSON.stringify(groupKeyFor(group))},`);
     lines.push(`    shortcuts: [`);
     for (const s of shortcuts) {
+      const pc = s.pcKeys ? `, pcKeys: ${JSON.stringify(s.pcKeys)}` : "";
       const platform = s.platform ? `, platform: ${JSON.stringify(s.platform)}` : "";
       lines.push(
-        `      { id: ${JSON.stringify(s.id)}, label: ${JSON.stringify(s.label)}, labelKey: ${JSON.stringify(labelKeyFor(s.id))}, keys: ${JSON.stringify(toCanonicalKeys(s.accelerator))}${platform} },`,
+        `      { id: ${JSON.stringify(s.id)}, label: ${JSON.stringify(s.label)}, labelKey: ${JSON.stringify(labelKeyFor(s.id))}, keys: ${JSON.stringify(s.keys)}${pc}${platform} },`,
       );
     }
     lines.push(`    ],`);
@@ -290,8 +390,9 @@ function notesFor(s) {
   if (s.platform === "macos") notes.push("macOS only");
   if (s.platform === "not-macos") notes.push("Windows / Linux only");
   if (s.note) notes.push(s.note);
-  const alternates = (s.accelerators ?? []).slice(1);
-  if (alternates.length) notes.push(`also ${alternates.map((a) => `${macKeys(a)} / ${pcKeys(a)}`).join(", ")}`);
+  const alternates = s.alsoKeys ?? [];
+  if (alternates.length) notes.push(`also ${alternates.map((k) => `${renderKeys(k, MAC_SYMBOLS)} / ${renderKeys(k, PC_SYMBOLS)}`).join(", ")}`);
+  if (s.pcOutsideTerminal) notes.push(`Windows / Linux: also ${renderKeys(s.pcOutsideTerminal, PC_SYMBOLS)} when no terminal has focus`);
   return notes.join("; ");
 }
 
@@ -300,7 +401,8 @@ export function renderMarkdown(groups) {
     "# Keyboard shortcuts",
     "",
     "<!-- GENERATED FILE — do not edit by hand. Run `node scripts/generate-shortcuts.mjs`",
-    "     to regenerate from src-tauri/src/menu/mod.rs and src/shortcuts/app-shortcuts.json. -->",
+    "     to regenerate from src-tauri/src/menu/mod.rs (with src/utils/keymap.json, if present)",
+    "     and src/shortcuts/app-shortcuts.json. -->",
     "",
     "This is every keyboard shortcut Hermes has: the accelerators its menu bar",
     "registers plus the ones the app handles itself, generated directly from",
@@ -312,8 +414,8 @@ export function renderMarkdown(groups) {
     lines.push("| Action | macOS | Windows / Linux | Notes |");
     lines.push("|---|---|---|---|");
     for (const s of shortcuts) {
-      const mac = s.platform === "not-macos" ? "—" : macKeys(s.accelerator);
-      const pc = s.platform === "macos" ? "—" : pcKeys(s.accelerator);
+      const mac = s.platform === "not-macos" ? "—" : renderKeys(s.keys, MAC_SYMBOLS);
+      const pc = s.platform === "macos" ? "—" : renderKeys(s.pcKeys ?? s.keys, PC_SYMBOLS);
       lines.push(`| ${s.label} | ${mac} | ${pc} | ${notesFor(s)} |`);
     }
     lines.push("");
@@ -334,7 +436,12 @@ function main() {
   const check = args.includes("--check");
   const TS_OUT = opt("--ts-out", TS_OUT_DEFAULT);
   const MD_OUT = opt("--md-out", MD_OUT_DEFAULT);
-  const groups = loadShortcutGroups(readFileSync(opt("--menu", MENU_SOURCE), "utf8"), readFileSync(opt("--app", APP_SOURCE), "utf8"));
+  const keymapPath = opt("--keymap", KEYMAP_SOURCE);
+  const groups = loadShortcutGroups(
+    readFileSync(opt("--menu", MENU_SOURCE), "utf8"),
+    readFileSync(opt("--app", APP_SOURCE), "utf8"),
+    existsSync(keymapPath) ? readFileSync(keymapPath, "utf8") : null,
+  );
   const ts = renderTsModule(groups);
   const md = renderMarkdown(groups);
 
@@ -350,8 +457,8 @@ function main() {
       } catch {
         actual = null;
       }
-      if (actual !== expected) {
-        console.error(`STALE: ${path} does not match what src-tauri/src/menu/mod.rs and src/shortcuts/app-shortcuts.json generate.`);
+      if (!sameText(actual, expected)) {
+        console.error(`STALE: ${path} does not match what the menu, keymap.json and app-shortcuts.json generate.`);
         console.error("Run `node scripts/generate-shortcuts.mjs` and commit the result.");
         stale = true;
       }

@@ -16,11 +16,10 @@
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N23-shortcuts-panel.mjs
 
-import { readFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
-import { loadShortcutGroups, macKeys, pcKeys } from "../../../scripts/generate-shortcuts.mjs";
+import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { MAC_SYMBOLS, PC_SYMBOLS, loadShortcutGroups, renderKeys } from "../../../scripts/generate-shortcuts.mjs";
 
 const SCENARIO = "N23-shortcuts-panel";
 const startedAt = Date.now();
@@ -34,16 +33,17 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-// What the panel must show on this platform, straight from the sources.
-const EXPECTED_GROUPS = loadShortcutGroups(
-  readFileSync(join(REPO_ROOT, "src-tauri", "src", "menu", "mod.rs"), "utf8"),
-  readFileSync(join(REPO_ROOT, "src", "shortcuts", "app-shortcuts.json"), "utf8"),
-)
+// What the panel must show on this platform, straight from the sources (the
+// menu, src/utils/keymap.json when it exists, and app-shortcuts.json).
+const EXPECTED_GROUPS = loadShortcutGroups()
   .map((g) => ({ ...g, shortcuts: g.shortcuts.filter((s) => !s.platform || (s.platform === "macos") === MAC) }))
   .filter((g) => g.shortcuts.length > 0);
 const EXPECTED_ROWS = EXPECTED_GROUPS.flatMap((g) =>
-  g.shortcuts.map((s) => ({ action: s.label, keys: MAC ? macKeys(s.accelerator) : pcKeys(s.accelerator) })),
+  g.shortcuts.map((s) => ({ action: s.label, keys: MAC ? renderKeys(s.keys, MAC_SYMBOLS) : renderKeys(s.pcKeys ?? s.keys, PC_SYMBOLS) })),
 );
+
+/** The keys the generated table gives a row on this platform. */
+const expectedKeys = (label) => EXPECTED_ROWS.find((r) => r.action === label)?.keys;
 
 /** Dispatch a real keydown on the focused element, as a key press would. */
 function pressScript({ key, shift = false, alt = false }) {
@@ -136,7 +136,7 @@ try {
   assert(extra.length === 0, `the panel has no row the sources don't define${extra.length ? `: ${JSON.stringify(extra)}` : ""}`);
   assert(JSON.stringify(panel.rows) === JSON.stringify(EXPECTED_ROWS), `all ${EXPECTED_ROWS.length} rows match, in order`);
   const find = (action) => panel.rows.find((r) => r.action === action);
-  assert(find("New Tab")?.keys === (MAC ? "⌘T" : "Ctrl+T"), '"New Tab" shows CmdOrCtrl+T (not the stale "Toggle Timeline")');
+  assert(!!expectedKeys("New Tab") && find("New Tab")?.keys === expectedKeys("New Tab"), `"New Tab" shows ${expectedKeys("New Tab")} (not the stale "Toggle Timeline")`);
   assert(!find("Toggle Timeline"), 'no "Toggle Timeline" row (that feature does not exist)');
   for (const [action, keys] of [
     ["Focus Composer", MAC ? "⌘⇧J" : "Ctrl+Shift+J"],
@@ -207,8 +207,8 @@ try {
   log(`  rows: ${JSON.stringify(panel.rows)}`);
   const ptFind = (action) => panel.rows.find((r) => r.action === action);
   assert(panel.rows.length === EXPECTED_ROWS.length, `still ${EXPECTED_ROWS.length} rows`);
-  assert(ptFind("Nova sessão")?.keys === (MAC ? "⌘N" : "Ctrl+N"), '"Nova sessão" with its accelerator');
-  assert(ptFind("Nova aba")?.keys === (MAC ? "⌘T" : "Ctrl+T"), '"Nova aba" (New Tab) with its accelerator');
+  assert(ptFind("Nova sessão")?.keys === expectedKeys("New Session"), '"Nova sessão" with its accelerator');
+  assert(ptFind("Nova aba")?.keys === expectedKeys("New Tab"), '"Nova aba" (New Tab) with its accelerator');
   assert(ptFind("Focar compositor")?.keys === (MAC ? "⌘⇧J" : "Ctrl+Shift+J"), '"Focar compositor" (app-handled) is translated too');
   assert(panel.groups.includes("Arquivo") && panel.groups.includes("Sessão"), "group labels are translated");
   assert(!panel.rows.some((r) => r.action === "New Session" || r.action.startsWith("shortcuts.")), "no English row and no raw i18n key left");

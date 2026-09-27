@@ -1,18 +1,30 @@
 #!/usr/bin/env node
 // The README claims gate. Every bullet under README.md's "## Features"
 // heading must be tagged `<!-- claim:<id> -->`, and every tagged claim must
-// have an entry in docs/readme-claims.yml that either names the real-app
-// scenario proving it (a scenario e2e/acceptance.yml actually tracks) or is
-// explicitly listed as `unproven` with a reason. A new feature bullet with
-// neither fails CI. See docs/readme-claims.yml for the format.
+// have an entry in docs/readme-claims.yml that names the real-app scenario
+// proving it (a scenario e2e/acceptance.yml actually tracks).
+//
+// Claims that were in the README before the gate existed and have no scenario
+// yet are listed as `unproven`, each with the scenario planned to prove it.
+// That backlog can only shrink:
+//   - with --baseline (CI passes the target branch's readme-claims.yml), a
+//     claim that is unproven here but was not unproven there fails: a new
+//     README claim needs a scenario;
+//   - an unproven claim whose planned scenario has landed (tracked by the
+//     ledger, on disk) fails until it names that scenario;
+//   - with --strict every unproven claim fails (CI runs this as a visible,
+//     non-blocking job, so the backlog shows red on every run).
+// See docs/readme-claims.yml for the format.
 //
 //   node scripts/check-readme-claims.mjs
 //
 // Options:
-//   --readme <file>   default README.md
-//   --claims <file>   default docs/readme-claims.yml
-//   --ledger <file>   default e2e/acceptance.yml
-//   --scenarios <dir> default e2e/app/scenarios
+//   --readme <file>    default README.md
+//   --claims <file>    default docs/readme-claims.yml
+//   --ledger <file>    default e2e/acceptance.yml
+//   --scenarios <dir>  default e2e/app/scenarios
+//   --baseline <file>  the target branch's readme-claims.yml
+//   --strict           fail on every unproven claim
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -78,9 +90,13 @@ export function normaliseClaims(doc, name = "readme-claims.yml") {
       if (Array.isArray(list) && list.length > 0) {
         throw new Error(`${where}: has both scenarios and "unproven"; drop "unproven" once a scenario proves it`);
       }
-      claims.push({ id, text: raw.text, scenarios: [], unproven });
+      if (typeof raw.planned !== "string" || !/^[A-Za-z0-9._-]+\.mjs$/.test(raw.planned)) {
+        throw new Error(`${where}: an unproven claim must name the scenario planned to prove it ("planned: <file>.mjs")`);
+      }
+      claims.push({ id, text: raw.text, scenarios: [], unproven, planned: raw.planned });
       continue;
     }
+    if (raw.planned !== undefined) throw new Error(`${where}: "planned" only goes with "unproven"`);
     if (!Array.isArray(list) || list.length === 0) {
       throw new Error(`${where}: needs at least one scenario ("scenario: <file>.mjs" or "scenarios: [...]"), or "unproven: <reason>"`);
     }
@@ -97,7 +113,7 @@ export function loadClaims(file) {
  * Cross-check the claims map against README.md and the acceptance ledger.
  * Returns a list of error strings; empty means the gate passes.
  */
-export function checkClaims({ readme, claims, ledgerScenarios, scenarioFiles }) {
+export function checkClaims({ readme, claims, ledgerScenarios, scenarioFiles, baseline = null, strict = false }) {
   const errors = [];
   const tagged = findTaggedLines(readme);
   const claimIds = new Set(claims.map((c) => c.id));
@@ -133,6 +149,22 @@ export function checkClaims({ readme, claims, ledgerScenarios, scenarioFiles }) 
     }
     if (claim.scenarios.length === 0 && !claim.unproven) {
       errors.push(`docs/readme-claims.yml: claim "${claim.id}" has no scenario proving it`);
+    }
+    if (claim.unproven) {
+      if (ledgerScenarios.has(claim.planned) && scenarioFiles.includes(claim.planned)) {
+        errors.push(
+          `docs/readme-claims.yml: claim "${claim.id}" is still unproven, but its planned scenario ${claim.planned} has landed; replace "unproven"/"planned" with "scenario: ${claim.planned}" (or plan a different scenario if it does not prove the claim)`,
+        );
+      }
+      if (baseline) {
+        const before = baseline.find((c) => c.id === claim.id);
+        if (!before) {
+          errors.push(`docs/readme-claims.yml: claim "${claim.id}" is new and has no scenario; a new README claim needs a real-app scenario that proves it`);
+        } else if (!before.unproven) {
+          errors.push(`docs/readme-claims.yml: claim "${claim.id}" was proven by ${before.scenarios.join(", ")} and is now unproven; keep its scenario`);
+        }
+      }
+      if (strict) errors.push(`docs/readme-claims.yml: claim "${claim.id}" has no scenario yet (planned: ${claim.planned})`);
     }
     for (const file of claim.scenarios) {
       if (!ledgerScenarios.has(file)) {
@@ -172,8 +204,10 @@ function main() {
     else if (a === "--claims") opts.claims = next();
     else if (a === "--ledger") opts.ledger = next();
     else if (a === "--scenarios") opts.scenarios = next();
+    else if (a === "--baseline") opts.baseline = next();
+    else if (a === "--strict") opts.strict = true;
     else if (a === "--help" || a === "-h") {
-      console.log("usage: node scripts/check-readme-claims.mjs [--readme f] [--claims f] [--ledger f] [--scenarios d]");
+      console.log("usage: node scripts/check-readme-claims.mjs [--readme f] [--claims f] [--ledger f] [--scenarios d] [--baseline f] [--strict]");
       process.exit(0);
     } else throw new Error(`unknown option ${a}`);
   }
@@ -183,13 +217,16 @@ function main() {
   const ledger = loadLedger(resolve(opts.ledger));
   const scenarioFiles = listScenarioFiles(resolve(opts.scenarios));
 
-  const errors = checkClaims({ readme, claims, ledgerScenarios: ledgerScenarioFiles(ledger), scenarioFiles });
+  const baseline = opts.baseline ? loadClaims(resolve(opts.baseline)) : null;
+
+  const errors = checkClaims({ readme, claims, ledgerScenarios: ledgerScenarioFiles(ledger), scenarioFiles, baseline, strict: !!opts.strict });
 
   const unproven = claims.filter((c) => c.unproven);
   console.log(
     `README claims: ${claims.length} tagged claim(s) checked against ${opts.ledger}; ${claims.length - unproven.length} proven by a scenario, ${unproven.length} listed as unproven`,
   );
-  for (const c of unproven) console.log(`  unproven: ${c.id} — ${c.unproven}`);
+  if (baseline) console.log(`compared with the baseline ${opts.baseline} (${baseline.filter((c) => c.unproven).length} unproven there)`);
+  for (const c of unproven) console.log(`  unproven: ${c.id} — ${c.unproven} (planned: ${c.planned})`);
   if (errors.length) {
     console.log("");
     for (const e of errors) console.log(`CLAIMS GATE: ${e}`);
