@@ -38,8 +38,11 @@ function assert(condition, message) {
 
 // ─── Fake `claude` and a home folder that survives a relaunch ────────
 if (platform() === "win32") {
+  // Not a failure: nothing was tested. No result.json is written, so this
+  // run can never count as a pass either.
   log("the fake claude is a POSIX shell script; this scenario runs on macOS and Linux only");
-  finishScenario({ scenario: SCENARIO, evidenceDir, failed: true, startedAt, log });
+  log("RESULT: SKIP");
+  process.exit(0);
 }
 const work = mkdtempSync(join(tmpdir(), "hermes-e2e-n09-"));
 const fakeBin = join(work, "bin");
