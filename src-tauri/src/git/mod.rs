@@ -1,3 +1,4 @@
+pub mod disk_guard;
 pub mod journal;
 pub mod watcher;
 pub mod worktree;
@@ -2849,6 +2850,7 @@ pub fn search_project(
 // ─── Worktree IPC Commands ──────────────────────────────────────────
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn git_create_worktree(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -2857,6 +2859,8 @@ pub fn git_create_worktree(
     branch_name: String,
     create_branch: bool,
     from_remote: Option<String>,
+    // Set by the frontend while the "diskGuard" feature flag is on.
+    enforce_disk_guard: Option<bool>,
 ) -> Result<worktree::WorktreeCreateResult, String> {
     // Get the app data directory for storing worktrees outside the project
     let app_data_dir = crate::instance::app_data_dir(&app)?;
@@ -2872,6 +2876,26 @@ pub fn git_create_worktree(
         .ok_or_else(|| format!("Project '{}' not found", project_id))?;
     let root_path = project.path.clone();
     drop(db);
+
+    // Disk guard: below 10 GB free, create nothing (no folder, branch,
+    // journal entry or record) and raise an inbox item. Reusing a worktree
+    // that already exists needs no space, so that is never refused.
+    if enforce_disk_guard.unwrap_or(false) {
+        let intended = worktree::intended_worktree_path(
+            &app_data_dir,
+            &root_path,
+            &session_id,
+            &branch_name,
+            from_remote.as_deref(),
+        );
+        if !intended.exists() {
+            if let Err(low) = disk_guard::check_room_for_worktree(&app_data_dir) {
+                log::warn!("[disk-guard] refused a worktree: {}", low.message());
+                let _ = app.emit(disk_guard::INBOX_ITEM_EVENT, low.inbox_item(&project.name));
+                return Err(low.message());
+            }
+        }
+    }
 
     // Journal: log the CREATE operation before performing it
     let intended_path =
@@ -3753,6 +3777,135 @@ pub fn git_cleanup_orphan_worktrees(
         }
     }
 
+    Ok(results)
+}
+
+// ─── Disk guard & worktree hygiene (feature flag "diskGuard") ───────
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiskStatus {
+    /// Free space on the disk holding the worktrees; None if unreadable.
+    pub free_bytes: Option<u64>,
+    /// Under this, new worktrees are refused.
+    pub required_bytes: u64,
+    pub below_threshold: bool,
+}
+
+#[tauri::command]
+pub async fn git_disk_status(app: AppHandle) -> Result<DiskStatus, String> {
+    let base = worktree::worktrees_base_dir(&crate::instance::app_data_dir(&app)?);
+    let free = tokio::task::spawn_blocking(move || disk_guard::free_space_bytes(&base))
+        .await
+        .map_err(|e| e.to_string())?
+        .ok();
+    Ok(DiskStatus {
+        free_bytes: free,
+        required_bytes: disk_guard::MIN_FREE_BYTES_FOR_WORKTREE,
+        below_threshold: free.is_some_and(|f| disk_guard::check_room(f).is_err()),
+    })
+}
+
+/// A linked worktree folder of this app, or an error. Never the repo root.
+fn checked_worktree_folder<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    worktree_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let base = worktree::worktrees_base_dir(&crate::instance::app_data_dir(app)?);
+    let path = std::path::PathBuf::from(worktree_path);
+    if disk_guard::is_worktree_folder(&base, &path) {
+        Ok(path)
+    } else {
+        Err(format!(
+            "Refusing to operate on '{}': not a Hermes worktree folder",
+            worktree_path
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn git_worktree_usage(
+    app: AppHandle,
+    worktree_path: String,
+) -> Result<disk_guard::WorktreeUsage, String> {
+    let path = checked_worktree_folder(&app, &worktree_path)?;
+    let mut usage = tokio::task::spawn_blocking(move || disk_guard::worktree_usage(&path))
+        .await
+        .map_err(|e| e.to_string())?;
+    usage.path = worktree_path;
+    Ok(usage)
+}
+
+/// Remove the build output (node_modules, target, dist — only folders git
+/// ignores and tracks nothing in) of one worktree. Land and Archive call this
+/// once they exist; the Worktrees view calls it on request.
+#[tauri::command]
+pub async fn git_reclaim_build_output(
+    app: AppHandle,
+    worktree_path: String,
+) -> Result<disk_guard::ReclaimResult, String> {
+    let path = checked_worktree_folder(&app, &worktree_path)?;
+    let mut result = tokio::task::spawn_blocking(move || disk_guard::reclaim_build_output(&path))
+        .await
+        .map_err(|e| e.to_string())?;
+    result.path = worktree_path;
+    log::info!(
+        "[disk-guard] removed build output of '{}': {} folders, {} bytes",
+        result.path,
+        result.removed.len(),
+        result.freed_bytes
+    );
+    Ok(result)
+}
+
+/// Worktree paths the database says a session owns.
+fn owned_worktree_paths(
+    state: &State<'_, AppState>,
+) -> Result<HashSet<std::path::PathBuf>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    Ok(db
+        .get_all_session_worktrees()?
+        .into_iter()
+        .map(|r| std::path::PathBuf::from(r.worktree_path))
+        .collect())
+}
+
+/// Every worktree folder under this app's `hermes-worktrees/` that no
+/// session owns, for every repo — including repos Hermes no longer lists.
+#[tauri::command]
+pub async fn git_list_orphan_folders(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<disk_guard::OrphanFolder>, String> {
+    let base = worktree::worktrees_base_dir(&crate::instance::app_data_dir(&app)?);
+    let known = owned_worktree_paths(&state)?;
+    tokio::task::spawn_blocking(move || disk_guard::scan_orphan_folders(&base, &known))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Remove the given orphaned worktree folders (see `git_list_orphan_folders`).
+/// A path that is not an orphan when this runs is left alone.
+#[tauri::command]
+pub async fn git_sweep_orphan_folders(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<disk_guard::SweepResult>, String> {
+    let base = worktree::worktrees_base_dir(&crate::instance::app_data_dir(&app)?);
+    let known = owned_worktree_paths(&state)?;
+    let results = tokio::task::spawn_blocking(move || {
+        disk_guard::sweep_orphan_folders(&base, &known, &paths)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    log::info!(
+        "[disk-guard] orphan sweep: {} removed, {} bytes freed",
+        results.iter().filter(|r| r.removed).count(),
+        results.iter().map(|r| r.freed_bytes).sum::<u64>()
+    );
     Ok(results)
 }
 

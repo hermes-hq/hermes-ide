@@ -27,6 +27,12 @@ export const FEATURE_FLAGS = [
     description:
       "A harmless badge in the top bar used to prove the feature-flag mechanism end to end. Delete this flag once a real flagged feature exists.",
   },
+  {
+    id: "diskGuard",
+    label: "Disk guard and worktree hygiene",
+    description:
+      "Refuses to create a worktree below 10 GB free, shows disk used per worktree, removes build output on request and sweeps orphaned worktree folders in one action (Git panel > Worktrees).",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

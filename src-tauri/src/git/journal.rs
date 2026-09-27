@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::worktree;
 
-const JOURNAL_FILENAME: &str = "worktree-journal.log";
+pub const JOURNAL_FILENAME: &str = "worktree-journal.log";
 
 /// Build the path to the journal file for a given repo.
 /// Stored in `{app_data_dir}/hermes-worktrees/{repo_hash}/worktree-journal.log`.
@@ -74,12 +74,17 @@ pub fn log_completed(
 
 /// Check for incomplete operations on startup
 pub fn get_incomplete_operations(app_data_dir: &Path, repo_path: &str) -> Vec<JournalEntry> {
-    let path = journal_path(app_data_dir, repo_path);
+    incomplete_operations_in(&journal_path(app_data_dir, repo_path))
+}
+
+/// Incomplete operations recorded in one journal file. Unlike
+/// `get_incomplete_operations` this never creates a folder.
+pub fn incomplete_operations_in(path: &Path) -> Vec<JournalEntry> {
     if !path.exists() {
         return Vec::new();
     }
 
-    let content = match read_to_string(&path) {
+    let content = match read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };

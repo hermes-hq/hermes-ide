@@ -258,3 +258,42 @@ export interface CleanupResult {
   success: boolean;
   error: string | null;
 }
+
+// ─── Disk guard & worktree hygiene ───────────────────────────────────
+
+export interface DiskStatus {
+  /** Free space on the disk holding the worktrees; null if unreadable. */
+  free_bytes: number | null;
+  /** Below this, new worktrees are refused. */
+  required_bytes: number;
+  below_threshold: boolean;
+}
+
+export interface WorktreeUsage {
+  path: string;
+  total_bytes: number;
+  /** The part of total_bytes that "Remove build output" frees. */
+  build_output_bytes: number;
+}
+
+export interface ReclaimResult {
+  path: string;
+  /** Removed folders, relative to the worktree. */
+  removed: string[];
+  freed_bytes: number;
+  failed: string[];
+}
+
+export interface OrphanFolder {
+  worktree_path: string;
+  repo_path: string | null;
+  repo_exists: boolean;
+  branch_hint: string | null;
+}
+
+export interface SweepResult {
+  path: string;
+  removed: boolean;
+  freed_bytes: number;
+  error: string | null;
+}

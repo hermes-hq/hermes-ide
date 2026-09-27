@@ -7,7 +7,9 @@ import type {
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
   WorktreeChanges,
   WorktreeOverviewEntry, OrphanWorktree, CleanupResult,
+  DiskStatus, WorktreeUsage, ReclaimResult, OrphanFolder, SweepResult,
 } from "../types/git";
+import { isFeatureFlagEnabled } from "../featureFlags";
 
 export function gitStatus(sessionId: string): Promise<GitSessionStatus> {
   return invoke<GitSessionStatus>("git_status", { sessionId });
@@ -249,6 +251,8 @@ export async function createWorktree(
     branchName,
     createBranch,
     fromRemote: fromRemote ?? null,
+    // Disk guard: refuse under 10 GB free (only while the flag is on).
+    ...(isFeatureFlagEnabled("diskGuard") ? { enforceDiskGuard: true } : {}),
   });
 }
 
@@ -322,4 +326,28 @@ export async function worktreeDiskUsage(worktreePath: string): Promise<number> {
 
 export async function cleanupOrphanWorktrees(paths: string[]): Promise<CleanupResult[]> {
   return invoke<CleanupResult[]>("git_cleanup_orphan_worktrees", { paths });
+}
+
+// ─── Disk guard & worktree hygiene (feature flag "diskGuard") ────────
+
+export function getDiskStatus(): Promise<DiskStatus> {
+  return invoke<DiskStatus>("git_disk_status");
+}
+
+export function getWorktreeUsage(worktreePath: string): Promise<WorktreeUsage> {
+  return invoke<WorktreeUsage>("git_worktree_usage", { worktreePath });
+}
+
+/** Removes node_modules, target and dist folders that git ignores and tracks nothing in. */
+export function reclaimBuildOutput(worktreePath: string): Promise<ReclaimResult> {
+  return invoke<ReclaimResult>("git_reclaim_build_output", { worktreePath });
+}
+
+/** Worktree folders no session owns, across every repo. */
+export function listOrphanFolders(): Promise<OrphanFolder[]> {
+  return invoke<OrphanFolder[]>("git_list_orphan_folders");
+}
+
+export function sweepOrphanFolders(paths: string[]): Promise<SweepResult[]> {
+  return invoke<SweepResult[]>("git_sweep_orphan_folders", { paths });
 }

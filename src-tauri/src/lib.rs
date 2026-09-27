@@ -788,6 +788,12 @@ pub fn run() {
             git::git_detect_orphan_worktrees,
             git::git_worktree_disk_usage,
             git::git_cleanup_orphan_worktrees,
+            // Disk guard & worktree hygiene
+            git::git_disk_status,
+            git::git_worktree_usage,
+            git::git_reclaim_build_output,
+            git::git_list_orphan_folders,
+            git::git_sweep_orphan_folders,
             // Menu
             menu::show_context_menu,
             menu::update_menu_state,

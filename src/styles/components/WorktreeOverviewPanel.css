@@ -455,3 +455,27 @@
   margin: var(--space-1) var(--space-2);
   word-break: break-word;
 }
+
+/* ─── Disk guard ──────────────────────────────────────────────────── */
+
+.worktree-disk-status {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  padding: var(--space-1) var(--space-2);
+}
+
+.worktree-disk-status-low {
+  color: var(--yellow);
+}
+
+.worktree-disk-status-warning {
+  font-weight: 600;
+}
+
+.worktree-reclaim-note,
+.worktree-sweep-note {
+  font-size: var(--text-xs);
+  color: var(--green);
+  padding: var(--space-1) var(--space-2);
+  word-break: break-word;
+}

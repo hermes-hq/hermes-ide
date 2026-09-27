@@ -5,6 +5,8 @@ import { getSettings } from "../api/settings";
 import { GitProjectSection } from "./GitProjectSection";
 import { GitDiffView } from "./GitDiffView";
 import { WorktreeIndicator } from "./WorktreeIndicator";
+import { WorktreeOverviewPanel } from "./WorktreeOverviewPanel";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import type { GitFile, SessionWorktree } from "../types/git";
 import type { GitToast } from "./GitPanel";
 import "../styles/components/SessionGitPanel.css";
@@ -28,6 +30,9 @@ export function SessionGitPanel({ sessionId, projectId }: SessionGitPanelProps) 
   const [diffTarget, setDiffTarget] = useState<{ sessionId: string; projectId: string; file: GitFile } | null>(null);
   const [toast, setToast] = useState<GitToast | null>(null);
   const [worktreeInfo, setWorktreeInfo] = useState<SessionWorktree | null>(null);
+  // Disk guard (feature flag): a Worktrees view with disk use and cleanup.
+  const diskGuard = isFeatureFlagEnabled("diskGuard");
+  const [view, setView] = useState<"changes" | "worktrees">("changes");
 
   // Load poll interval setting on mount
   useEffect(() => {
@@ -89,7 +94,30 @@ export function SessionGitPanel({ sessionId, projectId }: SessionGitPanelProps) 
         </button>
       </div>
 
-      <div className="session-git-panel-scroll">
+      {diskGuard && (
+        <div className="git-view-toggle">
+          <button
+            className={`git-view-toggle-btn ${view === "changes" ? "git-view-toggle-btn-active" : ""}`}
+            onClick={() => setView("changes")}
+          >
+            Changes
+          </button>
+          <button
+            className={`git-view-toggle-btn ${view === "worktrees" ? "git-view-toggle-btn-active" : ""}`}
+            onClick={() => setView("worktrees")}
+          >
+            Worktrees
+          </button>
+        </div>
+      )}
+
+      {view === "worktrees" && (
+        <div className="session-git-panel-scroll">
+          <WorktreeOverviewPanel />
+        </div>
+      )}
+
+      <div className="session-git-panel-scroll" hidden={view !== "changes"}>
         {error && (
           <div className="git-error">{error}</div>
         )}

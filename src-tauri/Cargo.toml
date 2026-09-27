@@ -23,7 +23,6 @@ e2e = [
   "dep:objc2-web-kit",
   "dep:block2",
   "dep:gtk",
-  "dep:windows-sys",
 ]
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -53,9 +52,12 @@ objc2-web-kit = { version = "0.3", optional = true, default-features = false, fe
 gtk = { version = "0.18", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", optional = true, features = [
+# Free disk space for the disk guard; the other features are for the e2e
+# bridge's window screenshots.
+windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
   "Win32_Storage_Xps",
   "Win32_UI_WindowsAndMessaging",
 ] }

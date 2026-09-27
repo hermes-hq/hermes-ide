@@ -124,6 +124,23 @@ pub fn worktree_path_for_session(
     base.join(worktree_name(session_id, branch_name))
 }
 
+/// Where `create_worktree` would put a session's worktree, computed without
+/// creating any folder or marker file (unlike `worktree_path_for_session`).
+pub fn intended_worktree_path(
+    app_data_dir: &Path,
+    repo_path: &str,
+    session_id: &str,
+    branch_name: &str,
+    from_remote: Option<&str>,
+) -> PathBuf {
+    let branch = from_remote
+        .map(derive_local_branch_name)
+        .unwrap_or_else(|| branch_name.to_string());
+    worktrees_base_dir(app_data_dir)
+        .join(repo_path_hash(repo_path))
+        .join(worktree_name(session_id, &branch))
+}
+
 /// Find an existing worktree that has the given branch checked out.
 /// Uses `git worktree list --porcelain` to find it.
 fn find_existing_worktree_for_branch(repo_path: &str, branch_name: &str) -> Option<String> {
@@ -840,6 +857,40 @@ mod tests {
         // Worktree should be outside the repo
         assert!(!wt.worktree_path.contains(repo_path));
         assert!(wt.worktree_path.contains("hermes-worktrees"));
+    }
+
+    #[test]
+    fn intended_worktree_path_matches_create_and_creates_nothing() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+
+        let intended =
+            intended_worktree_path(app_data.path(), repo_path, "session123", "feat/x", None);
+        assert!(
+            !worktrees_base_dir(app_data.path()).exists(),
+            "computing the path created a folder"
+        );
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "session123",
+            "feat/x",
+            true,
+            None,
+        )
+        .unwrap();
+        assert_eq!(Path::new(&wt.worktree_path), intended);
+
+        // From a remote ref the folder is named after the local branch.
+        let remote = intended_worktree_path(
+            app_data.path(),
+            repo_path,
+            "session456",
+            "ignored",
+            Some("origin/feature-y"),
+        );
+        assert!(remote.ends_with("session4_feature-y"));
     }
 
     #[test]
