@@ -1,5 +1,6 @@
 import "../styles/components/Settings.css";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import { lazyView } from "../utils/lazyView";
 import { useResizablePanel } from "../hooks/useResizablePanel";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -26,7 +27,6 @@ import { listSshSavedHosts, upsertSshSavedHost, deleteSshSavedHost, type SshSave
 import { setAnalyticsEnabled } from "../utils/analytics";
 import { normalizeUpdateChannel } from "../api/updater";
 import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
-import { PluginManager } from "./PluginManager";
 import { useI18n } from "../i18n/I18nProvider";
 import {
   FEATURE_FLAGS,
@@ -35,6 +35,9 @@ import {
   getReleaseChannel,
   type FeatureFlagId,
 } from "../featureFlags";
+
+// The plugin manager loads when its tab is first opened.
+const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  SETTINGS PAGE — EXPORT / IMPORT CONTRACT                              ║
@@ -838,7 +841,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     </p>
                   </div>
                 </div>
-                <PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} onConfirmUpdateAll={onConfirmPluginUpdateAll} refreshTrigger={pluginRefreshTrigger} />
+                <Suspense fallback={null}><PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} onConfirmUpdateAll={onConfirmPluginUpdateAll} refreshTrigger={pluginRefreshTrigger} /></Suspense>
               </>
             )}
 

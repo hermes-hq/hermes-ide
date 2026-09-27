@@ -5,9 +5,8 @@
 //! frontend via Tauri events.  See `docs/adr/001-agent-mode.md` for the design
 //! rationale and `wondrous-wishing-quilt` plan for the phase-by-phase build.
 
-mod prewarm;
+pub mod prewarm;
 mod respawn;
-pub use prewarm::prewarm_bridge_runtime;
 pub use respawn::AgentError;
 use respawn::SpawnGate;
 

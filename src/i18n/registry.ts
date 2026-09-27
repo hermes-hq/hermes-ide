@@ -9,6 +9,19 @@ export interface LanguagePack {
   messages: TranslationMessages;
 }
 
+/**
+ * A language pack whose messages are fetched only when the language is
+ * actually used. Its name shows in the language picker right away; the
+ * translations load when the user picks it (or at startup when it is the
+ * saved language). Until they arrive, English is shown.
+ */
+export interface LazyLanguagePack {
+  locale: string;
+  label: string;
+  nativeLabel?: string;
+  load: () => Promise<LanguagePack>;
+}
+
 export interface I18nSnapshot {
   currentLanguage: string;
   languages: LanguagePack[];
@@ -634,6 +647,17 @@ const ENGLISH_PACK: LanguagePack = {
     "agentError.signIn": "Sign in",
     "agentError.dismiss": "Dismiss",
     "agentError.signInSessionLabel": "Sign in to {agent}",
+    "crash.app.title": "Something went wrong",
+    "crash.app.hint": "Your sessions are still running. Reload to bring the window back.",
+    "crash.pane.title": "This pane stopped working",
+    "crash.pane.titleNamed": "This pane stopped working: {label}",
+    "crash.pane.hint": "Other panes are not affected. Reload to try again.",
+    "crash.block.title": "This block could not be shown",
+    "crash.block.titleNamed": "This block could not be shown: {label}",
+    "crash.block.hint": "The rest of the conversation is not affected.",
+    "crash.reload": "Reload",
+    "crash.reloadPane": "Reload pane",
+    "crash.closePane": "Close pane",
   },
 };
 
@@ -641,17 +665,57 @@ const packs = new Map<string, LanguagePack>([[ENGLISH_PACK.locale, ENGLISH_PACK]
 const listeners = new Set<() => void>();
 let currentLanguage = "en";
 let initialized = false;
+/** Registered lazy packs whose messages have not been fetched yet. */
+const lazyLoaders = new WeakMap<LanguagePack, () => Promise<LanguagePack>>();
+/** In-flight fetches, one per registered lazy pack. */
+const lazyLoads = new WeakMap<LanguagePack, Promise<void>>();
+/** Language most recently asked for through setLanguage (last call wins). */
+let requestedLanguage: string | null = null;
 
-function normalizePack(pack: LanguagePack): LanguagePack {
+function isLazyPack(pack: LanguagePack | LazyLanguagePack): pack is LazyLanguagePack {
+  return typeof (pack as LazyLanguagePack).load === "function" && !(pack as LanguagePack).messages;
+}
+
+function normalizePack(pack: LanguagePack | LazyLanguagePack): LanguagePack {
   const locale = pack.locale.trim();
   if (!locale) throw new Error("Language pack locale is required.");
   return {
-    ...pack,
     locale,
     label: pack.label.trim() || locale,
     nativeLabel: pack.nativeLabel?.trim() || pack.label.trim() || locale,
-    messages: { ...pack.messages },
+    messages: isLazyPack(pack) ? {} : { ...pack.messages },
   };
+}
+
+/**
+ * Makes sure the messages of the pack registered for `locale` are present,
+ * fetching them if the pack was registered lazily. Resolves once they are
+ * (or immediately for packs that are already complete / not registered).
+ */
+export function ensureLanguageLoaded(locale: string): Promise<void> {
+  const entry = packs.get(locale);
+  if (!entry) return Promise.resolve();
+  const loader = lazyLoaders.get(entry);
+  if (!loader) return Promise.resolve();
+  let load = lazyLoads.get(entry);
+  if (!load) {
+    load = loader().then(
+      (full) => {
+        lazyLoaders.delete(entry);
+        lazyLoads.delete(entry);
+        // Disposed or replaced while loading: nothing to fill in.
+        if (packs.get(entry.locale) !== entry) return;
+        entry.messages = { ...full.messages };
+        notify();
+      },
+      (err: unknown) => {
+        lazyLoads.delete(entry); // let a later attempt retry
+        throw err;
+      },
+    );
+    lazyLoads.set(entry, load);
+  }
+  return load;
 }
 
 // Cached snapshot so getI18nSnapshot() returns a referentially stable value
@@ -693,13 +757,21 @@ export async function initI18n(): Promise<void> {
   // falls back to English until the matching pack registers.
   currentLanguage = stored;
   notify();
+  ensureLanguageLoaded(stored).catch((err) => console.warn(`[i18n] Failed to load language "${stored}":`, err));
 }
 
-export function registerLanguagePack(pack: LanguagePack): { dispose(): void } {
+export function registerLanguagePack(pack: LanguagePack | LazyLanguagePack): { dispose(): void } {
   const normalized = normalizePack(pack);
+  if (isLazyPack(pack)) lazyLoaders.set(normalized, pack.load);
   const previous = packs.get(normalized.locale);
   packs.set(normalized.locale, normalized);
   notify();
+  // The saved language may be this one: fetch its messages now.
+  if (currentLanguage === normalized.locale) {
+    ensureLanguageLoaded(normalized.locale).catch((err) =>
+      console.warn(`[i18n] Failed to load language "${normalized.locale}":`, err),
+    );
+  }
   return {
     dispose() {
       // Ownership check: only remove/restore when the live entry is still the
@@ -734,6 +806,15 @@ export async function setLanguage(locale: string): Promise<void> {
     console.warn(`[i18n] Ignoring setLanguage("${locale}"): no language pack is registered for "${normalized}".`);
     return;
   }
+  requestedLanguage = normalized;
+  try {
+    await ensureLanguageLoaded(normalized);
+  } catch (err) {
+    console.warn(`[i18n] Could not load language "${normalized}"; keeping "${currentLanguage}".`, err);
+    return;
+  }
+  // A newer setLanguage() call arrived while this one was loading.
+  if (requestedLanguage !== normalized) return;
   currentLanguage = normalized;
   notify();
   localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, normalized);

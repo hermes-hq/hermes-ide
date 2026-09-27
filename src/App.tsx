@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef, Component, type ReactNode, type ErrorInfo } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import { lazyView } from "./utils/lazyView";
 import React from "react";
 import ReactDOM from "react-dom";
 import { PluginRuntime } from "./plugins/PluginRuntime";
@@ -17,41 +18,28 @@ import { I18nProvider, useI18n } from "./i18n/I18nProvider";
 import "./styles/layout.css";
 import "./styles/themes.css";
 import "./styles/topbar.css";
+import "./styles/onDemandViewStyles";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fmt, isActionMod, isMac } from "./utils/platform";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { getSetting } from "./api/settings";
 import { SessionList } from "./components/SessionList";
-import { ContextPanel } from "./components/ContextPanel";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
-import { UsagePanel } from "./components/UsagePanel";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
-import { WorkbenchPanel } from "./components/WorkbenchPanel";
 import { workbenchPixelWidth } from "./utils/workbenchLayout";
 import { DEFAULT_SIDEBAR_WIDTH_PX, DEFAULT_SIDE_PANEL_WIDTH_PX, fitLeftRail, leftRailVisibility, leftRailWidth, resizeSidebar, resizeSidePanel } from "./utils/pluginPanelLayout";
 import type { SessionView } from "./components/SessionList";
 
-import { ProcessPanel } from "./components/ProcessPanel";
-import { FileExplorerPanel } from "./components/FileExplorerPanel";
-import { FilePreviewPanel } from "./components/FilePreviewPanel";
-import { SearchPanel } from "./components/SearchPanel";
 import { StatusBar } from "./components/StatusBar";
-import { CommandPalette } from "./components/CommandPalette";
 import { EmptyState } from "./components/EmptyState";
 import { CloseSessionDialog } from "./components/CloseSessionDialog";
-import { Settings } from "./components/Settings";
-import { ShortcutsPanel } from "./components/ShortcutsPanel";
-import { WorkspacePanel } from "./components/WorkspacePanel";
-import { CostDashboard } from "./components/CostDashboard";
 import { FlowToast } from "./components/FlowToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
-import { SessionCreator } from "./components/SessionCreator";
-import { PromptComposer } from "./components/PromptComposer";
-import { SessionComposer, getComposerTextarea } from "./components/SessionComposer";
+import { getComposerTextarea } from "./components/composerTextarea";
 import { SplitLayout } from "./components/SplitLayout";
-import { SessionGitPanel } from "./components/SessionGitPanel";
+import { focusedPaneSnapshot, splitAfterCreateActions } from "./state/splitAfterCreate";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
@@ -63,24 +51,49 @@ import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
+import { hasAgentSession, useAgentBridgeWarmup } from "./hooks/useAgentBridgeWarmup";
 import { listen } from "@tauri-apps/api/event";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { useToastStore } from "./hooks/useToastStore";
 import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
-import { WhatsNewDialog } from "./components/WhatsNewDialog";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
-import { OnboardingWizard } from "./components/OnboardingWizard";
 import { FeatureFlagDummyBanner } from "./components/FeatureFlagDummyBanner";
 import { launchFailedMessage } from "./catalog/agentCatalog";
+import { OnboardingGate } from "./components/OnboardingGate";
+import { WhatsNewGate } from "./components/WhatsNewGate";
+import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
+
+// Loaded on demand, off the startup path: the editor (CodeMirror) with the
+// file preview, Settings (with the plugin manager), and the Agent view —
+// its composer and right-rail workbench only exist for Agent-mode sessions.
+const Settings = lazyView("Settings", () => import("./components/Settings").then((m) => m.Settings));
+const FilePreviewPanel = lazyView("FilePreviewPanel", () => import("./components/FilePreviewPanel").then((m) => m.FilePreviewPanel));
+const SessionComposer = lazyView("SessionComposer", () => import("./components/SessionComposer").then((m) => m.SessionComposer));
+const WorkbenchPanel = lazyView("WorkbenchPanel", () => import("./components/WorkbenchPanel").then((m) => m.WorkbenchPanel));
+// Side panels and the command palette: fetched the first time they open.
+const ContextPanel = lazyView("ContextPanel", () => import("./components/ContextPanel").then((m) => m.ContextPanel));
+const UsagePanel = lazyView("UsagePanel", () => import("./components/UsagePanel").then((m) => m.UsagePanel));
+const ProcessPanel = lazyView("ProcessPanel", () => import("./components/ProcessPanel").then((m) => m.ProcessPanel));
+const FileExplorerPanel = lazyView("FileExplorerPanel", () => import("./components/FileExplorerPanel").then((m) => m.FileExplorerPanel));
+const SearchPanel = lazyView("SearchPanel", () => import("./components/SearchPanel").then((m) => m.SearchPanel));
+const CommandPalette = lazyView("CommandPalette", () => import("./components/CommandPalette").then((m) => m.CommandPalette));
+const SessionGitPanel = lazyView("SessionGitPanel", () => import("./components/SessionGitPanel").then((m) => m.SessionGitPanel));
+// Dialogs that only exist once the user opens them.
+const SessionCreator = lazyView("SessionCreator", () => import("./components/SessionCreator").then((m) => m.SessionCreator));
+const PromptComposer = lazyView("PromptComposer", () => import("./components/PromptComposer").then((m) => m.PromptComposer));
+const ShortcutsPanel = lazyView("ShortcutsPanel", () => import("./components/ShortcutsPanel").then((m) => m.ShortcutsPanel));
+const WorkspacePanel = lazyView("WorkspacePanel", () => import("./components/WorkspacePanel").then((m) => m.WorkspacePanel));
+const CostDashboard = lazyView("CostDashboard", () => import("./components/CostDashboard").then((m) => m.CostDashboard));
 
 function AppContent() {
   const { t } = useI18n();
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace } = useSession();
   const activeSession = useActiveSession();
   const sessions = useSessionList();
+  useAgentBridgeWarmup(sessions);
   const sidebarSessions = useSidebarOrderedSessions();
   const { ui } = state;
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
@@ -933,19 +946,27 @@ function AppContent() {
         )}
         {ui.gitPanelOpen && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
           <PanelErrorBoundary panelName="Git Panel">
-            <SessionGitPanel sessionId={state.activeSessionId} projectId="" />
+            <Suspense fallback={null}>
+              <SessionGitPanel sessionId={state.activeSessionId} projectId="" />
+            </Suspense>
           </PanelErrorBoundary>
         )}
         {ui.processPanelOpen && !ui.flowMode && !activePluginPanel && (
           <PanelErrorBoundary panelName="Process Panel">
-            <ProcessPanel visible={ui.processPanelOpen} />
+            <Suspense fallback={null}>
+              <ProcessPanel visible={ui.processPanelOpen} />
+            </Suspense>
           </PanelErrorBoundary>
         )}
         {ui.fileExplorerOpen && !ui.flowMode && !activePluginPanel && (
-          <FileExplorerPanel visible={ui.fileExplorerOpen} />
+          <Suspense fallback={null}>
+            <FileExplorerPanel visible={ui.fileExplorerOpen} />
+          </Suspense>
         )}
         {ui.searchPanelOpen && !ui.flowMode && !activePluginPanel && (
-          <SearchPanel visible={ui.searchPanelOpen} />
+          <Suspense fallback={null}>
+            <SearchPanel visible={ui.searchPanelOpen} />
+          </Suspense>
         )}
         {activePluginPanel && !ui.flowMode && (() => {
           const panelMeta = pluginPanels.find(p => p.id === activePluginPanel && p.side === "left");
@@ -975,14 +996,18 @@ function AppContent() {
                 {(() => {
                   const handler = pluginRuntime?.getFileHandler(ui.filePreview.filePath);
                   return (
-                    <FilePreviewPanel
-                      sessionId={state.activeSessionId}
-                      projectId={ui.filePreview.projectId}
-                      filePath={ui.filePreview.filePath}
-                      onBack={() => dispatch({ type: "CLOSE_FILE_PREVIEW" })}
-                      fileHandler={handler?.component}
-                      fileHandlerPluginId={handler?.pluginId}
-                    />
+                    <PanelErrorBoundary panelName="File Preview">
+                      <Suspense fallback={null}>
+                        <FilePreviewPanel
+                          sessionId={state.activeSessionId}
+                          projectId={ui.filePreview.projectId}
+                          filePath={ui.filePreview.filePath}
+                          onBack={() => dispatch({ type: "CLOSE_FILE_PREVIEW" })}
+                          fileHandler={handler?.component}
+                          fileHandlerPluginId={handler?.pluginId}
+                        />
+                      </Suspense>
+                    </PanelErrorBoundary>
                   );
                 })()}
               </div>
@@ -1004,7 +1029,17 @@ function AppContent() {
               )}
             </div>
             )}
-            <SessionComposer />
+            {/* Mounted once any Agent-view session exists (not only while
+                one is active), so unsent image attachments survive a
+                switch to a terminal session and back. The composer renders
+                nothing for non-agent sessions. */}
+            {hasAgentSession(sessions) && (
+              <PanelErrorBoundary panelName="Composer">
+                <Suspense fallback={null}>
+                  <SessionComposer />
+                </Suspense>
+              </PanelErrorBoundary>
+            )}
           </div>
           {/* Right rail.
            *
@@ -1019,14 +1054,18 @@ function AppContent() {
            */}
           {!ui.flowMode && activeSession?.mode === "agent" && ui.workbench.open && (
             <PanelErrorBoundary panelName="Workbench">
-              <WorkbenchPanel session={activeSession} />
+              <Suspense fallback={null}>
+                <WorkbenchPanel session={activeSession} />
+              </Suspense>
             </PanelErrorBoundary>
           )}
           {ui.contextPanelOpen && !ui.flowMode && activeSession && activeSession.mode !== "agent" && (
             <>
               <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
               <PanelErrorBoundary panelName="Context Panel">
-                <ContextPanel session={activeSession} />
+                <Suspense fallback={null}>
+                  <ContextPanel session={activeSession} />
+                </Suspense>
               </PanelErrorBoundary>
             </>
           )}
@@ -1062,7 +1101,9 @@ function AppContent() {
                 <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
               )}
               <PanelErrorBoundary panelName="Usage Panel">
-                <UsagePanel session={activeSession} />
+                <Suspense fallback={null}>
+                  <UsagePanel session={activeSession} />
+                </Suspense>
               </PanelErrorBoundary>
             </>
           )}
@@ -1154,6 +1195,7 @@ function AppContent() {
       />
 
       {ui.commandPaletteOpen && (
+        <Suspense fallback={null}>
         <CommandPalette
           onClose={() => dispatch({ type: "TOGGLE_PALETTE" })}
           sessions={sessions}
@@ -1185,17 +1227,23 @@ function AppContent() {
             }
           }}
         />
+        </Suspense>
       )}
 
       {shortcutsOpen && (
-        <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />
+        <Suspense fallback={null}>
+          <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />
+        </Suspense>
       )}
 
       {costDashboardOpen && (
-        <CostDashboard onClose={() => setCostDashboardOpen(false)} />
+        <Suspense fallback={null}>
+          <CostDashboard onClose={() => setCostDashboardOpen(false)} />
+        </Suspense>
       )}
 
       {settingsOpen && (
+        <Suspense fallback={null}>
         <Settings
           onClose={() => setSettingsOpen(null)}
           initialTab={settingsOpen}
@@ -1235,10 +1283,13 @@ function AppContent() {
             setPendingUpdatePlugins(infos);
           }}
         />
+        </Suspense>
       )}
 
       {workspaceOpen && (
-        <WorkspacePanel onClose={() => setWorkspaceOpen(false)} />
+        <Suspense fallback={null}>
+          <WorkspacePanel onClose={() => setWorkspaceOpen(false)} />
+        </Suspense>
       )}
 
       {projectPickerOpen && activeSession && (
@@ -1260,6 +1311,7 @@ function AppContent() {
       )}
 
       {sessionCreatorOpen && (
+        <Suspense fallback={null}>
         <SessionCreator
           defaultGroup={sessionCreatorOpen.group}
           onReady={() => {
@@ -1274,14 +1326,19 @@ function AppContent() {
             pendingSplit.current = null;
           }}
           onCreate={async (opts) => {
+            // Which session the focused pane shows right now — read BEFORE
+            // createSession(), which makes the new session active and swaps
+            // it into the focused pane.
+            const focusedBefore = focusedPaneSnapshot(state.layout);
             const session = await createSession(opts);
             setSessionCreatorOpen(false);
             if (session) {
               const split = pendingSplit.current;
               pendingSplit.current = null;
               if (split && state.layout.root) {
-                // Split an existing pane
-                dispatch({ type: "SPLIT_PANE", paneId: split.paneId, direction: split.direction, newSessionId: session.id });
+                // Split an existing pane (the focused pane gets its own
+                // session back first, or the new one would show twice).
+                for (const action of splitAfterCreateActions(focusedBefore, split, session.id)) dispatch(action);
               } else if (!state.layout.root) {
                 // First session — init pane
                 dispatch({ type: "INIT_PANE", sessionId: session.id });
@@ -1292,14 +1349,17 @@ function AppContent() {
             }
           }}
         />
+        </Suspense>
       )}
 
       {ui.composerOpen && activeSession && (
-        <PromptComposer
-          sessionId={activeSession.id}
-          onClose={() => dispatch({ type: "CLOSE_COMPOSER" })}
-          addToast={toastStore.addToast}
-        />
+        <Suspense fallback={null}>
+          <PromptComposer
+            sessionId={activeSession.id}
+            onClose={() => dispatch({ type: "CLOSE_COMPOSER" })}
+            addToast={toastStore.addToast}
+          />
+        </Suspense>
       )}
 
       {ui.flowMode && activeSession && (
@@ -1316,8 +1376,8 @@ function AppContent() {
         }
       />
 
-      <OnboardingWizard />
-      <WhatsNewDialog version={__APP_VERSION__} />
+      <OnboardingGate />
+      <WhatsNewGate version={__APP_VERSION__} />
 
       {state.pendingCloseSessionId && (
         <CloseSessionDialog
@@ -1341,56 +1401,22 @@ function AppContent() {
   );
 }
 
-// ─── Error Boundary ─────────────────────────────────────────────────
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false, error: null };
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[ErrorBoundary] Uncaught error:", error, info.componentStack);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="error-boundary">
-          <div className="error-boundary-title">Something went wrong</div>
-          <pre className="error-boundary-stack">
-            {this.state.error?.message}
-          </pre>
-          <button
-            className="error-boundary-retry"
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Try Again
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 // ─── App Root ───────────────────────────────────────────────────────
 
 function App() {
+  // Two fences. The inner one sits INSIDE the session store, so a crash in
+  // the window's UI can be reloaded without losing any session. The outer
+  // one only catches a failure of the stores themselves.
   return (
-    <ErrorBoundary>
+    <ContainedErrorBoundary scope="app">
       <I18nProvider>
         <SessionProvider>
-          <AppContent />
+          <ContainedErrorBoundary scope="app">
+            <AppContent />
+          </ContainedErrorBoundary>
         </SessionProvider>
       </I18nProvider>
-    </ErrorBoundary>
+    </ContainedErrorBoundary>
   );
 }
 

@@ -43,6 +43,8 @@ import { selectFatalError } from "./errorSelector";
 import { agentDisplayName, classifyAgentError } from "./agentErrors";
 import { AgentErrorBanner, useAgentErrorTranslate } from "./AgentErrorBanner";
 import { isFeatureFlagEnabled } from "../featureFlags";
+import { ContainedErrorBoundary } from "../components/ContainedErrorBoundary";
+import { CrashProbe } from "../components/CrashProbe";
 import {
   slashReceiptAfterUserMessage,
   slashReceiptForMessage,
@@ -1034,7 +1036,9 @@ interface MessageRowProps {
   isFirstOfTurn?: boolean;
 }
 
-export function MessageRow({
+// Memoised: while one message streams, the rows before it keep their props
+// and are not re-rendered on every delta.
+export const MessageRow = memo(function MessageRow({
   message,
   toolResults,
   streamingMessageId = null,
@@ -1093,23 +1097,27 @@ export function MessageRow({
           <MessageRawView text={rawText} />
         ) : (
           message.blocks.map((block, i) => (
-            <BlockRenderer
-              key={i}
-              block={block}
-              blockIndex={i}
-              messageId={message.id}
-              toolResults={toolResults}
-              isStreamingTail={isStreamingMessage && i === lastTextIdx}
-              thinkingStartedAt={thinkingStartedAt}
-              thinkingElapsed={thinkingElapsed}
-              streamingThinkingText={streamingThinkingText}
-            />
+            // One malformed block shows an error card in its place; the
+            // rest of the message and the conversation keep rendering.
+            <ContainedErrorBoundary key={i} scope="block">
+              {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`block:${message.id}:${i}`} />}
+              <BlockRenderer
+                block={block}
+                blockIndex={i}
+                messageId={message.id}
+                toolResults={toolResults}
+                isStreamingTail={isStreamingMessage && i === lastTextIdx}
+                thinkingStartedAt={thinkingStartedAt}
+                thinkingElapsed={thinkingElapsed}
+                streamingThinkingText={streamingThinkingText}
+              />
+            </ContainedErrorBoundary>
           ))
         )}
       </div>
     </div>
   );
-}
+});
 
 /** Speaker-chip icons.  Drawn inline with `currentColor` so each
  *  theme's voice-color paints the glyph: --brass (warm operator

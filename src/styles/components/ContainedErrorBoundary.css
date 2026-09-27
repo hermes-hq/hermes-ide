@@ -1,0 +1,82 @@
+/* ─── Contained error cards (app / pane / block) ─────────────── */
+
+.contained-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+}
+
+.contained-error-app,
+.contained-error-pane {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-4);
+}
+
+.contained-error-app {
+  height: 100vh;
+  background: var(--bg-0);
+}
+
+.contained-error-pane {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-1);
+}
+
+.contained-error-block {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger-dim);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+
+.contained-error-title {
+  color: var(--danger);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+}
+
+.contained-error-app .contained-error-title {
+  font-size: var(--text-2xl);
+}
+
+.contained-error-hint {
+  color: var(--text-2);
+}
+
+.contained-error-message {
+  margin: 0;
+  max-width: 600px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.contained-error-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.contained-error-actions button {
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.contained-error-actions button:hover {
+  background: var(--bg-3);
+}

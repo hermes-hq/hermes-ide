@@ -315,3 +315,111 @@ describe("initI18n", () => {
     disposable.dispose();
   });
 });
+
+describe("lazy language packs (one pack loaded per locale)", () => {
+  function lazyPack(locale: string, messages: Record<string, string>) {
+    const load = vi.fn(() => Promise.resolve({ locale, label: `L-${locale}`, messages }));
+    return { pack: { locale, label: `L-${locale}`, nativeLabel: `N-${locale}`, load }, load };
+  }
+
+  it("lists a lazy pack in the picker without fetching its messages", async () => {
+    const { registry } = await freshRegistry();
+    const { pack, load } = lazyPack("xx", { "common.close": "XX-close" });
+    const disposable = registry.registerLanguagePack(pack);
+
+    const listed = registry.getI18nSnapshot().languages.find((l) => l.locale === "xx");
+    expect(listed).toMatchObject({ label: "L-xx", nativeLabel: "N-xx" });
+    expect(load).not.toHaveBeenCalled();
+
+    disposable.dispose();
+  });
+
+  it("setLanguage fetches only the chosen pack, then switches with its messages ready", async () => {
+    const { registry } = await freshRegistry();
+    const xx = lazyPack("xx", { "common.close": "XX-close" });
+    const yy = lazyPack("yy", { "common.close": "YY-close" });
+    const dx = registry.registerLanguagePack(xx.pack);
+    const dy = registry.registerLanguagePack(yy.pack);
+
+    await registry.setLanguage("xx");
+
+    expect(xx.load).toHaveBeenCalledTimes(1);
+    expect(yy.load).not.toHaveBeenCalled();
+    expect(registry.getCurrentLanguage()).toBe("xx");
+    expect(registry.translate("common.close")).toBe("XX-close");
+
+    // Switching back and forth never fetches a pack twice.
+    await registry.setLanguage("en");
+    await registry.setLanguage("xx");
+    expect(xx.load).toHaveBeenCalledTimes(1);
+
+    dx.dispose();
+    dy.dispose();
+  });
+
+  it("restores the saved language at startup by fetching just that pack", async () => {
+    const { registry, getSetting } = await freshRegistry();
+    getSetting.mockResolvedValue("xx");
+    await registry.initI18n(); // saved language known before the pack registers
+    expect(registry.translate("common.close")).toBe("Close"); // English until it arrives
+
+    const xx = lazyPack("xx", { "common.close": "XX-close" });
+    const yy = lazyPack("yy", { "common.close": "YY-close" });
+    const dx = registry.registerLanguagePack(xx.pack);
+    const dy = registry.registerLanguagePack(yy.pack);
+    await registry.ensureLanguageLoaded("xx");
+
+    expect(xx.load).toHaveBeenCalledTimes(1);
+    expect(yy.load).not.toHaveBeenCalled();
+    expect(registry.translate("common.close")).toBe("XX-close");
+
+    dx.dispose();
+    dy.dispose();
+  });
+
+  it("keeps the current language when a pack fails to load, and can retry", async () => {
+    const { registry } = await freshRegistry();
+    const load = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("chunk failed"))
+      .mockResolvedValueOnce({ locale: "xx", label: "X", messages: { "common.close": "XX-close" } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const disposable = registry.registerLanguagePack({ locale: "xx", label: "X", load });
+
+    await registry.setLanguage("xx");
+    expect(registry.getCurrentLanguage()).toBe("en");
+
+    await registry.setLanguage("xx");
+    expect(registry.getCurrentLanguage()).toBe("xx");
+    expect(registry.translate("common.close")).toBe("XX-close");
+    expect(load).toHaveBeenCalledTimes(2);
+
+    warn.mockRestore();
+    disposable.dispose();
+  });
+
+  it("the last setLanguage call wins when an earlier one is still loading", async () => {
+    const { registry } = await freshRegistry();
+    let finishSlow: () => void = () => {};
+    const slow = {
+      locale: "xx",
+      label: "X",
+      load: () =>
+        new Promise<{ locale: string; label: string; messages: Record<string, string> }>((resolve) => {
+          finishSlow = () => resolve({ locale: "xx", label: "X", messages: { "common.close": "XX-close" } });
+        }),
+    };
+    const dx = registry.registerLanguagePack(slow);
+    const dy = registry.registerLanguagePack({ locale: "yy", label: "Y", messages: { "common.close": "YY-close" } });
+
+    const first = registry.setLanguage("xx");
+    await registry.setLanguage("yy");
+    finishSlow();
+    await first;
+
+    expect(registry.getCurrentLanguage()).toBe("yy");
+
+    dx.dispose();
+    dy.dispose();
+  });
+});

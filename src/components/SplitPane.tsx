@@ -1,16 +1,24 @@
 import "../styles/components/SplitPane.css";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { Suspense, useEffect, useRef, useState, useCallback } from "react";
+import { lazyView } from "../utils/lazyView";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
-import { AgentSessionView } from "../agent/AgentSessionView";
+import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
+import { translate } from "../i18n/registry";
+import { CrashProbe } from "./CrashProbe";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
 import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+
+// The agent view (and everything it pulls in: markdown, syntax
+// highlighting, tool cards) loads on demand, the first time an
+// Agent-mode session is shown.
+const AgentSessionView = lazyView("AgentSessionView", () => import("../agent/AgentSessionView").then((m) => m.AgentSessionView));
 
 // Use text/plain with a prefix so it works in all WebViews
 const DRAG_PREFIX = "hermes-session:";
@@ -332,9 +340,27 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           className="split-pane-terminal"
           onContextMenu={(e) => showTerminalMenu(e, buildTerminalMenuItems(terminalHasSelection(sessionId)))}
         >
-          {session.mode === "agent"
-            ? <AgentSessionView sessionId={sessionId} workspacePathCount={session.workspace_paths.length} />
-            : <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />}
+          {/* A crash inside this pane stays in this pane: the other panes
+              keep running and this one offers Reload / Close. */}
+          <ContainedErrorBoundary
+            key={sessionId}
+            scope="pane"
+            label={session.label}
+            actions={
+              <button type="button" onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
+                {translate("crash.closePane")}
+              </button>
+            }
+          >
+            {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}
+            {session.mode === "agent" ? (
+              <Suspense fallback={<div className="split-pane-loading" aria-busy="true" />}>
+                <AgentSessionView sessionId={sessionId} workspacePathCount={session.workspace_paths.length} />
+              </Suspense>
+            ) : (
+              <TerminalPane sessionId={sessionId} phase={session.phase} color={session.color} />
+            )}
+          </ContainedErrorBoundary>
         </div>
       </div>
 

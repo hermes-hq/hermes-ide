@@ -6,6 +6,7 @@ import { checkAiProviders } from "../api/sessions";
 import { applyTheme, applyUiScale, DARK_THEMES, LIGHT_THEMES, UI_SCALE_OPTIONS, normalizeThemeId, DEFAULT_THEME_ID } from "../utils/themeManager";
 import { setAnalyticsEnabled } from "../utils/analytics";
 import { installCommand, listAgents } from "../catalog/agentCatalog";
+import { ONBOARDING_COMPLETED_SETTING as SETTING_KEY } from "./startupDialogSettings";
 
 type Step = "welcome" | "theme" | "ai_setup" | "privacy";
 
@@ -28,8 +29,6 @@ const THEME_PREVIEW: Record<string, { bg: string; text: string; accent: string; 
   newsprint:       { bg: "#f7f4ec", text: "#2a2a2a", accent: "#0a0a0a", green: "#2a6a2a" },
   atrium:          { bg: "#eef2f6", text: "#4a5566", accent: "#4a6a8c", green: "#4a8a6a" },
 };
-
-const SETTING_KEY = "onboarding_completed";
 
 export function OnboardingWizard() {
   const [visible, setVisible] = useState(false);

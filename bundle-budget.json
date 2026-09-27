@@ -1,0 +1,4 @@
+{
+  "_note": "Startup JS = the entry script in dist/index.html plus everything it imports statically. Checked by scripts/bundle-budget.mjs in CI. Raise only with a reason in the PR.",
+  "startupJsMaxBytes": 1200000
+}

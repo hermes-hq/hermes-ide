@@ -14,7 +14,7 @@ import {
 import { foldGutter, foldKeymap, indentOnInput, bracketMatching, syntaxHighlighting, defaultHighlightStyle, indentUnit } from "@codemirror/language";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { search, searchKeymap, openSearchPanel, gotoLine, selectNextOccurrence } from "@codemirror/search";
-import { getLanguageSupport } from "./languageRegistry";
+import { loadLanguageSupport, peekLanguageSupport } from "./languageRegistry";
 import { createSyntaxHighlighting } from "./editorTheme";
 import { Minimap } from "./Minimap";
 import {
@@ -263,7 +263,9 @@ export function EditorPane({ content, language, onContentChange, onSave, onCurso
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const langSupport = getLanguageSupport(language);
+    // Grammar already loaded → highlight from the first paint; otherwise the
+    // language effect below loads it and reconfigures the view.
+    const langSupport = peekLanguageSupport(language);
 
     const state = EditorState.create({
       doc: content,
@@ -420,10 +422,19 @@ export function EditorPane({ content, language, onContentChange, onSave, onCurso
     const view = viewRef.current;
     if (!view) return;
 
-    const langSupport = getLanguageSupport(language);
-    view.dispatch({
-      effects: languageCompartment.current.reconfigure(langSupport ? [langSupport] : []),
-    });
+    let cancelled = false;
+    loadLanguageSupport(language)
+      .then((langSupport) => {
+        // The view may have been destroyed, or the language changed again.
+        if (cancelled || viewRef.current !== view) return;
+        view.dispatch({
+          effects: languageCompartment.current.reconfigure(langSupport ? [langSupport] : []),
+        });
+      })
+      .catch((err) => console.warn(`[EditorPane] Failed to load ${language} highlighting:`, err));
+    return () => {
+      cancelled = true;
+    };
   }, [language]);
 
   // Toggle word wrap

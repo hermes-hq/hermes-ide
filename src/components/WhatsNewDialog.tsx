@@ -6,9 +6,11 @@ import {
   type ChangelogSection,
 } from "../data/changelog";
 import { getSetting, setSetting } from "../api/settings";
-
-const SETTING_LAST_SEEN = "last_seen_version";
-const SETTING_SUPPRESS = "suppress_whats_new";
+import {
+  WHATS_NEW_LAST_SEEN_SETTING as SETTING_LAST_SEEN,
+  WHATS_NEW_PREVIEW_STORAGE_KEY,
+  WHATS_NEW_SUPPRESS_SETTING as SETTING_SUPPRESS,
+} from "./startupDialogSettings";
 
 interface WhatsNewDialogProps {
   /** Current app version (from __APP_VERSION__) */
@@ -22,7 +24,7 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
   // for the DevTools snippet that activates this path.
   const previewVersion =
     typeof window !== "undefined"
-      ? window.localStorage.getItem("hermesPreviewWhatsNew") ?? null
+      ? window.localStorage.getItem(WHATS_NEW_PREVIEW_STORAGE_KEY) ?? null
       : null;
   const effectiveVersion =
     previewVersion && changelog[previewVersion] ? previewVersion : version;

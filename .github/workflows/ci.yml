@@ -79,6 +79,8 @@ jobs:
               - 'scripts/privacy-check.mjs'
               - 'scripts/mutation-score.mjs'
               - '.github/privacy-allowlist.json'
+              - 'bundle-budget.json'
+              - 'scripts/bundle-budget.mjs'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -155,6 +157,13 @@ jobs:
         run: npx knip
       - name: Unit tests
         run: npx vitest run
+      # Fails when the JavaScript the window must load before it can draw
+      # grows past bundle-budget.json. New views and heavy libraries belong
+      # behind React.lazy / import() so they load when first used.
+      - name: Build the frontend
+        run: npx vite build
+      - name: Startup JS budget
+        run: node scripts/bundle-budget.mjs
 
   # ── Rust Formatting ──────────────────────────────────────────────────
   rust-fmt:
@@ -350,7 +359,7 @@ jobs:
           xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
             set -e
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
-            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs
+            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs
           '
@@ -363,7 +372,7 @@ jobs:
         run: |
           export CARGO_TERM_COLOR=never
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
-          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs
+          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs
 

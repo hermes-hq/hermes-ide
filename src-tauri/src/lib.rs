@@ -585,10 +585,12 @@ pub fn run() {
             app.manage(agent::AgentState::default());
             app.manage(inline_pty::InlinePtyManager::new());
 
-            // Best-effort bridge runtime prewarm — populates OS file cache
-            // so the user's first Agent session spawns noticeably faster.
-            // Detached, capped at 10s, silent on failure (see prewarm.rs).
-            agent::prewarm_bridge_runtime(app.handle());
+            // The agent bridge is NOT warmed at startup: the frontend asks
+            // for it (warm_agent_bridge) once an Agent-view session exists,
+            // so terminal-only use never starts a Node process at launch.
+            log::info!(
+                "[prewarm] agent bridge warm-up deferred until an Agent-view session exists"
+            );
 
             // Save workspace when the main window is about to close
             let save_handle = app.handle().clone();
@@ -842,6 +844,7 @@ pub fn run() {
             agent::check_claude_cli,
             agent::read_image_for_attachment,
             agent::update_hermes_state,
+            agent::prewarm::warm_agent_bridge,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

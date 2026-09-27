@@ -2,7 +2,7 @@
  * CodeMirror editor module tests.
  *
  * Covers:
- * 1. getLanguageSupport — returns LanguageSupport for all 14 languages, null for unsupported, caches results
+ * 1. loadLanguageSupport — resolves LanguageSupport for all 14 languages, null for unsupported, caches results
  * 2. getLanguageForExtension — maps ALL extensions correctly, plaintext for unknown, leading dot, case insensitive
  * 3. exposeCodeMirror — sets window.__hermesCM correctly
  */
@@ -14,9 +14,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 // ===================================================================
-// 1. getLanguageSupport
+// 1. loadLanguageSupport
 // ===================================================================
-describe("getLanguageSupport", () => {
+describe("loadLanguageSupport", () => {
 	beforeEach(() => {
 		vi.resetModules();
 	});
@@ -44,8 +44,8 @@ describe("getLanguageSupport", () => {
 
 	for (const lang of SUPPORTED_LANGUAGES) {
 		it(`returns LanguageSupport for "${lang}"`, async () => {
-			const { getLanguageSupport } = await import("../editor/languageRegistry");
-			const result = getLanguageSupport(lang);
+			const { loadLanguageSupport } = await import("../editor/languageRegistry");
+			const result = await loadLanguageSupport(lang);
 			expect(result).not.toBeNull();
 			// LanguageSupport instances have `language` and `extension` properties
 			expect(result).toHaveProperty("language");
@@ -70,47 +70,72 @@ describe("getLanguageSupport", () => {
 
 	for (const lang of UNSUPPORTED_LANGUAGES) {
 		it(`returns null for unsupported language "${lang}"`, async () => {
-			const { getLanguageSupport } = await import("../editor/languageRegistry");
-			expect(getLanguageSupport(lang)).toBeNull();
+			const { loadLanguageSupport } = await import("../editor/languageRegistry");
+			expect(await loadLanguageSupport(lang)).toBeNull();
 		});
 	}
 
 	it("returns null for empty string", async () => {
-		const { getLanguageSupport } = await import("../editor/languageRegistry");
-		expect(getLanguageSupport("")).toBeNull();
+		const { loadLanguageSupport } = await import("../editor/languageRegistry");
+		expect(await loadLanguageSupport("")).toBeNull();
 	});
 
 	it("returns null for completely unknown identifier", async () => {
-		const { getLanguageSupport } = await import("../editor/languageRegistry");
-		expect(getLanguageSupport("brainfuck")).toBeNull();
-		expect(getLanguageSupport("cobol")).toBeNull();
+		const { loadLanguageSupport } = await import("../editor/languageRegistry");
+		expect(await loadLanguageSupport("brainfuck")).toBeNull();
+		expect(await loadLanguageSupport("cobol")).toBeNull();
 	});
 
 	it("caches results — second call returns the same instance", async () => {
-		const { getLanguageSupport } = await import("../editor/languageRegistry");
-		const first = getLanguageSupport("rust");
-		const second = getLanguageSupport("rust");
+		const { loadLanguageSupport } = await import("../editor/languageRegistry");
+		const first = await loadLanguageSupport("rust");
+		const second = await loadLanguageSupport("rust");
 		expect(first).not.toBeNull();
 		expect(first).toBe(second); // strict reference equality
 	});
 
 	it("caches each language independently", async () => {
-		const { getLanguageSupport } = await import("../editor/languageRegistry");
-		const ts = getLanguageSupport("typescript");
-		const js = getLanguageSupport("javascript");
+		const { loadLanguageSupport } = await import("../editor/languageRegistry");
+		const ts = await loadLanguageSupport("typescript");
+		const js = await loadLanguageSupport("javascript");
 		expect(ts).not.toBeNull();
 		expect(js).not.toBeNull();
 		expect(ts).not.toBe(js); // different instances for different languages
 	});
 
 	it("is case insensitive — 'RUST' maps to same cached instance as 'rust'", async () => {
-		const { getLanguageSupport } = await import("../editor/languageRegistry");
-		const lower = getLanguageSupport("rust");
-		const upper = getLanguageSupport("RUST");
-		const mixed = getLanguageSupport("Rust");
+		const { loadLanguageSupport } = await import("../editor/languageRegistry");
+		const lower = await loadLanguageSupport("rust");
+		const upper = await loadLanguageSupport("RUST");
+		const mixed = await loadLanguageSupport("Rust");
 		expect(lower).not.toBeNull();
 		expect(upper).toBe(lower);
 		expect(mixed).toBe(lower);
+	});
+
+	it("peekLanguageSupport is null until the grammar has loaded, then returns it", async () => {
+		const { loadLanguageSupport, peekLanguageSupport } = await import("../editor/languageRegistry");
+		expect(peekLanguageSupport("python")).toBeNull();
+		const loaded = await loadLanguageSupport("python");
+		expect(loaded).not.toBeNull();
+		expect(peekLanguageSupport("python")).toBe(loaded);
+		expect(peekLanguageSupport("PYTHON")).toBe(loaded);
+	});
+
+	it("concurrent loads of one language share a single load", async () => {
+		const { loadLanguageSupport } = await import("../editor/languageRegistry");
+		const a = loadLanguageSupport("go");
+		const b = loadLanguageSupport("GO");
+		expect(b).toBe(a);
+		expect(await a).toBe(await b);
+	});
+
+	it("hasLanguageSupport answers without loading anything", async () => {
+		const { hasLanguageSupport, peekLanguageSupport } = await import("../editor/languageRegistry");
+		expect(hasLanguageSupport("rust")).toBe(true);
+		expect(hasLanguageSupport("toString")).toBe(false);
+		expect(hasLanguageSupport("shell")).toBe(false);
+		expect(peekLanguageSupport("rust")).toBeNull();
 	});
 });
 
