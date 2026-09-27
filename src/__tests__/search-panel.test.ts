@@ -34,8 +34,7 @@ vi.mock("../utils/notifications", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────
 import { sessionReducer, initialState } from "../state/SessionContext";
 import { highlightMatch, formatResultCount, debounce } from "../components/SearchPanel";
-import { SHORTCUT_GROUPS } from "../components/ShortcutsPanel";
-import { translate } from "../i18n/registry";
+import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import type { SearchMatch, SearchFileResult, SearchResponse } from "../types/git";
 
 // ─── highlightMatch ──────────────────────────────────────────────────
@@ -391,24 +390,23 @@ describe("Initial state includes search", () => {
 // ─── ShortcutsPanel accuracy ─────────────────────────────────────────
 
 describe("ShortcutsPanel accuracy", () => {
-  const allShortcuts = SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
+  // The panel's data is generated from src-tauri/src/menu/mod.rs (see
+  // scripts/generate-shortcuts.mjs) — these checks guard the real menu
+  // definition, not a hand-maintained list that can drift from it.
+  const allShortcuts = GENERATED_SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
   const findShortcut = (keys: string) => allShortcuts.find((s) => s.keys === keys);
 
-  it("{mod}{shift}F is mapped to Search in Folder, not Flow Mode", () => {
+  it("{mod}{shift}F is mapped to Search Panel, not Flow Mode", () => {
     const s = findShortcut("{mod}{shift}F");
     expect(s).toBeDefined();
-    // Shortcuts carry i18n keys now — assert the key, then resolve it
-    // through the English base pack to guard the visible label.
-    expect(s!.actionKey).toBe("shortcuts.searchInFolder");
-    expect(translate(s!.actionKey)).toBe("Search in Folder");
-    expect(translate(s!.actionKey)).not.toContain("Flow");
+    expect(s!.label).toBe("Search Panel");
+    expect(s!.label).not.toContain("Flow");
   });
 
-  it("{mod}{shift}Z is mapped to Toggle Flow Mode", () => {
+  it("{mod}{shift}Z is mapped to Flow Mode", () => {
     const s = findShortcut("{mod}{shift}Z");
     expect(s).toBeDefined();
-    expect(s!.actionKey).toBe("shortcuts.toggleFlowMode");
-    expect(translate(s!.actionKey)).toBe("Toggle Flow Mode");
+    expect(s!.label).toBe("Flow Mode");
   });
 
   it("left-panel tabs are listed ({mod}P, {mod}G, {mod}F)", () => {

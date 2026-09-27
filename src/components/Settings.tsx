@@ -25,7 +25,8 @@ import {
 } from "../api/settings";
 import { listSshSavedHosts, upsertSshSavedHost, deleteSshSavedHost, type SshSavedHost } from "../api/ssh";
 import { setAnalyticsEnabled } from "../utils/analytics";
-import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
+import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
+import { visibleShortcutGroups } from "../utils/shortcuts";
 import { PluginManager } from "./PluginManager";
 import { useI18n } from "../i18n/I18nProvider";
 import {
@@ -568,12 +569,12 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 <p className="settings-hint">
                   {t("settings.shortcutsHint")}
                 </p>
-                {SHORTCUT_GROUPS.map((group) => (
-                  <div key={group.labelKey} className="settings-shortcut-group">
-                    <div className="settings-shortcut-group-label">{t(group.labelKey)}</div>
+                {visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS).map((group) => (
+                  <div key={group.group} className="settings-shortcut-group">
+                    <div className="settings-shortcut-group-label">{group.group}</div>
                     {group.shortcuts.map((s) => (
-                      <div key={s.keys} className="settings-shortcut-row">
-                        <span className="settings-shortcut-action">{t(s.actionKey)}</span>
+                      <div key={s.id} className="settings-shortcut-row">
+                        <span className="settings-shortcut-action">{s.label}</span>
                         <kbd className="settings-shortcut-kbd">{fmt(s.keys)}</kbd>
                       </div>
                     ))}

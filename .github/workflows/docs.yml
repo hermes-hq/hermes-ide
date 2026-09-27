@@ -1,0 +1,72 @@
+name: Docs
+
+# The main CI workflow ignores **.md changes, so a docs-only change (README,
+# docs/**) would otherwise never run any check. These two gates are cheap and
+# fast, so they get their own workflow scoped to the files they cover instead
+# of being folded into ci.yml's path filters.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "src/components/ShortcutsPanel.tsx"
+      - "src/components/Settings.tsx"
+      - "src/generated/shortcuts.ts"
+      - "src/utils/shortcuts.ts"
+      - "src-tauri/src/menu/mod.rs"
+      - "scripts/generate-shortcuts.mjs"
+      - "scripts/check-readme-claims.mjs"
+      - "e2e/acceptance.yml"
+      - "e2e/app/scenarios/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "src/components/ShortcutsPanel.tsx"
+      - "src/components/Settings.tsx"
+      - "src/generated/shortcuts.ts"
+      - "src/utils/shortcuts.ts"
+      - "src-tauri/src/menu/mod.rs"
+      - "scripts/generate-shortcuts.mjs"
+      - "scripts/check-readme-claims.mjs"
+      - "e2e/acceptance.yml"
+      - "e2e/app/scenarios/**"
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── The shortcuts panel and docs/shortcuts.md must match the real menu ──
+  shortcuts:
+    name: Shortcuts stay generated
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Regenerate and compare
+        run: node scripts/generate-shortcuts.mjs --check
+
+  # ── Every tagged README claim must map to a real, tracked scenario ──────
+  readme-claims:
+    name: README claims map to scenarios
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Check README claims
+        run: node scripts/check-readme-claims.mjs

@@ -1,0 +1,22 @@
+# README claims ledger: which real-app scenario proves which README claim.
+#
+# `node scripts/check-readme-claims.mjs` reads this file, README.md and
+# e2e/acceptance.yml, and fails when:
+#   - a line in README.md is tagged `<!-- claim:<id> -->` but has no entry here
+#   - a claim here has no matching tagged line in README.md, or its `text` is
+#     not found in that line (the map has drifted from what README.md says)
+#   - a claim names no scenario, or names one that e2e/acceptance.yml does not
+#     reference from any feature's criteria, or that does not exist under
+#     e2e/app/scenarios/
+#
+# Not every line in the README needs an entry: only a bullet the maintainer
+# has tagged with `<!-- claim:<id> -->` right after it is checked. That keeps
+# ordinary prose free while making it impossible to add a new tagged claim
+# without deciding, right there, which scenario proves it.
+#
+# To add one: tag the bullet, e.g.
+#   - **Multi-session terminals** — ... <!-- claim:multi-session -->
+# then add an entry below naming the same id, a distinctive substring of the
+# line, and the scenario file that proves it.
+
+claims:
