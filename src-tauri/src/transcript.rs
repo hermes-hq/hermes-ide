@@ -97,7 +97,9 @@ fn find_transcript_file_in(
     // The shell may report a path through a symlink (macOS `/tmp` is
     // `/private/tmp`); Claude Code names the folder after the resolved path.
     let mut candidates = vec![working_directory.to_string()];
-    if let Ok(resolved) = std::fs::canonicalize(working_directory) {
+    // `dunce` keeps Windows paths in their plain `C:\...` form; the
+    // `\\?\C:\...` form std returns would never match Claude Code's folder.
+    if let Ok(resolved) = dunce::canonicalize(working_directory) {
         let resolved = resolved.to_string_lossy().to_string();
         if resolved != working_directory {
             candidates.push(resolved);
@@ -503,6 +505,30 @@ mod tests {
         );
         assert_eq!(
             find_transcript_file_in(&projects, &link.to_string_lossy()),
+            Some(t)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolved_directory_matches_claude_folder() {
+        // Temp folders are often reported in 8.3 short form
+        // (`C:\Users\RUNNER~1\...`); Claude Code names the folder after the
+        // long, plain `C:\...` path, never the `\\?\` form.
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real-project");
+        fs::create_dir_all(&real).unwrap();
+        let resolved = dunce::canonicalize(&real).unwrap();
+        assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+
+        let projects = root.path().join("projects");
+        let t = write_jsonl(
+            &projects.join(claude_project_dir_name(&resolved.to_string_lossy())),
+            "t.jsonl",
+            1,
+        );
+        assert_eq!(
+            find_transcript_file_in(&projects, &real.to_string_lossy()),
             Some(t)
         );
     }
