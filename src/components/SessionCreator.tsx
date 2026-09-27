@@ -132,6 +132,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [defaultAiProvider, setDefaultAiProvider] = useState<string | null>(null);
   const [defaultAiProviderLoaded, setDefaultAiProviderLoaded] = useState(false);
   const defaultProviderAppliedRef = useRef(false);
+  // The local choice (agent + Terminal / Agent view) in place when the user
+  // opened the SSH form, so Back from it restores that choice.
+  const beforeSshRef = useRef<{ mode: SessionCreatorMode; aiProvider: string | null }>({ mode: "terminal", aiProvider: null });
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [allProjects, setAllProjects] = useState<ProjectOrdered[]>([]);
@@ -311,8 +314,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     const idx = orderedSteps.indexOf(step);
     if (idx > 0) {
       const prev = orderedSteps[idx - 1];
-      // Leaving the SSH form for the agent step returns to a local session.
-      if (prev === "ai" && mode === "ssh") setMode("terminal");
+      // Leaving the SSH form for the agent step returns to the local session
+      // the user had picked before opening it (agent and Terminal / Agent view).
+      if (prev === "ai" && mode === "ssh") {
+        const before = beforeSshRef.current;
+        setMode(before.mode);
+        setAiProvider(before.aiProvider);
+      }
       setStep(prev);
     }
   }, [step, orderedSteps, mode]);
@@ -655,6 +663,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   );
 
   const knownProviderIds = useMemo(() => AI_PROVIDERS.map((p) => p.id), []);
+
+  // Keep the keyboard highlight on the chosen agent when the choice changes
+  // without a click (the saved default arrives after the first render), so
+  // only one card looks selected.
+  useEffect(() => {
+    setHighlightedProviderIndex(enabledProviders.indexOf(aiProvider as (typeof enabledProviders)[number]));
+  }, [aiProvider, enabledProviders]);
 
   // Load the per-agent Terminal / Agent view choice once on mount.
   useEffect(() => {
@@ -1456,7 +1471,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <button
                 type="button"
                 className="session-creator-ssh-link"
-                onClick={() => { setMode("ssh"); setStep("ssh"); }}
+                onClick={() => { beforeSshRef.current = { mode, aiProvider }; setMode("ssh"); setStep("ssh"); }}
               >
                 {t("session.connectSsh")}
               </button>

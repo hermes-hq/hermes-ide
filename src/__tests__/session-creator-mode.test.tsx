@@ -222,4 +222,27 @@ describe("SessionCreator — terminal first", () => {
     expect(screen.getByText("What do you want to run?")).toBeInTheDocument();
     expect(onCreate).not.toHaveBeenCalled();
   });
+
+  it("Back from the SSH form keeps the agent and Agent view choice picked before", async () => {
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    fireEvent.click(agentViewCheckbox()!);
+    fireEvent.click(screen.getByRole("button", { name: "Connect over SSH" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(providerCard("Claude")).toHaveClass("selected");
+    expect(agentViewCheckbox()!.checked).toBe(true);
+    await finishWizard();
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "claude", mode: "agent" });
+  });
+
+  it("only the preselected agent is highlighted when the creator opens", async () => {
+    settingsStore.set("last_ai_provider", "claude");
+    await openCreator();
+    await waitFor(() => expect(providerCard("Claude")).toHaveClass("selected"));
+    const highlighted = screen
+      .getAllByRole("button")
+      .filter((b) => b.classList.contains("session-creator-provider-card") && b.classList.contains("selected"));
+    expect(highlighted).toEqual([providerCard("Claude")]);
+  });
 });
