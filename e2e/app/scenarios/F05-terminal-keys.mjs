@@ -299,6 +299,8 @@ try {
       (taken.length ? ` — NOT: ${taken.map((v) => v.key).join(", ")}` : ""),
   );
   assert(final.join(" ") === expected.join(" "), "the program received exactly those bytes, nothing extra");
+  log("  terminal content:");
+  for (const l of ((await bridge.readTerminal(sessionId)) ?? []).slice(-6)) log(`    | ${l}`);
   await bridge.screenshot(join(evidenceDir, "01-ctrl-letters-reached-the-program.png"));
 
   // ── 5. The Shortcuts panel shows this platform's chords ──────────
