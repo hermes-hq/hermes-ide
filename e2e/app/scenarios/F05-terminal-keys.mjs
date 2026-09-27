@@ -27,7 +27,7 @@
 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 import { osKeysAvailable, pressChords } from "../os-keys.mjs";
 
@@ -55,9 +55,9 @@ function assert(condition, message) {
 }
 
 /**
- * A `hermeskeylog` command in `dir`, a folder this scenario owns and puts on
- * the app's PATH, so typing "hermeskeylog" in a Hermes terminal starts the
- * keylogger writing to `out`. Nothing is written to the real home folder.
+ * A `hermeskeylog` command in `dir`, a folder this scenario owns, so running
+ * it from a Hermes terminal starts the keylogger writing to `out`. Nothing is
+ * written to the real home folder (the rig uses the real one on Windows).
  */
 function installKeyloggerCommand(dir, out) {
   const script = join(REPO_ROOT, "e2e", "app", "fixtures", "keylogger.mjs");
@@ -213,12 +213,9 @@ try {
 
   commandDir = mkdtempSync(join(tmpdir(), "hermes-f05-"));
   installKeyloggerCommand(commandDir, keylog);
-  // Windows spells it "Path"; override the variable under the name it has.
-  const pathVar = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
-  const env = { [pathVar]: `${commandDir}${delimiter}${process.env[pathVar] ?? ""}` };
 
   log("step 1: launch the test app");
-  app = await launchApp({ runDir: join(evidenceDir, "run"), log, home: process.env.HERMES_E2E_HOME || undefined, env });
+  app = await launchApp({ runDir: join(evidenceDir, "run"), log, home: process.env.HERMES_E2E_HOME || undefined });
   const { bridge } = app;
 
   if (EMULATE) {
@@ -275,7 +272,11 @@ try {
     return info && info.opened && lines.some((l) => l.trim().length > 0);
   `, { timeoutMs: 30_000 });
   await sleep(1000);
-  await bridge.typeInTerminal(sessionId, "hermeskeylog\n");
+  // cd into the command's folder first: the shell may not keep a PATH the
+  // app was started with (PowerShell on Windows rebuilds it).
+  const runKeylogger =
+    platform() === "win32" ? `cd "${commandDir}"; .\\hermeskeylog\n` : `cd '${commandDir}' && ./hermeskeylog\n`;
+  await bridge.typeInTerminal(sessionId, runKeylogger);
   await bridge.waitForTerminal(sessionId, /^KEYLOG READY/, { timeoutMs: 20_000 });
   log("  keylogger is running");
   const start = await bridge.eval(FINGERPRINT);
@@ -401,7 +402,6 @@ try {
     log(`  (could not capture failure evidence: ${inner.message})`);
   }
 } finally {
-  if (commandDir) rmSync(commandDir, { recursive: true, force: true });
   if (app) {
     log("step 7: quit the app");
     const exit = await app.stop();
@@ -409,6 +409,14 @@ try {
     if (!failed && (exit.forced || exit.code !== 0)) {
       failed = true;
       log("FAILED: the app did not quit cleanly");
+    }
+  }
+  // After the app (and its shells, which sat in this folder) are gone.
+  if (commandDir) {
+    try {
+      rmSync(commandDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (err) {
+      log(`  (could not remove ${commandDir}: ${err.message})`);
     }
   }
 }
