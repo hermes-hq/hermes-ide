@@ -1183,8 +1183,9 @@ mod tests {
             "feat/shared",
             None
         ));
-        // Another session asking for the same branch gets the existing
-        // worktree back, so it needs no space either.
+        // Another session asking for the same branch creates no folder (it
+        // is refused with BRANCH_IN_USE, or links the existing checkout if
+        // the user chooses to reuse it), so it needs no space either.
         assert!(would_reuse_existing_worktree(
             app_data.path(),
             repo_path,
@@ -1192,7 +1193,7 @@ mod tests {
             "feat/shared",
             None
         ));
-        let shared = create_worktree(
+        let err = create_worktree(
             app_data.path(),
             repo_path,
             "sessionB2",
@@ -1200,8 +1201,8 @@ mod tests {
             false,
             None,
         )
-        .unwrap();
-        assert!(shared.is_shared);
+        .unwrap_err();
+        assert!(parse_branch_in_use_error(&err).is_some());
         // A branch nobody has checked out needs a new folder.
         assert!(!would_reuse_existing_worktree(
             app_data.path(),
