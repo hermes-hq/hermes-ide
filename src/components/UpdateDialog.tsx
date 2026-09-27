@@ -8,6 +8,8 @@ interface UpdateDialogProps {
   onDownload: () => void;
   onCancel: () => void;
   onInstall: () => void;
+  /** Force-installs even while sessions are busy ("Relaunch now" override). */
+  onRelaunchNow: () => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -17,11 +19,13 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall }: UpdateDialogProps) {
+export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall, onRelaunchNow }: UpdateDialogProps) {
   if (!state.available || state.dismissed) return null;
 
   const showByteProgress = state.downloading && state.totalBytes > 0;
   const isBusy = state.downloading || state.installing;
+  // Sessions are working — the updater waits instead of relaunching (N10).
+  const waitingForAgents = state.ready && state.busySessionCount > 0 && !state.installing;
 
   return (
     <div className="update-dialog-backdrop" onClick={isBusy ? undefined : onDismiss}>
@@ -59,7 +63,14 @@ export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall
           </div>
         )}
 
-        {state.ready && !state.error && (
+        {state.ready && !state.error && waitingForAgents && (
+          <div className="update-dialog-ready update-dialog-waiting">
+            Update ready, waiting for {state.busySessionCount} working agent
+            {state.busySessionCount === 1 ? "" : "s"}
+          </div>
+        )}
+
+        {state.ready && !state.error && !waitingForAgents && (
           <div className="update-dialog-ready">
             Download complete. Click below to install and restart.
           </div>
@@ -89,7 +100,14 @@ export function UpdateDialog({ state, onDismiss, onDownload, onCancel, onInstall
             </button>
           )}
 
-          {state.ready ? (
+          {state.ready && waitingForAgents ? (
+            <button
+              className="update-dialog-btn update-dialog-btn-primary"
+              onClick={onRelaunchNow}
+            >
+              Relaunch now
+            </button>
+          ) : state.ready ? (
             <button
               className="update-dialog-btn update-dialog-btn-primary"
               onClick={onInstall}

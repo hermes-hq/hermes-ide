@@ -116,6 +116,10 @@
   margin-bottom: 12px;
 }
 
+.update-dialog-waiting {
+  color: var(--yellow);
+}
+
 .update-dialog-actions {
   display: flex;
   gap: var(--space-2);
