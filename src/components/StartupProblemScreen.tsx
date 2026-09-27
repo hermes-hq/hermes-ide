@@ -1,7 +1,8 @@
 import "../styles/components/StartupProblemScreen.css";
+import { useEffect, useState } from "react";
 import type { StartupProblem } from "../api/startupProblem";
 import { languagePacks } from "../i18n/packs";
-import { getStoredUiLanguage, translateIn } from "../i18n/registry";
+import { getStoredUiLanguage, translateIn, type LanguagePack } from "../i18n/registry";
 
 interface StartupProblemScreenProps {
 	problem: StartupProblem;
@@ -21,10 +22,25 @@ const KEY_PREFIX: Record<StartupProblem["kind"], string> = {
  * Shown instead of the workspace when Hermes could not open its data.
  * Nothing else starts in this state, so the data stays exactly as it was.
  * Plugins (and with them the language packs) never register here, so the
- * text is translated straight from the built-in packs.
+ * text is translated straight from the built-in packs (English until the
+ * picked language's pack has loaded).
  */
 export function StartupProblemScreen({ problem, onQuit, locale = getStoredUiLanguage() }: StartupProblemScreenProps) {
-	const pack = languagePacks.find((p) => p.locale.toLowerCase() === locale.toLowerCase());
+	const [pack, setPack] = useState<LanguagePack | undefined>(undefined);
+	useEffect(() => {
+		const entry = languagePacks.find((p) => p.locale.toLowerCase() === locale.toLowerCase());
+		let live = true;
+		setPack(undefined);
+		entry
+			?.load()
+			.then((loaded) => {
+				if (live) setPack(loaded);
+			})
+			.catch(() => {});
+		return () => {
+			live = false;
+		};
+	}, [locale]);
 	const t = (key: string, values?: Record<string, string | number>) => translateIn(pack, key, values);
 	const prefix = KEY_PREFIX[problem.kind] as string | undefined;
 	const values = {

@@ -45,9 +45,10 @@ describe("StartupProblemScreen", () => {
 		expect(onQuit).toHaveBeenCalledTimes(1);
 	});
 
-	it("speaks the language the user picked, even though plugins never load here", () => {
+	it("speaks the language the user picked, even though plugins never load here", async () => {
 		localStorage.setItem("hermes.ui_language", "de");
 		render(<StartupProblemScreen problem={newerData} onQuit={() => {}} />);
+		await screen.findByRole("button", { name: "Hermes beenden" });
 		const dialog = screen.getByRole("alertdialog");
 		expect(dialog).toHaveAccessibleName("Deine Daten stammen aus einer neueren Version von Hermes");
 		expect(dialog).toHaveAccessibleDescription(/Datenversion 7; diese Version versteht bis 1/);
@@ -61,7 +62,7 @@ describe("StartupProblemScreen", () => {
 		expect(screen.getByRole("alertdialog")).toHaveAccessibleName("Your data is from a newer version of Hermes");
 	});
 
-	it("names the failed step and the underlying error when an update fails", () => {
+	it("names the failed step and the underlying error when an update fails", async () => {
 		const failed: StartupProblem = {
 			kind: "migration-failed",
 			title: "Hermes could not update your data",
@@ -73,6 +74,7 @@ describe("StartupProblemScreen", () => {
 			detail: "disk I/O error",
 		};
 		render(<StartupProblemScreen problem={failed} onQuit={() => {}} locale="ja" />);
+		await screen.findByRole("alertdialog", { name: "Hermes はデータを更新できませんでした" });
 		const dialog = screen.getByRole("alertdialog");
 		expect(dialog).toHaveAccessibleName("Hermes はデータを更新できませんでした");
 		expect(dialog).toHaveAccessibleDescription(/ステップ 2: add_widgets.*disk I\/O error/);
