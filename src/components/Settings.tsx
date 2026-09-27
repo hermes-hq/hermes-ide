@@ -55,10 +55,6 @@ import {
 // ║                                                                        ║
 // ║  Plugin settings are stored separately (plugin_storage table) and are  ║
 // ║  NOT included in app settings export. Plugins manage their own data.   ║
-// ║                                                                        ║
-// ║  The hidden "Flags" tab (feature-flag overrides, unlocked by clicking  ║
-// ║  the title 7 times) is a developer-only surface and is deliberately    ║
-// ║  NOT localized; every other string here goes through t().              ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 interface SettingsProps {
@@ -242,8 +238,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
     { id: "privacy", label: t("settings.privacy") },
-    // Hidden dev section — not localized on purpose, see handleTitleClick.
-    ...(flagsUnlocked ? [{ id: "flags", label: "Flags" }] : []),
+    // Hidden developer section, unlocked by handleTitleClick.
+    ...(flagsUnlocked ? [{ id: "flags", label: t("settings.flags") }] : []),
   ];
 
   return (
@@ -854,10 +850,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
 
             {activeTab === "flags" && flagsUnlocked && (
               <div className="settings-section">
-                <p className="settings-hint">
-                  Hidden developer section. Release channel detected at startup: <strong>{getReleaseChannel()}</strong>.
-                  {" "}Overrides below take effect the next time Hermes launches.
-                </p>
+                <p className="settings-hint">{t("settings.flags.hint", { channel: getReleaseChannel() })}</p>
                 {FEATURE_FLAGS.map((flag) => {
                   const overrides = parseFeatureFlagOverrides(settings[FEATURE_FLAG_OVERRIDES_KEY]);
                   const current = overrides[flag.id];
@@ -868,6 +861,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <span className="settings-hint-inline">{flag.description}</span>
                       <select
                         className="settings-select"
+                        data-flag-id={flag.id}
                         value={selectValue}
                         onChange={(e) => {
                           const next: Partial<Record<FeatureFlagId, boolean>> = { ...overrides };
@@ -876,9 +870,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                           updateSetting(FEATURE_FLAG_OVERRIDES_KEY, JSON.stringify(next));
                         }}
                       >
-                        <option value="default">Default for channel</option>
-                        <option value="on">Force on</option>
-                        <option value="off">Force off</option>
+                        <option value="default">{t("settings.flags.default")}</option>
+                        <option value="on">{t("settings.flags.forceOn")}</option>
+                        <option value="off">{t("settings.flags.forceOff")}</option>
                       </select>
                     </div>
                   );

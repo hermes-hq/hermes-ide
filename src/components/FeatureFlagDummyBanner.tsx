@@ -4,11 +4,13 @@
 // visible surface. Delete this component together with the flag once a
 // real flagged feature exists.
 import { isFeatureFlagEnabled } from "../featureFlags";
+import { useI18n } from "../i18n/I18nProvider";
 
 export function FeatureFlagDummyBanner() {
+  const { t } = useI18n();
   if (!isFeatureFlagEnabled("dummyProofSurface")) return null;
   return (
-    <span className="topbar-flag-badge" title="Feature flag: dummyProofSurface">
+    <span className="topbar-flag-badge" title={t("featureFlags.badgeTitle", { id: "dummyProofSurface" })}>
       FLAG
     </span>
   );

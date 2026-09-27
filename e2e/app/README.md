@@ -70,6 +70,13 @@ header of that file.
    elsewhere.
 3. Run it locally, then let CI prove it on all three runners.
 
+To prove something that only takes effect on the next launch, relaunch the
+app against the same data: pass one `homeDir` to every `launchApp` call on
+macOS and Linux (the scenario owns and deletes that folder), and
+`resetData: false` on every launch after the first on Windows, where the
+data lives under `%APPDATA%` rather than the home folder.
+`scenarios/N07-feature-flags.mjs` does both.
+
 ## CI
 
 The `e2e-app` and `acceptance` jobs in `.github/workflows/ci.yml` build the

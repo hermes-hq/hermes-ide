@@ -96,7 +96,7 @@ features:
         scenarios: [SEC-plugin-identity-two-plugins.mjs]
   N07:
     name: "Feature flags"
-    status: partial
+    status: shipped
     criteria:
       N07-1:
         text: "A flagged feature is invisible on stable and visible on beta"
