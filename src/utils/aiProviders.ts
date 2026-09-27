@@ -138,7 +138,7 @@ export const PERMISSION_MODE_FLAGS: Record<string, Partial<Record<PermissionMode
 	},
 	kiro: {
 		default:           { flag: "", description: "Default behavior — asks before executing tools." },
-		auto:              { flag: "--trust-tools", description: "Trust all tools without confirmation prompts." },
+		auto:              { flag: "--trust-all-tools", description: "Trust all tools without confirmation prompts." },
 	},
 };
 
@@ -246,7 +246,7 @@ const PROVIDER_BINARY: Record<string, string> = {
 	aider: "aider",
 	codex: "codex",
 	copilot: "gh copilot",
-	kiro: "kiro-cli",
+	kiro: "kiro-cli chat",
 };
 
 /**
