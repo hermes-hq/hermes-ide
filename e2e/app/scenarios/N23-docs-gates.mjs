@@ -65,7 +65,7 @@ try {
 
   log("case 2: remove New Tab's accelerator from a copy of the menu");
   const menu = readFileSync(MENU, "utf8");
-  const trimmedMenu = menu.replace(/(with_id\("file\.new-session-tab", "New Tab"\)\s*)\.accelerator\([^\n]*\)\n/, "$1");
+  const trimmedMenu = menu.replace(/(with_id\("file\.new-session-tab", "New Tab"\)\s*)\.accelerator\([^\r\n]*\)\r?\n/, "$1");
   assert(trimmedMenu !== menu, "the copy no longer binds a key to New Tab");
   const menuCopy = join(work, "mod.rs");
   writeFileSync(menuCopy, trimmedMenu);

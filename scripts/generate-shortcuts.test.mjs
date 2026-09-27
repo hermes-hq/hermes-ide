@@ -75,6 +75,12 @@ describe("extractShortcuts", () => {
     expect(ids).not.toContain("other.thing");
   });
 
+  it("reads a CRLF checkout of the menu exactly like an LF one", () => {
+    const crlf = FIXTURE.replace(/\n/g, "\r\n");
+    expect(extractShortcuts(crlf)).toEqual(extractShortcuts(FIXTURE));
+    expect(extractShortcuts(crlf).find((i) => i.id === "edit.send-interrupt").platform).toBe("macos");
+  });
+
   it("assigns each item to the nearest preceding 2-dash menu header", () => {
     const items = extractShortcuts(FIXTURE);
     expect(items.find((i) => i.id === "file.new-session").group).toBe("File");

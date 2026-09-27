@@ -116,8 +116,10 @@ function acceleratorArgument(body) {
  * @param keymap the parsed keymap.json (see parseKeymap), needed when the menu
  *   reads chords through `app_accel("<id>")`.
  */
-export function extractShortcuts(source, keymap = null) {
-  const lines = source.split(/\r?\n/);
+export function extractShortcuts(crlfOrLfSource, keymap = null) {
+  // A Windows checkout can have CRLF endings; offsets below assume "\n".
+  const source = crlfOrLfSource.replace(/\r\n/g, "\n");
+  const lines = source.split("\n");
   const lineStarts = [];
   let offset = 0;
   for (const line of lines) {
