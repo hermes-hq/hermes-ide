@@ -54,6 +54,7 @@ jobs:
       frontend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.frontend == 'true' }}
       rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
       ci: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ci == 'true' }}
+      workflows: ${{ github.event_name != 'pull_request' || steps.filter.outputs.workflows == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -87,6 +88,8 @@ jobs:
               - 'scripts/ci-gate.mjs'
               - 'scripts/stage-bridge-deps.mjs'
               - 'e2e/**'
+            workflows:
+              - '.github/workflows/**'
 
   # ── Dev and test builds never run as the installed app ───────────────
   instance-identifiers:
@@ -101,6 +104,31 @@ jobs:
           node-version: 22
       - name: Dev and e2e configs never use the production identifier
         run: node scripts/check-instance-identifiers.mjs
+
+  # ── Workflow files: syntax, expressions, action inputs ───────────────
+  # Shell snippets are not linted (shellcheck off): this job is about the
+  # workflow files themselves, so an edit to any of them is checked.
+  actionlint:
+    name: Workflow Lint
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/actionlint.tgz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+      - name: Lint every workflow
+        run: '"$RUNNER_TEMP/actionlint" -color -shellcheck= -pyflakes='
 
   # ── Frontend: TypeScript + Tests (merged into one job) ───────────────
   frontend:
@@ -434,21 +462,27 @@ jobs:
   gate:
     name: gate
     if: always()
-    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, instance-identifiers]
+    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, instance-identifiers, actionlint]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 1
-          sparse-checkout: scripts/ci-gate.mjs
+          sparse-checkout: |
+            scripts/ci-gate.mjs
+            .github/workflows/ci.yml
           sparse-checkout-cone-mode: false
+      - name: Every job is gated, with the skip rules the gate expects
+        run: node scripts/ci-gate.mjs --workflow .github/workflows/ci.yml
       - name: Check every required job
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: node scripts/ci-gate.mjs
 
   # ── Rust Security Audit (main only) ─────────────────────────────────
+  # Not in the gate (see UNGATED in scripts/ci-gate.mjs): it runs after merge,
+  # and a newly published advisory must not block unrelated pull requests.
   rust-audit:
     name: Rust Security Audit
     needs: changes

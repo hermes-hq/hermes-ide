@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 // @ts-expect-error — plain ESM script without type declarations
-import { evaluateGate } from "../../scripts/ci-gate.mjs";
+import { evaluateGate, checkWorkflow } from "../../scripts/ci-gate.mjs";
 
 type Needs = Record<string, { result: string; outputs?: Record<string, string> }>;
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/ci-gate.mjs", import.meta.url));
 
-function changes(outputs: Partial<Record<"frontend" | "rust" | "ci", "true" | "false">>) {
-	return { result: "success", outputs: { frontend: "false", rust: "false", ci: "false", ...outputs } };
+function changes(outputs: Partial<Record<"frontend" | "rust" | "ci" | "workflows", "true" | "false">>) {
+	return {
+		result: "success",
+		outputs: { frontend: "false", rust: "false", ci: "false", workflows: "false", ...outputs },
+	};
 }
 
 function allJobs(result: string): Needs {
@@ -20,6 +26,7 @@ function allJobs(result: string): Needs {
 		"rust-test": { result },
 		"e2e-app": { result },
 		acceptance: { result },
+		actionlint: { result },
 		privacy: { result: "success" },
 	};
 }
@@ -125,5 +132,143 @@ describe("CI gate", () => {
 		const passRun = spawnSync(process.execPath, [SCRIPT], { input: JSON.stringify(good), encoding: "utf8" });
 		expect(passRun.status).toBe(0);
 		expect(passRun.stdout).toContain("gate: PASS");
+	});
+});
+
+// A workflow shaped like ci.yml, with every job the gate knows about.
+function workflow(overrides: { gateNeeds?: string; jobs?: Record<string, string> } = {}) {
+	const jobs: Record<string, string> = {
+		changes: `
+    runs-on: ubuntu-24.04
+    outputs:
+      frontend: \${{ steps.filter.outputs.frontend }}
+      rust: \${{ steps.filter.outputs.rust }}
+      ci: \${{ steps.filter.outputs.ci }}
+      workflows: \${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@v6
+        if: github.event_name == 'pull_request'`,
+		actionlint: `
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'`,
+		frontend: `
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.ci == 'true'`,
+		"rust-fmt": `
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
+		"rust-clippy": `
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
+		"rust-test": `
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' # comment`,
+		"e2e-app": `
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
+		acceptance: `
+    needs: [changes, e2e-app]
+    if: >-
+      always()
+      && needs.changes.result == 'success'
+      && (needs.changes.outputs.frontend == 'true'
+          || needs.changes.outputs.rust == 'true'
+          || needs.changes.outputs.ci == 'true')`,
+		privacy: `
+    runs-on: ubuntu-24.04`,
+		"rust-audit": `
+    needs: changes
+    if: github.event_name == 'push'`,
+		...overrides.jobs,
+	};
+	const gateNeeds =
+		overrides.gateNeeds ?? "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy";
+	const body = Object.entries(jobs)
+		.filter(([, text]) => text !== "")
+		.map(([id, text]) => `  ${id}:${text}\n`)
+		.join("\n");
+	return `name: CI\non:\n  pull_request:\njobs:\n${body}\n  gate:\n    if: always()\n    needs: [${gateNeeds}]\n`;
+}
+
+describe("CI gate: workflow and gate agree", () => {
+	it("accepts a workflow whose jobs and skip rules match the gate", () => {
+		const { ok, lines } = checkWorkflow(workflow());
+		expect(lines.filter((l: string) => l.startsWith("FAIL"))).toEqual([]);
+		expect(ok).toBe(true);
+	});
+
+	it("fails when a job is added to the workflow but not to gate.needs", () => {
+		const { ok, lines } = checkWorkflow(workflow({ jobs: { "new-job": "\n    runs-on: ubuntu-24.04" } }));
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/new-job: not in gate.needs/);
+	});
+
+	it("fails when a gated job skips on fewer changes than the gate expects", () => {
+		const narrower = "\n    needs: changes\n    if: needs.changes.outputs.rust == 'true'";
+		const { ok, lines } = checkWorkflow(workflow({ jobs: { "rust-test": narrower } }));
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/rust-test: runs when rust changed, but ci-gate.mjs expects rust\/ci/);
+	});
+
+	it("fails when a gated job has a condition the gate cannot model", () => {
+		const odd = "\n    needs: changes\n    if: github.event_name == 'push' && needs.changes.outputs.rust == 'true'";
+		const { ok, lines } = checkWorkflow(workflow({ jobs: { "rust-fmt": odd } }));
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/rust-fmt: .*not a plain OR/);
+	});
+
+	it("fails when an always-required job gains a condition", () => {
+		const { ok, lines } = checkWorkflow(workflow({ jobs: { privacy: "\n    if: github.event_name == 'push'" } }));
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/privacy: has `if:/);
+	});
+
+	it("fails when gate.needs names a job that does not exist, or a known job is removed", () => {
+		const extra = checkWorkflow(workflow({ gateNeeds: "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, ghost" }));
+		expect(extra.ok).toBe(false);
+		expect(extra.lines.join("\n")).toMatch(/ghost/);
+
+		const removed = checkWorkflow(workflow({ jobs: { actionlint: "" } }));
+		expect(removed.ok).toBe(false);
+		expect(removed.lines.join("\n")).toMatch(/actionlint: listed in ci-gate.mjs but not a job/);
+	});
+
+	it("fails when a trigger is not an output of the changes job", () => {
+		const changesWithout = `
+    outputs:
+      frontend: x
+      rust: x
+      ci: x`;
+		const { ok, lines } = checkWorkflow(workflow({ jobs: { changes: changesWithout } }));
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/actionlint: trigger `workflows` is not an output/);
+	});
+
+	it("fails when an ungated job is put in the gate, or the gate does not always run", () => {
+		const gated = checkWorkflow(
+			workflow({ gateNeeds: "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, rust-audit" }),
+		);
+		expect(gated.ok).toBe(false);
+		expect(gated.lines.join("\n")).toMatch(/rust-audit: listed as UNGATED/);
+
+		const notAlways = checkWorkflow(workflow().replace("    if: always()\n    needs: [", "    needs: ["));
+		expect(notAlways.ok).toBe(false);
+		expect(notAlways.lines.join("\n")).toMatch(/gate: must have `if: always\(\)`/);
+	});
+
+	it("the CLI's --workflow mode exits non-zero on a drifted workflow and zero on a matching one", () => {
+		const dir = mkdtempSync(join(tmpdir(), "ci-gate-"));
+		const good = join(dir, "good.yml");
+		const bad = join(dir, "bad.yml");
+		writeFileSync(good, workflow());
+		writeFileSync(bad, workflow({ jobs: { "new-job": "\n    runs-on: ubuntu-24.04" } }));
+
+		const passRun = spawnSync(process.execPath, [SCRIPT, "--workflow", good], { encoding: "utf8" });
+		expect(passRun.status).toBe(0);
+		expect(passRun.stdout).toContain("workflow: gate and jobs agree");
+
+		const failRun = spawnSync(process.execPath, [SCRIPT, "--workflow", bad], { encoding: "utf8" });
+		expect(failRun.status).toBe(1);
+		expect(failRun.stdout).toContain("new-job: not in gate.needs");
 	});
 });
