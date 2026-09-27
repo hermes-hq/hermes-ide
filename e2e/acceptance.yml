@@ -36,3 +36,12 @@ features:
       N01-4:
         text: "A feature marked shipped with no green scenario on all three OSes fails the release gate"
         scenarios: [N01-acceptance-gate.mjs]
+  N02:
+    name: "Hermes instances never clobber each other"
+    status: partial
+    criteria:
+      N02-1:
+        # Uses lsof to read which files each build has open, so not on Windows.
+        text: "A test build pointed at the installed app's data folder refuses to start; two builds side by side leave each other's and the installed app's files alone"
+        scenarios:
+          - "N02-instance-isolation.mjs@darwin,linux"

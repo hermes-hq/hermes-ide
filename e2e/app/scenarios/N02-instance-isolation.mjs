@@ -33,8 +33,10 @@ import {
 } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appBinaryPath, createLogger, launchApp, outDir, sleep } from "../harness.mjs";
+import { appBinaryPath, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
+const SCENARIO = "N02-instance-isolation";
+const startedAt = Date.now();
 const PRODUCTION_IDENTIFIER = "com.hermes-ide.terminal";
 const REFUSAL_EXIT_CODE = 78;
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", "N02-instance-isolation");
@@ -380,5 +382,4 @@ try {
   if (basename(scratch).startsWith("hermes-n02-")) rmSync(scratch, { recursive: true, force: true });
 }
 
-log(failed ? "RESULT: FAIL" : "RESULT: PASS");
-process.exit(failed ? 1 : 0);
+finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

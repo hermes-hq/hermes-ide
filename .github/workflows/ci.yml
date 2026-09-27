@@ -315,6 +315,7 @@ jobs:
             set -e
             node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
+            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs
           '
 
       - name: Run scenarios
@@ -326,6 +327,7 @@ jobs:
           export CARGO_TERM_COLOR=never
           node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
+          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs
 
       - name: Upload evidence
         if: always()
@@ -428,7 +430,7 @@ jobs:
   gate:
     name: gate
     if: always()
-    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy]
+    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, instance-identifiers]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
