@@ -1071,6 +1071,17 @@ pub fn create_session(
                         break;
                     }
                     Ok(n) => {
+                        // Session was closed but something still holds the PTY
+                        // open (e.g. a TUI that ignored SIGHUP).  Stop reading so
+                        // we never re-announce a closed session; exiting also
+                        // drops our master fd so the kernel hangs up the PTY.
+                        if session_clone
+                            .lock()
+                            .map(|s| s.phase == SessionPhase::Destroyed)
+                            .unwrap_or(false)
+                        {
+                            break;
+                        }
                         let data = &buf[..n];
 
                         // Declare outside analyzer lock scope so DB work can
@@ -1103,7 +1114,7 @@ pub fn create_session(
 
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_clone.lock() {
-                                    if s.phase != new_phase {
+                                    if s.phase.can_transition_to(&new_phase) {
                                         s.phase = new_phase.clone();
                                         s.last_activity_at = now();
                                         s.detected_agent = a.detected_agent.clone();
@@ -1133,20 +1144,14 @@ pub fn create_session(
                             // is the lightweight field that actually changed.
                             if a.detected_agent.is_some() {
                                 if let Ok(mut s) = session_clone.lock() {
-                                    if s.detected_agent.is_none() {
+                                    if agent_model_needs_emit(&s.detected_agent, &a.detected_agent)
+                                    {
+                                        if s.detected_agent.is_none() {
+                                            s.last_activity_at = now();
+                                        }
                                         s.detected_agent = a.detected_agent.clone();
-                                        s.last_activity_at = now();
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
-                                    } else if let (Some(ref sa), Some(ref aa)) =
-                                        (&s.detected_agent, &a.detected_agent)
-                                    {
-                                        // Model enrichment: agent detected but model was unknown, now resolved
-                                        if sa.model.is_none() && aa.model.is_some() {
-                                            s.detected_agent = a.detected_agent.clone();
-                                            let update = SessionUpdate::from(&*s);
-                                            let _ = app_clone.emit("session-updated", &update);
-                                        }
                                     }
                                 }
                             }
@@ -1535,7 +1540,7 @@ pub fn create_session(
                 if let Some((new_phase, detected_agent, metrics, launch_info)) = silence_result {
                     if let Some(new_phase) = new_phase {
                         if let (Some(metrics), Ok(mut s)) = (metrics, session_silence.lock()) {
-                            if s.phase != new_phase {
+                            if s.phase.can_transition_to(&new_phase) {
                                 s.phase = new_phase.clone();
                                 s.detected_agent = detected_agent;
                                 s.metrics = metrics;
@@ -1735,33 +1740,47 @@ pub fn write_to_session(
     if let Ok(mut a) = session.analyzer.lock() {
         a.mark_input_sent();
 
-        let text = String::from_utf8_lossy(&bytes);
-        let is_enter = text.contains('\r') || text.contains('\n');
+        // While a TUI owns the screen (vim, less, htop, claude, etc.) the
+        // line buffer must stay quiescent. Keystrokes typed at a TUI are
+        // application input, not shell commands, and recording them would
+        // pollute the execution-node stream and feed garbage into the
+        // command-prediction system (issue #172).
+        if !a.in_alternate_screen {
+            let text = String::from_utf8_lossy(&bytes);
+            let is_enter = text.contains('\r') || text.contains('\n');
 
-        // Accumulate printable chars into the line buffer
-        for ch in text.chars() {
-            if ch == '\r' || ch == '\n' {
-                // Enter pressed — commit the accumulated line
-                continue;
-            } else if ch == '\x7f' || ch == '\x08' {
-                // Backspace — pop last char
-                a.input_line_buffer.pop();
-            } else if ch == '\x03' {
-                // Ctrl+C — clear buffer
-                a.input_line_buffer.clear();
-            } else if !ch.is_control() {
-                a.input_line_buffer.push(ch);
+            // Accumulate printable chars into the line buffer
+            for ch in text.chars() {
+                if ch == '\r' || ch == '\n' {
+                    // Enter pressed — commit the accumulated line
+                    continue;
+                } else if ch == '\x7f' || ch == '\x08' {
+                    // Backspace — pop last char
+                    a.input_line_buffer.pop();
+                } else if ch == '\x03' {
+                    // Ctrl+C — clear buffer
+                    a.input_line_buffer.clear();
+                } else if !ch.is_control() {
+                    a.input_line_buffer.push(ch);
+                }
             }
-        }
 
-        if is_enter && !a.input_line_buffer.is_empty() {
-            let line = a.input_line_buffer.drain(..).collect::<String>();
-            a.mark_input_line(&line);
-            let cwd = a.current_cwd.clone().unwrap_or_default();
-            a.start_node(&cwd);
-        } else if is_enter {
-            // Enter with empty buffer — still mark activity
-            a.input_line_buffer.clear();
+            if is_enter && !a.input_line_buffer.is_empty() {
+                let line = a.input_line_buffer.drain(..).collect::<String>();
+                a.mark_input_line(&line);
+                let cwd = a.current_cwd.clone().unwrap_or_default();
+                a.start_node(&cwd);
+            } else if is_enter {
+                // Enter with empty buffer — still mark activity
+                a.input_line_buffer.clear();
+            }
+        } else {
+            // Defensive: a TUI may launch mid-line. Any half-typed shell
+            // command in the buffer at that point isn't a real command —
+            // drop it so we don't commit it on the next post-TUI Enter.
+            if !a.input_line_buffer.is_empty() {
+                a.input_line_buffer.clear();
+            }
         }
     }
 
@@ -2013,6 +2032,17 @@ pub fn resize_session(
     }
 
     Ok(())
+}
+
+/// Whether the analyzer's agent info should be pushed to the session and
+/// emitted: first detection, or any model change (None→Some and Some(a)→Some(b),
+/// e.g. `/model sonnet` → `/model opus`).
+fn agent_model_needs_emit(current: &Option<AgentInfo>, detected: &Option<AgentInfo>) -> bool {
+    match (current, detected) {
+        (None, Some(_)) => true,
+        (Some(cur), Some(new)) => new.model.is_some() && cur.model != new.model,
+        _ => false,
+    }
 }
 
 /// Drain the DB-side state for `session_id`: mark the session as
@@ -3620,5 +3650,47 @@ mod tests {
             count, 0,
             "agent-session pin must be cleaned (Bug 1 regression)"
         );
+    }
+
+    // ── #317 — terminal-mode model changes must reach the UI ────────
+
+    fn agent(model: Option<&str>) -> Option<crate::pty::models::AgentInfo> {
+        Some(crate::pty::models::AgentInfo {
+            name: "Claude Code".into(),
+            provider: "anthropic".into(),
+            model: model.map(Into::into),
+            detected_at: String::new(),
+            confidence: 1.0,
+        })
+    }
+
+    #[test]
+    fn agent_model_emit_on_first_detection_and_enrichment() {
+        assert!(super::agent_model_needs_emit(&None, &agent(None)));
+        assert!(super::agent_model_needs_emit(
+            &agent(None),
+            &agent(Some("opus"))
+        ));
+    }
+
+    #[test]
+    fn agent_model_emit_on_some_to_some_change() {
+        assert!(super::agent_model_needs_emit(
+            &agent(Some("sonnet")),
+            &agent(Some("opus"))
+        ));
+    }
+
+    #[test]
+    fn agent_model_no_emit_when_unchanged_or_lost() {
+        assert!(!super::agent_model_needs_emit(
+            &agent(Some("opus")),
+            &agent(Some("opus"))
+        ));
+        assert!(!super::agent_model_needs_emit(
+            &agent(Some("opus")),
+            &agent(None)
+        ));
+        assert!(!super::agent_model_needs_emit(&agent(None), &None));
     }
 }

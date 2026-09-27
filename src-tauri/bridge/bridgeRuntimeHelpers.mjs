@@ -129,3 +129,25 @@ export function createControlOpBuffer(handler) {
     pending: () => queue.length,
   };
 }
+
+/**
+ * Normalize a host stdin envelope into the SDKUserMessage shape the SDK
+ * expects.  Old Hermes envelopes lack `parent_tool_use_id`; the SDK wants
+ * null, not absent.  `session_id` falls back to the spawn-time id.
+ *
+ * `origin` (SDK 0.3.x provenance) is passed through only when the host
+ * set it — the composer stamps `{ kind: "human" }` on typed messages.
+ * The bridge never invents one: an envelope without `origin` stays
+ * unattributed, which the SDK treats as not-human (fails closed).
+ */
+export function toSdkUserMessage(next, fallbackSessionId) {
+  const sessionId = next.session_id ?? fallbackSessionId;
+  return {
+    type: "user",
+    message: next.message,
+    parent_tool_use_id: next.parent_tool_use_id ?? null,
+    uuid: next.uuid,
+    ...(sessionId ? { session_id: sessionId } : {}),
+    ...(next.origin && typeof next.origin.kind === "string" ? { origin: next.origin } : {}),
+  };
+}

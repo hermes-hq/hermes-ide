@@ -1,5 +1,5 @@
 import "../styles/components/agent/AgentSessionView.css";
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AgentEvent,
@@ -109,18 +109,37 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // event with a small tolerance — momentum scroll, sub-pixel rounding,
   // and cross-platform scrollbar sizes can leave a few pixels of error
   // even when the user is "at the bottom", so 24px is a safe margin.
-  useEffect(() => {
+  //
+  // Re-runs whenever the timeline opens a conversation: on mount (tab
+  // switch back from a terminal remounts us), when the pane swaps to a
+  // different session in place (same instance, same scroll element), and
+  // when the scroll element first appears after the empty state.  Each
+  // time, start at the latest message (#327/#328) — measuring on mount
+  // saw scrollTop 0, cleared the sticky flag, and left the view at the top.
+  const hasTimeline = state.initialized || !!exitInfo || state.messages.length > 0;
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const STICKY_THRESHOLD = 24;
+    // Only an UPWARD move can unstick.  Scroll events land a frame after
+    // our own `scrollTop = scrollHeight`; if streaming grew the content in
+    // that gap, the echo measures distance > threshold even though nobody
+    // touched anything.  Content growth never changes scrollTop and our
+    // programmatic scrolls only move down, so a decrease means the user.
+    let lastTop = 0;
     const onScroll = () => {
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickyBottomRef.current = distance <= STICKY_THRESHOLD;
+      const top = el.scrollTop;
+      const distance = el.scrollHeight - top - el.clientHeight;
+      if (distance <= STICKY_THRESHOLD) stickyBottomRef.current = true;
+      else if (top < lastTop) stickyBottomRef.current = false;
+      lastTop = top;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
+    stickyBottomRef.current = true;
+    el.scrollTop = el.scrollHeight;
+    lastTop = el.scrollTop;
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [sessionId, hasTimeline]);
 
   // Auto-scroll on new messages — but only when the user is at the bottom.
   // If they've scrolled up to re-read history, never yank them back.
@@ -165,8 +184,8 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // empty-state early return so the hook count never changes between
   // pre-init and post-first-message renders (see React #310).
   const todoSnapshot = useMemo(
-    () => extractTodoSnapshot(state.messages),
-    [state.messages],
+    () => extractTodoSnapshot(state.messages, state.toolResults),
+    [state.messages, state.toolResults],
   );
   // AGENT-09: turn-number assignment is memoized so it doesn't recompute
   // on every reducer notification (it only depends on `state.messages`).
@@ -198,7 +217,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
   // surfaced a session entry yet.
   const sessionEntryForPerm = sessionCtx.state.sessions[sessionId];
 
-  if (!state.initialized && !exitInfo && state.messages.length === 0) {
+  if (!hasTimeline) {
     // Claude's `--print --input-format stream-json` mode doesn't emit anything
     // (not even the init event) until it receives the first user message on
     // stdin. So the "pre-init" state is just the user's empty inbox — invite

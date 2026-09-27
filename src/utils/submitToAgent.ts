@@ -73,6 +73,10 @@ export interface UserEnvelope {
   type: "user";
   uuid: string;
   message: { role: "user"; content: AgentInputBlock[] };
+  /** SDK provenance: this envelope is only built from composer input the
+   *  user typed, so it is always human.  Other stdin writers must not
+   *  reuse this builder for injected (non-human) messages. */
+  origin: { kind: "human" };
 }
 
 /** Build the user envelope without firing any IPC.  Returns `null` when
@@ -87,6 +91,7 @@ export function buildUserEnvelope(
     type: "user",
     uuid: crypto.randomUUID(),
     message: { role: "user", content },
+    origin: { kind: "human" },
   };
 }
 

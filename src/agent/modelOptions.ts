@@ -17,10 +17,23 @@ export interface ModelInfo {
   description: string;
 }
 
-/** Claude's published model aliases as of 1.0.0. */
+/** Claude's published model aliases (which always resolve to the latest
+ *  model in each family), plus Fable, which has no alias. */
 export const CLAUDE_MODEL_OPTIONS: ModelInfo[] = [
   { id: "default", label: "Default", description: "Use Claude's default for this session" },
   { id: "sonnet", label: "Sonnet", description: "Balanced speed and capability" },
-  { id: "opus", label: "Opus", description: "Most capable, slower" },
+  { id: "opus", label: "Opus", description: "Highly capable for complex work" },
+  { id: "claude-fable-5-1", label: "Fable 5.1", description: "Most capable, for the toughest tasks" },
   { id: "haiku", label: "Haiku", description: "Fastest, lighter weight" },
 ];
+
+/** Collapse a full Claude model id (`claude-opus-4-1-20250805`,
+ *  `claude-fable-5`) to its family alias (`opus`, `fable`).  Anything
+ *  that doesn't match `claude-<family>-…` is returned trimmed; empty and
+ *  `"unknown"` become null so callers can fall back to the provider. */
+export function compactModelName(model: string | null | undefined): string | null {
+  const m = model?.trim();
+  if (!m || m.toLowerCase() === "unknown") return null;
+  const match = /^claude-([a-z]+)-/.exec(m.toLowerCase());
+  return match ? match[1] : m;
+}

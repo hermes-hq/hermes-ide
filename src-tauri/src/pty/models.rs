@@ -62,6 +62,13 @@ impl SessionPhase {
                 | SessionPhase::LaunchingAgent
         )
     }
+
+    /// Destroyed is terminal: once `close_session` marks a session destroyed,
+    /// late PTY output (e.g. from processes that outlived the shell) must not
+    /// flip it back to a live phase and re-announce it to the frontend.
+    pub fn can_transition_to(&self, new_phase: &SessionPhase) -> bool {
+        self != new_phase && *self != SessionPhase::Destroyed
+    }
 }
 
 // ─── Data Models ────────────────────────────────────────────────────

@@ -343,3 +343,69 @@ describe("TodoPanel — staleness + mark-done", () => {
     expect(container.querySelector(".todo-panel")).toBeNull();
   });
 });
+
+/* ─── SDK 0.3 Task tools (TaskCreate / TaskUpdate) ─────────────── */
+
+describe("extractTodoSnapshot — TaskCreate / TaskUpdate", () => {
+  const created = (id: string, subject: string) => ({
+    type: "tool_result",
+    tool_use_id: "",
+    content: `Task #${id} created successfully: ${subject}`,
+  });
+
+  it("builds the list from TaskCreate and applies TaskUpdate by id", () => {
+    const messages = [
+      {
+        id: "a-1",
+        role: "assistant",
+        timestamp: 100,
+        blocks: [
+          { type: "tool_use", name: "TaskCreate", id: "c1", input: { subject: "Write test", description: "d" } },
+          { type: "tool_use", name: "TaskCreate", id: "c2", input: { subject: "Fix bug", description: "d" } },
+          { type: "tool_use", name: "TaskCreate", id: "c3", input: { subject: "Drop me", description: "d" } },
+        ],
+      },
+      {
+        id: "a-2",
+        role: "assistant",
+        timestamp: 200,
+        blocks: [
+          { type: "tool_use", name: "TaskUpdate", id: "u1", input: { taskId: "7", status: "completed" } },
+          { type: "tool_use", name: "TaskUpdate", id: "u2", input: { taskId: "8", status: "in_progress", subject: "Fix the bug" } },
+          { type: "tool_use", name: "TaskUpdate", id: "u3", input: { taskId: "9", status: "deleted" } },
+        ],
+      },
+    ];
+    const results = new Map([
+      ["c1", created("7", "Write test")],
+      ["c2", created("8", "Fix bug")],
+      ["c3", created("9", "Drop me")],
+    ]);
+    const snap = extractTodoSnapshot(messages, results);
+    expect(snap.todos).toEqual([
+      { id: "7", content: "Write test", status: "completed" },
+      { id: "8", content: "Fix the bug", status: "in_progress" },
+    ]);
+    expect(snap.sourceMessageId).toBe("a-2");
+    expect(snap.lastUpdatedAt).toBe(200);
+  });
+
+  it("falls back to sequential ids when the TaskCreate result has not arrived", () => {
+    const messages = [
+      {
+        id: "a-1",
+        role: "assistant",
+        blocks: [
+          { type: "tool_use", name: "TaskCreate", id: "c1", input: { subject: "One", description: "" } },
+          { type: "tool_use", name: "TaskCreate", id: "c2", input: { subject: "Two", description: "" } },
+          { type: "tool_use", name: "TaskUpdate", id: "u1", input: { taskId: "2", status: "in_progress" } },
+        ],
+      },
+    ];
+    const snap = extractTodoSnapshot(messages);
+    expect(snap.todos).toEqual([
+      { id: "1", content: "One", status: "pending" },
+      { id: "2", content: "Two", status: "in_progress" },
+    ]);
+  });
+});

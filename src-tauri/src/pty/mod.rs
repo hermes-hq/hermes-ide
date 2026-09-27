@@ -209,7 +209,7 @@ pub(crate) fn ai_launch_command(
         "aider" => "aider",
         "codex" => "codex",
         "gemini" => "gemini",
-        "kiro" => "kiro-cli",
+        "kiro" => "kiro-cli chat",
         "copilot" => {
             return Some(wrap_prefix_suffix(
                 "gh copilot",
@@ -231,7 +231,7 @@ pub(crate) fn ai_launch_command(
         ("codex", "auto") => " --full-auto",
         ("codex", "bypassPermissions") => " --dangerously-bypass-approvals-and-sandbox",
         ("gemini", "bypassPermissions") => " --yolo",
-        ("kiro", "auto") => " --trust-tools",
+        ("kiro", "auto") => " --trust-all-tools",
         _ => "",
     };
     cmd.push_str(flag);
@@ -427,6 +427,18 @@ mod tests {
         assert!(SessionPhase::Busy.accepts_input());
         assert!(!SessionPhase::Closing.accepts_input());
         assert!(!SessionPhase::Destroyed.accepts_input());
+    }
+
+    #[test]
+    fn destroyed_phase_is_terminal() {
+        // A closed session must never be revived by late PTY output —
+        // otherwise the frontend re-adds it as a black "ghost" session.
+        assert!(!SessionPhase::Destroyed.can_transition_to(&SessionPhase::Idle));
+        assert!(!SessionPhase::Destroyed.can_transition_to(&SessionPhase::Busy));
+        assert!(!SessionPhase::Destroyed.can_transition_to(&SessionPhase::NeedsInput));
+        assert!(!SessionPhase::Idle.can_transition_to(&SessionPhase::Idle));
+        assert!(SessionPhase::Idle.can_transition_to(&SessionPhase::Busy));
+        assert!(SessionPhase::Busy.can_transition_to(&SessionPhase::NeedsInput));
     }
 
     #[test]
@@ -689,7 +701,7 @@ mod tests {
         );
         assert_eq!(
             ai_launch_command("kiro", "default", "", ""),
-            Some("kiro-cli".into())
+            Some("kiro-cli chat".into())
         );
         assert_eq!(ai_launch_command("unknown", "default", "", ""), None);
     }
@@ -744,10 +756,11 @@ mod tests {
             Some("gemini --yolo".into())
         );
 
-        // Kiro: auto mode uses --trust-tools
+        // Kiro: trust flags live on the `chat` subcommand; `--trust-tools`
+        // requires a tool list, so auto mode uses `--trust-all-tools`.
         assert_eq!(
             ai_launch_command("kiro", "auto", "", ""),
-            Some("kiro-cli --trust-tools".into())
+            Some("kiro-cli chat --trust-all-tools".into())
         );
 
         // Unsupported modes fall back to no flag

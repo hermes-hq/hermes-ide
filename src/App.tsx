@@ -69,6 +69,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { useToastStore } from "./hooks/useToastStore";
+import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { WhatsNewDialog } from "./components/WhatsNewDialog";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
@@ -303,6 +304,9 @@ function AppContent() {
     window.addEventListener("hermes:shared-worktree", handler);
     return () => window.removeEventListener("hermes:shared-worktree", handler);
   }, []);
+
+  // ── Worktree creation failures (#286) ──
+  useWorktreeErrorToasts(toastStore.addToast);
 
   const pluginRuntimeRef = useRef<PluginRuntime | null>(null);
 

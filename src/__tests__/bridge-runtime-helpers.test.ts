@@ -16,7 +16,12 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createIdempotentLatch,
   createControlOpBuffer,
+  toSdkUserMessage,
 } from "../../src-tauri/bridge/bridgeRuntimeHelpers.mjs";
+import { buildUserEnvelope } from "../utils/submitToAgent";
+
+vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn() }));
+vi.mock("../api/agent", () => ({ sendAgentInput: vi.fn() }));
 
 describe("createIdempotentLatch", () => {
   it("resolves the promise on first call", async () => {
@@ -132,5 +137,33 @@ describe("createControlOpBuffer", () => {
     expect(buf.isReady()).toBe(false);
     await buf.markReady();
     expect(buf.isReady()).toBe(true);
+  });
+});
+
+describe("toSdkUserMessage — SDK `origin` provenance", () => {
+  it("composer path: a typed message reaches the SDK stamped as human", () => {
+    const env = buildUserEnvelope("hello", [])!;
+    const msg = toSdkUserMessage(JSON.parse(JSON.stringify(env)), "sid-1");
+    expect(msg.origin).toEqual({ kind: "human" });
+    expect(msg.message).toEqual(env.message);
+    expect(msg.session_id).toBe("sid-1");
+    expect(msg.parent_tool_use_id).toBeNull();
+  });
+
+  it("injected path: an envelope without origin stays unattributed (never defaulted to human)", () => {
+    const injected = {
+      type: "user",
+      uuid: "u-1",
+      message: { role: "user", content: [{ type: "text", text: "injected" }] },
+    };
+    const msg = toSdkUserMessage(injected, "sid-1");
+    expect("origin" in msg).toBe(false);
+  });
+
+  it("passes a non-human origin through unchanged", () => {
+    const origin = { kind: "peer", from: "other-session" };
+    const msg = toSdkUserMessage({ type: "user", message: {}, origin }, undefined);
+    expect(msg.origin).toEqual(origin);
+    expect("session_id" in msg).toBe(false);
   });
 });

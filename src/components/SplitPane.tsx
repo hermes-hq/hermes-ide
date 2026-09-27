@@ -9,6 +9,7 @@ import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePa
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
+import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 // Use text/plain with a prefix so it works in all WebViews
@@ -248,11 +249,13 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       case "terminal.paste": document.execCommand("paste"); break;
       case "terminal.select-all": /* handled by terminal */ break;
       case "terminal.clear": clearTerminal(sessionId); break;
+      // Same flow as the menu bar / Cmd+D: pick a new session for the new pane.
+      // (Re-using this pane's session would move its terminal out of this pane.)
       case "terminal.split-right":
-        dispatch({ type: "SPLIT_PANE", paneId, direction: "horizontal", newSessionId: sessionId });
+        triggerMenuBarAction("view.split-horizontal");
         break;
       case "terminal.split-down":
-        dispatch({ type: "SPLIT_PANE", paneId, direction: "vertical", newSessionId: sessionId });
+        triggerMenuBarAction("view.split-vertical");
         break;
     }
   }, [dispatch, paneId, sessionId]);
@@ -261,11 +264,13 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
 
   const handlePaneHeaderAction = useCallback((actionId: string) => {
     switch (actionId) {
+      // Same flow as the menu bar / Cmd+D: pick a new session for the new pane.
+      // (Re-using this pane's session would move its terminal out of this pane.)
       case "pane.split-right":
-        dispatch({ type: "SPLIT_PANE", paneId, direction: "horizontal", newSessionId: sessionId });
+        triggerMenuBarAction("view.split-horizontal");
         break;
       case "pane.split-down":
-        dispatch({ type: "SPLIT_PANE", paneId, direction: "vertical", newSessionId: sessionId });
+        triggerMenuBarAction("view.split-vertical");
         break;
       case "pane.close":
         dispatch({ type: "CLOSE_PANE", paneId });
