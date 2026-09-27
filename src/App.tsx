@@ -30,7 +30,7 @@ import { UsagePanel } from "./components/UsagePanel";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
 import { WorkbenchPanel } from "./components/WorkbenchPanel";
 import { workbenchPixelWidth } from "./utils/workbenchLayout";
-import { DEFAULT_SIDEBAR_WIDTH_PX, DEFAULT_SIDE_PANEL_WIDTH_PX, leftRailWidth, resizeSidebar, resizeSidePanel } from "./utils/pluginPanelLayout";
+import { DEFAULT_SIDEBAR_WIDTH_PX, DEFAULT_SIDE_PANEL_WIDTH_PX, fitLeftRail, leftRailVisibility, leftRailWidth, resizeSidebar, resizeSidePanel } from "./utils/pluginPanelLayout";
 import type { SessionView } from "./components/SessionList";
 
 import { ProcessPanel } from "./components/ProcessPanel";
@@ -180,11 +180,15 @@ function AppContent() {
   const toastStoreRef = useRef(toastStore);
   toastStoreRef.current = toastStore;
 
+  // Widths actually rendered after fitting the left rail to the window
+  // (set below).  Drags start from these so a handle moves immediately
+  // even when the stored width is wider than the window allows.
+  const fittedLeftRailRef = useRef({ sidebarWidth: DEFAULT_SIDEBAR_WIDTH_PX, sidePanelWidth: DEFAULT_SIDE_PANEL_WIDTH_PX });
   const handleLeftResize = useCallback((delta: number) => {
-    setLeftPanelWidth((w) => resizeSidebar(w, delta));
+    setLeftPanelWidth((w) => resizeSidebar(Math.min(w, fittedLeftRailRef.current.sidebarWidth), delta));
   }, []);
   const handleSidePanelResize = useCallback((delta: number) => {
-    setSidePanelWidth((w) => resizeSidePanel(w, delta));
+    setSidePanelWidth((w) => resizeSidePanel(Math.min(w, fittedLeftRailRef.current.sidePanelWidth), delta));
   }, []);
   const handleRightResize = useCallback((delta: number) => {
     setRightPanelWidth((w) => Math.max(220, Math.min(500, w - delta)));
@@ -376,19 +380,31 @@ function AppContent() {
 
   // Left-rail visibility (mirrors the render conditions below).  Plugin
   // panels and the Git / Files sub-views use their own side-panel width.
-  const sessionListVisible = !ui.sessionListCollapsed && !ui.flowMode && !ui.processPanelOpen && !activePluginPanel;
-  const leftPluginPanelOpen = !ui.flowMode && !!activePluginPanel && pluginPanels.some(p => p.id === activePluginPanel && p.side === "left");
-  const secondPanelOpen = !ui.flowMode && !activePluginPanel && ((ui.gitPanelOpen && !!state.activeSessionId) || ui.fileExplorerOpen);
-  const sidePanelVisible = leftPluginPanelOpen || secondPanelOpen;
+  const { sessionListVisible, secondPanelOpen, sidePanelVisible, selfSizedPanelVisible } = leftRailVisibility({
+    flowMode: ui.flowMode,
+    sessionListCollapsed: ui.sessionListCollapsed,
+    gitPanelOpen: ui.gitPanelOpen,
+    fileExplorerOpen: ui.fileExplorerOpen,
+    searchPanelOpen: ui.searchPanelOpen,
+    processPanelOpen: ui.processPanelOpen,
+    hasActiveSession: !!state.activeSessionId,
+    activePluginPanel,
+    activePluginPanelIsLeft: pluginPanels.some(p => p.id === activePluginPanel && p.side === "left"),
+  });
   const ACTIVITY_BAR_W = 36; // mirrors --activity-bar-w in tokens.css
-  const sidebarBudget = leftRailWidth({
+  const leftRail = {
     activityBars: ui.flowMode ? 0 : ACTIVITY_BAR_W * 2,
     sessionListVisible,
     sidebarWidth: leftPanelWidth,
     sidePanelVisible,
     sidePanelWidth,
-    selfSizedPanelVisible: !ui.flowMode && !activePluginPanel && (ui.processPanelOpen || ui.searchPanelOpen),
-  });
+    selfSizedPanelVisible,
+  };
+  // Shrink the rail's columns when the window is too narrow for them,
+  // so the chat area and the right activity bar are never pushed off.
+  const fittedLeftRail = fitLeftRail(leftRail, viewportWidth);
+  fittedLeftRailRef.current = fittedLeftRail;
+  const sidebarBudget = leftRailWidth({ ...leftRail, ...fittedLeftRail });
   const chatWorkbenchSpace = Math.max(640, viewportWidth - sidebarBudget);
   const workbenchWidth = workbenchPixelWidth(chatWorkbenchSpace, ui.workbench.ratio);
   const pluginUpdater = usePluginUpdateChecker(pluginRuntime);
@@ -824,8 +840,8 @@ function AppContent() {
       <div
         className="app-body"
         style={{
-          "--sidebar-w": `${leftPanelWidth}px`,
-          "--side-panel-w": `${sidePanelWidth}px`,
+          "--sidebar-w": `${fittedLeftRail.sidebarWidth}px`,
+          "--side-panel-w": `${fittedLeftRail.sidePanelWidth}px`,
           // Right-rail width: when an agent session has the workbench
           // open, the panel uses its own viewport-ratio-derived width;
           // otherwise (terminal mode, workbench closed) we fall back to
