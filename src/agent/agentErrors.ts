@@ -18,19 +18,20 @@
  */
 import type { AgentErrorKind } from "../api/agent";
 import { translate } from "../i18n/registry";
-import { AI_PROVIDERS } from "../utils/aiProviders";
+import { getAgent } from "../catalog/agentCatalog";
 import type { AgentViewSnapshot } from "./agentSessionStore";
 
 export type AgentErrorAction = "retry" | "sign-in" | "dismiss";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
 
-/** The name to show for a session's agent: the provider's label ("Claude",
- *  "Codex", ...), the raw provider id when it is not a known one, and
- *  "Claude" when the session has no provider yet (Agent view's default). */
+/** The name to show for a session's agent: "Claude" for Claude and when the
+ *  session has no provider yet (Agent view's default), the catalog name for
+ *  another agent ("Codex", ...), and the raw provider id when it is not a
+ *  known one. */
 export function agentDisplayName(providerId: string | null | undefined): string {
-  if (!providerId) return "Claude";
-  return AI_PROVIDERS.find((p) => p.id === providerId)?.label ?? providerId;
+  if (!providerId || providerId === "claude") return "Claude";
+  return getAgent(providerId)?.name ?? providerId;
 }
 
 export interface AgentErrorView {

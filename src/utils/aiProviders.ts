@@ -3,8 +3,6 @@
 // src/catalog/agentCatalog.ts. This file keeps UI metadata that is not
 // about any one agent.
 
-import type { PermissionMode } from "../types/session";
-
 // ─── Per-agent Prefix Command ────────────────────────────────────────
 //
 // The prefix is prepended to the AI-agent launch string (e.g. `caffeinate -i
