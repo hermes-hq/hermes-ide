@@ -9,7 +9,7 @@
     { "action": "view.toggle-sidebar", "mac": "{mod}B", "pc": "{ctrl}{shift}B", "pcOutsideTerminal": "{ctrl}B" },
     { "action": "view.command-palette", "mac": "{mod}K", "pc": "{ctrl}{shift}K", "pcOutsideTerminal": "{ctrl}K" },
     { "action": "view.prompt-composer", "mac": "{mod}J", "pc": "{ctrl}{shift}M", "pcOutsideTerminal": "{ctrl}J" },
-    { "action": "view.process-panel", "mac": "{mod}P", "pc": "{ctrl}{shift}U", "pcOutsideTerminal": "{ctrl}P" },
+    { "action": "view.process-panel", "mac": "{mod}P", "pc": "{ctrl}{shift}L", "pcOutsideTerminal": "{ctrl}P" },
     { "action": "view.git-panel", "mac": "{mod}G", "pc": "{ctrl}{shift}G", "pcOutsideTerminal": "{ctrl}G" },
     { "action": "view.context-panel", "mac": "{mod}E", "pc": "{ctrl}{shift}E", "pcOutsideTerminal": "{ctrl}E" },
     { "action": "view.search-panel", "mac": "{mod}{shift}F", "pc": "{ctrl}{shift}F" },
