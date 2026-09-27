@@ -11,24 +11,26 @@
 //!   3. every request carries the random token written to the bridge file.
 //!
 //! The listener binds to 127.0.0.1 on an OS-assigned port, so it never clashes
-//! with a dev server or a second test app.
+//! with a dev server or a second test app. The transport and the token check
+//! live in `e2e_protocol.rs`, where they have socket-level tests.
 //!
 //! Protocol: plain HTTP/1.1, JSON bodies, `Authorization: Bearer <token>`.
-//!   GET  /health  -> { ok, pid, identifier, version }
-//!   GET  /window  -> { label, title, width, height, x, y, scaleFactor,
-//!                      visible, focused, cgWindowId }
-//!   POST /eval    -> body { script, timeoutMs?, window? }
-//!                    `script` is the body of an async function; its return
-//!                    value (JSON-serialisable) comes back as { ok, value }.
-//!   POST /quit    -> asks the app to exit cleanly.
+//!   GET  /health      -> { ok, pid, identifier, version }
+//!   GET  /window      -> { label, title, width, height, x, y, scaleFactor,
+//!                          visible, focused, cgWindowId }
+//!   POST /eval        -> body { script, timeoutMs?, window? }
+//!                        `script` is the body of an async function; its return
+//!                        value (JSON-serialisable) comes back as { ok, value }.
+//!   POST /screenshot  -> body { file, window? }; writes a PNG of the window
+//!                        from inside the app (no focus, no screen-recording
+//!                        permission) and returns { ok, file, width, height }.
+//!   POST /quit        -> asks the app to exit cleanly.
 
 #[cfg(not(debug_assertions))]
 compile_error!(
     "the `e2e` feature opens an automation socket and must never be compiled into a release build"
 );
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -36,15 +38,17 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
-const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+use crate::e2e_protocol::{self, Request, Response};
+
 const DEFAULT_EVAL_TIMEOUT_MS: u64 = 10_000;
 const MAX_EVAL_TIMEOUT_MS: u64 = 120_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(15);
+const MAIN_THREAD_TIMEOUT: Duration = Duration::from_secs(15);
 
 static NEXT_EVAL_ID: AtomicU64 = AtomicU64::new(1);
 
 fn enabled() -> bool {
-    std::env::var("HERMES_E2E").as_deref() == Ok("1")
+    e2e_protocol::is_enabled(std::env::var("HERMES_E2E").ok().as_deref())
 }
 
 /// Builder tweaks for a test run: launch without becoming the active app, so
@@ -65,7 +69,7 @@ pub fn start(app: &AppHandle) {
         return;
     }
 
-    let listener = match TcpListener::bind(("127.0.0.1", 0)) {
+    let listener = match e2e_protocol::bind() {
         Ok(l) => l,
         Err(e) => {
             log::error!("[e2e] failed to bind bridge socket: {}", e);
@@ -80,11 +84,7 @@ pub fn start(app: &AppHandle) {
         }
     };
 
-    let token = format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    );
+    let token = e2e_protocol::new_token();
 
     let bridge_file = std::env::var("HERMES_E2E_BRIDGE_FILE")
         .ok()
@@ -122,23 +122,12 @@ pub fn start(app: &AppHandle) {
     keep_rendering_in_background(app);
 
     let app = app.clone();
-    std::thread::Builder::new()
-        .name("hermes-e2e-bridge".into())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { continue };
-                let app = app.clone();
-                let token = token.clone();
-                let _ = std::thread::Builder::new()
-                    .name("hermes-e2e-conn".into())
-                    .spawn(move || handle_connection(stream, &app, &token));
-            }
-        })
-        .ok();
+    e2e_protocol::serve(listener, token, move |req| dispatch(&app, req));
 }
 
 /// Write a file readable only by the current user (the token lives in it).
 fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -154,160 +143,31 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     f.flush()
 }
 
-struct Request {
-    method: String,
-    path: String,
-    token: Option<String>,
-    body: Vec<u8>,
+fn json_body(req: &Request) -> Result<Value, Response> {
+    serde_json::from_slice(&req.body)
+        .map_err(|e| Response::error(400, format!("invalid JSON body: {}", e)))
 }
 
-fn read_request(stream: &TcpStream) -> Result<Request, String> {
-    let mut reader = BufReader::new(stream);
-
-    let mut request_line = String::new();
-    reader
-        .read_line(&mut request_line)
-        .map_err(|e| format!("read request line: {}", e))?;
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or_default().to_string();
-    let path = parts.next().unwrap_or_default().to_string();
-    if method.is_empty() || path.is_empty() {
-        return Err("malformed request line".into());
-    }
-
-    let mut content_length = 0usize;
-    let mut token = None;
-    loop {
-        let mut line = String::new();
-        let n = reader
-            .read_line(&mut line)
-            .map_err(|e| format!("read header: {}", e))?;
-        if n == 0 {
-            break;
-        }
-        let line = line.trim_end();
-        if line.is_empty() {
-            break;
-        }
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        match name.trim().to_ascii_lowercase().as_str() {
-            "content-length" => {
-                content_length = value
-                    .parse()
-                    .map_err(|_| "invalid content-length".to_string())?;
-            }
-            "authorization" => {
-                token = value
-                    .strip_prefix("Bearer ")
-                    .or_else(|| value.strip_prefix("bearer "))
-                    .map(|s| s.trim().to_string());
-            }
-            _ => {}
-        }
-    }
-
-    if content_length > MAX_BODY_BYTES {
-        return Err("request body too large".into());
-    }
-    let mut body = vec![0u8; content_length];
-    reader
-        .read_exact(&mut body)
-        .map_err(|e| format!("read body: {}", e))?;
-
-    Ok(Request {
-        method,
-        path,
-        token,
-        body,
-    })
-}
-
-fn respond(mut stream: &TcpStream, status: u16, body: &Value) {
-    let reason = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        404 => "Not Found",
-        _ => "Internal Server Error",
-    };
-    let payload = body.to_string();
-    let head = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status,
-        reason,
-        payload.len()
-    );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(payload.as_bytes());
-    let _ = stream.flush();
-}
-
-/// Compare without leaking the match length through timing.
-fn token_matches(given: &str, expected: &str) -> bool {
-    let (a, b) = (given.as_bytes(), expected.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-fn handle_connection(stream: TcpStream, app: &AppHandle, token: &str) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
-
-    let req = match read_request(&stream) {
-        Ok(r) => r,
-        Err(e) => return respond(&stream, 400, &json!({ "ok": false, "error": e })),
-    };
-
-    let authorised = req
-        .token
-        .as_deref()
-        .map(|t| token_matches(t, token))
-        .unwrap_or(false);
-    if !authorised {
-        return respond(
-            &stream,
-            401,
-            &json!({ "ok": false, "error": "missing or wrong token" }),
-        );
-    }
-
+/// Route an authenticated request. Called on a per-connection thread.
+fn dispatch(app: &AppHandle, req: &Request) -> Response {
     match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/health") => respond(
-            &stream,
-            200,
-            &json!({
-                "ok": true,
-                "pid": std::process::id(),
-                "identifier": app.config().identifier,
-                "version": app.package_info().version.to_string(),
-            }),
-        ),
+        ("GET", "/health") => Response::ok(json!({
+            "ok": true,
+            "pid": std::process::id(),
+            "identifier": app.config().identifier,
+            "version": app.package_info().version.to_string(),
+        })),
         ("GET", "/window") => match window_info(app, "main") {
-            Ok(v) => respond(&stream, 200, &v),
-            Err(e) => respond(&stream, 500, &json!({ "ok": false, "error": e })),
+            Ok(v) => Response::ok(v),
+            Err(e) => Response::error(500, e),
         },
         ("POST", "/eval") => {
-            let body: Value = match serde_json::from_slice(&req.body) {
+            let body = match json_body(req) {
                 Ok(v) => v,
-                Err(e) => {
-                    return respond(
-                        &stream,
-                        400,
-                        &json!({ "ok": false, "error": format!("invalid JSON body: {}", e) }),
-                    )
-                }
+                Err(r) => return r,
             };
             let Some(script) = body.get("script").and_then(Value::as_str) else {
-                return respond(
-                    &stream,
-                    400,
-                    &json!({ "ok": false, "error": "`script` is required" }),
-                );
+                return Response::error(400, "`script` is required");
             };
             let label = body.get("window").and_then(Value::as_str).unwrap_or("main");
             let timeout_ms = body
@@ -317,19 +177,34 @@ fn handle_connection(stream: TcpStream, app: &AppHandle, token: &str) {
                 .min(MAX_EVAL_TIMEOUT_MS);
 
             match eval_js(app, label, script, Duration::from_millis(timeout_ms)) {
-                Ok(v) => respond(&stream, 200, &v),
-                Err(e) => respond(&stream, 500, &json!({ "ok": false, "error": e })),
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::error(500, e),
+            }
+        }
+        ("POST", "/screenshot") => {
+            let body = match json_body(req) {
+                Ok(v) => v,
+                Err(r) => return r,
+            };
+            let Some(file) = body.get("file").and_then(Value::as_str) else {
+                return Response::error(400, "`file` is required");
+            };
+            let label = body.get("window").and_then(Value::as_str).unwrap_or("main");
+            match screenshot(app, label, std::path::Path::new(file)) {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::error(500, e),
             }
         }
         ("POST", "/quit") => {
-            respond(&stream, 200, &json!({ "ok": true }));
-            app.exit(0);
+            // Answer first: the socket may be gone once the app starts exiting.
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                app.exit(0);
+            });
+            Response::ok(json!({ "ok": true }))
         }
-        _ => respond(
-            &stream,
-            404,
-            &json!({ "ok": false, "error": "unknown route" }),
-        ),
+        _ => Response::error(404, "unknown route"),
     }
 }
 
@@ -428,6 +303,22 @@ fn eval_once(
     }
 }
 
+/// Run `f` on the main thread and wait for its result. Native window and
+/// toolkit objects must only be touched there.
+fn on_main_thread<T, F>(app: &AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel::<T>();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(f());
+    })
+    .map_err(|e| format!("could not reach the main thread: {}", e))?;
+    rx.recv_timeout(MAIN_THREAD_TIMEOUT)
+        .map_err(|_| "the main thread did not answer (is the app busy?)".to_string())
+}
+
 fn window_info(app: &AppHandle, label: &str) -> Result<Value, String> {
     let window = app
         .get_webview_window(label)
@@ -451,6 +342,264 @@ fn window_info(app: &AppHandle, label: &str) -> Result<Value, String> {
         "cgWindowId": native_window_id(app, &window),
     }))
 }
+
+// ─── Screenshots ─────────────────────────────────────────────────────
+
+/// Capture the window's pixels from inside the app and write them as a PNG.
+///
+/// Every platform reads the window's own surface, so this works while the
+/// window is covered, unfocused, on a virtual display (Linux xvfb) or on a CI
+/// runner that has never granted a screen-recording permission.
+fn screenshot(app: &AppHandle, label: &str, file: &std::path::Path) -> Result<Value, String> {
+    let window = app
+        .get_webview_window(label)
+        .ok_or_else(|| format!("no webview window labelled '{}'", label))?;
+    if !file.is_absolute() {
+        return Err("`file` must be an absolute path".into());
+    }
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {:?}: {}", parent, e))?;
+    }
+
+    let (width, height) = capture::capture_png(app, window, file)?;
+
+    let bytes = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+    if bytes == 0 {
+        return Err(format!("screenshot file {:?} is empty", file));
+    }
+    Ok(json!({
+        "ok": true,
+        "file": file.to_string_lossy(),
+        "width": width,
+        "height": height,
+        "bytes": bytes,
+    }))
+}
+
+/// Interleaved 32-bit BGRA pixels (what CoreGraphics and GDI both hand out)
+/// → an opaque RGBA PNG.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn write_png_from_bgra(
+    file: &std::path::Path,
+    width: u32,
+    height: u32,
+    stride: usize,
+    pixels: &[u8],
+) -> Result<(), String> {
+    let row_bytes = width as usize * 4;
+    let mut rgba = Vec::with_capacity(row_bytes * height as usize);
+    for y in 0..height as usize {
+        let row = pixels
+            .get(y * stride..y * stride + row_bytes)
+            .ok_or("pixel buffer is shorter than the image")?;
+        for px in row.as_chunks::<4>().0 {
+            // The window is opaque; dropping alpha also undoes premultiplication.
+            rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+        }
+    }
+    let img = image::RgbaImage::from_raw(width, height, rgba)
+        .ok_or("could not assemble the image buffer")?;
+    img.save(file)
+        .map_err(|e| format!("write PNG {:?}: {}", file, e))
+}
+
+#[cfg(target_os = "macos")]
+mod capture {
+    use super::on_main_thread;
+    use core_graphics::display::{CGDisplay, CGPoint, CGRect, CGSize};
+    use core_graphics::window::{
+        kCGWindowImageBoundsIgnoreFraming, kCGWindowImageNominalResolution,
+        kCGWindowListOptionIncludingWindow,
+    };
+    use tauri::AppHandle;
+
+    /// CGWindowListCreateImage only needs a permission to read OTHER apps'
+    /// windows; reading our own works everywhere, including CI runners.
+    pub fn capture_png(
+        app: &AppHandle,
+        window: tauri::WebviewWindow,
+        file: &std::path::Path,
+    ) -> Result<(u32, u32), String> {
+        let window_id = super::native_window_id(app, &window)
+            .ok_or("the window has no window number yet")? as u32;
+        let file = file.to_path_buf();
+        on_main_thread(app, move || {
+            // CGRectNull: use the window's own bounds.
+            let null_rect = CGRect::new(
+                &CGPoint::new(f64::INFINITY, f64::INFINITY),
+                &CGSize::new(0.0, 0.0),
+            );
+            let image = CGDisplay::screenshot(
+                null_rect,
+                kCGWindowListOptionIncludingWindow,
+                window_id,
+                kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution,
+            )
+            .ok_or("CGWindowListCreateImage returned no image (window off screen?)")?;
+
+            let width = image.width() as u32;
+            let height = image.height() as u32;
+            if image.bits_per_pixel() != 32 {
+                return Err(format!(
+                    "unexpected {} bits per pixel",
+                    image.bits_per_pixel()
+                ));
+            }
+            // Window images come back as 32-bit little-endian pixels with the
+            // alpha channel first (kCGBitmapByteOrder32Little |
+            // kCGImageAlphaPremultipliedFirst), i.e. BGRA in memory.
+            let data = image.data();
+            super::write_png_from_bgra(&file, width, height, image.bytes_per_row(), data.bytes())?;
+            Ok((width, height))
+        })?
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod capture {
+    use super::on_main_thread;
+    use tauri::AppHandle;
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
+        ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+    use windows_sys::Win32::Storage::Xps::PrintWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    /// Not in the public headers, but honoured since Windows 8.1: render the
+    /// full composed content, which is what a WebView2 window needs.
+    const PW_RENDERFULLCONTENT: u32 = 0x0000_0002;
+
+    /// PrintWindow asks the window to paint itself into our bitmap, so it
+    /// works while the window is covered or the runner has no real screen.
+    pub fn capture_png(
+        app: &AppHandle,
+        window: tauri::WebviewWindow,
+        file: &std::path::Path,
+    ) -> Result<(u32, u32), String> {
+        let hwnd: *mut core::ffi::c_void = window.hwnd().map_err(|e| e.to_string())?.0;
+        let hwnd_addr = hwnd as usize;
+        let file = file.to_path_buf();
+        on_main_thread(app, move || {
+            let hwnd = hwnd_addr as *mut core::ffi::c_void;
+            // SAFETY: plain GDI calls on handles this function creates and
+            // releases itself; `hwnd` is the live main window.
+            unsafe {
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                if GetClientRect(hwnd, &mut rect) == 0 {
+                    return Err("GetClientRect failed".to_string());
+                }
+                let width = (rect.right - rect.left).max(0) as u32;
+                let height = (rect.bottom - rect.top).max(0) as u32;
+                if width == 0 || height == 0 {
+                    return Err("the window has no client area".to_string());
+                }
+
+                let screen_dc = GetDC(std::ptr::null_mut());
+                let mem_dc = CreateCompatibleDC(screen_dc);
+                let bitmap = CreateCompatibleBitmap(screen_dc, width as i32, height as i32);
+                let previous = SelectObject(mem_dc, bitmap);
+                let printed = PrintWindow(hwnd, mem_dc, PW_RENDERFULLCONTENT);
+                SelectObject(mem_dc, previous);
+
+                let mut result = Err("PrintWindow failed".to_string());
+                if printed != 0 {
+                    let mut info: BITMAPINFO = std::mem::zeroed();
+                    info.bmiHeader = BITMAPINFOHEADER {
+                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: width as i32,
+                        biHeight: -(height as i32), // top-down rows
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB,
+                        biSizeImage: 0,
+                        biXPelsPerMeter: 0,
+                        biYPelsPerMeter: 0,
+                        biClrUsed: 0,
+                        biClrImportant: 0,
+                    };
+                    let stride = width as usize * 4;
+                    let mut pixels = vec![0u8; stride * height as usize];
+                    let rows = GetDIBits(
+                        mem_dc,
+                        bitmap,
+                        0,
+                        height,
+                        pixels.as_mut_ptr() as *mut core::ffi::c_void,
+                        &mut info,
+                        DIB_RGB_COLORS,
+                    );
+                    result = if rows as u32 == height {
+                        super::write_png_from_bgra(&file, width, height, stride, &pixels)
+                            .map(|_| (width, height))
+                    } else {
+                        Err(format!("GetDIBits copied {} of {} rows", rows, height))
+                    };
+                }
+
+                DeleteObject(bitmap);
+                DeleteDC(mem_dc);
+                ReleaseDC(std::ptr::null_mut(), screen_dc);
+                result
+            }
+        })?
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod capture {
+    use super::on_main_thread;
+    use gtk::gdk::prelude::*;
+    use gtk::prelude::*;
+    use tauri::AppHandle;
+
+    /// GDK reads the window's pixels straight from the X server, so a virtual
+    /// display (xvfb) is enough — no compositor and no window manager needed.
+    pub fn capture_png(
+        app: &AppHandle,
+        window: tauri::WebviewWindow,
+        file: &std::path::Path,
+    ) -> Result<(u32, u32), String> {
+        let file = file.to_path_buf();
+        on_main_thread(app, move || {
+            let gtk_window = window.gtk_window().map_err(|e| e.to_string())?;
+            let gdk_window = gtk_window
+                .window()
+                .ok_or("the window is not realised yet")?;
+            let (width, height) = (gdk_window.width(), gdk_window.height());
+            if width <= 0 || height <= 0 {
+                return Err("the window has no size yet".to_string());
+            }
+            let pixbuf = gdk_window
+                .pixbuf(0, 0, width, height)
+                .ok_or("gdk_pixbuf_get_from_window returned nothing")?;
+            pixbuf
+                .savev(&file, "png", &[])
+                .map_err(|e| format!("write PNG {:?}: {}", file, e))?;
+            Ok((width as u32, height as u32))
+        })?
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+mod capture {
+    use tauri::AppHandle;
+    pub fn capture_png(
+        _app: &AppHandle,
+        _window: tauri::WebviewWindow,
+        _file: &std::path::Path,
+    ) -> Result<(u32, u32), String> {
+        Err("screenshots are not implemented on this platform".into())
+    }
+}
+
+// ─── macOS: keep painting while hidden, expose the window number ─────
 
 #[cfg(target_os = "macos")]
 mod objc {
@@ -564,22 +713,19 @@ fn keep_rendering_in_background(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 fn native_window_id(app: &AppHandle, window: &tauri::WebviewWindow) -> Option<i64> {
     // AppKit objects must be touched on the main thread.
-    let (tx, rx) = mpsc::channel::<Option<i64>>();
     let window = window.clone();
-    app.run_on_main_thread(move || {
-        let id = window.ns_window().ok().and_then(|ns_window| {
+    on_main_thread(app, move || {
+        window.ns_window().ok().and_then(|ns_window| {
             if ns_window.is_null() {
                 return None;
             }
             // SAFETY: `ns_window` is a live NSWindow owned by the runtime and
             // `-[NSWindow windowNumber]` takes no arguments and returns NSInteger.
             Some(unsafe { objc::send_isize(ns_window, c"windowNumber") } as i64)
-        });
-        let _ = tx.send(id);
+        })
     })
-    .ok()?;
-
-    rx.recv_timeout(Duration::from_secs(5)).ok().flatten()
+    .ok()
+    .flatten()
 }
 
 #[cfg(not(target_os = "macos"))]

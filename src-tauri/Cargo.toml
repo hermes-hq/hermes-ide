@@ -14,8 +14,23 @@ path = "src/main.rs"
 
 [features]
 # Test-only automation bridge (src/e2e_bridge.rs). Off by default and refuses
-# to compile in a release build.
-e2e = []
+# to compile in a release build. The platform crates below are only for the
+# bridge's in-process window screenshots.
+e2e = ["dep:core-graphics", "dep:gtk", "dep:windows-sys"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = { version = "0.25", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Xps",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

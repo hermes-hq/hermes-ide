@@ -6,7 +6,7 @@
 // Zero dependencies — Node 20+ only — so the same file runs on macOS, Linux
 // and Windows runners.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -17,6 +17,7 @@ import {
   rmSync,
   statSync,
   appendFileSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -24,7 +25,10 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, "..", "..");
+export const SCENARIOS_DIR = join(HERE, "scenarios");
 export const E2E_IDENTIFIER = "com.hermes-ide.terminal.e2e";
+/** True on a CI runner, where nobody is using the machine. */
+export const IS_CI = process.env.CI === "true" || process.env.CI === "1";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -230,24 +234,42 @@ export class Bridge {
   }
 
   /**
-   * Save a PNG of the app window. Captures by window id, so it needs neither
-   * focus nor the window being in front.
+   * Save a PNG of the app window. The app captures its own window from the
+   * inside, so this needs neither focus, nor the window being in front, nor a
+   * screen-recording permission — and it works on a virtual display.
    */
   async screenshot(file) {
-    mkdirSync(dirname(file), { recursive: true });
-    const info = await this.windowInfo();
-    if (platform() !== "darwin") {
-      throw new Error("screenshot is only implemented for macOS in this spike");
+    const target = resolve(file);
+    mkdirSync(dirname(target), { recursive: true });
+    rmSync(target, { force: true });
+    const shot = await this.request("POST", "/screenshot", { file: target }, { timeoutMs: 30_000 });
+    if (!existsSync(target) || statSync(target).size === 0) {
+      throw new Error(`the app reported a screenshot but ${target} is missing or empty`);
     }
-    if (!info.cgWindowId) throw new Error("the app did not report a window id");
-    const res = spawnSync("screencapture", ["-x", "-o", "-l", String(info.cgWindowId), file], {
-      encoding: "utf8",
-    });
-    if (res.status !== 0 || !existsSync(file) || statSync(file).size === 0) {
-      throw new Error(`screencapture failed (status ${res.status}): ${res.stderr || res.stdout}`);
-    }
-    return { file, bytes: statSync(file).size, window: info };
+    return { file: target, bytes: statSync(target).size, width: shot.width, height: shot.height };
   }
+}
+
+// ─── Scenario results ────────────────────────────────────────────────
+
+/**
+ * Write the machine-readable outcome of a scenario run next to its evidence,
+ * print the RESULT line, and exit. The runner (run.mjs) and the acceptance
+ * gate (../acceptance-check.mjs) read these files.
+ */
+export function finishScenario({ scenario, evidenceDir, failed, startedAt, log = console.log, details = {} }) {
+  const result = {
+    scenario,
+    platform: platform(),
+    status: failed ? "fail" : "pass",
+    durationMs: Date.now() - startedAt,
+    finishedAt: new Date().toISOString(),
+    ...details,
+  };
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(join(evidenceDir, "result.json"), JSON.stringify(result, null, 2) + "\n");
+  log(failed ? "RESULT: FAIL" : "RESULT: PASS");
+  process.exit(failed ? 1 : 0);
 }
 
 // ─── Launch / stop ───────────────────────────────────────────────────
@@ -258,7 +280,7 @@ export class Bridge {
  * started from inside one, and the app under test must not inherit that
  * session's identity or shell setup.
  */
-function inheritedEnv() {
+export function inheritedEnv() {
   const env = {};
   for (const [name, value] of Object.entries(process.env)) {
     if (/^(_?HERMES_|CLAUDE_|CLAUDECODE$|ZDOTDIR$|TERM_PROGRAM)/.test(name)) continue;

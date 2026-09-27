@@ -4,6 +4,9 @@ mod clipboard;
 mod db;
 #[cfg(feature = "e2e")]
 mod e2e_bridge;
+#[cfg(any(test, feature = "e2e"))]
+#[cfg_attr(not(feature = "e2e"), allow(dead_code))]
+mod e2e_protocol;
 mod git;
 mod inline_pty;
 mod menu;

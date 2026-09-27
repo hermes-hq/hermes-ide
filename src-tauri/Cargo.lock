@@ -1990,12 +1990,14 @@ dependencies = [
  "arboard",
  "base64 0.22.1",
  "chrono",
+ "core-graphics",
  "criterion",
  "dirs 6.0.0",
  "dunce",
  "env_logger",
  "flate2",
  "git2",
+ "gtk",
  "ignore",
  "image",
  "lazy_static",
@@ -2023,6 +2025,7 @@ dependencies = [
  "tokio",
  "uuid",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

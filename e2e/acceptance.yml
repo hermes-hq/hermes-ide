@@ -1,0 +1,34 @@
+# Acceptance ledger: which real-app scenario proves which feature.
+#
+# `node e2e/acceptance-check.mjs` reads this file. A feature with
+# `status: shipped` fails the gate when any of its criteria has no scenario,
+# names a scenario file that is not under e2e/app/scenarios/, or — in CI,
+# where the results of all runners are checked — has a scenario that is
+# missing or red on a platform it must be green on.
+#
+#   status:     planned  nothing is required yet
+#               partial  listed scenarios must exist and be green; gaps allowed
+#               shipped  every criterion needs at least one green scenario
+#   scenarios:  file names under e2e/app/scenarios/. A scenario must be green
+#               on macOS, Windows and Linux unless it names its platforms:
+#               "<file>.mjs@linux" or "<file>.mjs@darwin,win32".
+#
+# Keep it plain: nested maps, "- item" or [a, b] lists, and "#" comments.
+
+features:
+  N01:
+    name: "Proof rig: tests that drive the real app"
+    status: shipped
+    criteria:
+      N01-1:
+        text: "The terminal-echo scenario passes 20 times in a row on macOS, Windows and Linux runners"
+        scenarios: [terminal-echo.mjs]
+      N01-2:
+        text: "A release build with the e2e feature fails to compile; without HERMES_E2E=1 the app opens no socket"
+        scenarios: [N01-release-refuses-e2e.mjs@linux, N01-bridge-safety.mjs]
+      N01-3:
+        text: "Requests without the token are refused; the socket is bound to 127.0.0.1 only"
+        scenarios: [N01-bridge-safety.mjs]
+      N01-4:
+        text: "A feature marked shipped with no green scenario on all three OSes fails the release gate"
+        scenarios: [N01-acceptance-gate.mjs]
