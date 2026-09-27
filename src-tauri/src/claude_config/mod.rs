@@ -327,17 +327,27 @@ fn canonicalise_memory_path(path: &str) -> Result<PathBuf, String> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PermissionRule {
     pub pattern: String,
-    pub source: String, // "user" | "project"
+    pub source: String, // "user" | "local"
     pub kind: String,   // "allow" | "deny"
 }
 
-/// Read both user and project settings, return merged rule list.
+/// The rules that apply to a session: the user's (~/.claude/settings.json)
+/// plus, when `project_dir` is a usable folder, the project's local ones
+/// (`<project_dir>/.claude/settings.local.json`, where "Always allow"
+/// saves them).
 #[tauri::command]
-pub fn read_permission_rules() -> Result<Vec<PermissionRule>, String> {
-    let user_path = home_settings_path()?;
-    let mut rules = Vec::new();
-    rules.extend(read_rules_at(&user_path, "user")?);
-    // Project settings discovery deferred to frontend (it knows cwd).
+pub fn read_permission_rules(project_dir: Option<String>) -> Result<Vec<PermissionRule>, String> {
+    collect_rules(&home_settings_path()?, project_dir.as_deref())
+}
+
+fn collect_rules(
+    user_path: &Path,
+    project_dir: Option<&str>,
+) -> Result<Vec<PermissionRule>, String> {
+    let mut rules = read_rules_at(user_path, "user")?;
+    if let Ok(local) = local_settings_path(project_dir) {
+        rules.extend(read_rules_at(&local, "local")?);
+    }
     Ok(rules)
 }
 
@@ -543,6 +553,48 @@ mod tests {
         assert!(write(Some(gone.to_string_lossy().into_owned()))
             .unwrap_err()
             .contains("not found"));
+    }
+
+    #[test]
+    fn listed_rules_include_the_projects_local_rules() {
+        let home = tempdir().unwrap();
+        let user = home.path().join("settings.json");
+        fs::write(&user, br#"{"permissions":{"deny":["Bash(curl:*)"]}}"#).unwrap();
+        let project = tempdir().unwrap();
+        let dir = project.path().to_string_lossy().into_owned();
+        write_permission_rule(
+            "Bash(rm -rf build:*)".into(),
+            "allow".into(),
+            "local".into(),
+            Some(dir.clone()),
+        )
+        .unwrap();
+
+        let got: Vec<(String, String, String)> = collect_rules(&user, Some(&dir))
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.pattern, r.source, r.kind))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Bash(curl:*)".into(), "user".into(), "deny".into()),
+                (
+                    "Bash(rm -rf build:*)".into(),
+                    "local".into(),
+                    "allow".into()
+                ),
+            ]
+        );
+
+        // No project folder (or one that is gone): the user's rules only.
+        assert_eq!(collect_rules(&user, None).unwrap().len(), 1);
+        let gone = project
+            .path()
+            .join("missing")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(collect_rules(&user, Some(&gone)).unwrap().len(), 1);
     }
 
     #[test]

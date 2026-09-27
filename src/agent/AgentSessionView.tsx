@@ -38,6 +38,7 @@ import {
   buildPermResponse,
   type PermissionDecision,
 } from "../utils/permissionRequest";
+import { PERMISSION_RULES_CHANGED_EVENT } from "../utils/permissionsRules";
 import { extractTodoSnapshot } from "../utils/todoStore";
 import { selectFatalError } from "./errorSelector";
 import {
@@ -603,7 +604,9 @@ function InteractivePermissionDispatcher({
             kind: "allow",
             scope: "local",
             projectDir,
-          }).catch((err) => console.warn("[perm] persist failed:", err)),
+          })
+            .then(() => window.dispatchEvent(new Event(PERMISSION_RULES_CHANGED_EVENT)))
+            .catch((err) => console.warn("[perm] persist failed:", err)),
         );
       }
     }

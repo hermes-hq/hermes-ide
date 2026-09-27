@@ -34,10 +34,10 @@ import { MemorySection } from "./MemorySection";
 import { PermissionsSection } from "./PermissionsSection";
 import { AddMcpDialog } from "./AddMcpDialog";
 import { useSession } from "../state/SessionContext";
-import type { PermissionRule } from "../utils/permissionsRules";
+import { PERMISSION_RULES_CHANGED_EVENT, type PermissionRule } from "../utils/permissionsRules";
 
 interface AgentContextPanelProps {
-  session: { id: string; mode: "agent" | "terminal" } | null;
+  session: { id: string; mode: "agent" | "terminal"; working_directory?: string } | null;
   initialState?: PanelState;
   onPersist?: (state: PanelState) => void;
 }
@@ -169,6 +169,7 @@ export function AgentContextPanel({
       <div className="agent-context-panel-body">
         <SectionContent
           sessionId={session.id}
+          projectDir={session.working_directory || null}
           collapsed={state.collapsed}
           onToggle={toggleSection}
         />
@@ -179,11 +180,13 @@ export function AgentContextPanel({
 
 interface SectionContentProps {
   sessionId: string;
+  /** The session's folder: its local permission rules are listed too. */
+  projectDir: string | null;
   collapsed: PanelState["collapsed"];
   onToggle: (key: PanelSectionKey) => void;
 }
 
-function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps) {
+function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionContentProps) {
   const init = useAgentInit(sessionId);
   const prewarm = useAgentPrewarm(init?.cwd);
   const { respawnAgent } = useSession();
@@ -191,16 +194,24 @@ function SectionContent({ sessionId, collapsed, onToggle }: SectionContentProps)
   const [permRules, setPermRules] = useState<PermissionRule[]>([]);
   const [mcpVersion, setMcpVersion] = useState(0);
 
-  // Pull permission rules from settings.json on mount + when init changes
-  // (init events fire post-respawn, which is when settings might have been
-  // edited externally).
+  // Pull permission rules (user settings.json + the project's
+  // settings.local.json) on mount, when init changes (init events fire
+  // post-respawn, which is when settings might have been edited
+  // externally) and whenever Hermes saves a rule.
   useEffect(() => {
     let cancelled = false;
-    invoke<PermissionRule[]>("read_permission_rules")
-      .then((rules) => { if (!cancelled) setPermRules(rules); })
-      .catch(() => { if (!cancelled) setPermRules([]); });
-    return () => { cancelled = true; };
-  }, [init?.session_id]);
+    const load = () => {
+      invoke<PermissionRule[]>("read_permission_rules", { projectDir })
+        .then((rules) => { if (!cancelled) setPermRules(rules); })
+        .catch(() => { if (!cancelled) setPermRules([]); });
+    };
+    load();
+    window.addEventListener(PERMISSION_RULES_CHANGED_EVENT, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(PERMISSION_RULES_CHANGED_EVENT, load);
+    };
+  }, [init?.session_id, projectDir]);
 
   // Names the user has removed during this panel's lifetime.  Claude's
   // `--resume` restores the session's prior MCP list from its own

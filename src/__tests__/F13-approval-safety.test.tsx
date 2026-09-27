@@ -35,6 +35,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { PermissionRequestModal } from "../components/PermissionRequestModal";
+import { AgentContextPanel } from "../components/AgentContextPanel";
+import { PERMISSION_RULES_CHANGED_EVENT, type PermissionRule } from "../utils/permissionsRules";
 import { AgentSessionView } from "../agent/AgentSessionView";
 import {
   _resetAgentSessionStoresForTest,
@@ -179,10 +181,15 @@ describe("F13 — Always allow is saved to the project, not globally", () => {
 
   it("writes the rule with scope local for the session's working directory", async () => {
     sessions = { "s-local": { working_directory: "/work/project", permission_mode: "default" } };
+    const changed = vi.fn();
+    window.addEventListener(PERMISSION_RULES_CHANGED_EVENT, changed);
     const user = userEvent.setup();
     await showPrompt("s-local");
     await user.click(screen.getByRole("button", { name: /Always allow/ }));
     await flush();
+    window.removeEventListener(PERMISSION_RULES_CHANGED_EVENT, changed);
+    // Lists of rules are told to re-read once the rule is saved.
+    expect(changed).toHaveBeenCalledTimes(1);
 
     const writes = invokeMock.mock.calls.filter(([cmd]) => cmd === "write_permission_rule");
     expect(writes).toEqual([
@@ -211,5 +218,29 @@ describe("F13 — Always allow is saved to the project, not globally", () => {
     // The in-session allow still reaches the agent.
     expect(sendCalls).toHaveLength(1);
     expect((sendCalls[0].envelope as PermResponse).decision).toMatchObject({ behavior: "allow" });
+  });
+});
+
+describe("F13 — rules saved by Always allow are listed in the Context panel", () => {
+  it("lists the project's local rules next to the user's and refreshes when a rule is saved", async () => {
+    let onDisk: PermissionRule[] = [{ pattern: "Bash(curl:*)", source: "user", kind: "deny" }];
+    invokeMock.mockImplementation(async (...args: unknown[]) =>
+      // Every other read the panel makes (MCP servers, memory files…) is empty.
+      (args[0] === "read_permission_rules" ? onDisk : []) as unknown as undefined,
+    );
+    const session = { id: "s-panel", mode: "agent" as const, working_directory: "/work/project" };
+    render(<AgentContextPanel session={session} />);
+    await screen.findByText("Bash(curl:*)");
+    expect(invokeMock).toHaveBeenCalledWith("read_permission_rules", { projectDir: "/work/project" });
+    expect(screen.queryByText("Bash(rm -rf build:*)")).toBeNull();
+
+    // "Always allow" saved a rule to the project's settings.local.json.
+    onDisk = [...onDisk, { pattern: "Bash(rm -rf build:*)", source: "local", kind: "allow" }];
+    act(() => {
+      window.dispatchEvent(new Event(PERMISSION_RULES_CHANGED_EVENT));
+    });
+    const row = (await screen.findByText("Bash(rm -rf build:*)")).closest("li");
+    expect(row).toHaveTextContent("local");
+    invokeMock.mockImplementation(async () => undefined);
   });
 });

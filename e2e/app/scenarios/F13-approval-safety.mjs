@@ -5,7 +5,8 @@
 // command. They keep typing and press Enter. That Enter must go to their
 // message, never to the approval. Then they choose "Always allow" and the
 // rule must land in the project's .claude/settings.local.json, not in their
-// global ~/.claude/settings.json.
+// global ~/.claude/settings.json, and show up in the workbench's Context
+// tab (Permissions) as a "local" rule.
 //
 // The agent is a replayed session (tools/fake-agents/replay-stdio.mjs with
 // e2e/app/fixtures/F13-bash-approval.jsonl), selected through
@@ -227,8 +228,23 @@ try {
   assert(!focusAfterPrompt.inPermPrompt, "the approval prompt did not take keyboard focus");
   assert(focusAfterPrompt.isComposer, "keyboard focus stayed in the composer when the prompt appeared");
 
-  // ── 6. Always allow ──────────────────────────────────────────────
-  log('step 6: click "Always allow" on the approval prompt');
+  // ── 6. Open the rule list ────────────────────────────────────────
+  log("step 6: open the workbench's Context tab, where permission rules are listed");
+  if (!(await bridge.exists(".workbench-panel"))) {
+    await bridge.click('.activity-bar-right [data-tab-id="workbench"]');
+  }
+  await bridge.waitFor("the workbench", `return !!e2e.first(".workbench-panel");`);
+  await bridge.clickWhenReady(`
+    const tab = e2e.all(".workbench-tab").find((b) => e2e.norm(b.innerText).toLowerCase() === "context");
+    return e2e.click(e2e.must(tab, "the workbench's Context tab"));
+  `);
+  await bridge.waitFor("the permissions list", `return !!e2e.first(".workbench-panel .perms-section");`);
+  const RULE_ROW = `e2e.all(".workbench-panel .perms-row").find((r) => r.innerText.includes(${JSON.stringify(EXPECTED_RULE)}))`;
+  assert(!(await bridge.eval(`return !!${RULE_ROW};`)), "the rule is not listed before Always allow");
+  assert(await bridge.exists(".perm-modal"), "the approval prompt is still open");
+
+  // ── 7. Always allow ──────────────────────────────────────────────
+  log('step 7: click "Always allow" on the approval prompt');
   // Found by its visible label (its accessible name is the hint text).
   const ALWAYS_ALLOW = `e2e.all(".perm-modal button").find((b) => e2e.norm(b.innerText).startsWith("Always allow"))`;
   const title = await bridge.eval(`
@@ -252,6 +268,10 @@ try {
   const userSettingsAfter = existsSync(userSettings) ? readFileSync(userSettings, "utf8") : null;
   assert(userSettingsAfter === userSettingsBefore, "the global ~/.claude/settings.json was not touched");
   assert(!existsSync(join(projectDir, ".claude", "settings.json")), "the shared project settings.json was not created");
+  await bridge.waitFor("the saved rule to appear in the Context tab", `return !!${RULE_ROW};`, { timeoutMs: 10_000 });
+  const listed = await bridge.eval(`return e2e.norm(${RULE_ROW}.innerText);`);
+  log(`  Context tab row: ${listed}`);
+  assert(/local$/i.test(listed), "the Context tab lists it as a local (this project) rule");
   await sleep(300);
   const shot = await bridge.screenshot(join(evidenceDir, "04-always-allowed.png"));
   log(`  screenshot saved: ${shot.file} (${shot.bytes} bytes)`);
@@ -275,7 +295,7 @@ try {
   }
 } finally {
   if (app) {
-    log("step 7: quit the app");
+    log("step 8: quit the app");
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
     if (!failed && (exit.forced || exit.code !== 0)) {

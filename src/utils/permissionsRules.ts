@@ -7,7 +7,13 @@
  */
 
 export type RuleKind = "allow" | "deny";
-export type RuleSource = "user" | "project";
+/** "local" = the project's `.claude/settings.local.json` (what an agent's
+ *  "Always allow" writes). */
+export type RuleSource = "user" | "project" | "local";
+
+/** Fired on `window` after Hermes saves a permission rule, so lists of
+ *  rules can re-read them. */
+export const PERMISSION_RULES_CHANGED_EVENT = "hermes:permission-rules-changed";
 
 export interface PermissionRule {
   pattern: string;
@@ -34,9 +40,10 @@ export function testPattern(input: string, rules: readonly PermissionRule[]): Ve
   const matches = rules.filter((r) => ruleMatches(r.pattern, input));
   if (matches.length === 0) return { verdict: "no-match" };
 
-  // Project deny wins over everything; then user deny; then any allow.
-  const projectDeny = matches.find((r) => r.kind === "deny" && r.source === "project");
-  if (projectDeny) return { verdict: "deny", source: "project", pattern: projectDeny.pattern };
+  // Project (shared or local) deny wins over everything; then user deny;
+  // then any allow.
+  const projectDeny = matches.find((r) => r.kind === "deny" && r.source !== "user");
+  if (projectDeny) return { verdict: "deny", source: projectDeny.source, pattern: projectDeny.pattern };
   const userDeny = matches.find((r) => r.kind === "deny" && r.source === "user");
   if (userDeny) return { verdict: "deny", source: "user", pattern: userDeny.pattern };
   const allow = matches.find((r) => r.kind === "allow");
