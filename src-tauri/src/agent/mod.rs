@@ -522,7 +522,7 @@ pub async fn spawn_agent_session(
     // We no longer spawn `claude` directly.  Instead we spawn a Node
     // bridge (`hermes-claude-bridge.mjs`) that drives the Claude Agent
     // SDK in-process and pipes the SDK's message stream back out as the
-    // same NDJSON format `claude --print stream-json` produces — so the
+    // same NDJSON event format as Claude's stream-json output — so the
     // existing message-store reducer and IPC plumbing work unchanged.
     //
     // The bridge gives us the SDK's superpowers (interrupt(), setModel(),

@@ -2,8 +2,8 @@
  * Slash-command receipt selector.
  *
  * When the user submits a recognised slash command (`/compact`,
- * `/clear`, `/init`, `/review`), `claude --print --input-format
- * stream-json` accepts it but the assistant turn comes back empty —
+ * `/clear`, `/init`, `/review`), the Agent SDK bridge accepts it but
+ * the assistant turn comes back empty —
  * the only text block contains the literal string `"(no content)"`
  * because the command's effect is internal (compaction, history
  * reset, side-effecting side-channels), not a conversational reply.
