@@ -5,7 +5,7 @@ import { detectShellEnvironment as apiDetectShellEnvironment } from "../../api/i
 export type SuggestionMode = "augment" | "replace" | "off";
 
 export interface ShellEnvironment {
-  shellType: "zsh" | "bash" | "fish" | "unknown";
+  shellType: "zsh" | "bash" | "fish" | "powershell" | "cmd" | "unknown";
   pluginsDetected: string[];
   hasNativeAutosuggest: boolean;
   hasOhMyZsh: boolean;

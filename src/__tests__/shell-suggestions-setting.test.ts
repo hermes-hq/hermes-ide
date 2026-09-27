@@ -44,20 +44,19 @@ import {
 
 /** What `detect_shell_environment` returns for a session (backend wire shape). */
 function backendEnv(hermesSuggestions: boolean) {
+	// Shell integration is active, so the "integration active → show ghost
+	// text" fast path is exercised: it must not override the session's
+	// spawn-time mode.
 	return {
-		shell_type: "zsh",
-		plugins_detected: ["zsh-autosuggestions"],
-		has_native_autosuggest: true,
-		has_oh_my_zsh: false,
-		has_syntax_highlighting: false,
-		has_starship: false,
-		has_powerlevel10k: false,
-		shell_integration_active: true,
-		hermesSuggestions,
-		// Also set the camelCase spelling the frontend type reads, so the
-		// "integration active → show ghost text" fast path is exercised: it
-		// must not override the session's spawn-time mode.
+		shellType: "zsh",
+		pluginsDetected: ["zsh-autosuggestions"],
+		hasNativeAutosuggest: true,
+		hasOhMyZsh: false,
+		hasSyntaxHighlighting: false,
+		hasStarship: false,
+		hasPowerlevel10k: false,
 		shellIntegrationActive: true,
+		hermesSuggestions,
 	};
 }
 

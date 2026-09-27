@@ -3883,6 +3883,39 @@ mod tests {
         let json = serde_json::to_value(&env).unwrap();
         assert_eq!(json["hermesSuggestions"], serde_json::json!(false));
     }
+
+    // The frontend `ShellEnvironment` type reads every field camelCase. A
+    // snake_case name reaches it as `undefined` (shell type unknown to
+    // history loading, integration/autosuggest checks never taken).
+    #[test]
+    fn shell_environment_serializes_every_field_camel_case() {
+        let env = crate::pty::models::ShellEnvironment {
+            shell_type: "zsh".into(),
+            plugins_detected: vec!["zsh-autosuggestions".into()],
+            has_native_autosuggest: true,
+            has_oh_my_zsh: true,
+            has_syntax_highlighting: false,
+            has_starship: true,
+            has_powerlevel10k: false,
+            shell_integration_active: true,
+            hermes_suggestions: true,
+        };
+        let json = serde_json::to_value(&env).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "shellType": "zsh",
+                "pluginsDetected": ["zsh-autosuggestions"],
+                "hasNativeAutosuggest": true,
+                "hasOhMyZsh": true,
+                "hasSyntaxHighlighting": false,
+                "hasStarship": true,
+                "hasPowerlevel10k": false,
+                "shellIntegrationActive": true,
+                "hermesSuggestions": true,
+            })
+        );
+    }
 }
 
 #[cfg(test)]

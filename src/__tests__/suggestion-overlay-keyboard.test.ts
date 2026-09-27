@@ -171,11 +171,13 @@ describe("Overlay: Key interception guards on overlay visibility, not intelligen
     expect(ifLine).not.toContain("intelligenceActive");
   });
 
-  it("intelligenceActive is still used for suggestion computation gating", () => {
-    // intelligenceActive should still gate suggestion computation, not key interception
+  it("prompt gating uses lastStablePhase, not the flickering sessionPhase", () => {
+    // Suggestion computation and ':' intent commands are gated on the shell
+    // being at its prompt; sessionPhase reads "busy" from keystroke echo.
     expect(TERMINAL_POOL_SRC).toContain(
-      '(phase === "idle" || phase === "shell_ready")',
+      'entry.lastStablePhase !== "idle" && entry.lastStablePhase !== "shell_ready"',
     );
+    expect(TERMINAL_POOL_SRC).not.toContain("entry.sessionPhase");
   });
 });
 

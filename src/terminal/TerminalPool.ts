@@ -131,9 +131,6 @@ function handleTerminalInput(sessionId: string, data: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
 
-  const phase = entry.sessionPhase;
-  const intelligenceActive = !isIntelligenceDisabled() &&
-    (phase === "idle" || phase === "shell_ready");
   const overlayVisible = entry.suggestionState?.visible ?? false;
 
   // ── Dismiss stale overlay when alternate buffer becomes active ──
@@ -162,9 +159,12 @@ function handleTerminalInput(sessionId: string, data: string): void {
       moveSuggestionSelection(sessionId, 1);
       return; // CONSUME
     }
-    // Tab — accept selected if an item is highlighted (respects shell compatibility)
+    // Tab — accept selected if an item is highlighted (respects shell compatibility;
+    // a ':' intent is Hermes's own, so it's accepted whatever the shell setup)
     if (data === "\t") {
-      if (entry.suggestionState.selectedIndex !== null && shouldConsumeTab(sessionId, true)) {
+      const { selectedIndex, suggestions } = entry.suggestionState;
+      const selectedIsIntent = selectedIndex !== null && suggestions[selectedIndex]?.badge === "intent";
+      if (selectedIndex !== null && (selectedIsIntent || shouldConsumeTab(sessionId, true))) {
         acceptSuggestion(sessionId);
         return; // CONSUME
       }
@@ -212,6 +212,13 @@ function handleTerminalInput(sessionId: string, data: string): void {
     return;
   }
 
+  // ── Intent command interception ──
+  // Runs before the buffer update below, which clears the buffer on Enter —
+  // the typed ':' command is needed to resolve the intent.
+  if (data === "\r" && runIntentCommand(sessionId, entry, entry.inputBuffer)) {
+    return;
+  }
+
   // ── Update input buffer ──
   // Always track input regardless of phase — the buffer must reflect what
   // the user has typed. Only suggestion computation is gated on phase,
@@ -221,23 +228,6 @@ function handleTerminalInput(sessionId: string, data: string): void {
   // ── Clear ghost text on any non-navigation keystroke ──
   if (entry.ghostText) {
     clearGhostText(sessionId);
-  }
-
-  // ── Intent command interception ──
-  if (data === "\r" && intelligenceActive && entry.inputBuffer.trimStart().startsWith(":")) {
-    const result = resolveIntent(entry.inputBuffer, { cwd: entry.cwd });
-    if (result.resolved) {
-      const eraseSequence = "\x7f".repeat(entry.inputBuffer.length);
-      const fullData = eraseSequence + result.command + "\r";
-      entry.historyProvider.addCommand(result.command);
-      entry.inputBuffer = "";
-      dismissSuggestions(sessionId);
-      clearGhostText(sessionId);
-      writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
-        console.warn(`[TerminalPool] write_to_session (intent) failed:`, err);
-      });
-      return;
-    }
   }
 
   // ── Pass data to PTY ──
@@ -258,6 +248,42 @@ function handleTerminalInput(sessionId: string, data: string): void {
     // Empty buffer — dismiss
     dismissSuggestions(sessionId);
   }
+}
+
+/**
+ * Whether typed input is going to the shell's own prompt rather than to a
+ * program running in it. Uses lastStablePhase: sessionPhase reads "busy"
+ * from the echo of each keystroke until the output has been quiet for a
+ * while, so it can't gate what Enter does.
+ */
+function isAtShellPrompt(entry: PoolEntry): boolean {
+  if (entry.lastStablePhase !== "idle" && entry.lastStablePhase !== "shell_ready") return false;
+  if (entry.terminal.buffer.active.type === "alternate") return false;
+  return entry.shellIsForeground;
+}
+
+/**
+ * Run a ':' intent command: erase what's typed on the prompt and write the
+ * resolved shell command + Enter. Returns false (nothing written) when
+ * `intentText` isn't a known intent or the shell isn't at its prompt.
+ * Intent commands work whether or not Hermes inline suggestions are on.
+ */
+function runIntentCommand(sessionId: string, entry: PoolEntry, intentText: string): boolean {
+  if (!intentText.trimStart().startsWith(":")) return false;
+  if (isIntelligenceDisabled() || !isAtShellPrompt(entry)) return false;
+  const result = resolveIntent(intentText, { cwd: entry.cwd });
+  if (!result.resolved) return false;
+
+  const eraseSequence = "\x7f".repeat(entry.inputBuffer.length);
+  const fullData = eraseSequence + result.command + "\r";
+  entry.historyProvider.addCommand(result.command);
+  entry.inputBuffer = "";
+  dismissSuggestions(sessionId);
+  clearGhostText(sessionId);
+  writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
+    console.warn(`[TerminalPool] write_to_session (intent) failed:`, err);
+  });
+  return true;
 }
 
 /** Remove the last Unicode code point from the buffer (surrogate-pair safe) */
@@ -361,7 +387,6 @@ function computeSuggestions(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (!entry || !entry.inputBuffer.trim()) return;
   if (isIntelligenceDisabled()) return;
-  if (!shouldShowOverlay(sessionId)) return;
 
   // Only show suggestions when the shell is at an interactive prompt.
   // Use lastStablePhase instead of sessionPhase — the current phase can
@@ -412,6 +437,10 @@ function computeSuggestions(sessionId: string): void {
       return;
     }
   }
+
+  // Everything below is Hermes inline suggestions, which the user can turn
+  // off. ':' intent commands above are not affected by that setting.
+  if (!shouldShowOverlay(sessionId)) return;
 
   const context: ProjectContext | null = entry.cwd ? getCachedContext(entry.cwd) : null;
   const results = suggest(entry.inputBuffer, context, entry.historyProvider);
@@ -525,6 +554,9 @@ function executeSuggestion(sessionId: string): void {
 
   const selected = entry.suggestionState.suggestions[entry.suggestionState.selectedIndex];
   if (!selected) return;
+
+  // A ':' intent picked from the list runs the command it stands for.
+  if (selected.badge === "intent" && runIntentCommand(sessionId, entry, selected.text)) return;
 
   // Log to history
   entry.historyProvider.addCommand(selected.text);
