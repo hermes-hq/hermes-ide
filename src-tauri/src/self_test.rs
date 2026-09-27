@@ -106,7 +106,7 @@ pub fn start(app: &AppHandle, report_path: PathBuf, db_path: PathBuf) {
             checks.insert("database".into(), check_database(&app, &db_path));
             checks.insert("bridge_resources".into(), check_bridge_resources(&app));
             checks.insert("webview".into(), check_webview(&app, WEBVIEW_TIMEOUT));
-            checks.insert("pty_echo".into(), check_pty_echo(PTY_TIMEOUT));
+            checks.insert("pty_echo".into(), check_pty_echo_guarded(PTY_TIMEOUT));
 
             let ok = checks
                 .values()
@@ -292,12 +292,47 @@ pub fn count_cursor_queries(output: &str) -> usize {
     output.matches(CURSOR_QUERY).count()
 }
 
-fn check_pty_echo(timeout: Duration) -> Value {
+/// The PTY check on its own thread: if the PTY layer hangs (seen once on a
+/// Windows Server runner), the report still gets written and says at which
+/// stage it stopped, instead of the whole run hitting the watchdog.
+fn check_pty_echo_guarded(timeout: Duration) -> Value {
+    let stage = Arc::new(Mutex::new(String::from("start")));
+    let stage_for_check = Arc::clone(&stage);
+    let (tx, rx) = mpsc::channel::<Value>();
+    let spawned = std::thread::Builder::new()
+        .name("self-test-pty".into())
+        .spawn(move || {
+            let _ = tx.send(check_pty_echo(timeout, &stage_for_check));
+        });
+    if let Err(e) = spawned {
+        return json!({ "ok": false, "error": format!("could not start the PTY check: {}", e) });
+    }
+    match rx.recv_timeout(timeout + Duration::from_secs(15)) {
+        Ok(v) => v,
+        Err(_) => json!({
+            "ok": false,
+            "error": format!(
+                "the PTY check did not finish within {} s (stuck at: {})",
+                timeout.as_secs() + 15,
+                stage.lock().map(|s| s.clone()).unwrap_or_default()
+            ),
+        }),
+    }
+}
+
+fn set_stage(stage: &Mutex<String>, what: &str) {
+    if let Ok(mut s) = stage.lock() {
+        *s = what.to_string();
+    }
+}
+
+fn check_pty_echo(timeout: Duration, stage: &Mutex<String>) -> Value {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
     let started = Instant::now();
     let shell = crate::pty::detect_shell();
     let marker = format!("hsts-{}", uuid::Uuid::new_v4().simple());
+    set_stage(stage, "openpty");
 
     let pty_system = native_pty_system();
     let size = PtySize {
@@ -312,6 +347,7 @@ fn check_pty_echo(timeout: Duration) -> Value {
     };
     let _ = pair.master.resize(size);
 
+    set_stage(stage, "spawn shell");
     let mut cmd = CommandBuilder::new(&shell);
     cmd.cwd(crate::pty::get_working_directory());
     cmd.env("TERM", "xterm-256color");
@@ -338,6 +374,7 @@ fn check_pty_echo(timeout: Duration) -> Value {
     };
     let mut child = child;
 
+    set_stage(stage, "open reader/writer");
     let mut reader = match pair.master.try_clone_reader() {
         Ok(r) => r,
         Err(e) => return json!({ "ok": false, "shell": shell, "error": format!("reader: {}", e) }),
@@ -368,12 +405,14 @@ fn check_pty_echo(timeout: Duration) -> Value {
 
     // Give the shell a moment to start (typed-ahead input is kept by the
     // line discipline either way, this only makes the transcript tidier).
+    set_stage(stage, "wait for first output");
     let settle = Instant::now() + Duration::from_secs(2);
     while Instant::now() < settle && snapshot().is_empty() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let first_output_ms = started.elapsed().as_millis() as u64;
 
+    set_stage(stage, "type the command");
     let lines = echo_command(&shell, &marker);
     for line in &lines {
         if let Err(e) = writer
@@ -386,6 +425,7 @@ fn check_pty_echo(timeout: Duration) -> Value {
     }
     let typed_ms = started.elapsed().as_millis() as u64;
 
+    set_stage(stage, "wait for the answer");
     let mut ok = false;
     let mut queries_answered = 0usize;
     while Instant::now() < deadline {
@@ -407,6 +447,7 @@ fn check_pty_echo(timeout: Duration) -> Value {
     let answered_ms = started.elapsed().as_millis() as u64;
 
     // Ask the shell to leave, then make sure it is gone.
+    set_stage(stage, "shell exit");
     let _ = writer.write_all(b"exit\r\n").and_then(|_| writer.flush());
     let exit_deadline = Instant::now() + Duration::from_secs(3);
     let mut exit_status: Option<String> = None;
@@ -424,9 +465,14 @@ fn check_pty_echo(timeout: Duration) -> Value {
         }
     }
     if exit_status.is_none() {
+        set_stage(stage, "kill shell");
         let _ = child.kill();
+        let _ = child.wait();
         exit_status = Some("killed".into());
     }
+    set_stage(stage, "close pty");
+    drop(writer);
+    drop(pair.master);
 
     let transcript = snapshot();
     let tail: String = transcript

@@ -746,7 +746,15 @@ jobs:
           if (-not $exe) { throw "hermes-ide.exe not found after install (looked in: $($candidates -join ', '))" }
           Write-Host "Installed at $exe"
           $report = Join-Path $env:RUNNER_TEMP "self-test.json"
-          $app = Start-Process $exe -ArgumentList "--self-test=$report" -Wait -PassThru
+          # Start-Process -Wait would also wait for every descendant (a shell
+          # left behind by a failed PTY check); wait for the app alone, bounded.
+          $startedAt = Get-Date
+          $app = Start-Process $exe -ArgumentList "--self-test=$report" -PassThru
+          if (-not $app.WaitForExit(240000)) {
+            Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+            throw "the app did not exit within 240 s"
+          }
+          Get-Process -Name pwsh, powershell, cmd -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt $startedAt } | Stop-Process -Force -ErrorAction SilentlyContinue
           if (Test-Path $report) { Get-Content $report }
           if ($app.ExitCode -ne 0) { throw "self-test exited with $($app.ExitCode)" }
 
