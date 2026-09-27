@@ -1805,15 +1805,18 @@ fn shell_group_is_foreground(
 
 /// Whether any running process has `parent_pid` as its parent. The console
 /// host Windows may start for a console program is not a program the user
-/// ran, so it does not count.
+/// ran, so it does not count. Windows reuses process ids and keeps an
+/// orphan's old parent id, so a process that started before the shell was
+/// the child of an earlier process with the same id, and does not count.
 #[cfg(any(not(unix), test))]
 fn has_child_process(parent_pid: u32) -> bool {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let mut sys = System::new();
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
     let parent = Pid::from_u32(parent_pid);
+    let parent_started = sys.process(parent).map_or(0, |p| p.start_time());
     sys.processes().values().any(|p| {
-        p.parent() == Some(parent) && {
+        p.parent() == Some(parent) && p.start_time() >= parent_started && {
             let name = p.name().to_string_lossy().to_ascii_lowercase();
             name != "conhost.exe" && name != "openconsole.exe"
         }
