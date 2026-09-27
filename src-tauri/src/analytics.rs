@@ -5,11 +5,10 @@
 //! no HTTP client and no background flush loop exist in the process, so
 //! nothing can be sent even if a call site forgets to check the setting.
 //!
-//! - At startup, `register_at_startup` adds the plugin only for a profile that
-//!   already opted in.
-//! - When the user opts in while the app runs (onboarding or Settings >
-//!   Privacy), the frontend calls `enable_analytics`, which adds the plugin
-//!   then and there, so the choice takes effect without a restart.
+//! - The frontend calls `enable_analytics` at startup when the stored setting
+//!   is `"true"`, and again when the user opts in (onboarding or Settings >
+//!   Privacy), so the choice takes effect without a restart. The command
+//!   re-checks the stored setting itself.
 //! - Opting out stops the frontend from tracking anything; the plugin only
 //!   ever sends events that were explicitly tracked (audited against
 //!   tauri-plugin-aptabase 1.0.0: its flush loop posts nothing while its
@@ -20,7 +19,6 @@
 //! instead point it at a loopback sink with `HERMES_E2E_ANALYTICS_HOST`, so a
 //! scenario can watch exactly what the app would send.
 
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -33,7 +31,6 @@ const APP_KEY: &str = "A-EU-1922161061";
 /// A self-hosted-style key, so the plugin accepts a custom host. Only ever
 /// used with a loopback host.
 const E2E_SINK_APP_KEY: &str = "A-SH-E2E";
-const DB_FILE: &str = "hermes_idea_v3.db";
 
 /// Whether the plugin has been registered in this process.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -94,40 +91,6 @@ fn plugin<R: Runtime>(destination: Destination) -> Option<TauriPlugin<R>> {
     }
 }
 
-/// Whether the database at `db_path` records an explicit opt-in. A missing
-/// database (fresh profile) or a missing setting means no.
-fn opted_in(db_path: &Path) -> bool {
-    if !db_path.exists() {
-        return false;
-    }
-    crate::db::Database::new(db_path)
-        .ok()
-        .and_then(|database| database.get_setting("telemetry_enabled").ok().flatten())
-        .as_deref()
-        == Some("true")
-}
-
-/// Adds the analytics plugin to `builder` only when this profile already
-/// opted in.
-pub fn register_at_startup<R: Runtime>(
-    builder: tauri::Builder<R>,
-    app_identifier: &str,
-) -> tauri::Builder<R> {
-    let Some(data_dir) = dirs::data_dir() else {
-        return builder;
-    };
-    if !opted_in(&data_dir.join(app_identifier).join(DB_FILE)) {
-        return builder;
-    }
-    match plugin(current_destination()) {
-        Some(p) => {
-            ACTIVE.store(true, Ordering::SeqCst);
-            builder.plugin(p)
-        }
-        None => builder,
-    }
-}
-
 /// Turns analytics on for the running app after the user opted in.
 ///
 /// Returns whether analytics is active. It stays off when the stored setting
@@ -156,49 +119,13 @@ pub fn enable_analytics(app: AppHandle, state: State<'_, AppState>) -> Result<bo
         ACTIVE.store(false, Ordering::SeqCst);
         return Err(e.to_string());
     }
+    log::info!("[analytics] opted in: analytics turned on");
     Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn db_with(dir: &Path, telemetry: Option<&str>) -> std::path::PathBuf {
-        let path = dir.join(DB_FILE);
-        let db = crate::db::Database::new(&path).unwrap();
-        if let Some(v) = telemetry {
-            db.set_setting("telemetry_enabled", v).unwrap();
-        }
-        path
-    }
-
-    #[test]
-    fn fresh_profile_is_not_opted_in() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(!opted_in(&dir.path().join(DB_FILE)));
-        assert!(
-            !dir.path().join(DB_FILE).exists(),
-            "checking must not create a database"
-        );
-    }
-
-    #[test]
-    fn profile_that_never_opted_in_is_not_opted_in() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(!opted_in(&db_with(dir.path(), None)));
-    }
-
-    #[test]
-    fn opted_out_profile_is_not_opted_in() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(!opted_in(&db_with(dir.path(), Some("false"))));
-    }
-
-    #[test]
-    fn explicit_opt_in_is_honored() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(opted_in(&db_with(dir.path(), Some("true"))));
-    }
 
     #[test]
     fn normal_runs_send_to_aptabase() {

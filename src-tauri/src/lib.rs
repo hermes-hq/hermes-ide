@@ -491,14 +491,10 @@ pub fn run() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let _guard = rt.enter();
 
-    let context = tauri::generate_context!();
-
     let builder = tauri::Builder::default();
     // Test runs must not take keyboard focus away from whoever is working.
     #[cfg(feature = "e2e")]
     let builder = e2e_bridge::configure(builder);
-    // Private by default: the analytics plugin exists only after an opt-in.
-    let builder = analytics::register_at_startup(builder, &context.config().identifier);
 
     builder
         .plugin(tauri_plugin_shell::init())

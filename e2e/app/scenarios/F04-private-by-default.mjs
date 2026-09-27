@@ -18,6 +18,8 @@
 //      context file, the agent-mode state folder) and leaves the session,
 //      another session's caches and a repository folder alone. A path-like
 //      session id is refused by the backend.
+//   6. A profile that opted in turns analytics on by itself on the next
+//      launch.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F04-private-by-default.mjs
@@ -25,9 +27,9 @@
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/F04-private-by-default.
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
@@ -202,6 +204,13 @@ async function pickSessionMenuItem(bridge, sessionId, actionId, answer) {
 
 let app;
 let failed = false;
+// Step 7 relaunches against the same profile. A private home is kept here
+// (the harness never deletes a home it was handed); on Windows the app's data
+// lives under %APPDATA%, so the relaunch keeps the test data folder instead.
+const onWindows = platform() === "win32";
+const homeDir = onWindows ? undefined : mkdtempSync(join(tmpdir(), "hermes-e2e-f04-home-"));
+const launchOptions = (resetData) =>
+  onWindows ? { home: "real", resetData } : { home: "private", homeDir };
 
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   analytics stand-in: ${sinkHost}`);
@@ -212,6 +221,7 @@ try {
     runDir: join(evidenceDir, "run"),
     log,
     env: { HERMES_E2E_ANALYTICS_HOST: sinkHost },
+    ...launchOptions(true),
   });
   const { bridge } = app;
 
@@ -329,7 +339,7 @@ try {
 
   // Agent-mode sessions keep a state folder in the app's home. A plain shell
   // session has none, so write the same shape a Claude session would.
-  const appHome = platform() === "win32" ? process.env.HOME : join(app.tmpDir, "home");
+  const appHome = onWindows ? process.env.HOME : homeDir;
   const stateRoot = appHome ? join(appHome, ".hermes-ide", "sessions") : null;
   if (stateRoot) {
     for (const sid of [sessionA, sessionB]) {
@@ -385,6 +395,33 @@ try {
   await bridge.screenshot(join(evidenceDir, "06-after-delete-session-data.png"));
 
   if (stateRoot) rmSync(join(stateRoot, sessionB), { recursive: true, force: true });
+
+  // ── 7. Relaunch while opted in: analytics starts with the app ─────
+  log("step 7: opt in, quit, and relaunch on the same profile");
+  await setAnalyticsInSettings(bridge, true, null);
+  const firstExit = await app.stop();
+  assert(!firstExit.forced && firstExit.code === 0, `the app quit cleanly before the relaunch (${JSON.stringify(firstExit)})`);
+  app = null;
+  const countBeforeRelaunch = received.length;
+  app = await launchApp({
+    runDir: join(evidenceDir, "run-relaunch"),
+    log,
+    env: { HERMES_E2E_ANALYTICS_HOST: sinkHost },
+    ...launchOptions(false),
+  });
+  const relaunched = app.bridge;
+  const afterRelaunch = () => received.slice(countBeforeRelaunch).map((e) => e.eventName);
+  const relaunchDeadline = Date.now() + 20_000;
+  while (!afterRelaunch().includes("app_started") && Date.now() < relaunchDeadline) await sleep(200);
+  assert(
+    afterRelaunch().includes("app_started"),
+    `the opted-in profile sent app_started on the next launch (${JSON.stringify(afterRelaunch())})`,
+  );
+  assert(
+    readFileSync(app.appLog, "utf8").includes("[analytics] opted in: analytics turned on"),
+    "the app turned analytics on from the stored opt-in",
+  );
+  await relaunched.screenshot(join(evidenceDir, "07-relaunched-opted-in.png"));
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
@@ -395,7 +432,7 @@ try {
   }
 } finally {
   if (app) {
-    log("step 7: quit the app");
+    log("step 8: quit the app");
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
     if (!failed && (exit.forced || exit.code !== 0)) {
@@ -404,6 +441,7 @@ try {
     }
   }
   sink.close();
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details: { analyticsEvents: eventNames() } });
