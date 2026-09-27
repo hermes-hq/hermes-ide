@@ -322,7 +322,7 @@
       },
       "detect": { "command": ["hermes", "--version"] },
       "auth": { "check": ["hermes", "status"], "hint": "Run 'hermes setup' to choose a model provider" },
-      "evidence": { "level": "docs" }
+      "evidence": { "level": "help", "version": "0.21.5" }
     },
     {
       "id": "aider",
