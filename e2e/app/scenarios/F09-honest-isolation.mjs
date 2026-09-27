@@ -57,7 +57,9 @@ function assert(condition, message) {
 }
 
 // ── A throwaway repository (synthetic identity, never the real one) ──
-const workDir = mkdtempSync(join(tmpdir(), "hermes-e2e-f09-"));
+// The long form of the path: on Windows the temp folder can come back as an
+// 8.3 short name (a segment like RUNNER~1) that the app spells out in full.
+const workDir = realpathSync.native(mkdtempSync(join(tmpdir(), "hermes-e2e-f09-")));
 const repo = join(workDir, "f09-repo");
 const gitEnv = {
   ...process.env,
@@ -93,7 +95,7 @@ function worktrees() {
 }
 const samePath = (a, b) => {
   const norm = (p) => {
-    try { p = realpathSync(p); } catch { /* gone */ }
+    try { p = realpathSync.native(p); } catch { /* gone */ }
     return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   };
   return norm(a) === norm(b);
