@@ -146,6 +146,48 @@ fn bridge_path_candidates(
     out
 }
 
+/// Strip the Windows verbatim prefix (`\\?\C:\...` -> `C:\...`) from a path
+/// before handing it to node / claude.  Tauri's `resource_dir()` and
+/// `std::fs::canonicalize` produce verbatim paths on Windows, and Node's
+/// realpath chokes on them (`EISDIR: illegal operation on a directory,
+/// lstat 'C:'`), killing the bridge on launch.  No-op on other platforms.
+fn node_safe_path(p: &std::path::Path) -> std::path::PathBuf {
+    dunce::simplified(p).to_path_buf()
+}
+
+/// Every path the spawn hands to node / claude (bridge script, cwd,
+/// `--add-dir`s), normalized in one place so none can skip [`node_safe_path`].
+#[derive(Debug, PartialEq, Eq)]
+struct NodeSpawnPaths {
+    bridge: std::path::PathBuf,
+    working_dir: String,
+    add_dirs: Vec<String>,
+}
+
+fn node_spawn_paths(
+    bridge: &std::path::Path,
+    working_dir: &str,
+    add_dirs: &[String],
+) -> NodeSpawnPaths {
+    node_spawn_paths_with(bridge, working_dir, add_dirs, node_safe_path)
+}
+
+/// Normalizer is injected so tests can prove every path goes through it on
+/// any OS (`dunce::simplified` is a no-op off Windows).
+fn node_spawn_paths_with(
+    bridge: &std::path::Path,
+    working_dir: &str,
+    add_dirs: &[String],
+    norm: impl Fn(&std::path::Path) -> std::path::PathBuf,
+) -> NodeSpawnPaths {
+    let s = |p: &str| norm(std::path::Path::new(p)).to_string_lossy().into_owned();
+    NodeSpawnPaths {
+        bridge: norm(bridge),
+        working_dir: s(working_dir),
+        add_dirs: add_dirs.iter().map(|d| s(d)).collect(),
+    }
+}
+
 fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     // Honor an explicit override even if it's broken — surface the
     // misconfiguration loudly rather than silently falling through.
@@ -450,11 +492,19 @@ pub async fn spawn_agent_session(
     fork: Option<bool>,
 ) -> Result<String, String> {
     let fork = fork.unwrap_or(false);
+    let NodeSpawnPaths {
+        bridge: bridge_path,
+        working_dir,
+        add_dirs: dirs,
+    } = node_spawn_paths(
+        &resolve_bridge_path(&app)?,
+        &working_dir,
+        &add_dirs.unwrap_or_default(),
+    );
     let claude_session_id = match (prior_uuid.as_deref(), fork) {
         (Some(uuid), false) => uuid.to_string(),
         (Some(_), true) | (None, _) => uuid::Uuid::new_v4().to_string(),
     };
-    let dirs: Vec<String> = add_dirs.unwrap_or_default();
     let plan = build_spawn_args(
         &claude_session_id,
         &working_dir,
@@ -481,7 +531,6 @@ pub async fn spawn_agent_session(
     let use_direct = std::env::var("HERMES_AGENT_DIRECT")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
-    let bridge_path = resolve_bridge_path(&app)?;
     let node_path = if use_direct {
         None
     } else {
@@ -1757,6 +1806,70 @@ mod tests {
             std::path::PathBuf::from("/tmp/explicit/hermes-claude-bridge.mjs"),
             "explicit override must win over manifest + resource_dir",
         );
+    }
+
+    #[test]
+    fn node_safe_path_leaves_plain_paths_untouched() {
+        let p = std::path::Path::new("/tmp/project");
+        assert_eq!(node_safe_path(p), PathBuf::from("/tmp/project"));
+    }
+
+    // Guards the spawn wiring, not just the helper: bridge, cwd and every
+    // add-dir must pass through the normalizer.  Uses a fake normalizer so it
+    // is meaningful on macOS/Linux, where dunce is a no-op.
+    #[test]
+    fn node_spawn_paths_normalizes_bridge_cwd_and_every_add_dir() {
+        let strip = |p: &std::path::Path| {
+            PathBuf::from(p.to_string_lossy().trim_start_matches(r"\\?\").to_string())
+        };
+        let got = node_spawn_paths_with(
+            std::path::Path::new(r"\\?\C:\Hermes\bridge\hermes-claude-bridge.mjs"),
+            r"\\?\C:\Users\me\project",
+            &[r"\\?\D:\lib".to_string(), r"\\?\E:\docs".to_string()],
+            strip,
+        );
+        assert_eq!(
+            got,
+            NodeSpawnPaths {
+                bridge: PathBuf::from(r"C:\Hermes\bridge\hermes-claude-bridge.mjs"),
+                working_dir: r"C:\Users\me\project".to_string(),
+                add_dirs: vec![r"D:\lib".to_string(), r"E:\docs".to_string()],
+            }
+        );
+    }
+
+    // Production wiring: node_spawn_paths must use node_safe_path (real
+    // stripping only happens on Windows; CI runs cargo test on windows-2022).
+    #[cfg(windows)]
+    #[test]
+    fn node_spawn_paths_strips_verbatim_prefix_on_windows() {
+        let got = node_spawn_paths(
+            std::path::Path::new(r"\\?\C:\Hermes\bridge\hermes-claude-bridge.mjs"),
+            r"\\?\C:\Users\me\project",
+            &[r"\\?\D:\lib".to_string()],
+        );
+        assert_eq!(
+            got.bridge,
+            PathBuf::from(r"C:\Hermes\bridge\hermes-claude-bridge.mjs")
+        );
+        assert_eq!(got.working_dir, r"C:\Users\me\project");
+        assert_eq!(got.add_dirs, vec![r"D:\lib".to_string()]);
+    }
+
+    // Issue #296: a `\\?\C:\...` bridge path / cwd crashed node with
+    // `EISDIR: lstat 'C:'`.  The verbatim prefix must be stripped.
+    #[cfg(windows)]
+    #[test]
+    fn node_safe_path_strips_windows_verbatim_prefix() {
+        let p = std::path::Path::new(
+            r"\\?\C:\Program Files\Hermes IDE\bridge\hermes-claude-bridge.mjs",
+        );
+        assert_eq!(
+            node_safe_path(p),
+            PathBuf::from(r"C:\Program Files\Hermes IDE\bridge\hermes-claude-bridge.mjs")
+        );
+        let wd = std::path::Path::new(r"\\?\C:\Users\me\project");
+        assert_eq!(node_safe_path(wd), PathBuf::from(r"C:\Users\me\project"));
     }
 
     #[test]

@@ -65,9 +65,10 @@ pub fn create_project(
     path: String,
     name: Option<String>,
 ) -> Result<Project, String> {
-    // Canonicalize so "." / "./" becomes an absolute path
+    // Canonicalize so "." / "./" becomes an absolute path.  dunce avoids the
+    // Windows `\\?\` verbatim prefix, which breaks node when used as cwd (#296).
     let canonical =
-        std::fs::canonicalize(&path).map_err(|e| format!("Cannot resolve path {}: {}", path, e))?;
+        dunce::canonicalize(&path).map_err(|e| format!("Cannot resolve path {}: {}", path, e))?;
     let resolved_path = canonical.to_string_lossy().to_string();
 
     if !canonical.is_dir() {
