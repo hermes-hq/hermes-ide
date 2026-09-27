@@ -25,9 +25,9 @@
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F05-terminal-keys.mjs
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { platform, tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 import { osKeysAvailable, pressChords } from "../os-keys.mjs";
 
@@ -55,21 +55,20 @@ function assert(condition, message) {
 }
 
 /**
- * A `hermeskeylog` command in the folder a new terminal starts in (the home
- * folder), so typing "./hermeskeylog" starts the keylogger writing to `out`.
- * Returns the files it created.
+ * A `hermeskeylog` command in `dir`, a folder this scenario owns and puts on
+ * the app's PATH, so typing "hermeskeylog" in a Hermes terminal starts the
+ * keylogger writing to `out`. Nothing is written to the real home folder.
  */
 function installKeyloggerCommand(dir, out) {
   const script = join(REPO_ROOT, "e2e", "app", "fixtures", "keylogger.mjs");
   if (platform() === "win32") {
     const file = join(dir, "hermeskeylog.cmd");
     writeFileSync(file, `@"${process.execPath}" "${script}" "${out}"\r\n`);
-    return [file];
+    return;
   }
   const file = join(dir, "hermeskeylog");
   writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${script}" "${out}"\n`);
   chmodSync(file, 0o755);
-  return [file];
 }
 
 /** Bytes the keylogger recorded, as hex strings, in order. */
@@ -197,7 +196,7 @@ async function domChords(bridge, sessionId, chords) {
 
 let app;
 let failed = false;
-const createdFiles = [];
+let commandDir = null;
 const details = { mode: OS_KEYS ? "os-keys" : "dom-keys", platformRules: EFFECTIVE };
 
 try {
@@ -212,11 +211,15 @@ try {
   const keylog = join(evidenceDir, "keylog.txt");
   rmSync(keylog, { force: true });
 
+  commandDir = mkdtempSync(join(tmpdir(), "hermes-f05-"));
+  installKeyloggerCommand(commandDir, keylog);
+  // Windows spells it "Path"; override the variable under the name it has.
+  const pathVar = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  const env = { [pathVar]: `${commandDir}${delimiter}${process.env[pathVar] ?? ""}` };
+
   log("step 1: launch the test app");
-  app = await launchApp({ runDir: join(evidenceDir, "run"), log, home: process.env.HERMES_E2E_HOME || undefined });
+  app = await launchApp({ runDir: join(evidenceDir, "run"), log, home: process.env.HERMES_E2E_HOME || undefined, env });
   const { bridge } = app;
-  const shellHome = app.tmpDir && existsSync(join(app.tmpDir, "home")) ? join(app.tmpDir, "home") : homedir();
-  createdFiles.push(...installKeyloggerCommand(shellHome, keylog));
 
   if (EMULATE) {
     log(`  switching the frontend to ${EMULATE} keyboard rules and reloading`);
@@ -272,7 +275,7 @@ try {
     return info && info.opened && lines.some((l) => l.trim().length > 0);
   `, { timeoutMs: 30_000 });
   await sleep(1000);
-  await bridge.typeInTerminal(sessionId, "./hermeskeylog\n");
+  await bridge.typeInTerminal(sessionId, "hermeskeylog\n");
   await bridge.waitForTerminal(sessionId, /^KEYLOG READY/, { timeoutMs: 20_000 });
   log("  keylogger is running");
   const start = await bridge.eval(FINGERPRINT);
@@ -398,7 +401,7 @@ try {
     log(`  (could not capture failure evidence: ${inner.message})`);
   }
 } finally {
-  for (const f of createdFiles) rmSync(f, { force: true });
+  if (commandDir) rmSync(commandDir, { recursive: true, force: true });
   if (app) {
     log("step 7: quit the app");
     const exit = await app.stop();
