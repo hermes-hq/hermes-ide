@@ -6,6 +6,9 @@ mod db;
 mod e2e_bridge;
 #[cfg(any(test, feature = "e2e"))]
 #[cfg_attr(not(feature = "e2e"), allow(dead_code))]
+mod e2e_evidence;
+#[cfg(any(test, feature = "e2e"))]
+#[cfg_attr(not(feature = "e2e"), allow(dead_code))]
 mod e2e_protocol;
 mod git;
 mod inline_pty;

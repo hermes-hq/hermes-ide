@@ -11,10 +11,13 @@
 //                   green only when every run passes
 //   --out DIR       evidence root (default <HERMES_E2E_OUT>/evidence)
 //   --keep-going    keep running the remaining scenarios after a failure
+//   --fresh         start a new results.json instead of adding to it
 //
 // Scenarios whose ledger entry excludes this platform are skipped. Results
 // accumulate across invocations so a workflow can run different scenario
-// sets with different repeat counts into the same results.json.
+// sets with different repeat counts into the same results.json — which also
+// means one old red run keeps `acceptance-check --results` red until you
+// pass --fresh (or delete the evidence folder).
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -27,12 +30,14 @@ const args = process.argv.slice(2);
 let repeat = 1;
 let out = join(outDir(), "evidence");
 let keepGoing = false;
+let fresh = false;
 const picked = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--repeat") repeat = Number(args[++i]);
   else if (a === "--out") out = resolve(args[++i]);
   else if (a === "--keep-going") keepGoing = true;
+  else if (a === "--fresh") fresh = true;
   else if (a.startsWith("--")) throw new Error(`unknown option ${a}`);
   else picked.push(a.endsWith(".mjs") ? a : `${a}.mjs`);
 }
@@ -65,7 +70,7 @@ if (!existsSync(appBinaryPath())) {
 
 mkdirSync(out, { recursive: true });
 const resultsFile = join(out, "results.json");
-const runs = existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, "utf8")) : [];
+const runs = !fresh && existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, "utf8")) : [];
 const save = () => writeFileSync(resultsFile, JSON.stringify(runs, null, 2) + "\n");
 
 let failures = 0;

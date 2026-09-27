@@ -24,6 +24,8 @@
 //!   POST /screenshot  -> body { file, window? }; writes a PNG of the window
 //!                        from inside the app (no focus, no screen-recording
 //!                        permission) and returns { ok, file, width, height }.
+//!                        A capture that is one flat colour (nothing painted,
+//!                        screen locked) is deleted and answered with an error.
 //!   POST /quit        -> asks the app to exit cleanly.
 
 #[cfg(not(debug_assertions))]
@@ -38,6 +40,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
+use crate::e2e_evidence;
 use crate::e2e_protocol::{self, Request, Response};
 
 const DEFAULT_EVAL_TIMEOUT_MS: u64 = 10_000;
@@ -347,9 +350,11 @@ fn window_info(app: &AppHandle, label: &str) -> Result<Value, String> {
 
 /// Capture the window's pixels from inside the app and write them as a PNG.
 ///
-/// Every platform reads the window's own surface, so this works while the
-/// window is covered, unfocused, on a virtual display (Linux xvfb) or on a CI
-/// runner that has never granted a screen-recording permission.
+/// Every platform asks the window (or the webview) to paint into a buffer of
+/// ours, so this works while the window is covered, unfocused, on a virtual
+/// display (Linux xvfb) or on a CI runner that has never granted a
+/// screen-recording permission. A capture that is one flat colour is not
+/// evidence of anything: it is deleted and reported as an error.
 fn screenshot(app: &AppHandle, label: &str, file: &std::path::Path) -> Result<Value, String> {
     let window = app
         .get_webview_window(label)
@@ -367,6 +372,13 @@ fn screenshot(app: &AppHandle, label: &str, file: &std::path::Path) -> Result<Va
     if bytes == 0 {
         return Err(format!("screenshot file {:?} is empty", file));
     }
+    if let Some(colour) = e2e_evidence::flat_colour(file)? {
+        let _ = std::fs::remove_file(file);
+        return Err(format!(
+            "the capture is one flat colour ({}): the window has not painted yet, or the screen is locked",
+            e2e_evidence::hex(colour)
+        ));
+    }
     Ok(json!({
         "ok": true,
         "file": file.to_string_lossy(),
@@ -376,9 +388,8 @@ fn screenshot(app: &AppHandle, label: &str, file: &std::path::Path) -> Result<Va
     }))
 }
 
-/// Interleaved 32-bit BGRA pixels (what CoreGraphics and GDI both hand out)
-/// → an opaque RGBA PNG.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+/// Interleaved 32-bit BGRA pixels (what GDI hands out) → an opaque RGBA PNG.
+#[cfg(target_os = "windows")]
 fn write_png_from_bgra(
     file: &std::path::Path,
     width: u32,
@@ -392,7 +403,7 @@ fn write_png_from_bgra(
         let row = pixels
             .get(y * stride..y * stride + row_bytes)
             .ok_or("pixel buffer is shorter than the image")?;
-        for px in row.as_chunks::<4>().0 {
+        for px in row.chunks_exact(4) {
             // The window is opaque; dropping alpha also undoes premultiplication.
             rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
         }
@@ -405,53 +416,80 @@ fn write_png_from_bgra(
 
 #[cfg(target_os = "macos")]
 mod capture {
-    use super::on_main_thread;
-    use core_graphics::display::{CGDisplay, CGPoint, CGRect, CGSize};
-    use core_graphics::window::{
-        kCGWindowImageBoundsIgnoreFraming, kCGWindowImageNominalResolution,
-        kCGWindowListOptionIncludingWindow,
-    };
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use block2::RcBlock;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSImage;
+    use objc2_foundation::NSError;
+    use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
     use tauri::AppHandle;
 
-    /// CGWindowListCreateImage only needs a permission to read OTHER apps'
-    /// windows; reading our own works everywhere, including CI runners.
+    const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(20);
+
+    /// Ask WebKit itself for a picture of the page. The web content process
+    /// renders it, so it works while the window is covered, in the background
+    /// or behind a locked screen — where the window server, and so any
+    /// screen capture, only hands out black.
     pub fn capture_png(
-        app: &AppHandle,
+        _app: &AppHandle,
         window: tauri::WebviewWindow,
         file: &std::path::Path,
     ) -> Result<(u32, u32), String> {
-        let window_id = super::native_window_id(app, &window)
-            .ok_or("the window has no window number yet")? as u32;
-        let file = file.to_path_buf();
-        on_main_thread(app, move || {
-            // CGRectNull: use the window's own bounds.
-            let null_rect = CGRect::new(
-                &CGPoint::new(f64::INFINITY, f64::INFINITY),
-                &CGSize::new(0.0, 0.0),
-            );
-            let image = CGDisplay::screenshot(
-                null_rect,
-                kCGWindowListOptionIncludingWindow,
-                window_id,
-                kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution,
-            )
-            .ok_or("CGWindowListCreateImage returned no image (window off screen?)")?;
+        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+        window
+            .with_webview(move |webview| {
+                let Some(mtm) = MainThreadMarker::new() else {
+                    let _ = tx.send(Err("the webview was not reached on the main thread".into()));
+                    return;
+                };
+                let wk = webview.inner() as *const WKWebView;
+                if wk.is_null() {
+                    let _ = tx.send(Err("the window has no webview yet".into()));
+                    return;
+                }
+                // SAFETY: `inner()` is the live WKWebView of this window, and
+                // `with_webview` runs this closure on the main thread.
+                let wk = unsafe { &*wk };
+                // SAFETY: plain WebKit calls on the main thread; the completion
+                // block only reads the objects WebKit hands to it.
+                unsafe {
+                    let config = WKSnapshotConfiguration::new(mtm);
+                    // Wait for pending layout and paint work first: the picture
+                    // must show what the page is showing now, not a frame ago.
+                    config.setAfterScreenUpdates(true);
+                    let handler = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+                        let result = if !image.is_null() {
+                            (*image)
+                                .TIFFRepresentation()
+                                .map(|data| data.to_vec())
+                                .ok_or_else(|| "the snapshot has no bitmap".to_string())
+                        } else if !error.is_null() {
+                            Err(format!(
+                                "WebKit could not take a snapshot: {}",
+                                (*error).localizedDescription()
+                            ))
+                        } else {
+                            Err("WebKit returned neither an image nor an error".into())
+                        };
+                        let _ = tx.send(result);
+                    });
+                    wk.takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler);
+                }
+            })
+            .map_err(|e| format!("could not reach the webview: {}", e))?;
 
-            let width = image.width() as u32;
-            let height = image.height() as u32;
-            if image.bits_per_pixel() != 32 {
-                return Err(format!(
-                    "unexpected {} bits per pixel",
-                    image.bits_per_pixel()
-                ));
-            }
-            // Window images come back as 32-bit little-endian pixels with the
-            // alpha channel first (kCGBitmapByteOrder32Little |
-            // kCGImageAlphaPremultipliedFirst), i.e. BGRA in memory.
-            let data = image.data();
-            super::write_png_from_bgra(&file, width, height, image.bytes_per_row(), data.bytes())?;
-            Ok((width, height))
-        })?
+        let tiff = rx
+            .recv_timeout(SNAPSHOT_TIMEOUT)
+            .map_err(|_| "WebKit did not deliver the snapshot in time".to_string())??;
+        let image = image::load_from_memory_with_format(&tiff, image::ImageFormat::Tiff)
+            .map_err(|e| format!("decode the snapshot: {}", e))?
+            .into_rgba8();
+        image
+            .save(file)
+            .map_err(|e| format!("write PNG {:?}: {}", file, e))?;
+        Ok(image.dimensions())
     }
 }
 
@@ -576,6 +614,9 @@ mod capture {
             if width <= 0 || height <= 0 {
                 return Err("the window has no size yet".to_string());
             }
+            // Everything drawn so far must have reached the X server before
+            // its pixels are read back.
+            gdk_window.display().sync();
             let pixbuf = gdk_window
                 .pixbuf(0, 0, width, height)
                 .ok_or("gdk_pixbuf_get_from_window returned nothing")?;

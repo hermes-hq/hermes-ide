@@ -3,7 +3,7 @@
 // command, sees its output, and closes the terminal.
 //
 // Runs against the REAL app, hands-free. Never needs the window to be focused
-// or even visible (it passes with the screen locked).
+// or in front; the screenshots are rendered by the app's own webview.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/terminal-echo.mjs
@@ -171,9 +171,10 @@ try {
   assert(lines.some((l) => exact.test(l)), `the command's output line "${EXPECT}" is on screen`);
   log("  terminal content:");
   for (const l of lines.slice(-8)) log(`    | ${l}`);
-  await sleep(300); // one more paint before the picture
+  // The picture is taken after the page has painted and is refused when it
+  // is a flat colour, so it shows the state asserted above — or fails.
   const shot = await bridge.screenshot(join(evidenceDir, "03-terminal-output.png"));
-  log(`  screenshot saved: ${shot.file} (${shot.bytes} bytes)`);
+  log(`  screenshot saved: ${shot.file} (${shot.bytes} bytes, ${shot.width}x${shot.height}, not a flat colour)`);
 
   // ── 6. Close the session ─────────────────────────────────────────
   log("step 6: close the session from the session list");
@@ -189,7 +190,6 @@ try {
     return !window.__HERMES_E2E__.terminalIds().includes(${JSON.stringify(sessionId)});
   `);
   assert(!(await bridge.terminalIds()).includes(sessionId), "the terminal is gone");
-  await sleep(300);
   await bridge.screenshot(join(evidenceDir, "04-after-close.png"));
 
   // ── 7. Focus was never taken ─────────────────────────────────────

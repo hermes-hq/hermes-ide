@@ -22,6 +22,7 @@ import {
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, "..", "..");
@@ -234,20 +235,123 @@ export class Bridge {
   }
 
   /**
-   * Save a PNG of the app window. The app captures its own window from the
-   * inside, so this needs neither focus, nor the window being in front, nor a
-   * screen-recording permission — and it works on a virtual display.
+   * Wait until what the page shows has been painted: two animation frames,
+   * so a renderer that draws on the next frame (the terminal does) has had
+   * its turn. A hidden window may never get a frame; then this gives up
+   * after a moment instead of hanging.
+   */
+  settle({ timeoutMs = 1_500 } = {}) {
+    return this.eval(`
+      await new Promise((done) => {
+        const giveUp = setTimeout(() => done("timeout"), ${timeoutMs});
+        requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(giveUp); done("painted"); }));
+      });
+      return true;
+    `);
+  }
+
+  /**
+   * Save a PNG of the app window as it looks right now. The app captures its
+   * own window from the inside, so this needs neither focus, nor the window
+   * being in front, nor a screen-recording permission — and it works on a
+   * virtual display. A picture that is one flat colour (nothing painted,
+   * screen locked) is not evidence and fails the call.
    */
   async screenshot(file) {
     const target = resolve(file);
     mkdirSync(dirname(target), { recursive: true });
     rmSync(target, { force: true });
+    await this.settle();
+    await sleep(SCREENSHOT_SETTLE_MS);
     const shot = await this.request("POST", "/screenshot", { file: target }, { timeoutMs: 30_000 });
     if (!existsSync(target) || statSync(target).size === 0) {
       throw new Error(`the app reported a screenshot but ${target} is missing or empty`);
     }
+    const flat = pngFlatColour(target);
+    if (flat) {
+      rmSync(target, { force: true });
+      throw new Error(`the screenshot ${target} is one flat colour (${flat}): the window had not painted, or the screen is locked`);
+    }
     return { file: target, bytes: statSync(target).size, width: shot.width, height: shot.height };
   }
+}
+
+/** After the page has painted, the window system still needs a moment to show it. */
+const SCREENSHOT_SETTLE_MS = 250;
+
+/**
+ * The one colour a PNG consists of ("#rrggbb"), or null when it shows more
+ * than one. Reads the 8-bit, non-interlaced greyscale/RGB/RGBA files the app
+ * writes; anything else is an error, never a silent pass. Zero dependencies:
+ * the runners have Node and nothing else.
+ */
+export function pngFlatColour(file) {
+  const buf = readFileSync(file);
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(signature)) throw new Error(`${file} is not a PNG`);
+  let width = 0;
+  let height = 0;
+  let depth = 0;
+  let colourType = -1;
+  let interlace = 0;
+  const idat = [];
+  for (let pos = 8; pos + 8 <= buf.length; ) {
+    const length = buf.readUInt32BE(pos);
+    const type = buf.toString("latin1", pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + length);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      depth = data[8];
+      colourType = data[9];
+      interlace = data[12];
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    pos += 12 + length;
+  }
+  const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[colourType];
+  if (!width || !height || !channels || depth !== 8 || interlace !== 0) {
+    throw new Error(`${file}: unsupported PNG (${width}x${height}, ${depth}-bit, colour type ${colourType}, interlace ${interlace})`);
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  if (raw.length < height * (stride + 1)) throw new Error(`${file}: PNG data is truncated`);
+  let previous = Buffer.alloc(stride);
+  let first = null;
+  for (let y = 0; y < height; y++) {
+    const at = y * (stride + 1);
+    const filter = raw[at];
+    const row = Buffer.from(raw.subarray(at + 1, at + 1 + stride));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? row[i - channels] : 0;
+      const b = previous[i];
+      const c = i >= channels ? previous[i - channels] : 0;
+      let predicted;
+      if (filter === 0) predicted = 0;
+      else if (filter === 1) predicted = a;
+      else if (filter === 2) predicted = b;
+      else if (filter === 3) predicted = (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        predicted = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else throw new Error(`${file}: bad PNG filter ${filter} on row ${y}`);
+      row[i] = (row[i] + predicted) & 0xff;
+    }
+    for (let x = 0; x < stride; x += channels) {
+      const pixel = row.subarray(x, x + channels);
+      if (first === null) first = Buffer.from(pixel);
+      else if (!pixel.equals(first)) return null;
+    }
+    previous = row;
+  }
+  const rgb = channels < 3 ? [first[0], first[0], first[0]] : [first[0], first[1], first[2]];
+  return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
 }
 
 // ─── Scenario results ────────────────────────────────────────────────

@@ -16,10 +16,38 @@ path = "src/main.rs"
 # Test-only automation bridge (src/e2e_bridge.rs). Off by default and refuses
 # to compile in a release build. The platform crates below are only for the
 # bridge's in-process window screenshots.
-e2e = ["dep:core-graphics", "dep:gtk", "dep:windows-sys"]
+e2e = [
+  "dep:objc2",
+  "dep:objc2-foundation",
+  "dep:objc2-app-kit",
+  "dep:objc2-web-kit",
+  "dep:block2",
+  "dep:gtk",
+  "dep:windows-sys",
+]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = { version = "0.25", optional = true }
+objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = [
+  "std",
+  "NSData",
+  "NSError",
+  "NSObject",
+  "NSString",
+  "NSValue",
+] }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = [
+  "std",
+  "NSImage",
+] }
+objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = [
+  "std",
+  "block2",
+  "objc2-app-kit",
+  "WKWebView",
+  "WKSnapshotConfiguration",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }

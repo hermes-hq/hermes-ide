@@ -29,10 +29,13 @@ function assert(condition, message) {
 }
 
 function cargoCheck(extra) {
-  const args = ["check", "--lib", "--features", "e2e", "--manifest-path", join(REPO_ROOT, "src-tauri", "Cargo.toml"), ...extra];
+  // Plain text, whatever the environment says (CI exports CARGO_TERM_COLOR=always):
+  // the assertions below read cargo's messages.
+  const args = ["check", "--lib", "--features", "e2e", "--color", "never", "--manifest-path", join(REPO_ROOT, "src-tauri", "Cargo.toml"), ...extra];
   log(`  $ cargo ${args.join(" ")}`);
   const res = spawnSync("cargo", args, {
     cwd: REPO_ROOT,
+    env: { ...process.env, CARGO_TERM_COLOR: "never" },
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     shell: platform() === "win32",

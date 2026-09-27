@@ -14,7 +14,10 @@ scenario on every OS.
   `127.0.0.1` on a random port, and needs a random token on every request.
   It evaluates JavaScript in the app's webview and takes window screenshots
   from inside the app (no focus, no screen-recording permission, works on a
-  virtual display).
+  virtual display). Screenshots are taken after the page has painted, and a
+  capture that is one flat colour (nothing painted, screen locked) is refused
+  by both the app and the harness, so a picture in the evidence always shows
+  the state the scenario asserted.
 - `src/e2e/hooks.ts` — read-only hooks for the terminal's text, compiled in
   only when the frontend is built with `VITE_HERMES_E2E=1`.
 - `harness.mjs` — the client: launch the test app with a throwaway home
@@ -35,6 +38,7 @@ node e2e/app/build.mjs                          # build the test app (once per c
 node e2e/app/scenarios/terminal-echo.mjs        # one scenario
 node e2e/app/run.mjs --repeat 20 terminal-echo.mjs
 node e2e/app/run.mjs                            # every scenario, once
+node e2e/app/run.mjs --fresh                    # ...forgetting earlier runs' results
 node e2e/acceptance-check.mjs                   # the ledger is well-formed
 node e2e/acceptance-check.mjs --results <dir>   # ...and green everywhere
 ```
