@@ -77,7 +77,7 @@ features:
     criteria:
       N10-1:
         text: "With an agent working, an available update does not relaunch the app"
-        scenarios: [n10-update-waits-for-idle.mjs]
+        scenarios: [N10-update-waits-for-idle.mjs]
       N10-2:
         text: "When all agents are idle, the update installs as today"
-        scenarios: [n10-update-waits-for-idle.mjs]
+        scenarios: [N10-update-waits-for-idle.mjs]

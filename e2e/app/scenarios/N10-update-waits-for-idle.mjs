@@ -14,17 +14,17 @@
 // here prints a line every half second until it finishes.
 //
 //   node e2e/app/build.mjs
-//   node e2e/app/scenarios/n10-update-waits-for-idle.mjs
+//   node e2e/app/scenarios/N10-update-waits-for-idle.mjs
 //
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
-// <out dir>/evidence/n10-update-waits-for-idle.
+// <out dir>/evidence/N10-update-waits-for-idle.
 
 import { platform } from "node:os";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
-const SCENARIO = "n10-update-waits-for-idle";
+const SCENARIO = "N10-update-waits-for-idle";
 const startedAt = Date.now();
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
