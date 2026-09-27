@@ -73,7 +73,7 @@ The app boots from `src/main.tsx` -> `src/App.tsx`. `App` wraps everything in an
 All application state flows through a single React Context + `useReducer` pattern in `src/state/SessionContext.tsx`.
 
 **Key types:**
-- `SessionState` — the full state tree: sessions map, active session, layout, UI toggles, execution modes
+- `SessionState` — the full state tree: sessions map, active session, layout, UI toggles
 - `SessionAction` — a discriminated union of ~35 action types (defined in `src/types/session.ts`)
 - `sessionReducer` — a pure function that handles all state transitions
 
@@ -88,7 +88,6 @@ All application state flows through a single React Context + `useReducer` patter
 - `useActiveSession()` — the currently focused session
 - `useSessionList()` — all sessions as an array
 - `useTotalCost()` / `useTotalTokens()` — aggregated metrics
-- `useExecutionMode(sessionId)` — per-session or default execution mode
 
 ### Layout System
 
@@ -294,13 +293,12 @@ The `ProviderRegistry` iterates through adapters on each output line. Once an ag
 | `cost_daily` | Aggregated daily cost data |
 | `memory` | Persistent memory with scopes (session, project, global) |
 | `execution_log` | Command execution history |
-| `execution_nodes` | Tracked command executions with exit codes and durations |
 | `settings` | Key-value application settings |
 | `context_pins` | Pinned files/text per session or project |
 | `context_snapshots` | Versioned snapshots of assembled context |
 | `session_worktrees` | Git worktree-to-session mappings |
 | `error_patterns` | Detected error fingerprints and their resolutions |
-| `command_patterns` | Command sequence patterns for prediction |
+| `command_patterns` | Command sequences learned by releases up to 1.4 (no longer read or written) |
 
 Migrations run on startup via `run_migrations()`, using idempotent `CREATE TABLE IF NOT EXISTS` statements and `ALTER TABLE` additions wrapped in try-catch blocks.
 
@@ -473,10 +471,10 @@ Tauri provides a native webview (WKWebView on macOS, WebView2 on Windows, WebKit
 
 ### Why a Single Reducer for Session State
 
-All session-related state (sessions, layout, UI toggles, execution modes, injection locks) lives in one `useReducer` in `SessionContext`. This was chosen over multiple contexts or a state management library because:
+All session-related state (sessions, layout, UI toggles, injection locks) lives in one `useReducer` in `SessionContext`. This was chosen over multiple contexts or a state management library because:
 
 - **Predictability** — every state transition is a pure function in `sessionReducer`, making it easy to trace and test
-- **Atomicity** — actions like `SESSION_REMOVED` need to update sessions, layout, active session, execution modes, and UI state in a single render. A single reducer handles this atomically.
+- **Atomicity** — actions like `SESSION_REMOVED` need to update sessions, layout, active session, injection locks, and UI state in a single render. A single reducer handles this atomically.
 - **Testability** — the reducer is exported and unit-tested independently of React
 
 ### Why a Module-Level Terminal Pool
