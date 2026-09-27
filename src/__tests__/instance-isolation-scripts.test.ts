@@ -2,7 +2,7 @@
 // check and the `npm run tauri` wrapper, exercised as real processes against
 // synthetic repos.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -199,22 +199,29 @@ describe("CI check: dev and test configs never use the production identifier", (
 });
 
 describe("`npm run tauri` wrapper", () => {
-	/** Runs the wrapper with a fake Tauri CLI that records what it was given. */
+	/**
+	 * Runs the wrapper with a fake Tauri CLI that prints what it was given and,
+	 * like the real CLI, the identifier of the first `--config` overlay.
+	 */
 	function runWrapper(args: string[], exitCode = 0) {
 		const dir = tempDir();
-		const record = join(dir, "argv.json");
 		const fakeCli = join(dir, "fake-tauri.mjs");
 		writeFileSync(
 			fakeCli,
-			`import { writeFileSync } from "node:fs";
-			 writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }));
+			`import { readFileSync } from "node:fs";
+			 const argv = process.argv.slice(2);
+			 const i = argv.indexOf("--config");
+			 const identifier = i >= 0 ? JSON.parse(readFileSync(argv[i + 1], "utf8")).identifier : null;
+			 process.stdout.write("\\nFAKE-TAURI " + JSON.stringify({ argv, cwd: process.cwd(), identifier }) + "\\n");
 			 process.exit(${exitCode});`,
 		);
 		const res = spawnSync(process.execPath, [WRAPPER, ...args], {
 			encoding: "utf8",
 			env: { ...process.env, HERMES_TAURI_CLI: fakeCli },
 		});
-		const seen = JSON.parse(readFileSync(record, "utf8")) as { argv: string[]; cwd: string };
+		const line = res.stdout.split("\n").find((l) => l.startsWith("FAKE-TAURI "));
+		if (!line) throw new Error(`the fake Tauri CLI did not run: ${res.stdout}${res.stderr}`);
+		const seen = JSON.parse(line.slice("FAKE-TAURI ".length)) as { argv: string[]; cwd: string; identifier: string | null };
 		return { code: res.status, ...seen };
 	}
 
@@ -234,8 +241,7 @@ describe("`npm run tauri` wrapper", () => {
 
 	it("the dev overlay it passes names a non-production identifier", () => {
 		const res = runWrapper(["dev"]);
-		const overlay = JSON.parse(readFileSync(join(res.cwd, res.argv[2]), "utf8")) as { identifier: string };
-		expect(overlay.identifier).toBe(`${PROD}.dev`);
+		expect(res.identifier).toBe(`${PROD}.dev`);
 	});
 
 	it("passes every other command through unchanged, including the release build", () => {
