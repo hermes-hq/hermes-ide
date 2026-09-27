@@ -2113,6 +2113,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "activity_bar_order",
     // Localization
     "ui_language",
+    // Feature flags (per-install debug overrides — see src/featureFlags/)
+    "feature_flag_overrides",
 ];
 
 #[tauri::command]
@@ -3112,6 +3114,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "plugin_ignored_updates",
     // SSH history — may contain sensitive hostnames
     "ssh_connection_history",
+    // Feature flag overrides — per-install debug state, not a real preference
+    "feature_flag_overrides",
 ];
 
 /// Validate a settings file path for export or import.

@@ -50,6 +50,18 @@
   cursor: default;
 }
 
+/* Feature-flag proof surface (src/components/FeatureFlagDummyBanner.tsx) */
+.topbar-flag-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent, #7aa2f7);
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  padding: 1px 5px;
+  opacity: 0.8;
+}
+
 .topbar-btn {
   background: none;
   border: 1px solid transparent;

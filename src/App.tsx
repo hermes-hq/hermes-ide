@@ -74,6 +74,7 @@ import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { WhatsNewDialog } from "./components/WhatsNewDialog";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
+import { FeatureFlagDummyBanner } from "./components/FeatureFlagDummyBanner";
 import { AI_PROVIDERS as AI_PROVIDER_LIST } from "./utils/aiProviders";
 
 const AI_PROVIDER_INFO_MAP: Record<string, { label: string; installCmd: string }> = Object.fromEntries(
@@ -833,6 +834,7 @@ function AppContent() {
           ) : (
             <span className="topbar-title">HERMES-IDE</span>
           )}
+          <FeatureFlagDummyBanner />
         </div>
 
       </div>

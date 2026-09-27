@@ -28,6 +28,13 @@ import { setAnalyticsEnabled } from "../utils/analytics";
 import { SHORTCUT_GROUPS } from "./ShortcutsPanel";
 import { PluginManager } from "./PluginManager";
 import { useI18n } from "../i18n/I18nProvider";
+import {
+  FEATURE_FLAGS,
+  FEATURE_FLAG_OVERRIDES_KEY,
+  parseFeatureFlagOverrides,
+  getReleaseChannel,
+  type FeatureFlagId,
+} from "../featureFlags";
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  SETTINGS PAGE — EXPORT / IMPORT CONTRACT                              ║
@@ -76,6 +83,22 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   }, []);
   const { dispatch } = useSession();
   const { onContextMenu: textContextMenu } = useTextContextMenu();
+
+  // Hidden "Flags" tab: unlocked by clicking the panel title 7 times within
+  // 1.5s of each other, like Android's build-number developer-options
+  // gesture. Not persisted — resets every time Settings is reopened.
+  const [flagsUnlocked, setFlagsUnlocked] = useState(false);
+  const titleClicks = useRef(0);
+  const titleClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleTitleClick = useCallback(() => {
+    titleClicks.current += 1;
+    if (titleClickTimer.current) clearTimeout(titleClickTimer.current);
+    titleClickTimer.current = setTimeout(() => { titleClicks.current = 0; }, 1500);
+    if (titleClicks.current >= 7) {
+      titleClicks.current = 0;
+      setFlagsUnlocked(true);
+    }
+  }, []);
 
   // Live window size state (separate from DB settings)
   const [winWidth, setWinWidth] = useState("");
@@ -226,6 +249,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
     { id: "privacy", label: t("settings.privacy") },
+    // Hidden dev section — not localized on purpose, see handleTitleClick.
+    ...(flagsUnlocked ? [{ id: "flags", label: "Flags" }] : []),
   ];
 
   return (
@@ -240,7 +265,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
         <div className="settings-resize-handle" onMouseDown={onResizeWidthStart} />
         <div className="settings-resize-handle-bottom" onMouseDown={onResizeHeightStart} />
         <div className="settings-header">
-          <span className="settings-title">{t("settings.title")}</span>
+          <span className="settings-title" onClick={handleTitleClick}>{t("settings.title")}</span>
           <button className="close-btn settings-close" onClick={onClose} aria-label={t("common.close")}>&times;</button>
         </div>
 
@@ -863,6 +888,40 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     {t("settings.analyticsHint")}
                   </p>
                 </div>
+              </div>
+            )}
+
+            {activeTab === "flags" && flagsUnlocked && (
+              <div className="settings-section">
+                <p className="settings-hint">
+                  Hidden developer section. Release channel detected at startup: <strong>{getReleaseChannel()}</strong>.
+                  {" "}Overrides below take effect the next time Hermes launches.
+                </p>
+                {FEATURE_FLAGS.map((flag) => {
+                  const overrides = parseFeatureFlagOverrides(settings[FEATURE_FLAG_OVERRIDES_KEY]);
+                  const current = overrides[flag.id];
+                  const selectValue = current === undefined ? "default" : current ? "on" : "off";
+                  return (
+                    <div className="settings-group" key={flag.id}>
+                      <label className="settings-label">{flag.label}</label>
+                      <span className="settings-hint-inline">{flag.description}</span>
+                      <select
+                        className="settings-select"
+                        value={selectValue}
+                        onChange={(e) => {
+                          const next: Partial<Record<FeatureFlagId, boolean>> = { ...overrides };
+                          if (e.target.value === "default") delete next[flag.id];
+                          else next[flag.id] = e.target.value === "on";
+                          updateSetting(FEATURE_FLAG_OVERRIDES_KEY, JSON.stringify(next));
+                        }}
+                      >
+                        <option value="default">Default for channel</option>
+                        <option value="on">Force on</option>
+                        <option value="off">Force off</option>
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
