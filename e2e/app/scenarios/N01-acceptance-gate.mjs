@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Scenario: the acceptance gate (e2e/acceptance-check.mjs) fails when a
 // shipped feature has no green scenario on every platform, and passes when
-// it does. Runs the real gate script as a child process against synthetic
-// ledgers and results in a temporary folder.
+// it does; and the release gate (e2e/release-gate.mjs) refuses a commit
+// whose CI gate did not pass. Runs the real gate scripts as child processes
+// against synthetic ledgers, results and check runs in a temporary folder.
 //
 //   node e2e/app/scenarios/N01-acceptance-gate.mjs
 
@@ -19,6 +20,8 @@ const logFile = join(evidenceDir, "scenario.log");
 rmSync(logFile, { force: true });
 const log = createLogger(logFile);
 const GATE = join(REPO_ROOT, "e2e", "acceptance-check.mjs");
+const RELEASE_GATE = join(REPO_ROOT, "e2e", "release-gate.mjs");
+const SHA = "0123456789abcdef0123456789abcdef01234567";
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -57,6 +60,32 @@ function gate(args) {
   const out = (res.stdout ?? "") + (res.stderr ?? "");
   log(`  $ acceptance-check ${args.join(" ")} → exit ${res.status}`);
   for (const line of out.trim().split("\n").filter((l) => /ACCEPTANCE GATE/.test(l))) log(`    ${line}`);
+  return { status: res.status, out };
+}
+
+function checkRuns(name, runs) {
+  const file = join(work, `check-runs-${name}.json`);
+  writeFileSync(file, JSON.stringify({ total_count: runs.length, check_runs: runs }));
+  return file;
+}
+
+const checkRun = (over = {}) => ({
+  id: 1,
+  name: "gate",
+  status: "completed",
+  conclusion: "success",
+  started_at: "2026-01-01T10:00:00Z",
+  ...over,
+});
+
+function releaseGate(args) {
+  const res = spawnSync(process.execPath, [RELEASE_GATE, "--sha", SHA, "--wait-minutes", "0", ...args], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  const out = (res.stdout ?? "") + (res.stderr ?? "");
+  log(`  $ release-gate ${args.join(" ")} → exit ${res.status}`);
+  for (const line of out.trim().split("\n").filter((l) => /RELEASE GATE/.test(l))) log(`    ${line}`);
   return { status: res.status, out };
 }
 
@@ -100,6 +129,27 @@ try {
   log("case 8: the repository's own ledger is well-formed and every scenario it names exists");
   r = spawnSync(process.execPath, [GATE], { cwd: REPO_ROOT, encoding: "utf8" });
   assert(r.status === 0, `node e2e/acceptance-check.mjs passes in the repository (exit ${r.status})`);
+
+  log("case 9: release gate — the commit's CI gate passed → PASS");
+  r = releaseGate(["--check-runs", checkRuns("green", [checkRun({ name: "Frontend" }), checkRun()])]);
+  assert(r.status === 0 && r.out.includes("RELEASE GATE: PASS"), "release gate passes");
+
+  log("case 10: release gate — the commit's CI gate is red → FAIL");
+  r = releaseGate(["--check-runs", checkRuns("red", [checkRun({ conclusion: "failure" })])]);
+  assert(r.status === 1 && r.out.includes('"gate" finished with conclusion "failure"'), "release gate exits 1 and names the red check");
+
+  log("case 11: release gate — CI never ran on the commit → FAIL");
+  r = releaseGate(["--check-runs", checkRuns("none", [checkRun({ name: "Frontend" })])]);
+  assert(r.status === 1 && r.out.includes("CI did not run on this commit"), "release gate exits 1 and says CI did not run");
+
+  log("case 12: release gate — a re-run that fixed an earlier red gate counts");
+  const rerun = [checkRun({ id: 1, conclusion: "failure" }), checkRun({ id: 2, started_at: "2026-01-01T11:00:00Z" })];
+  r = releaseGate(["--check-runs", checkRuns("rerun", rerun)]);
+  assert(r.status === 0, "release gate passes on the newer green run");
+
+  log("case 13: release gate — a green CI gate does not excuse a broken ledger → FAIL");
+  r = releaseGate(["--check-runs", checkRuns("green-2", [checkRun()]), "--scenarios", scenariosDir, "--ledger", ledger("shipped", "[F99-missing.mjs]")]);
+  assert(r.status === 1 && r.out.includes("does not exist"), "release gate exits 1 and names the missing scenario file");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

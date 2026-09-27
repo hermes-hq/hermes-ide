@@ -31,6 +31,17 @@ scenario on every OS.
 The test app has its own identifier (`com.hermes-ide.terminal.e2e`), so it
 never touches an installed Hermes or its data.
 
+`build.mjs` compiles a stamp into the binary (a hash of the checkout and the
+frontend bundle), checks the binary it stages carries it, and records it in
+`bin/build.json`; the harness refuses to run an app that reports another
+stamp. A cargo target folder shared with other checkouts can therefore never
+hand the rig someone else's build.
+
+Keys are typed as key events inside the app's webview (the terminal sees
+them exactly as it would from the keyboard). Real OS-level key presses are
+not part of this rig; a scenario that needs them (system shortcuts, IME) is
+a follow-up.
+
 ## Running locally
 
 ```sh
@@ -65,5 +76,15 @@ The `e2e-app` and `acceptance` jobs in `.github/workflows/ci.yml` build the
 test app and run the scenarios on `ubuntu-24.04` (under `xvfb`),
 `windows-2022` and `macos-15`, upload each runner's evidence, and then run
 the acceptance gate over the results of all three. Both sit under the
-required `gate` check, so a red, cancelled or missing run blocks the merge. Pull requests run `terminal-echo` 5 times; `main`, the merge queue and
-manual runs 20 times.
+required `gate` check, so a red, cancelled or missing run blocks the merge.
+Every run — pull requests included — runs `terminal-echo` 20 times; a
+manual run can choose another count.
+
+The release workflow (`.github/workflows/release.yml`) starts with
+`node e2e/release-gate.mjs`: it re-checks the ledger and requires the CI
+`gate` check to have passed on the commit being released (waiting for one
+that is still running). A commit CI never ran on is not released.
+
+Startup on the Linux runner takes about 30 s (a fixed wait inside
+WebKitGTK/GTK under xvfb, the same on every run); the harness allows 120 s
+there.

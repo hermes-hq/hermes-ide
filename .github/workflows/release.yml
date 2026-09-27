@@ -82,6 +82,29 @@ jobs:
             [[ "$PLATFORMS" == *windows* ]] && echo "windows=true" >> "$GITHUB_OUTPUT" || echo "windows=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # ── Proof gate ──────────────────────────────────────────────────────
+  # A release is only built from a commit that passed CI's `gate` check —
+  # the real-app scenarios on macOS, Windows and Linux plus the acceptance
+  # ledger (e2e/acceptance.yml). A commit CI never ran on, or one whose
+  # check is red, is not released. Waits for a check that is still running.
+  proof:
+    needs: config
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+
+      - name: The released commit passed the CI gate and the ledger is well-formed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --wait-minutes 90
+
   # ── Frontend Tests ──────────────────────────────────────────────────
   test-frontend:
     runs-on: ubuntu-24.04
@@ -184,8 +207,8 @@ jobs:
 
   # ── Build (selected platforms) ─────────────────────────────────────
   build:
-    needs: [config, test-frontend, test-rust]
-    if: always() && needs.test-frontend.result == 'success' && needs.test-rust.result == 'success'
+    needs: [config, proof, test-frontend, test-rust]
+    if: always() && needs.proof.result == 'success' && needs.test-frontend.result == 'success' && needs.test-rust.result == 'success'
     strategy:
       fail-fast: false
       matrix:

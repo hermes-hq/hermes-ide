@@ -15,12 +15,16 @@
 import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { platform } from "node:os";
-import { join } from "node:path";
-import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { basename, join } from "node:path";
+import { appBinaryPath, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
 const SCENARIO = "terminal-echo";
-/** productName in src-tauri/tauri.e2e.conf.json, as macOS reports it. */
-const E2E_APP_NAME = "Hermes IDE E2E";
+/**
+ * How macOS names the test app: the un-bundled binary is reported by its
+ * file name ("hermes-ide-e2e"); a bundled build would carry its productName
+ * from src-tauri/tauri.e2e.conf.json.
+ */
+const TEST_APP_NAMES = new Set([basename(appBinaryPath(), ".exe"), "Hermes IDE E2E"]);
 const startedAt = Date.now();
 const MARKER = "hermes-e2e-ok";
 // What the terminal is expected to print. Override it to prove the check can
@@ -200,7 +204,7 @@ try {
     assert(after.focused === false, "the test window never had keyboard focus at the end of the run");
     // The person may switch apps or lock the screen while this runs; what
     // must never happen is the test app itself ending up in front.
-    assert(focusAfter !== E2E_APP_NAME, `the test app is not the app with focus ("${focusAfter}")`);
+    assert(!TEST_APP_NAMES.has(focusAfter), `the test app is not the app with focus ("${focusAfter}")`);
   } else {
     // Windows and a bare X display hand focus to the newest window; nobody
     // is typing on those runners, so this is recorded but not asserted.

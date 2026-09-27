@@ -21,10 +21,10 @@ features:
     status: shipped
     criteria:
       N01-1:
-        # The workflow runs it 20 times on main, in the merge queue and on
-        # manual runs, and 5 times on a pull request for a quicker signal.
-        # "No focus stolen" is asserted on macOS; on Windows and Linux (bare
-        # runners where nobody is typing) the focus state is only logged.
+        # CI runs it 20 times on every pull request, on main and in the
+        # merge queue (a manual run can pick another count). "No focus
+        # stolen" is asserted on macOS; on Windows and Linux (bare runners
+        # where nobody is typing) the focus state is only logged.
         text: "The terminal-echo scenario passes 20 times in a row on macOS, Windows and Linux runners"
         scenarios: [terminal-echo.mjs]
       N01-2:
@@ -34,6 +34,9 @@ features:
         text: "Requests without the token are refused; the socket is bound to 127.0.0.1 only"
         scenarios: [N01-bridge-safety.mjs]
       N01-4:
+        # The gate runs twice: in CI over the runners' results, and again in
+        # the release workflow, which also refuses a commit whose CI gate
+        # did not pass.
         text: "A feature marked shipped with no green scenario on all three OSes fails the release gate"
         scenarios: [N01-acceptance-gate.mjs]
   N02:

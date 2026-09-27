@@ -38,9 +38,10 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  # Real-app scenarios: pull requests get a quick pass; main, the merge queue
-  # and manual runs get the full "20 in a row" the acceptance criteria ask for.
-  REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat || (github.event_name == 'pull_request' && '5' || '20') }}
+  # Real-app scenarios: every run — pull requests included — gets the full
+  # "20 in a row" the acceptance criteria ask for, so a flaky change is caught
+  # before it reaches main. A manual run can choose another count.
+  REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat || '20' }}
 
 jobs:
   # ── Detect what changed to skip irrelevant jobs ──────────────────────
@@ -307,6 +308,9 @@ jobs:
           # WebKitGTK on a runner without a GPU: draw on the CPU.
           WEBKIT_DISABLE_COMPOSITING_MODE: "1"
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          # No accessibility bus on a bare runner: do not look for one.
+          NO_AT_BRIDGE: "1"
+          GTK_A11Y: "none"
         run: |
           # The toolchain step turns cargo colours on for the job; scenarios
           # that read cargo's messages need them plain.

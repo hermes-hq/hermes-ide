@@ -22,6 +22,7 @@ import {
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildStampMismatch, readBuildStamp } from "./build-stamp.mjs";
 import { inflateSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -425,7 +426,9 @@ export async function launchApp({
   home = platform() === "win32" ? "real" : "private",
   homeDir,
   resetData = true,
-  startupTimeoutMs = 60_000,
+  // WebKitGTK on a bare runner (xvfb, no GPU) takes about 30 s before the
+  // app's window exists; leave room for a slow runner on top of that.
+  startupTimeoutMs = platform() === "linux" ? 120_000 : 60_000,
   tmp = "private",
   env: extraEnv = {},
   // Called with the app's (empty) data folder before the app starts, e.g. to
@@ -518,7 +521,16 @@ export async function launchApp({
   if (health.identifier !== E2E_IDENTIFIER) {
     throw new Error(`connected to the wrong app: ${health.identifier}`);
   }
-  log(`bridge up on 127.0.0.1:${bridge.port} — ${health.identifier} v${health.version} (pid ${health.pid})`);
+  // Never test a binary build.mjs did not stage (a shared cargo target
+  // folder can hand out another checkout's build).
+  const mismatch = buildStampMismatch(health, readBuildStamp(dirname(binary)));
+  if (mismatch) {
+    await bridge.quit().catch(() => {});
+    throw new Error(`${mismatch} — run \`node e2e/app/build.mjs\` again`);
+  }
+  log(
+    `bridge up on 127.0.0.1:${bridge.port} — ${health.identifier} v${health.version} (pid ${health.pid}, build ${health.build ?? "unstamped"})`,
+  );
 
   await bridge.waitFor(
     "the app UI to render",

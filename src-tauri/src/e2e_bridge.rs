@@ -15,7 +15,10 @@
 //! live in `e2e_protocol.rs`, where they have socket-level tests.
 //!
 //! Protocol: plain HTTP/1.1, JSON bodies, `Authorization: Bearer <token>`.
-//!   GET  /health      -> { ok, pid, identifier, version }
+//!   GET  /health      -> { ok, pid, identifier, version, build }
+//!                        `build` is the stamp e2e/app/build.mjs compiled in
+//!                        (HERMES_E2E_BUILD_STAMP), so the harness can tell
+//!                        the binary it staged from one built elsewhere.
 //!   GET  /window      -> { label, title, width, height, x, y, scaleFactor,
 //!                          visible, focused, cgWindowId }
 //!   POST /eval        -> body { script, timeoutMs?, window? }
@@ -47,6 +50,8 @@ const DEFAULT_EVAL_TIMEOUT_MS: u64 = 10_000;
 const MAX_EVAL_TIMEOUT_MS: u64 = 120_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(15);
 const MAIN_THREAD_TIMEOUT: Duration = Duration::from_secs(15);
+/// Set by e2e/app/build.mjs for the build it stages; None for any other build.
+const BUILD_STAMP: Option<&str> = option_env!("HERMES_E2E_BUILD_STAMP");
 
 static NEXT_EVAL_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -109,6 +114,7 @@ pub fn start(app: &AppHandle) {
         "pid": std::process::id(),
         "identifier": app.config().identifier,
         "version": app.package_info().version.to_string(),
+        "build": BUILD_STAMP,
     });
     if let Err(e) = write_private(&bridge_file, descriptor.to_string().as_bytes()) {
         log::error!("[e2e] failed to write {:?}: {}", bridge_file, e);
@@ -158,6 +164,7 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
             "pid": std::process::id(),
             "identifier": app.config().identifier,
             "version": app.package_info().version.to_string(),
+            "build": BUILD_STAMP,
         })),
         ("GET", "/window") => match window_info(app, "main") {
             Ok(v) => Response::ok(v),
