@@ -86,6 +86,18 @@ describe("winget manifests", () => {
 		}
 	});
 
+	it("takes the app version separately for a dry-run tag, and URLs still point at that tag", () => {
+		installer("HERMES-IDE_1.4.1_x64-setup.exe");
+		const tag = "v0.0.0-dryrun-7";
+		const { dir, installers } = buildWingetManifests(rel, { tag, repo: REPO, outDir: out, version: "1.4.1" });
+		expect(dir.endsWith(join("HermesIDE", "1.4.1"))).toBe(true);
+		expect(read(dir, `${PACKAGE_IDENTIFIER}.yaml`).PackageVersion).toBe("1.4.1");
+		expect(installers[0].url).toBe(`https://github.com/${REPO}/releases/download/${tag}/HERMES-IDE_1.4.1_x64-setup.exe`);
+		// Without it, the tag's own version must match the installer.
+		expect(() => buildWingetManifests(rel, { tag, repo: REPO, outDir: out })).toThrow(/not the 0.0.0-dryrun-7 installer/);
+		expect(() => buildWingetManifests(rel, { tag, repo: REPO, outDir: out, version: "nope" })).toThrow(/not a version/);
+	});
+
 	it("works with only the x64 installer (a partial build)", () => {
 		installer("HERMES-IDE_1.4.1_x64-setup.exe");
 		const { installers } = buildWingetManifests(rel, { tag: TAG, repo: REPO, outDir: out });

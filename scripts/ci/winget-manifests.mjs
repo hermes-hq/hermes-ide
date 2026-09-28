@@ -1,6 +1,9 @@
 // Windows Package Manager (winget) manifests for a release.
 //
-//   node scripts/ci/winget-manifests.mjs <release dir> --tag vX.Y.Z --repo owner/name --out <dir>
+//   node scripts/ci/winget-manifests.mjs <release dir> --tag vX.Y.Z --repo owner/name --out <dir> [--version X.Y.Z]
+//
+// --version is the app's version when the tag does not carry it (a dry run
+// such as v0.0.0-dryrun-3 builds the app's real version).
 //
 // Reads the NSIS installers in <release dir> (HERMES-IDE_<v>_x64-setup.exe,
 // HERMES-IDE_<v>_arm64-setup.exe), and writes the three files winget-pkgs
@@ -76,8 +79,9 @@ const kv = (key, value, indent = "") => `${indent}${key}: ${yamlScalar(value)}`;
  * Build the three manifests. Returns { dir, files: { name: text }, installers }.
  * `releaseDate` defaults to today (UTC).
  */
-export function buildWingetManifests(releaseDir, { tag, repo, outDir, releaseDate = new Date().toISOString().slice(0, 10) }) {
-	const version = versionFromTag(tag);
+export function buildWingetManifests(releaseDir, { tag, repo, outDir, version = versionFromTag(tag), releaseDate = new Date().toISOString().slice(0, 10) }) {
+	versionFromTag(tag); // the tag must still be well-formed
+	if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(version))) throw new Error(`not a version: ${JSON.stringify(version)}`);
 	if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error("--repo owner/name is required");
 	const files = readdirSync(releaseDir).sort();
 	const installers = [];
@@ -159,7 +163,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 		process.exit(2);
 	}
 	try {
-		const { dir, installers } = buildWingetManifests(releaseDir, { tag: opts.tag, repo: opts.repo, outDir: opts.out });
+		const { dir, installers } = buildWingetManifests(releaseDir, {
+			tag: opts.tag,
+			repo: opts.repo,
+			outDir: opts.out,
+			...(opts.version ? { version: opts.version } : {}),
+		});
 		console.log(`winget manifests for ${installers.map((i) => i.architecture).join(", ")} written to ${dir}`);
 	} catch (e) {
 		console.error(`winget manifests: ${e.message}`);
