@@ -54,6 +54,18 @@ const MAX_RECIPE_BYTES: u64 = 64 * 1024;
 /// Values shorter than this are not treated as secrets (ports, `true`, `dev`).
 const MIN_SECRET_LEN: usize = 6;
 const MAX_SECRET_FILE_BYTES: u64 = 256 * 1024;
+/// Keys whose values are never secret. Masking them would hide words like
+/// `localhost` or `development` everywhere in the setup log.
+const NON_SECRET_KEYS: &[&str] = &[
+    "HOST",
+    "HOSTNAME",
+    "PORT",
+    "NODE_ENV",
+    "APP_ENV",
+    "RAILS_ENV",
+    "LOG_LEVEL",
+    "TZ",
+];
 const MAX_LINE_CHARS: usize = 2000;
 const MAX_WALK_ENTRIES: usize = 50_000;
 const PORT_SEARCH_SPAN: u16 = 100;
@@ -408,7 +420,8 @@ pub fn copy_ignored_files(
 
 // ─── secrets ─────────────────────────────────────────────────────────
 
-/// Values of `KEY=value` lines (dotenv syntax: `export`, quotes, comments).
+/// Values of `KEY=value` lines (dotenv syntax: `export`, quotes, comments),
+/// except those of [`NON_SECRET_KEYS`].
 pub fn dotenv_values(text: &str) -> Vec<String> {
     let mut values = Vec::new();
     for line in text.lines() {
@@ -420,7 +433,11 @@ pub fn dotenv_values(text: &str) -> Vec<String> {
         let Some((key, raw)) = t.split_once('=') else {
             continue;
         };
-        if key.trim().is_empty() || key.trim().contains(char::is_whitespace) {
+        let key = key.trim();
+        if key.is_empty()
+            || key.contains(char::is_whitespace)
+            || NON_SECRET_KEYS.iter().any(|k| k.eq_ignore_ascii_case(key))
+        {
             continue;
         }
         let raw = raw.trim();
@@ -1252,6 +1269,19 @@ mod tests {
     fn dotenv_values_are_read_like_dotenv() {
         let v = dotenv_values("# c\nA=1\nexport B='two two'\nC=\"three\" # x\nD=four # comment\nbad line\n=novalue\nE=\n");
         assert_eq!(v, strings(&["1", "two two", "three", "four"]));
+    }
+
+    #[test]
+    fn dotenv_values_skip_keys_that_are_never_secret() {
+        let v = dotenv_values(
+            "HOST=localhost\nexport NODE_ENV=development\nport=3000\nAPI_TOKEN=fake-token-123\nHOSTS=keep-me-too\n",
+        );
+        assert_eq!(v, strings(&["fake-token-123", "keep-me-too"]));
+        let r = Redactor::new(v);
+        assert_eq!(
+            r.redact("GET http://localhost:3000 token=fake-token-123"),
+            "GET http://localhost:3000 token=••••••"
+        );
     }
 
     #[test]
