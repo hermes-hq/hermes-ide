@@ -11,8 +11,13 @@
 //
 //   1. Start app A and mark the left half of its page magenta.
 //   2. Start app B next to it (it covers A) and mark its left half cyan.
-//   3. Several times over: screenshot A, then B. A's picture must show
-//      magenta and B's cyan — never black, and never the other app.
+//   3. Several rounds of: give A's and B's marks a colour of their own for
+//      this round (each page draws it before the next step), then screenshot
+//      A, then B. A's picture must show A's colour of this round and B's
+//      picture B's — never black, never the other app, and never a colour
+//      from an earlier round (a covered window that was not repainted still
+//      shows its old pixels). B's screenshot raises B over A again, so every
+//      round starts with A covered.
 //   4. macOS only: cover all of A's page with one colour; the screenshot
 //      must still be refused as a flat colour (the retries do not weaken
 //      that check). On Windows and Linux the capture includes the window's
@@ -37,7 +42,12 @@ const log = createLogger(logFile);
 
 const MAGENTA = "#ff00ff";
 const CYAN = "#00ffff";
-const ROUNDS = 4;
+// A colour per round for each app; no two alike, none near the app's own
+// dark background, so a stale or wrong picture never matches by accident.
+// Round 1 already differs from the steps 1-2 colours.
+const A_COLOURS = ["#ffff00", "#ff0000", "#ff8000", "#ff80c0", "#808000", "#ff00ff"];
+const B_COLOURS = ["#00ff00", "#0000ff", "#8000ff", "#80c0ff", "#008080", "#00ffff"];
+const ROUNDS = 12;
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -52,7 +62,10 @@ function near(got, want) {
   return a.every((v, i) => Math.abs(v - b[i]) <= 24);
 }
 
-/** Paint the left half of the page (or all of it) one colour, above everything. */
+/**
+ * Paint the left half of the page (or all of it) one colour, above
+ * everything, and give the page a moment to draw it.
+ */
 function mark(bridge, colour, { whole = false } = {}) {
   return bridge.eval(`
     let el = document.getElementById("n01-marker");
@@ -63,6 +76,12 @@ function mark(bridge, colour, { whole = false } = {}) {
     }
     el.style.cssText = "position:fixed;left:0;top:0;height:100vh;z-index:2147483647;pointer-events:none;"
       + "width:${whole ? "100vw" : "50vw"};background:${colour};";
+    // A covered window may not be given frames; the screenshot is what must
+    // bring it forward and repaint it, so do not wait for ever here.
+    await Promise.race([
+      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+      new Promise((r) => setTimeout(r, 1000)),
+    ]);
     return true;
   `);
 }
@@ -95,12 +114,17 @@ try {
   appB = await launchApp({ runDir: join(evidenceDir, "run-b"), log, env: { HERMES_DATA_DIR: dataB } });
   await mark(appB.bridge, CYAN);
 
-  log(`step 3: screenshot A, then B, ${ROUNDS} times over`);
+  log(`step 3: ${ROUNDS} rounds of new colours, then a screenshot of A, then of B`);
   for (let round = 1; round <= ROUNDS; round++) {
-    const a = await shoot(appA, "A", `0${round}-a.png`);
-    assert(near(a, MAGENTA), `round ${round}: A's screenshot shows A (${a}, want ${MAGENTA}), not black and not B`);
-    const b = await shoot(appB, "B", `0${round}-b.png`);
-    assert(near(b, CYAN), `round ${round}: B's screenshot shows B (${b}, want ${CYAN})`);
+    const wantA = A_COLOURS[(round - 1) % A_COLOURS.length];
+    const wantB = B_COLOURS[(round - 1) % B_COLOURS.length];
+    await mark(appA.bridge, wantA);
+    await mark(appB.bridge, wantB);
+    const tag = String(round).padStart(2, "0");
+    const a = await shoot(appA, "A", `${tag}-a.png`);
+    assert(near(a, wantA), `round ${round}: A's screenshot shows A as it is now (${a}, want ${wantA})`);
+    const b = await shoot(appB, "B", `${tag}-b.png`);
+    assert(near(b, wantB), `round ${round}: B's screenshot shows B as it is now (${b}, want ${wantB})`);
   }
 
   if (platform() === "darwin") {
@@ -116,7 +140,7 @@ try {
     assert(refusal !== null && /one flat colour/.test(refusal), "a window showing one flat colour is refused");
     assert(/in all \d+ attempts/.test(refusal), "the app took it again before refusing it");
     await mark(appA.bridge, MAGENTA);
-    const after = await shoot(appA, "A", "05-a-after-flat.png");
+    const after = await shoot(appA, "A", "after-flat-a.png");
     assert(near(after, MAGENTA), "once A shows more than one colour again, its screenshot is taken");
   } else {
     log("step 4: skipped on this OS: the capture includes the native title and menu bar, so a page cannot make it one colour");

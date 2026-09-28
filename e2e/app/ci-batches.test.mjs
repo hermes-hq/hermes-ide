@@ -4,6 +4,13 @@
 // replaced by stubs that record each batch and fail the ones a test picks.
 // A failing batch must not stop later batches (each would otherwise report
 // "no result" to the acceptance gate), and the step must still fail.
+//
+// The batches a test expects are read from the step script itself, so the
+// tests follow the workflow when batches are added or reordered.
+//
+// Skipped on Windows: the stubs are POSIX shell scripts run by bash. The
+// workflow's own steps run under `shell: bash` on every OS, so what these
+// tests cover is the same there.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,6 +45,23 @@ function stepScript(name) {
   }
   const indent = Math.min(...body.filter((l) => l.trim()).map((l) => l.search(/\S/)));
   return body.map((l) => l.slice(indent)).join("\n");
+}
+
+/**
+ * The arguments of each `node e2e/app/run.mjs ...` batch in a step script, in
+ * order and with $REPEAT filled in: what the node stub records for each batch.
+ */
+function expectedBatches(script, repeat) {
+  return script
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("node e2e/app/run.mjs "))
+    .map((l) =>
+      l
+        .replace(/^node /, "")
+        .replace(/\s*\|\|\s*fail=1$/, "")
+        .replace(/"\$REPEAT"/g, repeat),
+    );
 }
 
 const dirs = [];
@@ -79,7 +103,7 @@ exec "$@"
 `,
   );
   const res = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", stepScript(name)], {
-    env: { PATH: `${dir}:${process.env.PATH}`, REPEAT: "20", FAIL_ON: failOn.join(" ") },
+    env: { PATH: `${dir}:${process.env.PATH}`, REPEAT, FAIL_ON: failOn.join(" ") },
     encoding: "utf8",
   });
   let batches = [];
@@ -91,38 +115,44 @@ exec "$@"
   return { code: res.status, batches, stderr: res.stderr };
 }
 
+const REPEAT = "20";
 const STEPS = ["Run scenarios (Linux, virtual display)", "Run scenarios"];
 
 describe.skipIf(process.platform === "win32")("real-app scenario steps in ci.yml", () => {
   for (const step of STEPS) {
     describe(step, () => {
-      it("runs every batch and passes when all pass", () => {
+      const expected = expectedBatches(stepScript(step), REPEAT);
+      /** The last scenario file named on a batch line. */
+      const lastFile = (batch) => batch.split(" ").filter((a) => a.endsWith(".mjs")).at(-1);
+
+      it("has several batches to run", () => {
+        expect(expected.length).toBeGreaterThanOrEqual(3);
+        expect(expected[0]).toBe(`e2e/app/run.mjs --repeat ${REPEAT} terminal-echo.mjs`);
+      });
+
+      it("runs every batch, in order, and passes when all pass", () => {
         const { code, batches, stderr } = runStep(step);
         expect(stderr).toBe("");
-        expect(batches.length).toBeGreaterThanOrEqual(4);
-        expect(batches[0]).toContain("--repeat 20 terminal-echo.mjs");
-        expect(batches.at(-1)).toContain("F09-honest-isolation.mjs");
+        expect(batches).toEqual(expected);
         expect(code).toBe(0);
       });
 
       it("keeps running later batches after the first batch fails, then fails the step", () => {
-        const all = runStep(step).batches;
-        const { code, batches } = runStep(step, ["terminal-echo.mjs"]);
-        expect(batches).toEqual(all);
+        const { code, batches } = runStep(step, [lastFile(expected[0])]);
+        expect(batches).toEqual(expected);
         expect(code).not.toBe(0);
       });
 
       it("fails the step when only a middle batch fails", () => {
-        const all = runStep(step).batches;
-        const { code, batches } = runStep(step, ["N01-bridge-safety.mjs"]);
-        expect(batches).toEqual(all);
+        const middle = expected[Math.floor(expected.length / 2)];
+        const { code, batches } = runStep(step, [lastFile(middle)]);
+        expect(batches).toEqual(expected);
         expect(code).not.toBe(0);
       });
 
       it("fails the step when only the last batch fails", () => {
-        const all = runStep(step).batches;
-        const { code, batches } = runStep(step, ["F09-honest-isolation.mjs"]);
-        expect(batches).toEqual(all);
+        const { code, batches } = runStep(step, [lastFile(expected.at(-1))]);
+        expect(batches).toEqual(expected);
         expect(code).not.toBe(0);
       });
     });
