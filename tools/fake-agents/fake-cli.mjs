@@ -16,16 +16,25 @@
 //     the `SessionEnd` hooks first).
 //
 // Behaviour is chosen per launch with HERMES_FAKE_MODE, or the file
-// `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches):
+// `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches).
+// The mode is one or more words:
 //   normal        start at once (default)
 //   trust-prompt  show a "Do you trust the files in this folder?" dialog and
 //                 wait for a key before doing anything else — what a vendor
-//                 does in a folder it has not seen
-//   resume-fails  reject `--resume` at once (exit 1), as a vendor does for an
-//                 id it does not know; a fresh start still works
+//                 does in a folder it has not seen. Ctrl-C there (the key or
+//                 SIGINT) exits 130 without running any hook.
+//   resume-fails  reject `--resume` at once (exit 1, "No conversation found
+//                 with session ID: <id>"), as a vendor does for an id it does
+//                 not know; a fresh start still works
 //   ignore-resume accept `--resume` but start a new conversation under a new
 //                 id anyway — a broken vendor, used as the negative control
 //                 that proves the resume checks can fail
+// and, with trust-prompt:
+//   interrupt-exit-1  Ctrl-C at the prompt exits 1 instead — the same code
+//                 as a rejected resume, but without its message
+//   no-start-hook once past the prompt, start without running the
+//                 SessionStart hook (hooks turned off, or a start signal that
+//                 never comes)
 //
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
@@ -80,6 +89,10 @@ function readMode() {
 
 const args = parseArgs(process.argv.slice(2));
 const mode = readMode();
+const modeWords = new Set(mode.split(/\s+/).filter(Boolean));
+const has = (word) => modeWords.has(word);
+const interruptCode = has("interrupt-exit-1") ? 1 : 130;
+let atTrustPrompt = false;
 const startedAt = Date.now();
 let settings = null;
 let settingsError = null;
@@ -175,7 +188,12 @@ process.stdin.on("end", () => {
 process.on("SIGTERM", () => finish(143, "SIGTERM"));
 process.on("SIGHUP", () => finish(129, "SIGHUP"));
 process.on("SIGINT", () => {
-	// Raw mode delivers Ctrl-C as a byte; this covers a real signal too.
+	// Raw mode delivers Ctrl-C as a byte; this covers a real signal too (the
+	// terminal may send both). At the trust prompt it is the same as the key.
+	if (atTrustPrompt) {
+		interruptTrustPrompt("sigint-at-trust-prompt");
+		return;
+	}
 	void quit("SIGINT");
 });
 const pendingKeys = [];
@@ -240,7 +258,7 @@ async function runHooks(event, extra = {}) {
 
 // ─── Behaviour ───────────────────────────────────────────────────────
 
-const resumed = !!args.resumeId && mode !== "ignore-resume";
+const resumed = !!args.resumeId && !has("ignore-resume");
 const sessionId = (resumed ? args.resumeId : args.sessionId) || randomUUID();
 let quitting = false;
 
@@ -252,16 +270,23 @@ async function quit(why) {
 	finish(0, why);
 }
 
+function interruptTrustPrompt(why) {
+	if (!atTrustPrompt) return;
+	atTrustPrompt = false;
+	note("trust-prompt-interrupted");
+	finish(interruptCode, why);
+}
+
 async function main() {
 	note("start", { sessionId, resumed });
 
-	if (resumed && mode === "resume-fails") {
+	if (resumed && has("resume-fails")) {
 		process.stderr.write(`No conversation found with session ID: ${args.resumeId}\n`);
 		finish(1, "resume-rejected");
 		return;
 	}
 
-	if (mode === "trust-prompt") {
+	if (has("trust-prompt")) {
 		out(`${ESC}[?25l`);
 		out("\r\n┌──────────────────────────────────────────────────────┐\r\n");
 		out("│ Do you trust the files in this folder?               │\r\n");
@@ -271,23 +296,27 @@ async function main() {
 		out("│ [y] Yes, proceed    [n] No, exit                     │\r\n");
 		out("└──────────────────────────────────────────────────────┘\r\n");
 		note("trust-prompt-shown");
+		atTrustPrompt = true;
 		for (;;) {
 			const key = await nextKey();
+			if (!atTrustPrompt) return; // interrupted by SIGINT meanwhile
 			if (key === null) {
+				atTrustPrompt = false;
 				finish(1, "stdin-closed-at-trust-prompt");
 				return;
 			}
 			if (key === "\x03") {
-				note("trust-prompt-interrupted");
-				finish(130, "ctrl-c-at-trust-prompt");
+				interruptTrustPrompt("ctrl-c-at-trust-prompt");
 				return;
 			}
 			if (key === "y" || key === "Y" || key === "\r" || key === "\n") {
+				atTrustPrompt = false;
 				note("trust-prompt-accepted");
 				out("Trusted. Starting…\r\n");
 				break;
 			}
 			if (key === "n" || key === "N") {
+				atTrustPrompt = false;
 				note("trust-prompt-declined");
 				finish(0, "declined-trust");
 				return;
@@ -298,7 +327,8 @@ async function main() {
 	out(`\r\nfake-cli 0.1 · session ${sessionId} (${resumed ? `resumed from ${args.resumeId}` : "new"})\r\n`);
 	if (record.prompt) out(`prompt: ${record.prompt}\r\n`);
 	out("fake-cli: type q to quit\r\n");
-	await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
+	if (has("no-start-hook")) note("start-hook-skipped");
+	else await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
 
 	for (;;) {

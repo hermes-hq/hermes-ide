@@ -32,7 +32,12 @@ export interface AgentSignals {
 export interface AgentTerminal {
 	/** Starts a new session. Every other argument list is appended to it. */
 	argv: AgentArgs;
-	resume: { by_id: AgentArgs | null; latest: AgentArgs | null };
+	resume: {
+		by_id: AgentArgs | null;
+		latest: AgentArgs | null;
+		/** How the vendor says a resumed conversation does not exist (read by the backend). */
+		not_found?: { exit_codes?: readonly number[]; output?: readonly string[] };
+	};
 	new_session_id: AgentArgs | null;
 	initial_prompt: AgentArgs | null;
 	signals: AgentSignals;

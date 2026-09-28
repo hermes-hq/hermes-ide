@@ -15,8 +15,12 @@
 //! zsh, bash, fish, PowerShell and cmd.
 //!
 //! `hi run` stays the parent of the agent so it can notice a resume that
-//! fails right away (the vendor rejects the old session id) and start a
-//! fresh conversation instead, saying so in one visible line. Ctrl-C is left
+//! fails right away because the vendor does not know the conversation, and
+//! start a fresh one instead, saying so in one visible line. Only the way the
+//! catalog says the vendor reports a missing conversation counts (its exit
+//! code, and the text Hermes saw it print); an agent that ends early for any
+//! other reason (Ctrl-C at its trust prompt, a signal, a crash) keeps its
+//! conversation for the next launch. Ctrl-C is left
 //! to the agent: `hi` ignores it and only reports the agent's exit status —
 //! to the shell, and to Hermes as a `hermes.exited` spool line, so Hermes
 //! knows the agent is gone even when it ended without running any hook
@@ -67,7 +71,7 @@ pub struct LaunchSpec {
     pub fallback: Option<Fallback>,
 }
 
-/// What to run instead when the main command fails right away.
+/// What to run instead when the main command finds no conversation to resume.
 #[derive(Debug, Clone)]
 pub struct Fallback {
     pub program: String,
@@ -79,7 +83,26 @@ pub struct Fallback {
     pub vendor_session_id: Option<String>,
     /// The one line shown before the fallback starts.
     pub message: Option<String>,
+    /// How the vendor says the conversation does not exist. Without it the
+    /// fallback never runs: an early exit alone proves nothing.
+    pub not_found: Option<NotFound>,
 }
+
+/// The vendor's own "no such conversation", from the agent catalog.
+#[derive(Debug, Clone, Default)]
+pub struct NotFound {
+    /// Exit codes that can mean it; empty means any code but an interrupt.
+    pub exit_codes: Vec<i32>,
+    /// Hermes writes this file (holding the launch's nonce) when it saw the
+    /// vendor print its "not found" text in the terminal. When set, the
+    /// fallback also needs that file.
+    pub evidence_file: Option<PathBuf>,
+    /// How long to wait for the evidence after the agent exited: Hermes reads
+    /// the terminal output on its own thread.
+    pub evidence_wait_ms: u64,
+}
+
+const DEFAULT_EVIDENCE_WAIT_MS: u64 = 2000;
 
 fn field_str(v: &serde_json::Value, key: &str) -> Option<String> {
     v.get(key).and_then(|x| x.as_str()).map(str::to_string)
@@ -97,6 +120,21 @@ fn field_args(v: &serde_json::Value, key: &str) -> Result<Vec<String>, String> {
             })
             .collect(),
         Some(_) => Err(format!("{key}: must be a list of strings")),
+    }
+}
+
+fn field_codes(v: &serde_json::Value, key: &str) -> Result<Vec<i32>, String> {
+    match v.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .map(|c| {
+                c.as_i64()
+                    .and_then(|c| i32::try_from(c).ok())
+                    .ok_or_else(|| format!("{key}: every entry must be an integer"))
+            })
+            .collect(),
+        Some(_) => Err(format!("{key}: must be a list of integers")),
     }
 }
 
@@ -128,12 +166,26 @@ impl LaunchSpec {
                 let program = field_str(f, "program")
                     .filter(|p| !p.is_empty())
                     .ok_or_else(|| "fallback.program is missing".to_string())?;
+                let not_found = match f.get("not_found") {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(n) => Some(NotFound {
+                        exit_codes: field_codes(n, "exit_codes")?,
+                        evidence_file: field_str(n, "evidence_file")
+                            .filter(|p| !p.is_empty())
+                            .map(PathBuf::from),
+                        evidence_wait_ms: n
+                            .get("evidence_wait_ms")
+                            .and_then(|x| x.as_u64())
+                            .unwrap_or(DEFAULT_EVIDENCE_WAIT_MS),
+                    }),
+                };
                 Some(Fallback {
                     program,
                     args: field_args(f, "args")?,
                     after_ms: f.get("after_ms").and_then(|x| x.as_u64()).unwrap_or(3000),
                     vendor_session_id: field_str(f, "vendor_session_id"),
                     message: field_str(f, "message"),
+                    not_found,
                 })
             }
         };
@@ -245,26 +297,119 @@ fn is_executable(path: &Path) -> bool {
 
 // ─── Running ─────────────────────────────────────────────────────────
 
-/// Whether a command that just ended counts as a failed resume.
-pub fn should_fall_back(success: bool, elapsed: Duration, fallback: Option<&Fallback>) -> bool {
-    match fallback {
-        Some(f) => !success && elapsed <= Duration::from_millis(f.after_ms),
-        None => false,
+/// How the agent process ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ended {
+    /// It exited with this code.
+    Code(i32),
+    /// A signal ended it (Unix).
+    Signal(i32),
+}
+
+impl Ended {
+    fn of(status: ExitStatus) -> Ended {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = status.signal() {
+                return Ended::Signal(sig);
+            }
+        }
+        Ended::Code(status.code().unwrap_or(1))
+    }
+
+    /// The status a shell would report.
+    pub fn code(self) -> i32 {
+        match self {
+            Ended::Code(c) => c,
+            Ended::Signal(s) => 128 + s,
+        }
+    }
+
+    /// Ended by the user or the system rather than by the agent deciding to
+    /// exit: a signal, a shell-style `128 + signal` code (130 is Ctrl-C), or
+    /// Windows' STATUS_CONTROL_C_EXIT.
+    pub fn is_interrupt(self) -> bool {
+        const STATUS_CONTROL_C_EXIT: i32 = 0xC000_013Au32 as i32;
+        match self {
+            Ended::Signal(_) => true,
+            Ended::Code(c) => (129..=128 + 64).contains(&c) || c == STATUS_CONTROL_C_EXIT,
+        }
     }
 }
 
-fn exit_code(status: ExitStatus) -> i32 {
-    if let Some(code) = status.code() {
-        return code;
+/// What an ended resume means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeVerdict {
+    /// The conversation stays: the agent ran, was interrupted, or ended in a
+    /// way that does not say the conversation is missing.
+    Keep,
+    /// The exit fits; the fallback also needs Hermes to have seen the
+    /// vendor's "not found" text.
+    NeedsEvidence,
+    /// The vendor said the conversation does not exist: start fresh.
+    FallBack,
+}
+
+/// Whether a resume that just ended failed because the vendor does not know
+/// the conversation. Never for an interrupt (Ctrl-C at a trust prompt, a
+/// signal), never after the window, and never unless the catalog says how
+/// the vendor reports a missing conversation.
+pub fn resume_verdict(
+    ended: Ended,
+    elapsed: Duration,
+    fallback: Option<&Fallback>,
+) -> ResumeVerdict {
+    let Some(f) = fallback else {
+        return ResumeVerdict::Keep;
+    };
+    let Some(nf) = &f.not_found else {
+        return ResumeVerdict::Keep;
+    };
+    if elapsed > Duration::from_millis(f.after_ms) || ended.is_interrupt() {
+        return ResumeVerdict::Keep;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(sig) = status.signal() {
-            return 128 + sig;
+    let Ended::Code(code) = ended else {
+        return ResumeVerdict::Keep;
+    };
+    let code_fits = nf.exit_codes.is_empty() || nf.exit_codes.contains(&code);
+    if !code_fits {
+        ResumeVerdict::Keep
+    } else if nf.evidence_file.is_some() {
+        ResumeVerdict::NeedsEvidence
+    } else {
+        ResumeVerdict::FallBack
+    }
+}
+
+/// Whether Hermes wrote the "not found" evidence for this launch: the file
+/// holds the launch's nonce (a file from another launch does not count).
+pub fn evidence_present(file: &Path, nonce: Option<&str>) -> bool {
+    match std::fs::read_to_string(file) {
+        Ok(text) => {
+            let text = text.trim();
+            match nonce {
+                Some(n) => text == n,
+                None => !text.is_empty(),
+            }
         }
+        Err(_) => false,
     }
-    1
+}
+
+/// Wait up to `wait` for the evidence; Hermes reads the terminal output on
+/// its own thread, so it can land a moment after the agent exited.
+fn wait_for_evidence(file: &Path, nonce: Option<&str>, wait: Duration) -> bool {
+    let deadline = Instant::now() + wait;
+    loop {
+        if evidence_present(file, nonce) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 /// Leave Ctrl-C to the agent: `hi` only reports how the agent ended.
@@ -299,11 +444,14 @@ unsafe extern "system" fn swallow_ctrl_event(_ctrl_type: u32) -> i32 {
     1
 }
 
+/// Run the agent to its end. With `running_after`, call it once when the
+/// agent is still running after that long.
 fn run_child(
     resolved: &Path,
     args: &[String],
     env: &BTreeMap<String, String>,
     cwd: Option<&Path>,
+    running_after: Option<(Duration, &dyn Fn())>,
 ) -> std::io::Result<ExitStatus> {
     let mut cmd = Command::new(resolved);
     cmd.args(args);
@@ -323,7 +471,21 @@ fn run_child(
             });
         }
     }
-    cmd.status()
+    let mut child = cmd.spawn()?;
+    if let Some((after, on_running)) = running_after {
+        let started = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait()? {
+                return Ok(status);
+            }
+            if started.elapsed() >= after {
+                on_running();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    child.wait()
 }
 
 fn now_unix() -> u64 {
@@ -452,7 +614,7 @@ fn cmd_run(arg: &str) -> i32 {
         return reporter.exited(EXIT_NOT_FOUND, Some(&error));
     };
     let started = Instant::now();
-    let status = match run_child(&resolved, &spec.args, &spec.env, cwd.as_deref()) {
+    let status = match run_child(&resolved, &spec.args, &spec.env, cwd.as_deref(), None) {
         Ok(s) => s,
         Err(e) => {
             let error = format!("cannot start {}: {e}", resolved.display());
@@ -461,13 +623,33 @@ fn cmd_run(arg: &str) -> i32 {
         }
     };
     let elapsed = started.elapsed();
-    if !should_fall_back(status.success(), elapsed, spec.fallback.as_ref()) {
-        return reporter.exited(exit_code(status), None);
+    let ended = Ended::of(status);
+    let fall_back = match resume_verdict(ended, elapsed, spec.fallback.as_ref()) {
+        ResumeVerdict::Keep => false,
+        ResumeVerdict::FallBack => true,
+        ResumeVerdict::NeedsEvidence => spec
+            .fallback
+            .as_ref()
+            .and_then(|f| f.not_found.as_ref())
+            .and_then(|nf| {
+                nf.evidence_file.as_deref().map(|file| {
+                    wait_for_evidence(
+                        file,
+                        reporter.nonce.as_deref(),
+                        Duration::from_millis(nf.evidence_wait_ms),
+                    )
+                })
+            })
+            .unwrap_or(false),
+    };
+    if !fall_back {
+        return reporter.exited(ended.code(), None);
     }
 
-    // The resume failed right away: say so once, tell Hermes, start fresh.
+    // The vendor does not know the conversation: say so once, tell Hermes,
+    // start fresh.
     let fallback = spec.fallback.as_ref().expect("checked above");
-    let code = exit_code(status);
+    let code = ended.code();
     let message = fallback.message.clone().unwrap_or_else(|| {
         format!("could not resume the previous conversation (exit {code}); starting a new one")
     });
@@ -488,8 +670,24 @@ fn cmd_run(arg: &str) -> i32 {
         eprintln!("hi: {error}");
         return reporter.exited(EXIT_NOT_FOUND, Some(&error));
     };
-    match run_child(&resolved, &fallback.args, &spec.env, cwd.as_deref()) {
-        Ok(s) => reporter.exited(exit_code(s), None),
+    // Tell Hermes once the fresh agent is past the quick-failure window, so
+    // it can adopt the new conversation even from an agent that sends no
+    // start signal of its own.
+    let running = || {
+        reporter.report(
+            "hermes.fallback_running",
+            serde_json::json!({ "vendor_session_id": fallback.vendor_session_id }),
+        )
+    };
+    let after = Duration::from_millis(fallback.after_ms);
+    match run_child(
+        &resolved,
+        &fallback.args,
+        &spec.env,
+        cwd.as_deref(),
+        Some((after, &running)),
+    ) {
+        Ok(s) => reporter.exited(Ended::of(s).code(), None),
         Err(e) => {
             let error = format!("cannot start {}: {e}", resolved.display());
             eprintln!("hi: {error}");
@@ -794,31 +992,137 @@ mod tests {
         assert_eq!(resolve_program("script", Some(&path), None), None);
     }
 
-    #[test]
-    fn falls_back_only_on_a_quick_failure() {
-        let fb = Fallback {
+    fn fallback(not_found: Option<NotFound>) -> Fallback {
+        Fallback {
             program: "x".into(),
             args: vec![],
             after_ms: 3000,
             vendor_session_id: None,
             message: None,
-        };
-        assert!(should_fall_back(
-            false,
-            Duration::from_millis(200),
-            Some(&fb)
+            not_found,
+        }
+    }
+
+    const QUICK: Duration = Duration::from_millis(200);
+
+    #[test]
+    fn an_interrupted_resume_never_falls_back() {
+        // Ctrl-C at a resumed agent's trust prompt: exit 130, or killed by
+        // SIGINT, or Windows' Ctrl-C status. The conversation must stay,
+        // even with a catalog entry that accepts any exit code.
+        let any_code = fallback(Some(NotFound::default()));
+        for ended in [
+            Ended::Code(130),
+            Ended::Signal(2),
+            Ended::Signal(15),
+            Ended::Signal(9),
+            Ended::Code(143),
+            Ended::Code(0xC000_013Au32 as i32),
+        ] {
+            assert!(ended.is_interrupt(), "{ended:?}");
+            assert_eq!(
+                resume_verdict(ended, QUICK, Some(&any_code)),
+                ResumeVerdict::Keep,
+                "{ended:?}"
+            );
+        }
+        assert!(!Ended::Code(1).is_interrupt());
+        assert!(!Ended::Code(42).is_interrupt());
+        assert!(!Ended::Code(128).is_interrupt());
+        assert_eq!(Ended::Signal(2).code(), 130);
+    }
+
+    #[test]
+    fn only_the_vendors_own_not_found_exit_falls_back() {
+        // No catalog entry: an early exit proves nothing.
+        assert_eq!(
+            resume_verdict(Ended::Code(1), QUICK, Some(&fallback(None))),
+            ResumeVerdict::Keep
+        );
+        assert_eq!(
+            resume_verdict(Ended::Code(1), QUICK, None),
+            ResumeVerdict::Keep
+        );
+        let codes = fallback(Some(NotFound {
+            exit_codes: vec![1],
+            ..NotFound::default()
+        }));
+        assert_eq!(
+            resume_verdict(Ended::Code(1), QUICK, Some(&codes)),
+            ResumeVerdict::FallBack
+        );
+        // Another code, a clean exit, or a late failure keeps it.
+        assert_eq!(
+            resume_verdict(Ended::Code(2), QUICK, Some(&codes)),
+            ResumeVerdict::Keep
+        );
+        assert_eq!(
+            resume_verdict(Ended::Code(0), QUICK, Some(&codes)),
+            ResumeVerdict::Keep
+        );
+        assert_eq!(
+            resume_verdict(Ended::Code(1), Duration::from_millis(3001), Some(&codes)),
+            ResumeVerdict::Keep
+        );
+        // With a text to look for, the exit only qualifies; Hermes must
+        // also have seen the text.
+        let text = fallback(Some(NotFound {
+            exit_codes: vec![1],
+            evidence_file: Some(PathBuf::from("/nonexistent/evidence")),
+            evidence_wait_ms: 10,
+        }));
+        assert_eq!(
+            resume_verdict(Ended::Code(1), QUICK, Some(&text)),
+            ResumeVerdict::NeedsEvidence
+        );
+        assert_eq!(
+            resume_verdict(Ended::Code(130), QUICK, Some(&text)),
+            ResumeVerdict::Keep
+        );
+    }
+
+    #[test]
+    fn evidence_counts_only_with_this_launchs_nonce() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("resume-not-found");
+        assert!(!evidence_present(&file, Some("n1")));
+        std::fs::write(&file, "n0\n").unwrap();
+        assert!(!evidence_present(&file, Some("n1")), "another launch's");
+        std::fs::write(&file, "n1\n").unwrap();
+        assert!(evidence_present(&file, Some("n1")));
+        assert!(evidence_present(&file, None));
+        assert!(wait_for_evidence(&file, Some("n1"), Duration::ZERO));
+        let start = Instant::now();
+        assert!(!wait_for_evidence(
+            &dir.path().join("none"),
+            Some("n1"),
+            Duration::from_millis(100)
         ));
-        assert!(!should_fall_back(
-            true,
-            Duration::from_millis(200),
-            Some(&fb)
-        ));
-        assert!(!should_fall_back(
-            false,
-            Duration::from_millis(3001),
-            Some(&fb)
-        ));
-        assert!(!should_fall_back(false, Duration::from_millis(200), None));
+        assert!(start.elapsed() >= Duration::from_millis(100));
+    }
+
+    #[test]
+    fn parses_the_not_found_block() {
+        let spec = LaunchSpec::parse(
+            r#"{"v":1,"program":"claude","fallback":{"program":"claude",
+                "not_found":{"exit_codes":[1,42],"evidence_file":"/x/resume-not-found"}}}"#,
+        )
+        .unwrap();
+        let nf = spec.fallback.unwrap().not_found.unwrap();
+        assert_eq!(nf.exit_codes, vec![1, 42]);
+        assert_eq!(
+            nf.evidence_file.as_deref(),
+            Some(Path::new("/x/resume-not-found"))
+        );
+        assert_eq!(nf.evidence_wait_ms, DEFAULT_EVIDENCE_WAIT_MS);
+        let none =
+            LaunchSpec::parse(r#"{"v":1,"program":"x","fallback":{"program":"x"}}"#).unwrap();
+        assert!(none.fallback.unwrap().not_found.is_none());
+        assert!(LaunchSpec::parse(
+            r#"{"v":1,"program":"x","fallback":{"program":"x","not_found":{"exit_codes":["1"]}}}"#
+        )
+        .unwrap_err()
+        .contains("exit_codes"));
     }
 
     #[test]
