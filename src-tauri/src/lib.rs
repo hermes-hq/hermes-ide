@@ -1,5 +1,6 @@
 mod agent;
 mod agent_catalog;
+mod agent_setup;
 mod analytics;
 mod claude_config;
 mod clipboard;
@@ -969,6 +970,10 @@ pub fn run() {
             claude_config::read_static_mcp_servers,
             claude_config::read_static_slash_commands,
             claude_config::read_static_memory_paths,
+            // What each agent loads, and how it was started (F30, F35).
+            agent_setup::agent_setup_overview,
+            agent_setup::link_instructions_to_agents_md,
+            agent_setup::session_process_argv,
             // Inline PTY for embedded slash-command terminals
             // (see src/inline_pty/mod.rs).
             inline_pty::spawn_inline_pty,

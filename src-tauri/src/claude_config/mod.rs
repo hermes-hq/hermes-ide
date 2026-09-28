@@ -110,11 +110,38 @@ pub enum McpServerSpec {
     },
 }
 
-/// Add or replace an MCP server entry in `~/.claude.json`.  Preserves
+/// Where an MCP server entry is written: the project's shared `.mcp.json`
+/// when a project folder is given (the only MCP file Hermes writes with the
+/// 2.0 agent catalog on, F30), else `~/.claude.json` (1.x behaviour).
+fn mcp_config_path(project_dir: Option<&str>) -> Result<PathBuf, String> {
+    match project_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        None => home_config_path(),
+        Some(dir) => {
+            let dir = Path::new(dir);
+            if !dir.is_absolute() {
+                return Err(format!(
+                    "project folder must be an absolute path, got {}",
+                    dir.display()
+                ));
+            }
+            if !dir.is_dir() {
+                return Err(format!("project folder not found: {}", dir.display()));
+            }
+            Ok(dir.join(".mcp.json"))
+        }
+    }
+}
+
+/// Add or replace an MCP server entry in `~/.claude.json`, or in
+/// `<project_dir>/.mcp.json` when a project folder is given.  Preserves
 /// every other key; the rule must NOT silently drop user data.
 #[tauri::command]
-pub fn write_mcp_server(name: String, spec: Value) -> Result<(), String> {
-    let path = home_config_path()?;
+pub fn write_mcp_server(
+    name: String,
+    spec: Value,
+    project_dir: Option<String>,
+) -> Result<(), String> {
+    let path = mcp_config_path(project_dir.as_deref())?;
     let validated_name = validate_server_name(&name)?;
     atomic_json_write(&path, |root| {
         let entry = root
@@ -128,19 +155,33 @@ pub fn write_mcp_server(name: String, spec: Value) -> Result<(), String> {
     })
 }
 
-/// Remove an MCP server entry.  No-op if absent (idempotent).
+/// Remove an MCP server entry.  Without a project folder: from
+/// `~/.claude.json`, a no-op if absent (idempotent, 1.x).  With one: only
+/// a server declared in `<project_dir>/.mcp.json` can be removed; any other
+/// name (a user-wide server, a plugin's) is refused and nothing is written,
+/// so the caller never believes a server is gone when it is not.
 #[tauri::command]
-pub fn remove_mcp_server(name: String) -> Result<(), String> {
-    let path = home_config_path()?;
+pub fn remove_mcp_server(name: String, project_dir: Option<String>) -> Result<(), String> {
+    let path = mcp_config_path(project_dir.as_deref())?;
     let validated_name = validate_server_name(&name)?;
+    let project_only = project_dir.is_some();
+    if project_only && !path.is_file() {
+        return Err(not_in_project(validated_name));
+    }
     atomic_json_write(&path, |root| {
-        if let Some(entry) = root.get_mut("mcpServers") {
-            if let Some(map) = entry.as_object_mut() {
-                map.remove(validated_name);
-            }
+        let removed = root
+            .get_mut("mcpServers")
+            .and_then(|entry| entry.as_object_mut())
+            .and_then(|map| map.remove(validated_name));
+        if project_only && removed.is_none() {
+            return Err(not_in_project(validated_name));
         }
         Ok(())
     })
+}
+
+fn not_in_project(name: &str) -> String {
+    format!("{name} is not declared in this project's .mcp.json; Hermes only edits that file")
 }
 
 /// Inspectable view of an MCP server entry — what the user can see in
@@ -168,16 +209,38 @@ pub struct McpServerSpecView {
     /// Names of HTTP headers (sse/http only).  Same redaction rule
     /// as `env_keys`.
     pub header_keys: Vec<String>,
+    /// Where the entry was found: `project` (the project's `.mcp.json`) or
+    /// `user` (`~/.claude.json`).  Hermes offers Remove for a `user` entry
+    /// only when no project folder is given (1.x behaviour, F30).
+    #[serde(default)]
+    pub source: String,
 }
 
 #[tauri::command]
-pub fn read_mcp_server_spec(name: String) -> Result<Option<McpServerSpecView>, String> {
-    let path = home_config_path()?;
+pub fn read_mcp_server_spec(
+    name: String,
+    project_dir: Option<String>,
+) -> Result<Option<McpServerSpecView>, String> {
     let validated_name = validate_server_name(&name)?;
+    // A project's .mcp.json first (when given), then ~/.claude.json.
+    if project_dir.is_some() {
+        let project = mcp_config_path(project_dir.as_deref())?;
+        if let Some(view) = read_mcp_server_spec_at(&project, validated_name, "project")? {
+            return Ok(Some(view));
+        }
+    }
+    read_mcp_server_spec_at(&home_config_path()?, validated_name, "user")
+}
+
+fn read_mcp_server_spec_at(
+    path: &Path,
+    validated_name: &str,
+    source: &str,
+) -> Result<Option<McpServerSpecView>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let bytes = fs::read(&path).map_err(|e| format!("read: {e}"))?;
+    let bytes = fs::read(path).map_err(|e| format!("read: {e}"))?;
     if bytes.is_empty() {
         return Ok(None);
     }
@@ -234,6 +297,7 @@ pub fn read_mcp_server_spec(name: String) -> Result<Option<McpServerSpecView>, S
         url,
         env_keys,
         header_keys,
+        source: source.to_string(),
     }))
 }
 
@@ -886,12 +950,87 @@ mod prewarm_tests {
     // when the MCP row is expanded.  Critical contract: env / header
     // VALUES must NEVER appear in the response — only the keys.
 
+    /// F30: with a project folder, add and remove touch only that
+    /// project's `.mcp.json`; `~/.claude.json` stays byte-identical.
+    #[test]
+    fn project_mcp_writes_leave_the_user_config_alone() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let user = home.path().join(".claude.json");
+        let user_bytes = br#"{"mcpServers":{"mine":{"command":"x"}},"other":1}"#;
+        fs::write(&user, user_bytes).unwrap();
+        let dir = Some(project.path().to_string_lossy().to_string());
+
+        write_mcp_server(
+            "proj".into(),
+            serde_json::json!({"type": "stdio", "command": "npx", "env": {"TOKEN": "t"}}),
+            dir.clone(),
+        )
+        .unwrap();
+        let written: Value =
+            serde_json::from_slice(&fs::read(project.path().join(".mcp.json")).unwrap()).unwrap();
+        assert_eq!(written["mcpServers"]["proj"]["command"], "npx");
+        assert_eq!(fs::read(&user).unwrap(), user_bytes);
+
+        // The spec is found in the project first; values stay redacted.
+        let view = read_mcp_server_spec("proj".into(), dir.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(view.env_keys, vec!["TOKEN".to_string()]);
+        assert_eq!(view.source, "project");
+        // A user-wide server is still readable, never rewritten.
+        let mine = read_mcp_server_spec("mine".into(), dir.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(mine.source, "user");
+
+        // Removing a user-wide server with a project folder is refused:
+        // nothing is written anywhere, and the caller hears about it.
+        let err = remove_mcp_server("mine".into(), dir.clone()).unwrap_err();
+        assert!(
+            err.contains("not declared in this project's .mcp.json"),
+            "{err}"
+        );
+        assert_eq!(fs::read(&user).unwrap(), user_bytes);
+
+        remove_mcp_server("proj".into(), dir.clone()).unwrap();
+        let after: Value =
+            serde_json::from_slice(&fs::read(project.path().join(".mcp.json")).unwrap()).unwrap();
+        assert!(after["mcpServers"].as_object().unwrap().is_empty());
+        assert_eq!(fs::read(&user).unwrap(), user_bytes);
+        // Removing it twice is refused too (it is no longer declared there).
+        assert!(remove_mcp_server("proj".into(), dir).is_err());
+    }
+
+    /// F30: a project with no .mcp.json gets none created by a refused remove.
+    #[test]
+    fn project_remove_without_an_mcp_file_writes_nothing() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let dir = Some(project.path().to_string_lossy().to_string());
+        assert!(remove_mcp_server("anything".into(), dir).is_err());
+        assert!(!project.path().join(".mcp.json").exists());
+        // Without a project folder the 1.x no-op stays.
+        remove_mcp_server("anything".into(), None).unwrap();
+    }
+
+    #[test]
+    fn project_mcp_writes_need_an_existing_absolute_folder() {
+        let spec = serde_json::json!({"command": "x"});
+        assert!(write_mcp_server("a".into(), spec.clone(), Some("relative/dir".into())).is_err());
+        assert!(write_mcp_server("a".into(), spec, Some("/definitely/not/here".into())).is_err());
+    }
+
     #[test]
     fn mcp_spec_returns_none_when_config_missing() {
         let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let td = tempdir().unwrap();
         std::env::set_var("HOME", td.path());
-        let got = read_mcp_server_spec("anything".into()).unwrap();
+        let got = read_mcp_server_spec("anything".into(), None).unwrap();
         assert!(got.is_none());
     }
 
@@ -905,7 +1044,7 @@ mod prewarm_tests {
             br#"{"mcpServers":{"other":{"type":"stdio","command":"x"}}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("missing".into()).unwrap();
+        let got = read_mcp_server_spec("missing".into(), None).unwrap();
         assert!(got.is_none());
     }
 
@@ -924,7 +1063,7 @@ mod prewarm_tests {
             }}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("ctx".into()).unwrap().unwrap();
+        let got = read_mcp_server_spec("ctx".into(), None).unwrap().unwrap();
         assert_eq!(got.name, "ctx");
         assert_eq!(got.transport, "stdio");
         assert_eq!(got.command, "npx");
@@ -951,7 +1090,7 @@ mod prewarm_tests {
             br#"{"mcpServers":{"s":{"type":"stdio","command":"x","env":{"SECRET":"DO_NOT_LEAK"}}}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("s".into()).unwrap().unwrap();
+        let got = read_mcp_server_spec("s".into(), None).unwrap().unwrap();
         let serialized = serde_json::to_string(&got).unwrap();
         assert!(!serialized.contains("DO_NOT_LEAK"));
         assert!(serialized.contains("SECRET"));
@@ -971,7 +1110,9 @@ mod prewarm_tests {
             }}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("sanity".into()).unwrap().unwrap();
+        let got = read_mcp_server_spec("sanity".into(), None)
+            .unwrap()
+            .unwrap();
         assert_eq!(got.transport, "sse");
         assert_eq!(got.url, "https://mcp.sanity.io/sse");
         assert_eq!(got.header_keys, vec!["Authorization".to_string()]);
@@ -992,7 +1133,7 @@ mod prewarm_tests {
             br#"{"mcpServers":{"s":{"type":"stdio","command":"echo"}}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("s".into()).unwrap().unwrap();
+        let got = read_mcp_server_spec("s".into(), None).unwrap().unwrap();
         assert_eq!(got.args.len(), 0);
         assert_eq!(got.env_keys.len(), 0);
         assert_eq!(got.header_keys.len(), 0);
@@ -1008,7 +1149,7 @@ mod prewarm_tests {
             br#"{"mcpServers":{"s":{"command":"x"}}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("s".into()).unwrap().unwrap();
+        let got = read_mcp_server_spec("s".into(), None).unwrap().unwrap();
         assert_eq!(got.transport, "unknown");
     }
 
@@ -1018,7 +1159,7 @@ mod prewarm_tests {
         let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let td = tempdir().unwrap();
         std::env::set_var("HOME", td.path());
-        let err = read_mcp_server_spec("../etc/passwd".into()).unwrap_err();
+        let err = read_mcp_server_spec("../etc/passwd".into(), None).unwrap_err();
         assert!(err.contains("invalid characters"));
     }
 
@@ -1027,7 +1168,7 @@ mod prewarm_tests {
         let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let td = tempdir().unwrap();
         std::env::set_var("HOME", td.path());
-        let err = read_mcp_server_spec("   ".into()).unwrap_err();
+        let err = read_mcp_server_spec("   ".into(), None).unwrap_err();
         assert!(err.contains("required"));
     }
 
@@ -1048,14 +1189,14 @@ mod prewarm_tests {
             }}"#,
         )
         .unwrap();
-        let gmail = read_mcp_server_spec("claude.ai Gmail".into())
+        let gmail = read_mcp_server_spec("claude.ai Gmail".into(), None)
             .unwrap()
             .unwrap();
         assert_eq!(gmail.name, "claude.ai Gmail");
         assert_eq!(gmail.transport, "http");
         assert_eq!(gmail.url, "https://x");
 
-        let tg = read_mcp_server_spec("plugin:telegram:telegram".into())
+        let tg = read_mcp_server_spec("plugin:telegram:telegram".into(), None)
             .unwrap()
             .unwrap();
         assert_eq!(tg.name, "plugin:telegram:telegram");
@@ -1077,7 +1218,7 @@ mod prewarm_tests {
             br#"{"mcpServers":{"context7":{"type":"stdio","command":"npx"}}}"#,
         )
         .unwrap();
-        let got = read_mcp_server_spec("claude.ai Gmail".into()).unwrap();
+        let got = read_mcp_server_spec("claude.ai Gmail".into(), None).unwrap();
         assert!(got.is_none());
     }
 

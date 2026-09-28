@@ -28,6 +28,7 @@ import {
 	customAgent,
 	getAgent,
 	getAvailableModes,
+	launchPermissionMode,
 	installCommand,
 	launchFailedMessage,
 	listAgents,
@@ -139,6 +140,14 @@ describe("agent catalog: content rules", () => {
 		}
 	});
 
+	it("lists only modes an agent has flags for as 2.0-only modes", () => {
+		for (const a of agents) {
+			for (const m of a.terminal.beta_permission_modes ?? []) {
+				expect(a.terminal.permission_flags[m], `${a.id} ${m}`).toBeDefined();
+			}
+		}
+	});
+
 	it("does not pass the Codex flag that 0.145 removed", () => {
 		const flags = Object.values(getAgent("codex")!.terminal.permission_flags).flat();
 		expect(flags).not.toContain("--full-auto");
@@ -166,6 +175,22 @@ describe("agent catalog: launch line", () => {
 
 describe("agent catalog: what a build shows", () => {
 	beforeEach(() => __resetFeatureFlagsForTest());
+
+	it("Copilot's Accept edits (new in 2.0) is offered and launched only with the flag on", async () => {
+		await initFeatureFlags({});
+		expect(getAvailableModes("copilot")).toEqual(["default", "plan", "auto", "bypassPermissions"]);
+		expect(permissionFlagText("copilot", "acceptEdits")).toBe("");
+		expect(buildLaunchPreview("copilot", "acceptEdits", "", "")).toBe("copilot");
+		expect(launchPermissionMode("copilot", "acceptEdits")).toBe("default");
+		// Other agents' modes are untouched.
+		expect(launchPermissionMode("claude", "acceptEdits")).toBe("acceptEdits");
+
+		__resetFeatureFlagsForTest();
+		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: true }) });
+		expect(getAvailableModes("copilot")).toEqual(["default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+		expect(buildLaunchPreview("copilot", "acceptEdits", "", "")).toBe("copilot --allow-tool write");
+		expect(launchPermissionMode("copilot", "acceptEdits")).toBe("acceptEdits");
+	});
 
 	const ids = (list: AgentEntry[]) => list.map((a) => a.id);
 

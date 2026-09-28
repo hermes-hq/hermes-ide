@@ -21,9 +21,11 @@ import {
   getAvailableModes,
   installCommand,
   listAgents,
+  launchPermissionMode,
   permissionFlagText,
   sanitizeCommandFragment,
 } from "../catalog/agentCatalog";
+import { isSafetyDefaultEnabled, safetyDefaultMode } from "../catalog/agentSafety";
 import { PLATFORM } from "../utils/platform";
 import { getSetting, setSetting } from "../api/settings";
 import { LAST_AI_PROVIDER_KEY, resolveDefaultAiProvider } from "../utils/lastAiProvider";
@@ -201,6 +203,11 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // Permission/agent-launch knobs (terminal mode only).
   const [autoApprove, setAutoApprove] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  // F35: with the 2.0 catalog on, each agent starts in its mapping of
+  // Hermes's one safety default, unless the user picked a mode (a pill, or
+  // the default mode saved in Settings).
+  const safetyDefaultOn = isSafetyDefaultEnabled();
+  const userPickedModeRef = useRef(false);
   const [customSuffix, setCustomSuffix] = useState("");
   // Custom agent (any command): the name shown for the session and the command typed to start it.
   const [customAgentName, setCustomAgentName] = useState("");
@@ -356,7 +363,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     // Settings: 3 small key/value lookups. Cheap (~ms each) and the
     // values are needed for permission/prefix/suffix UI. Keep at mount.
     getSetting("default_permission_mode")
-      .then((val) => { if (val) setPermissionMode(val as PermissionMode); })
+      .then((val) => {
+        if (val) {
+          userPickedModeRef.current = true;
+          setPermissionMode(val as PermissionMode);
+        }
+      })
       .catch(() => {});
     getSetting("custom_command_suffix")
       .then((val) => { if (val) setCustomSuffix(val); })
@@ -625,7 +637,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         aiProvider: providerForCreate,
         // The Agent view skips permission/prefix/suffix entirely.
         autoApprove: isLocal && !isAgent ? (autoApprove || undefined) : undefined,
-        permissionMode: isLocal && !isAgent && aiProvider ? permissionMode : undefined,
+        permissionMode: isLocal && !isAgent && aiProvider ? launchPermissionMode(aiProvider, permissionMode) : undefined,
         customPrefix: isLocal && !isAgent && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
         customSuffix: isLocal && !isAgent && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
         agentName: isCustomAgent ? sanitizeCommandFragment(customAgentName) || undefined : undefined,
@@ -761,6 +773,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
       );
     }
   }, [modePrefs, aiProvider]);
+
+  // F35: the chosen agent starts in its mapping of the safety default.
+  useEffect(() => {
+    if (!safetyDefaultOn || !aiProvider || aiProvider === CUSTOM_AGENT_ID || userPickedModeRef.current) return;
+    const safe = safetyDefaultMode(aiProvider);
+    setPermissionMode(safe);
+    setAutoApprove(safe === "bypassPermissions");
+  }, [safetyDefaultOn, aiProvider]);
 
   const selectProviderAndAdvance = (idx: number) => {
     const id = enabledProviders[idx] ?? null;
@@ -1444,11 +1464,15 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       type="button"
                       className={`session-creator-permission-pill${permissionMode === m ? " session-creator-permission-pill-active" : ""}${m === "bypassPermissions" ? " session-creator-permission-pill-danger" : ""}`}
                       onClick={() => {
+                        userPickedModeRef.current = true;
                         setPermissionMode(m);
                         setAutoApprove(m === "bypassPermissions");
                       }}
                     >
                       {permissionShortLabel(m)}
+                      {safetyDefaultOn && m === safetyDefaultMode(aiProvider) && (
+                        <span className="session-creator-permission-pill-default">{t("safety.hermesDefault")}</span>
+                      )}
                     </button>
                   ))}
                 </div>

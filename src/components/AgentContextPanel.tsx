@@ -33,6 +33,7 @@ import { McpSection } from "./McpSection";
 import { MemorySection } from "./MemorySection";
 import { PermissionsSection } from "./PermissionsSection";
 import { AddMcpDialog } from "./AddMcpDialog";
+import { isAgentCatalogBetaEnabled } from "../catalog/agentCatalog";
 import { useSession } from "../state/SessionContext";
 import { PERMISSION_RULES_CHANGED_EVENT, type PermissionRule } from "../utils/permissionsRules";
 
@@ -193,6 +194,9 @@ function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionC
   const [addingMcp, setAddingMcp] = useState(false);
   const [permRules, setPermRules] = useState<PermissionRule[]>([]);
   const [mcpVersion, setMcpVersion] = useState(0);
+  // F30: with the 2.0 catalog on, Hermes writes MCP servers only to the
+  // project's .mcp.json, never to the user-wide ~/.claude.json.
+  const mcpProjectDir = isAgentCatalogBetaEnabled() && projectDir ? projectDir : null;
 
   // Pull permission rules (user settings.json + the project's
   // settings.local.json) on mount, when init changes (init events fire
@@ -261,7 +265,7 @@ function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionC
       );
     }
     try {
-      await invoke("remove_mcp_server", { name });
+      await invoke("remove_mcp_server", mcpProjectDir ? { name, projectDir: mcpProjectDir } : { name });
       console.log(`[mcp] remove_mcp_server IPC succeeded for "${name}"`);
     } catch (err) {
       console.error(`[mcp] remove_mcp_server IPC failed for "${name}":`, err);
@@ -287,7 +291,7 @@ function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionC
     } catch (err) {
       console.warn(`[mcp] respawn after remove threw:`, err);
     }
-  }, [sessionId, respawnAgent, localOnlyNames, prewarm]);
+  }, [sessionId, respawnAgent, localOnlyNames, prewarm, mcpProjectDir]);
 
   const handleRestartMcp = useCallback(async (name: string) => {
     console.log(`[mcp] restart invoked for "${name}" — respawning bridge`);
@@ -313,6 +317,7 @@ function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionC
           onRequestAdd={() => setAddingMcp(true)}
           onRequestRemove={handleRemoveMcp}
           onRequestRestart={handleRestartMcp}
+          projectDir={mcpProjectDir}
         />
       </Section>
       <Section
@@ -345,6 +350,7 @@ function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionC
       {addingMcp && (
         <AddMcpDialog
           existingNames={existingMcpNames}
+          projectDir={mcpProjectDir}
           onClose={() => {
             setAddingMcp(false);
             // After the dialog writes a new entry to ~/.claude.json,

@@ -43,7 +43,13 @@
           "dontAsk": ["--permission-mode", "dontAsk"],
           "bypassPermissions": ["--permission-mode", "bypassPermissions"]
         },
-        "min_version": "2.1.0"
+        "min_version": "2.1.0",
+        "safety": {
+          "default_mode": "acceptEdits",
+          "fit": "exact",
+          "looser_args": [["--dangerously-skip-permissions"], ["--permission-mode", "bypassPermissions"], ["--permission-mode", "auto"]],
+          "note": "Edits inside the working folder are accepted; commands, web access and other folders ask."
+        }
       },
       "structured": { "protocol": "claude-agent-sdk" },
       "install": {
@@ -53,7 +59,13 @@
       },
       "detect": { "command": ["claude", "--version"] },
       "auth": { "check": ["claude", "auth", "status"], "hint": "Run 'claude' and sign in on first use" },
-      "evidence": { "level": "help", "version": "2.1.283" }
+      "evidence": { "level": "help", "version": "2.1.283" },
+      "setup": {
+        "instructions": { "project": ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"], "global": ["~/.claude/CLAUDE.md"], "imports": true },
+        "settings": { "project": [".claude/settings.json", ".claude/settings.local.json"], "global": ["~/.claude/settings.json"] },
+        "skills": { "project": [".claude/skills"], "global": ["~/.claude/skills"] },
+        "mcp": [{ "path": ".mcp.json", "scope": "project", "format": "json", "key": "mcpServers" }, { "path": "~/.claude.json", "scope": "global", "format": "json", "key": "mcpServers" }, { "path": "~/.claude.json", "scope": "global", "format": "claude_local", "key": "mcpServers" }]
+      }
     },
     {
       "id": "codex",
@@ -96,7 +108,13 @@
           "auto": ["--sandbox", "workspace-write", "--ask-for-approval", "on-request"],
           "bypassPermissions": ["--dangerously-bypass-approvals-and-sandbox"]
         },
-        "min_version": "0.145.0"
+        "min_version": "0.145.0",
+        "safety": {
+          "default_mode": "auto",
+          "fit": "exact",
+          "looser_args": [["--dangerously-bypass-approvals-and-sandbox"], ["--yolo"], ["--sandbox", "danger-full-access"], ["-s", "danger-full-access"], ["--ask-for-approval", "never"], ["-a", "never"]],
+          "note": "Writes inside the workspace; the network is off and anything outside it asks."
+        }
       },
       "structured": { "protocol": "codex-app-server", "args": ["app-server"] },
       "install": {
@@ -105,7 +123,13 @@
       },
       "detect": { "command": ["codex", "--version"] },
       "auth": { "check": ["codex", "login", "status"], "hint": "Run 'codex' and sign in on first use" },
-      "evidence": { "level": "help", "version": "0.145.0" }
+      "evidence": { "level": "help", "version": "0.145.0" },
+      "setup": {
+        "instructions": { "project": ["AGENTS.override.md|AGENTS.md"], "global": ["~/.codex/AGENTS.override.md|~/.codex/AGENTS.md"], "imports": false },
+        "settings": { "project": [".codex/config.toml"], "global": ["~/.codex/config.toml"] },
+        "skills": { "project": [".agents/skills"], "global": ["~/.agents/skills", "~/.codex/skills"] },
+        "mcp": [{ "path": ".codex/config.toml", "scope": "project", "format": "toml", "key": "mcp_servers" }, { "path": "~/.codex/config.toml", "scope": "global", "format": "toml", "key": "mcp_servers" }]
+      }
     },
     {
       "id": "antigravity",
@@ -135,7 +159,13 @@
           "default": [],
           "bypassPermissions": ["--dangerously-skip-permissions"]
         },
-        "min_version": "1.0.6"
+        "min_version": "1.0.6",
+        "safety": {
+          "default_mode": "default",
+          "fit": "stricter",
+          "looser_args": [["--dangerously-skip-permissions"]],
+          "note": "No launch flag accepts edits only, so the agent asks before every change."
+        }
       },
       "install": {
         "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
@@ -144,7 +174,13 @@
       },
       "detect": { "command": ["agy", "--version"] },
       "auth": { "check": null, "hint": "Run 'agy' and sign in with Google in the browser, or set GEMINI_API_KEY" },
-      "evidence": { "level": "help", "version": "1.0.6" }
+      "evidence": { "level": "help", "version": "1.0.6" },
+      "setup": {
+        "instructions": { "project": ["AGENTS.md", "GEMINI.md"], "global": ["~/.gemini/GEMINI.md"], "imports": false },
+        "settings": { "project": [".agents/hooks.json"], "global": [] },
+        "skills": { "project": [".agents/skills"], "global": [] },
+        "mcp": null
+      }
     },
     {
       "id": "gemini",
@@ -181,7 +217,13 @@
           "plan": ["--approval-mode", "plan"],
           "bypassPermissions": ["--yolo"]
         },
-        "min_version": "0.45.0"
+        "min_version": "0.45.0",
+        "safety": {
+          "default_mode": "acceptEdits",
+          "fit": "exact",
+          "looser_args": [["--yolo"], ["-y"], ["--approval-mode", "yolo"]],
+          "note": "Edits are accepted; commands and web access ask."
+        }
       },
       "structured": { "protocol": "acp", "args": ["--acp"] },
       "install": {
@@ -190,7 +232,13 @@
       },
       "detect": { "command": ["gemini", "--version"] },
       "auth": { "check": null, "hint": "Needs GEMINI_API_KEY or a Gemini Code Assist Standard or Enterprise login" },
-      "evidence": { "level": "help", "version": "0.45.2" }
+      "evidence": { "level": "help", "version": "0.45.2" },
+      "setup": {
+        "instructions": { "project": ["GEMINI.md"], "global": ["~/.gemini/GEMINI.md"], "imports": true },
+        "settings": { "project": [".gemini/settings.json"], "global": ["~/.gemini/settings.json"] },
+        "skills": { "project": [".gemini/skills"], "global": ["~/.gemini/skills"] },
+        "mcp": [{ "path": ".gemini/settings.json", "scope": "project", "format": "json", "key": "mcpServers" }, { "path": "~/.gemini/settings.json", "scope": "global", "format": "json", "key": "mcpServers" }]
+      }
     },
     {
       "id": "copilot",
@@ -219,11 +267,19 @@
         },
         "permission_flags": {
           "default": [],
+          "acceptEdits": ["--allow-tool", "write"],
           "plan": ["--plan"],
           "auto": ["--allow-all-tools"],
           "bypassPermissions": ["--allow-all"]
         },
-        "min_version": "1.0.0"
+        "beta_permission_modes": ["acceptEdits"],
+        "min_version": "1.0.0",
+        "safety": {
+          "default_mode": "acceptEdits",
+          "fit": "exact",
+          "looser_args": [["--allow-all"], ["--allow-all-tools"], ["--allow-all-paths"], ["--allow-all-urls"], ["--yolo"]],
+          "note": "File edits are allowed; commands, URLs and paths outside the folder ask."
+        }
       },
       "structured": { "protocol": "acp", "args": ["--acp"] },
       "install": {
@@ -232,7 +288,13 @@
       },
       "detect": { "command": ["copilot", "--version"] },
       "auth": { "check": null, "hint": "Run 'copilot' and use /login, or set GH_TOKEN" },
-      "evidence": { "level": "help", "version": "1.0.88" }
+      "evidence": { "level": "help", "version": "1.0.88" },
+      "setup": {
+        "instructions": { "project": [".github/copilot-instructions.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/instructions/*.instructions.md"], "global": ["~/.copilot/copilot-instructions.md"], "imports": false },
+        "settings": { "project": [], "global": ["~/.copilot/config.json"] },
+        "skills": { "project": [".github/skills", ".claude/skills"], "global": ["~/.copilot/skills"] },
+        "mcp": [{ "path": "~/.copilot/mcp-config.json", "scope": "global", "format": "json", "key": "mcpServers" }]
+      }
     },
     {
       "id": "opencode",
@@ -264,7 +326,13 @@
           "default": [],
           "auto": ["--auto"]
         },
-        "min_version": "1.18.0"
+        "min_version": "1.18.0",
+        "safety": {
+          "default_mode": "default",
+          "fit": "looser",
+          "looser_args": [["--auto"]],
+          "note": "OpenCode runs tools without asking by default and has no launch flag that narrows it."
+        }
       },
       "structured": { "protocol": "acp", "args": ["acp"] },
       "install": {
@@ -273,7 +341,13 @@
       },
       "detect": { "command": ["opencode", "--version"] },
       "auth": { "check": ["opencode", "providers", "list"], "hint": "Run 'opencode providers login' to add a model provider" },
-      "evidence": { "level": "help", "version": "1.18.32" }
+      "evidence": { "level": "help", "version": "1.18.32" },
+      "setup": {
+        "instructions": { "project": ["AGENTS.md|CLAUDE.md"], "global": ["~/.config/opencode/AGENTS.md|~/.claude/CLAUDE.md"], "imports": false },
+        "settings": { "project": ["opencode.json", "opencode.jsonc"], "global": ["~/.config/opencode/opencode.json"] },
+        "skills": { "project": [".opencode/skills", ".claude/skills", ".agents/skills"], "global": ["~/.config/opencode/skills"] },
+        "mcp": [{ "path": "opencode.json", "scope": "project", "format": "json", "key": "mcp" }, { "path": "~/.config/opencode/opencode.json", "scope": "global", "format": "json", "key": "mcp" }]
+      }
     },
     {
       "id": "goose",
@@ -296,7 +370,13 @@
           "note": "Hooks only through plugin folders; no approval or notification event."
         },
         "permission_flags": { "default": [] },
-        "min_version": null
+        "min_version": null,
+        "safety": {
+          "default_mode": "default",
+          "fit": "looser",
+          "looser_args": [],
+          "note": "goose's own mode setting decides, and its default approves every tool."
+        }
       },
       "install": {
         "command": "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
@@ -304,7 +384,13 @@
       },
       "detect": { "command": ["goose", "--version"] },
       "auth": { "check": null, "hint": "Run 'goose configure' to choose a model provider" },
-      "evidence": { "level": "help", "version": "1.52.0" }
+      "evidence": { "level": "help", "version": "1.52.0" },
+      "setup": {
+        "instructions": { "project": [".goosehints", "AGENTS.md"], "global": ["~/.config/goose/.goosehints"], "imports": false },
+        "settings": { "project": [], "global": ["~/.config/goose/config.yaml"] },
+        "skills": { "project": [".agents/skills"], "global": [] },
+        "mcp": null
+      }
     },
     {
       "id": "hermes-agent",
@@ -324,7 +410,13 @@
           "default": [],
           "bypassPermissions": ["--yolo"]
         },
-        "min_version": null
+        "min_version": null,
+        "safety": {
+          "default_mode": "default",
+          "fit": "unknown",
+          "looser_args": [["--yolo"]],
+          "note": "No documented approval policy to map yet."
+        }
       },
       "install": {
         "command": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
@@ -334,7 +426,13 @@
       },
       "detect": { "command": ["hermes", "--version"] },
       "auth": { "check": ["hermes", "status"], "hint": "Run 'hermes setup' to choose a model provider" },
-      "evidence": { "level": "help", "version": "0.21.5" }
+      "evidence": { "level": "help", "version": "0.21.5" },
+      "setup": {
+        "instructions": { "project": ["AGENTS.md"], "global": [], "imports": false },
+        "settings": { "project": [], "global": [] },
+        "skills": { "project": [], "global": [] },
+        "mcp": null
+      }
     },
     {
       "id": "aider",
@@ -355,7 +453,13 @@
           "auto": ["--yes-always"],
           "bypassPermissions": ["--yes-always"]
         },
-        "min_version": null
+        "min_version": null,
+        "safety": {
+          "default_mode": "default",
+          "fit": "closest",
+          "looser_args": [["--yes-always"], ["--yes"]],
+          "note": "Aider edits the files added to the chat and asks before running commands or opening URLs."
+        }
       },
       "install": {
         "command": "python -m pip install aider-install && aider-install",
@@ -364,7 +468,13 @@
       },
       "detect": { "command": ["aider", "--version"] },
       "auth": { "check": null, "hint": "Set OPENAI_API_KEY or ANTHROPIC_API_KEY" },
-      "evidence": { "level": "help", "version": "0.86.2" }
+      "evidence": { "level": "help", "version": "0.86.2" },
+      "setup": {
+        "instructions": { "project": [], "global": [], "imports": false },
+        "settings": { "project": [".aider.conf.yml"], "global": ["~/.aider.conf.yml"] },
+        "skills": { "project": [], "global": [] },
+        "mcp": null
+      }
     },
     {
       "id": "kiro",
@@ -384,7 +494,13 @@
           "default": [],
           "auto": ["--trust-all-tools"]
         },
-        "min_version": null
+        "min_version": null,
+        "safety": {
+          "default_mode": "default",
+          "fit": "stricter",
+          "looser_args": [["--trust-all-tools"], ["--trust-tools"]],
+          "note": "Kiro asks before writing files and running commands."
+        }
       },
       "install": {
         "command": "curl -fsSL https://cli.kiro.dev/install | bash",
@@ -392,7 +508,13 @@
       },
       "detect": { "command": ["kiro-cli", "--version"] },
       "auth": { "check": null, "hint": "Run 'kiro-cli login' to sign in" },
-      "evidence": { "level": "help", "version": "2.24.1" }
+      "evidence": { "level": "help", "version": "2.24.1" },
+      "setup": {
+        "instructions": { "project": ["AGENTS.md", ".kiro/steering/*.md"], "global": ["~/.kiro/steering/*.md"], "imports": false },
+        "settings": { "project": [".kiro/settings/mcp.json"], "global": ["~/.kiro/settings/mcp.json"] },
+        "skills": { "project": [], "global": [] },
+        "mcp": [{ "path": ".kiro/settings/mcp.json", "scope": "project", "format": "json", "key": "mcpServers" }, { "path": "~/.kiro/settings/mcp.json", "scope": "global", "format": "json", "key": "mcpServers" }]
+      }
     },
     {
       "id": "custom",
@@ -410,7 +532,13 @@
         "initial_prompt": null,
         "signals": { "method": "none", "confidence": "guessed" },
         "permission_flags": { "default": [] },
-        "min_version": null
+        "min_version": null,
+        "safety": {
+          "default_mode": "default",
+          "fit": "unknown",
+          "looser_args": [],
+          "note": "Hermes does not know this command's approval model."
+        }
       },
       "install": null,
       "detect": null,

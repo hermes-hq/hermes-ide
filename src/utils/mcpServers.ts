@@ -26,6 +26,8 @@ export interface McpServerSpecView {
   env_keys: string[];
   /** Names of HTTP headers (sse/http only) — values redacted. */
   header_keys: string[];
+  /** Where the entry was found: the project's .mcp.json or ~/.claude.json. */
+  source?: "project" | "user";
 }
 
 /** Map an SDK status string into a stable category the UI can switch

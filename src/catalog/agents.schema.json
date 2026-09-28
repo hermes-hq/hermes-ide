@@ -233,7 +233,8 @@
         "initial_prompt",
         "signals",
         "permission_flags",
-        "min_version"
+        "min_version",
+        "safety"
       ],
       "properties": {
         "argv": {
@@ -319,6 +320,17 @@
             "type": "array"
           }
         },
+        "beta_permission_modes": {
+          "description": "Permission modes shown only with the agentCatalog flag on (2.0). Each must be a key of permission_flags; with the flag off the mode is not offered and a session asking for it starts in default.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/permissionMode",
+            "not": {
+              "const": "default"
+            }
+          }
+        },
         "min_version": {
           "anyOf": [
             {
@@ -329,6 +341,9 @@
               "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
             }
           ]
+        },
+        "safety": {
+          "$ref": "#/definitions/safety"
         }
       }
     },
@@ -524,6 +539,94 @@
               "type": "string"
             }
           }
+        },
+        "setup": {
+          "description": "Where the agent reads its instruction files, settings, skills and MCP servers. Hermes only reads these (the instruction-file link writes one project file on request).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "instructions",
+            "settings",
+            "skills",
+            "mcp"
+          ],
+          "properties": {
+            "instructions": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "project",
+                "global",
+                "imports"
+              ],
+              "properties": {
+                "project": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/setupPath"
+                  }
+                },
+                "global": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/setupPath"
+                  }
+                },
+                "imports": {
+                  "description": "Whether the agent follows @path imports inside its instruction files.",
+                  "type": "boolean"
+                }
+              }
+            },
+            "settings": {
+              "$ref": "#/definitions/setupPaths"
+            },
+            "skills": {
+              "$ref": "#/definitions/setupPaths"
+            },
+            "mcp": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path",
+                      "scope",
+                      "format",
+                      "key"
+                    ],
+                    "properties": {
+                      "path": {
+                        "$ref": "#/definitions/setupPath"
+                      },
+                      "scope": {
+                        "enum": [
+                          "project",
+                          "global"
+                        ]
+                      },
+                      "format": {
+                        "enum": [
+                          "json",
+                          "toml",
+                          "claude_local"
+                        ]
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
         }
       },
       "allOf": [
@@ -604,6 +707,75 @@
           }
         }
       ]
+    },
+    "setupPath": {
+      "description": "A file or folder an agent reads, relative to a project folder, or to the home folder when it starts with ~/. 'a|b' means the first that exists; '*' matches file names in one folder.",
+      "type": "string",
+      "pattern": "^(~/)?[A-Za-z0-9._*-][A-Za-z0-9._*/|~-]*$",
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      }
+    },
+    "setupPaths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "global"
+      ],
+      "properties": {
+        "project": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/setupPath"
+          }
+        },
+        "global": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/setupPath"
+          }
+        }
+      }
+    },
+    "safety": {
+      "description": "Hermes's one safety default (write inside the working folder; ask for network and outside paths), mapped to this agent's launch flags. default_mode names one of permission_flags; fit says how close that mode comes to the default; looser_args are argument sequences that run the agent looser than the default.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_mode",
+        "fit",
+        "looser_args",
+        "note"
+      ],
+      "properties": {
+        "default_mode": {
+          "$ref": "#/definitions/permissionMode"
+        },
+        "fit": {
+          "enum": [
+            "exact",
+            "closest",
+            "stricter",
+            "looser",
+            "unknown"
+          ]
+        },
+        "looser_args": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/definitions/shellToken"
+            }
+          }
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }

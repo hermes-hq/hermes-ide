@@ -2,8 +2,9 @@
  * Add-MCP-server dialog.  Visual: docs/internal/v1-tui-parity-plan.md §8.7.
  *
  * Trust + show status dot — no probe-on-save (locked decision §0.7).
- * Writes directly to ~/.claude.json via `write_mcp_server` IPC; SDK
- * picks up the new server on the next agent respawn.
+ * Writes directly to ~/.claude.json via `write_mcp_server` IPC (with the
+ * 2.0 agent catalog on: to the project's .mcp.json instead); SDK picks up
+ * the new server on the next agent respawn.
  */
 import "../styles/components/AddMcpDialog.css";
 import { useState } from "react";
@@ -17,9 +18,11 @@ import {
 interface Props {
   existingNames: string[];
   onClose: () => void;
+  /** When set, the server goes into this folder's .mcp.json instead of ~/.claude.json (2.0, F30). */
+  projectDir?: string | null;
 }
 
-export function AddMcpDialog({ existingNames, onClose }: Props) {
+export function AddMcpDialog({ existingNames, onClose, projectDir }: Props) {
   const [form, setForm] = useState<AddMcpForm>({
     name: "",
     transport: "stdio",
@@ -47,6 +50,7 @@ export function AddMcpDialog({ existingNames, onClose }: Props) {
       await invoke("write_mcp_server", {
         name: form.name.trim(),
         spec: buildMcpSpec(form),
+        ...(projectDir ? { projectDir } : {}),
       });
       onClose();
     } catch (err) {

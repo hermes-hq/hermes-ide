@@ -42,7 +42,30 @@ export interface AgentTerminal {
 	initial_prompt: AgentArgs | null;
 	signals: AgentSignals;
 	permission_flags: Partial<Record<PermissionMode, AgentArgs>>;
+	/** Modes offered only with the agentCatalog flag on (2.0). */
+	beta_permission_modes?: readonly PermissionMode[];
 	min_version: string | null;
+	/** Hermes's one safety default mapped to this agent (F35, see ./agentSafety.ts). */
+	safety: AgentSafety;
+}
+
+export type SafetyFit = "exact" | "closest" | "stricter" | "looser" | "unknown";
+
+export interface AgentSafety {
+	/** The permission mode that comes closest to the default. */
+	default_mode: PermissionMode;
+	fit: SafetyFit;
+	/** Argument sequences that run the agent looser than the default. */
+	looser_args: readonly AgentArgs[];
+	note: string;
+}
+
+/** Where an agent reads its instructions, settings, skills and MCP servers (F30). Read by the backend. */
+export interface AgentSetup {
+	instructions: { project: readonly string[]; global: readonly string[]; imports: boolean };
+	settings: { project: readonly string[]; global: readonly string[] };
+	skills: { project: readonly string[]; global: readonly string[] };
+	mcp: readonly { path: string; scope: "project" | "global"; format: "json" | "toml" | "claude_local"; key: string }[] | null;
 }
 
 export interface AgentEntry {
@@ -61,6 +84,7 @@ export interface AgentEntry {
 	detect: { command: AgentArgs } | null;
 	auth: { check: AgentArgs | null; hint: string } | null;
 	evidence: { level: "help" | "docs" | "none"; version?: string };
+	setup?: AgentSetup;
 }
 
 export interface AgentCatalog {
@@ -99,15 +123,29 @@ export function customAgent(includeBeta: boolean = isAgentCatalogBetaEnabled()):
 	return includeBeta ? AGENT_CATALOG.agents.find((a) => a.custom) : undefined;
 }
 
-/** Permission modes an agent supports, in a fixed order. */
-export function getAvailableModes(agentId: string): PermissionMode[] {
-	const flags = getAgent(agentId)?.terminal.permission_flags;
-	if (!flags) return ["default"];
-	return MODE_ORDER.filter((m) => flags[m] !== undefined);
+/** Permission modes an agent supports, in a fixed order. 2.0-only modes need the agentCatalog flag. */
+export function getAvailableModes(agentId: string, includeBeta: boolean = isAgentCatalogBetaEnabled()): PermissionMode[] {
+	const terminal = getAgent(agentId)?.terminal;
+	if (!terminal) return ["default"];
+	const flags = terminal.permission_flags;
+	const beta = terminal.beta_permission_modes ?? [];
+	return MODE_ORDER.filter((m) => flags[m] !== undefined && (includeBeta || !beta.includes(m)));
+}
+
+/** Whether `mode` is a 2.0-only mode of this agent while the agentCatalog flag is off. */
+function isGatedMode(agentId: string, mode: PermissionMode): boolean {
+	const beta = getAgent(agentId)?.terminal.beta_permission_modes ?? [];
+	return beta.includes(mode) && !isAgentCatalogBetaEnabled();
+}
+
+/** The mode a session is started in: a 2.0-only mode falls back to default while the flag is off. */
+export function launchPermissionMode(agentId: string, mode: PermissionMode): PermissionMode {
+	return isGatedMode(agentId, mode) ? "default" : mode;
 }
 
 /** The launch arguments for a permission mode ("" when the mode adds none). */
 export function permissionFlagText(agentId: string, mode: PermissionMode): string {
+	if (isGatedMode(agentId, mode)) return "";
 	return (getAgent(agentId)?.terminal.permission_flags[mode] ?? []).join(" ");
 }
 

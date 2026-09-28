@@ -32,6 +32,8 @@ interface Props {
   onRequestAdd: () => void;
   onRequestRemove?: (name: string) => void | Promise<void>;
   onRequestRestart?: (name: string) => void | Promise<void>;
+  /** The project whose .mcp.json is read first for a server's details (2.0, F30). */
+  projectDir?: string | null;
 }
 
 export function McpSection({
@@ -40,6 +42,7 @@ export function McpSection({
   onRequestAdd,
   onRequestRemove,
   onRequestRestart,
+  projectDir,
 }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -83,6 +86,7 @@ export function McpSection({
                     serverTools={filterToolsForServer(tools, s.name)}
                     onRequestRemove={onRequestRemove}
                     onRequestRestart={onRequestRestart}
+                    projectDir={projectDir}
                   />
                 )}
               </li>
@@ -115,6 +119,7 @@ interface DetailsProps {
   serverTools: string[];
   onRequestRemove?: (name: string) => void | Promise<void>;
   onRequestRestart?: (name: string) => void | Promise<void>;
+  projectDir?: string | null;
 }
 
 function McpRowDetails({
@@ -124,6 +129,7 @@ function McpRowDetails({
   serverTools,
   onRequestRemove,
   onRequestRestart,
+  projectDir,
 }: DetailsProps) {
   const [spec, setSpec] = useState<McpServerSpecView | null | "loading" | "error">("loading");
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -131,11 +137,18 @@ function McpRowDetails({
 
   useEffect(() => {
     let cancelled = false;
-    invoke<McpServerSpecView | null>("read_mcp_server_spec", { name })
+    invoke<McpServerSpecView | null>("read_mcp_server_spec", projectDir ? { name, projectDir } : { name })
       .then((v) => { if (!cancelled) setSpec(v); })
       .catch(() => { if (!cancelled) setSpec("error"); });
     return () => { cancelled = true; };
-  }, [name]);
+  }, [name, projectDir]);
+
+  // F30: with a project folder, Hermes edits only that project's .mcp.json.
+  // A server set up anywhere else (user-wide, a plugin) is not offered for
+  // removal: removing it there would silently do nothing.
+  const projectOnly = !!projectDir;
+  const removable = !projectOnly || (typeof spec === "object" && spec !== null && spec.source === "project");
+  const showKeptNote = projectOnly && spec !== "loading" && !removable;
 
   return (
     <div className="mcp-row-body">
@@ -181,7 +194,12 @@ function McpRowDetails({
             restart
           </button>
         )}
-        {onRequestRemove && !confirmRemove && (
+        {onRequestRemove && showKeptNote && (
+          <span className="mcp-kept-note">
+            Set up outside this project's <code>.mcp.json</code> (user-wide or by a plugin). Hermes will not edit it.
+          </span>
+        )}
+        {onRequestRemove && removable && !confirmRemove && (
           <button
             type="button"
             className="mcp-action mcp-action-deny"
@@ -194,10 +212,10 @@ function McpRowDetails({
             remove
           </button>
         )}
-        {onRequestRemove && confirmRemove && (
+        {onRequestRemove && removable && confirmRemove && (
           <div className="mcp-confirm">
             <span className="mcp-confirm-text">
-              Delete <strong>{name}</strong> from <code>~/.claude.json</code>?
+              Delete <strong>{name}</strong> from <code>{projectOnly ? ".mcp.json" : "~/.claude.json"}</code>?
             </span>
             <button
               type="button"

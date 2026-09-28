@@ -1,0 +1,177 @@
+/* Instruction-file and safety chips in a terminal pane's header (F30, F35). */
+
+.agent-setup-chips {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-rules-chip,
+.agent-safety-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-rules-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.agent-rules-chip:hover,
+.agent-rules-chip[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--text-0);
+}
+
+.agent-safety-chip {
+  border: 1px solid var(--warning);
+  background: var(--warning-dim);
+  color: var(--warning-bright);
+  cursor: help;
+}
+
+.agent-setup-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  width: 380px;
+  max-width: 80vw;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-3);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+}
+
+.agent-setup-title {
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 6px;
+}
+
+.agent-setup-section {
+  margin-top: 8px;
+}
+
+.agent-setup-section-title {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  margin-bottom: 3px;
+}
+
+.agent-setup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-setup-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.agent-setup-name {
+  font-family: var(--font-mono);
+  color: var(--text-0);
+  word-break: break-all;
+}
+
+.agent-setup-not-loaded .agent-setup-name {
+  color: var(--text-2);
+}
+
+.agent-setup-meta {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
+.agent-setup-badge {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+
+.agent-setup-linked {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.agent-setup-empty,
+.agent-setup-note {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  margin: 2px 0;
+}
+
+.agent-setup-warning {
+  color: var(--warning-bright);
+}
+
+.agent-setup-error {
+  color: var(--red);
+  font-size: var(--text-xs);
+}
+
+.agent-setup-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.agent-setup-link-btn {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.agent-setup-link-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.agent-setup-mcp-agent {
+  margin-top: 4px;
+}
+
+.agent-setup-mcp-agent-name {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.agent-setup-footer {
+  margin-top: 10px;
+}

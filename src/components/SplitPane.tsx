@@ -4,6 +4,7 @@ import { lazyView } from "../utils/lazyView";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
+import { AgentSetupChips } from "./AgentSetupChips";
 import { TerminalPane } from "./TerminalPane";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { translate } from "../i18n/registry";
@@ -315,6 +316,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
         <div className="split-pane-label">
           <span>{session.label}</span>
           <span className="split-pane-phase">{session.phase}</span>
+          {session.mode !== "agent" && <AgentSetupChips session={session} />}
           <button
             className="split-pane-close"
             onClick={(e) => { e.stopPropagation(); dispatch({ type: "CLOSE_PANE", paneId }); }}

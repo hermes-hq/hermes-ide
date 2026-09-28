@@ -468,3 +468,37 @@ features:
       C0-2:
         text: "The inbox seam raises, lists oldest first and resolves; the turn ledger commands answer with nothing"
         scenarios: [C0-session-event-bridge.mjs]
+  F30:
+    name: "One instruction file"
+    # Behind the agentCatalog flag. The scenario starts a fake agent through
+    # the launch line Hermes builds for Codex and Claude (never the real CLI).
+    # Also proven by unit tests: src-tauri/src/agent_setup.rs (what each
+    # agent loads, @imports, the link, attached folders, nothing written),
+    # src-tauri/src/claude_config (project-only MCP writes and removes),
+    # src/__tests__/agent-setup-chips.test.tsx and mcp-panel.test.tsx.
+    status: partial
+    criteria:
+      F30-1:
+        text: "The chip on a Codex session lists AGENTS.md; on Claude it lists CLAUDE.md and the linked AGENTS.md"
+        scenarios: [F30-instruction-files.mjs]
+      F30-2:
+        text: "The MCP view shows which servers each agent sees without editing user-global config"
+        scenarios: [F30-instruction-files.mjs]
+      F30-3:
+        text: "In Agent view, Remove is offered only for servers in the project's .mcp.json; a user-wide server says Hermes will not edit it"
+        scenarios: [F30-agent-view-mcp.mjs]
+  F35:
+    name: "One safety default across vendors"
+    # Behind the agentCatalog flag. The chip reads the running agent's
+    # command line; reading permission_mode from hooks waits for F11.
+    status: partial
+    criteria:
+      F35-1:
+        text: "A new Claude and a new Codex session both start in the mapped default"
+        scenarios: [F35-safety-default.mjs]
+      F35-2:
+        text: "An agent launched with a looser flag shows a 'looser than default' chip"
+        scenarios: [F35-safety-default.mjs]
+      F35-3:
+        text: "A program that only mentions an agent on its command line is not taken for the agent"
+        scenarios: [F35-safety-default.mjs]
