@@ -5,8 +5,9 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 5 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 6th, retire one first.
+// At most 12 flags may exist at once — enforced by
+// src/__tests__/feature-flags.test.ts (raised from 5 for the 2.0 wave, where
+// every feature ships behind its own flag; back to 5 once they are retired).
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -50,6 +51,12 @@ export const FEATURE_FLAGS = [
     label: "Launch helper (hi run)",
     description:
       "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt.",
+  },
+  {
+    id: "featureTracks",
+    label: "Feature Tracks",
+    description:
+      "Guided work as short files in the repository (.hermes/features/<slug>): phases with gates you approve from the Track panel, the hi helper on PATH in every Hermes shell, and an inbox item when a phase or a blocking question waits on you.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

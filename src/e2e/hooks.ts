@@ -20,6 +20,7 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { getTrackState, trackWorktreePaths } from "../track/store";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +125,10 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F28 Feature Tracks: what the store holds for a worktree ────────
+  trackState: (worktreePath: string) => getTrackState(worktreePath),
+  trackWorktreePaths: (): string[] => trackWorktreePaths(),
 };
 
 export type HermesE2EHooks = typeof hooks;

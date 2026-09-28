@@ -242,6 +242,16 @@ export const ContextIcon = (
   </svg>
 );
 
+export const TrackIcon = (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {/* Three phases on a line, the middle one a gate (diamond) */}
+    <line x1="2.5" y1="9" x2="15.5" y2="9" opacity="0.5" />
+    <circle cx="4" cy="9" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M9 6.2 L11.8 9 L9 11.8 L6.2 9 Z" />
+    <circle cx="14" cy="9" r="1.5" />
+  </svg>
+);
+
 export const UsageIcon = (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2.5 14.5 L2.5 9.5 L5.5 9.5 L5.5 14.5 Z" />

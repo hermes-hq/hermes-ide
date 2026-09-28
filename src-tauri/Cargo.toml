@@ -99,6 +99,8 @@ tar = "0.4"
 anyhow = "1"
 notify = "8"
 dunce = "1"
+# Feature Tracks (F28): the .hermes/features files, shared with the hi helper.
+hermes-track = { path = "track" }
 
 [dev-dependencies]
 tempfile = "3"

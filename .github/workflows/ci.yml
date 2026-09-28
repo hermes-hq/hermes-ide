@@ -188,6 +188,8 @@ jobs:
         run: cd src-tauri && cargo fmt --check
       - name: Check formatting (hi helper)
         run: cd src-tauri/hi && cargo fmt --check
+      - name: Check formatting (track crate)
+        run: cd src-tauri/track && cargo fmt --check
 
   # ── Rust Clippy ──────────────────────────────────────────────────────
   rust-clippy:
@@ -233,6 +235,8 @@ jobs:
         run: cd src-tauri && cargo clippy --locked --all-targets -- -D warnings
       - name: Run clippy (hi helper)
         run: cd src-tauri/hi && cargo clippy --locked --all-targets -- -D warnings
+      - name: Run clippy (track crate)
+        run: cd src-tauri/track && cargo clippy --locked --all-targets -- -D warnings
 
   # ── Rust Tests (all three OSes) ──────────────────────────────────────
   rust-test:
@@ -287,6 +291,11 @@ jobs:
       # run the built binary the way a Hermes terminal does, on every OS.
       - name: Test the hi helper
         working-directory: src-tauri/hi
+        run: cargo test --locked
+      # Feature Tracks (src-tauri/track): the files, phases, gates and land,
+      # shared by the app and hi; its tests run git in a temporary repository.
+      - name: Test the track crate
+        working-directory: src-tauri/track
         run: cargo test --locked
 
   # ── Real-app scenarios (all three OSes) ──────────────────────────────
@@ -380,7 +389,7 @@ jobs:
             node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F03-foreground-check-lock.mjs F06-custom-agent.mjs N12-launch-and-resume.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs || fail=1
             node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
-            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
+            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs F28-feature-tracks.mjs || fail=1
             node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
             exit "$fail"
@@ -399,7 +408,7 @@ jobs:
           node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F03-foreground-check-lock.mjs F06-custom-agent.mjs N12-launch-and-resume.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs || fail=1
           node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
-          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
+          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs F28-feature-tracks.mjs || fail=1
           node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
           exit "$fail"

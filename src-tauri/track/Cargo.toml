@@ -1,0 +1,13 @@
+[package]
+name = "hermes-track"
+version = "0.1.0"
+description = "Feature Tracks: the .hermes/features/<slug> files, their phases and gates (shared by the app and the hi helper)"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

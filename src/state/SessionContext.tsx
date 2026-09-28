@@ -348,6 +348,9 @@ interface SessionState {
     /** Usage panel — shows account info + rate limits + per-session cost.
      *  Lives on the right activity bar, below the Context tab. */
     usagePanelOpen: boolean;
+    /** Track panel (F28, flag `featureTracks`) — the Feature Track of the
+     *  active session's worktree. Mutex with Context and Usage. */
+    trackPanelOpen: boolean;
     sessionListCollapsed: boolean;
     commandPaletteOpen: boolean;
     flowMode: boolean;
@@ -555,13 +558,14 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case "SET_RECENT":
       return { ...state, recentSessions: action.entries };
     case "TOGGLE_CONTEXT":
-      // Right rail is single-panel: opening Context closes Usage.
+      // Right rail is single-panel: opening Context closes Usage and Track.
       return {
         ...state,
         ui: {
           ...state.ui,
           contextPanelOpen: !state.ui.contextPanelOpen,
           usagePanelOpen: state.ui.contextPanelOpen ? state.ui.usagePanelOpen : false,
+          trackPanelOpen: state.ui.contextPanelOpen ? state.ui.trackPanelOpen : false,
         },
       };
     case "TOGGLE_USAGE":
@@ -571,6 +575,18 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
           ...state.ui,
           usagePanelOpen: !state.ui.usagePanelOpen,
           contextPanelOpen: state.ui.usagePanelOpen ? state.ui.contextPanelOpen : false,
+          trackPanelOpen: state.ui.usagePanelOpen ? state.ui.trackPanelOpen : false,
+        },
+      };
+    case "TOGGLE_TRACK":
+      // Opening the Track panel closes Context and Usage (same column).
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          trackPanelOpen: !state.ui.trackPanelOpen,
+          contextPanelOpen: state.ui.trackPanelOpen ? state.ui.contextPanelOpen : false,
+          usagePanelOpen: state.ui.trackPanelOpen ? state.ui.usagePanelOpen : false,
         },
       };
     case "TOGGLE_SIDEBAR":
@@ -1046,6 +1062,7 @@ export const initialState: SessionState = {
     // they need it.
     contextPanelOpen: false,
     usagePanelOpen: false,
+    trackPanelOpen: false,
     sessionListCollapsed: false,
     commandPaletteOpen: false,
     flowMode: false,
@@ -1585,6 +1602,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 // Terminal-agent resume (launchHelper flag): hand the saved
                 // conversation id back so the agent continues it.
                 launchHelper: isFeatureFlagEnabled("launchHelper"),
+                featureTracks: isFeatureFlagEnabled("featureTracks"),
                 vendorSessionId: saved.vendor_session_id ?? null,
               });
 
@@ -1849,6 +1867,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         initialCols: initialDims.cols,
         mode,
         launchHelper: isFeatureFlagEnabled("launchHelper"),
+        featureTracks: isFeatureFlagEnabled("featureTracks"),
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.
@@ -2288,6 +2307,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           sshJumpHost: session.ssh_info?.jump_host || null,
           mode: "terminal",
           launchHelper: isFeatureFlagEnabled("launchHelper"),
+          featureTracks: isFeatureFlagEnabled("featureTracks"),
           vendorSessionId: session.vendor_session_id ?? null,
         });
       }

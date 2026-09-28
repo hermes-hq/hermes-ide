@@ -40,6 +40,9 @@ export function createSession(opts: {
   launchHelper?: boolean;
   /** A restored session's saved conversation id to resume (helper only). */
   vendorSessionId?: string | null;
+  /** Feature flag `featureTracks`: put the bundled `hi` helper on the
+   *  terminal's PATH so `hi phase`, `hi status` and friends work. */
+  featureTracks?: boolean;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

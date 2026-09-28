@@ -6,6 +6,9 @@
 //! hi signal [--agent A] [--event E]    append one line to $HERMES_SIGNAL_FILE
 //!           [--argv-json <json>]       (payload from the last argument, as
 //!                                       Codex's notify program gets it)
+//! hi feature new <slug> ...             Feature Tracks (F28): see track_cmd.rs
+//! hi phase [name|done|skip]
+//! hi approve | check | land | status
 //! hi --version
 //! ```
 //!
@@ -29,6 +32,8 @@
 //! from stdin, keeps a few small fields and appends one line to the spool
 //! file Hermes watches. It prints nothing and always exits 0, so a hook can
 //! never break an agent.
+
+mod track_cmd;
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -659,19 +664,30 @@ fn cmd_signal(args: &[String]) -> i32 {
 fn usage() -> i32 {
     eprintln!(
         "hi {VERSION} — Hermes launch and signal helper\n\n\
-         usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n  hi --version"
+         usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n\
+         \n  hi feature new <slug> [--track Quick|Light|Full] [--title <text>] [--no-branch]\n\
+         \x20 hi phase [questions|research|design|structure|plan|implement|done|skip]\n\
+         \x20 hi approve            (people only: refuses when HERMES_AGENT is set)\n\
+         \x20 hi check\n  hi land [--body-file <path>]\n  hi status [--all]\n  hi --version"
     );
     EXIT_USAGE
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let code = match args.first().map(String::as_str) {
         Some("run") => match args.get(1) {
             Some(arg) if args.len() == 2 => cmd_run(arg),
             _ => usage(),
         },
         Some("signal") => cmd_signal(&args[1..]),
+        Some("feature") => track_cmd::cmd_feature(&cwd, &args[1..]),
+        Some("phase") => track_cmd::cmd_phase(&cwd, &args[1..]),
+        Some("approve") => track_cmd::cmd_approve(&cwd, &args[1..]),
+        Some("check") => track_cmd::cmd_check(&cwd, &args[1..]),
+        Some("land") => track_cmd::cmd_land(&cwd, &args[1..]),
+        Some("status") => track_cmd::cmd_status(&cwd, &args[1..]),
         Some("--version") | Some("-V") | Some("version") => {
             println!("hi {VERSION} (launch file v{SPEC_VERSION})");
             0
