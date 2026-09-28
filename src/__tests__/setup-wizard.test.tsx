@@ -249,9 +249,10 @@ describe("OnboardingGate", () => {
         <OnboardingGate {...props} />
       </I18nProvider>,
     );
-    await waitFor(() => expect(document.querySelector(".setup-dialog")).not.toBeNull());
+    // The view is lazy-loaded; allow for a slow first import.
+    await waitFor(() => expect(document.querySelector(".setup-dialog")).not.toBeNull(), { timeout: 10_000 });
     expect(document.querySelector(".onboarding-dialog")).toBeNull();
-  });
+  }, 20_000);
 
   it("keeps the classic wizard with the flag off", async () => {
     h.flags = { taskLauncher: false };
@@ -260,9 +261,10 @@ describe("OnboardingGate", () => {
         <OnboardingGate {...props} />
       </I18nProvider>,
     );
-    await waitFor(() => expect(document.querySelector(".onboarding-dialog")).not.toBeNull());
+    // The view is lazy-loaded; allow for a slow first import.
+    await waitFor(() => expect(document.querySelector(".onboarding-dialog")).not.toBeNull(), { timeout: 10_000 });
     expect(document.querySelector(".setup-dialog")).toBeNull();
-  });
+  }, 20_000);
 
   it("shows nothing once onboarding is done", async () => {
     h.settings.set("onboarding_completed", "true");
