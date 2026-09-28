@@ -28,7 +28,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { platform, tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -155,6 +155,24 @@ function startServer(files) {
       }),
     );
   });
+}
+
+/** Run `remove` once no AppImage mount is left under `dir` (up to 15 s); never throws. */
+async function removeWhenUnmounted(remove, dir) {
+  const mounted = () => {
+    try {
+      return readdirSync(dir).some((n) => n.startsWith(".mount_"));
+    } catch {
+      return false;
+    }
+  };
+  const until = Date.now() + 15_000;
+  while (mounted() && Date.now() < until) await sleep(250);
+  try {
+    remove();
+  } catch (e) {
+    log(`  (left a temp folder behind: ${e.message})`);
+  }
 }
 
 let failed = false;
@@ -323,10 +341,12 @@ try {
   if (app) {
     const exit = await app.stop({ keepFiles: true });
     log(`  first app exit: ${JSON.stringify(exit)}`);
-    app.cleanup();
+    // The AppImage runtime unmounts its FUSE mount (a .mount_* folder in the
+    // app's temp folder) a moment after the app exits; clean up after that.
+    await removeWhenUnmounted(() => app.cleanup(), app.tmpDir);
   }
   if (http) http.server.close();
-  rmSync(work, { recursive: true, force: true });
+  await removeWhenUnmounted(() => rmSync(work, { recursive: true, force: true }), work);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details: { sabotage: SABOTAGE } });

@@ -114,7 +114,16 @@ try {
 
   // ── 3. Install ───────────────────────────────────────────────────
   log(`step 3: winget install --manifest (${PACKAGE_IDENTIFIER} ${version})`);
-  const install = sh("winget", ["install", "--manifest", dir, ...wingetArgs], { allowFail: true });
+  const wingetLog = join(evidenceDir, "winget-install.log");
+  const install = sh("winget", ["install", "--manifest", dir, ...wingetArgs, "--verbose-logs", "--log", wingetLog], {
+    allowFail: true,
+    timeoutMs: 300_000,
+  });
+  if (install.code !== 0) {
+    // What was still running (the installer, a WebView2 setup, the app?).
+    sh("tasklist", ["/FO", "CSV", "/NH"], { allowFail: true });
+    if (existsSync(wingetLog)) log(readFileSync(wingetLog, "utf8").split(/\r?\n/).slice(-60).map((l) => `      | ${l}`).join("\n"));
+  }
   assert(install.code === 0, `winget install succeeds (exit ${install.code})`);
   installedDir = join(process.env.LOCALAPPDATA ?? "", PACKAGE.productCode);
   assert(existsSync(exePath()), `the app is installed for the current user (${exePath()})`);
