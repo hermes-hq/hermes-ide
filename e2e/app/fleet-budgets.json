@@ -10,7 +10,9 @@
     "agentSessionMemoryMb: a session running the fake agent (shell + node), as its row shows it.",
     "ptyThroughputMbPerSec: plain text printed in a visible terminal, time until the last line is",
     "  on screen: a floor at about half of what CI measured on 2026-09-28 (debug test build):",
-    "  macOS 1.18-1.66, Linux 1.39-2.02, Windows 0.74-0.79 MB/s.",
+    "  macOS 1.18-1.66, Linux 1.39-2.02 MB/s. Windows is two-speed: the console host either hands",
+    "  over ~2 KB pieces (0.74-0.79 MB/s) or one line at a time (~86 bytes, 0.03-0.04 MB/s, seen in",
+    "  2 of 4 runs, with the same output path as main); its floor only catches a stall.",
     "floodMb: how much text that throughput step prints on each OS (less where the terminal is slow).",
     "echoLatencyMs: Enter pressed to the command's output on screen, over 20 open sessions (p95 and worst).",
     "switchMs: clicking a session row to its terminal being shown, graphics context included (worst)."
@@ -18,7 +20,7 @@
   "idleAppMemoryMb": { "darwin": 300, "linux": 900, "win32": 900 },
   "perSessionAppMemoryMb": { "darwin": 15, "linux": 40, "win32": 40 },
   "agentSessionMemoryMb": { "darwin": 250, "linux": 250, "win32": 250 },
-  "ptyThroughputMbPerSec": { "darwin": 0.6, "linux": 0.6, "win32": 0.3 },
+  "ptyThroughputMbPerSec": { "darwin": 0.6, "linux": 0.6, "win32": 0.015 },
   "floodMb": { "darwin": 8, "linux": 4, "win32": 1 },
   "echoLatencyMs": {
     "p95": { "darwin": 500, "linux": 3000, "win32": 3000 },
