@@ -56,34 +56,48 @@ pub fn sanitize(raw: &[u8]) -> String {
 }
 
 /// The status a vendor's notification text means, from the phrases the
-/// agents print (Codex: "Approval requested", "Question requested", "Agent
-/// turn complete"; Gemini: "needs your attention", "session complete";
-/// Claude: "needs your permission", "waiting for your input"). None when
+/// agents print (Codex: "Approval requested", "Question requested", "Plan
+/// mode prompt", "Agent turn complete"; Gemini: "needs your attention",
+/// "session complete"; Claude: "needs your permission", "waiting for your
+/// input"). Only those phrases count: a bare "approve", "question" or
+/// "completed" inside other text ("tool approved, running") means nothing,
+/// so the strip does not flip on an agent's ordinary chatter. None when
 /// the text says nothing Hermes recognises.
 pub fn classify(text: &str) -> Option<AgentStatusKind> {
     let t = text.to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|n| t.contains(n));
     if has(&[
         "approval requested",
+        "approval needed",
+        "approval required",
+        "awaiting approval",
+        "waiting for approval",
+        "waiting for your approval",
         "needs your permission",
         "permission needed",
         "permission required",
+        "permission requested",
         "wants to edit",
         "wants to run",
         "needs your attention",
         "needs your approval",
-        "approve",
     ]) {
         return Some(AgentStatusKind::NeedsApproval);
     }
     if has(&[
         "question requested",
+        "has a question",
+        "asked a question",
         "waiting for your input",
+        "waiting for your answer",
         "needs your input",
+        "needs your answer",
         "waiting for input",
-        "question",
     ]) {
         return Some(AgentStatusKind::NeedsAnswer);
+    }
+    if has(&["plan mode prompt", "plan ready", "plan is ready"]) {
+        return Some(AgentStatusKind::PlanReady);
     }
     if has(&[
         "turn complete",
@@ -92,8 +106,9 @@ pub fn classify(text: &str) -> Option<AgentStatusKind> {
         "run finished",
         "task complete",
         "task done",
-        "is done",
-        "completed",
+        "task finished",
+        "agent finished",
+        "agent is done",
     ]) {
         return Some(AgentStatusKind::DoneUnread);
     }
@@ -266,7 +281,22 @@ mod tests {
                 other => panic!("{text}: {other:?}"),
             }
         }
+        assert_eq!(
+            classify("Plan mode prompt: review the plan"),
+            Some(AgentStatusKind::PlanReady)
+        );
         assert_eq!(classify("hello there"), None);
+        // Only the vendors' phrases count: the bare words inside other text
+        // must not flip the strip.
+        for text in [
+            "Tool approved, running",
+            "no questions asked",
+            "completed 3 of 5 steps",
+            "the build is done building the index",
+            "approve.sh printed nothing",
+        ] {
+            assert_eq!(classify(text), None, "{text}");
+        }
         let events = notification_events(&n(777, "fake-agent", "hello there"), "custom", None, 1);
         assert_eq!(events.len(), 1, "unknown text is attention only");
         assert!(

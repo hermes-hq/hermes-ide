@@ -1323,6 +1323,7 @@ mod tests {
             events,
             vec![
                 "Notification",
+                "PermissionDenied",
                 "PermissionRequest",
                 "PostToolUse",
                 "PostToolUseFailure",

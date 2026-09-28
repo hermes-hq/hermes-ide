@@ -17,6 +17,7 @@
 //            within one second of the agent asking, with the tool as detail;
 //          - an ordinary tool does not fire the narrowed PreToolUse hook;
 //          - question, plan, turn end, failure, prompt: each its own status;
+//          - a denied permission puts the strip back to working (exact);
 //          - two sub-agents started, one stopped: the counter says so;
 //          - an OSC 9 notification printed by the agent (no hook) raises
 //            "needs approval · notification, signal" — never exact;
@@ -465,6 +466,14 @@ try {
   assert(seen1.find((s) => s.key === "e")?.detail === "rate_limit", "a failed turn shows the agent's own error as detail");
   assert(seen1.every((s) => s.source === "hook" && s.sourceText === "hook, exact"), "every hook-driven status is hook, exact");
 
+  // A denied permission: the agent's PermissionDenied hook puts the strip
+  // back to working instead of leaving it on "needs approval".
+  await app.bridge.typeInTerminal(s1, "p");
+  await waitForStrip(app.bridge, s1, { kind: "needs_approval", confidence: "exact" });
+  await app.bridge.typeInTerminal(s1, "n");
+  const { strip: denied, ms: deniedMs } = await waitForStrip(app.bridge, s1, { kind: "working", confidence: "exact" });
+  assert(denied.source === "hook", `a denied permission puts the strip back to "${denied.word} · ${denied.sourceText}" (${deniedMs} ms)`);
+
   // Sub-agents.
   await app.bridge.typeInTerminal(s1, "u");
   await waitForStrip(app.bridge, s1, { subagents: 1 });
@@ -541,15 +550,26 @@ try {
   assert(JSON.stringify(upToFailure(eventsA)) === JSON.stringify(upToFailure(eventsB)), `both sessions ran the same hooks in the same order (${upToFailure(eventsB).length})`);
   const outA = (await normalizedRows(app.bridge, s1, vendorId1)).filter((r) => !/sub-agent|OSC 9|marker/.test(r));
   const outB = await normalizedRows(app.bridge, s2, vendorId2);
-  const cut = (rows) => rows.slice(0, rows.findIndex((r) => r.includes("turn failed")) + 1);
-  // On Windows the pseudo console keeps only what is on screen: the first
-  // session's banner rows have scrolled away by now. Compare the rows both
+  // The agent's own output: from its banner to the failed turn. The rows
+  // before it are the shell's (a login banner, the prompt with the command
+  // wrapped wherever the runner's hostname makes it wrap) and differ per
+  // session. On Windows the pseudo console keeps only what is on screen, so
+  // the first session's banner may have scrolled away: compare the rows both
   // sessions still hold; the permission prompt through the failed turn (8
   // rows) is the least that must match.
+  const cut = (rows) => {
+    const end = rows.findIndex((r) => r.includes("turn failed"));
+    const start = rows.findIndex((r) => r.includes("fake-cli"));
+    return rows.slice(Math.max(start, 0), end + 1);
+  };
   const sameA = cut(outA);
   const sameB = cut(outB);
   const n = Math.min(sameA.length, sameB.length);
   assert(n >= 8, `both sessions still show the permission prompt through the failed turn (${n} rows)`);
+  if (JSON.stringify(sameA.slice(-n)) !== JSON.stringify(sameB.slice(-n))) {
+    log(`  strip on : ${JSON.stringify(sameA.slice(-n))}`);
+    log(`  strip off: ${JSON.stringify(sameB.slice(-n))}`);
+  }
   assert(JSON.stringify(sameA.slice(-n)) === JSON.stringify(sameB.slice(-n)), `the agent's output is the same with the strip on or off (${n} rows)`);
   await app.bridge.screenshot(join(evidenceDir, "06-second-session-strip-off.png"));
   await setStatusStrip(app.bridge, true);

@@ -3,10 +3,11 @@
 // F11: one line above a terminal agent session that says what the agent
 // is doing and how Hermes knows: the status (needs approval, working,
 // done, ...), its source and confidence (hook, exact / notification,
-// signal / guessed), the number of running sub-agents, and the ⌘I hint
-// for the attention inbox. It reads the per-session event store only
-// (docs/adr/004-2.0-contracts.md) and never touches the terminal: with
-// the strip on or off the agent's output is the same bytes.
+// signal / guessed), the number of running sub-agents, and the inbox
+// shortcut hint (⌘I on macOS, Ctrl+I elsewhere) for the attention inbox.
+// It reads the per-session event store only (docs/adr/004-2.0-contracts.md)
+// and never touches the terminal: with the strip on or off the agent's
+// output is the same bytes.
 //
 // Before any signal arrives the strip shows a guess from the session
 // phase, dimmed, so a session is never labelled with a certainty it does
@@ -16,6 +17,10 @@ import "../styles/components/SessionStatusStrip.css";
 import { useSessionEvents, type SessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { AgentStatus, AgentStatusKind, Confidence } from "../agent/contract/status";
 import { useI18n } from "../i18n/I18nProvider";
+import { fmt } from "../utils/platform";
+
+/** The attention inbox shortcut as this platform writes it (⌘I / Ctrl+I). */
+export const INBOX_SHORTCUT = fmt("{mod}I");
 
 /** One glyph per status kind; the word next to it carries the meaning. */
 export const STATUS_GLYPHS: Readonly<Record<AgentStatusKind, string>> = {
@@ -93,14 +98,14 @@ export function SessionStatusStrip({ sessionId, phase }: SessionStatusStripProps
       {snapshot.subagents > 0 && (
         <>
           <span className="session-status-strip-sep" aria-hidden="true">·</span>
-          <span className="session-status-strip-subagents">{t("status.subagents", { count: snapshot.subagents })}</span>
+          <span className="session-status-strip-subagents">{t(snapshot.subagents === 1 ? "status.subagentOne" : "status.subagents", { count: snapshot.subagents })}</span>
         </>
       )}
       {status.detail && (
         <span className="session-status-strip-detail" title={status.detail}>{status.detail}</span>
       )}
-      <button type="button" className="session-status-strip-inbox" title={t("status.inboxHint")} onClick={openInbox}>
-        ⌘I
+      <button type="button" className="session-status-strip-inbox" title={t("status.inboxHint", { shortcut: INBOX_SHORTCUT })} onClick={openInbox}>
+        {INBOX_SHORTCUT}
       </button>
     </div>
   );

@@ -17,7 +17,8 @@ vi.mock("../api/settings", () => ({
 import { I18nProvider } from "../i18n/I18nProvider";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent, getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { SessionEvent } from "../agent/contract/events";
-import { SessionStatusStrip, guessedStatus, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
+import { INBOX_SHORTCUT, SessionStatusStrip, guessedStatus, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
+import { PLATFORM } from "../utils/platform";
 import { AGENT_STATUS_KINDS } from "../agent/contract/status";
 import {
   _resetStatusStripPreferenceForTest,
@@ -139,6 +140,10 @@ describe("<SessionStatusStrip>", () => {
     expect(strip().dataset.subagents).toBe("2");
     expect(strip().querySelector(".session-status-strip-subagents")?.textContent).toBe("2 sub-agents");
     act(() => {
+      dispatchSessionEvent(SID, { type: "subagents", at: 2, running: 1 });
+    });
+    expect(strip().querySelector(".session-status-strip-subagents")?.textContent).toBe("1 sub-agent");
+    act(() => {
       dispatchSessionEvent(SID, { type: "subagents", at: 2, running: 0 });
     });
     expect(strip().querySelector(".session-status-strip-subagents")).toBeNull();
@@ -150,8 +155,12 @@ describe("<SessionStatusStrip>", () => {
     expect(strip().dataset.subagents).toBe("0");
   });
 
-  it("asks for the attention inbox on ⌘I", () => {
+  it("asks for the attention inbox on the platform's inbox shortcut", () => {
     renderStrip();
+    const button = strip().querySelector(".session-status-strip-inbox") as HTMLButtonElement;
+    expect(INBOX_SHORTCUT).toBe(PLATFORM === "mac" ? "⌘I" : "Ctrl+I");
+    expect(button.textContent).toBe(INBOX_SHORTCUT);
+    expect(button.title).toBe(`Attention inbox (${INBOX_SHORTCUT})`);
     const heard: unknown[] = [];
     window.addEventListener("hermes:open-inbox", (e) => heard.push((e as CustomEvent).detail));
     act(() => {
