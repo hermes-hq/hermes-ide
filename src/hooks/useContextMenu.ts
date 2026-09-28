@@ -57,11 +57,18 @@ export function buildTerminalMenuItems(hasSelection: boolean): ContextMenuItem[]
 export function buildSessionMenuItems(
   session: { id: string; group: string | null; phase: string },
   groups: string[],
+  /** N19: offer the handoff actions, with these (translated) labels. */
+  handoff?: { continueLabel: string; duplicateLabel: string },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
     menuItem("session.rename", "Rename..."),
     separator(),
   ];
+  if (handoff) {
+    items.push(menuItem("session.handoff-continue", handoff.continueLabel));
+    items.push(menuItem("session.handoff-duplicate", handoff.duplicateLabel));
+    items.push(separator());
+  }
 
   if (groups.length > 0) {
     const groupChildren = groups.map((g) =>

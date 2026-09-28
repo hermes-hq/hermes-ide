@@ -40,10 +40,20 @@ export interface SessionEventSnapshot {
   /** The last attention detail, or null when none was raised. */
   readonly attention: string | null;
   readonly exit: { readonly code: number | null; readonly signal: string | null } | null;
+  /** N19: the usage limit the agent is under, as its last `limit` event
+   *  said, or null (never limited, or the limit cleared). */
+  readonly limit: SessionLimit | null;
   /** The most recent events, oldest first, at most SESSION_EVENT_CAP. */
   readonly events: readonly SessionEvent[];
   /** Bumps on every accepted event; 0 for a session nothing reported on. */
   readonly version: number;
+}
+
+export interface SessionLimit {
+  /** Epoch ms when the vendor says the limit resets; null when it did not say. */
+  readonly resetsAt: number | null;
+  /** The vendor's name for the limit ("five_hour", "seven_day"...), or null. */
+  readonly window: string | null;
 }
 
 const NO_IDENTITY: SessionIdentity = Object.freeze({ vendorSessionId: null, model: null, permissionMode: null });
@@ -57,6 +67,7 @@ function emptySnapshot(sessionId: string): SessionEventSnapshot {
     turn: NO_TURN,
     attention: null,
     exit: null,
+    limit: null,
     events: Object.freeze([]) as readonly SessionEvent[],
     version: 0,
   });
@@ -95,6 +106,9 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       next.status = { kind: "exited", confidence: "exact", detail: "" };
       next.turn = { current: null, completed: prev.turn.completed + (prev.turn.current === null ? 0 : 1) };
       break;
+    case "limit":
+      next.limit = event.state === "limited" ? Object.freeze({ resetsAt: event.resetsAt, window: event.window }) : null;
+      break;
   }
   return Object.freeze(next);
 }
@@ -104,6 +118,8 @@ type Listener = () => void;
 const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
+/** Listeners woken for an event on ANY session (N19 addition). */
+const anyListeners = new Set<(sessionId: string) => void>();
 
 /** The current snapshot of a session; stable until an event lands. */
 export function getSessionEventSnapshot(sessionId: string): SessionEventSnapshot {
@@ -137,7 +153,20 @@ export function dispatchSessionEvent(sessionId: string, event: SessionEvent): Se
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const l of [...anyListeners]) l(sessionId);
   return next;
+}
+
+/**
+ * Be told which session changed, whatever the session (N19 addition: the
+ * limit inbox raises and resolves items for every session, including ones
+ * no component is showing). Returns the unsubscribe function.
+ */
+export function subscribeAnySessionEvent(listener: (sessionId: string) => void): () => void {
+  anyListeners.add(listener);
+  return () => {
+    anyListeners.delete(listener);
+  };
 }
 
 /** Sessions that have at least one event. */
@@ -151,6 +180,7 @@ export function clearSessionEvents(sessionId: string): void {
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const l of [...anyListeners]) l(sessionId);
 }
 
 /** The snapshot of one session, re-rendering only when that session changes. */
@@ -166,4 +196,5 @@ export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
   emptyCache.clear();
+  anyListeners.clear();
 }

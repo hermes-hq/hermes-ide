@@ -40,6 +40,10 @@ export function createSession(opts: {
   launchHelper?: boolean;
   /** A restored session's saved conversation id to resume (helper only). */
   vendorSessionId?: string | null;
+  /** N19 handoff: the first prompt, passed as a launch argument (helper only). */
+  seedPrompt?: string | null;
+  /** N19 handoff: the session this one continues or duplicates. */
+  parentSessionId?: string | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

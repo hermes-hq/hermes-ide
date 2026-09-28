@@ -6,6 +6,7 @@ import { getStartupProblem } from "./api/startupProblem";
 import { StartupProblemScreen } from "./components/StartupProblemScreen";
 import { initFeatureFlags } from "./featureFlags";
 import { startSessionEventChannel } from "./agent/contract/channel";
+import { startLimitInbox } from "./limits/limitStatus";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -56,6 +57,8 @@ void getStartupProblem().then((problem) => {
   void import("@tauri-apps/api/event")
     .then(({ listen }) => startSessionEventChannel(listen))
     .catch((e) => console.warn("[session-event] channel not attached:", e));
+  // N19: a session that hits its usage limit waits in the attention inbox.
+  startLimitInbox();
   void initFeatureFlags().finally(() => {
     root.render(
       <React.StrictMode>

@@ -62,6 +62,20 @@ export interface ExitEvent extends EventBase {
   readonly signal: string | null;
 }
 
+/**
+ * N19 (an addition to C0): the agent hit, or left, its vendor's usage
+ * limit. A `limited` travels together with a `status` event of kind
+ * `limited`; this one carries what the status cannot: when the vendor says
+ * the limit resets (epoch ms, null when it did not say) and which limit it
+ * was ("five_hour", "seven_day"...), both as the vendor reported them.
+ */
+export interface LimitEvent extends EventBase {
+  readonly type: "limit";
+  readonly state: "limited" | "cleared";
+  readonly resetsAt: number | null;
+  readonly window: string | null;
+}
+
 export type SessionEvent =
   | StatusEvent
   | TurnStartEvent
@@ -70,7 +84,8 @@ export type SessionEvent =
   | TurnInterruptedEvent
   | AttentionEvent
   | IdentityEvent
-  | ExitEvent;
+  | ExitEvent
+  | LimitEvent;
 
 export type SessionEventType = SessionEvent["type"];
 
@@ -83,6 +98,7 @@ export const SESSION_EVENT_TYPES: readonly SessionEventType[] = [
   "attention",
   "identity",
   "exit",
+  "limit",
 ];
 
 function optionalString(v: unknown): string | null | undefined {
@@ -140,6 +156,14 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       if (code !== null && !(typeof code === "number" && Number.isInteger(code) && code >= -2147483648 && code <= 2147483647)) return null;
       if (signal !== null && typeof signal !== "string") return null;
       return { ...base, type: "exit", code, signal };
+    }
+    case "limit": {
+      if (v.state !== "limited" && v.state !== "cleared") return null;
+      const resetsAt = v.resetsAt === undefined || v.resetsAt === null ? null : v.resetsAt;
+      if (resetsAt !== null && !(typeof resetsAt === "number" && Number.isInteger(resetsAt))) return null;
+      const window = optionalString(v.window);
+      if (window === undefined) return null;
+      return { ...base, type: "limit", state: v.state, resetsAt, window };
     }
     default:
       return null;

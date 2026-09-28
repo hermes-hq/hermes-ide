@@ -26,6 +26,22 @@
 //   ignore-resume accept `--resume` but start a new conversation under a new
 //                 id anyway — a broken vendor, used as the negative control
 //                 that proves the resume checks can fail
+//   rate-limit    start, do some "work" in its folder (a new src/login.ts, a
+//                 changed README.md), report its limit windows through the
+//                 settings file's status line (five_hour used up, resetting
+//                 at <HERMES_FAKE_DIR>/resets_at, epoch seconds, or in two
+//                 hours) and end the turn on its usage limit: the
+//                 `StopFailure` hooks with `error: "rate_limit"`, as Claude
+//                 Code 2.1.283 does
+//   server-error  the same, but the turn ends on `error: "server_error"` —
+//                 not a limit (the negative control for the limit checks)
+//
+// In any mode, the key `r` stands for "the limit reset and the agent goes
+// on": the `Notification` hooks with `quota_auto_resume_fired`.
+//
+// Hook groups with a `matcher` only run when it matches, like the real CLI
+// (the error of a StopFailure, the notification type of a Notification, the
+// tool of a tool event).
 //
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
@@ -189,11 +205,30 @@ function nextKey() {
 
 // ─── Hooks (the settings file's `hooks` block, Claude Code shape) ────
 
-function hookCommands(event) {
+/** The payload field a hook group's matcher is tested against. */
+function matcherField(event, payload) {
+	if (event === "StopFailure") return payload.error;
+	if (event === "Notification") return payload.notification_type;
+	if (event === "SessionStart") return payload.source;
+	return payload.tool_name;
+}
+
+function matches(matcher, value) {
+	if (matcher === undefined || matcher === null || matcher === "" || matcher === "*") return true;
+	if (typeof value !== "string") return false;
+	try {
+		return new RegExp(`^(?:${matcher})$`).test(value);
+	} catch {
+		return matcher === value;
+	}
+}
+
+function hookCommands(event, payload = {}) {
 	const groups = settings?.hooks?.[event];
 	if (!Array.isArray(groups)) return [];
 	const cmds = [];
 	for (const g of groups) {
+		if (!matches(g?.matcher, matcherField(event, payload))) continue;
 		for (const h of g?.hooks ?? []) {
 			if (h && h.type === "command" && typeof h.command === "string") cmds.push(h);
 		}
@@ -232,10 +267,70 @@ async function runHooks(event, extra = {}) {
 		...extra,
 	};
 	const results = [];
-	for (const hook of hookCommands(event)) results.push(await runHook(hook, payload));
+	for (const hook of hookCommands(event, payload)) results.push(await runHook(hook, payload));
 	record.hooksRan.push({ event, results });
 	note("hooks", { event, count: results.length });
 	return results;
+}
+
+/** Runs the settings file's status line command with the given input, like
+ *  Claude Code does after a turn. Returns what it printed, or null. */
+async function runStatusLine(extra) {
+	const cmd = settings?.statusLine;
+	if (!cmd || cmd.type !== "command" || typeof cmd.command !== "string") {
+		note("status-line", { configured: false });
+		return null;
+	}
+	const input = {
+		session_id: sessionId,
+		transcript_path: `/fixture-home/.fake/${sessionId}.jsonl`,
+		cwd: process.cwd(),
+		model: { id: "fake-model-1", display_name: "Fake" },
+		workspace: { current_dir: process.cwd(), project_dir: process.cwd() },
+		...extra,
+	};
+	const result = await runHook({ command: cmd.command, timeout: 5 }, input);
+	record.hooksRan.push({ event: "statusLine", results: [result] });
+	note("status-line", { configured: true, code: result.code });
+	return result.stdout;
+}
+
+function readResetsAt() {
+	const fromEnv = Number(process.env.HERMES_FAKE_RESETS_AT);
+	if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+	if (RECORD_DIR) {
+		try {
+			const n = Number(fs.readFileSync(path.join(RECORD_DIR, "resets_at"), "utf8").trim());
+			if (Number.isFinite(n) && n > 0) return n;
+		} catch {
+			/* not set */
+		}
+	}
+	return Math.floor(Date.now() / 1000) + 2 * 3600;
+}
+
+/** A turn that edits files and ends on an API error (rate-limit / server-error modes). */
+async function workThenFail(error) {
+	const cwd = process.cwd();
+	fs.mkdirSync(path.join(cwd, "src"), { recursive: true });
+	fs.writeFileSync(path.join(cwd, "src", "login.ts"), "export function login() {\n  // redirect after sign-in: work in progress\n}\n");
+	const readme = path.join(cwd, "README.md");
+	if (fs.existsSync(readme)) fs.appendFileSync(readme, "\nLogin: redirect after sign-in (in progress).\n");
+	note("work", { files: ["src/login.ts", "README.md"] });
+	out("fake-cli: editing src/login.ts, README.md\r\n");
+	const resetsAt = readResetsAt();
+	await runStatusLine({
+		rate_limits: {
+			five_hour: { used_percentage: 100, resets_at: resetsAt },
+			seven_day: { used_percentage: 40, resets_at: resetsAt + 4 * 86400 },
+		},
+	});
+	await runHooks("StopFailure", {
+		error,
+		error_details: error === "rate_limit" ? "429 Too Many Requests" : "500 Internal Server Error",
+		last_assistant_message: error === "rate_limit" ? "API Error: Rate limit reached" : "API Error: 500",
+	});
+	out(error === "rate_limit" ? "fake-cli: usage limit reached\r\n" : "fake-cli: the API failed\r\n");
 }
 
 // ─── Behaviour ───────────────────────────────────────────────────────
@@ -300,6 +395,8 @@ async function main() {
 	out("fake-cli: type q to quit\r\n");
 	await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
+	if (mode === "rate-limit") await workThenFail("rate_limit");
+	else if (mode === "server-error") await workThenFail("server_error");
 
 	for (;;) {
 		const key = await nextKey();
@@ -314,6 +411,14 @@ async function main() {
 		if (key === "q") {
 			await quit("q");
 			return;
+		}
+		if (key === "r") {
+			await runHooks("Notification", {
+				notification_type: "quota_auto_resume_fired",
+				message: "Usage limit reset, continuing automatically",
+			});
+			out("\r\nfake-cli: limit reset, continuing\r\n");
+			continue;
 		}
 		if (key === "\r") out("\r\n");
 		else if (key >= " ") out(key);

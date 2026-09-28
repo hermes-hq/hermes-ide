@@ -724,6 +724,14 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
         log::warn!("Unknown AI provider rejected: {}", provider);
         return None;
     };
+    if s.seed_prompt.is_some() {
+        // A handoff's task goes only through the launch file `hi` reads,
+        // never into the shell line typed below.
+        log::warn!(
+            "[LAUNCH] {}: the handoff task needs the launch helper; the agent starts without it",
+            s.id
+        );
+    }
     // For Claude/Gemini: pass context instruction as CLI argument
     // so it's processed immediately without PTY injection timing issues
     let supports_cli_prompt = provider == "claude" || provider == "gemini";
@@ -789,6 +797,11 @@ pub fn create_session(
     // A restored session's saved conversation id; with the helper on, the
     // agent resumes it (see `launch.rs`).
     vendor_session_id: Option<String>,
+    // N19: the first prompt of a handed-off session (the task and the work
+    // so far). Only ever passed as a launch argument through `hi`.
+    seed_prompt: Option<String>,
+    // N19: the session this one continues or duplicates.
+    parent_session_id: Option<String>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -910,6 +923,8 @@ pub fn create_session(
         vendor_session_id: vendor_session_id.filter(|id| !id.is_empty()),
         agent_startup: None,
         launch_helper: launch_helper.unwrap_or(false),
+        seed_prompt: seed_prompt.filter(|p| !p.trim().is_empty()),
+        parent_session_id: parent_session_id.filter(|id| !id.is_empty()),
     };
 
     // ─── Agent-mode short-circuit ───────────────────────────────────────

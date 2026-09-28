@@ -16,6 +16,7 @@ mod e2e_protocol;
 mod git;
 mod inline_pty;
 mod instance;
+mod limits;
 mod menu;
 mod platform;
 mod plugin_identity;
@@ -1090,6 +1091,7 @@ mod tests {
             ssh_info: None,
             vendor_session_id: None,
             agent_startup: None,
+            parent_session_id: None,
         };
         database.create_session_v2(&update).unwrap();
 

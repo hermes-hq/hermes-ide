@@ -75,6 +75,7 @@ import { createRespawnQueue, respawnJoinDisabledForTest } from "../utils/respawn
 import { destroyAgentSessionStore } from "../agent/agentSessionStore";
 import { cleanupSessionRefs } from "../utils/sessionRefCleanup";
 import { cacheAgentInit, clearAgentInitCache, peekAgentInitCache } from "../agent/useAgentInit";
+import { clearSessionEvents } from "../agent/contract/sessionEventStore";
 import {
   buildUserEnvelope,
   echoUserEnvelope,
@@ -1470,6 +1471,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // otherwise the Map grows unbounded across long-running app
         // sessions.
         clearAgentInitCache(event.payload);
+        // Forget its 2.0 session events: whatever waited on it (a usage
+        // limit in the inbox, N19) goes with it.
+        clearSessionEvents(event.payload);
         dispatch({ type: "SESSION_REMOVED", id: event.payload });
       });
       unlisteners.push(u2);
@@ -1849,6 +1853,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         initialCols: initialDims.cols,
         mode,
         launchHelper: isFeatureFlagEnabled("launchHelper"),
+        seedPrompt: opts?.seedPrompt || null,
+        parentSessionId: opts?.parentSessionId || null,
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.

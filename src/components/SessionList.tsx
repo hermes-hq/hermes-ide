@@ -18,6 +18,10 @@ import type { PluginSessionActionContribution } from "../plugins/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionModel } from "../agent/useSessionModel";
 import { agentDisplayName } from "../catalog/agentCatalog";
+import { isFeatureFlagEnabled } from "../featureFlags";
+import { SessionLimitTag } from "./SessionLimitTag";
+import { HandoffDialog } from "./HandoffDialog";
+import { nestUnderParents, type HandoffKind } from "../limits/handoff";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -609,6 +613,10 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
 
   // Track which session was right-clicked for action handlers
   const contextSessionRef = useRef<string | null>(null);
+  // N19: the handoff dialog (continue / duplicate in another agent). It
+  // passes the task as a launch argument, so it needs the launch helper.
+  const handoffEnabled = isFeatureFlagEnabled("launchHelper");
+  const [handoff, setHandoff] = useState<{ sessionId: string; kind: HandoffKind } | null>(null);
 
   const { grouped, allGroups } = useMemo(() => {
     const map = new Map<string | null, SessionData[]>();
@@ -618,9 +626,10 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       list.push(session);
       map.set(group, list);
     }
-    // Sort within each group: destroyed at bottom
+    // Sort within each group: destroyed at bottom; a handed-off session
+    // (N19) right under the session it came from.
     for (const [key, list] of map) {
-      map.set(key, sortSessions(list));
+      map.set(key, nestUnderParents(sortSessions(list)));
     }
     // Include empty projects (no sessions yet)
     for (const ep of emptyProjects) {
@@ -709,6 +718,8 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
       onClose(sid);
     } else if (actionId === "session.delete-data") {
       confirmAndDeleteSessionData(sid, t("session.deleteData.confirm"), window.confirm.bind(window), deleteSessionData);
+    } else if (actionId === "session.handoff-continue" || actionId === "session.handoff-duplicate") {
+      setHandoff({ sessionId: sid, kind: actionId === "session.handoff-continue" ? "continue" : "duplicate" });
     } else if (actionId.startsWith("session.set-group.")) {
       const group = actionId.replace("session.set-group.", "");
       handleMoveToProject(sid, group);
@@ -732,9 +743,12 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     const items = buildSessionMenuItems(
       { id: session.id, group: session.group || null, phase: session.phase },
       allGroups,
+      handoffEnabled && session.phase !== "destroyed" && !session.ssh_info
+        ? { continueLabel: t("handoff.continueMenu"), duplicateLabel: t("handoff.duplicateMenu") }
+        : undefined,
     );
     showMenu(e, items);
-  }, [sessions, allGroups, showMenu]);
+  }, [sessions, allGroups, showMenu, handoffEnabled, t]);
 
   const handleEmptyAreaContextMenu = useCallback((e: React.MouseEvent) => {
     showEmptyMenu(e, buildEmptyAreaMenuItems("sidebar"));
@@ -890,8 +904,13 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     const isActive = session.id === activeSessionId;
     const shouldTriggerRename = renameSessionId === session.id;
     const isLinkedWorktree = isHermesWorktreePath(session.working_directory);
+    const nested = !!session.parent_session_id && sessions.some((s) => s.id === session.parent_session_id);
     return (
-      <div key={session.id} className={`session-item-wrapper${isActive ? " session-item-wrapper-active" : ""}`}>
+      <div
+        key={session.id}
+        className={`session-item-wrapper${isActive ? " session-item-wrapper-active" : ""}${nested ? " session-item-wrapper-nested" : ""}`}
+        data-parent-session-id={nested ? session.parent_session_id ?? undefined : undefined}
+      >
         <SessionItemBranchAccent sessionId={session.id} isDestroyed={session.phase === "destroyed"} workingDirectory={session.working_directory} />
         <div
           className={`session-item ${isActive ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
@@ -941,6 +960,10 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                   {t("sessions.startupPrompt")}
                 </span>
               )}
+              <SessionLimitTag
+                sessionId={session.id}
+                onHandOff={handoffEnabled && !session.ssh_info ? () => setHandoff({ sessionId: session.id, kind: "continue" }) : undefined}
+              />
               <span className="session-phase-tag" data-phase={session.phase}>
                 {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
               </span>
@@ -1263,6 +1286,14 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           </button>
         )}
       </div>
+      {handoff && sessions.find((s) => s.id === handoff.sessionId) && (
+        <HandoffDialog
+          key={`${handoff.sessionId}:${handoff.kind}`}
+          session={sessions.find((s) => s.id === handoff.sessionId)!}
+          initialKind={handoff.kind}
+          onClose={() => setHandoff(null)}
+        />
+      )}
     </div>
   );
 }

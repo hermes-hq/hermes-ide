@@ -272,6 +272,16 @@ pub struct Session {
     /// `launchHelper`) instead of typing the vendor command into the shell.
     #[serde(skip)]
     pub launch_helper: bool,
+    /// N19: the first prompt of a session started by "Continue in another
+    /// agent" or "Duplicate to another agent". Passed as a launch argument
+    /// through the `hi` helper and never typed; kept out of every saved or
+    /// emitted copy of the session.
+    #[serde(skip)]
+    pub seed_prompt: Option<String>,
+    /// N19: the session this one was handed off from (continued or
+    /// duplicated), so the list can show it under that session.
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
     /// Deferred nudge: stored when context is applied while the agent is busy.
     /// Delivered when the session phase transitions to NeedsInput.
     #[serde(skip)]
@@ -321,6 +331,9 @@ pub struct SessionUpdate {
     pub vendor_session_id: Option<String>,
     #[serde(default)]
     pub agent_startup: Option<AgentStartup>,
+    /// N19: the session this one was handed off from.
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
 }
 
 impl From<&Session> for SessionUpdate {
@@ -354,6 +367,7 @@ impl From<&Session> for SessionUpdate {
             mode: s.mode,
             vendor_session_id: s.vendor_session_id.clone(),
             agent_startup: s.agent_startup.clone(),
+            parent_session_id: s.parent_session_id.clone(),
         }
     }
 }

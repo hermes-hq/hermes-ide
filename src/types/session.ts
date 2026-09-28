@@ -139,6 +139,8 @@ export interface SessionData {
   vendor_session_id?: string | null;
   /** Startup state of an agent started through the `hi` helper. */
   agent_startup?: AgentStartup | null;
+  /** N19: the session this one continues or duplicates (a handoff). */
+  parent_session_id?: string | null;
 }
 
 export type AgentStartupState = "launching" | "started" | "waiting_at_startup_prompt" | "ended";
@@ -200,6 +202,11 @@ export interface CreateSessionOpts {
   sshJumpHost?: string;
   /** Frontend-chosen session mode.  Defaults to `agent` for Claude, `terminal` otherwise. */
   mode?: SessionMode;
+  /** N19 handoff: the new agent's first prompt (the task and the work so
+   *  far). Passed only as a launch argument through the `hi` helper. */
+  seedPrompt?: string;
+  /** N19 handoff: the session this one continues or duplicates. */
+  parentSessionId?: string;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────

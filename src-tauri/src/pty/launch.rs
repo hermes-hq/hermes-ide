@@ -84,6 +84,14 @@ pub struct LaunchInput<'a> {
     pub context_path: Option<&'a str>,
     /// The conversation to resume (a restored session's saved id).
     pub resume_id: Option<&'a str>,
+    /// N19: the first prompt of a session started by "Continue in another
+    /// agent" / "Duplicate to another agent" (the task and the work so far).
+    /// It travels as a launch argument, never typed.
+    pub seed_prompt: Option<&'a str>,
+    /// N19: the user has a status line of their own configured for this
+    /// agent, so Hermes must not set one (the vendor's `rate_limits` then
+    /// never reach Hermes, and a limit has no reset time).
+    pub user_status_line: bool,
     /// Absolute path of the `hi` helper.
     pub hi: &'a Path,
     /// The session's launch folder (`<app data>/launch/<session id>`).
@@ -134,6 +142,8 @@ pub struct LaunchPlan {
     pub expects_start_signal: bool,
     /// True when the project-context prompt travels as an argument.
     pub context_in_args: bool,
+    /// True when the seed prompt (N19) travels as an argument.
+    pub seed_in_args: bool,
     /// The nonce every spool line of this launch must carry.
     pub nonce: String,
 }
@@ -178,24 +188,101 @@ fn plain_events<'a>(agent: &'a Agent, status: &str) -> impl Iterator<Item = &'a 
         .filter(|e| !e.contains(':'))
 }
 
+/// N19: the catalog's `limited` entries — the vendor events that start,
+/// update or end a usage limit — as `(event, matcher)`. `Event:Matcher`
+/// becomes a hook group with that matcher; the pseudo-event `statusLine`
+/// is the status line command (its input carries `rate_limits`).
+fn limit_events(agent: &Agent) -> impl Iterator<Item = (&str, Option<&str>)> {
+    agent
+        .terminal
+        .signals
+        .events
+        .get("limited")
+        .into_iter()
+        .flatten()
+        .map(|e| match e.split_once(':') {
+            Some((event, matcher)) => (event, Some(matcher)),
+            None => (e.as_str(), None),
+        })
+}
+
+/// Whether the agent reports its limits through its status line input.
+fn limits_via_status_line(agent: &Agent) -> bool {
+    limit_events(agent).any(|(event, _)| event == "statusLine")
+}
+
 /// The per-launch hook file for the `settings_file` method (Claude's
-/// settings shape): hooks only, so it merges on top of the user's own
-/// settings without replacing anything.
-pub fn settings_file_json(agent: &Agent, hi: &Path) -> String {
+/// settings shape): hooks, so it merges on top of the user's own settings
+/// without replacing anything — plus, for N19, a status line that reports
+/// the vendor's `rate_limits`, but only when `status_line` says the user has
+/// none of their own (a status line is one setting, not a list: ours would
+/// replace theirs).
+pub fn settings_file_json(agent: &Agent, hi: &Path, status_line: bool) -> String {
     let mut hooks = serde_json::Map::new();
+    let mut add = |event: &str, matcher: Option<&str>| {
+        let mut group = serde_json::json!({ "hooks": [{
+            "type": "command",
+            "command": signal_command(hi, &agent.id, event),
+            "timeout": 5
+        }]});
+        if let Some(m) = matcher {
+            group["matcher"] = serde_json::Value::String(m.to_string());
+        }
+        let entry = hooks
+            .entry(event.to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        if let Some(groups) = entry.as_array_mut() {
+            if !groups.contains(&group) {
+                groups.push(group);
+            }
+        }
+    };
     for status in ["session_start", "exited"] {
         for event in plain_events(agent, status) {
-            hooks.insert(
-                event.to_string(),
-                serde_json::json!([{ "hooks": [{
-                    "type": "command",
-                    "command": signal_command(hi, &agent.id, event),
-                    "timeout": 5
-                }]}]),
-            );
+            add(event, None);
         }
     }
-    serde_json::to_string_pretty(&serde_json::json!({ "hooks": hooks })).unwrap_or_default()
+    for (event, matcher) in limit_events(agent) {
+        if event != "statusLine" {
+            add(event, matcher);
+        }
+    }
+    let mut settings = serde_json::json!({ "hooks": hooks });
+    if status_line && limits_via_status_line(agent) {
+        settings["statusLine"] = serde_json::json!({
+            "type": "command",
+            "command": signal_command(hi, &agent.id, "StatusLine"),
+        });
+    }
+    serde_json::to_string_pretty(&settings).unwrap_or_default()
+}
+
+/// Whether any of these settings files sets a status line (N19). A file
+/// that is missing or unreadable sets none.
+pub fn settings_set_status_line(files: &[PathBuf]) -> bool {
+    files.iter().any(|f| {
+        std::fs::read_to_string(f)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .is_some_and(|v| v.get("statusLine").is_some_and(|s| !s.is_null()))
+    })
+}
+
+/// The settings files where a user may have set Claude's status line: their
+/// own (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and the project's.
+fn claude_settings_files(cwd: &str) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| crate::platform::home_dir().map(|h| h.join(".claude")));
+    if let Some(dir) = config_dir {
+        files.push(dir.join("settings.json"));
+    }
+    let project = Path::new(cwd).join(".claude");
+    files.push(project.join("settings.json"));
+    files.push(project.join("settings.local.json"));
+    files
 }
 
 /// The per-launch defaults file for the `env_file` method (Gemini's
@@ -237,6 +324,7 @@ fn signal_setup(
     hi: &Path,
     session_dir: &Path,
     hermes_env: &BTreeMap<String, String>,
+    status_line: bool,
 ) -> SignalSetup {
     let signals = &agent.terminal.signals;
     let has_start = plain_events(agent, "session_start").next().is_some();
@@ -249,7 +337,7 @@ fn signal_setup(
     let file = match signals.method.as_str() {
         "settings_file" => Some((
             session_dir.join(format!("{}.settings.json", agent.id)),
-            settings_file_json(agent, hi),
+            settings_file_json(agent, hi, status_line),
         )),
         "env_file" => Some((
             session_dir.join(format!("{}.defaults.json", agent.id)),
@@ -326,7 +414,13 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             .to_string_lossy()
             .to_string(),
     );
-    let signals = signal_setup(agent, input.hi, input.session_dir, &env);
+    let signals = signal_setup(
+        agent,
+        input.hi,
+        input.session_dir,
+        &env,
+        !input.user_status_line,
+    );
     env.extend(signals.env.iter().map(|(k, v)| (k.clone(), v.clone())));
 
     // Claude reads a positional argument after --channels as another
@@ -346,11 +440,21 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         .new_session_id
         .as_ref()
         .map(|_| input.new_session_id.to_string());
-    let prompt_args: Vec<String> = match (&terminal.initial_prompt, input.context_path) {
-        (Some(template), Some(ctx)) => fill(template, &[("prompt", &context_prompt(ctx))]),
+    // The first prompt: a handoff's seed (N19), the project-context line,
+    // or both in one argument (the seed first: it is the task).
+    let seed = input.seed_prompt.map(str::trim).filter(|p| !p.is_empty());
+    let prompt_text = match (seed, input.context_path) {
+        (Some(seed), Some(ctx)) => Some(format!("{seed}\n\n{}", context_prompt(ctx))),
+        (Some(seed), None) => Some(seed.to_string()),
+        (None, Some(ctx)) => Some(context_prompt(ctx)),
+        (None, None) => None,
+    };
+    let prompt_args: Vec<String> = match (&terminal.initial_prompt, prompt_text) {
+        (Some(template), Some(prompt)) => fill(template, &[("prompt", &prompt)]),
         _ => Vec::new(),
     };
-    let context_in_args = !prompt_args.is_empty();
+    let context_in_args = input.context_path.is_some() && !prompt_args.is_empty();
+    let seed_in_args = seed.is_some() && !prompt_args.is_empty();
     let fresh_args = {
         let mut args = head.clone();
         args.extend(base.iter().cloned());
@@ -414,6 +518,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         // A resumed conversation already has its context; the prompt is
         // only on the fresh command (which the fallback also carries).
         context_in_args: context_in_args && !resumes,
+        seed_in_args: seed_in_args && !resumes,
         nonce: input.nonce.to_string(),
     })
 }
@@ -505,7 +610,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         return None;
     }
     let provider = s.ai_provider.clone()?;
-    recipe_for(&provider)?;
+    let agent = recipe_for(&provider)?;
     let Some(hi) = hi_path(app) else {
         log::warn!(
             "[LAUNCH] hi helper not found next to the app; typing the {} command instead",
@@ -533,6 +638,9 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         cwd: &s.working_directory,
         context_path: context_path.as_deref(),
         resume_id: s.vendor_session_id.as_deref(),
+        seed_prompt: s.seed_prompt.as_deref(),
+        user_status_line: limits_via_status_line(agent)
+            && settings_set_status_line(&claude_settings_files(&s.working_directory)),
         hi: &hi,
         session_dir: &session_dir,
         new_session_id: &new_session_id,
@@ -555,6 +663,16 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         if plan.resumes { "resume " } else { "new" },
         plan.vendor_session_id.as_deref().unwrap_or("")
     );
+    if s.seed_prompt.is_some() && !plan.seed_in_args {
+        log::warn!(
+            "[LAUNCH] {}: {} takes no first prompt, so the handoff task was not passed (it is never typed)",
+            s.id,
+            provider
+        );
+    }
+    // The seed is for this session's first start only; it now lives in the
+    // launch file.
+    s.seed_prompt = None;
     s.vendor_session_id = plan.vendor_session_id.clone();
     s.agent_startup = Some(AgentStartup {
         state: AgentStartupState::Launching,
@@ -751,6 +869,9 @@ pub(crate) fn watch_signals(
     std::thread::spawn(move || {
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
         let mut launched_at = Instant::now();
+        // N19: usage limits the agent reports, as contract session events.
+        let mut limits = crate::limits::LimitTracker::new();
+        let mut limit_events: Vec<crate::contract::SessionEvent> = Vec::new();
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
@@ -765,6 +886,9 @@ pub(crate) fn watch_signals(
                     stop = true;
                 }
                 for line in &lines {
+                    if let Ok(record) = crate::contract::signal::parse_signal_line(line.trim()) {
+                        limit_events.extend(limits.observe(&record, &nonce));
+                    }
                     if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             launched_at = Instant::now();
@@ -810,6 +934,9 @@ pub(crate) fn watch_signals(
                     let update = SessionUpdate::from(&*s);
                     let _ = app.emit("session-updated", &update);
                 }
+                for event in limit_events.drain(..) {
+                    crate::contract::emit_session_event(&app, &s.id, event);
+                }
             } else {
                 stop = true;
             }
@@ -846,6 +973,8 @@ mod tests {
             cwd: "/fixture-home/repo",
             context_path: None,
             resume_id,
+            seed_prompt: None,
+            user_status_line: false,
             hi,
             session_dir,
             new_session_id: "11111111-2222-4333-8444-555555555555",
@@ -887,13 +1016,14 @@ mod tests {
         assert_eq!(plan.spec.cwd, "/fixture-home/repo");
         assert_eq!(plan.spec.v, SPEC_VERSION);
 
-        // The settings file holds hooks only, both calling hi.
+        // The settings file holds hooks, all calling hi, and (N19) a status
+        // line that reports the rate limits, since this user has none.
         let (path, contents) = &plan.files[0];
         assert_eq!(path, &dir.join("claude.settings.json"));
         let json: serde_json::Value = serde_json::from_str(contents).unwrap();
         assert_eq!(
             json.as_object().unwrap().keys().collect::<Vec<_>>(),
-            vec!["hooks"]
+            vec!["hooks", "statusLine"]
         );
         let start = &json["hooks"]["SessionStart"][0]["hooks"][0];
         assert_eq!(start["type"], "command");
@@ -1083,6 +1213,117 @@ mod tests {
             .args
             .iter()
             .any(|a| a.starts_with("Read the file")));
+    }
+
+    #[test]
+    fn claude_gets_limit_hooks_with_matchers_and_a_status_line_only_when_the_user_has_none() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let plan = plan_launch(&input("claude", None, hi, dir)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
+        let hooks = &json["hooks"];
+        assert_eq!(hooks["StopFailure"][0]["matcher"], "rate_limit");
+        assert_eq!(
+            hooks["StopFailure"][0]["hooks"][0]["command"],
+            "\"/app/hi\" signal --agent claude --event StopFailure"
+        );
+        let matchers: Vec<&str> = hooks["Notification"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["matcher"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            matchers,
+            [
+                "quota_auto_resume_stale",
+                "quota_auto_resume_disabled",
+                "quota_auto_resume_fired"
+            ]
+        );
+        assert!(hooks["UserPromptSubmit"][0].get("matcher").is_none());
+        assert!(hooks.get("statusLine").is_none(), "not a hook");
+        assert_eq!(
+            json["statusLine"],
+            serde_json::json!({
+                "type": "command",
+                "command": "\"/app/hi\" signal --agent claude --event StatusLine"
+            })
+        );
+
+        // The user has a status line of their own: ours would replace it.
+        let mut inp = input("claude", None, hi, dir);
+        inp.user_status_line = true;
+        let plan = plan_launch(&inp).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
+        assert!(json.get("statusLine").is_none());
+        assert_eq!(json["hooks"]["StopFailure"][0]["matcher"], "rate_limit");
+
+        // An agent whose catalog entry lists no limit events gets none.
+        let gemini = plan_launch(&input("gemini", None, hi, dir)).unwrap();
+        assert!(!gemini.files[0].1.contains("StopFailure"));
+        assert!(!gemini.files[0].1.contains("statusLine"));
+    }
+
+    #[test]
+    fn a_status_line_in_any_settings_file_counts_as_the_users() {
+        let tmp = tempfile::tempdir().unwrap();
+        let none = tmp.path().join("none.json");
+        let plain = tmp.path().join("plain.json");
+        let with = tmp.path().join("with.json");
+        let null = tmp.path().join("null.json");
+        let broken = tmp.path().join("broken.json");
+        std::fs::write(&plain, r#"{"model":"x"}"#).unwrap();
+        std::fs::write(&with, r#"{"statusLine":{"type":"command","command":"x"}}"#).unwrap();
+        std::fs::write(&null, r#"{"statusLine":null}"#).unwrap();
+        std::fs::write(&broken, "{not json").unwrap();
+        assert!(!settings_set_status_line(&[
+            none.clone(),
+            plain.clone(),
+            null.clone(),
+            broken.clone()
+        ]));
+        assert!(settings_set_status_line(&[none, plain, with]));
+    }
+
+    #[test]
+    fn a_handoff_seed_travels_as_one_argument_before_the_context_line() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        // Quotes, a newline and shell syntax: typed into a shell this would
+        // split, run or submit early; as one argument it is just text.
+        let seed = "Continue this task: \"fix login\"\n\nFiles changed so far:\n- M src/login.ts\n$(echo hi) `x` ; & |";
+        for agent in ["codex", "claude", "copilot"] {
+            let mut inp = input(agent, None, hi, dir);
+            inp.seed_prompt = Some(seed);
+            let plan = plan_launch(&inp).unwrap();
+            assert!(plan.seed_in_args, "{agent}");
+            assert!(!plan.context_in_args, "{agent}");
+            assert!(
+                plan.spec.args.iter().any(|a| a == seed),
+                "{agent}: the seed is one untouched argument: {:?}",
+                plan.spec.args
+            );
+        }
+        // With project context too: one prompt, the task first.
+        let mut inp = input("claude", None, hi, dir);
+        inp.seed_prompt = Some("Do the task.");
+        inp.context_path = Some("/data/context/hermes-1.md");
+        let plan = plan_launch(&inp).unwrap();
+        assert!(plan.seed_in_args && plan.context_in_args);
+        assert!(plan.spec.args.iter().any(|a| a
+            == "Do the task.\n\nRead the file at /data/context/hermes-1.md for project context about the attached workspaces."));
+        // An agent that takes no first prompt cannot carry the seed.
+        let mut inp = input("goose", None, hi, dir);
+        inp.seed_prompt = Some("Do the task.");
+        if let Some(plan) = plan_launch(&inp) {
+            assert!(!plan.seed_in_args);
+            assert!(!plan.spec.args.iter().any(|a| a.contains("Do the task.")));
+        }
+        // A blank seed is no seed.
+        let mut inp = input("codex", None, hi, dir);
+        inp.seed_prompt = Some("  \n ");
+        assert!(!plan_launch(&inp).unwrap().seed_in_args);
     }
 
     #[test]
@@ -1307,6 +1548,8 @@ mod tests {
             vendor_session_id: None,
             agent_startup: None,
             launch_helper: true,
+            seed_prompt: None,
+            parent_session_id: None,
         }
     }
 }
