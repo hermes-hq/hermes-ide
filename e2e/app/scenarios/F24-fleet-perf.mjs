@@ -32,6 +32,9 @@
 //          and Windows; Linux CI renders without WebGL), and the rows show no
 //          memory.
 //   HERMES_E2E_F24_BUDGET_SCALE=0.01 every budget a hundred times tighter.
+//   HERMES_E2E_F24_NEGATIVE=no-batching  output batching is switched off
+//          before the throughput step: the flood takes as many events as
+//          unbatched.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F24-fleet-perf.mjs
@@ -50,6 +53,7 @@ const MAC = OS === "darwin";
 const FLAG = process.env.HERMES_E2E_F24_FLAG === "off" ? "off" : "on";
 const SCALE = Number(process.env.HERMES_E2E_F24_BUDGET_SCALE || "1");
 const SESSIONS = Number(process.env.HERMES_E2E_F24_SESSIONS || "20");
+const NO_BATCHING = process.env.HERMES_E2E_F24_NEGATIVE === "no-batching";
 const MB = 1024 * 1024;
 
 const raw = JSON.parse(readFileSync(join(REPO_ROOT, "e2e", "app", "fleet-budgets.json"), "utf8"));
@@ -290,6 +294,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   };
   const setBatching = (enabled) =>
     bridge.eval(`await window.__TAURI_INTERNALS__.invoke("fleet_set_output_batching", { enabled: ${enabled} }); return true;`);
+  if (NO_BATCHING) await setBatching(false);
   const { seconds: floodSeconds, delivery: floodDelivery } = await timeFlood("f24-flood-done", "the end of the flood on screen");
   metrics.floodDelivery = floodDelivery;
   metrics.floodMb = FLOOD_MB;
