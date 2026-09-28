@@ -576,6 +576,7 @@ jobs:
       # share blocks for both the repo and the app's data: the temp folder on
       # macOS (APFS), an XFS image on Linux, a ReFS disk on Windows. Both are
       # sparse and 20 GB, above the 10 GB the disk guard (same flag) needs.
+      # The N17 scenarios run on the shard the hash puts them on (ci-plan.mjs).
       - name: Copy-on-write volume for fast worktrees (Linux, XFS)
         if: ${{ !cancelled() && runner.os == 'Linux' }}
         shell: bash
@@ -617,14 +618,16 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --keep-going N17-fast-worktrees.mjs N17-real-deps.mjs
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going
 
       - name: Fast worktrees
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         shell: bash
         env:
           CI: "true"
-        run: node e2e/app/run.mjs --keep-going N17-fast-worktrees.mjs N17-real-deps.mjs
+        run: |
+          node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going
 
       - name: Upload evidence
         if: always()

@@ -11,10 +11,13 @@ import { createHash } from "node:crypto";
  * Scenarios the shard jobs do not run, and where they run instead.
  * `build`: in the build job, next to the Rust toolchain and the warm target
  * folder it needs. `keys`: in its own step, with real OS key presses.
+ * `cow`: in its own step, once a copy-on-write volume is mounted (N17).
  */
 export const CI_ELSEWHERE = {
   "N01-release-refuses-e2e.mjs": "build",
   "F05-terminal-keys.mjs": "keys",
+  "N17-fast-worktrees.mjs": "cow",
+  "N17-real-deps.mjs": "cow",
 };
 
 /** Scenarios the shard jobs never run, with the reason (not at all, or in a job of their own). */

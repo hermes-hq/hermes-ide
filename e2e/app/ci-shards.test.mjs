@@ -13,7 +13,8 @@
 //     other shard;
 //   - a step's exit code is its own invocation's: an older failed run in
 //     results.json does not fail it;
-//   - the key-press and build-toolchain scenarios run where the plan says.
+//   - the key-press, build-toolchain and fast-worktrees scenarios run where
+//     the plan says.
 //
 // Skipped on Windows: the stubs are POSIX shell scripts run by bash. The
 // workflow's own steps run under `shell: bash` on every OS, so what these
@@ -151,6 +152,7 @@ const KEY_STEPS = [
   "Terminal keys with real key presses (Windows)",
   "Terminal keys (macOS)",
 ];
+const COW_STEPS = ["Fast worktrees (Linux, virtual display)", "Fast worktrees"];
 
 // Each test starts a node process per stand-in scenario: give a loaded
 // machine time.
@@ -223,6 +225,21 @@ describe.skipIf(process.platform === "win32")("real-app shard steps in ci.yml", 
       }
       const keys = Object.keys(CI_ELSEWHERE).filter((f) => CI_ELSEWHERE[f] === "keys").map((f) => f.replace(/\.mjs$/, ""));
       expect(ran.sort()).toEqual(keys.sort());
+    });
+  }
+
+  for (const step of COW_STEPS) {
+    it(`${step}: runs each fast-worktrees scenario on exactly one shard`, () => {
+      const rig = makeRig();
+      const ran = [];
+      for (const k of shards) {
+        const { code, runs } = runStep(rig, step, { shard: shardValue(k) });
+        expect(code).toBe(0);
+        ran.push(...runs.map((r) => r.scenario));
+      }
+      const cow = Object.keys(CI_ELSEWHERE).filter((f) => CI_ELSEWHERE[f] === "cow").map((f) => f.replace(/\.mjs$/, ""));
+      expect(cow.length).toBeGreaterThan(0);
+      expect(ran.sort()).toEqual(cow.sort());
     });
   }
 
