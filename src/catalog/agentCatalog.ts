@@ -38,6 +38,27 @@ export interface AgentTerminal {
 	signals: AgentSignals;
 	permission_flags: Partial<Record<PermissionMode, AgentArgs>>;
 	min_version: string | null;
+	/** Hermes's one safety default mapped to this agent (F35, see ./agentSafety.ts). */
+	safety: AgentSafety;
+}
+
+export type SafetyFit = "exact" | "closest" | "stricter" | "looser" | "unknown";
+
+export interface AgentSafety {
+	/** The permission mode that comes closest to the default. */
+	default_mode: PermissionMode;
+	fit: SafetyFit;
+	/** Argument sequences that run the agent looser than the default. */
+	looser_args: readonly AgentArgs[];
+	note: string;
+}
+
+/** Where an agent reads its instructions, settings, skills and MCP servers (F30). Read by the backend. */
+export interface AgentSetup {
+	instructions: { project: readonly string[]; global: readonly string[]; imports: boolean };
+	settings: { project: readonly string[]; global: readonly string[] };
+	skills: { project: readonly string[]; global: readonly string[] };
+	mcp: readonly { path: string; scope: "project" | "global"; format: "json" | "toml" | "claude_local"; key: string }[] | null;
 }
 
 export interface AgentEntry {
@@ -56,6 +77,7 @@ export interface AgentEntry {
 	detect: { command: AgentArgs } | null;
 	auth: { check: AgentArgs | null; hint: string } | null;
 	evidence: { level: "help" | "docs" | "none"; version?: string };
+	setup?: AgentSetup;
 }
 
 export interface AgentCatalog {

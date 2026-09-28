@@ -22,6 +22,7 @@ pub struct Catalog {
 #[derive(Debug, Deserialize)]
 pub struct Agent {
     pub id: String,
+    pub name: String,
     /// `stable` (everyone) or `beta` (behind the agentCatalog flag in the UI).
     pub channel: String,
     /// The "Custom agent" entry: the user types the command.
@@ -29,6 +30,46 @@ pub struct Agent {
     pub custom: bool,
     pub terminal: Terminal,
     pub detect: Option<Detect>,
+    /// Where the agent reads its instruction files, settings, skills and MCP
+    /// servers (`crate::agent_setup`). Absent for the Custom agent.
+    #[serde(default)]
+    pub setup: Option<Setup>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Setup {
+    pub instructions: Instructions,
+    pub settings: SetupPaths,
+    pub skills: SetupPaths,
+    pub mcp: Option<Vec<McpSource>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Instructions {
+    /// Relative to a project folder. `a|b` = the first that exists; `*`
+    /// matches file names in one folder.
+    pub project: Vec<String>,
+    /// `~/`-relative.
+    pub global: Vec<String>,
+    /// Whether the agent follows `@path` imports inside these files.
+    pub imports: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetupPaths {
+    pub project: Vec<String>,
+    pub global: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct McpSource {
+    pub path: String,
+    /// `project` or `global`.
+    pub scope: String,
+    /// `json` (servers under `key`), `toml` (`[key.<name>]` tables) or
+    /// `claude_local` (`projects.<folder>.<key>` in `~/.claude.json`).
+    pub format: String,
+    pub key: String,
 }
 
 #[derive(Debug, Deserialize)]

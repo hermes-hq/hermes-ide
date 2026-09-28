@@ -578,6 +578,13 @@
   background: var(--error);
 }
 
+/* "Hermes default" marker on the pill of the agent's mapped safety default (F35). */
+.session-creator-permission-pill-default {
+  margin-left: 4px;
+  font-size: var(--text-2xs);
+  opacity: 0.8;
+}
+
 .session-creator-permission-mode-info {
   display: flex;
   align-items: center;

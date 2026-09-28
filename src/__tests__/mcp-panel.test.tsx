@@ -427,6 +427,18 @@ describe("AddMcpDialog — submit (mcp-10, mcp-14)", () => {
     expect(payload.spec.args).toEqual(["-y", "@upstash/context7-mcp"]);
   });
 
+  it("F30: with a project folder, the server goes to that project's .mcp.json", async () => {
+    render(<AddMcpDialog existingNames={[]} onClose={() => {}} projectDir="/work/project" />);
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "docs" } });
+    fireEvent.change(screen.getByLabelText(/command/i), { target: { value: "npx" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await Promise.resolve();
+    await Promise.resolve();
+    const calls = invokeMock.mock.calls.filter(([c]) => c === "write_mcp_server");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ name: "docs", projectDir: "/work/project" });
+  });
+
   it("mcp-8 wired in dialog: invalid form blocks save", () => {
     render(<AddMcpDialog existingNames={["context7"]} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "context7" } });

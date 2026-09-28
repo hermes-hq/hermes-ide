@@ -345,3 +345,30 @@ features:
       F05-3:
         text: "The keymap scenario runs nightly on all three OSes"
         scenarios: [F05-terminal-keys.mjs]
+  F30:
+    name: "One instruction file"
+    # Behind the agentCatalog flag. The scenario starts a fake agent through
+    # the launch line Hermes builds for Codex and Claude (never the real CLI).
+    # Also proven by unit tests: src-tauri/src/agent_setup.rs (what each
+    # agent loads, @imports, the link, attached folders, nothing written) and
+    # src/__tests__/agent-setup-chips.test.tsx.
+    status: partial
+    criteria:
+      F30-1:
+        text: "The chip on a Codex session lists AGENTS.md; on Claude it lists CLAUDE.md and the linked AGENTS.md"
+        scenarios: [F30-instruction-files.mjs]
+      F30-2:
+        text: "The MCP view shows which servers each agent sees without editing user-global config"
+        scenarios: [F30-instruction-files.mjs]
+  F35:
+    name: "One safety default across vendors"
+    # Behind the agentCatalog flag. The chip reads the running agent's
+    # command line; reading permission_mode from hooks waits for F11.
+    status: partial
+    criteria:
+      F35-1:
+        text: "A new Claude and a new Codex session both start in the mapped default"
+        scenarios: [F35-safety-default.mjs]
+      F35-2:
+        text: "An agent launched with a looser flag shows a 'looser than default' chip"
+        scenarios: [F35-safety-default.mjs]
