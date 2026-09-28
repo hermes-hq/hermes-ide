@@ -30,7 +30,7 @@ import { forgetUserLabel } from "../attention/userLabels";
 import { blockedCount, groupInbox, inboxKindForStatus, inboxRows, isMuted, nextBlockedSession } from "../attention/model";
 import { muteSession, unmuteSession, useMutes, getMutes } from "../attention/mutes";
 import { createNotifier, type Notifier } from "../attention/notifier";
-import { startStatusBridge, type StatusBridge } from "../attention/statusBridge";
+import { startStatusBridge, trustedStatus, type StatusBridge } from "../attention/statusBridge";
 import { isWindowFocused, subscribeWindowFocus } from "../attention/windowFocus";
 import { useI18n } from "../i18n/I18nProvider";
 import type { SessionData } from "../types/session";
@@ -54,8 +54,8 @@ const PC_CHORDS = ["{ctrl}{shift}I", "{ctrl}{shift}A"];
 /** The status kind an item stands for, when it still matches the session. */
 function statusFor(item: InboxItem) {
   if (!item.sessionId) return null;
-  const status = getSessionEventSnapshot(item.sessionId).status.kind;
-  return inboxKindForStatus(status) === item.kind ? status : null;
+  const status = trustedStatus(getSessionEventSnapshot(item.sessionId))?.kind ?? null;
+  return status && inboxKindForStatus(status) === item.kind ? status : null;
 }
 
 function optionId(item: InboxItem): string {
@@ -228,7 +228,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   useEffect(() => {
     const recompute = () => {
       const working = Object.keys(latest.current.sessions).some(
-        (id) => getSessionEventSnapshot(id).status.kind === "working",
+        (id) => trustedStatus(getSessionEventSnapshot(id))?.kind === "working",
       );
       if (keepAwakeRef.current === working) return;
       keepAwakeRef.current = working;

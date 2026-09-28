@@ -19,10 +19,29 @@ import {
   getSessionEventSnapshot,
   sessionIdsWithEvents,
   subscribeAllSessionEvents,
+  type SessionEventSnapshot,
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem, type InboxKind } from "../agent/contract/inbox";
 import type { AgentStatus } from "../agent/contract/status";
 import { inboxKindForStatus } from "./model";
+
+const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
+
+/**
+ * The last status of a session that did not come from a guess: a terminal's
+ * own heuristics (F10's PTY statuses, confidence `guessed`) neither raise
+ * nor resolve an item, so a shell prompt redrawn after an agent asked for
+ * approval does not hide the request. An exit counts (it is a fact). Null
+ * when the session has reported nothing else.
+ */
+export function trustedStatus(snap: SessionEventSnapshot): AgentStatus | null {
+  for (let i = snap.events.length - 1; i >= 0; i--) {
+    const e = snap.events[i];
+    if (e.type === "exit") return EXITED;
+    if (e.type === "status" && e.status.confidence !== "guessed") return e.status;
+  }
+  return null;
+}
 
 /** The `source` of every item this bridge raises. */
 export const STATUS_SOURCE = "status";
@@ -44,16 +63,16 @@ export interface StatusBridge {
 export function startStatusBridge(): StatusBridge {
   const raised = new Map<string, Raised>();
   /** The status object last handled per session (a new event = a new object). */
-  const handled = new Map<string, AgentStatus>();
+  const handled = new Map<string, AgentStatus | null>();
 
   const isOpen = (id: string) => listInboxItems().some((i) => i.id === id);
 
   function sync(sessionId: string): void {
-    const snap = getSessionEventSnapshot(sessionId);
-    if (handled.get(sessionId) === snap.status) return; // another kind of event landed
-    handled.set(sessionId, snap.status);
-    const kind = snap.version === 0 ? null : inboxKindForStatus(snap.status.kind);
-    const detail = snap.status.detail;
+    const status = trustedStatus(getSessionEventSnapshot(sessionId));
+    if (handled.has(sessionId) && handled.get(sessionId) === status) return; // another kind of event landed
+    handled.set(sessionId, status);
+    const kind = status ? inboxKindForStatus(status.kind) : null;
+    const detail = status?.detail ?? "";
     const prev = raised.get(sessionId);
     if (prev && kind === prev.kind && detail === prev.detail && isOpen(prev.itemId)) return;
     if (prev) {

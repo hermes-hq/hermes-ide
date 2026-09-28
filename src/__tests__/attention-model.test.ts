@@ -153,6 +153,21 @@ describe("status bridge", () => {
     bridge.stop();
   });
 
+  it("a terminal's guess (F10's PTY statuses) neither raises nor resolves an item", () => {
+    const bridge = startStatusBridge();
+    const guess = (sessionId: string, kind: AgentStatusKind) =>
+      dispatchSessionEvent(sessionId, { type: "status", at: clock, source: "pty", status: { kind, confidence: "guessed", detail: "" } });
+    guess("A", "needs_approval");
+    expect(listInboxItems()).toEqual([]);
+    status("B", "needs_answer", "Which database?");
+    guess("B", "idle");
+    guess("B", "working");
+    expect(listInboxItems().map((i) => [i.sessionId, i.detail])).toEqual([["B", "Which database?"]]);
+    status("B", "working");
+    expect(listInboxItems()).toEqual([]);
+    bridge.stop();
+  });
+
   it("turns done_unread into a ready item that stays read once acknowledged", () => {
     const bridge = startStatusBridge();
     status("A", "done_unread");
