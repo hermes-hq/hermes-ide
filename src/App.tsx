@@ -882,6 +882,7 @@ function AppContent() {
     contextPanelOpen: ui.contextPanelOpen,
     searchPanelOpen: ui.searchPanelOpen,
     flowMode: ui.flowMode,
+    costDashboardAvailable: !fleetOn,
   });
 
   return (

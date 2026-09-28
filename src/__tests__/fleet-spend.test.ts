@@ -134,6 +134,37 @@ describe("the spend cap watcher", () => {
     expect(interrupt).toHaveBeenCalledTimes(2);
   });
 
+  it("a cap set again after another value is a new cap: it trips again", () => {
+    const { w, interrupt } = watcher();
+    usage("s1", 1.25);
+    expect(w.check()).toHaveLength(1);
+    caps = { ...NO_CAPS, sessionUsd: 2 };
+    expect(w.check()).toEqual([]);
+    caps = { ...NO_CAPS, sessionUsd: 1 };
+    const again = w.check();
+    expect(again).toHaveLength(1);
+    expect(again[0].capUsd).toBe(1);
+    expect(interrupt).toHaveBeenCalledTimes(2);
+    // The same line is still open in the inbox: not listed twice.
+    expect(listInboxItems()).toHaveLength(1);
+    expect(getCapTrip("s1")?.capUsd).toBe(1);
+    // ...and, keeping that value, it does not trip a third time.
+    usage("s1", 1.5, 2);
+    expect(w.check()).toEqual([]);
+    expect(interrupt).toHaveBeenCalledTimes(2);
+  });
+
+  it("turning the cap off and on with the same value re-arms it too", () => {
+    const { w, interrupt } = watcher();
+    usage("s1", 1.25);
+    w.check();
+    caps = { ...NO_CAPS };
+    expect(w.check()).toEqual([]);
+    caps = { ...NO_CAPS, sessionUsd: 1 };
+    expect(w.check()).toHaveLength(1);
+    expect(interrupt).toHaveBeenCalledTimes(2);
+  });
+
   it("an interrupt that fails still leaves the inbox item", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { w } = watcher(vi.fn(async () => {

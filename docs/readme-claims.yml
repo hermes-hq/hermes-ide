@@ -123,7 +123,10 @@ claims:
   cost-dashboard:
     text: "Cost Dashboard"
     unproven: "No real-app scenario proves this yet"
-    planned: F31-cost-and-limits.mjs
+    # The Cost Dashboard of estimated costs is what stable users have;
+    # F31 (fleetControls flag) greys it out and F31-honest-spend-cap.mjs
+    # proves that, not the dashboard itself.
+    planned: cost-dashboard.mjs
   memory-pins:
     text: "Memory & context pins"
     unproven: "No real-app scenario proves this yet"

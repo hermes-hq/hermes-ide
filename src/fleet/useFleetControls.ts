@@ -20,7 +20,7 @@ import { formatUsd, type CapTrip } from "./spend";
 import { createSpendCapWatcher } from "./spendCapWatcher";
 import { refreshSessionTurnFiles, setRadarSessions } from "./radarStore";
 import { buildWorktreeIndex, EMPTY_WORKTREE_INDEX, type WorktreeIndex } from "./worktreeIndex";
-import { applyAgentLoad, fetchAgentLoad, getAllLoads, LOAD_POLL_MS, subscribeAgentLoad } from "./fleetLoad";
+import { applyAgentLoad, fetchAgentLoad, getAllLoads, loadPollDelay, subscribeAgentLoad } from "./fleetLoad";
 import {
   enqueueTask,
   hasFreeSlot,
@@ -248,12 +248,22 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     if (enabled) pumpQueue();
   }, [enabled, sessions, pumpQueue]);
 
-  // ── N22: the agents' load, polled while a cap is set ─────────────────
+  // ── N22: the agents' load, polled while a cap is set (every second
+  // while tasks wait, every few seconds otherwise) ─────────────────────
   useEffect(() => {
     if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timerDue = 0;
+    let polling = false;
     let stopped = false;
+    const schedule = () => {
+      const delay = loadPollDelay(listQueuedTasks().length);
+      timerDue = Date.now() + delay;
+      timer = setTimeout(tick, delay);
+    };
     const tick = async () => {
+      timer = undefined;
+      polling = true;
       const agents = sessionsRef.current.filter((s) => isAgentSession(s) && !CLOSED_PHASES.has(s.phase)).map((s) => s.id);
       if (queueEnabled(getFleetCaps()) && agents.length > 0) {
         try {
@@ -262,11 +272,19 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
           console.warn("[fleet] could not read the agents' load:", err);
         }
       }
-      if (!stopped) timer = setTimeout(tick, LOAD_POLL_MS);
+      polling = false;
+      if (!stopped) schedule();
     };
+    // A task that starts waiting brings the next read forward.
+    const offQueue = subscribeTaskQueue(() => {
+      if (stopped || polling || !timer || timerDue - Date.now() <= loadPollDelay(listQueuedTasks().length)) return;
+      clearTimeout(timer);
+      schedule();
+    });
     void tick();
     return () => {
       stopped = true;
+      offQueue();
       if (timer) clearTimeout(timer);
     };
   }, [enabled]);

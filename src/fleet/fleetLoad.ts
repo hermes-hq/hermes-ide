@@ -2,7 +2,9 @@
 //
 // Asks the backend (fleet_agent_load, src-tauri/src/fleet.rs) whether a
 // program runs in each agent session's shell and how much memory it uses.
-// Polled only while the queue needs it: a cap is set.
+// Polled only while the queue needs it: a cap is set. Each poll reads the
+// whole process table, so it runs every LOAD_POLL_IDLE_MS, and every
+// LOAD_POLL_MS only while tasks wait for a slot to free.
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -20,6 +22,12 @@ export interface SessionLoad {
 }
 
 export const LOAD_POLL_MS = 1000;
+export const LOAD_POLL_IDLE_MS = 3000;
+
+/** How long until the next poll: short only while tasks wait. */
+export function loadPollDelay(queuedTasks: number): number {
+  return queuedTasks > 0 ? LOAD_POLL_MS : LOAD_POLL_IDLE_MS;
+}
 
 export function fetchAgentLoad(sessionIds: readonly string[]): Promise<AgentLoadRow[]> {
   return invoke<AgentLoadRow[]>("fleet_agent_load", { sessionIds });

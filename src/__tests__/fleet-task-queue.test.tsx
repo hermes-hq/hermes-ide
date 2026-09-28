@@ -36,7 +36,7 @@ import {
   STARTUP_GRACE_MS,
   type SlotInput,
 } from "../fleet/taskQueue";
-import { _resetAgentLoadForTest } from "../fleet/fleetLoad";
+import { _resetAgentLoadForTest, LOAD_POLL_IDLE_MS, LOAD_POLL_MS } from "../fleet/fleetLoad";
 import { _resetFleetCapsForTest, FLEET_SETTING_KEYS, NO_CAPS, setFleetCap } from "../fleet/fleetSettings";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetRadarForTest } from "../fleet/radarStore";
@@ -279,7 +279,8 @@ describe("useFleetControls: cap 3, five tasks", () => {
     });
     h.memory.set("t1", 150 * 1024 * 1024);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1100);
+      // Nothing waits yet: the load is read every LOAD_POLL_IDLE_MS.
+      await vi.advanceTimersByTimeAsync(LOAD_POLL_IDLE_MS + 100);
     });
     await act(async () => {
       await launch("small");
@@ -288,6 +289,51 @@ describe("useFleetControls: cap 3, five tasks", () => {
     expect(listQueuedTasks().map((t) => t.label)).toEqual(["small"]);
     await finish("t1");
     expect(started.map((o) => o.label)).toEqual(["big", "small"]);
+  });
+
+  it("reads the process table every few seconds, and every second only while tasks wait", async () => {
+    const { launch } = mount();
+    const polls = () => h.invoke.mock.calls.filter(([cmd]) => cmd === "fleet_agent_load").length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    await act(async () => {
+      await launch("one");
+    });
+    let before = polls();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    // Nothing waits: one poll per LOAD_POLL_IDLE_MS (3 s), not per second.
+    expect(polls() - before).toBeLessThanOrEqual(Math.ceil(9_000 / LOAD_POLL_IDLE_MS));
+    expect(polls() - before).toBeGreaterThanOrEqual(2);
+
+    for (const label of ["two", "three", "four"]) {
+      await act(async () => {
+        await launch(label);
+      });
+    }
+    expect(listQueuedTasks().map((t) => t.label)).toEqual(["four"]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOAD_POLL_IDLE_MS); // the idle timer already set
+    });
+    before = polls();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    // "four" waits: the load is read every LOAD_POLL_MS (1 s).
+    expect(polls() - before).toBeGreaterThanOrEqual(Math.floor(5_000 / LOAD_POLL_MS) - 1);
+  });
+
+  it("without a cap the process table is never read", async () => {
+    h.settings = {};
+    const { launch } = mount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+      await launch("one");
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(h.invoke.mock.calls.some(([cmd]) => cmd === "fleet_agent_load")).toBe(false);
   });
 
   it("a plain shell (no agent) is never queued", async () => {

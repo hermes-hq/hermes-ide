@@ -6,7 +6,8 @@
 //
 // A soft cap trips once per scope and cap value: the session (or every
 // session of a feature branch) is interrupted and a `limit` inbox item is
-// raised. Raising the cap re-arms it; the same cap never trips twice.
+// raised. Changing the cap re-arms it; while it keeps its value it never
+// trips twice (see spendCapWatcher).
 
 import type { FleetCaps } from "./fleetSettings";
 

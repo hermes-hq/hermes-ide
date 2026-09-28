@@ -6,20 +6,26 @@
 // Claude Code, and token counts from which that analyzer ESTIMATES a cost
 // ($0.08), then works until interrupted.
 //
-//   run 1  flag off (stable): the estimate shows in the status bar. This is
-//          the scenario's own control: the bait works, and the checks of
-//          run 2 can fail. Turn the fleetControls flag on; relaunch.
+//   run 1  flag off (stable): the estimate shows in the status bar, and the
+//          Cost Dashboard is offered (View menu item enabled, listed in the
+//          command palette, the menu action opens it). This is the
+//          scenario's own control: the bait works, and the checks of run 2
+//          can fail. Turn the fleetControls flag on; relaunch.
 //   run 2  flag on:
 //          - Settings > Limits: spend cap per session = 1 (USD).
 //          - Two terminal sessions A and B run the fake agent. The backend
 //            holds an estimated cost for them, yet no "$" appears anywhere in
 //            the window: each row says "n/a" (the agent reports no cost).
+//            The Cost Dashboard is greyed out in the View menu, missing from
+//            the command palette, and its menu action opens nothing.
 //          - The agent's own usage arrives as `usage` SessionEvents pushed
 //            through the RUST side of the event channel (test build only):
 //            A $0.40, B $0.30 -> the rows and the status bar show exactly
 //            that, nothing is interrupted.
-//          - A reports $1.25 -> A's agent is interrupted (SIGINT on macOS and
-//            Linux, Ctrl+C on Windows; it logs it and exits 130), A's row
+//          - A reports $1.25 -> A's agent is interrupted by a signal, and
+//            nothing is typed into its terminal (SIGINT on macOS and Linux,
+//            the console's Ctrl+C event on Windows, which Node reports as
+//            SIGINT; it logs it and exits 130), A's row
 //            says "cap $1.00 reached", one `limit` item is in the inbox
 //            (source "cap"), and B's agent is still running.
 //          - A reports $2.00 -> nothing more happens (the cap is soft: once
@@ -38,6 +44,7 @@ import { REPO_ROOT, sleep } from "../harness.mjs";
 import { completeOnboarding, createPlainTerminal, runScenario } from "../n11-steps.mjs";
 import { PROBE_OUTPUT, classifyProbe, commandLine, probeCommand } from "../shells.mjs";
 import {
+  costDashboardOffers,
   emitFromRust,
   readJsonl,
   relauncher,
@@ -92,6 +99,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   log(`  status bar with the flag off: "${estimate}"`);
   assert(estimate === "$0.08", `without the flag Hermes shows its own estimate ("${estimate}")`);
   assert((await rowState(app.bridge, legacy)).spend === null, "without the flag the row has no spend badge");
+  const offers1 = await costDashboardOffers(app.bridge);
+  log(`  Cost Dashboard with the flag off: ${JSON.stringify(offers1)}`);
+  assert(offers1.menuEnabled === true && offers1.inPalette && offers1.opens, "without the flag the Cost Dashboard is in the View menu and the palette, and opens");
   await app.bridge.screenshot(join(evidenceDir, "01-flag-off-estimate.png"));
   if (FLAG_ON) await setFlagOverrides(app.bridge, { fleetControls: true });
   await app.bridge.click(".session-item .session-item-close");
@@ -141,6 +151,11 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   const rowB0 = await rowState(bridge, b);
   assert(rowB0.spend?.text === "n/a", `B's row says "${rowB0.spend?.text}"`);
   await bridge.screenshot(join(evidenceDir, "02-flag-on-na.png"));
+  const offers2 = await costDashboardOffers(bridge);
+  log(`  Cost Dashboard with the flag on: ${JSON.stringify(offers2)}`);
+  assert(offers2.menuEnabled === false, "View > Cost Dashboard is greyed out (with its shortcut)");
+  assert(!offers2.inPalette, "the command palette does not list the Cost Dashboard");
+  assert(!offers2.opens, "the menu action opens nothing");
 
   log("step 3: the agents report their usage (Rust -> frontend): exactly that is shown, nothing is stopped");
   await emitFromRust(bridge, a, { type: "usage", at: Date.now(), source: "e2e", inputTokens: 12000, outputTokens: 3400, costUsd: 0.4 });
@@ -165,13 +180,11 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
     const events = await readJsonl(logA);
     return events.find((e) => e.ev === "exit") ? events : null;
   });
-  const how = exitA.find((e) => (e.ev === "signal" && e.sig === "SIGINT") || e.ev === "ctrl-c");
-  assert(!!how, `A's agent received an interrupt (${JSON.stringify(how)})`);
+  const how = exitA.find((e) => e.ev === "signal" && e.sig === "SIGINT");
+  assert(!!how, `A's agent received an interrupt signal (${JSON.stringify(how ?? exitA.find((e) => e.ev === "ctrl-c") ?? null)})`);
   assert(exitA.filter((e) => e.ev === "exit").length === 1 && exitA.find((e) => e.ev === "exit").code === 130, "A's agent exited 130, once");
-  if (platform() !== "win32") {
-    const typed = exitA.filter((e) => e.ev === "input").map((e) => e.hex).join("");
-    assert(!typed.includes("03"), `on ${platform()} nothing was typed into A's terminal: the interrupt is a signal (input ${JSON.stringify(typed)})`);
-  }
+  const typed = exitA.filter((e) => e.ev === "input").flatMap((e) => e.hex.match(/../g) ?? []);
+  assert(!exitA.some((e) => e.ev === "ctrl-c") && !typed.includes("03"), `on ${platform()} nothing was typed into A's terminal: the interrupt is a signal (input ${JSON.stringify(typed)})`);
   const capText = await bridge.waitFor("A's row to say the cap was reached", `
     const el = document.querySelector('.session-item[data-session-item-id="' + CSS.escape(${JSON.stringify(a)}) + '"] .session-cap-reached');
     return el ? e2e.norm(el.innerText) : null;

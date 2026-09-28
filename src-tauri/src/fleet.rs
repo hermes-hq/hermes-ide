@@ -7,14 +7,15 @@
 //!   (the agent), and how much memory does it use? The task queue counts
 //!   running agents and their memory against the caps the user set.
 //! - [`interrupt_session_agent`]: stop the running agent the way Ctrl+C at a
-//!   shell would, because a spend cap the user set was reached.
+//!   shell would, because a spend cap the user set was reached. It signals;
+//!   it never types into the terminal.
 //!
 //! Hermes decides nothing here: both commands are answers and actions the
 //! frontend asks for, only when the user has turned a cap on.
 
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 
 use crate::pty::commands::counts_as_shell_child;
 use crate::AppState;
@@ -154,70 +155,156 @@ pub async fn fleet_agent_load(
 /// Interrupt the agent running in a session's terminal, because a spend cap
 /// was reached. Returns `false` when nothing was running (nothing is sent).
 ///
+/// Nothing is typed into the terminal on any platform:
+///
 /// - macOS and Linux: SIGINT to the terminal's foreground process group, the
-///   signal Ctrl+C makes the terminal send. Nothing is typed.
-/// - Windows has no signals for console programs; the pseudo console turns
-///   a Ctrl+C character into the console's interrupt event, so that one
-///   character is sent, only while a program is running.
+///   signal Ctrl+C makes the terminal send.
+/// - Windows: the console's Ctrl+C event, raised with
+///   `GenerateConsoleCtrlEvent` by a short-lived copy of Hermes attached to
+///   the session's console (see [`console_interrupt_helper`]); Hermes itself
+///   never attaches to a session's console.
 #[tauri::command]
-pub fn interrupt_session_agent(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<bool, String> {
+pub async fn interrupt_session_agent(app: AppHandle, session_id: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || interrupt_blocking(&app, &session_id))
+        .await
+        .map_err(|e| format!("could not interrupt the agent: {e}"))?
+}
+
+#[cfg(unix)]
+fn interrupt_blocking(app: &AppHandle, session_id: &str) -> Result<bool, String> {
+    let state = app.state::<AppState>();
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     let session = mgr
         .sessions
-        .get(&session_id)
+        .get(session_id)
         .ok_or_else(|| format!("Session {session_id} not found"))?;
     let shell_pid = session
         .child
         .process_id()
         .ok_or_else(|| "the session has no shell process".to_string())?;
 
-    #[cfg(unix)]
-    {
-        let shell_pgid = unsafe { libc::getpgid(shell_pid as i32) };
-        if let Some(foreground) = session.master.process_group_leader() {
-            if foreground > 0 && foreground != shell_pgid {
-                let sent = unsafe { libc::kill(-foreground, libc::SIGINT) } == 0;
-                log::info!(
-                    "[fleet] cap interrupt: SIGINT to group {foreground} of {session_id}: {sent}"
-                );
-                return Ok(sent);
-            }
+    let shell_pgid = unsafe { libc::getpgid(shell_pid as i32) };
+    if let Some(foreground) = session.master.process_group_leader() {
+        if foreground > 0 && foreground != shell_pgid {
+            let sent = unsafe { libc::kill(-foreground, libc::SIGINT) } == 0;
+            log::info!(
+                "[fleet] cap interrupt: SIGINT to group {foreground} of {session_id}: {sent}"
+            );
+            return Ok(sent);
         }
-        // The terminal could not say (or the shell owns it): signal the
-        // shell's children directly.
-        let children = crate::pty::commands::enumerate_child_pids(shell_pid);
-        let mut sent = false;
-        for pid in children {
-            if pid == 0 || pid > i32::MAX as u32 {
-                continue;
-            }
-            let pid = pid as i32;
-            let group = unsafe { libc::kill(-pid, libc::SIGINT) } == 0;
-            let own = group || unsafe { libc::kill(pid, libc::SIGINT) } == 0;
-            sent |= own;
-        }
-        log::info!("[fleet] cap interrupt: SIGINT to the children of {session_id}: {sent}");
-        Ok(sent)
     }
-
-    #[cfg(not(unix))]
-    {
-        if !crate::pty::commands::has_child_process(shell_pid) {
-            return Ok(false);
+    // The terminal could not say (or the shell owns it): signal the
+    // shell's children directly.
+    let children = crate::pty::commands::enumerate_child_pids(shell_pid);
+    let mut sent = false;
+    for pid in children {
+        if pid == 0 || pid > i32::MAX as u32 {
+            continue;
         }
-        let mut w = session
-            .writer
-            .lock()
-            .map_err(|e| format!("Writer lock failed: {e}"))?;
-        use std::io::Write;
-        w.write_all(b"\x03")
-            .map_err(|e| format!("Write failed: {e}"))?;
-        w.flush().map_err(|e| format!("Flush failed: {e}"))?;
-        log::info!("[fleet] cap interrupt: Ctrl+C to the console of {session_id}");
-        Ok(true)
+        let pid = pid as i32;
+        let group = unsafe { libc::kill(-pid, libc::SIGINT) } == 0;
+        let own = group || unsafe { libc::kill(pid, libc::SIGINT) } == 0;
+        sent |= own;
+    }
+    log::info!("[fleet] cap interrupt: SIGINT to the children of {session_id}: {sent}");
+    Ok(sent)
+}
+
+#[cfg(not(unix))]
+fn interrupt_blocking(app: &AppHandle, session_id: &str) -> Result<bool, String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let shell_pid = {
+        let state = app.state::<AppState>();
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        let session = mgr
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| format!("Session {session_id} not found"))?;
+        session
+            .child
+            .process_id()
+            .ok_or_else(|| "the session has no shell process".to_string())?
+    };
+    if !crate::pty::commands::has_child_process(shell_pid) {
+        return Ok(false);
+    }
+    // DETACHED_PROCESS: the helper starts with no console of its own, then
+    // attaches to the session's.
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    let exe = std::env::current_exe().map_err(|e| format!("could not find Hermes: {e}"))?;
+    let mut child = Command::new(exe)
+        .arg(INTERRUPT_HELPER_ARG)
+        .arg(shell_pid.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(DETACHED_PROCESS)
+        .spawn()
+        .map_err(|e| format!("could not start the interrupt helper: {e}"))?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                return Err("the interrupt helper did not finish".to_string());
+            }
+            Err(e) => return Err(format!("could not wait for the interrupt helper: {e}")),
+        }
+    };
+    let sent = status.success();
+    log::info!(
+        "[fleet] cap interrupt: console Ctrl+C event to {session_id} (shell {shell_pid}): {sent} ({status})"
+    );
+    Ok(sent)
+}
+
+/// The argument that starts Hermes as the Windows interrupt helper.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const INTERRUPT_HELPER_ARG: &str = "--hermes-interrupt-console";
+
+/// Windows: when Hermes was started as `hermes-ide --hermes-interrupt-console
+/// <shell pid>`, attach to that shell's console, raise its Ctrl+C event
+/// (every program attached to it gets it, as when Ctrl+C is pressed in a
+/// console, whatever mode the program put the console in) and return the
+/// exit code: 0 sent, 2 bad arguments, 3 could not attach, 4 not sent.
+/// `None` for any other command line: start the app. Always `None`
+/// elsewhere.
+pub fn console_interrupt_helper(args: &[String]) -> Option<i32> {
+    if args.get(1).map(String::as_str) != Some(INTERRUPT_HELPER_ARG) {
+        return None;
+    }
+    let Some(pid) = args.get(2).and_then(|a| a.parse::<u32>().ok()) else {
+        return Some(2);
+    };
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{
+            AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
+            CTRL_C_EVENT,
+        };
+        // SAFETY: plain Win32 calls on this short-lived process's own
+        // console state; no pointers are passed.
+        unsafe {
+            FreeConsole();
+            if AttachConsole(pid) == 0 {
+                return Some(3);
+            }
+            // The helper is attached too: it must not stop itself.
+            SetConsoleCtrlHandler(None, 1);
+            let sent = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) != 0;
+            FreeConsole();
+            Some(if sent { 0 } else { 4 })
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
     }
 }
 
@@ -233,6 +320,36 @@ mod tests {
             memory,
             name: name.to_string(),
         }
+    }
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn the_app_starts_normally_unless_asked_to_be_the_interrupt_helper() {
+        assert_eq!(console_interrupt_helper(&args(&["hermes-ide"])), None);
+        assert_eq!(
+            console_interrupt_helper(&args(&["hermes-ide", "--self-test=r.json"])),
+            None
+        );
+        assert_eq!(
+            console_interrupt_helper(&args(&["hermes-ide", INTERRUPT_HELPER_ARG])),
+            Some(2)
+        );
+        assert_eq!(
+            console_interrupt_helper(&args(&["hermes-ide", INTERRUPT_HELPER_ARG, "abc"])),
+            Some(2)
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn outside_windows_the_helper_never_runs() {
+        assert_eq!(
+            console_interrupt_helper(&args(&["hermes-ide", INTERRUPT_HELPER_ARG, "123"])),
+            None
+        );
     }
 
     #[test]

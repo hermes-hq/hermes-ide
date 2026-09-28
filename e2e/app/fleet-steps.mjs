@@ -102,6 +102,34 @@ export async function setCapInSettings(bridge, log, field, value) {
   return label;
 }
 
+/** Fire a native menu item's action the way the menu bar (or its shortcut) does. */
+export async function menuAction(bridge, action) {
+  await invoke(bridge, "plugin:event|emit", { event: "menu-action", payload: { action } });
+}
+
+/**
+ * Where Hermes offers its dashboard of estimated costs: whether View > Cost
+ * Dashboard is enabled in the native menu (its shortcut goes with it),
+ * whether the command palette lists it, and whether the menu's action
+ * opens it. Leaves the palette and the dashboard closed.
+ */
+export async function costDashboardOffers(bridge) {
+  const menuEnabled = await invoke(bridge, "menu_item_enabled_for_test", { id: "view.cost-dashboard" });
+  await menuAction(bridge, "view.command-palette");
+  await bridge.waitFor("the command palette", `return !!e2e.first(".command-palette .command-palette-input");`);
+  const inPalette = await bridge.eval(`return e2e.all(".command-palette-label").some((el) => e2e.norm(el.innerText) === "Cost Dashboard");`);
+  await menuAction(bridge, "view.command-palette");
+  await bridge.waitFor("the command palette to close", `return !e2e.first(".command-palette");`);
+  await menuAction(bridge, "view.cost-dashboard");
+  await sleep(1000);
+  const opens = await bridge.exists(".cost-dashboard");
+  if (opens) {
+    await bridge.click(".cost-dashboard-close");
+    await bridge.waitFor("the Cost Dashboard to close", `return !e2e.first(".cost-dashboard");`);
+  }
+  return { menuEnabled, inPalette, opens };
+}
+
 /** Push one SessionEvent through the Rust side of the channel (test builds only). */
 export async function emitFromRust(bridge, sessionId, event) {
   await invoke(bridge, "emit_session_event_for_test", { sessionId, event });
