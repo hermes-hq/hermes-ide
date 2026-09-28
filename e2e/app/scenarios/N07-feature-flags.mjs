@@ -2,18 +2,18 @@
 // Scenario: N07 — feature flags.
 //
 // Proves, on the REAL app, that the feature-flag mechanism actually gates a
-// visible surface (the "FLAG" badge in the top bar, gated on the
-// "dummyProofSurface" flag — see src/featureFlags/ and
-// src/components/FeatureFlagDummyBanner.tsx):
+// visible surface. The surface is a real flagged feature: the Custom agent
+// card in the New Session agent step, shown only when the "agentCatalog"
+// flag is on (see src/featureFlags/ and src/catalog/agentCatalog.ts).
 //
-//   run 1  fresh install, stable channel, no override  -> badge OFF
+//   run 1  fresh install, stable channel, no override  -> card absent
 //          force the flag on in the hidden Settings > Flags section
-//   run 2  relaunch                                    -> badge ON
+//   run 2  relaunch                                    -> card present
 //          put the flag back to "Default for channel"; quit; switch this
 //          install to the beta update channel (update_channel = beta)
-//   run 3  relaunch, beta channel, no override          -> badge ON
+//   run 3  relaunch, beta channel, no override          -> card present
 //          force the flag off
-//   run 4  relaunch, beta channel, forced off           -> badge OFF
+//   run 4  relaunch, beta channel, forced off           -> card absent
 //
 // Flags are read once at startup, so every change is checked after a
 // relaunch against the same data, and also checked NOT to apply in the
@@ -23,6 +23,9 @@
 // the Settings control for it ships, this scenario writes that setting into
 // the app's database while the app is closed, exactly as the control would
 // store it.
+//
+// Negative control: HERMES_E2E_N07_EXPECT_CARD_ID=<some other id> must end
+// in RESULT: FAIL (the card check is real).
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N07-feature-flags.mjs
@@ -48,9 +51,9 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-const BADGE = ".topbar-flag-badge";
-// The override control of this one flag, not just the first select on the tab.
-const FLAG_SELECT = 'select[data-flag-id="dummyProofSurface"]';
+const FLAG_ID = "agentCatalog";
+/** The card the flag gates. Overridable so the check can be shown to fail. */
+const CARD_ID = process.env.HERMES_E2E_N07_EXPECT_CARD_ID || "custom";
 const DB_FILE = "hermes_idea_v3.db";
 
 // Windows keeps app data under %APPDATA%, which a private HOME does not
@@ -106,25 +109,55 @@ async function waitForReturningLaunch(bridge) {
   assert(!(await bridge.exists(".onboarding-backdrop")), "onboarding is not shown again (same persisted data)");
 }
 
-/** The badge must stay in its state for a while, not just at one instant. */
-async function assertBadgeStays(bridge, shown, message) {
+/** Opens the New Session wizard in terminal mode and waits for the agent step. */
+async function openAgentStep(bridge) {
+  if (await bridge.exists("button.es-tile-primary")) await bridge.click("button.es-tile-primary");
+  else await bridge.clickByName("New session");
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
+  // Terminal is the default for every agent (N09); an older wizard started
+  // with a mode step, where terminal has to be picked first.
+  if (await bridge.exists(".session-creator-mode-step")) {
+    await bridge.click('.session-creator-mode-card[data-category="universal"]');
+    await bridge.waitFor("terminal mode to be selected", `
+      return e2e.first('.session-creator-mode-card[data-category="universal"]')?.getAttribute("aria-checked") === "true";
+    `);
+    await bridge.click(".session-creator-actions .session-creator-btn-primary");
+  }
+  await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`, { timeoutMs: 20_000 });
+}
+
+async function closeWizard(bridge) {
+  await bridge.click(".session-creator .settings-close");
+  await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
+}
+
+const cardIds = (bridge) =>
+  bridge.eval(`return e2e.all(".session-creator-provider-card").map((c) => c.getAttribute("data-agent-id"));`);
+
+/**
+ * The flagged surface must stay in its state for a while, not just at one
+ * instant: the agent step is read five times over a second.
+ */
+async function assertSurfaceStays(bridge, shown, message, shot) {
+  await openAgentStep(bridge);
+  let ids = [];
   for (let i = 0; i < 5; i++) {
-    if ((await bridge.exists(BADGE)) !== shown) throw new Error(`ASSERTION FAILED: ${message} (changed after ${i * 200}ms)`);
+    ids = await cardIds(bridge);
+    if (ids.includes(CARD_ID) !== shown) {
+      throw new Error(`ASSERTION FAILED: ${message} (cards after ${i * 200}ms: ${JSON.stringify(ids)})`);
+    }
     await sleep(200);
   }
-  const seen = await bridge.eval(`
-    const b = e2e.first(${JSON.stringify(BADGE)});
-    const r = b?.getBoundingClientRect();
-    return { topbar: e2e.norm(e2e.first(".topbar")?.innerText), badge: b ? { text: e2e.norm(b.innerText), x: r.x, y: r.y, w: r.width, h: r.height } : null };
-  `);
-  log(`  ok — ${message}   (top bar: ${JSON.stringify(seen)})`);
+  log(`  ok — ${message}   (agent cards: ${JSON.stringify(ids)})`);
+  if (shot) await bridge.screenshot(join(evidenceDir, shot));
+  await closeWizard(bridge);
 }
 
 /**
  * Opens Settings, unlocks the hidden "Flags" tab (7 clicks on the panel
  * title, the real gesture — see Settings.tsx handleTitleClick), sets the
- * dummyProofSurface override ("default" | "on" | "off"), waits for it to
- * land in the app's settings, then closes Settings.
+ * agentCatalog override ("default" | "on" | "off"), waits for it to land
+ * in the app's settings, then closes Settings.
  */
 async function setFlagOverride(bridge, value) {
   await bridge.clickByName("Settings");
@@ -142,23 +175,25 @@ async function setFlagOverride(bridge, value) {
     const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.innerText) === "Flags");
     return e2e.click(e2e.must(tab, "Flags tab"));
   `);
-  await bridge.waitFor("the flag override select", `return !!e2e.first(${JSON.stringify(FLAG_SELECT)});`);
+  const selector = `select.settings-select[data-flag-id="${FLAG_ID}"]`;
+  await bridge.waitFor("the flag override select", `return !!e2e.first(${JSON.stringify(selector)});`);
 
   const result = await bridge.eval(`
-    const sel = e2e.must(e2e.first(${JSON.stringify(FLAG_SELECT)}), "flag override select");
+    const sel = e2e.must(e2e.first(${JSON.stringify(selector)}), "flag override select");
+    const label = e2e.norm(sel.closest(".settings-group")?.querySelector(".settings-label")?.innerText);
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
     setter.call(sel, ${JSON.stringify(value)});
     sel.dispatchEvent(new Event("change", { bubbles: true }));
-    return { value: sel.value };
+    return { value: sel.value, label };
   `);
-  assert(result.value === value, `flag override select now shows "${value}"`);
+  assert(result.value === value, `flag "${result.label}" override select now shows "${value}"`);
 
   const expected = value === "default" ? "undefined" : value === "on" ? "true" : "false";
   // updateSetting fires the write without awaiting it: wait until it lands.
   await bridge.waitFor("the override to be saved", `
     const raw = await window.__TAURI_INTERNALS__.invoke("get_settings");
     const overrides = raw.feature_flag_overrides ? JSON.parse(raw.feature_flag_overrides) : {};
-    return overrides.dummyProofSurface === ${expected};
+    return overrides[${JSON.stringify(FLAG_ID)}] === ${expected};
   `);
 
   await bridge.click(".settings-close");
@@ -193,28 +228,25 @@ let app;
 let failed = false;
 
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}   flag: ${FLAG_ID}   card: ${CARD_ID}`);
 
   // ── run 1: fresh install, stable, no override -> OFF ─────────────
-  log("step 1: fresh launch — stable channel, no override: the badge is OFF");
+  log("step 1: fresh launch — stable channel, no override: the flagged card is absent");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
   assert((await app.bridge.eval(`return e2e.all(".session-item").length;`)) === 0, "a fresh install (no sessions)");
-  await assertBadgeStays(app.bridge, false, "the flag badge is NOT shown on a fresh stable install");
-  await app.bridge.screenshot(join(evidenceDir, "01-stable-default.png"));
+  await assertSurfaceStays(app.bridge, false, "the flagged card is NOT offered on a fresh stable install", "01-stable-default.png");
 
   log("step 2: force the flag ON in the hidden Settings > Flags section");
   await setFlagOverride(app.bridge, "on");
-  await assertBadgeStays(app.bridge, false, "still OFF in this session (flags are read once, at startup)");
+  await assertSurfaceStays(app.bridge, false, "still absent in this session (flags are read once, at startup)");
   await quit(app);
 
   // ── run 2: stable, forced on -> ON ───────────────────────────────
   log("step 3: relaunch — the forced-on override takes effect");
   app = await launch(2);
   await waitForReturningLaunch(app.bridge);
-  await app.bridge.waitFor("the flag badge to appear", `return !!e2e.first(${JSON.stringify(BADGE)});`);
-  await assertBadgeStays(app.bridge, true, "the flag badge IS shown with the override forced on");
-  await app.bridge.screenshot(join(evidenceDir, "02-stable-forced-on.png"));
+  await assertSurfaceStays(app.bridge, true, "the flagged card IS offered with the override forced on", "02-stable-forced-on.png");
 
   log("step 4: clear the override (Default for channel), quit, switch this install to the beta channel");
   await setFlagOverride(app.bridge, "default");
@@ -222,7 +254,7 @@ try {
   setUpdateChannel(app.dataDir, "beta");
 
   // ── run 3: beta, no override -> ON ───────────────────────────────
-  log("step 5: relaunch on the beta channel with no override — the badge is ON");
+  log("step 5: relaunch on the beta channel with no override — the card is offered");
   app = await launch(3);
   await waitForReturningLaunch(app.bridge);
   const stored = await app.bridge.eval(`
@@ -231,23 +263,20 @@ try {
   `);
   log(`  settings seen by the app: ${JSON.stringify(stored)}`);
   assert(stored.channel === "beta", "the app sees update_channel = beta");
-  assert(!stored.overrides || !("dummyProofSurface" in JSON.parse(stored.overrides)), "no override is set");
-  await app.bridge.waitFor("the flag badge to appear", `return !!e2e.first(${JSON.stringify(BADGE)});`);
-  await assertBadgeStays(app.bridge, true, "the flag badge IS shown on beta with no override");
-  await app.bridge.screenshot(join(evidenceDir, "03-beta-default.png"));
+  assert(!stored.overrides || !(FLAG_ID in JSON.parse(stored.overrides)), "no override is set");
+  await assertSurfaceStays(app.bridge, true, "the flagged card IS offered on beta with no override", "03-beta-default.png");
 
   log("step 6: force the flag OFF");
   await setFlagOverride(app.bridge, "off");
-  await assertBadgeStays(app.bridge, true, "still ON in this session (flags are read once, at startup)");
+  await assertSurfaceStays(app.bridge, true, "still offered in this session (flags are read once, at startup)");
   await quit(app);
 
   // ── run 4: beta, forced off -> OFF ───────────────────────────────
-  log("step 7: relaunch — turning the flag off hides it on next launch");
+  log("step 7: relaunch — turning the flag off hides the feature on next launch");
   app = await launch(4);
   await waitForReturningLaunch(app.bridge);
   await sleep(500);
-  await assertBadgeStays(app.bridge, false, "the flag badge is hidden on beta after forcing it off and relaunching");
-  await app.bridge.screenshot(join(evidenceDir, "04-beta-forced-off.png"));
+  await assertSurfaceStays(app.bridge, false, "the flagged card is hidden on beta after forcing the flag off and relaunching", "04-beta-forced-off.png");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

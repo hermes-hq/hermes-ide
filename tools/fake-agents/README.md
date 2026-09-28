@@ -10,6 +10,7 @@ network and no particular CLI version. Plain Node, no dependencies.
 | `record-stdio.mjs` | Records a real session as a cassette. A transparent tee between host and agent; the result is scrubbed. |
 | `scrub.mjs` | Deterministic scrubber: home folders, user and host names, e-mails, UUIDs and credential-shaped tokens. `--check` fails on anything left over. |
 | `manifest.mjs` | Keeps `cassettes/manifest.json` (agent, version, sha256, scrubber version) in step with the files. |
+| `fake-cli.mjs` | A fake **vendor CLI at startup** (`claude`, or any agent that takes `--session-id`, `--resume`, `--settings`). Records how it was started, runs the hooks from its settings file, and can act like a vendor at a folder-trust prompt or one that rejects a resume. |
 
 ## Fake terminal agent
 
@@ -37,6 +38,34 @@ Ctrl-C, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
 Steps: `print, sleep, title, osc9, progress, osc99, osc777, bigOsc, bell, raw,
 split, altScreen, modes, box, size, waitKey, waitPaste, waitResize, hang, kill,
 exit`.
+
+## Fake vendor CLI
+
+```sh
+node tools/fake-agents/fake-cli.mjs [--session-id <id>] [--resume <id>] [--settings <file>] [prompt]
+```
+
+Like the real CLI it takes `--session-id` as its conversation id (or invents
+one), continues a conversation with `--resume <id>`, reads the `--settings`
+file and runs its `SessionStart` and `SessionEnd` hooks with the same JSON on
+stdin that Claude Code sends, then behaves as a small TUI (`q` quits).
+
+Behaviour per launch, from `HERMES_FAKE_MODE` or the file
+`<HERMES_FAKE_DIR>/mode` (so a scenario can change it between app launches):
+
+| mode | behaviour |
+|---|---|
+| `normal` | starts at once |
+| `trust-prompt` | shows a "Do you trust the files in this folder?" dialog and holds every hook back until a key is pressed (`y` continues, `n` exits), as a vendor does in a folder it has not seen |
+| `resume-fails` | rejects `--resume` at once (exit 1), as a vendor does for an id it does not know |
+| `ignore-resume` | accepts `--resume` but starts a new conversation under a new id anyway (a broken vendor; the negative control of the resume checks) |
+
+With `HERMES_FAKE_DIR` set, every launch is recorded to
+`<HERMES_FAKE_DIR>/launch-<n>.json`: argv, cwd, the Hermes environment it
+saw, the settings file's contents, which hooks ran and how it ended.
+`e2e/app/scenarios/N12-launch-and-resume.mjs` puts a `claude` shim that runs
+this file first on the app's PATH and reads those records. Tests:
+`tools/fake-agents/test/fake-cli.test.mjs`.
 
 ## Replaying a cassette
 

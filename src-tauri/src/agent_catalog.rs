@@ -35,8 +35,44 @@ pub struct Agent {
 pub struct Terminal {
     /// Starts a new session; every other argument list is appended to it.
     pub argv: Vec<String>,
+    /// How to continue a conversation: `by_id` takes `{session_id}`.
+    pub resume: Resume,
+    /// Arguments that pre-assign the conversation id (`{session_id}`), or
+    /// null when the vendor has no such flag (the id is then read from the
+    /// agent's first signal).
+    #[serde(default)]
+    pub new_session_id: Option<Vec<String>>,
+    /// Arguments that pass a first prompt (`{prompt}`), or null.
+    #[serde(default)]
+    pub initial_prompt: Option<Vec<String>>,
+    /// How the agent tells Hermes what it is doing, per launch.
+    pub signals: Signals,
     /// Permission mode (`default`, `acceptEdits`, ...) -> extra arguments.
     pub permission_flags: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Resume {
+    #[serde(default)]
+    pub by_id: Option<Vec<String>>,
+    #[serde(default)]
+    pub latest: Option<Vec<String>>,
+}
+
+/// The per-launch hook setup of an agent (see `pty::launch`). Placeholders
+/// in `args` and `env`: `{signals_file}`, `{signals_dir}`, `{hi}`.
+#[derive(Debug, Deserialize)]
+pub struct Signals {
+    /// `settings_file`, `config_flags`, `env_file`, `plugin_dir`,
+    /// `worktree_file`, `event_stream` or `none`.
+    pub method: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// Hermes status -> the vendor events that mean it.
+    #[serde(default)]
+    pub events: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +197,51 @@ mod tests {
             let want = c["expected"].as_str().map(str::to_string);
             assert_eq!(got, want, "case {c}");
         }
+    }
+
+    #[test]
+    fn launch_recipes_carry_the_placeholders_pty_launch_fills_in() {
+        for a in &catalog().agents {
+            if let Some(by_id) = &a.terminal.resume.by_id {
+                assert!(
+                    by_id.iter().any(|x| x == "{session_id}"),
+                    "{}: resume.by_id has no {{session_id}}",
+                    a.id
+                );
+            }
+            if let Some(new_id) = &a.terminal.new_session_id {
+                assert!(
+                    new_id.iter().any(|x| x == "{session_id}"),
+                    "{}: new_session_id has no {{session_id}}",
+                    a.id
+                );
+            }
+            if let Some(prompt) = &a.terminal.initial_prompt {
+                assert!(
+                    prompt.iter().any(|x| x == "{prompt}"),
+                    "{}: initial_prompt has no {{prompt}}",
+                    a.id
+                );
+            }
+        }
+        let claude = agent("claude").unwrap();
+        assert_eq!(claude.terminal.signals.method, "settings_file");
+        assert_eq!(
+            claude.terminal.signals.args,
+            vec!["--settings", "{signals_file}"]
+        );
+        assert!(claude.terminal.signals.events.contains_key("session_start"));
+        let gemini = agent("gemini").unwrap();
+        assert_eq!(gemini.terminal.signals.method, "env_file");
+        assert_eq!(
+            gemini
+                .terminal
+                .signals
+                .env
+                .get("GEMINI_CLI_SYSTEM_DEFAULTS_PATH"),
+            Some(&"{signals_file}".to_string())
+        );
+        assert_eq!(agent("custom").unwrap().terminal.signals.method, "none");
     }
 
     #[test]

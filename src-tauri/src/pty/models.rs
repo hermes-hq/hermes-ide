@@ -190,6 +190,33 @@ pub struct TmuxWindowEntry {
     pub active: bool,
 }
 
+/// Where an agent launched through the `hi` helper stands at startup.
+///
+/// `launching` from the moment the launch line is typed; `started` once the
+/// agent's own start signal arrived (exact); `waiting_at_startup_prompt` when
+/// no start signal came within a few seconds (a guess — vendor folder-trust
+/// dialogs hold every hook back until answered); `ended` after the agent's
+/// end signal. The inbox reads this field; the session list shows the guess.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStartupState {
+    Launching,
+    Started,
+    WaitingAtStartupPrompt,
+    Ended,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentStartup {
+    pub state: AgentStartupState,
+    /// When the state was entered (RFC 3339).
+    pub since: String,
+    /// `exact` when a signal from the agent set it, `guessed` for a timeout.
+    pub confidence: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
@@ -232,6 +259,19 @@ pub struct Session {
     /// predate the field.
     #[serde(default)]
     pub mode: SessionMode,
+    /// The agent's own conversation id (Claude/Gemini session id, Codex
+    /// thread id): pre-assigned at launch where the vendor allows it,
+    /// otherwise recorded from the agent's first signal. Restoring a session
+    /// resumes this conversation.
+    #[serde(default)]
+    pub vendor_session_id: Option<String>,
+    /// Startup state of an agent launched through the `hi` helper.
+    #[serde(default)]
+    pub agent_startup: Option<AgentStartup>,
+    /// Start the agent through the bundled `hi` helper (feature flag
+    /// `launchHelper`) instead of typing the vendor command into the shell.
+    #[serde(skip)]
+    pub launch_helper: bool,
     /// Deferred nudge: stored when context is applied while the agent is busy.
     /// Delivered when the session phase transitions to NeedsInput.
     #[serde(skip)]
@@ -277,6 +317,10 @@ pub struct SessionUpdate {
     pub ssh_info: Option<SshConnectionInfo>,
     #[serde(default)]
     pub mode: SessionMode,
+    #[serde(default)]
+    pub vendor_session_id: Option<String>,
+    #[serde(default)]
+    pub agent_startup: Option<AgentStartup>,
 }
 
 impl From<&Session> for SessionUpdate {
@@ -308,6 +352,8 @@ impl From<&Session> for SessionUpdate {
             last_nudged_version: s.last_nudged_version,
             ssh_info: s.ssh_info.clone(),
             mode: s.mode,
+            vendor_session_id: s.vendor_session_id.clone(),
+            agent_startup: s.agent_startup.clone(),
         }
     }
 }

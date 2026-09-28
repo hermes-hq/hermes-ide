@@ -231,7 +231,6 @@ export const hiPack: LanguagePack = {
     "settings.flags.default": "चैनल का डिफ़ॉल्ट",
     "settings.flags.forceOn": "ज़बरदस्ती चालू",
     "settings.flags.forceOff": "ज़बरदस्ती बंद",
-    "featureFlags.badgeTitle": "फ़ीचर फ़्लैग: {id}",
     "settings.pluginUpdates": "प्लगइन अपडेट",
     "settings.checkPluginUpdates": "प्लगइन अपडेट जांचें",
     "settings.onStartup": "स्टार्टअप पर",
@@ -632,6 +631,7 @@ export const hiPack: LanguagePack = {
     "sessions.ready": "तैयार",
     "sessions.starting": "शुरू हो रहा है",
     "sessions.disconnected": "डिस्कनेक्ट हुआ",
+    "sessions.startupPrompt": "स्टार्टअप प्रॉम्प्ट पर प्रतीक्षा में",
     "language.panel.selectLabel": "भाषा",
   },
 };

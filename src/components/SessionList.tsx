@@ -897,6 +897,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           className={`session-item ${isActive ? "session-item-active" : ""} ${session.phase === "destroyed" ? "session-item-destroyed" : ""}`}
           data-phase={session.phase}
           data-session-item-id={session.id}
+          data-startup={session.agent_startup?.state ?? undefined}
           draggable={session.phase !== "destroyed"}
           onDragStart={(e) => handleDragStart(e, session)}
           onClick={() => onSelect(session.id)}
@@ -931,6 +932,15 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
               <SessionAgentTag session={session} />
+              {session.agent_startup?.state === "waiting_at_startup_prompt" && (
+                <span
+                  className="session-startup-tag"
+                  data-startup={session.agent_startup.state}
+                  title={session.agent_startup.detail ?? undefined}
+                >
+                  {t("sessions.startupPrompt")}
+                </span>
+              )}
               <span className="session-phase-tag" data-phase={session.phase}>
                 {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
               </span>

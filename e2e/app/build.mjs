@@ -63,20 +63,29 @@ console.log(`[e2e build] build stamp ${stamp} (frontend ${distHash.slice(0, 12)}
 
 const targetDir = cargoTargetDir();
 
-// macOS terminals need the small `hermes-pty-setup` helper next to the binary.
-// Build it explicitly: the app's build script only finds its output folder
-// when the cargo target directory is literally named `target`.
-let helper = null;
-if (platform() === "darwin") {
-  const helperTarget = join(targetDir, "pty-setup-build");
+// Helpers that live next to the app binary: `hi` (agent launch and signals,
+// every OS) and, on macOS, `hermes-pty-setup`. Built explicitly here into
+// their own target folders and staged next to the binary below, so the rig
+// never depends on where the app's build script managed to put them.
+function buildHelper(crateDir, binName) {
+  const helperTarget = join(targetDir, `${crateDir}-build`);
   run("cargo", [
     "build",
     "--manifest-path",
-    join(REPO_ROOT, "src-tauri", "pty-setup", "Cargo.toml"),
+    join(REPO_ROOT, "src-tauri", crateDir, "Cargo.toml"),
     "--target-dir",
     helperTarget,
   ]);
-  helper = join(helperTarget, "debug", "hermes-pty-setup");
+  const built = join(helperTarget, "debug", isWindows ? `${binName}.exe` : binName);
+  if (!existsSync(built)) {
+    console.error(`[e2e build] helper not found after build: ${built}`);
+    process.exit(1);
+  }
+  return built;
+}
+const helpers = [{ built: buildHelper("hi", "hi"), name: isWindows ? "hi.exe" : "hi" }];
+if (platform() === "darwin") {
+  helpers.push({ built: buildHelper("pty-setup", "hermes-pty-setup"), name: "hermes-pty-setup" });
 }
 
 run(npx, [
@@ -119,10 +128,11 @@ writeFileSync(
   join(outDir(), "bin", STAMP_FILE),
   JSON.stringify({ stamp, distHash, builtAt: new Date().toISOString() }, null, 2) + "\n",
 );
-if (helper) {
-  const stagedHelper = join(outDir(), "bin", "hermes-pty-setup");
-  copyFileSync(helper, stagedHelper);
-  chmodSync(stagedHelper, 0o755);
+for (const { built: helperBin, name } of helpers) {
+  const stagedHelper = join(outDir(), "bin", name);
+  copyFileSync(helperBin, stagedHelper);
+  if (!isWindows) chmodSync(stagedHelper, 0o755);
+  console.log(`[e2e build] staged helper ${stagedHelper}`);
 }
 
 console.log(`\n[e2e build] test app ready: ${staged} (stamp ${stamp})`);

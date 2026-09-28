@@ -682,6 +682,74 @@ pub fn check_ai_providers(include_beta: Option<bool>) -> std::collections::HashM
     crate::platform::check_ai_cli_availability(include_beta.unwrap_or(false))
 }
 
+/// The line typed into a session's shell to start its agent.
+struct AgentLaunch {
+    cmd: String,
+    provider: String,
+    /// The project-context prompt travels with the command (no later nudge).
+    context_in_args: bool,
+    /// With the `hi` helper: the session's launch folder to watch for
+    /// signals, whether silence means a startup prompt, and the nonce the
+    /// launch's spool lines carry.
+    watch: Option<(std::path::PathBuf, bool, String)>,
+}
+
+/// Resolve the launch line once the shell is ready: through the bundled `hi`
+/// helper when the `launchHelper` flag is on (see `launch.rs`), else the
+/// vendor command typed as before. None when the session has no agent, or
+/// an agent Hermes does not know.
+fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Option<AgentLaunch> {
+    let mut s = session.lock().ok()?;
+    let provider = s.ai_provider.clone()?;
+    if let Some(prepared) = crate::pty::launch::prepare_helper_launch(app, &mut s) {
+        return Some(AgentLaunch {
+            cmd: prepared.line,
+            provider,
+            context_in_args: prepared.context_in_args,
+            watch: Some((
+                prepared.session_dir,
+                prepared.expects_start_signal,
+                prepared.nonce,
+            )),
+        });
+    }
+    // Only launch known/allowed AI providers (reject unknown values)
+    let Some(launch_cmd) = ai_launch_command(
+        &provider,
+        &s.permission_mode,
+        &s.custom_prefix,
+        &s.custom_suffix,
+        &s.agent_command,
+    ) else {
+        log::warn!("Unknown AI provider rejected: {}", provider);
+        return None;
+    };
+    // For Claude/Gemini: pass context instruction as CLI argument
+    // so it's processed immediately without PTY injection timing issues
+    let supports_cli_prompt = provider == "claude" || provider == "gemini";
+    let context_in_args = s.has_initial_context && supports_cli_prompt;
+    // Build command: base+flags, then prompt, then --channels
+    // (channels must come AFTER prompt so CLI doesn't treat prompt as a channel entry)
+    let mut cmd = if context_in_args {
+        format!(
+            "{} {}",
+            launch_cmd,
+            crate::pty::context_prompt_arg(&s.shell)
+        )
+    } else {
+        launch_cmd
+    };
+    if provider == "claude" && !s.channels.is_empty() {
+        cmd.push_str(&channels_suffix(&s.channels));
+    }
+    Some(AgentLaunch {
+        cmd,
+        provider,
+        context_in_args,
+        watch: None,
+    })
+}
+
 // Tauri command handler — params come from frontend invocation
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -715,6 +783,12 @@ pub fn create_session(
     // the Claude subprocess via `agent::spawn_agent_session` after this
     // command returns.
     mode: Option<SessionMode>,
+    // Feature flag `launchHelper` (evaluated by the frontend): start the
+    // agent through the bundled `hi` helper and resume it on restore.
+    launch_helper: Option<bool>,
+    // A restored session's saved conversation id; with the helper on, the
+    // agent resumes it (see `launch.rs`).
+    vendor_session_id: Option<String>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -833,6 +907,9 @@ pub fn create_session(
             port_forwards: Vec::new(),
         }),
         mode: session_mode,
+        vendor_session_id: vendor_session_id.filter(|id| !id.is_empty()),
+        agent_startup: None,
+        launch_helper: launch_helper.unwrap_or(false),
     };
 
     // ─── Agent-mode short-circuit ───────────────────────────────────────
@@ -1063,6 +1140,31 @@ pub fn create_session(
             cmd.env("HERMES_CONTEXT", context_path.to_string_lossy().as_ref());
         }
         cmd.env("HERMES_SESSION_ID", &session_id);
+
+        // The bundled `hi` helper, only while the `launchHelper` flag is on
+        // (a stable user's PATH stays exactly as it was): first on PATH for
+        // this terminal so `hi run` is unambiguous (the shell integration
+        // re-adds it after the user's profile ran), plus where it finds the
+        // session's launch file. The PATH it goes in front of is the one the
+        // terminal would get anyway (on Windows the terminal library rebuilds
+        // it from the registry, not from this process).
+        if launch_helper.unwrap_or(false) {
+            if let Some(dir) = crate::pty::launch::hi_path(&app)
+                .and_then(|hi| hi.parent().map(|d| d.to_path_buf()))
+            {
+                let mut paths = vec![dir.clone()];
+                if let Some(existing) = cmd.get_env("PATH").map(|p| p.to_os_string()) {
+                    paths.extend(std::env::split_paths(&existing));
+                }
+                if let Ok(joined) = std::env::join_paths(paths) {
+                    cmd.env("PATH", joined);
+                }
+                cmd.env("HERMES_BIN_DIR", dir.as_os_str());
+            }
+            if let Ok(launch_dir) = crate::pty::launch::launch_dir(&app) {
+                cmd.env("HERMES_LAUNCH_DIR", launch_dir.as_os_str());
+            }
+        }
     }
 
     // On macOS, portable-pty's spawn_command() uses fork() + pre_exec which
@@ -1219,80 +1321,36 @@ pub fn create_session(
                             // Auto-launch AI agent when shell is ready
                             if a.pending_ai_launch {
                                 a.pending_ai_launch = false;
-                                let launch_info = session_clone.lock().ok().map(|s| {
-                                    (
-                                        s.ai_provider.clone(),
-                                        s.has_initial_context,
-                                        s.permission_mode.clone(),
-                                        s.custom_prefix.clone(),
-                                        s.custom_suffix.clone(),
-                                        s.channels.clone(),
-                                        s.agent_command.clone(),
-                                        s.shell.clone(),
-                                    )
-                                });
-                                if let Some((
-                                    Some(ref provider),
-                                    has_context,
-                                    ref perm_mode,
-                                    ref custom_prefix,
-                                    ref custom_suffix,
-                                    ref channels,
-                                    ref agent_command,
-                                    ref shell,
-                                )) = launch_info
+                                if let Some(launch) =
+                                    resolve_agent_launch(&app_clone, &session_clone)
                                 {
-                                    // Only launch known/allowed AI providers (reject unknown values)
-                                    if let Some(launch_cmd) = ai_launch_command(
-                                        provider,
-                                        perm_mode,
-                                        custom_prefix,
-                                        custom_suffix,
-                                        agent_command,
-                                    ) {
-                                        // For Claude/Gemini: pass context instruction as CLI argument
-                                        // so it's processed immediately without PTY injection timing issues
-                                        let supports_cli_prompt =
-                                            provider == "claude" || provider == "gemini";
-                                        // Build command: base+flags, then prompt, then --channels
-                                        // (channels must come AFTER prompt so CLI doesn't treat prompt as a channel entry)
-                                        let mut cmd = if has_context && supports_cli_prompt {
-                                            format!(
-                                                "{} {}",
-                                                launch_cmd,
-                                                crate::pty::context_prompt_arg(shell)
-                                            )
-                                        } else {
-                                            launch_cmd
-                                        };
-                                        if provider == "claude" && !channels.is_empty() {
-                                            cmd.push_str(&channels_suffix(channels));
+                                    // Set up "command not found" detection window
+                                    a.ai_launching_provider = Some(launch.provider.clone());
+                                    a.ai_launch_check_remaining = 10; // scan next 10 lines
+                                    if let Ok(mut w) = writer_for_reader.lock() {
+                                        let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
+                                        let _ = w.flush();
+                                    }
+                                    // Mark context as injected if it was baked into the launch command
+                                    if launch.context_in_args {
+                                        a.context_injected = true;
+                                    }
+                                    if let Ok(mut s) = session_clone.lock() {
+                                        if launch.context_in_args {
+                                            s.context_injected = true;
                                         }
-                                        // Set up "command not found" detection window
-                                        a.ai_launching_provider = Some(provider.clone());
-                                        a.ai_launch_check_remaining = 10; // scan next 10 lines
-                                        if let Ok(mut w) = writer_for_reader.lock() {
-                                            let _ = w.write_all(format!("{}\r", cmd).as_bytes());
-                                            let _ = w.flush();
-                                        }
-                                        // Mark context as injected if it was baked into the launch command
-                                        if has_context && supports_cli_prompt {
-                                            a.context_injected = true;
-                                            if let Ok(mut s) = session_clone.lock() {
-                                                s.context_injected = true;
-                                                s.phase = SessionPhase::LaunchingAgent;
-                                                let update = SessionUpdate::from(&*s);
-                                                let _ = app_clone.emit("session-updated", &update);
-                                            }
-                                        } else {
-                                            if let Ok(mut s) = session_clone.lock() {
-                                                s.phase = SessionPhase::LaunchingAgent;
-                                                let update = SessionUpdate::from(&*s);
-                                                let _ = app_clone.emit("session-updated", &update);
-                                            }
-                                        }
-                                    } else {
-                                        log::warn!("Unknown AI provider rejected: {}", provider);
+                                        s.phase = SessionPhase::LaunchingAgent;
+                                        let update = SessionUpdate::from(&*s);
+                                        let _ = app_clone.emit("session-updated", &update);
+                                    }
+                                    if let Some((dir, expects_start_signal, nonce)) = launch.watch {
+                                        crate::pty::launch::watch_signals(
+                                            app_clone.clone(),
+                                            Arc::clone(&session_clone),
+                                            dir,
+                                            expects_start_signal,
+                                            nonce,
+                                        );
                                     }
                                 }
                             }
@@ -1475,68 +1533,33 @@ pub fn create_session(
 
                     // Fallback auto-launch
                     if launch_info.is_some() {
-                        let launch_data = session_silence.lock().ok().map(|s| {
-                            (
-                                s.ai_provider.clone(),
-                                s.has_initial_context,
-                                s.permission_mode.clone(),
-                                s.custom_prefix.clone(),
-                                s.custom_suffix.clone(),
-                                s.channels.clone(),
-                                s.agent_command.clone(),
-                                s.shell.clone(),
-                            )
-                        });
-                        if let Some((
-                            Some(ref provider),
-                            has_context,
-                            ref perm_mode,
-                            ref custom_prefix,
-                            ref custom_suffix,
-                            ref channels,
-                            ref agent_command,
-                            ref shell,
-                        )) = launch_data
-                        {
-                            if let Some(launch_cmd) = ai_launch_command(
-                                provider,
-                                perm_mode,
-                                custom_prefix,
-                                custom_suffix,
-                                agent_command,
-                            ) {
-                                let supports_cli_prompt =
-                                    provider == "claude" || provider == "gemini";
-                                let mut cmd = if has_context && supports_cli_prompt {
-                                    format!(
-                                        "{} {}",
-                                        launch_cmd,
-                                        crate::pty::context_prompt_arg(shell)
-                                    )
-                                } else {
-                                    launch_cmd
-                                };
-                                if provider == "claude" && !channels.is_empty() {
-                                    cmd.push_str(&channels_suffix(channels));
+                        if let Some(launch) = resolve_agent_launch(&app_silence, &session_silence) {
+                            if let Ok(mut w) = writer_for_silence.lock() {
+                                let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
+                                let _ = w.flush();
+                            }
+                            // Update session state — need analyzer lock for context_injected
+                            if launch.context_in_args {
+                                if let Ok(mut a) = analyzer_silence.lock() {
+                                    a.context_injected = true;
                                 }
-                                if let Ok(mut w) = writer_for_silence.lock() {
-                                    let _ = w.write_all(format!("{}\r", cmd).as_bytes());
-                                    let _ = w.flush();
+                            }
+                            if let Ok(mut s) = session_silence.lock() {
+                                if launch.context_in_args {
+                                    s.context_injected = true;
                                 }
-                                // Update session state — need analyzer lock for context_injected
-                                if has_context && supports_cli_prompt {
-                                    if let Ok(mut a) = analyzer_silence.lock() {
-                                        a.context_injected = true;
-                                    }
-                                }
-                                if let Ok(mut s) = session_silence.lock() {
-                                    if has_context && supports_cli_prompt {
-                                        s.context_injected = true;
-                                    }
-                                    s.phase = SessionPhase::LaunchingAgent;
-                                    let update = SessionUpdate::from(&*s);
-                                    let _ = app_silence.emit("session-updated", &update);
-                                }
+                                s.phase = SessionPhase::LaunchingAgent;
+                                let update = SessionUpdate::from(&*s);
+                                let _ = app_silence.emit("session-updated", &update);
+                            }
+                            if let Some((dir, expects_start_signal, nonce)) = launch.watch {
+                                crate::pty::launch::watch_signals(
+                                    app_silence.clone(),
+                                    Arc::clone(&session_silence),
+                                    dir,
+                                    expects_start_signal,
+                                    nonce,
+                                );
                             }
                         }
                     }
@@ -2293,6 +2316,7 @@ pub fn close_session(
     drop(mgr); // release PTY-manager lock before touching DB / filesystem
     let _ = app.emit("session-removed", &session_id);
     crate::project::attunement::delete_session_context_file(&app, &session_id);
+    crate::pty::launch::remove_session_files(&app, &session_id);
 
     // Drop it from the saved workspace now: a quit right after this close
     // must not bring it back on the next launch.

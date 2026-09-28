@@ -453,6 +453,14 @@
 .session-phase-tag[data-phase="error"] { color: var(--danger); }
 .session-phase-tag[data-phase="idle"] { color: var(--text-2); }
 
+/* An agent that sent no start signal in time: most likely a folder-trust or
+   login prompt is waiting for the person. */
+.session-startup-tag {
+  font-size: var(--text-2xs);
+  color: var(--warning);
+  letter-spacing: var(--tracking-snug);
+}
+
 .session-age {
   font-size: var(--text-2xs);
   color: var(--text-3);

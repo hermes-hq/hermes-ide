@@ -75,6 +75,11 @@ ZDOTDIR="$_HERMES_ZDOTDIR"
 setopt HIST_IGNORE_SPACE 2>/dev/null
 
 export HERMES_TERMINAL=1
+
+# Keep Hermes's helper (hi) reachable even when a profile rewrote PATH.
+if [ -n "$HERMES_BIN_DIR" ]; then
+  case ":$PATH:" in *":$HERMES_BIN_DIR:"*) ;; *) export PATH="$HERMES_BIN_DIR:$PATH" ;; esac
+fi
 "#;
 
 /// Appended to the zsh .zshrc when Hermes shows its own inline suggestions:
@@ -148,6 +153,11 @@ fi
 
 export HERMES_TERMINAL=1
 
+# Keep Hermes's helper (hi) reachable even when a profile rewrote PATH.
+if [ -n "$HERMES_BIN_DIR" ]; then
+  case ":$PATH:" in *":$HERMES_BIN_DIR:"*) ;; *) export PATH="$HERMES_BIN_DIR:$PATH" ;; esac
+fi
+
 # Force terminal size re-read (fixes SIGWINCH race during startup)
 kill -WINCH $$ 2>/dev/null
 "#;
@@ -164,11 +174,11 @@ fi
 /// Fish init-command — passed via `fish -C "..."`.
 /// Runs after config.fish, so built-in autosuggestions are already active.
 const FISH_INIT_CMD: &str =
-    "set -g fish_autosuggestion_enabled 0 2>/dev/null; set -gx HERMES_TERMINAL 1";
+    "set -g fish_autosuggestion_enabled 0 2>/dev/null; set -gx HERMES_TERMINAL 1; if set -q HERMES_BIN_DIR; and not contains -- $HERMES_BIN_DIR $PATH; set -gx PATH $HERMES_BIN_DIR $PATH; end";
 
 /// Fish init-command used when Hermes suggestions are off: leaves fish's
 /// built-in autosuggestions alone.
-const FISH_INIT_CMD_NATIVE: &str = "set -gx HERMES_TERMINAL 1";
+const FISH_INIT_CMD_NATIVE: &str = "set -gx HERMES_TERMINAL 1; if set -q HERMES_BIN_DIR; and not contains -- $HERMES_BIN_DIR $PATH; set -gx PATH $HERMES_BIN_DIR $PATH; end";
 
 // ─── Setup Functions ─────────────────────────────────────────────────
 

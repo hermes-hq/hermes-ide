@@ -373,3 +373,39 @@ features:
       FIX-close-before-quit-2:
         text: "Closing a session drops it from the saved workspace within 2 s, even when the app is killed right after the close"
         scenarios: [FIX-close-before-quit.mjs]
+  N12:
+    name: "Agents start reliably, with no typing into your shell"
+    # partial: fish is not covered by a scenario yet (zsh and bash on macOS
+    # and Linux, PowerShell and cmd on Windows are), and the startup-prompt
+    # report exists only for agents whose catalog entry has a hook file with
+    # a start event (Claude today; Codex, Gemini and the rest get no guess).
+    # Passing trust per launch is not built; the prompt is reported instead.
+    status: partial
+    criteria:
+      N12-1:
+        text: "The same launch works in zsh, bash, fish, PowerShell and cmd"
+        scenarios: [N12-launch-and-resume.mjs]
+      N12-2:
+        text: "A new worktree that triggers a trust prompt raises an inbox item within 5 seconds"
+        scenarios: [N12-launch-and-resume.mjs]
+      N12-3:
+        text: "Hermes never writes to the vendor's global config"
+        scenarios: [N12-launch-and-resume.mjs]
+  N13:
+    name: "Resume every agent after a restart or crash"
+    # partial: N13-2 is covered indirectly (a restored plain terminal keeps
+    # its worktree; the link is keyed by the session id, which a restored
+    # agent session keeps too), not by a restored agent session itself.
+    status: partial
+    criteria:
+      N13-1:
+        text: "Quit and reopen: the Claude session continues the same conversation"
+        scenarios: [N12-launch-and-resume.mjs]
+      N13-2:
+        # Restored sessions keep their id (the worktree link is keyed by it);
+        # the honest-isolation scenario relaunches and checks the branch.
+        text: "A restored session still points at its worktree and branch"
+        scenarios: [F09-honest-isolation.mjs]
+      N13-3:
+        text: "A failed resume prints one line and starts a new conversation"
+        scenarios: [N12-launch-and-resume.mjs]

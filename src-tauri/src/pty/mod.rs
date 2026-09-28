@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod analyzer;
 pub mod commands;
+pub mod launch;
 pub mod models;
 pub mod patterns;
 pub mod shell_integration;

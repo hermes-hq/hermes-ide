@@ -133,6 +133,23 @@ export interface SessionData {
   /** "terminal" (default) → the agent's own interface in a PTY/xterm.
    *  "agent" → optional Agent view (SDK bridge + AgentSessionView), Claude only. */
   mode: SessionMode;
+  /** The agent's own conversation id (pre-assigned or recorded at launch
+   *  when the `launchHelper` flag is on). Saved with the workspace so a
+   *  restore resumes the same conversation. Absent on older backends. */
+  vendor_session_id?: string | null;
+  /** Startup state of an agent started through the `hi` helper. */
+  agent_startup?: AgentStartup | null;
+}
+
+export type AgentStartupState = "launching" | "started" | "waiting_at_startup_prompt" | "ended";
+
+export interface AgentStartup {
+  state: AgentStartupState;
+  /** When the state was entered (RFC 3339). */
+  since: string;
+  /** "exact" when the agent signalled it, "guessed" for a timeout. */
+  confidence: "exact" | "guessed" | string;
+  detail?: string | null;
 }
 
 export interface SessionHistoryEntry {
@@ -222,6 +239,12 @@ export interface SavedSessionInfo {
   agent_effort?: string;
   /** Currently-attached additional directories (Hermes' projects). */
   agent_add_dirs?: string[];
+  // ─── Terminal-agent resume (launchHelper flag) ───────────────────
+  /** The agent's own conversation id for a terminal session (Claude or
+   *  Gemini session id, Codex thread id). On restore the agent is resumed
+   *  with it; agents without resume start fresh. Optional: older saves and
+   *  sessions started without the helper have none. */
+  vendor_session_id?: string;
 }
 
 export interface SavedWorkspace {
@@ -292,6 +315,10 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     }
     if (si.agent_add_dirs !== undefined && !Array.isArray(si.agent_add_dirs)) {
       delete si.agent_add_dirs;
+    }
+    // A conversation id is a non-empty string or nothing at all.
+    if (si.vendor_session_id !== undefined && (typeof si.vendor_session_id !== "string" || !si.vendor_session_id)) {
+      delete si.vendor_session_id;
     }
   }
 

@@ -436,16 +436,22 @@ jobs:
       # app binary. It goes in as a Tauri external binary so the bundler
       # puts it (signed) into the .app before the DMG and the updater
       # archive are made. Copying it in afterwards left the DMG without it.
-      - name: Build PTY helper (macOS)
+      # The agent launch helper `hi` (src-tauri/hi) goes in the same way, so
+      # it is signed and inside Contents/MacOS next to the app binary.
+      - name: Build PTY and launch helpers (macOS)
         if: steps.check.outputs.enabled == 'true' && runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
           cargo build --release --target ${{ matrix.target }} \
             --manifest-path src-tauri/pty-setup/Cargo.toml --target-dir src-tauri/target
+          cargo build --release --locked --target ${{ matrix.target }} \
+            --manifest-path src-tauri/hi/Cargo.toml --target-dir src-tauri/target/hi-build
           mkdir -p src-tauri/binaries
           cp "src-tauri/target/${{ matrix.target }}/release/hermes-pty-setup" \
             "src-tauri/binaries/hermes-pty-setup-${{ matrix.target }}"
+          cp "src-tauri/target/hi-build/${{ matrix.target }}/release/hi" \
+            "src-tauri/binaries/hi-${{ matrix.target }}"
           ls -la src-tauri/binaries/
 
       - name: Build and sign
@@ -467,19 +473,22 @@ jobs:
             npx tauri build --target ${{ matrix.target }} --bundles nsis
           else
             npx tauri build --target ${{ matrix.target }} \
-              --config '{"bundle":{"externalBin":["binaries/hermes-pty-setup"]}}'
+              --config '{"bundle":{"externalBin":["binaries/hermes-pty-setup","binaries/hi"]}}'
           fi
 
-      - name: Check the macOS bundle carries the PTY helper
+      - name: Check the macOS bundle carries the PTY and launch helpers
         if: steps.check.outputs.enabled == 'true' && runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
           APP=$(ls -d src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
           test -x "$APP/Contents/MacOS/hermes-pty-setup"
+          test -x "$APP/Contents/MacOS/hi"
+          "$APP/Contents/MacOS/hi" --version
           TAR_GZ=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz | head -1)
           tar -tzf "$TAR_GZ" | grep -q 'Contents/MacOS/hermes-pty-setup$'
-          echo "hermes-pty-setup is in the app and in the updater archive"
+          tar -tzf "$TAR_GZ" | grep -q 'Contents/MacOS/hi$'
+          echo "hermes-pty-setup and hi are in the app and in the updater archive"
 
       - name: Notarize DMG
         if: steps.check.outputs.enabled == 'true' && matrix.notarize

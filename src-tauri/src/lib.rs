@@ -578,6 +578,10 @@ pub fn run() {
             // Clean up stale shell integration temp files from previous sessions
             pty::shell_integration::cleanup_stale();
 
+            // Launch files belong to sessions of the previous run (restored
+            // sessions get new ids), so the folder starts empty.
+            pty::launch::clear_launch_dir(app.handle());
+
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
 
@@ -1078,6 +1082,8 @@ mod tests {
             has_initial_context: false,
             last_nudged_version: 0,
             ssh_info: None,
+            vendor_session_id: None,
+            agent_startup: None,
         };
         database.create_session_v2(&update).unwrap();
 
