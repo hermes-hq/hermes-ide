@@ -701,6 +701,8 @@ export const dePack: LanguagePack = {
     "status.inboxHint": "Aufmerksamkeits-Posteingang ({shortcut})",
     "settings.statusStrip": "Statuszeile über Agentensitzungen",
     "settings.statusStripHint": "Eine Zeile, die sagt, was jeder Terminal-Agent gerade tut und woher Hermes das weiß. Die Ausgabe des Agenten bleibt in jedem Fall unverändert.",
+    "sessions.modelChipLabel": "Modell: {model}",
+    "sessions.permissionModeChipLabel": "Berechtigungsmodus: {mode}",
     "language.panel.title": "Oberflächensprache",
     "language.panel.selectLabel": "Sprache",
     "language.panel.subtitle": "Sprachpakete werden von Plugins bereitgestellt. Englisch bleibt der zentrale Fallback.",

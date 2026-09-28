@@ -658,3 +658,21 @@ features:
         # message carries no task name.
         text: "The message never contains prompt text or file content"
         scenarios: [N16-away-notifications.mjs]
+  F08:
+    name: "Model and permission-mode chips on terminal sessions"
+    # Read-only, sourced only from the C0 `identity` SessionEvent
+    # (docs/adr/004-2.0-contracts.md #2) — never a heuristic, hidden
+    # field-by-field when the agent hasn't reported that field. F11 (the
+    # spool watcher that produces real identity events from an agent's own
+    # hooks) is a separate track and not on main yet, so the scenario plays
+    # its part through the same e2e injector F11 will use in production;
+    # what's proven here is the chip's side of the contract, not the
+    # watcher.
+    status: partial
+    criteria:
+      F08-1:
+        text: "A terminal session with no reported identity shows no chip; a fake agent reporting a model, then a model change, updates the chip live; the permission-mode chip is hidden independently when only the model is known"
+        scenarios: [F08-model-chips.mjs]
+      F08-2:
+        text: "A malformed identity event is refused and the chip does not move; another session's identity never appears on this one's chip"
+        scenarios: [F08-model-chips.mjs]

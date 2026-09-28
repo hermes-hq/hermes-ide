@@ -701,6 +701,8 @@ export const ruPack: LanguagePack = {
     "status.inboxHint": "Входящие внимания ({shortcut})",
     "settings.statusStrip": "Строка состояния над сессиями агентов",
     "settings.statusStripHint": "Одна строка о том, что делает каждый терминальный агент и откуда Hermes это знает. Вывод агента в любом случае не меняется.",
+    "sessions.modelChipLabel": "Модель: {model}",
+    "sessions.permissionModeChipLabel": "Режим разрешений: {mode}",
     "language.panel.title": "Язык интерфейса",
     "language.panel.selectLabel": "Язык",
     "language.panel.subtitle": "Языки поставляются плагинами. Английский остается резервным языком ядра.",

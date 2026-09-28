@@ -701,6 +701,8 @@ export const ptBRPack: LanguagePack = {
     "status.inboxHint": "Caixa de atenção ({shortcut})",
     "settings.statusStrip": "Linha de status acima das sessões de agente",
     "settings.statusStripHint": "Uma linha que diz o que cada agente de terminal está fazendo e como o Hermes sabe. A saída do agente não muda em nenhum caso.",
+    "sessions.modelChipLabel": "Modelo: {model}",
+    "sessions.permissionModeChipLabel": "Modo de permissão: {mode}",
     "language.panel.title": "Idioma da interface",
     "language.panel.selectLabel": "Idioma",
     "language.panel.subtitle": "Os pacotes de idioma são fornecidos por plugins. O inglês permanece como idioma de fallback.",

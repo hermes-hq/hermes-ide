@@ -734,6 +734,8 @@ export const hiPack: LanguagePack = {
     "status.inboxHint": "ध्यान इनबॉक्स ({shortcut})",
     "settings.statusStrip": "एजेंट सत्रों के ऊपर स्थिति पंक्ति",
     "settings.statusStripHint": "एक पंक्ति जो बताती है कि हर टर्मिनल एजेंट क्या कर रहा है और Hermes को यह कैसे पता है। एजेंट का आउटपुट किसी भी स्थिति में नहीं बदलता।",
+    "sessions.modelChipLabel": "मॉडल: {model}",
+    "sessions.permissionModeChipLabel": "अनुमति मोड: {mode}",
     "language.panel.selectLabel": "भाषा",
   },
 };

@@ -701,6 +701,8 @@ export const frPack: LanguagePack = {
     "status.inboxHint": "Boîte d'attention ({shortcut})",
     "settings.statusStrip": "Ligne d'état au-dessus des sessions d'agent",
     "settings.statusStripHint": "Une ligne qui dit ce que fait chaque agent de terminal et comment Hermes le sait. La sortie de l'agent reste identique dans tous les cas.",
+    "sessions.modelChipLabel": "Modèle : {model}",
+    "sessions.permissionModeChipLabel": "Mode de permission : {mode}",
     "language.panel.title": "Langue de l'interface",
     "language.panel.selectLabel": "Langue",
     "language.panel.subtitle": "Les packs de langue sont fournis par des extensions. L'anglais reste la langue de secours.",

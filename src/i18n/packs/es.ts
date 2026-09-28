@@ -701,6 +701,8 @@ export const esPack: LanguagePack = {
     "status.inboxHint": "Bandeja de atención ({shortcut})",
     "settings.statusStrip": "Línea de estado sobre las sesiones de agente",
     "settings.statusStripHint": "Una línea que dice qué hace cada agente de terminal y cómo lo sabe Hermes. La salida del agente no cambia en ningún caso.",
+    "sessions.modelChipLabel": "Modelo: {model}",
+    "sessions.permissionModeChipLabel": "Modo de permiso: {mode}",
     "language.panel.title": "Idioma de la interfaz",
     "language.panel.selectLabel": "Idioma",
     "language.panel.subtitle": "Los paquetes de idioma los proporcionan los plugins. El inglés sigue siendo el idioma de reserva principal.",

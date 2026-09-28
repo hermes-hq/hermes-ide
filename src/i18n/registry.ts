@@ -731,6 +731,8 @@ const ENGLISH_PACK: LanguagePack = {
     "status.inboxHint": "Attention inbox ({shortcut})",
     "settings.statusStrip": "Status line above agent sessions",
     "settings.statusStripHint": "One line that says what each terminal agent is doing and how Hermes knows. The agent's own output is unchanged either way.",
+    "sessions.modelChipLabel": "Model: {model}",
+    "sessions.permissionModeChipLabel": "Permission mode: {mode}",
     "language.panel.title": "Interface language",
     "language.panel.selectLabel": "Language",
     "language.panel.subtitle": "Language packs are provided by plugins. English remains the core fallback.",

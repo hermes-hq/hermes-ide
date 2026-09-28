@@ -701,6 +701,8 @@ export const jaPack: LanguagePack = {
     "status.inboxHint": "注意インボックス ({shortcut})",
     "settings.statusStrip": "エージェントセッション上の状態行",
     "settings.statusStripHint": "各ターミナルエージェントが何をしていて、Hermes がそれをどう知ったかを示す1行です。エージェントの出力はどちらの場合も変わりません。",
+    "sessions.modelChipLabel": "モデル: {model}",
+    "sessions.permissionModeChipLabel": "権限モード: {mode}",
     "language.panel.title": "表示言語",
     "language.panel.selectLabel": "言語",
     "language.panel.subtitle": "言語パックはプラグインから提供されます。英語はコアのフォールバックとして残ります。",

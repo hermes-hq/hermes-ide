@@ -701,6 +701,8 @@ export const zhCNPack: LanguagePack = {
     "status.inboxHint": "注意收件箱 ({shortcut})",
     "settings.statusStrip": "代理会话上方的状态行",
     "settings.statusStripHint": "一行文字，说明每个终端代理正在做什么，以及 Hermes 是如何知道的。无论开关，代理的输出都不会改变。",
+    "sessions.modelChipLabel": "模型:{model}",
+    "sessions.permissionModeChipLabel": "权限模式:{mode}",
     "language.panel.title": "界面语言",
     "language.panel.selectLabel": "语言",
     "language.panel.subtitle": "语言包由插件提供。英语仍是核心回退语言。",

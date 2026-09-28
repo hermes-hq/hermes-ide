@@ -21,6 +21,7 @@ import { useSessionModel } from "../agent/useSessionModel";
 import { agentDisplayName } from "../catalog/agentCatalog";
 import { AgentStatusTag } from "./AgentStatusTag";
 import { isAgentStatusEnabled } from "../agent/status/flag";
+import { useSessionEvents } from "../agent/contract/sessionEventStore";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -59,6 +60,41 @@ export function SessionAgentTag({ session }: { session: SessionData }) {
   const name = agentDisplayName(session) ?? undefined;
   const label = name && model ? `${name} · ${model}` : name ?? model;
   return label ? <span className="session-agent-tag">{label}</span> : null;
+}
+
+/** F08: read-only model / permission-mode chips for terminal sessions,
+ *  sourced only from the agent's own signals (the C0 `identity`
+ *  SessionEvent — docs/adr/004-2.0-contracts.md #2), never a heuristic.
+ *  Hidden field-by-field when the agent hasn't reported it: an unknown
+ *  model or permission mode shows nothing, it never guesses. Terminal-mode
+ *  only — agent mode already shows its model in the composer header. */
+export function SessionIdentityChips({ session }: { session: SessionData }) {
+  const { t } = useI18n();
+  const { identity } = useSessionEvents(session.id);
+  if (session.mode !== "terminal") return null;
+  if (!identity.model && !identity.permissionMode) return null;
+  return (
+    <>
+      {identity.model && (
+        <span
+          className="session-model-chip"
+          data-testid="session-model-chip"
+          title={t("sessions.modelChipLabel", { model: identity.model })}
+        >
+          {identity.model}
+        </span>
+      )}
+      {identity.permissionMode && (
+        <span
+          className="session-permission-chip"
+          data-testid="session-permission-chip"
+          title={t("sessions.permissionModeChipLabel", { mode: identity.permissionMode })}
+        >
+          {identity.permissionMode}
+        </span>
+      )}
+    </>
+  );
 }
 
 export type SessionView = "git" | "files" | "search" | null;
@@ -938,6 +974,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
               <SessionAgentTag session={session} />
+              <SessionIdentityChips session={session} />
               {agentStatus && session.phase !== "disconnected" ? (
                 <AgentStatusTag sessionId={session.id} />
               ) : (
