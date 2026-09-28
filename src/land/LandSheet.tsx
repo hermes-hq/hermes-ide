@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useSession } from "../state/SessionContext";
+import { useI18n } from "../i18n/I18nProvider";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { writeToSession } from "../api/sessions";
 import { utf8ToBase64 } from "../utils/encoding";
@@ -44,6 +45,8 @@ type Mode = "commit" | "pr" | "merge";
 const GH_INSTALL_URL = "https://cli.github.com";
 const GH_SIGN_IN_URL = "https://cli.github.com/manual/gh_auth_login";
 const CHECKS_POLL_MS = 15_000;
+// A shell command, not language: the same in every translation.
+const GH_SIGN_IN_COMMAND = "gh auth login";
 
 interface LandSheetProps {
   sessionId: string;
@@ -55,6 +58,11 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** A translated sentence with elements (a <code> branch, a link) spliced in at their {placeholders}. */
+function withNodes(text: string, nodes: Record<string, ReactNode>): ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 === 1 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
+}
+
 /**
  * Land sheet (F22): ship a task's worktree in one step — commit on its
  * branch, open a pull request, or squash-merge locally — and archive it,
@@ -62,6 +70,7 @@ function errorText(e: unknown): string {
  * stays open after an archive closes the session.
  */
 export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
+  const { t } = useI18n();
   const { state, closeSession, createSession } = useSession();
   const events = useSessionEvents(sessionId);
   const session = state.sessions[sessionId];
@@ -302,31 +311,31 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
       <div className="land-sheet" role="dialog" aria-modal="true" aria-labelledby="land-sheet-title">
         <div className="land-sheet-header">
           <span className="land-sheet-title" id="land-sheet-title">
-            Land {preview ? <code className="land-sheet-branch">{preview.branch}</code> : "task"}
-            {preview?.base && (
-              <>
-                {" "}into <code className="land-sheet-branch">{preview.base.name}</code>
-              </>
-            )}
+            {!preview
+              ? t("land.titleTask")
+              : withNodes(t(preview.base ? "land.titleInto" : "land.title"), {
+                  branch: <code className="land-sheet-branch">{preview.branch}</code>,
+                  base: preview.base && <code className="land-sheet-branch">{preview.base.name}</code>,
+                })}
           </span>
-          <button className="land-sheet-x" onClick={onClose} disabled={busy !== null} aria-label="Close">
+          <button className="land-sheet-x" onClick={onClose} disabled={busy !== null} aria-label={t("common.close")}>
             &times;
           </button>
         </div>
 
         <div className="land-sheet-body">
           {loadError && <div className="land-sheet-error">{loadError}</div>}
-          {!preview && !loadError && <div className="land-sheet-loading">Reading the worktree…</div>}
+          {!preview && !loadError && <div className="land-sheet-loading">{t("land.readingWorktree")}</div>}
           {baseNote && <div className="land-sheet-note land-sheet-base-note">{baseNote}</div>}
 
           {preview && (
             <div className="land-sheet-summary">
               <div className={`land-sheet-stat land-sheet-donewhen land-sheet-donewhen-${doneWhen.kind}`} data-state={doneWhen.kind}>
-                <span className="land-sheet-stat-label">Done-When</span>
+                <span className="land-sheet-stat-label">{t("land.statDoneWhen")}</span>
                 <span className="land-sheet-stat-value">{doneWhenLabel(doneWhen)}</span>
               </div>
               <div className="land-sheet-stat land-sheet-turns" data-turns={turnCount}>
-                <span className="land-sheet-stat-label">Turns</span>
+                <span className="land-sheet-stat-label">{t("land.statTurns")}</span>
                 <span className="land-sheet-stat-value">{turnCount}</span>
               </div>
               <div
@@ -335,15 +344,15 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 data-insertions={preview.diffstat.insertions}
                 data-deletions={preview.diffstat.deletions}
               >
-                <span className="land-sheet-stat-label">Changes</span>
+                <span className="land-sheet-stat-label">{t("land.statChanges")}</span>
                 <span className="land-sheet-stat-value">
-                  {preview.diffstat.files} file{preview.diffstat.files === 1 ? "" : "s"}{" "}
+                  {t(preview.diffstat.files === 1 ? "land.fileCountOne" : "land.fileCount", { count: preview.diffstat.files })}{" "}
                   <span className="land-sheet-ins">+{preview.diffstat.insertions}</span>{" "}
                   <span className="land-sheet-del">-{preview.diffstat.deletions}</span>
                 </span>
               </div>
               <div className="land-sheet-stat land-sheet-disk" data-total-bytes={usage?.total_bytes ?? ""}>
-                <span className="land-sheet-stat-label">Disk</span>
+                <span className="land-sheet-stat-label">{t("land.statDisk")}</span>
                 <span className="land-sheet-stat-value">
                   {usage
                     ? `${formatBytes(usage.total_bytes)}${usage.build_output_bytes > 0 ? ` (build output ${formatBytes(usage.build_output_bytes)})` : ""}`
@@ -365,9 +374,9 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
 
           {preview && !showResult && lastOpenLanding && (
             <div className="land-sheet-previous">
-              Landed before ({lastOpenLanding.mode === "archive" ? "archived" : lastOpenLanding.mode}).
+              {t("land.landedBefore", { mode: lastOpenLanding.mode === "archive" ? t("land.modeArchived") : lastOpenLanding.mode })}
               <button className="land-sheet-link-btn land-sheet-undo-previous" disabled={busy !== null} onClick={() => undo(lastOpenLanding)}>
-                Undo that
+                {t("land.undoThat")}
               </button>
             </div>
           )}
@@ -377,7 +386,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
               {preview.changedFiles.length > 0 && (
                 <details className="land-sheet-files">
                   <summary>
-                    {preview.changedFiles.length} changed file{preview.changedFiles.length === 1 ? "" : "s"}
+                    {t(preview.changedFiles.length === 1 ? "land.changedFileOne" : "land.changedFiles", { count: preview.changedFiles.length })}
                     {preview.uncommittedFiles > 0 ? `, ${preview.uncommittedFiles} not committed yet` : ""}
                   </summary>
                   <ul>
@@ -391,7 +400,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
               )}
 
               <fieldset className="land-sheet-options">
-                <legend>How to land</legend>
+                <legend>{t("land.howToLand")}</legend>
                 <LandOption
                   mode="commit"
                   current={mode}
@@ -408,12 +417,12 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 >
                   {gh?.state === "missing" && (
                     <button className="land-sheet-link-btn land-sheet-gh-link" onClick={() => void shellOpen(GH_INSTALL_URL)}>
-                      Install GitHub CLI
+                      {t("land.installGh")}
                     </button>
                   )}
                   {gh?.state === "signed_out" && (
                     <button className="land-sheet-link-btn land-sheet-gh-link" onClick={() => void shellOpen(GH_SIGN_IN_URL)}>
-                      Sign in: run gh auth login
+                      {t("land.signInGh", { command: GH_SIGN_IN_COMMAND })}
                     </button>
                   )}
                 </LandOption>
@@ -430,25 +439,25 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
               {conflictFiles && (
                 <div className="land-sheet-conflict">
                   <div>
-                    Merging would conflict in {conflictFiles.join(", ")}. Hermes never forces a merge.
+                    {t("land.conflict", { files: conflictFiles.join(", ") })}
                   </div>
                   <div className="land-sheet-conflict-actions">
                     <button className="land-sheet-btn land-sheet-route-pr" onClick={routeToPr} disabled={!!available?.pr}>
-                      Open a pull request instead
+                      {t("land.routeToPr")}
                     </button>
                     <button
                       className="land-sheet-btn land-sheet-ask-rebase"
                       onClick={() => void askRebase(conflictFiles)}
                       disabled={!sessionAlive}
                     >
-                      Ask agent to rebase
+                      {t("land.askRebase")}
                     </button>
                   </div>
                 </div>
               )}
 
               <label className="land-sheet-field">
-                <span>Commit message</span>
+                <span>{t("land.commitMessage")}</span>
                 <textarea
                   className="land-sheet-message"
                   value={message}
@@ -462,7 +471,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
 
               {mode === "pr" && (
                 <details className="land-sheet-prbody" open>
-                  <summary>Pull request description</summary>
+                  <summary>{t("land.prDescription")}</summary>
                   <pre className="land-sheet-prbody-text">{prBody}</pre>
                 </details>
               )}
@@ -475,11 +484,11 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                   disabled={preview.shared}
                   onChange={(e) => setArchiveAfter(e.target.checked)}
                 />
-                Archive the worktree after landing (the branch is kept)
+                {t("land.archiveAfter")}
               </label>
               {failing && (
                 <div className="land-sheet-warning">
-                  Done-When checks are failing. Landing now ships work your checks reject.
+                  {t("land.failingWarning")}
                 </div>
               )}
             </>
@@ -487,19 +496,22 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
 
           {outcome?.status === "landed" && outcome.record && (
             <div className="land-sheet-result" data-status="landed">
-              <strong>Landed.</strong> {landedText(outcome.record)}
+              <strong>{t("land.landed")}</strong> {landedText(outcome.record)}
             </div>
           )}
           {outcome?.status === "failed" && (
             <div className="land-sheet-result land-sheet-error" data-status="failed">
-              Landing stopped: {outcome.error}
+              {t("land.landingStopped", { error: outcome.error ?? "" })}
             </div>
           )}
           {archived && (
             <div className="land-sheet-result land-sheet-archived" data-freed-bytes={archived.totalBytes}>
-              Archived: removed the worktree folder ({formatBytes(archived.totalBytes)}
-              {archived.buildOutputBytes > 0 ? `, including ${formatBytes(archived.buildOutputBytes)} of build output` : ""}). The
-              branch <code>{archived.record.branch}</code> is kept.
+              {withNodes(
+                archived.buildOutputBytes > 0
+                  ? t("land.archivedResultBuild", { size: formatBytes(archived.totalBytes), build: formatBytes(archived.buildOutputBytes) })
+                  : t("land.archivedResult", { size: formatBytes(archived.totalBytes) }),
+                { branch: <code>{archived.record.branch}</code> },
+              )}
             </div>
           )}
 
@@ -507,18 +519,21 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
             <div className="land-sheet-checks">
               <div className="land-sheet-checks-head">
                 <span>
-                  Checks on{" "}
-                  <button className="land-sheet-link-btn land-sheet-pr-link" onClick={() => void shellOpen(prUrl)}>
-                    {prUrl}
-                  </button>
+                  {withNodes(t("land.checksOn"), {
+                    url: (
+                      <button className="land-sheet-link-btn land-sheet-pr-link" onClick={() => void shellOpen(prUrl)}>
+                        {prUrl}
+                      </button>
+                    ),
+                  })}
                 </span>
                 <button className="land-sheet-link-btn land-sheet-refresh-checks" onClick={() => void refreshChecks()}>
-                  Refresh
+                  {t("land.refresh")}
                 </button>
               </div>
               {checksError && <div className="land-sheet-error">{checksError}</div>}
-              {checks === null && !checksError && <div className="land-sheet-loading">Reading checks…</div>}
-              {checks?.length === 0 && <div className="land-sheet-muted">No checks reported yet.</div>}
+              {checks === null && !checksError && <div className="land-sheet-loading">{t("land.readingChecks")}</div>}
+              {checks?.length === 0 && <div className="land-sheet-muted">{t("land.noChecks")}</div>}
               <ul className="land-sheet-check-list">
                 {checks?.map((c) => (
                   <li key={`${c.workflow}/${c.name}`} className={`land-sheet-ci land-sheet-ci-${c.bucket}`} data-bucket={c.bucket}>
@@ -531,7 +546,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                         title={sessionAlive ? undefined : "The session was archived"}
                         onClick={() => void sendLog(c)}
                       >
-                        Send failing CI log to the agent
+                        {t("land.sendLog")}
                       </button>
                     )}
                   </li>
@@ -542,13 +557,13 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
 
           {undone && (
             <div className="land-sheet-result land-sheet-undone">
-              <strong>Undone.</strong>
+              <strong>{t("land.undone")}</strong>
               <ul className="land-sheet-undo-steps">
                 {undone.steps.map((s) => (
                   <li key={s}>{s}</li>
                 ))}
               </ul>
-              {undone.restored && <div>The worktree is back in a new session.</div>}
+              {undone.restored && <div>{t("land.restored")}</div>}
             </div>
           )}
 
@@ -565,7 +580,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 title={available?.archive ?? undefined}
                 onClick={() => void archiveOnly()}
               >
-                Archive only
+                {t("land.archiveOnly")}
               </button>
               <span className="land-sheet-spacer" />
               <button
@@ -573,7 +588,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 onClick={onClose}
                 disabled={busy !== null}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 className={`land-sheet-btn land-sheet-land ${failing ? "land-sheet-btn-secondary" : "land-sheet-btn-primary"}`}
@@ -594,7 +609,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
               )}
               <span className="land-sheet-spacer" />
               <button className="land-sheet-btn land-sheet-btn-primary land-sheet-close" disabled={busy !== null} onClick={onClose}>
-                Close
+                {t("common.close")}
               </button>
             </>
           )}

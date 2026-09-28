@@ -29,6 +29,7 @@ vi.mock("../state/SessionContext", () => ({
 }));
 
 import { LandSheet } from "../land/LandSheet";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { LandSheetHost, openLandSheet } from "../land/LandSheetHost";
 import { dispatchSessionEvent, _resetSessionEventStoreForTest } from "../agent/contract/sessionEventStore";
 import { setFakeLandTurnsForTest } from "../land/turnSource";
@@ -146,7 +147,7 @@ function calls(b: Backend, cmd: string) {
 
 async function openSheet() {
   const onClose = vi.fn();
-  render(<LandSheet sessionId={SID} projectId={PID} onClose={onClose} />);
+  render(<I18nProvider><LandSheet sessionId={SID} projectId={PID} onClose={onClose} /></I18nProvider>);
   await screen.findByText("Squash-merge into main locally");
   return onClose;
 }
@@ -202,7 +203,7 @@ describe("what the sheet shows", () => {
 
   it("warns when the project folder is on another branch than main", async () => {
     backend({ preview: preview({ base: { name: "release-1", head: "2222222222", checkedOutAt: "/repo" } }) });
-    render(<LandSheet sessionId={SID} projectId={PID} onClose={vi.fn()} />);
+    render(<I18nProvider><LandSheet sessionId={SID} projectId={PID} onClose={vi.fn()} /></I18nProvider>);
     await screen.findByText("Squash-merge into release-1 locally");
     expect(document.querySelector(".land-sheet-base-note")?.textContent).toBe(
       "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
@@ -342,7 +343,7 @@ describe("the host", () => {
     backend();
     __resetFeatureFlagsForTest();
     await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ landSheet: false }) });
-    const { unmount } = render(<LandSheetHost />);
+    const { unmount } = render(<I18nProvider><LandSheetHost /></I18nProvider>);
     openLandSheet(SID, PID);
     await new Promise((r) => setTimeout(r, 20));
     expect(document.querySelector(".land-sheet")).toBeNull();
@@ -350,7 +351,7 @@ describe("the host", () => {
 
     __resetFeatureFlagsForTest();
     await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ landSheet: true }) });
-    render(<LandSheetHost />);
+    render(<I18nProvider><LandSheetHost /></I18nProvider>);
     openLandSheet(SID, PID);
     await screen.findByText("Squash-merge into main locally");
   });
