@@ -40,11 +40,16 @@ export function requiredCheckState(checkRuns, name) {
  * Poll `fetchCheckRuns()` until the named check is no longer pending or the
  * deadline passes. `sleep` and `now` are injectable for tests.
  *
- * `missingGraceMs`: for this long after the start, a commit with no run of
- * that name counts as pending rather than missing. CI and the release train
- * start together on a push to main, so the release's first look can come
- * before CI has registered its check runs. After the grace, missing means
- * CI did not run on this commit.
+ * A commit with no run of that name is not necessarily one CI skipped:
+ * GitHub registers a job's check run only once the job is queued, i.e. once
+ * every job it `needs` has finished, and the gate is the last job of CI. So
+ * a missing run counts as pending while either
+ *   - `ciRunning()` says a CI workflow run for the commit is queued or in
+ *     progress (the check will appear when that run reaches the job), or
+ *   - less than `missingGraceMs` has passed since the start (CI and the
+ *     release train start together on a push to main, and the CI run itself
+ *     can take a moment to be registered).
+ * Otherwise missing means CI did not run on this commit.
  */
 export async function waitForRequiredCheck(
   fetchCheckRuns,
@@ -53,6 +58,7 @@ export async function waitForRequiredCheck(
     timeoutMs = 60 * 60_000,
     intervalMs = 30_000,
     missingGraceMs = 0,
+    ciRunning = async () => false,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     now = Date.now,
     log = () => {},
@@ -62,8 +68,12 @@ export async function waitForRequiredCheck(
   const deadline = started + timeoutMs;
   for (;;) {
     let result = requiredCheckState(await fetchCheckRuns(), name);
-    if (result.state === "missing" && now() - started < missingGraceMs) {
-      result = { state: "pending", detail: `${result.detail} yet (CI may not have registered it; waiting up to ${Math.round(missingGraceMs / 60_000)} min for it to appear)` };
+    if (result.state === "missing") {
+      if (await ciRunning()) {
+        result = { state: "pending", detail: `${result.detail} yet; a CI run for it is still going (the check is registered when that run reaches the job)` };
+      } else if (now() - started < missingGraceMs) {
+        result = { state: "pending", detail: `${result.detail} yet (CI may not have registered it; waiting up to ${Math.round(missingGraceMs / 60_000)} min for it to appear)` };
+      }
     }
     if (result.state !== "pending") return result;
     if (now() >= deadline) return { state: "failure", detail: `${result.detail}; gave up waiting after ${Math.round(timeoutMs / 60_000)} min` };

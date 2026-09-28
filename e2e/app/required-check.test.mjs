@@ -110,6 +110,46 @@ describe("waitForRequiredCheck", () => {
     expect(logged[0]).toMatch(/no check run named "gate" on this commit yet/);
   });
 
+  it("while a CI run for the commit is going, waits past the grace for the check to be registered", async () => {
+    // The gate is CI's last job and GitHub registers a job's check run only
+    // once the jobs it needs are done: for most of a CI run there is no
+    // "gate" run at all, only the workflow run.
+    const answers = [[], [], [], [run({ status: "in_progress", conclusion: null })], [run()]];
+    const ci = [true, true, true, false, false];
+    let clock = 0;
+    const logged = [];
+    const r = await waitForRequiredCheck(() => answers.shift(), "gate", {
+      timeoutMs: 90 * 60_000,
+      intervalMs: 10 * 60_000,
+      missingGraceMs: 60_000,
+      ciRunning: async () => ci.shift(),
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+      log: (m) => logged.push(m),
+    });
+    expect(r.state).toBe("success");
+    expect(logged[0]).toMatch(/a CI run for it is still going/);
+    expect(logged).toHaveLength(4);
+  });
+
+  it("with no CI run for the commit, a check that never appears is missing after the grace", async () => {
+    let clock = 0;
+    const r = await waitForRequiredCheck(() => [], "gate", {
+      timeoutMs: 90 * 60_000,
+      intervalMs: 60_000,
+      missingGraceMs: 2 * 60_000,
+      ciRunning: async () => false,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+    });
+    expect(r.state).toBe("missing");
+    expect(clock).toBe(2 * 60_000);
+  });
+
   it("after the grace period, a run that never appeared is missing", async () => {
     let clock = 0;
     let calls = 0;

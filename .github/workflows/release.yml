@@ -183,9 +183,10 @@ jobs:
   # the real-app scenarios on macOS, Windows and Linux plus the acceptance
   # ledger (e2e/acceptance.yml). A commit CI never ran on, or one whose
   # check is red, is not released. Waits for a check that is still running,
-  # and gives CI a few minutes to register the check at all: on a push to
-  # main, CI and this workflow start at the same moment, so the first look
-  # can come before CI has created its check runs.
+  # and, while CI's own workflow run for the commit is still going, for the
+  # check to exist at all: on a push to main, CI and this workflow start at
+  # the same moment, and GitHub registers the `gate` check run only when CI
+  # reaches that job, i.e. after every other CI job has finished.
   proof:
     needs: config
     if: needs.config.outputs.release == 'true'
@@ -202,7 +203,7 @@ jobs:
       - name: The released commit passed the CI gate and the ledger is well-formed
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --wait-minutes 90 --missing-grace-minutes 15
+        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --ci-workflow ci.yml --wait-minutes 90 --missing-grace-minutes 15
 
   # ── Frontend tests ─────────────────────────────────────────────────
   test-frontend:

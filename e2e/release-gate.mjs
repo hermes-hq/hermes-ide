@@ -11,11 +11,17 @@
 //   --check <name>         the check run that must have passed (default: gate)
 //   --repo <owner/name>    default $GITHUB_REPOSITORY
 //   --wait-minutes <n>     how long to wait for a running check (default 90)
+//   --ci-workflow <file>   the workflow whose run registers the check
+//                          (default ci.yml). While a run of it for the
+//                          commit is queued or in progress, a missing check
+//                          is waited for: GitHub registers the check run only
+//                          when CI reaches that job, and the gate is CI's
+//                          last job. "" turns this off.
 //   --missing-grace-minutes <n>
-//                          how long a commit may have no run of that name
-//                          before that counts as "CI did not run" (default
-//                          15): CI and the release start together on a push
-//                          to main, so the check can be a few seconds away
+//                          how long a commit may have neither the check nor
+//                          a CI run before that counts as "CI did not run"
+//                          (default 15): CI and the release start together
+//                          on a push to main
 //   --check-runs <file>    read the check runs from a JSON file instead of
 //                          GitHub (a { check_runs: [...] } object or an array)
 //   --ledger <file>        default e2e/acceptance.yml
@@ -38,6 +44,7 @@ const opts = {
   check: "gate",
   repo: process.env.GITHUB_REPOSITORY || "",
   waitMinutes: 90,
+  ciWorkflow: "ci.yml",
   missingGraceMinutes: 15,
   checkRuns: "",
   ledger: "e2e/acceptance.yml",
@@ -53,13 +60,14 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--check") opts.check = next();
   else if (a === "--repo") opts.repo = next();
   else if (a === "--wait-minutes") opts.waitMinutes = Number(next());
+  else if (a === "--ci-workflow") opts.ciWorkflow = next();
   else if (a === "--missing-grace-minutes") opts.missingGraceMinutes = Number(next());
   else if (a === "--check-runs") opts.checkRuns = next();
   else if (a === "--ledger") opts.ledger = next();
   else if (a === "--scenarios") opts.scenarios = next();
   else if (a === "--help" || a === "-h") {
     console.log(
-      "usage: node e2e/release-gate.mjs --sha <commit> [--check gate] [--repo o/r] [--wait-minutes n] [--missing-grace-minutes n] [--check-runs f]",
+      "usage: node e2e/release-gate.mjs --sha <commit> [--check gate] [--repo o/r] [--ci-workflow ci.yml] [--wait-minutes n] [--missing-grace-minutes n] [--check-runs f]",
     );
     process.exit(0);
   } else throw new Error(`unknown option ${a}`);
@@ -107,15 +115,34 @@ function fetchFromGitHub() {
   return runs;
 }
 
+// Is a run of the CI workflow for this commit still queued or in progress?
+// Then the check will be registered once that run reaches the job.
+function ciRunningOnGitHub() {
+  const res = spawnSync(
+    "gh",
+    ["api", `repos/${opts.repo}/actions/workflows/${opts.ciWorkflow}/runs?head_sha=${opts.sha}&per_page=20`, "-H", "Accept: application/vnd.github+json"],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (res.status !== 0) {
+    console.log(`  could not list ${opts.ciWorkflow} runs for ${opts.sha}: ${(res.stderr || res.stdout || "").trim()}`);
+    return false;
+  }
+  const runs = JSON.parse(res.stdout).workflow_runs ?? [];
+  return runs.some((r) => r.status !== "completed");
+}
+
 const fetchCheckRuns = opts.checkRuns ? fetchFromFile : fetchFromGitHub;
+// Offline (--check-runs) reads a fixed file: a missing run there is missing.
+const online = !opts.checkRuns;
 console.log(
-  `commit ${opts.sha}: waiting up to ${opts.waitMinutes} min for the "${opts.check}" check (up to ${opts.missingGraceMinutes} min for CI to register it)`,
+  `commit ${opts.sha}: waiting up to ${opts.waitMinutes} min for the "${opts.check}" check` +
+    (online ? ` (while a ${opts.ciWorkflow || "CI"} run for the commit is going, or ${opts.missingGraceMinutes} min, for it to be registered)` : ""),
 );
 const result = await waitForRequiredCheck(fetchCheckRuns, opts.check, {
   timeoutMs: opts.waitMinutes * 60_000,
-  intervalMs: opts.checkRuns ? 0 : 30_000,
-  // Offline (--check-runs) reads a fixed file: a missing run there is missing.
-  missingGraceMs: opts.checkRuns ? 0 : opts.missingGraceMinutes * 60_000,
+  intervalMs: online ? 30_000 : 0,
+  missingGraceMs: online ? opts.missingGraceMinutes * 60_000 : 0,
+  ciRunning: online && opts.ciWorkflow ? async () => ciRunningOnGitHub() : async () => false,
   log: (m) => console.log(`  ${m}`),
 });
 console.log(`  ${result.detail}`);
