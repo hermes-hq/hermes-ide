@@ -53,6 +53,7 @@ node e2e/app/scenarios/terminal-echo.mjs        # one scenario
 node e2e/app/run.mjs --repeat 20 terminal-echo.mjs
 node e2e/app/run.mjs                            # every scenario, once
 node e2e/app/run.mjs --fresh                    # ...forgetting earlier runs' results
+node e2e/app/run.mjs --ci-set shards --shard 2/3 --keep-going   # what CI shard 2 runs
 node e2e/acceptance-check.mjs                   # the ledger is well-formed
 node e2e/acceptance-check.mjs --results <dir>   # ...and green everywhere
 ```
@@ -63,6 +64,20 @@ Set `HERMES_E2E_OUT` to choose where the app and the evidence go (default:
 `node e2e/app/cli.mjs` talks to a running test app step by step; see the
 header of that file.
 
+`run.mjs` exits 1 exactly when a run of that invocation failed (older runs
+kept in `results.json` do not count) and ends with a summary that names each
+failed scenario.
+
+## In CI
+
+`.github/workflows/ci.yml` builds the test app once per OS and uploads it;
+three shard jobs per OS download that build and each run the scenarios a
+hash of the file name puts on their shard (`ci-plan.mjs`), so a scenario
+always runs on the same shard. `ci-plan.mjs` also lists the few scenarios
+that run elsewhere (the build job, the real key-press step) or not in CI.
+The required `gate` check fails when any shard fails. terminal-echo runs
+once per change and 20 times in a row in the nightly run.
+
 ## Adding a scenario
 
 1. Create `scenarios/<feature-id>-<name>.mjs` (copy `terminal-echo.mjs`).
@@ -71,7 +86,9 @@ header of that file.
 2. Add the file to the feature's criteria in `e2e/acceptance.yml`. Append
    `@linux`, `@darwin` or `@win32` only when the scenario genuinely cannot run
    elsewhere.
-3. Run it locally, then let CI prove it on all three runners.
+3. Run it locally, then let CI prove it on all three runners. CI picks up
+   every new file under `scenarios/` on its own; list it in `ci-plan.mjs`
+   only when it has to run somewhere other than the shards.
 
 To prove something that only takes effect on the next launch, relaunch the
 app against the same data: pass one `homeDir` to every `launchApp` call on

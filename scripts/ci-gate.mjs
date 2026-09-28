@@ -24,6 +24,7 @@ export const JOB_TRIGGERS = {
   "rust-fmt": ["rust", "ci"],
   "rust-clippy": ["rust", "ci"],
   "rust-test": ["rust", "ci"],
+  "e2e-build": ["frontend", "rust", "ci"],
   "e2e-app": ["frontend", "rust", "ci"],
   acceptance: ["frontend", "rust", "ci"],
   actionlint: ["workflows"],

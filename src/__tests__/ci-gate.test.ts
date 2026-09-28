@@ -24,6 +24,7 @@ function allJobs(result: string): Needs {
 		"rust-fmt": { result },
 		"rust-clippy": { result },
 		"rust-test": { result },
+		"e2e-build": { result },
 		"e2e-app": { result },
 		acceptance: { result },
 		actionlint: { result },
@@ -40,6 +41,7 @@ describe("CI gate", () => {
 	it("fails when any job was cancelled, even if nothing it checks changed", () => {
 		const needs = { changes: changes({ frontend: "true" }), ...allJobs("skipped") } as Needs;
 		needs.frontend = { result: "success" };
+		needs["e2e-build"] = { result: "success" };
 		needs["e2e-app"] = { result: "success" };
 		needs.acceptance = { result: "success" };
 		needs["rust-test"] = { result: "cancelled" };
@@ -60,6 +62,15 @@ describe("CI gate", () => {
 		const failedRunner = { changes: changes({ frontend: "true" }), ...allJobs("success") } as Needs;
 		failedRunner["e2e-app"] = { result: "failure" };
 		expect(evaluateGate(failedRunner).ok).toBe(false);
+
+		// A failed test-app build leaves its shards skipped: both fail the gate.
+		const failedBuild = { changes: changes({ frontend: "true" }), ...allJobs("success") } as Needs;
+		failedBuild["e2e-build"] = { result: "failure" };
+		failedBuild["e2e-app"] = { result: "skipped" };
+		const { ok, lines } = evaluateGate(failedBuild);
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/e2e-build: failure/);
+		expect(lines.join("\n")).toMatch(/e2e-app: skipped, but its inputs changed/);
 
 		for (const result of ["skipped", "cancelled"]) {
 			const needs = { changes: changes({ rust: "true" }), ...allJobs("success") } as Needs;
@@ -163,8 +174,11 @@ function workflow(overrides: { gateNeeds?: string; jobs?: Record<string, string>
 		"rust-test": `
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' # comment`,
-		"e2e-app": `
+		"e2e-build": `
     needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
+		"e2e-app": `
+    needs: [changes, e2e-build]
     if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
 		acceptance: `
     needs: [changes, e2e-app]
@@ -182,7 +196,7 @@ function workflow(overrides: { gateNeeds?: string; jobs?: Record<string, string>
 		...overrides.jobs,
 	};
 	const gateNeeds =
-		overrides.gateNeeds ?? "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy";
+		overrides.gateNeeds ?? "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-build, e2e-app, acceptance, privacy";
 	const body = Object.entries(jobs)
 		.filter(([, text]) => text !== "")
 		.map(([id, text]) => `  ${id}:${text}\n`)
@@ -224,7 +238,7 @@ describe("CI gate: workflow and gate agree", () => {
 	});
 
 	it("fails when gate.needs names a job that does not exist, or a known job is removed", () => {
-		const extra = checkWorkflow(workflow({ gateNeeds: "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, ghost" }));
+		const extra = checkWorkflow(workflow({ gateNeeds: "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-build, e2e-app, acceptance, privacy, ghost" }));
 		expect(extra.ok).toBe(false);
 		expect(extra.lines.join("\n")).toMatch(/ghost/);
 
@@ -246,7 +260,7 @@ describe("CI gate: workflow and gate agree", () => {
 
 	it("fails when an ungated job is put in the gate, or the gate does not always run", () => {
 		const gated = checkWorkflow(
-			workflow({ gateNeeds: "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, rust-audit" }),
+			workflow({ gateNeeds: "changes, actionlint, frontend, rust-fmt, rust-clippy, rust-test, e2e-build, e2e-app, acceptance, privacy, rust-audit" }),
 		);
 		expect(gated.ok).toBe(false);
 		expect(gated.lines.join("\n")).toMatch(/rust-audit: listed as UNGATED/);
