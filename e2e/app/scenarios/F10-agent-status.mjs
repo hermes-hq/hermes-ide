@@ -405,6 +405,9 @@ try {
   const shell = classifyProbe(line);
   log(`  the session's shell is ${shell}`);
   log("B: an agent reported as ended while the shell stays open says exited until the terminal runs something again");
+  // Let the probe's output settle first (Windows keeps the phase busy for a
+  // while after a command), so the fake agent's start is new activity.
+  await waitForRowStatus(bridge, termId, "idle", "the shell to settle at its prompt", { timeoutMs: 20_000 });
   const ended = await emitFromRust(bridge, termId, { type: "status", at: "now", source: "hi", status: { kind: "exited", confidence: "exact", detail: "F10 the agent ended" } });
   assert(ended.ok, "Rust emitted the launch helper's ended report");
   await waitForRowStatus(bridge, termId, "exited", "the terminal row to say exited");
