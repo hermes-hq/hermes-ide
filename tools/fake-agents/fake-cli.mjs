@@ -425,6 +425,7 @@ async function main() {
 	let line = "";
 	let escape = "";
 	let pasting = false;
+	let pasteStart = 0;
 	for (;;) {
 		const key = await nextKey();
 		if (key === null || key === "\x04") {
@@ -435,9 +436,12 @@ async function main() {
 			escape += key;
 			if (escape === `${ESC}[200~`) {
 				pasting = true;
+				pasteStart = line.length;
 				escape = "";
 			} else if (escape === `${ESC}[201~`) {
 				pasting = false;
+				// Like the real CLI: a paste shows as a placeholder, not its text.
+				out(`[pasted ${line.length - pasteStart} chars]`);
 				escape = "";
 			} else if (!`${ESC}[200~`.startsWith(escape) && !`${ESC}[201~`.startsWith(escape)) {
 				escape = ""; // some other key sequence: dropped
@@ -553,7 +557,7 @@ async function main() {
 			// Outside the `prompts` mode only a paste builds a prompt; typed
 			// text is echoed, as before.
 			if (promptsMode || pasting) line += key;
-			out(key);
+			if (!pasting) out(key);
 		}
 	}
 }
