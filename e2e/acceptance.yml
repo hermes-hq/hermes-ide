@@ -449,6 +449,10 @@ features:
         # message) replaces a conversation; an interrupt never does.
         text: "Ctrl-C at a resumed agent's startup prompt keeps the conversation: the next launch resumes the same one"
         scenarios: [N13-interrupted-resume.mjs]
+      N13-5:
+        # The old id stays until the fresh conversation has started.
+        text: "When a failed resume starts a new conversation that is interrupted before it starts, the session keeps the previous conversation"
+        scenarios: [N13-interrupted-resume.mjs]
   C0:
     name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
     # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).

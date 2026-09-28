@@ -50,7 +50,14 @@ const SCENARIO = "N12-launch-and-resume";
 const startedAt = Date.now();
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
-rmSync(logFile, { force: true });
+// Start from a clean evidence folder: a screenshot or record left by an
+// earlier run must not sit next to this run's result.
+mkdirSync(evidenceDir, { recursive: true });
+for (const name of readdirSync(evidenceDir)) {
+  if (name === "scenario.log" || name === "result.json" || name === "fake-launch-records" || name.endsWith(".png") || /^run-\w+$/.test(name)) {
+    rmSync(join(evidenceDir, name), { recursive: true, force: true });
+  }
+}
 const log = createLogger(logFile);
 const onWindows = platform() === "win32";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -131,12 +138,26 @@ const setFakeMode = (mode) => {
   writeFileSync(join(recordDir, "mode"), `${mode}\n`);
   log(`  fake vendor mode: ${mode}`);
 };
+/**
+ * One launch record. The fake replaces it whole on every update; a failed
+ * parse (a fake from before that, or a slow file system) is read again.
+ */
+function readRecord(file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(readFileSync(join(recordDir, file), "utf8"));
+    } catch (e) {
+      if (attempt >= 20 || !(e instanceof SyntaxError)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
 /** The fake's launch records, oldest first. */
 const records = () =>
   readdirSync(recordDir)
-    .filter((f) => f.startsWith("launch-"))
+    .filter((f) => f.startsWith("launch-") && f.endsWith(".json"))
     .sort()
-    .map((f) => ({ file: f, ...JSON.parse(readFileSync(join(recordDir, f), "utf8")) }));
+    .map((f) => ({ file: f, ...readRecord(f) }));
 async function waitForRecords(count, { timeoutMs = 30_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

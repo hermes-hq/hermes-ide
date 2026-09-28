@@ -182,6 +182,46 @@ describe("fake vendor CLI", () => {
 		expect(records(dir).map((r) => r.exit.why).sort()).toEqual(["ctrl-c-at-trust-prompt", "ctrl-c-at-trust-prompt"]);
 	});
 
+	it("a reader polling the launch record while the fake writes it never sees a half-written file", async () => {
+		const dir = tmp();
+		const { file } = hookSettings(dir);
+		const child = spawn(process.execPath, [FAKE, "--session-id", "sid-poll", "--settings", file], {
+			env: { ...process.env, HERMES_FAKE_DIR: dir },
+			stdio: ["pipe", "ignore", "ignore"],
+		});
+		const closed = new Promise((r) => child.on("close", r));
+		// Queued before the fake reads: it starts, runs its hooks, then quits
+		// (running the end hooks) — a burst of record updates.
+		child.stdin.write("q");
+		let reads = 0;
+		let halfWritten = 0;
+		let exited = false;
+		const deadline = Date.now() + 8_000;
+		// A tight synchronous loop: the fake is another process, so this reads
+		// as fast as the disk allows while it writes.
+		while (!exited && Date.now() < deadline) {
+			for (const f of readdirSync(dir).filter((n) => n.startsWith("launch-"))) {
+				let text;
+				try {
+					text = readFileSync(join(dir, f), "utf8");
+				} catch {
+					continue; // not there yet
+				}
+				reads++;
+				try {
+					exited = JSON.parse(text).exit !== null;
+				} catch {
+					halfWritten++;
+				}
+			}
+		}
+		expect(await closed).toBe(0);
+		expect(exited).toBe(true);
+		expect(reads).toBeGreaterThan(10);
+		expect(halfWritten).toBe(0);
+		expect(readdirSync(dir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+	});
+
 	it.skipIf(process.platform === "win32")("SIGINT at the trust prompt is the same as the key", async () => {
 		const dir = tmp();
 		const child = spawn(process.execPath, [FAKE, "--resume", "old-1"], {

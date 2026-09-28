@@ -126,8 +126,25 @@ if (RECORD_DIR) {
 	fs.mkdirSync(RECORD_DIR, { recursive: true });
 	recordFile = path.join(RECORD_DIR, `launch-${String(startedAt).padStart(15, "0")}-${process.pid}.json`);
 }
+// A test polls the record while the fake is still writing to it, so it is
+// replaced whole (a temporary file renamed over it), never seen half-written.
+// The temporary name does not start with "launch-", so a reader listing the
+// records never picks it up.
 const save = () => {
-	if (recordFile) fs.writeFileSync(recordFile, JSON.stringify(record, null, 2) + "\n");
+	if (!recordFile) return;
+	const text = JSON.stringify(record, null, 2) + "\n";
+	const tmp = path.join(path.dirname(recordFile), `.${path.basename(recordFile)}.tmp`);
+	fs.writeFileSync(tmp, text);
+	// Windows refuses the rename for a moment while a reader holds the file.
+	for (let attempt = 0; ; attempt++) {
+		try {
+			fs.renameSync(tmp, recordFile);
+			return;
+		} catch (e) {
+			if (attempt >= 20 || (e.code !== "EPERM" && e.code !== "EACCES" && e.code !== "EBUSY")) throw e;
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+		}
+	}
 };
 const note = (ev, extra = {}) => {
 	record.events.push({ t: Date.now() - startedAt, ev, ...extra });
