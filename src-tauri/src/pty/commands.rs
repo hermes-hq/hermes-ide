@@ -1743,39 +1743,78 @@ pub fn write_to_session(
 ///      told apart from a foreground one, so on Windows suggestions also stay
 ///      off while the shell has one running. Erring that way never draws over
 ///      an agent.
+///
+/// The frontend asks every 300 ms and before each suggestion. The check runs
+/// on a blocking thread, and the PTY manager lock is held only for step 1:
+/// keystrokes are written under the same lock, and steps 2 and 3 (the Windows
+/// one scans the whole process table) must never make typing wait.
 #[tauri::command]
-pub async fn is_shell_foreground(
-    state: State<'_, AppState>,
-    session_id: String,
+pub async fn is_shell_foreground(app: AppHandle, session_id: String) -> Result<bool, String> {
+    use tauri::Manager;
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        foreground_lock_released_for_scan(
+            &state.pty_manager,
+            |mgr| {
+                let probe = probe_foreground(mgr, &session_id);
+                #[cfg(feature = "e2e")]
+                let probe = e2e_slow_foreground::probe(probe);
+                probe
+            },
+            |shell_pid| {
+                #[cfg(feature = "e2e")]
+                e2e_slow_foreground::scan();
+                shell_at_prompt_by_process_table(shell_pid)
+            },
+        )
+    })
+    .await
+    .map_err(|e| format!("Foreground check failed: {}", e))?
+}
+
+/// Run `probe` under the PTY manager lock and, only after releasing it,
+/// `scan` when the probe could not tell. `probe` gives the shell's pid and,
+/// when the terminal can say, whether the shell owns it; `scan` answers from
+/// the process table.
+fn foreground_lock_released_for_scan<M>(
+    manager: &StdMutex<M>,
+    probe: impl FnOnce(&M) -> Result<(u32, Option<bool>), String>,
+    scan: impl FnOnce(u32) -> bool,
 ) -> Result<bool, String> {
-    // Hold the PTY manager lock only for what needs the session: its shell
-    // pid and, on Unix, one tcgetpgrp() on the master. Keystrokes are written
-    // under the same lock, so the slower fallbacks below (the Windows one
-    // scans the whole process table) run after it is released.
-    let (shell_pid, from_master) = {
-        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-        let session = mgr
-            .sessions
-            .get(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
-        let shell_pid = session
-            .child
-            .process_id()
-            .ok_or_else(|| "Shell process ID not available".to_string())?;
-
-        // ── macOS and Linux: the foreground process group, from the master ──
-        #[cfg(unix)]
-        let from_master = shell_group_is_foreground(session.master.as_ref(), shell_pid);
-        #[cfg(not(unix))]
-        let from_master: Option<bool> = None;
-
-        (shell_pid, from_master)
+    let (shell_pid, from_terminal) = {
+        let mgr = manager.lock().unwrap_or_else(|e| e.into_inner());
+        probe(&mgr)?
     };
-
-    if let Some(owns) = from_master {
-        return Ok(owns);
+    match from_terminal {
+        Some(owns) => Ok(owns),
+        None => Ok(scan(shell_pid)),
     }
+}
 
+/// The session's shell pid and, on Unix, whether its process group is the
+/// terminal's foreground group (one `tcgetpgrp()` on the master).
+fn probe_foreground(
+    mgr: &super::PtyManager,
+    session_id: &str,
+) -> Result<(u32, Option<bool>), String> {
+    let session = mgr
+        .sessions
+        .get(session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    let shell_pid = session
+        .child
+        .process_id()
+        .ok_or_else(|| "Shell process ID not available".to_string())?;
+    #[cfg(unix)]
+    let from_master = shell_group_is_foreground(session.master.as_ref(), shell_pid);
+    #[cfg(not(unix))]
+    let from_master: Option<bool> = None;
+    Ok((shell_pid, from_master))
+}
+
+/// Whether the shell is at its prompt, from the process table (steps 2 and 3
+/// above). Slow on Windows; never call it holding the PTY manager lock.
+fn shell_at_prompt_by_process_table(shell_pid: u32) -> bool {
     // ── Linux: read tpgid from /proc/{pid}/stat ──
     #[cfg(target_os = "linux")]
     {
@@ -1789,7 +1828,7 @@ pub async fn is_shell_foreground(
                     if let (Ok(pgrp), Ok(tpgid)) =
                         (fields[2].parse::<i32>(), fields[5].parse::<i32>())
                     {
-                        return Ok(tpgid == pgrp);
+                        return tpgid == pgrp;
                     }
                 }
             }
@@ -1799,17 +1838,54 @@ pub async fn is_shell_foreground(
     // ── Fallback: no direct children → shell is at prompt ──
     #[cfg(unix)]
     {
-        let children = enumerate_child_pids(shell_pid);
-        Ok(children.is_empty())
+        enumerate_child_pids(shell_pid).is_empty()
     }
-
-    // Windows: the process-table scan blocks, so keep it off the async
-    // runtime's worker threads.
     #[cfg(not(unix))]
     {
-        tokio::task::spawn_blocking(move || !has_child_process(shell_pid))
-            .await
-            .map_err(|e| format!("Foreground check failed: {}", e))
+        !has_child_process(shell_pid)
+    }
+}
+
+/// e2e builds only: make the foreground check slow on purpose, so the
+/// real-app scenario F03-foreground-check-lock can show that typing does not
+/// wait for it. `HERMES_E2E_FOREGROUND_SCAN_MS` sends every check down the
+/// process-table path and makes that scan take this long. With
+/// `HERMES_E2E_FOREGROUND_SCAN_UNDER_LOCK=1` the delay is spent while the
+/// PTY manager lock is held instead (the scenario's negative control).
+#[cfg(feature = "e2e")]
+mod e2e_slow_foreground {
+    use std::time::Duration;
+
+    fn delay() -> Option<Duration> {
+        std::env::var("HERMES_E2E_FOREGROUND_SCAN_MS")
+            .ok()?
+            .parse()
+            .ok()
+            .map(Duration::from_millis)
+    }
+
+    fn under_lock() -> bool {
+        std::env::var("HERMES_E2E_FOREGROUND_SCAN_UNDER_LOCK").as_deref() == Ok("1")
+    }
+
+    /// Runs under the lock.
+    pub fn probe(
+        probe: Result<(u32, Option<bool>), String>,
+    ) -> Result<(u32, Option<bool>), String> {
+        let Some(delay) = delay() else { return probe };
+        if under_lock() {
+            std::thread::sleep(delay);
+        }
+        probe.map(|(pid, _)| (pid, None))
+    }
+
+    /// Runs with the lock released.
+    pub fn scan() {
+        if let Some(delay) = delay() {
+            if !under_lock() {
+                std::thread::sleep(delay);
+            }
+        }
     }
 }
 
@@ -1828,11 +1904,8 @@ fn shell_group_is_foreground(
     Some(foreground == shell_pgid)
 }
 
-/// Whether any running process has `parent_pid` as its parent. The console
-/// host Windows may start for a console program is not a program the user
-/// ran, so it does not count. Windows reuses process ids and keeps an
-/// orphan's old parent id, so a process that started before the shell was
-/// the child of an earlier process with the same id, and does not count.
+/// Whether any running process has `parent_pid` as its parent and counts as
+/// a program the shell started (see [`counts_as_shell_child`]).
 #[cfg(any(not(unix), test))]
 fn has_child_process(parent_pid: u32) -> bool {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -1841,11 +1914,32 @@ fn has_child_process(parent_pid: u32) -> bool {
     let parent = Pid::from_u32(parent_pid);
     let parent_started = sys.process(parent).map_or(0, |p| p.start_time());
     sys.processes().values().any(|p| {
-        p.parent() == Some(parent) && p.start_time() >= parent_started && {
-            let name = p.name().to_string_lossy().to_ascii_lowercase();
-            name != "conhost.exe" && name != "openconsole.exe"
-        }
+        p.parent() == Some(parent)
+            && counts_as_shell_child(parent_started, p.start_time(), &p.name().to_string_lossy())
     })
+}
+
+/// Whether a process whose parent id is the shell's pid is a program the
+/// shell started. Start times are in whole seconds since the epoch; 0 means
+/// the OS would not say (Windows cannot open some processes).
+///
+/// - Windows reuses process ids and keeps an orphan's old parent id, so a
+///   process that started before the shell was the child of an earlier
+///   process with the same id: it does not count.
+/// - The times have one-second granularity. A child started in the same
+///   second as the shell counts; so does an orphan of a reused id started
+///   in that second, which only keeps suggestions off (never draws over an
+///   agent).
+/// - An unknown time counts, for the same reason.
+/// - The console host Windows may start for a console program is not a
+///   program the user ran, so it does not count.
+#[cfg(any(not(unix), test))]
+fn counts_as_shell_child(shell_started: u64, started: u64, name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    if name == "conhost.exe" || name == "openconsole.exe" {
+        return false;
+    }
+    shell_started == 0 || started == 0 || started >= shell_started
 }
 
 #[tauri::command]
@@ -4010,12 +4104,23 @@ mod ssh_command_tests {
     }
 }
 
+// These tests drive foreground_lock_released_for_scan with injected probe and
+// scan closures (plus the real probe and process scan where noted). The wiring
+// in is_shell_foreground itself (probe_foreground, then
+// shell_at_prompt_by_process_table on spawn_blocking) is covered by the
+// real-app scenario e2e/app/scenarios/F03-foreground-check-lock.mjs.
 #[cfg(test)]
 mod foreground_tests {
-    use super::has_child_process;
+    use super::{
+        counts_as_shell_child, foreground_lock_released_for_scan, has_child_process,
+        probe_foreground,
+    };
+    use crate::pty::PtyManager;
     #[cfg(unix)]
     use std::io::Write;
     use std::process::{Child, Command};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     /// A process that starts a child of its own and waits for it.
@@ -4121,6 +4226,165 @@ mod foreground_tests {
             after_exit,
             "the shell owns the terminal again after it exits"
         );
+    }
+
+    /// Whether another thread can take the lock right now.
+    fn free_for_another_thread<T: Send>(lock: &Mutex<T>) -> bool {
+        std::thread::scope(|s| s.spawn(|| lock.try_lock().is_ok()).join().unwrap())
+    }
+
+    #[test]
+    fn the_process_table_scan_runs_with_the_pty_manager_lock_released() {
+        let manager = Mutex::new(PtyManager::new());
+        // A "shell" at its prompt: a process that starts nothing.
+        let mut shell = lone_process();
+        let mut free_during_probe = None;
+        let mut free_during_scan = None;
+        let at_prompt = foreground_lock_released_for_scan(
+            &manager,
+            |_| {
+                free_during_probe = Some(free_for_another_thread(&manager));
+                Ok((shell.id(), None))
+            },
+            |pid| {
+                free_during_scan = Some(free_for_another_thread(&manager));
+                // The real scan: keystrokes must not wait for it.
+                !has_child_process(pid)
+            },
+        );
+        let _ = shell.kill();
+        let _ = shell.wait();
+        // The probe really does run under the lock, so this check can fail.
+        assert_eq!(free_during_probe, Some(false));
+        assert_eq!(
+            free_during_scan,
+            Some(true),
+            "another thread could not take the PTY manager lock during the scan"
+        );
+        assert_eq!(at_prompt, Ok(true), "the real scan found no child");
+    }
+
+    #[test]
+    fn a_keystroke_waiting_for_the_lock_does_not_wait_for_the_scan() {
+        let manager = Mutex::new(PtyManager::new());
+        let scan_started = AtomicBool::new(false);
+        let scan_done = AtomicBool::new(false);
+        std::thread::scope(|s| {
+            let typist = s.spawn(|| {
+                while !scan_started.load(Ordering::SeqCst) {
+                    std::thread::yield_now();
+                }
+                // What write_to_session does for each keystroke.
+                let _guard = manager.lock().unwrap();
+                scan_done.load(Ordering::SeqCst)
+            });
+            let _ = foreground_lock_released_for_scan(
+                &manager,
+                |_| Ok((1, None)),
+                |_| {
+                    scan_started.store(true, Ordering::SeqCst);
+                    // A slow enumerator: long enough for the keystroke to be
+                    // written first unless the lock is still held.
+                    std::thread::sleep(Duration::from_millis(500));
+                    scan_done.store(true, Ordering::SeqCst);
+                    true
+                },
+            );
+            let waited_for_scan = typist.join().unwrap();
+            assert!(!waited_for_scan, "the keystroke waited for the scan");
+        });
+    }
+
+    #[test]
+    fn an_answer_from_the_terminal_skips_the_scan() {
+        let manager = Mutex::new(PtyManager::new());
+        for owns in [true, false] {
+            let mut scanned = false;
+            let got = foreground_lock_released_for_scan(
+                &manager,
+                |_| Ok((1, Some(owns))),
+                |_| {
+                    scanned = true;
+                    !owns
+                },
+            );
+            assert_eq!(got, Ok(owns));
+            assert!(!scanned);
+        }
+    }
+
+    #[test]
+    fn an_unknown_session_is_an_error_and_nothing_is_scanned() {
+        let manager = Mutex::new(PtyManager::new());
+        let mut scanned = false;
+        let got = foreground_lock_released_for_scan(
+            &manager,
+            |mgr| probe_foreground(mgr, "no-such-session"),
+            |_| {
+                scanned = true;
+                true
+            },
+        );
+        assert_eq!(got, Err("Session no-such-session not found".to_string()));
+        assert!(!scanned);
+        assert!(free_for_another_thread(&manager), "the lock was left held");
+    }
+
+    // Start times are whole seconds since the epoch, as the OS reports them.
+    const SHELL_STARTED: u64 = 1_800_000_000;
+
+    #[test]
+    fn a_program_started_after_the_shell_is_its_child() {
+        assert!(counts_as_shell_child(
+            SHELL_STARTED,
+            SHELL_STARTED + 5,
+            "node.exe"
+        ));
+    }
+
+    #[test]
+    fn a_program_started_in_the_same_second_as_the_shell_is_its_child() {
+        // One-second clock: an agent launched right away must not be missed.
+        assert!(counts_as_shell_child(
+            SHELL_STARTED,
+            SHELL_STARTED,
+            "claude.exe"
+        ));
+    }
+
+    #[test]
+    fn an_orphan_of_an_earlier_process_with_the_reused_pid_is_not_a_child() {
+        // Windows reused the shell's pid; the orphan still names it as its
+        // parent but started before the shell existed.
+        assert!(!counts_as_shell_child(
+            SHELL_STARTED,
+            SHELL_STARTED - 1,
+            "node.exe"
+        ));
+        assert!(!counts_as_shell_child(
+            SHELL_STARTED,
+            1_700_000_000,
+            "node.exe"
+        ));
+    }
+
+    #[test]
+    fn an_unknown_start_time_counts_as_a_child() {
+        // Windows cannot open some processes: err towards "an agent may be
+        // running", which only keeps suggestions off.
+        assert!(counts_as_shell_child(SHELL_STARTED, 0, "elevated.exe"));
+        assert!(counts_as_shell_child(0, SHELL_STARTED - 60, "node.exe"));
+    }
+
+    #[test]
+    fn the_console_host_is_not_a_program_the_user_ran() {
+        for name in ["conhost.exe", "CONHOST.EXE", "OpenConsole.exe"] {
+            assert!(!counts_as_shell_child(
+                SHELL_STARTED,
+                SHELL_STARTED + 1,
+                name
+            ));
+        }
     }
 
     #[test]

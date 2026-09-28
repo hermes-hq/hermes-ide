@@ -76,6 +76,12 @@ features:
       F03-3:
         text: "A 1.4.0 database migrates and loses only execution_nodes, which its backup keeps"
         scenarios: [F03-retire-autopilot.mjs, N06-db-migrations.mjs]
+      F03-4:
+        # The test build makes every foreground check take a slow process
+        # scan on every OS (on macOS and Linux the terminal usually answers
+        # without one), so the scenario sees the Windows path everywhere.
+        text: "Typing in a terminal stays responsive while the check for a program in the foreground runs repeatedly"
+        scenarios: [F03-foreground-check-lock.mjs]
   N05:
     name: "Safe release train with a beta channel"
     # The train itself (draft, smoke on every OS, beta first, promote later)
