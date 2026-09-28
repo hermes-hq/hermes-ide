@@ -14,9 +14,10 @@
 //   3. Several rounds of: give A's and B's marks a colour of their own for
 //      this round (each page draws it before the next step), then screenshot
 //      A, then B. A's picture must show A's colour of this round and B's
-//      picture B's — never black, never the other app, and never a colour
-//      from an earlier round (a covered window that was not repainted still
-//      shows its old pixels). B's screenshot raises B over A again, so every
+//      picture B's, at 40 points spread over the left half — never black,
+//      never the other app, never a colour from an earlier round, and never
+//      torn rows of old and new pixels (what a covered window that was not
+//      repainted gave on the Linux runner). B's screenshot raises B over A again, so every
 //      round starts with A covered.
 //   4. macOS only: cover all of A's page with one colour; the screenshot
 //      must still be refused as a flat colour (the retries do not weaken
@@ -31,7 +32,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLogger, finishScenario, launchApp, outDir, pngPixel } from "../harness.mjs";
+import { createLogger, finishScenario, launchApp, outDir, pngPixels } from "../harness.mjs";
 
 const SCENARIO = "N01-screenshot-covered-window";
 const startedAt = Date.now();
@@ -86,12 +87,37 @@ function mark(bridge, colour, { whole = false } = {}) {
   `);
 }
 
-/** Screenshot `app` and return the colour in the middle of its left half. */
-async function shoot(app, name, file) {
+/**
+ * Points spread over the marked left half, below the native title and menu
+ * bar. A covered window read before it repainted can come back as torn rows
+ * of old and new pixels, so one point is not enough to tell.
+ */
+function gridPoints(width, height) {
+  const points = [];
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 8; j++) {
+      points.push([Math.floor(width * (0.05 + 0.1 * i)), Math.floor(height * (0.2 + 0.1 * j))]);
+    }
+  }
+  return points;
+}
+
+/**
+ * Screenshot `app`; answer the first point of its left half that does not
+ * show `want` ("x,y is #rrggbb"), or null when every point shows it.
+ */
+async function shoot(app, name, file, want) {
   const shot = await app.bridge.screenshot(join(evidenceDir, file));
-  const colour = pngPixel(shot.file, Math.floor(shot.width / 4), Math.floor(shot.height / 2));
-  log(`  ${name}: ${shot.width}x${shot.height}, taken in ${shot.attempts} attempt(s), left half is ${colour}`);
-  return colour;
+  const points = gridPoints(shot.width, shot.height);
+  const colours = pngPixels(shot.file, points);
+  const bad = colours.findIndex((c) => !near(c, want));
+  const wrong = bad < 0 ? null : `${points[bad].join(",")} is ${colours[bad]}`;
+  log(
+    `  ${name}: ${shot.width}x${shot.height}, taken in ${shot.attempts} attempt(s), ` +
+      `${colours.filter((c) => near(c, want)).length}/${points.length} points of the left half are ${want}` +
+      (wrong ? ` (${wrong})` : ""),
+  );
+  return wrong;
 }
 
 let failed = false;
@@ -121,10 +147,10 @@ try {
     await mark(appA.bridge, wantA);
     await mark(appB.bridge, wantB);
     const tag = String(round).padStart(2, "0");
-    const a = await shoot(appA, "A", `${tag}-a.png`);
-    assert(near(a, wantA), `round ${round}: A's screenshot shows A as it is now (${a}, want ${wantA})`);
-    const b = await shoot(appB, "B", `${tag}-b.png`);
-    assert(near(b, wantB), `round ${round}: B's screenshot shows B as it is now (${b}, want ${wantB})`);
+    const a = await shoot(appA, "A", `${tag}-a.png`, wantA);
+    assert(a === null, `round ${round}: A's screenshot shows A as it is now (${wantA} all over its left half${a ? `; ${a}` : ""})`);
+    const b = await shoot(appB, "B", `${tag}-b.png`, wantB);
+    assert(b === null, `round ${round}: B's screenshot shows B as it is now (${wantB} all over its left half${b ? `; ${b}` : ""})`);
   }
 
   if (platform() === "darwin") {
@@ -140,8 +166,8 @@ try {
     assert(refusal !== null && /one flat colour/.test(refusal), "a window showing one flat colour is refused");
     assert(/in all \d+ attempts/.test(refusal), "the app took it again before refusing it");
     await mark(appA.bridge, MAGENTA);
-    const after = await shoot(appA, "A", "after-flat-a.png");
-    assert(near(after, MAGENTA), "once A shows more than one colour again, its screenshot is taken");
+    const after = await shoot(appA, "A", "after-flat-a.png", MAGENTA);
+    assert(after === null, "once A shows more than one colour again, its screenshot is taken");
   } else {
     log("step 4: skipped on this OS: the capture includes the native title and menu bar, so a page cannot make it one colour");
   }

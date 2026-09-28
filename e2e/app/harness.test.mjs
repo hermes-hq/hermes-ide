@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, pngPixel, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
+import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, pngPixel, pngPixels, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
 
 const TOKEN = "t".repeat(64);
 let server;
@@ -236,6 +236,14 @@ describe("pngPixel", () => {
     writeFileSync(file, encodePng(4, 4, () => [1, 2, 3]));
     expect(() => pngPixel(file, 4, 0)).toThrow(/outside the 4x4 picture/);
     expect(() => pngPixel(file, 0, -1)).toThrow(/outside/);
+  });
+
+  it("reads several points of one picture in the order asked", () => {
+    const file = join(dir, "many.png");
+    writeFileSync(file, encodePng(8, 8, (x, y) => [x * 30, y * 30, 7, 255], { filter: 2 }));
+    expect(pngPixels(file, [[0, 0], [7, 0], [3, 5], [7, 7]])).toEqual(["#000007", "#d20007", "#5a9607", "#d2d207"]);
+    expect(pngPixels(file, [])).toEqual([]);
+    expect(() => pngPixels(file, [[1, 1], [8, 1]])).toThrow(/pixel \(8, 1\) is outside the 8x8 picture/);
   });
 });
 

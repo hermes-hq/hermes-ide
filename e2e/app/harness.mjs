@@ -303,11 +303,21 @@ export function pngFlatColour(file) {
  * Same formats as pngFlatColour; a pixel outside the picture is an error.
  */
 export function pngPixel(file, x, y) {
+  return pngPixels(file, [[x, y]])[0];
+}
+
+/**
+ * The colours ("#rrggbb") of several pixels ([x, y] pairs) of one PNG, read
+ * once. A pixel outside the picture is an error.
+ */
+export function pngPixels(file, points) {
   const { width, height, channels, rows } = readPng(file);
-  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= width || y >= height) {
-    throw new Error(`${file}: pixel (${x}, ${y}) is outside the ${width}x${height} picture`);
-  }
-  return hexColour(rows[y].subarray(x * channels, (x + 1) * channels), channels);
+  return points.map(([x, y]) => {
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= width || y >= height) {
+      throw new Error(`${file}: pixel (${x}, ${y}) is outside the ${width}x${height} picture`);
+    }
+    return hexColour(rows[y].subarray(x * channels, (x + 1) * channels), channels);
+  });
 }
 
 /** Width, height and the unfiltered pixel rows of a PNG. */
