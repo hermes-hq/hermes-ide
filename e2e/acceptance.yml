@@ -21,8 +21,9 @@ features:
     status: shipped
     criteria:
       N01-1:
-        # CI runs it 20 times on every pull request, on main and in the
-        # merge queue (a manual run can pick another count). "No focus
+        # The nightly CI run runs it 20 times in a row on each OS; pull
+        # requests, the merge queue and pushes to main run it once (a manual
+        # run can pick the count). "No focus
         # stolen" is asserted on macOS; on Windows and Linux (bare runners
         # where nobody is typing) the focus state is only logged.
         text: "The terminal-echo scenario passes 20 times in a row on macOS, Windows and Linux runners"
