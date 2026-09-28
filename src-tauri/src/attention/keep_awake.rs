@@ -8,7 +8,9 @@
 //!            also ends if Hermes dies (`pmset -g assertions` lists it).
 //!   Linux    `systemd-inhibit --what=idle:sleep --mode=block` holding
 //!            `tail --pid=<hermes pid>`, so it ends if Hermes dies
-//!            (`systemd-inhibit --list` lists it).
+//!            (`systemd-inhibit --list` lists it). Outside the active
+//!            desktop session logind only allows blocking idle, so a refused
+//!            `idle:sleep` falls back to `--what=idle`.
 //!   Windows  a power request (`PowerSetRequest(PowerRequestSystemRequired)`)
 //!            with a reason (`powercfg /requests` lists it).
 //!
@@ -32,6 +34,9 @@ pub struct KeepAwakeStatus {
     pub mechanism: String,
     /// The helper process holding it (macOS, Linux).
     pub pid: Option<u32>,
+    /// What the hold blocks, where the OS lets that vary (Linux: "idle:sleep",
+    /// or "idle" when logind refuses to block sleep).
+    pub what: Option<String>,
     /// Why the last attempt could not hold the machine awake.
     pub error: Option<String>,
 }
@@ -55,6 +60,7 @@ fn inactive(mechanism: &str, error: Option<String>) -> KeepAwakeStatus {
         active: false,
         mechanism: mechanism.to_string(),
         pid: None,
+        what: None,
         error,
     }
 }
@@ -115,18 +121,44 @@ fn acquire() -> Result<(Hold, KeepAwakeStatus), (&'static str, String)> {
         active: true,
         mechanism: "caffeinate".into(),
         pid: Some(child.id()),
+        what: None,
         error: None,
     };
     Ok((Hold::Process(child), status))
 }
 
+/// What the Linux hold blocks, strongest first. logind lets a process in the
+/// active desktop session block sleep; one outside it (a service, an SSH
+/// login, a CI runner) may only block idle, so that is the fallback.
+#[cfg(all(unix, not(target_os = "macos")))]
+const LINUX_WHAT: [&str; 2] = ["idle:sleep", "idle"];
+
 #[cfg(all(unix, not(target_os = "macos")))]
 fn acquire() -> Result<(Hold, KeepAwakeStatus), (&'static str, String)> {
+    let mut errors = Vec::new();
+    for what in LINUX_WHAT {
+        match inhibit(what) {
+            Ok(held) => {
+                if !errors.is_empty() {
+                    log::info!("[keep-awake] {}", errors.join("; "));
+                }
+                return Ok(held);
+            }
+            Err((mechanism, error)) if mechanism == "none" => return Err((mechanism, error)),
+            Err((_, error)) => errors.push(format!("{what}: {error}")),
+        }
+    }
+    Err(("systemd-inhibit", errors.join("; ")))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn inhibit(what: &str) -> Result<(Hold, KeepAwakeStatus), (&'static str, String)> {
     use std::os::unix::process::CommandExt;
     let pid = std::process::id();
+    let what_arg = format!("--what={what}");
     let mut child = std::process::Command::new("systemd-inhibit")
         .args([
-            "--what=idle:sleep",
+            what_arg.as_str(),
             "--who=Hermes",
             &format!("--why={REASON}"),
             "--mode=block",
@@ -159,6 +191,7 @@ fn acquire() -> Result<(Hold, KeepAwakeStatus), (&'static str, String)> {
         active: true,
         mechanism: "systemd-inhibit".into(),
         pid: Some(child.id()),
+        what: Some(what.to_string()),
         error: None,
     };
     Ok((Hold::Process(child), status))
@@ -202,6 +235,7 @@ fn acquire() -> Result<(Hold, KeepAwakeStatus), (&'static str, String)> {
         active: true,
         mechanism: "power-request".into(),
         pid: None,
+        what: None,
         error: None,
     };
     Ok((Hold::PowerRequest(handle as isize), status))
@@ -248,6 +282,11 @@ mod tests {
         assert_eq!(first, again, "a second take changes nothing");
         if first.active {
             assert_ne!(first.mechanism, "none");
+            #[cfg(all(unix, not(target_os = "macos")))]
+            assert!(
+                LINUX_WHAT.contains(&first.what.as_deref().unwrap_or_default()),
+                "the hold says what it blocks: {first:?}"
+            );
             #[cfg(target_os = "macos")]
             {
                 let pid = first.pid.expect("caffeinate pid");
