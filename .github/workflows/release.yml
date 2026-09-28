@@ -872,7 +872,11 @@ jobs:
       - name: Create the tag on the merged commit (never moved)
         run: |
           set -euo pipefail
-          EXISTING=$(gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" -q '.object.sha' 2>/dev/null || true)
+          # Looked up with git, as `config` does. `gh api` prints the JSON
+          # error body on stdout for a tag that does not exist (404), so an
+          # `|| true` capture of it reads as "the tag points somewhere else"
+          # and the never-move guard refuses to create it.
+          EXISTING=$(git ls-remote --tags origin "refs/tags/$TAG" | cut -f1)
           if [ -n "$EXISTING" ]; then
             if [ "$EXISTING" != "$SHA" ]; then
               echo "::error::tag $TAG already points at $EXISTING, not $SHA — tags are never moved"; exit 1
