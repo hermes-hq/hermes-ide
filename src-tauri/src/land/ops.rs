@@ -722,7 +722,10 @@ pub(crate) mod tests {
             "Land task"
         );
         assert_eq!(
-            fs::read_to_string(repo.join("b.txt")).unwrap(),
+            // A checkout may write CRLF (core.autocrlf on Windows).
+            fs::read_to_string(repo.join("b.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "1\n2\n",
             "the project folder's files moved with main"
         );
