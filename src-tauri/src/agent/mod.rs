@@ -520,6 +520,15 @@ fn respawn_lock_enabled() -> bool {
     true
 }
 
+/// A session whose agent starts is live again, even under an id closed
+/// earlier in this run (converting a terminal session to Agent view closes
+/// its terminal first), so the saved workspace keeps it.
+fn mark_session_live(app: &AppHandle, session_id: &str) {
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.closed_sessions.mark_created(session_id);
+    }
+}
+
 /// Spawn a Claude agent subprocess for `session_id`.  Returns the Claude session
 /// UUID we passed via `--session-id` so the frontend can track it for resume.
 ///
@@ -542,6 +551,7 @@ pub async fn spawn_agent_session(
     add_dirs: Option<Vec<String>>,
     fork: Option<bool>,
 ) -> Result<String, AgentError> {
+    mark_session_live(&app, &session_id);
     let sessions = state.handle();
     let req = SpawnRequest {
         session_id: session_id.clone(),
@@ -582,6 +592,7 @@ pub async fn restart_agent_session(
     add_dirs: Option<Vec<String>>,
     fork: Option<bool>,
 ) -> Result<String, AgentError> {
+    mark_session_live(&app, &session_id);
     let sessions = state.handle();
     let fork = fork.unwrap_or(false);
     let req = SpawnRequest {

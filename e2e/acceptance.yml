@@ -359,3 +359,17 @@ features:
       F05-3:
         text: "The keymap scenario runs nightly on all three OSes"
         scenarios: [F05-terminal-keys.mjs]
+  FIX-close-before-quit:
+    # A bug fix, not new 2.0 work, so it is not behind a feature flag.
+    # Negative controls (run by hand, see the scenario header): a build
+    # without the fix, and one with only the frontend half of it, both end
+    # in RESULT: FAIL at the first relaunch.
+    name: "A session closed just before quitting stays closed"
+    status: shipped
+    criteria:
+      FIX-close-before-quit-1:
+        text: "Create two sessions, close one (through its close button, confirming the close dialog if it asks), quit within 1 s, relaunch: only the remaining session comes back"
+        scenarios: [FIX-close-before-quit.mjs]
+      FIX-close-before-quit-2:
+        text: "Closing a session drops it from the saved workspace within 2 s, even when the app is killed right after the close"
+        scenarios: [FIX-close-before-quit.mjs]

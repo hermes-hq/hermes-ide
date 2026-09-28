@@ -1945,6 +1945,12 @@ pub fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Re
     if !VALID_SETTING_KEYS.contains(&key.as_str()) {
         return Err(format!("Unknown setting key: {}", key));
     }
+    // A save that started before a session was closed must not bring it back.
+    let value = if key == crate::saved_workspace::SETTING_KEY {
+        crate::saved_workspace::filter_incoming(value, &state.closed_sessions.snapshot())
+    } else {
+        value
+    };
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.set_setting(&key, &value)
 }

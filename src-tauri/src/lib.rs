@@ -24,6 +24,7 @@ mod project;
 /// Exposed for benchmarks — not part of the public API.
 #[doc(hidden)]
 pub mod pty;
+mod saved_workspace;
 mod self_test;
 mod transcript;
 mod updater;
@@ -397,15 +398,20 @@ pub struct AppState {
     pub sys: Mutex<sysinfo::System>,
     pub startup_marker_path: std::path::PathBuf,
     pub worktree_watcher: Mutex<Option<git::watcher::WorktreeWatcher>>,
+    /// Sessions closed in this run; kept out of the saved workspace.
+    pub closed_sessions: saved_workspace::ClosedSessions,
 }
 
 /// Save scrollback snapshots and session metadata to DB on close.
-/// The frontend auto-save handles `saved_workspace` (with layout data).
+/// The frontend auto-save handles `saved_workspace` (with layout data); here
+/// it only loses the sessions closed in this run, which a quit shortly after
+/// the close would otherwise bring back on the next launch.
 fn do_save_workspace(app: &tauri::AppHandle) {
     let state = match app.try_state::<AppState>() {
         Some(s) => s,
         None => return,
     };
+    let closed = state.closed_sessions.snapshot();
     let mgr = match state.pty_manager.lock() {
         Ok(m) => m,
         Err(poisoned) => {
@@ -417,6 +423,13 @@ fn do_save_workspace(app: &tauri::AppHandle) {
         Ok(d) => d,
         Err(_) => return,
     };
+
+    if let Err(e) = saved_workspace::prune_stored(&db, &closed) {
+        log::error!(
+            "Failed to drop closed sessions from the saved workspace: {}",
+            e
+        );
+    }
 
     for (session_id, pty_session) in &mgr.sessions {
         // Save session metadata first (INSERT OR REPLACE resets the row)
@@ -578,6 +591,7 @@ pub fn run() {
                 sys: Mutex::new(sys),
                 startup_marker_path: startup_marker.clone(),
                 worktree_watcher: Mutex::new(watcher),
+                closed_sessions: saved_workspace::ClosedSessions::default(),
             };
 
             app.manage(state);

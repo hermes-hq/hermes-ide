@@ -718,6 +718,7 @@ pub fn create_session(
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    state.closed_sessions.mark_created(&session_id);
     let shell = state
         .db
         .lock()
@@ -2293,7 +2294,19 @@ pub fn close_session(
     let _ = app.emit("session-removed", &session_id);
     crate::project::attunement::delete_session_context_file(&app, &session_id);
 
+    // Drop it from the saved workspace now: a quit right after this close
+    // must not bring it back on the next launch.
+    state.closed_sessions.mark_closed(&session_id);
+    let closed = state.closed_sessions.snapshot();
+
     if let Ok(db) = state.db.lock() {
+        if let Err(e) = crate::saved_workspace::prune_stored(&db, &closed) {
+            log::warn!(
+                "close_session: could not drop '{}' from the saved workspace: {}",
+                session_id,
+                e
+            );
+        }
         let needs_disk = drain_session_db_state(&db, &session_id);
         if !needs_disk.is_empty() {
             remove_owned_worktrees_from_disk(&app, &db, &session_id, needs_disk);
