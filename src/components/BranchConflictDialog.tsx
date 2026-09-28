@@ -82,7 +82,10 @@ export function BranchConflictDialog({
             already checked out by{" "}
             <strong className="branch-conflict-session-name">{heldBy}</strong>.
           </p>
-          <p className="branch-conflict-hint" title={path}>
+          <p className="branch-conflict-path" title={path}>
+            <code>{path}</code>
+          </p>
+          <p className="branch-conflict-hint">
             Two sessions on one checkout edit the same files. Choose what this session should do:
           </p>
 

@@ -380,7 +380,7 @@ jobs:
             node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F03-foreground-check-lock.mjs F06-custom-agent.mjs N12-launch-and-resume.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs || fail=1
             node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
-            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
+            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs F09-isolation-edge-cases.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
             node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
             exit "$fail"
@@ -399,7 +399,7 @@ jobs:
           node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F03-foreground-check-lock.mjs F06-custom-agent.mjs N12-launch-and-resume.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs || fail=1
           node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
-          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
+          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs F09-isolation-edge-cases.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
           node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
           exit "$fail"

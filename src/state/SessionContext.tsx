@@ -39,7 +39,7 @@ import {
 } from "../api/git";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import {
-  createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose,
+  createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose, describeBranchHolder,
   type BranchConflictChoice, type BranchInUse,
 } from "./isolation";
 import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
@@ -1680,6 +1680,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               console.warn("[SessionContext] Failed to restore session:", saved.label, err);
               // Clean up the terminal that was pre-created for this failed session
               destroyTerminal(restoreId);
+              // The backend announces a session before its shell starts; if
+              // the start failed, that entry would stay at "starting" for
+              // ever. Drop it and say why.
+              dispatch({ type: "SESSION_REMOVED", id: restoreId });
+              window.dispatchEvent(new CustomEvent("hermes:session-restore-failed", {
+                detail: { label: saved.label, error: err instanceof Error ? err.message : String(err) },
+              }));
             }
           }
 
@@ -1783,11 +1790,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           resolveConflict: (conflict) => {
             if (!askUser) return Promise.resolve({ kind: "reuse" });
             const holder = conflict.sessionId ? stateRef.current.sessions[conflict.sessionId] : undefined;
-            const heldBy = conflict.projectFolder
-              ? "the project folder"
-              : holder
-                ? `session "${holder.label}"`
-                : "another checkout";
+            const heldBy = describeBranchHolder(conflict, holder?.label ?? null);
             return new Promise<BranchConflictChoice>((resolve) => {
               setPendingBranchConflict({ conflict, heldBy, resolve });
             });

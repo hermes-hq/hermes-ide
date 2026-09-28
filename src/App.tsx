@@ -28,6 +28,7 @@ import { triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { getSetting } from "./api/settings";
+import { workingDirectoryRecoveryMessage, type WorkingDirectoryRecovery } from "./state/isolation";
 import { SessionList } from "./components/SessionList";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
@@ -273,6 +274,36 @@ function AppContent() {
       if (cancelled) { u(); } else { unlisten = u; }
     });
     return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
+  // ── A session's folder was missing: where it opened instead ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<WorkingDirectoryRecovery>("session-working-directory-recovered", (event) => {
+      if (cancelled) return;
+      toastStoreRef.current.addToast({
+        message: workingDirectoryRecoveryMessage(event.payload),
+        type: event.payload.outcome === "recreated" ? "info" : "warning",
+        duration: 15000,
+      });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    const onRestoreFailed = (e: Event) => {
+      const { label, error } = (e as CustomEvent<{ label: string; error: string }>).detail;
+      toastStoreRef.current.addToast({
+        message: `Could not restore session '${label}': ${error}`,
+        type: "error",
+        duration: 15000,
+      });
+    };
+    window.addEventListener("hermes:session-restore-failed", onRestoreFailed);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      window.removeEventListener("hermes:session-restore-failed", onRestoreFailed);
+    };
   }, []);
 
   // ── Worktree path deleted externally (file watcher) ──

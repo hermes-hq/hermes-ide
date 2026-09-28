@@ -13,6 +13,8 @@ import {
   createSessionWorktrees,
   closeCommitMessage,
   shouldAskAboutChangesOnClose,
+  describeBranchHolder,
+  workingDirectoryRecoveryMessage,
   type WorktreeDeps,
   type BranchConflictChoice,
 } from "../state/isolation";
@@ -214,5 +216,38 @@ describe("shouldAskAboutChangesOnClose", () => {
   it("without it, keeps checking the project folder as before", () => {
     expect(shouldAskAboutChangesOnClose(wt({ isMainWorktree: true }), false)).toBe(true);
     expect(shouldAskAboutChangesOnClose(null, false)).toBe(true);
+  });
+
+  it("never asks about a checkout Hermes did not make (reused external worktree), flag on or off", () => {
+    const external = wt({ worktreePath: "/work/repo-external-wt", branchName: "external", ownedBySession: false });
+    expect(shouldAskAboutChangesOnClose(external, true)).toBe(false);
+    expect(shouldAskAboutChangesOnClose(external, false)).toBe(false);
+    // The backend's verdict wins over the path when it says the checkout is ours.
+    expect(shouldAskAboutChangesOnClose(wt({ ownedBySession: true }), true)).toBe(true);
+    // An older backend without the field: a linked worktree is treated as ours.
+    expect(shouldAskAboutChangesOnClose(wt({ ownedBySession: undefined }), true)).toBe(true);
+  });
+});
+
+describe("describeBranchHolder", () => {
+  const conflict = { branch: "feature", path: "/work/repo-external-wt", sessionId: null, projectFolder: false };
+
+  it("names the project folder, the session, or the folder of an external checkout", () => {
+    expect(describeBranchHolder({ ...conflict, projectFolder: true }, null)).toBe("the project folder");
+    expect(describeBranchHolder({ ...conflict, sessionId: "s1" }, "Fix login")).toBe('session "Fix login"');
+    expect(describeBranchHolder(conflict, null)).toBe("a checkout outside Hermes");
+  });
+});
+
+describe("workingDirectoryRecoveryMessage", () => {
+  const base = { sessionId: "s1", branchName: "hermes/task-a", missingPath: "/data/hermes-worktrees/x/s1_a", path: "/work/repo" };
+
+  it("says what was missing and where the session opened", () => {
+    expect(workingDirectoryRecoveryMessage({ ...base, outcome: "recreated", path: base.missingPath }))
+      .toBe("The working folder of branch 'hermes/task-a' was missing and has been recreated.");
+    expect(workingDirectoryRecoveryMessage({ ...base, outcome: "project-folder" }))
+      .toBe("The working folder of branch 'hermes/task-a' is gone; the session opened in the project folder instead.");
+    expect(workingDirectoryRecoveryMessage({ ...base, branchName: null, outcome: "home", path: "/tmp/home" }))
+      .toBe("The working folder '/data/hermes-worktrees/x/s1_a' is gone; the session opened in your home folder instead.");
   });
 });

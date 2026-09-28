@@ -814,31 +814,27 @@ pub fn create_session(
     );
     let original_cwd = working_directory.unwrap_or_else(get_working_directory);
 
-    // If this session has a linked worktree, use its path as the working directory.
-    // The worktree row may have been inserted before create_session is called
-    // (e.g. the frontend pre-generated the session_id and created the worktree first).
-    let cwd = if let Ok(db) = state.db.lock() {
-        if let Ok(worktrees) = db.get_session_worktrees(&session_id) {
-            if let Some(primary) = worktrees.first() {
-                let wt = std::path::Path::new(&primary.worktree_path);
-                if wt.is_dir() {
-                    primary.worktree_path.clone()
-                } else {
-                    log::warn!(
-                        "Worktree directory '{}' does not exist for session {}; falling back to '{}'",
-                        primary.worktree_path, session_id, original_cwd
-                    );
-                    original_cwd
-                }
-            } else {
-                original_cwd
-            }
-        } else {
-            original_cwd
-        }
-    } else {
-        original_cwd
+    // If this session has a linked worktree, use its path as the working
+    // directory. The worktree row may have been inserted before
+    // create_session is called (the frontend pre-generates the session id
+    // and creates the worktree first). A folder that went missing is put
+    // back or replaced by a folder that exists: the shell is never spawned
+    // into a missing directory (a restored session used to hang at
+    // "starting" that way).
+    let (cwd, recovery) = match state.db.lock() {
+        Ok(db) => resolve_session_cwd(&db, &session_id, original_cwd, project_ids.as_deref()),
+        Err(_) => (original_cwd, None),
     };
+    if let Some(recovery) = recovery {
+        log::warn!(
+            "Session {} did not open in '{}' ({}); it opens in '{}' instead",
+            session_id,
+            recovery.missing_path,
+            recovery.outcome,
+            recovery.path
+        );
+        let _ = app.emit(WORKING_DIRECTORY_RECOVERED_EVENT, &recovery);
+    }
 
     let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     mgr.session_counter += 1;
@@ -2101,6 +2097,148 @@ fn agent_model_needs_emit(current: &Option<AgentInfo>, detected: &Option<AgentIn
     }
 }
 
+/// Emitted when a session could not open in the folder it was asked to open
+/// in (payload: `WorkingDirectoryRecovery`). The frontend shows one line.
+pub const WORKING_DIRECTORY_RECOVERED_EVENT: &str = "session-working-directory-recovered";
+
+/// How a session whose folder went missing was given a folder that exists.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingDirectoryRecovery {
+    pub session_id: String,
+    /// Branch of the worktree that was missing, when there was one.
+    pub branch_name: Option<String>,
+    /// The folder that no longer exists.
+    pub missing_path: String,
+    /// The folder the session opens in.
+    pub path: String,
+    /// `recreated`: the worktree was put back at `path` on its branch.
+    /// `project-folder`: the branch is gone (or there was no worktree), so
+    /// the session opens in the project folder. `home`: nothing else exists.
+    pub outcome: &'static str,
+}
+
+/// The folder a session's shell starts in, always one that exists.
+///
+/// Preference: the session's linked worktree; when its folder is missing and
+/// Hermes made it, the worktree recreated on its branch; else the requested
+/// folder; else the project folder (the worktree's project, or the first
+/// attached one); else the home folder. A worktree link that could not be
+/// honoured is dropped so the session is not shown as isolated when it is
+/// not. The second value says what happened when it was not the plain case.
+pub fn resolve_session_cwd(
+    db: &Database,
+    session_id: &str,
+    requested_cwd: String,
+    project_ids: Option<&[String]>,
+) -> (String, Option<WorkingDirectoryRecovery>) {
+    use crate::git::worktree::{is_owned_checkout, isolation_fixes_enabled, recreate_worktree};
+    use std::path::Path;
+
+    let recovered = |missing: &str, branch: Option<&str>, path: String, outcome: &'static str| {
+        Some(WorkingDirectoryRecovery {
+            session_id: session_id.to_string(),
+            branch_name: branch.map(str::to_string),
+            missing_path: missing.to_string(),
+            path,
+            outcome,
+        })
+    };
+
+    let rows = db.get_session_worktrees(session_id).unwrap_or_default();
+    let mut missing: Option<(String, Option<String>)> = None;
+    let mut fallback_project: Option<String> = None;
+
+    if let Some(primary) = rows.first() {
+        if Path::new(&primary.worktree_path).is_dir() {
+            return (primary.worktree_path.clone(), None);
+        }
+        if !isolation_fixes_enabled() {
+            // Test builds only (negative control): the old behaviour, which
+            // handed back the requested folder even when it was missing.
+            return (requested_cwd, None);
+        }
+        let project_path = db
+            .get_project(&primary.project_id)
+            .ok()
+            .flatten()
+            .map(|p| p.path);
+        if is_owned_checkout(primary.is_main_worktree, &primary.worktree_path) {
+            if let (Some(repo), Some(branch)) = (&project_path, &primary.branch_name) {
+                match recreate_worktree(repo, &primary.worktree_path, branch) {
+                    Ok(()) => {
+                        return (
+                            primary.worktree_path.clone(),
+                            recovered(
+                                &primary.worktree_path,
+                                Some(branch),
+                                primary.worktree_path.clone(),
+                                "recreated",
+                            ),
+                        );
+                    }
+                    Err(e) => log::warn!(
+                        "Could not put back the worktree '{}' of session {}: {}",
+                        primary.worktree_path,
+                        session_id,
+                        e
+                    ),
+                }
+            }
+        }
+        // The link cannot be honoured: drop it, so the session is not shown
+        // as isolated, and open somewhere that exists.
+        if let Err(e) = db.delete_session_worktree(&primary.id) {
+            log::warn!(
+                "Failed to drop the stale worktree link '{}': {}",
+                primary.id,
+                e
+            );
+        }
+        missing = Some((primary.worktree_path.clone(), primary.branch_name.clone()));
+        fallback_project = project_path;
+    }
+
+    if Path::new(&requested_cwd).is_dir() {
+        return match missing {
+            // The worktree is gone, but the folder asked for is the project
+            // folder (or another folder that exists): say so.
+            Some((gone, branch)) if !crate::git::worktree::same_dir(&gone, &requested_cwd) => (
+                requested_cwd.clone(),
+                recovered(&gone, branch.as_deref(), requested_cwd, "project-folder"),
+            ),
+            _ => (requested_cwd, None),
+        };
+    }
+    if !isolation_fixes_enabled() {
+        return (requested_cwd, None);
+    }
+
+    let (gone, branch) = missing.unwrap_or((requested_cwd, None));
+    let project_folder = fallback_project
+        .into_iter()
+        .chain(
+            project_ids
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|id| db.get_project(id).ok().flatten().map(|p| p.path)),
+        )
+        .find(|p| Path::new(p).is_dir());
+    if let Some(folder) = project_folder {
+        return (
+            folder.clone(),
+            recovered(&gone, branch.as_deref(), folder, "project-folder"),
+        );
+    }
+    let home = crate::platform::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(get_working_directory);
+    (
+        home.clone(),
+        recovered(&gone, branch.as_deref(), home, "home"),
+    )
+}
+
 /// Drain the DB-side state for `session_id`: mark the session as
 /// destroyed, clean up session-scoped pins, and dispose of every linked
 /// worktree row that does NOT require filesystem removal (main worktrees
@@ -2139,11 +2277,18 @@ pub fn drain_session_db_state(db: &Database, session_id: &str) -> Vec<SessionWor
     let mut needs_disk_removal: Vec<SessionWorktreeRow> = Vec::new();
 
     for wt in worktrees {
-        if wt.is_main_worktree {
-            // Main worktrees live in the project repo itself; close must
-            // never remove them from disk.  Drop the link row.
+        if !crate::git::worktree::is_owned_checkout(wt.is_main_worktree, &wt.worktree_path) {
+            // The project folder, or a worktree made outside Hermes that the
+            // user chose to reuse: not ours, so close must never remove it
+            // from disk (and `remove_worktree` would refuse to, which used
+            // to surface as a "cleanup failed, retrying on next startup"
+            // warning on every close).  Drop the link row only.
             if let Err(e) = db.delete_session_worktree(&wt.id) {
-                log::warn!("Failed to delete main-worktree DB row '{}': {}", wt.id, e,);
+                log::warn!(
+                    "Failed to delete the link row '{}' for a checkout not made by Hermes: {}",
+                    wt.id,
+                    e,
+                );
             }
             continue;
         }
@@ -3408,7 +3553,7 @@ pub fn ssh_get_remote_git_info(
 
 #[cfg(test)]
 mod tests {
-    use super::drain_session_db_state;
+    use super::{drain_session_db_state, resolve_session_cwd};
     use crate::db::Database;
     use tempfile::NamedTempFile;
 
@@ -3438,7 +3583,7 @@ mod tests {
             "wt1",
             "agent-1",
             "proj-1",
-            "/tmp/wt-agent-1",
+            "/tmp/hermes-worktrees/wt-agent-1",
             Some("feature-x"),
             false,
         )
@@ -3451,7 +3596,10 @@ mod tests {
             1,
             "owned non-main worktree must be returned for git worktree remove"
         );
-        assert_eq!(needs_disk[0].worktree_path, "/tmp/wt-agent-1");
+        assert_eq!(
+            needs_disk[0].worktree_path,
+            "/tmp/hermes-worktrees/wt-agent-1"
+        );
 
         // DB row is kept so the caller can delete it AFTER successful disk
         // removal — failures stay in the table for retry on next startup.
@@ -3483,7 +3631,7 @@ mod tests {
             "wt-shared-a",
             "agent-1",
             "proj-1",
-            "/tmp/wt-shared",
+            "/tmp/hermes-worktrees/wt-shared",
             Some("feature-x"),
             false,
         )
@@ -3492,7 +3640,7 @@ mod tests {
             "wt-shared-b",
             "agent-2",
             "proj-1",
-            "/tmp/wt-shared",
+            "/tmp/hermes-worktrees/wt-shared",
             Some("feature-x"),
             false,
         )
@@ -3519,6 +3667,197 @@ mod tests {
         let db = test_db();
         let needs_disk = drain_session_db_state(&db, "ghost-session");
         assert!(needs_disk.is_empty());
+    }
+
+    // ── F09 edge cases ──────────────────────────────────────────────
+
+    #[test]
+    fn drain_unlinks_a_checkout_made_outside_hermes_without_touching_disk() {
+        // The session reused a worktree made by hand (`git worktree add`),
+        // which is not under hermes-worktrees/. Closing must drop the link
+        // only: never schedule it for removal (which would fail on the
+        // safety guard and warn "retry on next startup" every time).
+        let db = test_db();
+        db.insert_session_worktree(
+            "wt-ext",
+            "s-ext",
+            "proj-1",
+            "/work/repo-external-wt",
+            Some("external"),
+            false,
+        )
+        .unwrap();
+
+        let needs_disk = drain_session_db_state(&db, "s-ext");
+
+        assert!(
+            needs_disk.is_empty(),
+            "not ours: nothing to remove from disk"
+        );
+        assert!(
+            db.get_session_worktrees("s-ext").unwrap().is_empty(),
+            "the link row is gone"
+        );
+    }
+
+    /// A git repository with one commit, a registered project row and a
+    /// worktree Hermes made for session `s1` on `hermes/task`.
+    fn repo_with_hermes_worktree(db: &Database) -> (tempfile::TempDir, tempfile::TempDir, String) {
+        let repo = tempfile::tempdir().unwrap();
+        let app_data = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().to_str().unwrap().to_string();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(&repo_path)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Hermes Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.path().join("README.md"), "# test\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "initial"]);
+        db.insert_project("proj-1", &repo_path, "repo", "[]", "[]")
+            .unwrap();
+        let wt = crate::git::worktree::create_worktree(
+            app_data.path(),
+            &repo_path,
+            "s1",
+            "hermes/task",
+            true,
+            None,
+        )
+        .unwrap();
+        db.insert_session_worktree(
+            "wt1",
+            "s1",
+            "proj-1",
+            &wt.worktree_path,
+            Some("hermes/task"),
+            false,
+        )
+        .unwrap();
+        (repo, app_data, wt.worktree_path)
+    }
+
+    #[test]
+    fn resolve_session_cwd_uses_the_worktree_when_it_exists() {
+        let db = test_db();
+        let (_repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);
+        let (cwd, recovery) = resolve_session_cwd(&db, "s1", "/nowhere".into(), None);
+        assert_eq!(cwd, wt_path);
+        assert_eq!(recovery, None);
+    }
+
+    #[test]
+    fn resolve_session_cwd_recreates_a_deleted_worktree_on_its_branch() {
+        let db = test_db();
+        let (repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);
+        std::fs::remove_dir_all(&wt_path).unwrap();
+
+        let (cwd, recovery) = resolve_session_cwd(&db, "s1", wt_path.clone(), None);
+
+        assert_eq!(cwd, wt_path);
+        assert!(
+            std::path::Path::new(&wt_path).join("README.md").is_file(),
+            "the folder is back"
+        );
+        assert_eq!(
+            crate::git::worktree::get_worktree_branch(&wt_path)
+                .unwrap()
+                .as_deref(),
+            Some("hermes/task")
+        );
+        let r = recovery.expect("says what happened");
+        assert_eq!(
+            (r.outcome, r.branch_name.as_deref()),
+            ("recreated", Some("hermes/task"))
+        );
+        assert_eq!(r.missing_path, wt_path);
+        assert_eq!(
+            db.get_session_worktrees("s1").unwrap().len(),
+            1,
+            "the link is kept"
+        );
+        drop(repo);
+    }
+
+    #[test]
+    fn resolve_session_cwd_falls_back_to_the_project_folder_when_the_branch_is_gone() {
+        let db = test_db();
+        let (repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);
+        let repo_path = repo.path().to_str().unwrap().to_string();
+        std::fs::remove_dir_all(&wt_path).unwrap();
+        for args in [
+            &["worktree", "prune"][..],
+            &["branch", "-D", "hermes/task"][..],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&repo_path)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+
+        let (cwd, recovery) = resolve_session_cwd(&db, "s1", wt_path.clone(), None);
+
+        assert_eq!(cwd, repo_path);
+        assert!(
+            !std::path::Path::new(&wt_path).exists(),
+            "nothing was recreated"
+        );
+        let r = recovery.expect("says what happened");
+        assert_eq!(r.outcome, "project-folder");
+        assert_eq!(r.branch_name.as_deref(), Some("hermes/task"));
+        assert!(
+            db.get_session_worktrees("s1").unwrap().is_empty(),
+            "the stale link is dropped"
+        );
+    }
+
+    #[test]
+    fn resolve_session_cwd_never_returns_a_missing_folder() {
+        // No worktree link (the startup cleanup dropped it) and the saved
+        // folder is gone: the first attached project that exists wins, and
+        // failing that the home folder. Never the missing one.
+        let db = test_db();
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().to_str().unwrap().to_string();
+        db.insert_project("proj-1", &repo_path, "repo", "[]", "[]")
+            .unwrap();
+        let ids = vec!["proj-1".to_string()];
+
+        let gone = repo.path().join("hermes-worktrees").join("x").join("gone");
+        let gone = gone.to_str().unwrap().to_string();
+        let (cwd, recovery) = resolve_session_cwd(&db, "s9", gone.clone(), Some(&ids));
+        assert_eq!(cwd, repo_path);
+        let r = recovery.unwrap();
+        assert_eq!(
+            (r.outcome, r.missing_path.as_str()),
+            ("project-folder", gone.as_str())
+        );
+
+        let (cwd, recovery) = resolve_session_cwd(&db, "s9", gone.clone(), None);
+        assert!(
+            std::path::Path::new(&cwd).is_dir(),
+            "home folder exists: {}",
+            cwd
+        );
+        assert_eq!(recovery.unwrap().outcome, "home");
+
+        // A folder that exists is used as asked, quietly.
+        let (cwd, recovery) = resolve_session_cwd(&db, "s9", repo_path.clone(), None);
+        assert_eq!((cwd, recovery), (repo_path, None));
     }
 
     // ── Regression suite for the close path (Bug 1) ─────────────────
@@ -3605,7 +3944,7 @@ mod tests {
             "wt-feat",
             "term-mix",
             "proj-B",
-            "/tmp/wt-feat",
+            "/tmp/hermes-worktrees/wt-feat",
             Some("feature-y"),
             false,
         )
@@ -3641,7 +3980,7 @@ mod tests {
             "wt-retry",
             "agent-retry",
             "proj-1",
-            "/tmp/wt-retry",
+            "/tmp/hermes-worktrees/wt-retry",
             Some("feature-z"),
             false,
         )
@@ -3673,7 +4012,7 @@ mod tests {
             "wt-c",
             "closing",
             "proj-1",
-            "/tmp/wt-c",
+            "/tmp/hermes-worktrees/wt-c",
             Some("feat-c"),
             false,
         )
@@ -3682,7 +4021,7 @@ mod tests {
             "wt-s",
             "surviving",
             "proj-1",
-            "/tmp/wt-s",
+            "/tmp/hermes-worktrees/wt-s",
             Some("feat-s"),
             false,
         )

@@ -84,6 +84,26 @@ fn install_crash_handler() {
 
 static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
 
+/// Whether a `session_worktrees` link whose folder is missing (and whose
+/// session still exists) is kept for `create_session` to put the worktree
+/// back: only a worktree Hermes made, on a branch that still exists.
+fn keep_missing_worktree_link(
+    is_main_worktree: bool,
+    worktree_path: &str,
+    project_path: Option<&str>,
+    branch: Option<&str>,
+) -> bool {
+    if !git::worktree::isolation_fixes_enabled()
+        || !git::worktree::is_owned_checkout(is_main_worktree, worktree_path)
+    {
+        return false;
+    }
+    match (project_path, branch) {
+        (Some(repo), Some(branch)) => git::worktree::local_branch_exists(repo, branch),
+        _ => false,
+    }
+}
+
 /// Clean up worktrees whose sessions no longer exist, remove orphaned
 /// directories, and replay incomplete journal operations.
 ///
@@ -130,13 +150,14 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
             wt.worktree_path, wt.session_id
         );
 
-        // Only remove linked worktrees from disk, not main worktrees, and
-        // never a checkout another session still points at.
+        // Only remove worktrees Hermes made from disk: not the project
+        // folder, not a checkout made outside Hermes that the session
+        // reused, and never a checkout another session still points at.
         let shared = database
             .count_sessions_for_worktree_path(&wt.worktree_path)
             .map(|n| n > 1)
             .unwrap_or(true);
-        if !wt.is_main_worktree && !shared {
+        if git::worktree::is_owned_checkout(wt.is_main_worktree, &wt.worktree_path) && !shared {
             if let Ok(Some(project_entry)) = database.get_project(&wt.project_id) {
                 if let Err(e) = git::worktree::remove_worktree(
                     &project_entry.path,
@@ -182,6 +203,28 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                 wt.session_id,
                 wt.branch_name.as_deref().unwrap_or("unknown")
             );
+
+            // A worktree Hermes made whose branch still exists is put back
+            // when its session is restored (create_session), so its link
+            // must survive: dropping it here left the restored session with
+            // a folder that did not exist, stuck at "starting".
+            let project_path = database
+                .get_project(&wt.project_id)
+                .ok()
+                .flatten()
+                .map(|p| p.path);
+            if keep_missing_worktree_link(
+                wt.is_main_worktree,
+                &wt.worktree_path,
+                project_path.as_deref(),
+                wt.branch_name.as_deref(),
+            ) {
+                log::info!(
+                    "Startup worktree cleanup: keeping the link; the worktree is recreated when session '{}' is restored",
+                    wt.session_id
+                );
+                continue;
+            }
 
             // Delete only the session_worktrees DB record — never touch the project or session
             if let Err(e) = database.delete_session_worktree(&wt.id) {
@@ -1150,6 +1193,71 @@ mod tests {
             database.session_exists(session_id).unwrap(),
             "session must NOT be deleted"
         );
+    }
+
+    /// F09 edge case: a link whose folder is missing survives the startup
+    /// cleanup only when Hermes made the worktree and its branch still
+    /// exists (then `create_session` puts it back on restore).
+    #[test]
+    fn missing_worktree_link_is_kept_only_for_a_hermes_worktree_on_a_live_branch() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(repo_path)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {:?}", args);
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Hermes Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo_dir.path().join("a.txt"), "a").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "initial"]);
+        git(&["branch", "hermes/task"]);
+
+        let own = "/data/hermes-worktrees/abc/s1_hermes-task";
+        assert!(keep_missing_worktree_link(
+            false,
+            own,
+            Some(repo_path),
+            Some("hermes/task")
+        ));
+        // Branch gone, unknown, or no project to look in: drop the link.
+        assert!(!keep_missing_worktree_link(
+            false,
+            own,
+            Some(repo_path),
+            Some("hermes/gone")
+        ));
+        assert!(!keep_missing_worktree_link(
+            false,
+            own,
+            Some(repo_path),
+            None
+        ));
+        assert!(!keep_missing_worktree_link(
+            false,
+            own,
+            None,
+            Some("hermes/task")
+        ));
+        // Not ours: the project folder, or a worktree made outside Hermes.
+        assert!(!keep_missing_worktree_link(
+            true,
+            repo_path,
+            Some(repo_path),
+            Some("main")
+        ));
+        assert!(!keep_missing_worktree_link(
+            false,
+            "/work/external-wt",
+            Some(repo_path),
+            Some("hermes/task")
+        ));
     }
 
     /// Journal should NOT be cleared if orphans still exist after replay.
