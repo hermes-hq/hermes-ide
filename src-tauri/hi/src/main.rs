@@ -757,14 +757,22 @@ mod tests {
         };
         let exe = write_exe(dir.path(), name);
         let path = std::env::join_paths([other.path(), dir.path()]).unwrap();
-        assert_eq!(
-            resolve_program(
-                "fake-agent",
-                Some(&path),
-                Some(OsStr::new(".COM;.EXE;.CMD"))
-            ),
-            Some(exe.clone())
-        );
+        // On Windows the extension comes from PATHEXT (`.CMD`), and the file
+        // system does not care about case; compare without it there.
+        let same_file = |a: &Path, b: &Path| {
+            if cfg!(windows) {
+                a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+            } else {
+                a == b
+            }
+        };
+        let found = resolve_program(
+            "fake-agent",
+            Some(&path),
+            Some(OsStr::new(".COM;.EXE;.CMD")),
+        )
+        .expect("fake-agent is on PATH");
+        assert!(same_file(&found, &exe), "{found:?} vs {exe:?}");
         assert_eq!(resolve_program("no-such-agent", Some(&path), None), None);
         // A path is used as given.
         assert_eq!(
