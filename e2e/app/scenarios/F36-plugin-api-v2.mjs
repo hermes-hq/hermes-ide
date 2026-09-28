@@ -511,8 +511,17 @@ try {
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
   }
-  rmSync(scratch, { recursive: true, force: true });
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+  // Best effort: on Windows the session's shell can hold the demo repository
+  // for a moment after the app quits (EBUSY). Leftover temp files are not a
+  // failure of what this scenario proves.
+  for (const dir of [scratch, homeDir]) {
+    if (!dir) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    } catch (err) {
+      log(`  (left temp folder behind: ${err.code ?? err.message})`);
+    }
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details: { break: BREAK || undefined } });
