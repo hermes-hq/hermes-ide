@@ -36,8 +36,21 @@ import type { SessionData } from "../types/session";
 const PATCH_A = "diff --git a/src/app.js b/src/app.js\n--- a/src/app.js\n+++ b/src/app.js\n@@ -1,3 +1,3 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n export default a + b;\n";
 const PATCH_B = "diff --git a/package-lock.json b/package-lock.json\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1,2 +1,3 @@\n {\n+  \"x\": 1,\n }\n";
 
+// Started through the helper (launchHelper on), so its prompt hook is installed and a receipt can come back.
+const STARTED = { state: "started", since: "2026-01-01T00:00:00Z", confidence: "exact" } as const;
 const session = (id: string, label: string, extra: Partial<SessionData> = {}): SessionData =>
-  ({ id, label, working_directory: "/fixture/repo", mode: "terminal", phase: "running", ai_provider: "claude", ...extra }) as SessionData;
+  ({ id, label, working_directory: "/fixture/repo", mode: "terminal", phase: "running", ai_provider: "claude", agent_startup: STARTED, ...extra }) as SessionData;
+const working = (at: number) => ({ type: "status", at, status: { kind: "working", confidence: "exact", detail: "" } }) as const;
+const turnEnded = (at: number) => ({ type: "status", at, status: { kind: "done_unread", confidence: "exact", detail: "" } }) as const;
+const pastes = () => h.invoke.mock.calls.filter((c) => c[0] === "write_to_session");
+async function commentForA(text: string) {
+  fireEvent.click(screen.getByRole("radio", { name: "By turn" }));
+  fireEvent.click(document.querySelector('.review-turn-row[data-turn="1"]')!);
+  await waitFor(() => expect(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')).toBeInTheDocument());
+  fireEvent.click(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')!);
+  fireEvent.change(await screen.findByPlaceholderText(/Comment for Agent A/), { target: { value: text } });
+  fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+}
 const SESSIONS = [session("sess-a", "Agent A"), session("sess-b", "Agent B"), session("sess-c", "Elsewhere", { working_directory: "/fixture/other" })];
 
 function fileOf(patch: string, path: string) {
@@ -187,6 +200,91 @@ describe("ReviewDesk", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("types nothing into a working agent: Send stops at waiting, and only Send now — enabled once the turn ended — pastes", async () => {
+    await open();
+    act(() => {
+      dispatchSessionEvent("sess-a", working(1));
+    });
+    await commentForA("Why 3?");
+    fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
+    await waitFor(() => expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("waiting"));
+    expect(h.invoke).toHaveBeenCalledWith("review_write_file", expect.objectContaining({ sessionId: "sess-a", n: 1 }));
+    expect(pastes()).toHaveLength(0);
+    const sendNow = screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement;
+    expect(sendNow.disabled).toBe(true);
+    // Still working (a tool call): the button stays off.
+    act(() => {
+      dispatchSessionEvent("sess-a", working(2));
+    });
+    expect((screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement).disabled).toBe(true);
+    // The turn ends: nothing is pasted by itself; the button comes on.
+    act(() => {
+      dispatchSessionEvent("sess-a", turnEnded(3));
+    });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement).disabled).toBe(false));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pastes()).toHaveLength(0);
+    expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("waiting");
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    await waitFor(() => expect(pastes()).toHaveLength(1));
+    expect(atob((pastes()[0][1] as { data: string }).data)).toContain("[hermes-review #1] ");
+    await waitFor(() => expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("sending"));
+    act(() => {
+      dispatchSessionEvent("sess-a", { type: "status", at: 4, tags: ["hermes-review#1"], status: { kind: "working", confidence: "exact", detail: "" } });
+    });
+    await waitFor(() => expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("delivered"));
+    // One review, one paste.
+    expect(pastes()).toHaveLength(1);
+  });
+
+  it("shows pasted, not a red not-delivered, for an agent whose launch installed no prompt hook", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // Started without the helper: no hooks, so no receipt can ever come.
+      const sessions = [session("sess-a", "Agent A", { agent_startup: null }), SESSIONS[1]];
+      render(<ReviewDesk sessionId="sess-a" sessions={sessions} onClose={() => {}} />);
+      await waitFor(() => expect(document.querySelector(".review-desk")?.getAttribute("data-loading")).toBe("0"));
+      await commentForA("Why 3?");
+      fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
+      await waitFor(() => expect(pastes()).toHaveLength(1));
+      await waitFor(() => expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("pasted"));
+      expect(document.querySelector(".review-delivery")?.textContent).toContain("cannot confirm");
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Copy line" })).toBeInTheDocument();
+      // Time passing changes nothing: there is no receipt to wait for.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000);
+      });
+      expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("pasted");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("after a restart a not-delivered review keeps its Retry, and Retry pastes the same review again", async () => {
+    localStorage.setItem(
+      "hermes.review./fixture/repo",
+      JSON.stringify({
+        viewed: [],
+        comments: [{ id: "c-old", sessionId: "sess-a", turnN: 1, path: "src/app.js", side: "new", line: 2, excerpt: "const b = 3;", text: "Why 3?", createdAt: 1 }],
+        lastN: 1,
+        sent: { "c-old": 1 },
+        deliveries: { 1: { kind: "sending", sessionId: "sess-a", filePath: "/data/reviews/sess-a/review-1.md" } },
+      }),
+    );
+    await open();
+    const delivery = document.querySelector<HTMLElement>('.review-delivery[data-n="1"]');
+    expect(delivery?.getAttribute("data-state")).toBe("not_delivered");
+    expect(pastes()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(pastes()).toHaveLength(1));
+    expect(h.invoke).toHaveBeenCalledWith("review_write_file", expect.objectContaining({ sessionId: "sess-a", n: 1, content: expect.stringContaining("Why 3?") }));
+    expect(atob((pastes()[0][1] as { data: string }).data)).toContain("[hermes-review #1] ");
+    // The comment is still marked as sent in review 1, not re-sent as review 2.
+    expect(document.querySelector<HTMLElement>(".review-comment")?.dataset.sent).toBe("1");
+    expect(h.invoke).not.toHaveBeenCalledWith("review_write_file", expect.objectContaining({ n: 2 }));
   });
 
   it("puts the line into the composer for a structured (Agent view) session instead of pasting", async () => {

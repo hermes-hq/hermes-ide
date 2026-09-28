@@ -16,6 +16,8 @@ export interface MenuItemUpdate {
   id: string;
   enabled?: boolean;
   checked?: boolean;
+  /** A new label for the item (F21: "Git Panel" reads "Review Desk" with the flag on). */
+  text?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

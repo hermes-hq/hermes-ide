@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SessionEvent } from "../agent/contract/events";
 import type { AgentStatus } from "../agent/contract/status";
 import { encodePaste, pasteLine, reviewMarkdown, reviewTag, reviewTagId, type ReviewComment } from "../review/reviewModel";
-import { isBusy, isReceiptFor, sendReviewBack, type DeliveryState, type SendBackDeps } from "../review/sendBack";
+import { deliveryReceiptAvailable, isBusy, isReceiptFor, sendReviewBack, type DeliveryState, type SendBackDeps } from "../review/sendBack";
 import {
   _resetReviewStoreForTest,
   addComment,
@@ -88,6 +88,7 @@ describe("sendReviewBack", () => {
         return () => set.delete(l);
       },
       status: () => status("idle", "guessed"),
+      canConfirm: () => true,
       setTimeout: (fn, ms) => {
         timers.push({ fn, ms });
         return timers.length;
@@ -118,44 +119,63 @@ describe("sendReviewBack", () => {
     }
   });
 
-  it("types nothing into a working agent: the send waits, and the line goes out once the turn ends", async () => {
-    const d = deps({ status: () => status("working") });
+  it("types nothing into a working agent: the send stops at waiting, and Hermes never pastes later on its own", async () => {
+    let current = status("working");
+    const d = deps({ status: () => current });
     const states: DeliveryState[] = [];
-    const p = sendReviewBack(d, request(3), (s) => states.push(s));
-    await settle();
+    const out = await sendReviewBack(d, request(3), (s) => states.push(s));
     expect(d.writeFile).toHaveBeenCalledOnce();
     expect(d.pasted).toHaveLength(0);
+    expect(out).toEqual({ state: { kind: "waiting", reason: expect.stringContaining("Send now") }, filePath: "/data/reviews/sess-b/review-3.md" });
     expect(states.map((s) => s.kind)).toEqual(["sending", "waiting"]);
-    expect(d.timers).toHaveLength(0); // no receipt timer runs before the paste
-    // Still working (a tool call): still nothing.
-    d.emit("sess-b", event(undefined, "working"));
-    await settle();
-    expect(d.pasted).toHaveLength(0);
-    // Another session's turn ending does not count.
-    d.emit("sess-a", event(undefined, "done_unread"));
-    await settle();
-    expect(d.pasted).toHaveLength(0);
-    // The turn ends: paste, then the receipt.
+    expect(d.timers).toHaveLength(0); // no receipt timer without a paste
+    expect(d.listeners.get("sess-b")?.size ?? 0).toBe(0); // nothing waits to paste later
+    // The turn ends: still nothing — only the person's next press pastes.
+    current = status("done_unread");
     d.emit("sess-b", event(undefined, "done_unread"));
+    await settle();
+    expect(d.pasted).toHaveLength(0);
+    // "Send now": the same review goes out, then the receipt.
+    const second = sendReviewBack(d, request(3), (s) => states.push(s));
     await vi.waitFor(() => expect(d.pasted).toHaveLength(1));
     expect(d.pasted[0]).toBe(pasteLine(3, "/data/reviews/sess-b/review-3.md"));
     expect(d.timers).toHaveLength(1);
     d.emit("sess-b", event(["hermes-review#3"]));
-    expect((await p).state).toEqual({ kind: "delivered", at: 42 });
+    expect((await second).state).toEqual({ kind: "delivered", at: 42 });
     expect(states.map((s) => s.kind)).toEqual(["sending", "waiting", "sending", "delivered"]);
     expect(d.listeners.get("sess-b")?.size).toBe(0);
   });
 
-  it("a held send fails, without pasting, when the agent exits first", async () => {
-    const d = deps({ status: () => status("working") });
-    const p = sendReviewBack(d, request(3));
-    await settle();
-    d.emit("sess-b", { type: "exit", at: 2, code: 1, signal: null });
-    const out = await p;
-    expect(out.state.kind).toBe("failed");
-    expect(out.filePath).toBe("/data/reviews/sess-b/review-3.md");
+  it("Send now while the agent is still working stays at waiting, without pasting", async () => {
+    const d = deps({ status: () => status("working", "guessed") });
+    expect((await sendReviewBack(d, request(3))).state.kind).toBe("waiting");
+    expect((await sendReviewBack(d, request(3))).state.kind).toBe("waiting");
     expect(d.pasted).toHaveLength(0);
-    expect(d.listeners.get("sess-b")?.size).toBe(0);
+  });
+
+  it("an agent that cannot send a receipt ends as pasted: one paste, no timer, no listener, no red state", async () => {
+    const d = deps({ canConfirm: () => false });
+    const states: DeliveryState[] = [];
+    const out = await sendReviewBack(d, request(3), (s) => states.push(s));
+    expect(d.pasted).toEqual([pasteLine(3, "/data/reviews/sess-b/review-3.md")]);
+    expect(out).toEqual({ state: { kind: "pasted", at: 42 }, filePath: "/data/reviews/sess-b/review-3.md" });
+    expect(states.map((s) => s.kind)).toEqual(["sending", "pasted"]);
+    expect(d.timers).toHaveLength(0);
+    expect(d.listeners.get("sess-b")?.size ?? 0).toBe(0);
+  });
+
+  it("a receipt is only possible for a helper-started agent whose vendor takes a prompt hook", () => {
+    const started = { state: "started", since: "2026-01-01T00:00:00Z", confidence: "exact" } as const;
+    expect(deliveryReceiptAvailable({ ai_provider: "claude", agent_startup: started })).toBe(true);
+    // Started without the helper (flag off): no hooks were installed.
+    expect(deliveryReceiptAvailable({ ai_provider: "claude", agent_startup: null })).toBe(false);
+    expect(deliveryReceiptAvailable({ ai_provider: "claude", agent_startup: undefined })).toBe(false);
+    // Vendors whose launch carries no prompt hook, helper or not.
+    for (const provider of ["gemini", "codex", "copilot", "opencode", "goose", "aider", "custom", "unknown-vendor"]) {
+      expect(deliveryReceiptAvailable({ ai_provider: provider, agent_startup: started }), provider).toBe(false);
+    }
+    expect(deliveryReceiptAvailable({ ai_provider: null, agent_startup: started })).toBe(false);
+    expect(deliveryReceiptAvailable(undefined)).toBe(false);
   });
 
   it("recognises the receipt by its tag only", () => {
@@ -242,20 +262,42 @@ describe("the review store", () => {
     expect(sentReviewOf("/repo/a", c.id)).toBe(2);
     expect(sentReviewOf("/repo/b", c.id)).toBeNull();
     unsub();
-    // A fresh store reads the persisted part back — a sent comment stays
-    // sent after a restart, so it is never re-sent as a new review;
-    // deliveries are per run.
+    // A fresh store reads everything back — a sent comment stays sent
+    // after a restart, so it is never re-sent as a new review, and its
+    // delivery (session and file path) is still there for Retry.
     _resetReviewStoreForTest();
     const again = getReviewState("/repo/a");
     expect(again.viewed).toEqual(["src/app.js"]);
     expect(again.comments[0].id).toBe(c.id);
     expect(again.lastN).toBe(2);
     expect(sentReviewOf("/repo/a", c.id)).toBe(2);
-    expect(again.deliveries).toEqual({});
+    expect(again.deliveries).toEqual({ 2: { kind: "delivered", at: 5, sessionId: "s", filePath: "/f" } });
     removeComment("/repo/a", c.id);
     expect(getReviewState("/repo/a").comments).toEqual([]);
     setViewed("/repo/a", "src/app.js", false);
     expect(getReviewState("/repo/a").viewed).toEqual([]);
+  });
+
+  it("after a restart an in-flight send reads as not delivered, a waiting one stays waiting, and broken entries are dropped", () => {
+    localStorage.setItem(
+      "hermes.review./repo/e",
+      JSON.stringify({
+        lastN: 5,
+        deliveries: {
+          1: { kind: "sending", sessionId: "s", filePath: "/r/review-1.md" },
+          2: { kind: "waiting", reason: "busy", sessionId: "s", filePath: "/r/review-2.md" },
+          3: { kind: "not_delivered", reason: "silence", sessionId: "s", filePath: "/r/review-3.md" },
+          4: { kind: "delivered", at: 9 }, // no session: cannot be retried, dropped
+          5: { kind: "teleported", sessionId: "s", filePath: null },
+          x: { kind: "delivered", at: 9, sessionId: "s", filePath: null },
+        },
+      }),
+    );
+    const s = getReviewState("/repo/e");
+    expect(Object.keys(s.deliveries).map(Number).sort()).toEqual([1, 2, 3]);
+    expect(s.deliveries[1]).toEqual({ kind: "not_delivered", reason: expect.stringContaining("closed"), sessionId: "s", filePath: "/r/review-1.md" });
+    expect(s.deliveries[2]).toEqual({ kind: "waiting", reason: "busy", sessionId: "s", filePath: "/r/review-2.md" });
+    expect(s.deliveries[3].kind).toBe("not_delivered");
   });
 
   it("ignores broken persisted data", () => {

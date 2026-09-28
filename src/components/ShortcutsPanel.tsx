@@ -2,6 +2,7 @@ import "../styles/components/ShortcutsPanel.css";
 import { useEffect } from "react";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import { visibleShortcutGroups } from "../utils/shortcuts";
 
@@ -44,7 +45,7 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
               <div className="shortcuts-table">
                 {group.shortcuts.map((s) => (
                   <div key={s.id} className="shortcuts-row" data-shortcut-id={s.id}>
-                    <span className="shortcuts-action">{t(s.labelKey)}</span>
+                    <span className="shortcuts-action">{s.id === "view.git-panel" && isFeatureFlagEnabled("reviewDesk") ? t("palette.reviewDesk") : t(s.labelKey)}</span>
                     <kbd className="shortcuts-kbd">{fmt(s.keys)}</kbd>
                   </div>
                 ))}
