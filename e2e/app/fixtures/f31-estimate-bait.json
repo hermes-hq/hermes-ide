@@ -1,0 +1,10 @@
+{
+	"name": "f31-estimate-bait",
+	"description": "Prints what Hermes's terminal analyzer takes for Claude Code and its token counts (from which it would estimate a cost), then works until interrupted: Ctrl-C or SIGINT (130), SIGTERM (143) or SIGHUP (129).",
+	"steps": [
+		{ "do": "print", "text": "Claude Code v2.0.0 (fake agent for tests)\n" },
+		{ "do": "print", "text": "Input: 12,000 tokens | Output: 3,000 tokens\n" },
+		{ "do": "print", "text": "fake-agent: working until interrupted\n" },
+		{ "do": "hang" }
+	]
+}

@@ -84,6 +84,9 @@ import { OnboardingGate } from "./components/OnboardingGate";
 import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
+import { useFleetControls } from "./fleet/useFleetControls";
+import { getAgent } from "./catalog/agentCatalog";
+import type { CreateSessionOpts } from "./types/session";
 
 // Loaded on demand, off the startup path: the editor (CodeMirror) with the
 // file preview, Settings (with the plugin manager), and the Agent view —
@@ -127,7 +130,17 @@ function AppContent() {
   const { ui } = state;
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [costDashboardOpen, setCostDashboardOpen] = useState(false);
+  const [costDashboardOpen, setCostDashboardOpenState] = useState(false);
+  // 2.0 fleet controls (flag, read once at startup). With it on, only the
+  // spend an agent reports itself is shown, so the dashboard of estimated
+  // costs does not open.
+  const fleetOn = isFeatureFlagEnabled("fleetControls");
+  const setCostDashboardOpen = useCallback(
+    (v: boolean | ((prev: boolean) => boolean)) => {
+      if (!fleetOn) setCostDashboardOpenState(v);
+    },
+    [fleetOn],
+  );
   // F21 Review Desk: replaces the git panels when its flag is on.
   const reviewDeskEnabled = isFeatureFlagEnabled("reviewDesk");
   const [reviewDeskOpen, setReviewDeskOpen] = useState(false);
@@ -897,6 +910,22 @@ function AppContent() {
     return () => { cancelled = true; unlisten?.(); };
   }, [dispatch]);
 
+  // ── Fleet controls: spend caps, Collision Radar, task queue ──
+  const activeIdRef = useRef(state.activeSessionId);
+  activeIdRef.current = state.activeSessionId;
+  /** A queued task starts in the background: whatever the user is looking
+   *  at stays in front. */
+  const startQueuedTask = useCallback(async (opts: CreateSessionOpts) => {
+    const before = activeIdRef.current;
+    const session = await createSession(opts);
+    if (session) {
+      if (!layoutRootRef.current) dispatch({ type: "INIT_PANE", sessionId: session.id });
+      else if (before) dispatch({ type: "SET_ACTIVE", id: before });
+    }
+    return session;
+  }, [createSession, dispatch]);
+  const fleet = useFleetControls({ enabled: fleetOn, sessions, startTask: startQueuedTask, t });
+
   // ── Instant session creation (Cmd+N / Cmd+T) ──
   const createSessionDirect = useCallback(async () => {
     const session = await createSession({});
@@ -994,6 +1023,7 @@ function AppContent() {
     contextPanelOpen: ui.contextPanelOpen,
     searchPanelOpen: ui.searchPanelOpen,
     flowMode: ui.flowMode,
+    costDashboardAvailable: !fleetOn,
   });
 
   // Attention inbox (F12): show a session's pane and give it the keyboard.
@@ -1427,7 +1457,7 @@ function AppContent() {
           onToggleSessions={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
           onOpenSettings={(tab) => setSettingsOpen(tab || "general")}
           onOpenWorkspace={() => setWorkspaceOpen(true)}
-          onOpenCostDashboard={() => setCostDashboardOpen(true)}
+          onOpenCostDashboard={fleetOn ? undefined : () => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
           onAttachProject={() => setProjectPickerOpen(true)}
           onOpenComposer={() => dispatch({ type: "OPEN_COMPOSER" })}
@@ -1560,6 +1590,13 @@ function AppContent() {
             pendingSplit.current = null;
           }}
           onCreate={async (opts) => {
+            // With a running-agents or memory cap and no free slot, an
+            // agent task waits in the queue instead of starting (N22).
+            if (fleet.queueIfFull(opts, opts.label || opts.agentName || getAgent(opts.aiProvider)?.name || opts.aiProvider || "")) {
+              setSessionCreatorOpen(false);
+              pendingSplit.current = null;
+              return;
+            }
             // Which session the focused pane shows right now — read BEFORE
             // createSession(), which makes the new session active and swaps
             // it into the focused pane.

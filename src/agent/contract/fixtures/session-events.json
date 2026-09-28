@@ -27,7 +27,9 @@
     { "type": "exit", "at": 1790000007000, "source": "pty", "code": 0, "signal": null },
     { "type": "exit", "at": 1790000008000, "code": null, "signal": "SIGTERM" },
     { "type": "subagents", "at": 1790000009000, "source": "hook:claude", "running": 2 },
-    { "type": "status", "at": 1790000010000, "source": "hook:claude", "tags": ["hermes-review#3"], "status": { "kind": "working", "confidence": "exact", "detail": "" } }
+    { "type": "status", "at": 1790000010000, "source": "hook:claude", "tags": ["hermes-review#3"], "status": { "kind": "working", "confidence": "exact", "detail": "" } },
+    { "type": "usage", "at": 1790000011000, "source": "hook:claude", "inputTokens": 12000, "outputTokens": 3400, "costUsd": 0.4125 },
+    { "type": "usage", "at": 1790000011500, "inputTokens": 800, "outputTokens": null, "costUsd": null }
   ],
   "rejected": [
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
@@ -46,6 +48,10 @@
     { "type": "nope", "at": 1790000000000 },
     { "type": "status", "at": 1790000009000, "tags": "hermes-review#3", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
     { "type": "status", "at": 1790000009000, "tags": [3], "status": { "kind": "working", "confidence": "exact", "detail": "" } },
+    { "type": "usage", "at": 1790000009000, "inputTokens": -1, "outputTokens": null, "costUsd": null },
+    { "type": "usage", "at": 1790000009000, "inputTokens": 1.5, "outputTokens": null, "costUsd": null },
+    { "type": "usage", "at": 1790000009000, "inputTokens": null, "outputTokens": null, "costUsd": -0.01 },
+    { "type": "usage", "at": 1790000009000, "inputTokens": null, "outputTokens": null, "costUsd": "0.50" },
     "not an object"
   ]
 }

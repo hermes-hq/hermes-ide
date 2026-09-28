@@ -255,7 +255,8 @@ fn with_tags(mut event: SessionEvent, found: Vec<String>) -> SessionEvent {
         | SessionEvent::Attention { tags, .. }
         | SessionEvent::Identity { tags, .. }
         | SessionEvent::Exit { tags, .. }
-        | SessionEvent::Subagents { tags, .. } => *tags = Some(found),
+        | SessionEvent::Subagents { tags, .. }
+        | SessionEvent::Usage { tags, .. } => *tags = Some(found),
     }
     event
 }

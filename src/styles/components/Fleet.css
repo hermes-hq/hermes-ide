@@ -1,0 +1,124 @@
+/* ─── Fleet controls: spend, overlap, task queue ──────────────── */
+
+.session-spend {
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  letter-spacing: var(--tracking-snug);
+}
+
+.session-spend[data-spend="na"] {
+  color: var(--text-3);
+}
+
+.session-cap-reached {
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--red);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-snug);
+}
+
+.session-overlap-badge {
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--warning);
+  border: 1px solid currentColor;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-snug);
+}
+
+/* Queued tasks, above the sessions */
+
+.task-queue {
+  margin-bottom: var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.task-queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+}
+
+.task-queue-slots {
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-3);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-queue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+.task-queue-position {
+  color: var(--text-3);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-queue-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-queue-btn {
+  font-size: var(--text-2xs);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  padding: 0 var(--space-1);
+  cursor: pointer;
+}
+
+.task-queue-btn:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+/* Settings > Limits */
+
+.fleet-cap-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fleet-cap-input {
+  width: 8em;
+}
+
+.fleet-cap-unit {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.task-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

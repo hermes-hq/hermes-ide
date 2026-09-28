@@ -103,6 +103,7 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
       return { ...make("exited", "", "exact"), processExited: true };
     case "identity":
     case "subagents":
+    case "usage":
       return null;
   }
 }

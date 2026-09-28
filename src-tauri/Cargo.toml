@@ -60,11 +60,13 @@ objc2-web-kit = { version = "0.3", optional = true, default-features = false, fe
 gtk = { version = "0.18", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Free disk space for the disk guard. The e2e feature adds what the bridge's
-# window screenshots need. Keeping the machine awake while an agent works uses a power request.
+# Free disk space for the disk guard; the console Ctrl+C event for spend
+# caps. The e2e feature adds what the bridge's window screenshots need.
+# Keeping the machine awake while an agent works uses a power request.
 windows-sys = { version = "0.61", features = [
   "Win32_Storage_FileSystem",
   "Win32_Foundation",
+  "Win32_System_Console",
   "Win32_System_Power",
   "Win32_System_Threading",
 ] }

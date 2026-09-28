@@ -28,6 +28,10 @@ export interface Turn {
   /** Epoch milliseconds, null while the turn is running. */
   readonly endedAt: number | null;
   readonly diffstat: Diffstat;
+  /** Repository-relative paths the turn changed, when the ledger records
+   *  them (optional, added for F37 Collision Radar; without it the radar
+   *  reads the paths from the turn's diff). */
+  readonly paths?: readonly string[];
   /**
    * F20 (additive): the snapshot ran past its budget, so this turn has a
    * diffstat summary but no snapshot (`ref` is empty) and cannot be diffed

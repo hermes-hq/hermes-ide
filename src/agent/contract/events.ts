@@ -74,6 +74,21 @@ export interface SubagentsEvent extends EventBase {
   readonly running: number;
 }
 
+/**
+ * What the agent itself reports about its usage, as totals for the session
+ * so far (F31). Only an agent's own numbers travel here — a transcript, a
+ * protocol result, a hook payload — never an estimate made by Hermes. A part
+ * the agent does not report is null, and stays "n/a" wherever it is shown.
+ * Totals, not deltas: a repeated or late event can never double-count.
+ */
+export interface UsageEvent extends EventBase {
+  readonly type: "usage";
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  /** US dollars, only when the vendor itself reports a cost. */
+  readonly costUsd: number | null;
+}
+
 export type SessionEvent =
   | StatusEvent
   | TurnStartEvent
@@ -83,7 +98,8 @@ export type SessionEvent =
   | AttentionEvent
   | IdentityEvent
   | ExitEvent
-  | SubagentsEvent;
+  | SubagentsEvent
+  | UsageEvent;
 
 export type SessionEventType = SessionEvent["type"];
 
@@ -97,6 +113,7 @@ export const SESSION_EVENT_TYPES: readonly SessionEventType[] = [
   "identity",
   "exit",
   "subagents",
+  "usage",
 ];
 
 function optionalString(v: unknown): string | null | undefined {
@@ -106,6 +123,18 @@ function optionalString(v: unknown): string | null | undefined {
 
 /** The largest turn number: the Rust side reads `n` as a NonZeroU32. */
 const MAX_TURN_NUMBER = 4294967295;
+
+/** A whole number of tokens, or null; undefined when malformed. */
+function optionalTokens(v: unknown): number | null | undefined {
+  if (v === undefined || v === null) return null;
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : undefined;
+}
+
+/** A finite, non-negative amount of dollars, or null; undefined when malformed. */
+function optionalUsd(v: unknown): number | null | undefined {
+  if (v === undefined || v === null) return null;
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+}
 
 function turnNumber(v: unknown): number | null {
   return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_TURN_NUMBER ? v : null;
@@ -169,6 +198,13 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       const running = v.running;
       if (typeof running !== "number" || !Number.isInteger(running) || running < 0 || running > 4294967295) return null;
       return { ...base, type: "subagents", running };
+    }
+    case "usage": {
+      const inputTokens = optionalTokens(v.inputTokens);
+      const outputTokens = optionalTokens(v.outputTokens);
+      const costUsd = optionalUsd(v.costUsd);
+      if (inputTokens === undefined || outputTokens === undefined || costUsd === undefined) return null;
+      return { ...base, type: "usage", inputTokens, outputTokens, costUsd };
     }
     default:
       return null;

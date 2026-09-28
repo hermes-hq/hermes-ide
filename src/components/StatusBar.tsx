@@ -1,5 +1,5 @@
 import "../styles/components/StatusBar.css";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { useActiveSession, useSessionList, useTotalCost, useTotalTokens } from "../state/SessionContext";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
@@ -11,6 +11,7 @@ import { isAgentStatusEnabled } from "../agent/status/flag";
 import { useSessionStatus } from "../agent/status/attentionStore";
 import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
 import { isFeatureFlagEnabled } from "../featureFlags";
+import { useReportedTotals } from "../fleet/useReportedTotals";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
@@ -60,8 +61,17 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   // Read once at startup (flags never change while the app runs).
   const agentStatus = isAgentStatusEnabled();
   const sessions = useSessionList();
-  const totalCost = useTotalCost();
-  const totalTokens = useTotalTokens();
+  const legacyCost = useTotalCost();
+  const legacyTokens = useTotalTokens();
+  // With the 2.0 fleet controls on, only what the agents themselves
+  // reported is added up: no estimated cost, no tokens read off the screen.
+  const fleetOn = isFeatureFlagEnabled("fleetControls");
+  const reported = useReportedTotals(sessions.map((s) => s.id), fleetOn);
+  const totalCost = fleetOn ? reported.costUsd ?? 0 : legacyCost;
+  const totalTokens = useMemo(
+    () => (fleetOn ? { input: reported.inputTokens ?? 0, output: reported.outputTokens ?? 0 } : legacyTokens),
+    [fleetOn, reported.inputTokens, reported.outputTokens, legacyTokens],
+  );
   const hasTokens = totalTokens.input + totalTokens.output > 0;
   const [, setTick] = useState(0);
 
@@ -156,7 +166,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         )}
         {totalCost > 0 && (
           <>
-            <span className="status-bar-item status-bar-cost" onContextMenu={(e) => {
+            <span className="status-bar-item status-bar-cost" title={fleetOn ? t("fleet.spendReported") : undefined} onContextMenu={(e) => {
               showStatusMenu(e, [
                 menuItem("status.copy-cost", t("status.copyCost")),
                 menuItem("status.copy-tokens", t("status.copyTokenCount")),

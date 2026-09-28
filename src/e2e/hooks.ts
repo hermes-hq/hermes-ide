@@ -32,6 +32,17 @@ import { defaultDoneWhen, listRecipeRuns } from "../state/worktreeRecipes";
 import { checksForTurn, getDoneWhenSnapshot } from "../doneWhen/store";
 import { sendFailuresBack } from "../doneWhen/controller";
 import { getTrackState, trackWorktreePaths } from "../track/store";
+import { getAllOverlaps, setTurnSourceForTest } from "../fleet/radarStore";
+import { getFleetCaps } from "../fleet/fleetSettings";
+import { getOccupancy, listQueuedTasks } from "../fleet/taskQueue";
+import { getAllLoads } from "../fleet/fleetLoad";
+
+/** A fake turn for the fake ledger: its number and what it changed. */
+interface FakeTurn {
+  n: number;
+  paths?: string[];
+  patch?: string;
+}
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -134,6 +145,45 @@ const hooks = {
     sessionEventWatches.delete(sessionId);
   },
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
+
+  // ── 2.0 fleet controls (F31, F37, N22) ─────────────────────────────
+  /**
+   * Answer the turn ledger (listTurns / getTurnDiff) from fake turns, for
+   * as long as the app runs, until F20 fills the real one. A turn without
+   * `paths` is read from its `patch`. Pass null to go back to the ledger.
+   */
+  setFakeTurnLedger: (ledger: Record<string, FakeTurn[]> | null): void => {
+    if (!ledger) {
+      setTurnSourceForTest(null);
+      return;
+    }
+    const turnsOf = (sessionId: string): Turn[] =>
+      (ledger[sessionId] ?? []).map((t) => ({
+        sessionId,
+        n: t.n,
+        ref: `refs/hermes/${sessionId}/turn/${t.n}`,
+        startedAt: 1790000000000 + t.n * 1000,
+        endedAt: 1790000000500 + t.n * 1000,
+        diffstat: { files: t.paths?.length ?? 0, insertions: 1, deletions: 0 },
+        ...(t.paths ? { paths: t.paths } : {}),
+      }));
+    setTurnSourceForTest({
+      listTurns: async (sessionId) => turnsOf(sessionId),
+      getTurnDiff: async (sessionId, n) => {
+        const turn = turnsOf(sessionId).find((t) => t.n === n);
+        const fake = (ledger[sessionId] ?? []).find((t) => t.n === n);
+        return turn ? { turn, patch: fake?.patch ?? "" } : null;
+      },
+    });
+  },
+  /** What the fleet controls hold: caps, queue, slots, load, overlaps. */
+  fleetState: () => ({
+    caps: getFleetCaps(),
+    queue: listQueuedTasks().map((t) => ({ id: t.id, label: t.label, aiProvider: t.opts.aiProvider ?? null })),
+    occupancy: getOccupancy(),
+    loads: Object.fromEntries(getAllLoads()),
+    overlaps: Object.fromEntries(getAllOverlaps()),
+  }),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
 

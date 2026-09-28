@@ -27,6 +27,11 @@ pub trait PtyTransport: Send {
     fn hosted(&self) -> bool;
     /// Leaves a hosted program running and drops the connection to it.
     fn detach(&mut self) {}
+    /// The terminal's foreground process group, when the terminal can say
+    /// (`None` when it cannot, as for a hosted terminal).
+    fn foreground_group(&self) -> Option<i32> {
+        None
+    }
 }
 
 /// A PTY opened and owned by this process.
@@ -113,6 +118,11 @@ impl PtyTransport for InProcessPty {
 
     fn pid(&self) -> Option<u32> {
         self.child.process_id()
+    }
+
+    #[cfg(unix)]
+    fn foreground_group(&self) -> Option<i32> {
+        self.master.process_group_leader()
     }
 
     fn shell_owns_terminal(&self, shell_pid: u32) -> Option<bool> {

@@ -32,6 +32,15 @@ export interface SessionTurnState {
   readonly completed: number;
 }
 
+/** The latest usage totals the agent reported (F31); null parts are "n/a". */
+export interface SessionUsage {
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly costUsd: number | null;
+  /** Epoch ms of the usage event these totals came from. */
+  readonly at: number;
+}
+
 export interface SessionEventSnapshot {
   readonly sessionId: string;
   readonly status: AgentStatus;
@@ -42,6 +51,8 @@ export interface SessionEventSnapshot {
   readonly exit: { readonly code: number | null; readonly signal: string | null } | null;
   /** Sub-agents the agent reports as running (F11); 0 when none or unknown. */
   readonly subagents: number;
+  /** The latest usage totals the agent itself reported; null until it reports any. */
+  readonly usage: SessionUsage | null;
   /** The most recent events, oldest first, at most SESSION_EVENT_CAP. */
   readonly events: readonly SessionEvent[];
   /** Bumps on every accepted event; 0 for a session nothing reported on. */
@@ -60,6 +71,7 @@ function emptySnapshot(sessionId: string): SessionEventSnapshot {
     attention: null,
     exit: null,
     subagents: 0,
+    usage: null,
     events: Object.freeze([]) as readonly SessionEvent[],
     version: 0,
   });
@@ -101,6 +113,16 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       // localised agentError.exitCode / agentError.exitSignal strings.
       next.status = { kind: "exited", confidence: "exact", detail: "" };
       next.turn = { current: null, completed: prev.turn.completed + (prev.turn.current === null ? 0 : 1) };
+      break;
+    case "usage":
+      // Totals as the agent reports them. A part it stopped reporting keeps
+      // the last value it did report; nothing is added up or guessed here.
+      next.usage = Object.freeze({
+        inputTokens: event.inputTokens ?? prev.usage?.inputTokens ?? null,
+        outputTokens: event.outputTokens ?? prev.usage?.outputTokens ?? null,
+        costUsd: event.costUsd ?? prev.usage?.costUsd ?? null,
+        at: event.at,
+      });
       break;
   }
   return Object.freeze(next);

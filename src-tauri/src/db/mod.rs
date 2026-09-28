@@ -1944,6 +1944,11 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "feature_flag_overrides",
     // Away notifications (N16): webhook / ntfy / Telegram address
     "away_notify_url",
+    // Fleet controls (2.0: spend caps and the task queue — see src/fleet/)
+    "fleet_spend_cap_session_usd",
+    "fleet_spend_cap_feature_usd",
+    "fleet_max_running_agents",
+    "fleet_max_agent_memory_mb",
 ];
 
 #[tauri::command]

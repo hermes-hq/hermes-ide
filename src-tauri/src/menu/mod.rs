@@ -580,6 +580,27 @@ pub(crate) fn find_menu_item_recursive(
     None
 }
 
+/// Test builds only (cargo feature `e2e`): whether a native menu item is
+/// enabled, so a real-app scenario can see what the menu bar offers.
+/// `None` when the app has no menu or no item with that id.
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub fn menu_item_enabled_for_test(app: AppHandle, id: String) -> Option<bool> {
+    let menu = app.menu()?;
+    match find_menu_item_recursive(&menu, &id)? {
+        tauri::menu::MenuItemKind::MenuItem(mi) => mi.is_enabled().ok(),
+        tauri::menu::MenuItemKind::Check(ci) => ci.is_enabled().ok(),
+        _ => None,
+    }
+}
+
+/// The same command in a normal build: refuses.
+#[cfg(not(feature = "e2e"))]
+#[tauri::command]
+pub fn menu_item_enabled_for_test(_id: String) -> Result<bool, String> {
+    Err("only available in a test build".to_string())
+}
+
 fn find_in_submenu(
     submenu: &tauri::menu::Submenu<Wry>,
     target_id: &str,

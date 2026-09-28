@@ -1,6 +1,6 @@
 {
 	"name": "hang",
-	"description": "Prints a line and never returns. Only Ctrl-C (130), SIGTERM (143) or SIGHUP (129) end it.",
+	"description": "Prints a line and never returns. Only Ctrl-C or SIGINT (130), SIGTERM (143) or SIGHUP (129) end it.",
 	"steps": [
 		{ "do": "print", "text": "fake-agent: thinking forever\n" },
 		{ "do": "progress", "state": 3 },

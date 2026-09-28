@@ -5,9 +5,10 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 12 flags may exist at once (raised from 5 for the 2.0 build, where
-// every new feature ships behind its own flag) — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 13th, retire one first.
+// At most 13 flags may exist at once (raised from 5 for the 2.0 build, where
+// every new feature ships behind its own flag; 13 once fleetControls joined
+// the twelve already there) — enforced by src/__tests__/feature-flags.test.ts.
+// If you need a 14th, retire one first.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -93,6 +94,12 @@ export const FEATURE_FLAGS = [
     label: "Sessions survive quit, update and crash",
     description:
       "Run terminals in a small background host so agents keep working while Hermes is closed, updated or crashes; Hermes reattaches to them and replays what you missed. Quitting with a working agent asks whether to keep it running. macOS and Linux.",
+  },
+  {
+    id: "fleetControls",
+    label: "Spend caps, overlap badges and the task queue",
+    description:
+      "Shows only the spend an agent reports itself (n/a otherwise) and stops a session at a spend cap you set, marks sessions whose latest turns touched the same files, and queues new agent tasks beyond a running-agents or memory cap (Settings > Limits).",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

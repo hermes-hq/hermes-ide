@@ -1720,7 +1720,7 @@ pub fn create_session(
 
 /// Enumerate direct child PIDs of a given parent process.
 #[cfg(unix)]
-fn enumerate_child_pids(parent_pid: u32) -> Vec<u32> {
+pub(crate) fn enumerate_child_pids(parent_pid: u32) -> Vec<u32> {
     let mut children = Vec::new();
 
     #[cfg(target_os = "macos")]
@@ -2046,7 +2046,7 @@ fn shell_group_is_foreground(
 /// Whether any running process has `parent_pid` as its parent and counts as
 /// a program the shell started (see [`counts_as_shell_child`]).
 #[cfg(any(not(unix), test))]
-fn has_child_process(parent_pid: u32) -> bool {
+pub(crate) fn has_child_process(parent_pid: u32) -> bool {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let mut sys = System::new();
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
@@ -2072,8 +2072,9 @@ fn has_child_process(parent_pid: u32) -> bool {
 /// - An unknown time counts, for the same reason.
 /// - The console host Windows may start for a console program is not a
 ///   program the user ran, so it does not count.
-#[cfg(any(not(unix), test))]
-fn counts_as_shell_child(shell_started: u64, started: u64, name: &str) -> bool {
+///
+/// Also used by the fleet load (`crate::fleet`) on every platform.
+pub(crate) fn counts_as_shell_child(shell_started: u64, started: u64, name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     if name == "conhost.exe" || name == "openconsole.exe" {
         return false;

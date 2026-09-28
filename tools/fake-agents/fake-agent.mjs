@@ -13,7 +13,7 @@
 // --speed scales every sleep (0 = no sleeps; waits for input are unaffected).
 //
 // Exit codes: the scenario's own, 124 on a waitKey/waitPaste/waitResize
-// timeout, 130 on Ctrl-C, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
+// timeout, 130 on Ctrl-C or SIGINT, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -76,7 +76,9 @@ const restore = () => {
 	out(`${ESC}[?25h${ESC}[?2004l${ESC}[?1004l`);
 	if (process.stdin.isTTY) process.stdin.setRawMode(false);
 };
+let finishing = false;
 const finish = (code) => {
+	finishing = true;
 	log({ ev: "exit", code });
 	restore();
 	process.exitCode = code;
@@ -113,6 +115,14 @@ process.on("SIGTERM", () => {
 process.on("SIGHUP", () => {
 	log({ ev: "signal", sig: "SIGHUP" });
 	finish(129);
+});
+// An interrupt sent as a signal rather than typed (the way Hermes stops an
+// agent at a spend cap on macOS and Linux). Ignored once the agent is
+// already leaving, e.g. after a typed Ctrl-C that also raised one.
+process.on("SIGINT", () => {
+	if (finishing) return;
+	log({ ev: "signal", sig: "SIGINT" });
+	finish(130);
 });
 
 if (process.stdin.isTTY) process.stdin.setRawMode(true);

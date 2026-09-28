@@ -58,6 +58,34 @@ pub struct AgentStatus {
     pub detail: String,
 }
 
+/// A finite, non-negative amount of US dollars, exactly as a vendor reported
+/// it (F31). Refused on the wire when negative, infinite or not a number, so
+/// it can be compared for equality like the rest of an event.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Usd(f64);
+
+// Every value is finite by construction (see `Usd::new`), so equality is total.
+impl Eq for Usd {}
+
+impl Usd {
+    pub fn new(value: f64) -> Option<Self> {
+        (value.is_finite() && value >= 0.0).then_some(Self(value))
+    }
+
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Usd {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = f64::deserialize(deserializer)?;
+        Usd::new(value)
+            .ok_or_else(|| serde::de::Error::custom("a cost must be a finite, non-negative number"))
+    }
+}
+
 /// What a session reports. `at` is epoch milliseconds; `source` names where
 /// the event came from ("hook:claude", "osc", "pty", "plugin:<id>", "e2e").
 /// `tags` (F21, additive) are machine markers found in what the agent
@@ -145,6 +173,20 @@ pub enum SessionEvent {
         tags: Option<Vec<String>>,
         running: u32,
     },
+    /// Usage totals for the session so far, as the agent itself reports
+    /// them (F31). A part the agent does not report is `None` ("n/a"); Hermes
+    /// never fills one in with an estimate.
+    #[serde(rename_all = "camelCase")]
+    Usage {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        cost_usd: Option<Usd>,
+    },
 }
 
 /// The one Tauri event every SessionEvent travels on.
@@ -226,7 +268,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 12);
+        assert_eq!(events.len(), 14);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -234,7 +276,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&event).unwrap(), raw);
             seen.insert(raw["type"].as_str().unwrap().to_string());
         }
-        assert_eq!(seen.len(), 9, "every variant appears: {seen:?}");
+        assert_eq!(seen.len(), 10, "every variant appears: {seen:?}");
     }
 
     #[test]
@@ -252,6 +294,42 @@ mod tests {
         let raw = json!({ "type": "turn_end", "at": 1, "n": 4, "futureField": true });
         let event: SessionEvent = serde_json::from_value(raw).unwrap();
         assert!(matches!(event, SessionEvent::TurnEnd { n, .. } if n.get() == 4));
+    }
+
+    #[test]
+    fn a_usage_event_keeps_the_vendor_cost_and_refuses_a_bad_one() {
+        let raw = json!({ "type": "usage", "at": 9, "inputTokens": 10, "outputTokens": null, "costUsd": 1.25 });
+        let event: SessionEvent = serde_json::from_value(raw.clone()).unwrap();
+        match &event {
+            SessionEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                ..
+            } => {
+                assert_eq!(*input_tokens, Some(10));
+                assert_eq!(*output_tokens, None);
+                assert_eq!(cost_usd.map(Usd::get), Some(1.25));
+            }
+            other => panic!("not a usage event: {other:?}"),
+        }
+        assert_eq!(serde_json::to_value(&event).unwrap(), raw);
+        // Missing parts are "not reported", never zero.
+        let sparse: SessionEvent =
+            serde_json::from_value(json!({ "type": "usage", "at": 9 })).unwrap();
+        assert!(matches!(
+            sparse,
+            SessionEvent::Usage {
+                input_tokens: None,
+                output_tokens: None,
+                cost_usd: None,
+                ..
+            }
+        ));
+        assert!(Usd::new(f64::NAN).is_none());
+        assert!(Usd::new(f64::INFINITY).is_none());
+        assert!(Usd::new(-0.5).is_none());
+        assert!(Usd::new(0.0).is_some());
     }
 
     #[test]

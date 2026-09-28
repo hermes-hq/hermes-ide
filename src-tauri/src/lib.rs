@@ -16,6 +16,7 @@ mod e2e_evidence;
 #[cfg(any(test, feature = "e2e"))]
 #[cfg_attr(not(feature = "e2e"), allow(dead_code))]
 mod e2e_protocol;
+mod fleet;
 mod git;
 mod inline_pty;
 mod instance;
@@ -567,9 +568,19 @@ pub(crate) fn save_workspace_state(app: &tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Windows: `hermes-ide --hermes-interrupt-console <pid>` is the short-lived
+/// helper that raises a console's Ctrl+C event for a spend cap (see
+/// `fleet::interrupt_session_agent`). Returns its exit code; `None` means
+/// start the app. `main` asks before anything else starts.
+pub fn run_console_interrupt_helper() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    fleet::console_interrupt_helper(&args)
+}
+
 pub fn run() {
     env_logger::init();
     install_crash_handler();
+    fleet::let_terminals_receive_ctrl_c();
 
     // Decide which instance this is before anything touches app data: a dev,
     // beta or test build must never open the installed app's data folder.
@@ -958,6 +969,7 @@ pub fn run() {
             // Menu
             menu::show_context_menu,
             menu::update_menu_state,
+            menu::menu_item_enabled_for_test,
             // Plugins
             plugins::list_installed_plugins,
             plugins::read_plugin_bundle,
@@ -1039,6 +1051,9 @@ pub fn run() {
             session_host::session_host_status,
             session_host::session_host_quit,
             session_host::session_host_stop_all,
+            // Fleet controls (2.0: spend caps, task queue) — see fleet.rs.
+            fleet::fleet_agent_load,
+            fleet::interrupt_session_agent,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
