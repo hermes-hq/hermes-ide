@@ -112,11 +112,35 @@ export type AnySessionListener = (sessionId: string) => void;
 
 const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
-const anyListeners = new Set<AnySessionListener>();
+const anyListeners = new Set<AnySessionEventListener>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
 
-function notifyAny(sessionId: string): void {
-  for (const l of [...anyListeners]) l(sessionId);
+/**
+ * Told about every session (F10 and F12 recount, F36 fans out to plugins).
+ * On an accepted event: the event, the snapshot after and the one before.
+ * When a session is cleared: `event` is null and `snapshot` is the empty
+ * snapshot; listeners that only follow events skip that call.
+ */
+export type AnySessionEventListener = (
+  sessionId: string,
+  event: SessionEvent | null,
+  snapshot: SessionEventSnapshot,
+  previous: SessionEventSnapshot,
+) => void;
+
+function notifyAny(
+  sessionId: string,
+  event: SessionEvent | null,
+  snapshot: SessionEventSnapshot,
+  previous: SessionEventSnapshot,
+): void {
+  for (const l of [...anyListeners]) {
+    try {
+      l(sessionId, event, snapshot, previous);
+    } catch (err) {
+      console.warn("[session-event] a listener for every session threw", err);
+    }
+  }
 }
 
 /** The current snapshot of a session; stable until an event lands. */
@@ -147,10 +171,12 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
 /**
  * Subscribe to every session at once (added by F10 for the attention store,
  * which summarises all sessions; F12's inbox uses it to follow sessions it
- * has not seen yet). The listener hears the session id after that session's
- * own subscribers were woken, on every event and on clear.
+ * has not seen yet; F36's plugin API fans the events out to plugins). The
+ * listener runs after that session's own subscribers were woken, on every
+ * accepted event and on clear (see AnySessionEventListener). A listener
+ * that throws is logged and never stops the others or the store.
  */
-export function subscribeAllSessionEvents(listener: AnySessionListener): () => void {
+export function subscribeAllSessionEvents(listener: AnySessionEventListener): () => void {
   anyListeners.add(listener);
   return () => {
     anyListeners.delete(listener);
@@ -159,12 +185,13 @@ export function subscribeAllSessionEvents(listener: AnySessionListener): () => v
 
 /** Fold one event into its session and wake that session's subscribers. */
 export function dispatchSessionEvent(sessionId: string, event: SessionEvent): SessionEventSnapshot {
-  const next = reduceSessionEvent(getSessionEventSnapshot(sessionId), event);
+  const prev = getSessionEventSnapshot(sessionId);
+  const next = reduceSessionEvent(prev, event);
   snapshots.set(sessionId, next);
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
-  notifyAny(sessionId);
+  notifyAny(sessionId, event, next, prev);
   return next;
 }
 
@@ -175,11 +202,12 @@ export function sessionIdsWithEvents(): string[] {
 
 /** Forget a closed session (its subscribers are left to unsubscribe). */
 export function clearSessionEvents(sessionId: string): void {
+  const previous = getSessionEventSnapshot(sessionId);
   snapshots.delete(sessionId);
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
-  notifyAny(sessionId);
+  notifyAny(sessionId, null, getSessionEventSnapshot(sessionId), previous);
 }
 
 /** The snapshot of one session, re-rendering only when that session changes. */
@@ -194,6 +222,6 @@ export function useSessionEvents(sessionId: string): SessionEventSnapshot {
 export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
-  anyListeners.clear();
   emptyCache.clear();
+  anyListeners.clear();
 }

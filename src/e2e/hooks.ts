@@ -23,6 +23,7 @@ import type { InboxRaise } from "../agent/contract/inbox";
 import { getAttentionSummary, getSessionStatus } from "../agent/status/attentionStore";
 import { attentionDebug } from "../attention/debug";
 import { setWindowFocusOverride } from "../attention/windowFocus";
+import { listReviewChecks, reviewInputFromPatch, runReviewChecks } from "../agent/contract/reviewChecks";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -148,6 +149,15 @@ const hooks = {
     badge: [...attentionDebug.badge],
     keepAwake: [...attentionDebug.keepAwake],
   }),
+  // ── F36: review checks (the seam F21's Review Desk runs) ──────────
+  /** Checks registered so far (by plugins through review.registerCheck). */
+  reviewChecks: () => listReviewChecks(),
+  /**
+   * Run every registered check over a diff, the way the Review Desk runs
+   * them over a turn's patch (get_turn_diff). Stands in for F21 until it lands.
+   */
+  runReviewChecks: (sessionId: string, turn: number | null, patch: string, timeoutMs?: number) =>
+    runReviewChecks(reviewInputFromPatch(sessionId, turn, patch), { timeoutMs }),
 };
 
 export type HermesE2EHooks = typeof hooks;

@@ -13,6 +13,7 @@ import {
   reduceSessionEvent,
   SESSION_EVENT_CAP,
   sessionIdsWithEvents,
+  subscribeAllSessionEvents,
   subscribeSessionEvents,
   useSessionEvents,
 } from "../agent/contract/sessionEventStore";
@@ -165,5 +166,45 @@ describe("the Rust -> frontend channel", () => {
     expect(listen).toHaveBeenCalledTimes(1);
     handlers[0]({ payload: { sessionId: "s9", event: { type: "identity", at: 1, vendorSessionId: null, model: "m9", permissionMode: null } } });
     expect(getSessionEventSnapshot("s9").identity.model).toBe("m9");
+  });
+});
+
+describe("listening to every session (F36 addition)", () => {
+  it("hears every accepted event after the store has it, with the snapshot before and after", () => {
+    const heard: Array<[string, string, number, number]> = [];
+    const off = subscribeAllSessionEvents((sessionId, event, next, prev) => {
+      expect(getSessionEventSnapshot(sessionId)).toBe(next);
+      heard.push([sessionId, event?.type ?? "cleared", prev.version, next.version]);
+    });
+    dispatchSessionEvent("a", status("working"));
+    dispatchSessionEvent("b", { type: "attention", at: 2, detail: "x" });
+    dispatchSessionEvent("a", { type: "exit", at: 3, code: 0, signal: null });
+    clearSessionEvents("b");
+    off();
+    dispatchSessionEvent("a", status("idle"));
+    expect(heard).toEqual([
+      ["a", "status", 0, 1],
+      ["b", "attention", 0, 1],
+      ["a", "exit", 1, 2],
+      // A cleared session: no event, the empty snapshot after it.
+      ["b", "cleared", 1, 0],
+    ]);
+  });
+
+  it("a listener that throws stops neither the store, the per-session subscribers nor the others", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const perSession = vi.fn();
+    const other = vi.fn();
+    subscribeSessionEvents("a", perSession);
+    subscribeAllSessionEvents(() => {
+      throw new Error("bad listener");
+    });
+    subscribeAllSessionEvents(other);
+    expect(() => dispatchSessionEvent("a", status("working"))).not.toThrow();
+    expect(getSessionEventSnapshot("a").status.kind).toBe("working");
+    expect(perSession).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

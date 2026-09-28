@@ -6,6 +6,8 @@ export interface PluginManifest {
 	version: string;
 	description: string;
 	author: string;
+	/** Plugin API the plugin is built for. Absent means 1 (deprecated once v2 is on). */
+	apiVersion?: number;
 	activationEvents: ActivationEvent[];
 	contributes: PluginContributions;
 	permissions?: PluginPermission[];
@@ -71,7 +73,11 @@ export type PluginPermission =
 	| "sessions.read"
 	| "notifications"
 	| "network"
-	| "shell.exec";
+	| "shell.exec"
+	// Plugin API v2
+	| "inbox.raise"
+	| "features.read"
+	| "review.checks";
 
 // ─── Plugin Settings Schema ──────────────────────────────
 

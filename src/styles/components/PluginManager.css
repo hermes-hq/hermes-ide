@@ -293,6 +293,26 @@
   background: var(--yellow-dim);
   color: var(--yellow);
 }
+.pm-badge-deprecated {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+}
+
+/* Plugin API notices in the detail view (old API, API not available) */
+.pm-detail-notice {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.pm-detail-notice-warning {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+}
+.pm-detail-notice-error {
+  background: var(--red-dim);
+  color: var(--red);
+}
 
 /* Row action — single button on the right */
 .pm-row-action {

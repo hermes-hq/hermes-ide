@@ -2,6 +2,7 @@ import type { PluginManifest, PluginCommandContribution, PluginPanelContribution
 import { createPluginAPI, type HermesPluginAPI, type PluginPanelProps, type PluginAPICallbacks } from "./PluginAPI";
 import type { Disposable } from "./types";
 import { hostInvoke, issuePluginToken, revokePluginToken } from "./identity";
+import { PLUGIN_API_V1_REMOVED_IN, resolvePluginApi } from "./apiV2";
 
 export type PluginActivateFn = (api: HermesPluginAPI) => void | Promise<void>;
 export type PluginDeactivateFn = () => void | Promise<void>;
@@ -30,6 +31,15 @@ interface PluginEntry {
 	status: PluginStatus;
 	api: PluginApiHandle | null;
 	error?: Error;
+	/** Ships with the app: never reported as using a deprecated API. */
+	builtin: boolean;
+	/** The API it runs against, once activation resolved it. */
+	apiVersion: 1 | 2 | null;
+}
+
+export interface PluginRuntimeOptions {
+	/** The pluginApiV2 feature flag, read once at startup. */
+	pluginApiV2?: boolean;
 }
 
 export interface RuntimeStatusBarItem extends PluginStatusBarItem {
@@ -47,24 +57,44 @@ export class PluginRuntime {
 	private changeListeners = new Set<() => void>();
 	private eventListeners = new Map<HermesEvent, Set<(...args: unknown[]) => void>>();
 	private callbacks: PluginAPICallbacks;
+	private options: PluginRuntimeOptions;
 
-	constructor(callbacks: PluginAPICallbacks) {
+	constructor(callbacks: PluginAPICallbacks, options: PluginRuntimeOptions = {}) {
 		this.callbacks = callbacks;
+		this.options = options;
 	}
 
-	register(module: PluginModule): void {
+	register(module: PluginModule, options: { builtin?: boolean } = {}): void {
 		const { id } = module.manifest;
 		if (this.plugins.has(id)) {
 			console.warn(`[PluginRuntime] Plugin "${id}" already registered`);
 			return;
 		}
-		this.plugins.set(id, { module, status: "registered", api: null });
+		this.plugins.set(id, { module, status: "registered", api: null, builtin: options.builtin === true, apiVersion: null });
 		this.notify();
 	}
 
 	async activate(pluginId: string): Promise<void> {
 		const entry = this.plugins.get(pluginId);
 		if (!entry || entry.status === "active" || entry.status === "activating") return;
+
+		// Which plugin API it gets, before anything runs: a plugin built for
+		// an API this Hermes does not offer is refused, not half-started.
+		const apiChoice = resolvePluginApi(entry.module.manifest.apiVersion, this.options.pluginApiV2 === true, entry.builtin);
+		if (!apiChoice.ok) {
+			entry.status = "error";
+			entry.apiVersion = null;
+			entry.error = new Error(`Plugin "${pluginId}" ${apiChoice.message}.`);
+			console.error(`[PluginRuntime] Not activating "${pluginId}": ${apiChoice.message}.`);
+			this.notify();
+			return;
+		}
+		entry.apiVersion = apiChoice.version;
+		if (apiChoice.deprecated) {
+			console.warn(
+				`[PluginRuntime] Plugin "${pluginId}" uses plugin API v1, which is deprecated and stops loading in Hermes ${PLUGIN_API_V1_REMOVED_IN}. Declare "apiVersion": 2 in its hermes-plugin.json (see docs/plugin-api-v2.md).`,
+			);
+		}
 
 		entry.status = "activating";
 		this.notify();
@@ -121,6 +151,7 @@ export class PluginRuntime {
 				this.commandHandlers,
 				this.panelComponents,
 				this.fileHandlers,
+				apiChoice.version,
 			);
 			entry.api = {
 				subscriptions: api.subscriptions,
@@ -143,7 +174,7 @@ export class PluginRuntime {
 
 			// Dispose subscriptions added during partial activation
 			if (entry.api) {
-				for (const sub of entry.api.subscriptions) {
+				for (const sub of [...entry.api.subscriptions]) {
 					try { sub.dispose(); } catch {}
 				}
 				entry.api = null;
@@ -174,7 +205,7 @@ export class PluginRuntime {
 
 		// Dispose all subscriptions
 		if (entry.api) {
-			for (const sub of entry.api.subscriptions) {
+			for (const sub of [...entry.api.subscriptions]) {
 				try { sub.dispose(); } catch {}
 			}
 		}
@@ -354,10 +385,12 @@ export class PluginRuntime {
 		return this.plugins.size;
 	}
 
-	getAllPlugins(): { manifest: PluginManifest; status: PluginStatus }[] {
+	getAllPlugins(): { manifest: PluginManifest; status: PluginStatus; apiVersion: 1 | 2 | null; error: string | null }[] {
 		return Array.from(this.plugins.values()).map((entry) => ({
 			manifest: entry.module.manifest,
 			status: entry.status,
+			apiVersion: entry.apiVersion,
+			error: entry.status === "error" ? (entry.error?.message ?? null) : null,
 		}));
 	}
 

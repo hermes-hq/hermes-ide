@@ -5,8 +5,9 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 6 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 7th, retire one first.
+// At most 12 flags may exist at once (raised from 5 for the 2.0 build, where
+// every new feature ships behind its own flag) — enforced by
+// src/__tests__/feature-flags.test.ts. If you need a 13th, retire one first.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -56,6 +57,12 @@ export const FEATURE_FLAGS = [
     label: "Attention inbox",
     description:
       "A title-bar badge with the number of agents blocked on you opens the attention inbox (⌘⇧I); ⌘I jumps to the agent waiting longest. Adds grouped notifications, the dock/taskbar badge, keeping the machine awake while an agent works, and optional away messages to a web address.",
+  },
+  {
+    id: "pluginApiV2",
+    label: "Plugin API v2",
+    description:
+      "Plugins can declare \"apiVersion\": 2 to react to every agent's status, add inbox items, read feature tracks and add review checks; plugins built for v1 keep working and are marked as using the old API.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

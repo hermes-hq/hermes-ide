@@ -695,3 +695,19 @@ features:
       F18-2:
         text: "The rig's accessibility audit runs on a real 2.0 surface, passes it, and fails on an unnamed control planted in it"
         scenarios: [F08-model-chips.mjs]
+  F36:
+    name: "Plugin API v2: react to any agent, raise inbox items, add review checks"
+    # Behind the pluginApiV2 flag (on for beta). partial: the inbox list (F12)
+    # and the Review Desk (F21) are not built yet, so the scenario reads the
+    # inbox store and runs the review checks through the e2e hooks, at the
+    # same seams those views will use (docs/adr/004, sections 5 and 7). What
+    # a person sees today is Settings > Plugins: the old-API mark, the
+    # "not loaded" reason and the review checks each plugin registered.
+    status: partial
+    criteria:
+      F36-1:
+        text: "A sample plugin raises an inbox item and registers a Review check"
+        scenarios: [F36-plugin-api-v2.mjs]
+      F36-2:
+        text: "v1 plugins keep working for one minor with a deprecation warning"
+        scenarios: [F36-plugin-api-v2.mjs]

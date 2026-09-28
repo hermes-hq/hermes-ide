@@ -10,6 +10,9 @@ import { PluginSettingsForm } from "./PluginSettingsForm";
 import { REGISTRY_URL, DEFAULT_PLUGINS } from "../plugins/constants";
 import { getSetting, setSetting } from "../api/settings";
 import { useI18n } from "../i18n/I18nProvider";
+import { isFeatureFlagEnabled } from "../featureFlags";
+import { PLUGIN_API_V1_REMOVED_IN, resolvePluginApi } from "../plugins/apiV2";
+import { useReviewChecks } from "../agent/contract/reviewChecks";
 
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 	"storage": "Read and write persistent data on your device",
@@ -19,6 +22,9 @@ const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 	"notifications": "Show desktop notifications",
 	"sessions.read": "Access terminal session information",
 	"shell.exec": "Execute shell commands on your system",
+	"inbox.raise": "Add items to your inbox",
+	"features.read": "Read your feature tracks (read only)",
+	"review.checks": "Add checks to code review",
 };
 
 interface InstalledPluginInfo {
@@ -85,6 +91,9 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 	const [checking, setChecking] = useState(false);
 	const [pendingUninstall, setPendingUninstall] = useState<{ pluginId: string; dirName: string; pluginName: string } | null>(null);
 	const [pendingInstall, setPendingInstall] = useState<RegistryPlugin | null>(null);
+	const reviewChecks = useReviewChecks();
+	// Read once at startup, like every flag.
+	const pluginApiV2 = isFeatureFlagEnabled("pluginApiV2");
 
 	const loadPlugins = useCallback(async () => {
 		setLoading(true);
@@ -428,9 +437,17 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 		const isToggling = togglingId === p.manifest.id;
 		const isUpdating = installingId === p.manifest.id;
 		const isExpanded = expandedId === p.manifest.id;
+		const apiChoice = resolvePluginApi(p.manifest.apiVersion, pluginApiV2, !!p.builtin);
+		const apiDeprecated = apiChoice.ok && apiChoice.deprecated;
+		const apiRefusal = apiChoice.ok
+			? null
+			: apiChoice.reason === "needs-flag"
+				? t("plugins.apiV2NotEnabled")
+				: t("plugins.apiUnsupported", { version: String(apiChoice.version) });
+		const checks = reviewChecks.filter((c) => c.owner === `plugin:${p.manifest.id}`);
 
 		return (
-			<div key={p.manifest.id}>
+			<div key={p.manifest.id} data-plugin-row={p.manifest.id}>
 				<div
 					className={`pm-row${isExpanded ? " pm-row-expanded" : ""}${!p.enabled ? " pm-row-disabled" : ""}`}
 					onClick={() => toggleExpand(p.manifest.id)}
@@ -446,6 +463,14 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 						{p.builtin && <span className="pm-badge">{t("plugins.builtIn")}</span>}
 						{!p.enabled && <span className="pm-badge pm-badge-disabled">{t("plugins.off")}</span>}
 						{update && <span className="pm-badge pm-badge-update">{t("plugins.update")}</span>}
+						{p.enabled && apiDeprecated && (
+							<span className="pm-badge pm-badge-deprecated" title={t("plugins.apiV1Deprecated", { version: PLUGIN_API_V1_REMOVED_IN })}>
+								{t("plugins.apiV1Badge")}
+							</span>
+						)}
+						{p.enabled && apiRefusal && (
+							<span className="pm-badge pm-badge-incompatible" title={apiRefusal}>{t("plugins.apiUnavailableBadge")}</span>
+						)}
 					</div>
 					<div className="pm-row-action">
 						<button
@@ -469,7 +494,18 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 								<span className="pm-detail-tag"><strong>{t("plugins.category")}</strong> {registryInfo.category}</span>
 							)}
 							<span className="pm-detail-tag"><strong>ID:</strong> {p.manifest.id}</span>
+							{pluginApiV2 && apiChoice.ok && !p.builtin && (
+								<span className="pm-detail-tag"><strong>{t("plugins.apiVersion")}</strong> v{apiChoice.version}</span>
+							)}
 						</div>
+						{apiDeprecated && (
+							<div className="pm-detail-notice pm-detail-notice-warning" role="note">
+								{t("plugins.apiV1Deprecated", { version: PLUGIN_API_V1_REMOVED_IN })}
+							</div>
+						)}
+						{apiRefusal && (
+							<div className="pm-detail-notice pm-detail-notice-error" role="note">{apiRefusal}</div>
+						)}
 						{p.manifest.permissions && p.manifest.permissions.length > 0 && (
 							<div className="pm-detail-perms">
 								<div className="pm-perms-title">{t("plugins.permissions")}</div>
@@ -477,6 +513,17 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 									<div key={perm} className="pm-perm-row">
 										<span className="pm-detail-perm">{perm}</span>
 										<span className="pm-perm-desc">{permissionDescription(perm)}</span>
+									</div>
+								))}
+							</div>
+						)}
+						{checks.length > 0 && (
+							<div className="pm-detail-perms pm-detail-checks">
+								<div className="pm-perms-title">{t("plugins.reviewChecks")}</div>
+								{checks.map((c) => (
+									<div key={c.key} className="pm-perm-row" data-check-key={c.key}>
+										<span className="pm-detail-perm">{c.title}</span>
+										{c.description && <span className="pm-perm-desc">{c.description}</span>}
 									</div>
 								))}
 							</div>
