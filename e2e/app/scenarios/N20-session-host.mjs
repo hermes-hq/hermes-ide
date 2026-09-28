@@ -20,7 +20,15 @@
 //   run 3  the "update": the same app pretends to be version 9.9.9. It
 //          reattaches to the same host (same pid) and the same streamer.
 //          Quit: the question again; stop. The streamer ends and the host,
-//          having nothing left, exits on its own.
+//          having nothing left, exits on its own and takes its socket
+//          folder with it.
+//   run 4  the host cannot be used (the socket root is a file): the flag
+//          falls back to a terminal owned by the app and says so in a
+//          notice, so nobody trusts a terminal that will not survive.
+//
+// Run 2 quits through the window's close button and run 3 through the
+// app's exit request (menu, Cmd+Q, the bridge): both front doors reach the
+// same question.
 //
 // On Windows the host does not exist yet: with the flag on, the terminal
 // stays in-process and the scenario proves only that fallback (a session
@@ -36,7 +44,7 @@
 // Evidence (log, screenshots, the host's log) goes to HERMES_E2E_EVIDENCE,
 // or <out dir>/evidence/N20-session-host.
 
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { REPO_ROOT, appBinaryPath, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
@@ -268,9 +276,22 @@ async function waitForExit(current, { timeoutMs = 15_000 } = {}) {
   return !running;
 }
 
-/** Quit through the app's own exit request; the keep-or-stop question appears. */
-async function quitAndAnswer(current, answer) {
-  await current.bridge.quit();
+/**
+ * Quit and answer the keep-or-stop question. `via` is the front door: the
+ * window's close button ("window-close", asked by the frontend before the
+ * window goes) or the app's exit request ("app-quit": menu, Cmd+Q, the
+ * bridge; held by the backend until the dialog answers).
+ */
+async function quitAndAnswer(current, answer, via = "app-quit") {
+  if (via === "window-close") {
+    await current.bridge.eval(`
+      const label = window.__TAURI_INTERNALS__.metadata.currentWindow.label;
+      await window.__TAURI_INTERNALS__.invoke("plugin:window|close", { label });
+      return true;
+    `);
+  } else {
+    await current.bridge.quit();
+  }
   await current.bridge.waitFor("the keep-or-stop question", `return !!e2e.first('[data-testid="quit-with-agents-dialog"]');`, { timeoutMs: 15_000 });
   const names = await current.bridge.eval(`
     return e2e.all('[data-testid="quit-with-agents-dialog"] .quit-dialog-session').map((el) => e2e.norm(el.innerText));
@@ -428,9 +449,9 @@ async function run() {
   assert(true, "the restored session shows as busy, not initializing");
   await app.bridge.screenshot(join(evidenceDir, "run2-reattached.png"));
 
-  // Quit with a working agent: the app asks; keep it running.
-  const asked = await quitAndAnswer(app, "Keep running");
-  assert(asked.length >= 1, "quitting with a working agent asks keep running or stop");
+  // Close the window with a working agent: the app asks; keep it running.
+  const asked = await quitAndAnswer(app, "Keep running", "window-close");
+  assert(asked.length >= 1, "closing the window with a working agent asks keep running or stop");
   assert(await waitForExit(app), "the app quit after \"Keep running\"");
   await sleep(1000);
   assert(pidAlive(streamerPid), "after \"Keep running\" the streamer is still alive");
@@ -453,13 +474,38 @@ async function run() {
   assert(readState(stateFile).pid === streamerPid && pidAlive(streamerPid), "the streamer survived the update");
   await app.bridge.screenshot(join(evidenceDir, "run3-after-update.png"));
 
-  // Quit again: this time stop. The streamer ends; the host exits on its own.
-  await quitAndAnswer(app, "Stop and quit");
+  // Quit again (the app's exit request this time): stop. The streamer
+  // ends; the host exits on its own.
+  const asked3 = await quitAndAnswer(app, "Stop and quit", "app-quit");
+  assert(asked3.length >= 1, "an app quit with a working agent asks too");
   assert(await waitForExit(app), "the app quit after \"Stop and quit\"");
   assert(await waitForPid(streamerPid, false), "after \"Stop and quit\" the streamer is gone");
   assert(await waitForPid(hostPid, false, { timeoutMs: 20_000 }), "the host exits once it has no sessions");
   assert(!existsSync(status3.socket), "...and removes its socket");
+  assert(!existsSync(dirname(status3.socket)), "...and its now-empty socket folder");
   saveHostLog(dataDir, "host.log");
+
+  // ── run 4: the host cannot be used — the fallback says so ───────────
+  log("run 4: the socket root is unusable: the flag falls back in-process and says so");
+  const badRoot = join(work, "not-a-folder");
+  writeFileSync(badRoot, "a file where the socket root should be\n");
+  app = await launch(4, { env: { HERMES_HOST_SOCKET_ROOT: badRoot } });
+  await waitForReturningLaunch(app.bridge);
+  const fallbackId = await createPlainTerminal(app.bridge);
+  const notice = await app.bridge.waitFor("the fallback notice", `
+    return e2e.all(".toast-message").map((el) => e2e.norm(el.innerText)).find((s) => s.includes("will not survive")) ?? null;
+  `, { timeoutMs: 20_000 });
+  log(`  notice: ${notice}`);
+  const fallbackData = await sessionData(app.bridge, fallbackId);
+  assert(fallbackData && !fallbackData.hosted, "with no usable host the terminal is owned by the app");
+  const status4 = await hostStatus(app.bridge);
+  assert(!status4.running && status4.hosted_session_ids.length === 0, "no host was started");
+  await app.bridge.typeInTerminal(fallbackId, "echo fallback-works\n");
+  await app.bridge.waitForTerminal(fallbackId, /^fallback-works\s*$/, { timeoutMs: 30_000 });
+  assert(true, "the fallback terminal works");
+  await app.bridge.screenshot(join(evidenceDir, "run4-fallback-notice.png"));
+  const exit4 = await app.stop();
+  assert(!exit4.forced && exit4.code === 0, "the app quit cleanly (nothing hosted, no question)");
 }
 
 try {

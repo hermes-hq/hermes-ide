@@ -48,10 +48,21 @@ a time; a new attach replaces the old one.
 Anyone who can connect can type into an agent, so three checks: the socket
 folder is `0700`, every connection presents the token from
 `<data>/host/token` (`0600`), and the host checks the connecting process's
-uid (`SO_PEERCRED` / `getpeereid`). The socket lives in a short user-only
-folder under the system temp root keyed by the data folder (Unix socket
-paths are limited to about 100 bytes, and a test run's `TMPDIR` changes on
-every launch), so two Hermes instances never share a host.
+uid (`SO_PEERCRED` / `getpeereid`). The socket lives in a short folder keyed
+by the data folder (Unix socket paths are limited to about 100 bytes, and a
+test run's `TMPDIR` changes on every launch), so two Hermes instances never
+share a host: `<root>/hermes-host-<uid>/<hash>/host.sock`, where the root
+is the user's own runtime folder (`$XDG_RUNTIME_DIR` on Linux, the per-user
+temp folder on macOS) and only without one the shared `/tmp`. Because a
+shared root lets any local account create names there, every folder Hermes
+owns on that path is created with mode `0700` and verified with `lstat`
+before use — a real folder, not a symlink, owned by this uid, no group or
+other bits — by the app and again by the host, and refused otherwise
+(`pty-host/src/privdir.rs`). A socket that answers but cannot be used
+(another protocol version, a bad token, a slow handshake) is never treated
+as stale: the app reports it and opens the terminal in-process, so a newer
+app can never unlink the socket of a host still running the user's agents.
+Only a socket nobody listens on is removed and replaced.
 
 ### Lifecycle
 

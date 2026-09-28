@@ -137,11 +137,12 @@ pub fn run(cfg: Config) -> io::Result<()> {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
-    std::fs::create_dir_all(&cfg.dir)?;
-    std::fs::set_permissions(&cfg.dir, std::fs::Permissions::from_mode(0o700))?;
+    crate::privdir::ensure_private_dir(&cfg.dir)?;
+    // The app verified every folder it owns on the way to the socket; the
+    // host checks the one it binds in, so a swapped folder is caught here
+    // too.
     if let Some(parent) = cfg.socket.parent() {
-        std::fs::create_dir_all(parent)?;
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        crate::privdir::ensure_private_dir(parent)?;
     }
     // A socket file left by a host that is gone would refuse the bind.
     if cfg.socket.exists() && UnixStream::connect(&cfg.socket).is_err() {
@@ -228,6 +229,11 @@ fn janitor(sessions: Sessions, cfg: Arc<Config>, started: Instant) {
             if since.elapsed() >= cfg.empty_exit_after && started.elapsed() >= cfg.startup_grace {
                 log("no sessions left; exiting");
                 let _ = std::fs::remove_file(&cfg.socket);
+                // The socket's folder is this host's alone: take it along
+                // when nothing else is in it.
+                if let Some(parent) = cfg.socket.parent() {
+                    let _ = std::fs::remove_dir(parent);
+                }
                 std::process::exit(0);
             }
         }

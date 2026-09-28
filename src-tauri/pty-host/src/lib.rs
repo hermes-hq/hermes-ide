@@ -20,6 +20,8 @@ pub mod ring;
 #[cfg(unix)]
 pub mod client;
 #[cfg(unix)]
+pub mod privdir;
+#[cfg(unix)]
 pub mod server;
 
 /// The host binary's own version, reported in every `HelloAck`.
