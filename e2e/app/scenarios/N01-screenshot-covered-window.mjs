@@ -13,14 +13,18 @@
 //   2. Start app B next to it (it covers A) and mark its left half cyan.
 //   3. Several times over: screenshot A, then B. A's picture must show
 //      magenta and B's cyan — never black, and never the other app.
-//   4. Cover all of A's page with one colour: the screenshot must still be
-//      refused as a flat colour (the retries do not weaken that check).
+//   4. macOS only: cover all of A's page with one colour; the screenshot
+//      must still be refused as a flat colour (the retries do not weaken
+//      that check). On Windows and Linux the capture includes the window's
+//      native title and menu bar, which a page cannot paint over, so there
+//      the refusal is proven by the unit tests of e2e_evidence.rs and
+//      harness.test.mjs instead.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N01-screenshot-covered-window.mjs
 
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, pngPixel } from "../harness.mjs";
 
@@ -99,20 +103,24 @@ try {
     assert(near(b, CYAN), `round ${round}: B's screenshot shows B (${b}, want ${CYAN})`);
   }
 
-  log("step 4: cover all of A's page with one colour; its screenshot must be refused");
-  await mark(appA.bridge, MAGENTA, { whole: true });
-  let refusal = null;
-  try {
-    await appA.bridge.screenshot(join(evidenceDir, "flat-a.png"));
-  } catch (e) {
-    refusal = String(e?.message ?? e);
+  if (platform() === "darwin") {
+    log("step 4: cover all of A's page with one colour; its screenshot must be refused");
+    await mark(appA.bridge, MAGENTA, { whole: true });
+    let refusal = null;
+    try {
+      await appA.bridge.screenshot(join(evidenceDir, "flat-a.png"));
+    } catch (e) {
+      refusal = String(e?.message ?? e);
+    }
+    log(`  answer: ${refusal ?? "a screenshot was saved"}`);
+    assert(refusal !== null && /one flat colour/.test(refusal), "a window showing one flat colour is refused");
+    assert(/in all \d+ attempts/.test(refusal), "the app took it again before refusing it");
+    await mark(appA.bridge, MAGENTA);
+    const after = await shoot(appA, "A", "05-a-after-flat.png");
+    assert(near(after, MAGENTA), "once A shows more than one colour again, its screenshot is taken");
+  } else {
+    log("step 4: skipped on this OS: the capture includes the native title and menu bar, so a page cannot make it one colour");
   }
-  log(`  answer: ${refusal ?? "a screenshot was saved"}`);
-  assert(refusal !== null && /one flat colour/.test(refusal), "a window showing one flat colour is refused");
-  assert(/in all \d+ attempts/.test(refusal), "the app took it again before refusing it");
-  await mark(appA.bridge, MAGENTA);
-  const after = await shoot(appA, "A", "05-a-after-flat.png");
-  assert(near(after, MAGENTA), "once A shows more than one colour again, its screenshot is taken");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
