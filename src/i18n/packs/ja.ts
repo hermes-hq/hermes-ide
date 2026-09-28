@@ -599,6 +599,8 @@ export const jaPack: LanguagePack = {
     "sessions.starting": "起動中",
     "sessions.disconnected": "切断",
     "sessions.startupPrompt": "起動時のプロンプトで待機中",
+    "sessions.modelChipLabel": "モデル: {model}",
+    "sessions.permissionModeChipLabel": "権限モード: {mode}",
     "language.panel.title": "表示言語",
     "language.panel.selectLabel": "言語",
     "language.panel.subtitle": "言語パックはプラグインから提供されます。英語はコアのフォールバックとして残ります。",

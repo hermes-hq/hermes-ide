@@ -599,6 +599,8 @@ export const frPack: LanguagePack = {
     "sessions.starting": "démarrage",
     "sessions.disconnected": "déconnectée",
     "sessions.startupPrompt": "en attente à une invite de démarrage",
+    "sessions.modelChipLabel": "Modèle : {model}",
+    "sessions.permissionModeChipLabel": "Mode de permission : {mode}",
     "language.panel.title": "Langue de l'interface",
     "language.panel.selectLabel": "Langue",
     "language.panel.subtitle": "Les packs de langue sont fournis par des extensions. L'anglais reste la langue de secours.",

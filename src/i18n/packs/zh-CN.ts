@@ -599,6 +599,8 @@ export const zhCNPack: LanguagePack = {
     "sessions.starting": "正在启动",
     "sessions.disconnected": "已断开",
     "sessions.startupPrompt": "正在等待启动提示",
+    "sessions.modelChipLabel": "模型:{model}",
+    "sessions.permissionModeChipLabel": "权限模式:{mode}",
     "language.panel.title": "界面语言",
     "language.panel.selectLabel": "语言",
     "language.panel.subtitle": "语言包由插件提供。英语仍是核心回退语言。",

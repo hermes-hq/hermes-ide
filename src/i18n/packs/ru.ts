@@ -599,6 +599,8 @@ export const ruPack: LanguagePack = {
     "sessions.starting": "запуск",
     "sessions.disconnected": "отключено",
     "sessions.startupPrompt": "ожидает на стартовом запросе",
+    "sessions.modelChipLabel": "Модель: {model}",
+    "sessions.permissionModeChipLabel": "Режим разрешений: {mode}",
     "language.panel.title": "Язык интерфейса",
     "language.panel.selectLabel": "Язык",
     "language.panel.subtitle": "Языки поставляются плагинами. Английский остается резервным языком ядра.",

@@ -431,6 +431,24 @@
   letter-spacing: var(--tracking-snug);
 }
 
+/* F08: read-only chips fed by the agent's own identity signal (C0).
+ * Deliberately plain — no color-coding, no interaction — this is a fact
+ * the agent reported, not a status to react to. */
+.session-model-chip,
+.session-permission-chip {
+  font-size: var(--text-2xs);
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  letter-spacing: var(--tracking-snug);
+  font-family: var(--font-numeric);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12em;
+}
+
 .session-ssh-tag {
   font-size: var(--text-2xs);
   background: var(--info-dim, rgba(57, 197, 207, 0.15));

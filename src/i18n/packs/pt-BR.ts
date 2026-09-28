@@ -599,6 +599,8 @@ export const ptBRPack: LanguagePack = {
     "sessions.starting": "iniciando",
     "sessions.disconnected": "desconectada",
     "sessions.startupPrompt": "aguardando em um prompt de inicialização",
+    "sessions.modelChipLabel": "Modelo: {model}",
+    "sessions.permissionModeChipLabel": "Modo de permissão: {mode}",
     "language.panel.title": "Idioma da interface",
     "language.panel.selectLabel": "Idioma",
     "language.panel.subtitle": "Os pacotes de idioma são fornecidos por plugins. O inglês permanece como idioma de fallback.",

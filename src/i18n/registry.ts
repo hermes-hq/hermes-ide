@@ -629,6 +629,8 @@ const ENGLISH_PACK: LanguagePack = {
     "sessions.starting": "starting",
     "sessions.disconnected": "disconnected",
     "sessions.startupPrompt": "waiting at a startup prompt",
+    "sessions.modelChipLabel": "Model: {model}",
+    "sessions.permissionModeChipLabel": "Permission mode: {mode}",
     "language.panel.title": "Interface language",
     "language.panel.selectLabel": "Language",
     "language.panel.subtitle": "Language packs are provided by plugins. English remains the core fallback.",

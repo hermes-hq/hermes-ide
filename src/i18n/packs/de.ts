@@ -599,6 +599,8 @@ export const dePack: LanguagePack = {
     "sessions.starting": "startet",
     "sessions.disconnected": "getrennt",
     "sessions.startupPrompt": "wartet an einer Startabfrage",
+    "sessions.modelChipLabel": "Modell: {model}",
+    "sessions.permissionModeChipLabel": "Berechtigungsmodus: {mode}",
     "language.panel.title": "Oberflächensprache",
     "language.panel.selectLabel": "Sprache",
     "language.panel.subtitle": "Sprachpakete werden von Plugins bereitgestellt. Englisch bleibt der zentrale Fallback.",

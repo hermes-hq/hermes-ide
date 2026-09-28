@@ -632,6 +632,8 @@ export const hiPack: LanguagePack = {
     "sessions.starting": "शुरू हो रहा है",
     "sessions.disconnected": "डिस्कनेक्ट हुआ",
     "sessions.startupPrompt": "स्टार्टअप प्रॉम्प्ट पर प्रतीक्षा में",
+    "sessions.modelChipLabel": "मॉडल: {model}",
+    "sessions.permissionModeChipLabel": "अनुमति मोड: {mode}",
     "language.panel.selectLabel": "भाषा",
   },
 };
