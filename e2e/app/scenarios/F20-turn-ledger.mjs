@@ -363,7 +363,9 @@ const inject = (bridge, sessionId, event) =>
 
 // On Windows the fake agent's `echo x>file` (cmd.exe) writes CRLF, so a
 // deleted line reads "-draft\r" in the raw diff text; compare without it.
-const stripCr = (lines) => lines.map((l) => l.replace(/\r$/, ""));
+// Windows: files cmd wrote end in CRLF, and `echo draft>f & ...` keeps the
+// space before the `&` ("draft "), so compare diff lines without either.
+const stripCr = (lines) => lines.map((l) => l.replace(/[\r ]+$/, ""));
 
 const chipsOf = (bridge, sessionId) =>
   bridge.eval(`

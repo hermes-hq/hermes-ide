@@ -111,6 +111,9 @@ execFileSync("git", ["init", "-q", "-b", "main", repo], { env: gitEnv });
 git("config", "user.name", "Hermes Test");
 git("config", "user.email", "test@example.com");
 git("config", "commit.gpgsign", "false");
+// The app's own git (the revert) reads this repository's config: keep LF
+// checkouts on Windows too, so file text compares exactly.
+git("config", "core.autocrlf", "false");
 for (const [rel, text] of Object.entries(BASE)) write(rel, text);
 git("add", ".");
 git("commit", "-q", "-m", "base");
