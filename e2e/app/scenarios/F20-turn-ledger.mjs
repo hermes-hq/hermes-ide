@@ -14,12 +14,14 @@
 //      were: the snapshot lives only in refs/hermes/<session>/turn/1;
 //   C. a turn that changed nothing creates no commit and no chip
 //      (negative control: the chip count and the ref count do not move);
-//   D. two more turns (T2, T3); "Restore to T1" previews first (nothing
-//      changes yet), then restores exactly the T1 tree: the file T2 added is
-//      gone, the file T3 deleted is back, the user's HEAD/index/stash still
-//      unchanged;
-//   E. the kill switch (Settings > Git, the `turn_ledger` setting) stops a
-//      turn from being recorded, and turning it back on records the next;
+//   D. two more turns (T2, T3); a person edits a file, then "Restore to T1"
+//      previews first (nothing changes yet) and restores exactly the T1
+//      tree: the file T2 added is gone, the file T3 deleted is back, the
+//      user's HEAD/index/stash still unchanged; another person edit, then
+//      "Restore to T3" brings back exactly the T3 tree, and each restore
+//      kept what it replaced under its own refs/hermes/<s>/before-restore/<k>;
+//   E. the kill switch: the checkbox in Settings > Git (a real click) stops
+//      a turn from being recorded, and ticking it again records the next;
 //
 // and, in a Custom-agent session in the same repository (no injected event
 // at all; the wizard offers no default branch there because `main` is in
@@ -398,6 +400,36 @@ const closeSheet = async (bridge) => {
   await bridge.waitFor("the sheet to close", `return !e2e.first(".turn-sheet");`);
 };
 
+/**
+ * Opens Settings > Git from the activity bar, sets the turn history checkbox
+ * to `on` with a real click, and closes Settings again. Returns the
+ * checkbox's state after the click.
+ */
+async function setTurnLedgerInSettings(bridge, on, shot) {
+  await bridge.clickWhenReady(`
+    const btn = e2e.all(".activity-bar-action").find((b) =>
+      e2e.norm(b.querySelector(".activity-bar-label")?.textContent).toLowerCase() === "settings");
+    return e2e.click(e2e.must(btn, "the Settings button"));
+  `);
+  await bridge.waitFor("the Settings panel", `return !!e2e.first(".settings-panel");`);
+  await bridge.clickByName("Git", { within: ".settings-tabs" });
+  const box = 'input[type=checkbox][data-setting="turn_ledger"]';
+  await bridge.waitFor("the turn history checkbox on the Git tab", `return !!e2e.first(${JSON.stringify(box)});`);
+  const hint = await bridge.eval(`return e2e.norm(e2e.first('[data-setting-hint="turn_ledger"]')?.innerText ?? "");`);
+  assert(/untracked files/.test(hint) && /mirror push/.test(hint), `the setting says snapshots include untracked files and are copied by a mirror push: "${hint}"`);
+  const before = await bridge.eval(`return e2e.first(${JSON.stringify(box)}).checked;`);
+  if (before !== on) await bridge.click(box);
+  const after = await bridge.waitFor(`the checkbox to be ${on ? "ticked" : "unticked"}`, `
+    const b = e2e.first(${JSON.stringify(box)});
+    return b && b.checked === ${on} ? { checked: b.checked } : null;
+  `);
+  await bridge.screenshot(join(evidenceDir, shot));
+  await bridge.click(".settings-close");
+  await bridge.waitFor("Settings to close", `return !e2e.first(".settings-panel");`);
+  await sleep(300);
+  return after.checked;
+}
+
 let app;
 let failed = false;
 let sessionA = null;
@@ -491,6 +523,11 @@ try {
   assert(!linesT3.some((l) => l.startsWith("+hello world")), "the T1 edit is not in the T3 diff");
   await closeSheet(bridge);
   assert(read(dirA, "notes/new.txt") === null && read(dirA, "src/app.txt").includes("second"), "the worktree is at T3");
+  const treeAtT3 = worktreeTree(dirA);
+  assert(gitIn(dirA, "rev-parse", `refs/hermes/${sessionA}/turn/3^{tree}`) === treeAtT3, "the T3 snapshot is exactly the worktree after edit3");
+  // A person edits after T3 (outside any turn): the restore must set this
+  // aside, not lose it.
+  writeFileSync(join(dirA, "src", "app.txt"), read(dirA, "src/app.txt") + "by a person\n");
 
   await openDiff(bridge, sessionA, 1);
   await bridge.clickByName("Restore to T1", { within: ".turn-sheet-actions" });
@@ -520,28 +557,55 @@ try {
   const stateAfterRestore = userState(dirA);
   assert(stateAfterRestore.head === stateAtStart.head && stateAfterRestore.index === stateAtStart.index && stateAfterRestore.stash === stateAtStart.stash, "HEAD, index and stash are still untouched after the restore");
   assert(turnRefs(dirA, sessionA).length === 3, "T1..T3 are still there after the restore");
-  // What was there before the restore is kept: in before-restore when the
-  // worktree had moved on since the last snapshot, otherwise in that
-  // snapshot itself (here T3: nothing changed after it).
-  let keptTree;
-  try {
-    keptTree = gitIn(dirA, "rev-parse", "--verify", "-q", `refs/hermes/${sessionA}/before-restore^{tree}`);
-    log("  the pre-restore state is in before-restore");
-  } catch {
-    keptTree = gitIn(dirA, "rev-parse", `refs/hermes/${sessionA}/turn/3^{tree}`);
-    log("  nothing changed after T3, so T3 itself holds the pre-restore state");
-  }
-  assert(keptTree === treeBeforeRestore, "what was there before the restore is kept in a hidden ref");
+  const keptRefs = (dir, sid) =>
+    gitIn(dir, "for-each-ref", "--format=%(refname)", `refs/hermes/${sid}/before-restore/`).split(/\r?\n/).filter(Boolean);
+  assert(keptRefs(dirA, sessionA).join(",") === `refs/hermes/${sessionA}/before-restore/1`, `the pre-restore state is kept under before-restore/1: ${keptRefs(dirA, sessionA).join(",")}`);
+  assert(gitIn(dirA, "rev-parse", `refs/hermes/${sessionA}/before-restore/1^{tree}`) === treeBeforeRestore, "before-restore/1 is exactly the worktree the restore replaced (including the person's edit)");
+
+  // Now forward again: a second restore, to T3 (the plan's F20-3), after
+  // another person edit. It keeps its own pre-restore state and leaves the
+  // first one alone.
+  log("step D2: Restore to T3 (previewed first) brings back exactly the T3 tree; both pre-restore states are kept");
+  writeFileSync(join(dirA, "README.md"), "# f20\nperson again\n");
+  const treeBeforeRestore2 = worktreeTree(dirA);
+  await openDiff(bridge, sessionA, 3);
+  await bridge.clickByName("Restore to T3", { within: ".turn-sheet-actions" });
+  const preview3 = await bridge.waitFor("the restore preview of T3", `
+    const s = e2e.first('.turn-sheet[data-sheet="restore"][data-turn-n="3"]');
+    const hint = s && e2e.first(".turn-sheet-hint", s);
+    return hint ? { files: Number(hint.getAttribute("data-preview-files")), text: e2e.norm(hint.innerText), lines: e2e.all(".turn-diff-line", s).map((l) => l.textContent) } : null;
+  `, { timeoutMs: 20_000 });
+  preview3.lines = stripCr(preview3.lines);
+  log(`  preview: ${preview3.text}`);
+  assert(preview3.files === 3, `the preview says 3 files would change (app.txt, README.md, notes/new.txt): ${preview3.files}`);
+  assert(preview3.lines.some((l) => l === "-draft") && preview3.lines.some((l) => l.startsWith("+second")), "the preview shows the changes restoring to T3 would make");
+  assert(read(dirA, "README.md") === "# f20\nperson again\n", "a preview changes nothing on disk");
+  await bridge.screenshot(join(evidenceDir, "03b-restore-preview-t3.png"));
+  await bridge.clickByName("Restore", { within: ".turn-sheet-actions" });
+  await bridge.waitFor("the restore notice", `
+    const bar = e2e.first('.turn-bar[data-session-id="' + CSS.escape(${JSON.stringify(sessionA)}) + '"]');
+    const n = bar && e2e.first(".turn-bar-notice", bar);
+    return n && e2e.norm(n.innerText) === "Restored to T3" ? true : null;
+  `, { timeoutMs: 20_000 });
+  assert(worktreeTree(dirA) === treeAtT3, "the worktree is exactly the T3 tree");
+  assert(read(dirA, "notes/new.txt") === null && read(dirA, "README.md").startsWith("# changed"), "notes/new.txt is gone again and README.md is T3's");
+  const stateAfterRestore2 = userState(dirA);
+  assert(stateAfterRestore2.head === stateAtStart.head && stateAfterRestore2.index === stateAtStart.index && stateAfterRestore2.stash === stateAtStart.stash, "HEAD, index and stash are still untouched after the second restore");
+  assert(keptRefs(dirA, sessionA).join(",") === `refs/hermes/${sessionA}/before-restore/1,refs/hermes/${sessionA}/before-restore/2`, `two pre-restore states are kept: ${keptRefs(dirA, sessionA).join(",")}`);
+  assert(gitIn(dirA, "rev-parse", `refs/hermes/${sessionA}/before-restore/1^{tree}`) === treeBeforeRestore, "before-restore/1 was not overwritten by the second restore");
+  assert(gitIn(dirA, "rev-parse", `refs/hermes/${sessionA}/before-restore/2^{tree}`) === treeBeforeRestore2, "before-restore/2 is exactly the worktree the second restore replaced");
 
   // ── E. the kill switch ──────────────────────────────────────────
-  log("step E: the kill switch stops recording; turning it back on records again");
-  await invoke(bridge, "set_setting", { key: "turn_ledger", value: "off" });
+  log("step E: the kill switch (the checkbox in Settings > Git) stops recording; ticking it again records again");
+  assert((await setTurnLedgerInSettings(bridge, false, "06-settings-git-off.png")) === false, "the checkbox is unticked after a real click");
+  assert((await invoke(bridge, "get_settings")).turn_ledger === "off", "the click saved turn_ledger=off");
   await runAgent(bridge, sessionA, shellKind, SCEN.edit4, "fake-agent: edit4 done");
   assert(await inject(bridge, sessionA, { type: "turn_end", at: Date.now(), n: 5, source: "e2e" }), "turn_end injected");
   await sleep(3000);
   assert((await chipsOf(bridge, sessionA)).length === 3, "no chip was added while the switch is off");
   assert(turnRefs(dirA, sessionA).length === 3, "no ref was added while the switch is off");
-  await invoke(bridge, "set_setting", { key: "turn_ledger", value: "on" });
+  assert((await setTurnLedgerInSettings(bridge, true, "07-settings-git-on.png")) === true, "the checkbox is ticked again after a real click");
+  assert((await invoke(bridge, "get_settings")).turn_ledger === "on", "the click saved turn_ledger=on");
   assert(await inject(bridge, sessionA, { type: "turn_end", at: Date.now(), n: 6, source: "e2e" }), "turn_end injected");
   const t4 = await waitForChip(bridge, sessionA, 4);
   assert(t4.files === 1, `T4 records the edit made while the switch was off, now that it is on: ${JSON.stringify(t4)}`);
