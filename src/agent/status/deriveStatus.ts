@@ -14,6 +14,10 @@
 //      own "starting" with a guessed "waiting at a startup prompt").
 //   4. A less certain report cannot replace a more certain one, except
 //      over `idle`: a quiet state yields to any evidence of activity.
+//   5. An agent reported as ended inside a terminal that is still open
+//      (the launch helper's "ended", not the process exiting) stays
+//      "exited" while the shell sits idle, and yields to any other
+//      evidence that something runs there again.
 // Certainty tiers, highest first: exact, signal, guessed, and below every
 // named guess the terminal's generic heuristics (source "pty"), so a
 // helper's specific guess is never overwritten by shell-output shapes.
@@ -32,6 +36,11 @@ export interface DerivedStatus extends AgentStatus {
   readonly at: number | null;
   /** The deciding event's source; null when unknown. */
   readonly source: string | null;
+  /**
+   * Set on `exited` when the session's process itself ended (an `exit`
+   * event), as opposed to an agent reported as ended in a live terminal.
+   */
+  readonly processExited?: true;
 }
 
 export const PTY_SOURCE = "pty";
@@ -91,7 +100,7 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
     case "exit":
       // The detail stays empty: the renderer words the exit from the
       // snapshot's { code, signal } in the person's language.
-      return make("exited", "", "exact");
+      return { ...make("exited", "", "exact"), processExited: true };
     case "identity":
       return null;
   }
@@ -104,6 +113,7 @@ export function replaces(current: DerivedStatus, next: DerivedStatus, nextIsExit
   const cur = certaintyRank(current.confidence, current.source);
   const nxt = certaintyRank(next.confidence, next.source);
   if (nxt >= cur) return true;
+  if (current.kind === "exited" && !current.processExited) return next.kind !== "idle";
   return YIELDING.has(current.kind);
 }
 

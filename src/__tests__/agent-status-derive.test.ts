@@ -128,6 +128,19 @@ describe("deriveStatus: precedence", () => {
     expect(derive([...exited, status(2, "idle", "exact", "agent-view")]).kind).toBe("idle");
   });
 
+  it("an agent that ended in a live terminal stays exited while the shell idles, and yields to new activity", () => {
+    const ended = [status(1, "working", "exact", "hi"), status(2, "exited", "exact", "hi", "declined")];
+    expect(derive([...ended, status(3, "idle", "guessed", "pty")])).toMatchObject({ kind: "exited", detail: "declined" });
+    expect(derive([...ended, status(3, "idle", "guessed", "pty"), status(4, "working", "guessed", "pty")])).toMatchObject({ kind: "working", source: "pty" });
+    expect(derive([...ended, status(3, "working", "guessed", "pty"), status(4, "idle", "guessed", "pty")]).kind).toBe("idle");
+  });
+
+  it("the process exiting does not yield to later activity from another source", () => {
+    const exited: SessionEvent[] = [{ type: "exit", at: 1, source: "hook:x", code: 0, signal: null }];
+    expect(derive([...exited, status(2, "working", "guessed", "pty")]).kind).toBe("exited");
+    expect(derive([...exited, { type: "attention", at: 2, source: "osc", detail: "?" }]).kind).toBe("exited");
+  });
+
   it("an exact working holds against later pty guesses (documented limit, F11 reconciles)", () => {
     expect(derive([status(1, "working", "exact", "hook:x"), status(2, "idle", "guessed", "pty")]).kind).toBe("working");
   });
