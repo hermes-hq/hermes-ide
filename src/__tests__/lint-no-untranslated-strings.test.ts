@@ -29,22 +29,22 @@ describe("no-untranslated-strings lint rule", () => {
   });
 
   it.each([
-    ['export function X({ t }) { return <button title="Copy to clipboard" />; }', "title attribute"],
-    ['export function X({ t }) { return <input aria-label="Search files" />; }', "aria-label attribute"],
-    ['export function X({ t }) { return <input placeholder="Type a command" />; }', "placeholder attribute"],
-    ['export function X({ t }) { return <img alt="Session avatar" />; }', "alt attribute"],
-    ['export function X() { return <div>{"Multiple words here"}</div>; }', "string literal child (not flagged as JSXText, still literal)"],
-  ])("flags %#: %s", async (code, _label) => {
-    // The last case is a JSXExpressionContainer with a string literal, which
-    // this rule intentionally does not parse (it only looks at literal JSX
-    // text and the fixed attribute list) — kept here as a documented gap,
-    // not a false claim of coverage.
+    { attr: "title", code: 'export function X({ t }) { return <button title="Copy to clipboard" />; }' },
+    { attr: "aria-label", code: 'export function X({ t }) { return <input aria-label="Search files" />; }' },
+    { attr: "placeholder", code: 'export function X({ t }) { return <input placeholder="Type a command" />; }' },
+    { attr: "alt", code: 'export function X({ t }) { return <img alt="Session avatar" />; }' },
+  ])("flags a hardcoded $attr attribute", async ({ code }) => {
     const messages = await lint(code, NEW_COMPONENT);
-    if (_label.startsWith("string literal child")) {
-      expect(messages).toEqual([]);
-    } else {
-      expect(messages.length).toBeGreaterThan(0);
-    }
+    expect(messages.length).toBeGreaterThan(0);
+  });
+
+  it("known gap: a string literal inside {…} is not flagged", async () => {
+    // The rule reads only literal JSX text and the fixed attribute list,
+    // never expressions — so `{"Some text"}`, template literals and other
+    // attributes slip through. Kept as a test so the gap is visible, not
+    // mistaken for coverage.
+    const code = `export function X() { return <div>{"Multiple words here"}</div>; }`;
+    expect(await lint(code, NEW_COMPONENT)).toEqual([]);
   });
 
   it("allows text already routed through t()", async () => {
@@ -83,6 +83,17 @@ describe("untranslated-strings allowlist", () => {
     expect(allowlist.files.length).toBeLessThanOrEqual(ALLOWLIST_CEILING);
     expect(new Set(allowlist.files).size).toBe(allowlist.files.length);
   });
+
+  it("has no stale entries: every listed file still exists and still hardcodes text", async () => {
+    const strict = new ESLint({
+      cwd: REPO_ROOT,
+      overrideConfig: { rules: { [RULE]: ["error", { allowlist: [] }] } },
+    });
+    const results = await strict.lintFiles(allowlist.files);
+    const stale = results.filter((r) => !r.messages.some((m) => m.ruleId === RULE)).map((r) => r.filePath);
+    expect(results).toHaveLength(allowlist.files.length);
+    expect(stale, "these files no longer hardcode text — remove them from the allowlist").toEqual([]);
+  }, 60_000);
 
   it("lists no test files (tests are out of the rule's scope entirely)", () => {
     expect(allowlist.files.filter((f) => /\.test\.tsx$|__tests__/.test(f))).toEqual([]);
