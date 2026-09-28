@@ -39,15 +39,32 @@ export function requiredCheckState(checkRuns, name) {
 /**
  * Poll `fetchCheckRuns()` until the named check is no longer pending or the
  * deadline passes. `sleep` and `now` are injectable for tests.
+ *
+ * `missingGraceMs`: for this long after the start, a commit with no run of
+ * that name counts as pending rather than missing. CI and the release train
+ * start together on a push to main, so the release's first look can come
+ * before CI has registered its check runs. After the grace, missing means
+ * CI did not run on this commit.
  */
 export async function waitForRequiredCheck(
   fetchCheckRuns,
   name,
-  { timeoutMs = 60 * 60_000, intervalMs = 30_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now, log = () => {} } = {},
+  {
+    timeoutMs = 60 * 60_000,
+    intervalMs = 30_000,
+    missingGraceMs = 0,
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+    now = Date.now,
+    log = () => {},
+  } = {},
 ) {
-  const deadline = now() + timeoutMs;
+  const started = now();
+  const deadline = started + timeoutMs;
   for (;;) {
-    const result = requiredCheckState(await fetchCheckRuns(), name);
+    let result = requiredCheckState(await fetchCheckRuns(), name);
+    if (result.state === "missing" && now() - started < missingGraceMs) {
+      result = { state: "pending", detail: `${result.detail} yet (CI may not have registered it; waiting up to ${Math.round(missingGraceMs / 60_000)} min for it to appear)` };
+    }
     if (result.state !== "pending") return result;
     if (now() >= deadline) return { state: "failure", detail: `${result.detail}; gave up waiting after ${Math.round(timeoutMs / 60_000)} min` };
     log(`waiting: ${result.detail}`);

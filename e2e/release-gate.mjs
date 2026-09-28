@@ -11,14 +11,20 @@
 //   --check <name>         the check run that must have passed (default: gate)
 //   --repo <owner/name>    default $GITHUB_REPOSITORY
 //   --wait-minutes <n>     how long to wait for a running check (default 90)
+//   --missing-grace-minutes <n>
+//                          how long a commit may have no run of that name
+//                          before that counts as "CI did not run" (default
+//                          15): CI and the release start together on a push
+//                          to main, so the check can be a few seconds away
 //   --check-runs <file>    read the check runs from a JSON file instead of
 //                          GitHub (a { check_runs: [...] } object or an array)
 //   --ledger <file>        default e2e/acceptance.yml
 //   --scenarios <dir>      default e2e/app/scenarios
 //
 // Exit 0 and "RELEASE GATE: PASS" when the release may go ahead; exit 1 and
-// "RELEASE GATE: FAIL" with the reason otherwise. A commit with no `gate`
-// run (CI did not run on it) fails: run the CI workflow on it first.
+// "RELEASE GATE: FAIL" with the reason otherwise. A commit that still has no
+// `gate` run after the grace period (CI did not run on it) fails: run the CI
+// workflow on it first.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -32,6 +38,7 @@ const opts = {
   check: "gate",
   repo: process.env.GITHUB_REPOSITORY || "",
   waitMinutes: 90,
+  missingGraceMinutes: 15,
   checkRuns: "",
   ledger: "e2e/acceptance.yml",
   scenarios: "e2e/app/scenarios",
@@ -46,11 +53,14 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--check") opts.check = next();
   else if (a === "--repo") opts.repo = next();
   else if (a === "--wait-minutes") opts.waitMinutes = Number(next());
+  else if (a === "--missing-grace-minutes") opts.missingGraceMinutes = Number(next());
   else if (a === "--check-runs") opts.checkRuns = next();
   else if (a === "--ledger") opts.ledger = next();
   else if (a === "--scenarios") opts.scenarios = next();
   else if (a === "--help" || a === "-h") {
-    console.log("usage: node e2e/release-gate.mjs --sha <commit> [--check gate] [--repo o/r] [--wait-minutes n] [--check-runs f]");
+    console.log(
+      "usage: node e2e/release-gate.mjs --sha <commit> [--check gate] [--repo o/r] [--wait-minutes n] [--missing-grace-minutes n] [--check-runs f]",
+    );
     process.exit(0);
   } else throw new Error(`unknown option ${a}`);
 }
@@ -63,6 +73,7 @@ function fail(reason) {
 
 if (!/^[0-9a-f]{7,40}$/i.test(opts.sha)) fail(`--sha must be a commit hash, got "${opts.sha}"`);
 if (!Number.isFinite(opts.waitMinutes) || opts.waitMinutes < 0) fail("--wait-minutes must be a number");
+if (!Number.isFinite(opts.missingGraceMinutes) || opts.missingGraceMinutes < 0) fail("--missing-grace-minutes must be a number");
 
 // 1. The ledger in the tree: every shipped feature names scenarios that exist.
 const ledgerFile = resolve(opts.ledger);
@@ -97,10 +108,14 @@ function fetchFromGitHub() {
 }
 
 const fetchCheckRuns = opts.checkRuns ? fetchFromFile : fetchFromGitHub;
-console.log(`commit ${opts.sha}: waiting up to ${opts.waitMinutes} min for the "${opts.check}" check`);
+console.log(
+  `commit ${opts.sha}: waiting up to ${opts.waitMinutes} min for the "${opts.check}" check (up to ${opts.missingGraceMinutes} min for CI to register it)`,
+);
 const result = await waitForRequiredCheck(fetchCheckRuns, opts.check, {
   timeoutMs: opts.waitMinutes * 60_000,
   intervalMs: opts.checkRuns ? 0 : 30_000,
+  // Offline (--check-runs) reads a fixed file: a missing run there is missing.
+  missingGraceMs: opts.checkRuns ? 0 : opts.missingGraceMinutes * 60_000,
   log: (m) => console.log(`  ${m}`),
 });
 console.log(`  ${result.detail}`);

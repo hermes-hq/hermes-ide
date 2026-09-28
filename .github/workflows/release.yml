@@ -182,7 +182,10 @@ jobs:
   # A release is only built from a commit that passed CI's `gate` check —
   # the real-app scenarios on macOS, Windows and Linux plus the acceptance
   # ledger (e2e/acceptance.yml). A commit CI never ran on, or one whose
-  # check is red, is not released. Waits for a check that is still running.
+  # check is red, is not released. Waits for a check that is still running,
+  # and gives CI a few minutes to register the check at all: on a push to
+  # main, CI and this workflow start at the same moment, so the first look
+  # can come before CI has created its check runs.
   proof:
     needs: config
     if: needs.config.outputs.release == 'true'
@@ -199,7 +202,7 @@ jobs:
       - name: The released commit passed the CI gate and the ledger is well-formed
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --wait-minutes 90
+        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --wait-minutes 90 --missing-grace-minutes 15
 
   # ── Frontend tests ─────────────────────────────────────────────────
   test-frontend:

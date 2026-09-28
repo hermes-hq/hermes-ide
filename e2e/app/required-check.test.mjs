@@ -90,6 +90,49 @@ describe("waitForRequiredCheck", () => {
     expect(r.detail).toMatch(/gave up waiting/);
   });
 
+  it("within the grace period, waits for a run CI has not registered yet", async () => {
+    // A push to main starts CI and the release together: the first look can
+    // land before CI has created its check runs.
+    const answers = [[], [], [run({ status: "queued", conclusion: null })], [run()]];
+    let clock = 0;
+    const logged = [];
+    const r = await waitForRequiredCheck(() => answers.shift(), "gate", {
+      timeoutMs: 60 * 60_000,
+      intervalMs: 30_000,
+      missingGraceMs: 15 * 60_000,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+      log: (m) => logged.push(m),
+    });
+    expect(r.state).toBe("success");
+    expect(logged[0]).toMatch(/no check run named "gate" on this commit yet/);
+  });
+
+  it("after the grace period, a run that never appeared is missing", async () => {
+    let clock = 0;
+    let calls = 0;
+    const r = await waitForRequiredCheck(
+      () => {
+        calls++;
+        return [];
+      },
+      "gate",
+      {
+        timeoutMs: 60 * 60_000,
+        intervalMs: 60_000,
+        missingGraceMs: 5 * 60_000,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+      },
+    );
+    expect(r.state).toBe("missing");
+    expect(calls).toBe(6);
+  });
+
   it("does not wait at all for a missing or failed run", async () => {
     let calls = 0;
     const r = await waitForRequiredCheck(
