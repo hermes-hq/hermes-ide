@@ -542,7 +542,15 @@ try {
   const outA = (await normalizedRows(app.bridge, s1, vendorId1)).filter((r) => !/sub-agent|OSC 9|marker/.test(r));
   const outB = await normalizedRows(app.bridge, s2, vendorId2);
   const cut = (rows) => rows.slice(0, rows.findIndex((r) => r.includes("turn failed")) + 1);
-  assert(JSON.stringify(cut(outA)) === JSON.stringify(cut(outB)), `the agent's output is the same with the strip on or off (${cut(outB).length} rows)`);
+  // On Windows the pseudo console keeps only what is on screen: the first
+  // session's banner rows have scrolled away by now. Compare the rows both
+  // sessions still hold; the permission prompt through the failed turn (8
+  // rows) is the least that must match.
+  const sameA = cut(outA);
+  const sameB = cut(outB);
+  const n = Math.min(sameA.length, sameB.length);
+  assert(n >= 8, `both sessions still show the permission prompt through the failed turn (${n} rows)`);
+  assert(JSON.stringify(sameA.slice(-n)) === JSON.stringify(sameB.slice(-n)), `the agent's output is the same with the strip on or off (${n} rows)`);
   await app.bridge.screenshot(join(evidenceDir, "06-second-session-strip-off.png"));
   await setStatusStrip(app.bridge, true);
   await waitForStrip(app.bridge, s2, { kind: "error", confidence: "exact" });
