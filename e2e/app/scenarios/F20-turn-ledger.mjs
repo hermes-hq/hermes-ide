@@ -22,11 +22,16 @@
 //      turn from being recorded, and turning it back on records the next;
 //
 // and, in a Custom-agent session in the same repository (no injected event
-// at all):
+// at all; the wizard offers no default branch there because `main` is in
+// use by the first session, so the scenario takes "Continue without
+// isolation", as a person would):
 //
 //   F. the PTY heuristic: the agent edits a file and goes quiet at its
 //      prompt; the Busy -> Idle transition records a turn whose diff shows
 //      that edit.
+//
+// Also checked: opening a session writes nothing to the repository (no
+// refs/hermes ref exists until a turn changed something).
 //
 // Negative control of the whole scenario: HERMES_E2E_F20_FLAG=off leaves
 // the flag off; the turn bar never appears and no refs/hermes ref is
@@ -281,8 +286,24 @@ async function createSession(bridge, { label, custom = null }) {
         return e2e.all(".project-picker-item.project-picker-item-attached").some((el) => el.innerText.includes("f20-repo"));
       `);
     } else if (step === "branch") {
-      await bridge.waitFor("a default branch to be chosen", `return !!e2e.first(".session-creator-branch-selected-label");`);
-      log(`  branch offered: "${(await bridge.text(".session-creator-branch-selected-label")).trim()}"`);
+      // The first session in the repository is offered its current branch.
+      // A second one is not (that branch is in use by the first), and the
+      // wizard offers "Continue without isolation" instead: both sessions
+      // then share the checkout, which is what F needs.
+      const offered = await bridge.waitFor("the branch step to settle", `
+        if (e2e.first(".session-creator-branch-selected-label")) return "default";
+        const body = e2e.first(".branch-selector-body");
+        if (body && !e2e.first(".branch-selector-loading", body) && e2e.all(".branch-selector-item", body).length > 0) return "none";
+        return null;
+      `, { timeoutMs: 20_000 });
+      if (offered === "default") {
+        log(`  branch offered: "${(await bridge.text(".session-creator-branch-selected-label")).trim()}"`);
+      } else {
+        log("  no default branch (in use by the first session): continuing without isolation");
+        await bridge.clickByName("Continue without isolation", { within: ".session-creator-footer-actions" });
+        await sleep(300);
+        continue;
+      }
     } else if (step === "confirm") {
       await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
     }
@@ -338,6 +359,10 @@ async function runAgent(bridge, sessionId, shellKind, scenarioFile, doneLine) {
 const inject = (bridge, sessionId, event) =>
   bridge.eval(`return window.__HERMES_E2E__.injectSessionEvent(${JSON.stringify(sessionId)}, ${JSON.stringify(event)});`);
 
+// On Windows the fake agent's `echo x>file` (cmd.exe) writes CRLF, so a
+// deleted line reads "-draft\r" in the raw diff text; compare without it.
+const stripCr = (lines) => lines.map((l) => l.replace(/\r$/, ""));
+
 const chipsOf = (bridge, sessionId) =>
   bridge.eval(`
     const bar = e2e.first('.turn-bar[data-session-id="' + CSS.escape(${JSON.stringify(sessionId)}) + '"]');
@@ -365,7 +390,7 @@ async function openDiff(bridge, sessionId, n) {
   return bridge.eval(`
     const s = e2e.first('.turn-sheet[data-sheet="diff"]');
     return e2e.all(".turn-diff-line", s).map((l) => l.textContent);
-  `);
+  `).then(stripCr);
 }
 
 const closeSheet = async (bridge) => {
@@ -408,6 +433,10 @@ try {
   const stateAtStart = userState(dirA);
   assert(stateAtStart.stash.split("\n").length === 1, `the stash starts with one entry (${stateAtStart.stash})`);
   assert((await chipsOf(bridge, sessionA)).length === 0, "no turn chip before any turn");
+  // The baseline is taken in the background when the session opens; it must
+  // stay in memory: a session that never records a turn leaves no ref.
+  await sleep(1500);
+  assert(gitIn(dirA, "for-each-ref", "refs/hermes/") === "", "no refs/hermes ref before any turn (the baseline writes nothing)");
 
   // ── A. a shell edit shows in the turn diff ──────────────────────
   log("step A: the fake agent edits with a shell command; its turn end records T1");
@@ -470,6 +499,7 @@ try {
     const hint = s && e2e.first(".turn-sheet-hint", s);
     return hint ? { files: Number(hint.getAttribute("data-preview-files")), text: e2e.norm(hint.innerText), lines: e2e.all(".turn-diff-line", s).map((l) => l.textContent) } : null;
   `, { timeoutMs: 20_000 });
+  preview.lines = stripCr(preview.lines);
   log(`  preview: ${preview.text}`);
   assert(preview.files === 3, `the preview says 3 files would change (app.txt, README.md, notes/new.txt): ${preview.files}`);
   assert(preview.lines.some((l) => l === "-second") && preview.lines.some((l) => l.startsWith("+draft")), "the preview shows the changes restoring would make");
