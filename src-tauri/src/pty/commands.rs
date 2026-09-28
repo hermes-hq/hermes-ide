@@ -1144,13 +1144,15 @@ pub fn create_session(
         // (a stable user's PATH stays exactly as it was): first on PATH for
         // this terminal so `hi run` is unambiguous (the shell integration
         // re-adds it after the user's profile ran), plus where it finds the
-        // session's launch file.
+        // session's launch file. The PATH it goes in front of is the one the
+        // terminal would get anyway (on Windows the terminal library rebuilds
+        // it from the registry, not from this process).
         if launch_helper.unwrap_or(false) {
             if let Some(dir) = crate::pty::launch::hi_path(&app)
                 .and_then(|hi| hi.parent().map(|d| d.to_path_buf()))
             {
                 let mut paths = vec![dir.clone()];
-                if let Some(existing) = std::env::var_os("PATH") {
+                if let Some(existing) = cmd.get_env("PATH").map(|p| p.to_os_string()) {
                     paths.extend(std::env::split_paths(&existing));
                 }
                 if let Ok(joined) = std::env::join_paths(paths) {

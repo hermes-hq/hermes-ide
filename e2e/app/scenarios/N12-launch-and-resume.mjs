@@ -40,6 +40,7 @@
 // Evidence (log, screenshots, the fake's launch records) goes to
 // HERMES_E2E_EVIDENCE, or <out dir>/evidence/N12-launch-and-resume.
 
+import { execFileSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
@@ -86,6 +87,45 @@ if (onWindows) {
 const hasRealClaude = (dir) => ["claude", "claude.exe", "claude.cmd"].some((n) => existsSync(join(dir, n)));
 process.env.PATH = [fakeBin, ...(process.env.PATH || "").split(delimiter).filter((d) => d && !hasRealClaude(d))].join(delimiter);
 for (const name of Object.keys(process.env)) if (name.startsWith("ANTHROPIC_")) delete process.env[name];
+
+/**
+ * Windows terminals do not inherit the app's PATH: the terminal library
+ * rebuilds PATH from the registry (machine Path, then the user's
+ * HKCU\Environment Path) for every new terminal. So on Windows the fake
+ * `claude` has to be on the user's registry Path (run 0 types `claude` into
+ * that PATH; with the flag on, `hi` starts the agent with the same PATH).
+ * That is a machine setting, so it is only changed on a throwaway CI runner,
+ * and restored afterwards. Returns an undo function, or null.
+ */
+const canEditRegistryPath = onWindows && process.env.GITHUB_ACTIONS === "true";
+function addFakeBinToRegistryPath() {
+  if (!canEditRegistryPath) return null;
+  let old = null;
+  try {
+    const out = execFileSync("reg", ["query", "HKCU\\Environment", "/v", "Path"], { encoding: "utf8" });
+    const m = out.match(/^\s*Path\s+REG_\w+\s+(.*)$/im);
+    old = m ? m[1].trim() : "";
+  } catch {
+    old = null; // no user Path yet
+  }
+  const next = old ? `${old};${fakeBin}` : fakeBin;
+  execFileSync("reg", ["add", "HKCU\\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", next, "/f"]);
+  log("  (CI runner: added the fake claude folder to the user's registry Path)");
+  return () => {
+    if (old === null) {
+      execFileSync("reg", ["delete", "HKCU\\Environment", "/v", "Path", "/f"]);
+    } else {
+      execFileSync("reg", ["add", "HKCU\\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", old, "/f"]);
+    }
+    log("  (CI runner: restored the user's registry Path)");
+  };
+}
+if (onWindows && !canEditRegistryPath) {
+  log("this scenario needs the fake claude on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
+  log("RESULT: SKIP (Windows outside CI)");
+  process.exit(0);
+}
+let undoRegistryPath = null;
 
 const setFakeMode = (mode) => {
   writeFileSync(join(recordDir, "mode"), `${mode}\n`);
@@ -282,6 +322,22 @@ async function firstRestoredTerminal(bridge) {
     return ids.length >= 1 ? ids[0] : null;
   `, { timeoutMs: 30_000 });
 }
+/**
+ * Waits until the terminal's rows, joined without the wrap boundaries and
+ * with runs of blanks collapsed, satisfy `test`; returns that text. A shell
+ * with a long prompt can wrap or redraw one typed line over two rows.
+ */
+async function waitForTerminalText(bridge, sessionId, test, what, { timeoutMs = 30_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let text = "";
+  while (Date.now() < deadline) {
+    const rows = (await bridge.readTerminal(sessionId)) ?? [];
+    text = rows.map((r) => r.trimEnd()).join("").replace(/\s+/g, " ");
+    if (test(text)) return text;
+    await sleep(100);
+  }
+  throw new Error(`terminal never showed ${what} within ${timeoutMs} ms. Last content:\n${text}`);
+}
 async function waitForSavedVendorId(bridge, sessionId, vendorId) {
   // The frontend saves the workspace every 10 s once something changed.
   await bridge.waitFor("the conversation id to be saved with the workspace", `
@@ -327,6 +383,7 @@ let secondShell;
 
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   fake claude: ${fakeBin}`);
+  undoRegistryPath = addFakeBinToRegistryPath();
   log(`  vendor config before: ${JSON.stringify(vendorBefore)}`);
   setFakeMode("normal");
 
@@ -359,8 +416,11 @@ try {
   const s1 = await createClaudeSession(app.bridge);
   log(`  session created: ${s1}`);
   const launchedAt = Date.now();
-  const typed = await app.bridge.waitForTerminal(s1, new RegExp(`hi run ${s1}`), { timeoutMs: 30_000 });
-  assert(typed.line.trim().endsWith(`hi run ${s1}`), `the terminal shows only the shell-neutral line "hi run ${s1}"`);
+  // A long prompt (a CI runner's bash) wraps or redraws the typed line over
+  // two rows, so the launch line is looked for in the rows' text as a whole.
+  const typed = await waitForTerminalText(app.bridge, s1, (text) => text.includes(`hi run ${s1}`), `the launch line "hi run ${s1}"`);
+  assert(typed.includes(`hi run ${s1}`), `the terminal shows the shell-neutral line "hi run ${s1}"`);
+  assert(!/--session-id|--settings|--resume/.test(typed), "the terminal never shows the vendor's own flags: everything else is in the launch file");
   await app.bridge.waitForTerminal(s1, /fake-cli: ready/, { timeoutMs: 30_000 });
   const startedIn = await waitForStartup(app.bridge, s1, "started");
   log(`  started (exact) ${Date.now() - launchedAt} ms after the launch line`);
@@ -462,7 +522,7 @@ try {
   log("run 3, second session: the vendor sits at a folder-trust prompt");
   setFakeMode("trust-prompt");
   const s4 = await createClaudeSession(app.bridge);
-  await app.bridge.waitForTerminal(s4, new RegExp(`hi run ${s4}`), { timeoutMs: 30_000 });
+  await waitForTerminalText(app.bridge, s4, (text) => text.includes(`hi run ${s4}`), `the launch line "hi run ${s4}"`);
   const t4 = Date.now();
   await app.bridge.waitForTerminal(s4, /Do you trust the files in this folder\?/, { timeoutMs: 30_000 });
   const guessIn = await waitForStartup(app.bridge, s4, "waiting_at_startup_prompt", { timeoutMs: 15_000 });
@@ -537,6 +597,11 @@ try {
       failed = true;
       log("FAILED: the app did not quit cleanly");
     }
+  }
+  try {
+    undoRegistryPath?.();
+  } catch (e) {
+    log(`  (could not restore the registry Path: ${e.message})`);
   }
   // Keep the fake's launch records with the evidence; drop the rest.
   try {
