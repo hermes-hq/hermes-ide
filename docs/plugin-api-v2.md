@@ -35,7 +35,7 @@ Listeners run after Hermes has recorded the event, never inside it; a listener t
 
 ### Inbox
 
-`raise` returns the item. Hermes sets its source to `plugin:<your id>`; you cannot set it. Raising the same kind, session and detail again returns the open item. A plugin can hold at most 20 open items, can only resolve and list its own, and its items are removed when it is turned off or uninstalled.
+`raise` returns the item. Hermes sets its source to `plugin:<your id>`; you cannot set it. Raising the same kind, session and detail again returns the open item. A plugin can hold at most 20 open items, can only resolve and list its own, and its items are removed when it is turned off or uninstalled. Items live only while Hermes runs: they are not kept across a restart, so raise them again when your plugin starts (the sample does this on its next scan).
 
 ### Feature tracks (read-only)
 

@@ -8,8 +8,9 @@
 // and runs them over the diff it shows, which for a turn is the `patch` of
 // `get_turn_diff` (turns.ts). No UI here.
 //
-// The runner never trusts a check: every check gets its own frozen copy of
-// the input, a time limit, and its answer is validated and bounded. A check
+// The runner never trusts a check: every check gets the same deeply frozen
+// input (so none can change what another sees), a time limit, and its answer
+// is validated and bounded. A check
 // that throws, times out or answers nonsense is reported as `error` or
 // `timeout` and never stops the others.
 
