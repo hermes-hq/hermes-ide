@@ -7,7 +7,11 @@
  * a terminal agent gets review-<n>.md plus ONE visible tagged line pasted
  * only when the person presses Send; Hermes shows "delivered" when the
  * agent's next prompt signal carries the tag, otherwise "not delivered"
- * with Retry. One turn can be reverted (git apply -R, previewed first).
+ * with Retry. A working agent gets nothing typed into it: the send stops
+ * at "waiting" and the person presses "Send now" once the turn has ended.
+ * An agent whose launch installed no prompt hook shows "pasted" instead —
+ * the line went in, nobody can confirm it. One turn can be reverted
+ * (git apply -R, previewed first).
  * Deterministic risk flags mark lockfiles, new dependencies, workflow
  * edits, auth/crypto paths, secret patterns, new binaries, install scripts
  * and curl | sh.
@@ -23,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../state/SessionContext";
 import { useI18n } from "../i18n/I18nProvider";
-import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
+import { getSessionEventSnapshot, subscribeSessionEvents, useSessionEvents } from "../agent/contract/sessionEventStore";
 import type { SessionEvent } from "../agent/contract/events";
 import type { Turn } from "../agent/contract/turns";
 import { writeToSession } from "../api/sessions";
@@ -34,7 +38,7 @@ import { reviewDiff, reviewRevertPatch, reviewRevertPreview, reviewWriteFile, ty
 import { parsePatch, type DiffLine, type ParsedFile } from "../review/patch";
 import { riskFlagsFor, type RiskFlag } from "../review/riskFlags";
 import { commentsForSession, encodePaste, pasteLine, reviewMarkdown, type ReviewComment } from "../review/reviewModel";
-import { sendReviewBack } from "../review/sendBack";
+import { deliveryReceiptAvailable, isBusy, sendReviewBack } from "../review/sendBack";
 import {
   addComment,
   markSent,
@@ -113,6 +117,16 @@ const SEND_DEPS = {
   onSessionEvent: watchSessionEvents,
   status: (sessionId: string) => getSessionEventSnapshot(sessionId).status,
 };
+
+/** "Send now" for a send held while the agent worked: enabled only once the turn has ended. */
+function SendNowButton({ sessionId, label, onClick }: { sessionId: string; label: string; onClick: () => void }) {
+  const busy = isBusy(useSessionEvents(sessionId).status);
+  return (
+    <button type="button" className="review-btn review-btn-small review-send-now-btn" disabled={busy} data-busy={busy ? "1" : "0"} onClick={onClick}>
+      {label}
+    </button>
+  );
+}
 
 export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   const { t } = useI18n();
@@ -279,7 +293,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         return;
       }
       await sendReviewBack(
-        SEND_DEPS,
+        { ...SEND_DEPS, canConfirm: (id) => deliveryReceiptAvailable(sessions.find((s) => s.id === id)) },
         { sessionId: sid, n, content, line: (filePath) => pasteLine(n, filePath) },
         (state) => setDelivery(repoPath, n, sid, state, review.deliveries[n]?.filePath ?? null),
       ).then((out) => setDelivery(repoPath, n, sid, out.state, out.filePath));
@@ -302,7 +316,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
     [unsentFor, repoPath, runSend],
   );
 
-  const retry = useCallback(
+  /** Retry (not delivered / failed) and Send now (waiting): the same review goes out again. */
+  const resend = useCallback(
     async (n: number) => {
       const d = review.deliveries[n];
       if (!d) return;
@@ -495,33 +510,36 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
             ? t("review.inComposer")
             : d.kind === "waiting"
               ? t("review.waitingForTurn")
-              : d.kind === "not_delivered"
-                ? t("review.notDelivered")
-                : d.kind === "failed"
-                  ? t("review.failed", { reason: d.reason })
-                  : "";
+              : d.kind === "pasted"
+                ? t("review.pastedNoReceipt")
+                : d.kind === "not_delivered"
+                  ? t("review.notDelivered")
+                  : d.kind === "failed"
+                    ? t("review.failed", { reason: d.reason })
+                    : "";
+    const glyph = d.kind === "delivered" ? "✓" : d.kind === "pasted" ? "→" : d.kind === "not_delivered" || d.kind === "failed" ? "!" : "…";
+    const copyLine = d.filePath && (
+      <button
+        type="button"
+        className="review-btn review-btn-small review-btn-quiet review-copy-line-btn"
+        onClick={() => navigator.clipboard.writeText(pasteLine(n, d.filePath ?? "")).catch(() => {})}
+      >
+        {t("review.copyLine")}
+      </button>
+    );
     return (
       <span className={`review-delivery review-delivery-${d.kind}`} data-state={d.kind} data-n={n}>
         <span className="review-delivery-glyph" aria-hidden="true">
-          {d.kind === "delivered" ? "✓" : d.kind === "not_delivered" || d.kind === "failed" ? "!" : "…"}
+          {glyph}
         </span>
         {t("review.reviewN", { n })} · {label}
+        {d.kind === "waiting" && <SendNowButton sessionId={d.sessionId} label={t("review.sendNow")} onClick={() => void resend(n)} />}
         {(d.kind === "not_delivered" || d.kind === "failed") && (
-          <>
-            <button type="button" className="review-btn review-btn-small review-retry-btn" onClick={() => void retry(n)}>
-              {t("review.retry")}
-            </button>
-            {d.filePath && (
-              <button
-                type="button"
-                className="review-btn review-btn-small review-btn-quiet"
-                onClick={() => navigator.clipboard.writeText(pasteLine(n, d.filePath ?? "")).catch(() => {})}
-              >
-                {t("review.copyLine")}
-              </button>
-            )}
-          </>
+          <button type="button" className="review-btn review-btn-small review-retry-btn" onClick={() => void resend(n)}>
+            {t("review.retry")}
+          </button>
         )}
+        {(d.kind === "not_delivered" || d.kind === "failed" || d.kind === "pasted") && copyLine}
       </span>
     );
   };

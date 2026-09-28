@@ -34,6 +34,9 @@ pub struct MenuItemUpdate {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub checked: Option<bool>,
+    /// A new label for the item (F21: "Git Panel" reads "Review Desk" with the flag on).
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -542,6 +545,13 @@ pub async fn update_menu_state(app: AppHandle, updates: Vec<MenuItemUpdate>) -> 
                     let _ = mi.set_enabled(enabled);
                 } else if let Some(ci) = item.as_check_menuitem() {
                     let _ = ci.set_enabled(enabled);
+                }
+            }
+            if let Some(ref text) = update.text {
+                if let Some(mi) = item.as_menuitem() {
+                    let _ = mi.set_text(text);
+                } else if let Some(ci) = item.as_check_menuitem() {
+                    let _ = ci.set_text(text);
                 }
             }
         }

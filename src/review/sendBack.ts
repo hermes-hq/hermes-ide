@@ -5,9 +5,16 @@
 // working agent gets nothing typed into it: a real CLI queues input while
 // it works and reports it only when the turn ends, which would look like a
 // lost line. So while the session's status (the C0 store) says `working`,
-// the send waits; the line is pasted once the status says the turn ended.
+// the send stops at "waiting": the file is written, nothing is pasted, and
+// the desk offers "Send now" once the turn has ended — a second explicit
+// press, never a paste Hermes decides on later by itself.
+//
 // The receipt is the next prompt signal from that session carrying the tag
-// — a SessionEvent whose `tags` include `hermes-review#<n>`. Without one in
+// — a SessionEvent whose `tags` include `hermes-review#<n>`. Only an agent
+// whose launch installed a prompt hook can send one (see
+// `deliveryReceiptAvailable`); for any other agent the outcome is "pasted"
+// — the line went into its terminal and nobody can confirm more — instead
+// of a wrong "not delivered". With a receipt possible but none in
 // RECEIPT_TIMEOUT_MS after the paste the send is "not delivered", and the
 // person may retry (the file is already there; only the line is pasted
 // again).
@@ -17,6 +24,8 @@
 
 import type { SessionEvent } from "../agent/contract/events";
 import type { AgentStatus } from "../agent/contract/status";
+import { getAgent } from "../catalog/agentCatalog";
+import type { SessionData } from "../types/session";
 import { reviewTagId } from "./reviewModel";
 
 export const RECEIPT_TIMEOUT_MS = 5000;
@@ -24,9 +33,11 @@ export const RECEIPT_TIMEOUT_MS = 5000;
 export type DeliveryState =
   | { readonly kind: "idle" }
   | { readonly kind: "sending" }
-  /** The agent is working; the line is pasted when its turn ends. */
+  /** The agent was working at Send time; nothing was pasted. "Send now" pastes it once the turn ended. */
   | { readonly kind: "waiting"; readonly reason: string }
   | { readonly kind: "delivered"; readonly at: number }
+  /** The line was pasted; this agent has no prompt hook, so nothing can confirm it. */
+  | { readonly kind: "pasted"; readonly at: number }
   /** A structured agent: the line waits in its composer for the person to send. */
   | { readonly kind: "queued"; readonly reason: string }
   | { readonly kind: "not_delivered"; readonly reason: string }
@@ -41,6 +52,8 @@ export interface SendBackDeps {
   readonly onSessionEvent: (sessionId: string, listener: (event: SessionEvent) => void) => () => void;
   /** The session's current status from the C0 store. */
   readonly status: (sessionId: string) => AgentStatus;
+  /** Whether this session's agent can send the receipt at all (a prompt hook is installed). */
+  readonly canConfirm: (sessionId: string) => boolean;
   readonly now?: () => number;
   readonly timeoutMs?: number;
   readonly setTimeout?: (fn: () => void, ms: number) => unknown;
@@ -71,9 +84,28 @@ export function isBusy(status: AgentStatus): boolean {
 }
 
 /**
- * Write the file, wait for the agent to be free, paste the line, wait for
- * the receipt. Resolves once the outcome is known; `onState` is told about
- * each step on the way.
+ * The launch methods for which the helper installs a prompt-submitted hook
+ * (src-tauri/src/pty/launch.rs, `settings_file_json`): only those agents
+ * ever send the `[hermes-review #n]` receipt. Keep in step with launch.rs.
+ */
+const PROMPT_HOOK_METHODS: ReadonlySet<string> = new Set(["settings_file"]);
+
+/**
+ * Whether a delivery receipt can come back from this session: the agent was
+ * started through the helper (so its hooks are installed) and its vendor
+ * takes a prompt hook. A session without one gets "pasted", not a receipt.
+ */
+export function deliveryReceiptAvailable(session: Pick<SessionData, "ai_provider" | "agent_startup"> | undefined): boolean {
+  if (!session || !session.agent_startup) return false;
+  const method = getAgent(session.ai_provider)?.terminal?.signals?.method;
+  return typeof method === "string" && PROMPT_HOOK_METHODS.has(method);
+}
+
+/**
+ * Write the file; if the agent is free, paste the line and wait for the
+ * receipt (or report "pasted" when none can come). If the agent is working,
+ * stop at "waiting" without pasting — the person presses "Send now" later.
+ * Resolves once the outcome is known; `onState` is told about each step.
  */
 export async function sendReviewBack(
   deps: SendBackDeps,
@@ -95,51 +127,43 @@ export async function sendReviewBack(
     return { state, filePath: null };
   }
 
+  if (isBusy(deps.status(request.sessionId))) {
+    const state: DeliveryState = { kind: "waiting", reason: "the agent is working; press Send now once its turn has ended" };
+    onState(state);
+    return { state, filePath };
+  }
+
+  const confirmable = deps.canConfirm(request.sessionId);
   // Listen before pasting, so a fast agent cannot answer before we look.
   let settle: (state: DeliveryState) => void = () => {};
   const receipt = new Promise<DeliveryState>((resolve) => {
     settle = resolve;
   });
-  // The turn's end, when the agent is busy at Send time.
-  let free: () => void = () => {};
-  const exit: { state: DeliveryState | null } = { state: null };
-  const turnEnded = new Promise<void>((resolve) => {
-    free = resolve;
-  });
-  const unsubscribe = deps.onSessionEvent(request.sessionId, (event) => {
-    if (isReceiptFor(event, request.n)) settle({ kind: "delivered", at: now() });
-    if (event.type === "exit") {
-      exit.state = { kind: "failed", reason: "the agent exited before the line could be pasted" };
-      free();
-    } else if (event.type === "status" && !isBusy(event.status)) {
-      free();
-    }
-  });
-
-  if (isBusy(deps.status(request.sessionId))) {
-    onState({ kind: "waiting", reason: "the agent is working; the line is pasted when its turn ends" });
-    await turnEnded;
-    if (exit.state) {
-      unsubscribe();
-      onState(exit.state);
-      return { state: exit.state, filePath };
-    }
-    onState({ kind: "sending" });
-  }
-
-  const timer = setT(() => settle({ kind: "not_delivered", reason: "the agent did not report the review line" }), timeoutMs);
+  const unsubscribe = confirmable
+    ? deps.onSessionEvent(request.sessionId, (event) => {
+        if (isReceiptFor(event, request.n)) settle({ kind: "delivered", at: now() });
+      })
+    : () => {};
+  const timer = confirmable
+    ? setT(() => settle({ kind: "not_delivered", reason: "the agent did not report the review line" }), timeoutMs)
+    : null;
   try {
     await deps.paste(request.sessionId, request.line(filePath));
   } catch (e) {
-    clearT(timer);
+    if (timer !== null) clearT(timer);
     unsubscribe();
     const state: DeliveryState = { kind: "failed", reason: `could not paste into the terminal: ${String(e)}` };
     onState(state);
     return { state, filePath };
   }
+  if (!confirmable) {
+    const state: DeliveryState = { kind: "pasted", at: now() };
+    onState(state);
+    return { state, filePath };
+  }
 
   const state = await receipt;
-  clearT(timer);
+  if (timer !== null) clearT(timer);
   unsubscribe();
   onState(state);
   return { state, filePath };

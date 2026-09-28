@@ -771,6 +771,12 @@ features:
       F21-5:
         text: "A lockfile or workflow change shows a risk flag"
         scenarios: [F21-review-desk.mjs]
+      # F21-6 and F21-7 are not in the plan: they pin down the rule that
+      # Hermes never types into a terminal on its own, and what an agent
+      # without a prompt hook shows.
       F21-6:
-        text: "Send to a working agent types nothing into it; the line goes out when its turn ends"
+        text: "Send to a working agent types nothing into it, not even when its turn ends; only a second press (Send now) pastes the line"
+        scenarios: [F21-review-desk.mjs]
+      F21-7:
+        text: "An agent whose launch installed no prompt hook shows \"pasted — cannot confirm\" instead of \"not delivered\""
         scenarios: [F21-review-desk.mjs]

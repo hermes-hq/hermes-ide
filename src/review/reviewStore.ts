@@ -2,9 +2,12 @@
 //
 // What the person did in the desk for one repository: which files are
 // viewed, the comments, the review counter, which review each comment went
-// out in, and each send's outcome. Viewed marks, comments, the counter and
-// the sent marks are kept per repository path in localStorage so they
-// survive closing the desk and restarting; delivery states are per run.
+// out in, and each send's outcome. All of it is kept per repository path in
+// localStorage so it survives closing the desk and restarting: a review
+// shown as "not delivered" can still be retried (its session and file path
+// are known) and one left "waiting" can still be sent. A send that was in
+// flight when Hermes closed comes back as "not delivered" — whether the
+// line reached the agent is not known.
 
 import { useSyncExternalStore } from "react";
 import type { ReviewComment } from "./reviewModel";
@@ -18,9 +21,11 @@ export interface ReviewState {
   /** The review number each sent comment went out in, by comment id. */
   readonly sent: Readonly<Record<string, number>>;
   /** Delivery per review number. */
-  readonly deliveries: Readonly<Record<number, DeliveryState & { readonly sessionId: string; readonly filePath: string | null }>>;
+  readonly deliveries: Readonly<Record<number, Delivery>>;
   readonly version: number;
 }
+
+export type Delivery = DeliveryState & { readonly sessionId: string; readonly filePath: string | null };
 
 const EMPTY: ReviewState = Object.freeze({ viewed: [], comments: [], lastN: 0, sent: {}, deliveries: {}, version: 0 });
 
@@ -39,7 +44,7 @@ function load(repoPath: string): ReviewState {
       comments: Array.isArray(parsed.comments) ? (parsed.comments as ReviewComment[]) : [],
       lastN: typeof parsed.lastN === "number" && Number.isInteger(parsed.lastN) && parsed.lastN >= 0 ? parsed.lastN : 0,
       sent: sentMarks(parsed.sent),
-      deliveries: {},
+      deliveries: deliveries(parsed.deliveries),
       version: 0,
     });
   } catch {
@@ -56,11 +61,33 @@ function sentMarks(value: unknown): Record<string, number> {
   return out;
 }
 
+const DELIVERY_KINDS: ReadonlySet<string> = new Set(["waiting", "delivered", "pasted", "queued", "not_delivered", "failed"]);
+
+/** Persisted deliveries read back; an in-flight send is reported as not delivered. */
+function deliveries(value: unknown): Record<number, Delivery> {
+  const out: Record<number, Delivery> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const n = Number(key);
+    if (!Number.isInteger(n) || n <= 0 || !raw || typeof raw !== "object") continue;
+    const d = raw as Partial<Delivery> & { kind?: string; reason?: unknown; at?: unknown };
+    if (typeof d.sessionId !== "string" || typeof d.kind !== "string") continue;
+    const filePath = typeof d.filePath === "string" ? d.filePath : null;
+    if (d.kind === "sending" || d.kind === "idle") {
+      out[n] = { kind: "not_delivered", reason: "Hermes was closed while this review was being sent", sessionId: d.sessionId, filePath };
+      continue;
+    }
+    if (!DELIVERY_KINDS.has(d.kind)) continue;
+    out[n] = { ...(d as Delivery), sessionId: d.sessionId, filePath };
+  }
+  return out;
+}
+
 function persist(repoPath: string, state: ReviewState): void {
   try {
     globalThis.localStorage?.setItem(
       storageKey(repoPath),
-      JSON.stringify({ viewed: state.viewed, comments: state.comments, lastN: state.lastN, sent: state.sent }),
+      JSON.stringify({ viewed: state.viewed, comments: state.comments, lastN: state.lastN, sent: state.sent, deliveries: state.deliveries }),
     );
   } catch {
     // Storage may be unavailable; the desk still works for this run.

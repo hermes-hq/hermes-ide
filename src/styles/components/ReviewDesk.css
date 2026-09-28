@@ -455,6 +455,12 @@
 .review-delivery-failed {
   color: var(--red);
 }
+.review-delivery-waiting {
+  color: var(--yellow, var(--text-2));
+}
+.review-delivery-pasted {
+  color: var(--text-2);
+}
 .review-delivery-glyph {
   font-weight: 700;
 }

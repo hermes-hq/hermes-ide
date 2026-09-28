@@ -195,17 +195,20 @@ pub fn worktree_patch(repo: &Path, base: &str) -> Result<String, String> {
     let index = dir.path().join("index");
     let index_str = index.to_string_lossy().to_string();
     let env: [(&str, &str); 1] = [("GIT_INDEX_FILE", index_str.as_str())];
-    // Start from HEAD's tree so only changed files are hashed, then take
-    // the worktree as it is: additions, edits, deletions and new files.
+    // Start from HEAD's tree, then record every worktree path in the
+    // private index as intent-to-add (`-N`): that lists new files without
+    // hashing anything, so the diff below, which compares the base tree to
+    // the worktree itself, writes no objects into the repository and leaves
+    // its real index alone. Additions, edits, deletions and renames all
+    // show; ignored files never do.
     if git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"], &[]).is_ok() {
         git(repo, &["read-tree", "HEAD"], &env)?;
     }
-    git(repo, &["add", "-A", "--", "."], &env)?;
+    git(repo, &["add", "-N", "-A", "--", "."], &env)?;
     git(
         repo,
         &[
             "diff",
-            "--cached",
             "--no-color",
             "--no-ext-diff",
             "--find-renames",
@@ -527,6 +530,11 @@ mod tests {
             "{\n  \"name\": \"fixture\"\n}\n",
         )
         .unwrap();
+        fs::write(
+            repo.join("package.json"),
+            "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"private\": true\n}\n",
+        )
+        .unwrap();
         run(&repo, &["add", "-A"]);
         run(&repo, &["commit", "-q", "-m", "base"]);
         run(&repo, &["checkout", "-q", "-b", "hermes/task"]);
@@ -550,8 +558,19 @@ mod tests {
             "{\n  \"name\": \"fixture\",\n  \"x\": 1\n}\n",
         )
         .unwrap();
+        // Renamed without staging: git sees a deletion plus a new file
+        // until rename detection pairs them.
+        fs::rename(repo.join("package.json"), repo.join("package.renamed.json")).unwrap();
+        // A file that only ever existed on the branch and is gone again
+        // is not part of the review.
+        fs::write(repo.join("scratch.txt"), "tmp\n").unwrap();
+        run(&repo, &["add", "scratch.txt"]);
+        run(&repo, &["commit", "-q", "-m", "scratch"]);
+        run(&repo, &["rm", "-q", "scratch.txt"]);
+        run(&repo, &["commit", "-q", "-m", "drop scratch"]);
         let index_before = run(&repo, &["diff", "--cached", "--name-only"]);
         let status_before = run(&repo, &["status", "--porcelain"]);
+        let objects_before = object_files(&repo);
 
         let diff = review_diff(repo.to_string_lossy().to_string()).unwrap();
         assert_eq!(diff.base_ref, "main");
@@ -568,10 +587,17 @@ mod tests {
             vec![
                 ("README.md".to_string(), FileStatus::Deleted),
                 ("package-lock.json".to_string(), FileStatus::Modified),
+                ("package.renamed.json".to_string(), FileStatus::Renamed),
                 ("src/app.js".to_string(), FileStatus::Modified),
                 ("src/util.js".to_string(), FileStatus::Added),
             ]
         );
+        let renamed = diff
+            .files
+            .iter()
+            .find(|f| f.path == "package.renamed.json")
+            .unwrap();
+        assert_eq!(renamed.old_path.as_deref(), Some("package.json"));
         let app = diff.files.iter().find(|f| f.path == "src/app.js").unwrap();
         assert_eq!((app.additions, app.deletions), (1, 1));
         assert!(app.patch.contains("-const b = 2;") && app.patch.contains("+const b = 3;"));
@@ -587,6 +613,40 @@ mod tests {
             status_before.contains("?? src/util.js"),
             "the new file is still untracked"
         );
+        // Reading the diff writes none of the person's content into the
+        // repository: no blob for the new or edited files lands in
+        // .git/objects. The one object intent-to-add may create is the
+        // well-known empty blob (e69de29…), which carries nothing.
+        let new_objects: Vec<String> = object_files(&repo)
+            .into_iter()
+            .filter(|o| !objects_before.contains(o))
+            .collect();
+        assert!(
+            new_objects
+                .iter()
+                .all(|o| o.ends_with("e6/9de29bb2d1d6434b8b29ae775ad8c2e48c5391")),
+            "only the empty blob may appear: {new_objects:?}"
+        );
+    }
+
+    /// Every loose object and pack file under .git/objects, sorted.
+    fn object_files(repo: &Path) -> Vec<String> {
+        fn walk(dir: &Path, out: &mut Vec<String>) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        walk(&p, out);
+                    } else {
+                        out.push(p.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&repo.join(".git/objects"), &mut out);
+        out.sort();
+        out
     }
 
     #[test]

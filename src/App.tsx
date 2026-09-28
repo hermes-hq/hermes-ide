@@ -116,6 +116,9 @@ function AppContent() {
   const reviewDeskEnabled = isFeatureFlagEnabled("reviewDesk");
   const [reviewDeskOpen, setReviewDeskOpen] = useState(false);
   const toggleReviewDesk = useCallback(() => setReviewDeskOpen((open) => !open), []);
+  // The old git panel's persisted "open" means nothing while the desk
+  // replaces it: it must not keep the sidebar open or its button active.
+  const gitPanelOpen = ui.gitPanelOpen && !reviewDeskEnabled;
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpenInner] = useState<false | { group?: string }>(false);
 
@@ -868,6 +871,7 @@ function AppContent() {
     processPanelOpen: ui.processPanelOpen,
     // F21: with the desk on, the ⌘G item's checkmark follows the desk.
     gitPanelOpen: reviewDeskEnabled ? reviewDeskOpen : ui.gitPanelOpen,
+    gitPanelLabel: reviewDeskEnabled ? t("palette.reviewDesk") : undefined,
     contextPanelOpen: ui.contextPanelOpen,
     searchPanelOpen: ui.searchPanelOpen,
     flowMode: ui.flowMode,
@@ -989,7 +993,7 @@ function AppContent() {
               activeView={
                 ui.searchPanelOpen ? "search" :
                 ui.fileExplorerOpen ? "files" :
-                ui.gitPanelOpen ? "git" :
+                (reviewDeskEnabled ? reviewDeskOpen : ui.gitPanelOpen) ? "git" :
                 null
               }
               onViewChange={(view: SessionView) => {
@@ -1018,7 +1022,7 @@ function AppContent() {
         {sessionListVisible && secondPanelOpen && (
           <PanelResizeHandle direction="horizontal" onResize={handleLeftResize} onResizeEnd={refitActive} />
         )}
-        {ui.gitPanelOpen && !reviewDeskEnabled && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
+        {gitPanelOpen && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
           <PanelErrorBoundary panelName="Git Panel">
             <Suspense fallback={null}>
               <SessionGitPanel sessionId={state.activeSessionId} projectId="" />
@@ -1060,7 +1064,7 @@ function AppContent() {
           toastStore={toastStore}
           onShowUpdateConfirm={() => setPendingUpdatePlugins([...pluginUpdater.updatesAvailable])}
         />
-        {!ui.flowMode && (!ui.sessionListCollapsed || ui.gitPanelOpen || ui.processPanelOpen || ui.fileExplorerOpen || ui.searchPanelOpen || (activePluginPanel && pluginPanels.some(p => p.id === activePluginPanel && p.side === "left"))) && (
+        {!ui.flowMode && (!ui.sessionListCollapsed || gitPanelOpen || ui.processPanelOpen || ui.fileExplorerOpen || ui.searchPanelOpen || (activePluginPanel && pluginPanels.some(p => p.id === activePluginPanel && p.side === "left"))) && (
           <PanelResizeHandle direction="horizontal" onResize={sidePanelVisible ? handleSidePanelResize : handleLeftResize} onResizeEnd={refitActive} />
         )}
         <div className="main-area">
