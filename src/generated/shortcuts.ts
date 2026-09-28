@@ -76,6 +76,8 @@ export const GENERATED_SHORTCUT_GROUPS: GeneratedShortcutGroup[] = [
       { id: "session.copy-context", label: "Copy Context", labelKey: "shortcuts.item.session.copyContext", keys: "{mod}{shift}C", pcKeys: "{ctrl}{shift}C" },
       { id: "app.focus-composer", label: "Focus Composer", labelKey: "shortcuts.item.app.focusComposer", keys: "{mod}{shift}J" },
       { id: "app.switch-session", label: "Switch to Session 1–9", labelKey: "shortcuts.item.app.switchSession", keys: "{mod}1-9" },
+      { id: "app.attention-next", label: "Jump to Next Waiting Agent", labelKey: "shortcuts.item.app.attentionNext", keys: "{mod}I", pcKeys: "{ctrl}{shift}I" },
+      { id: "app.attention-inbox", label: "Attention Inbox", labelKey: "shortcuts.item.app.attentionInbox", keys: "{mod}{shift}I", pcKeys: "{ctrl}{shift}A" },
     ],
   },
   {

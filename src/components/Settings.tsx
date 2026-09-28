@@ -36,8 +36,10 @@ import {
   FEATURE_FLAG_OVERRIDES_KEY,
   parseFeatureFlagOverrides,
   getReleaseChannel,
+  isFeatureFlagEnabled,
   type FeatureFlagId,
 } from "../featureFlags";
+import { AwayNotifySetting } from "./AwayNotifySetting";
 
 // The plugin manager loads when its tab is first opened.
 const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
@@ -426,6 +428,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   </label>
                   <span className="settings-hint-inline">{t("settings.confirmBeforeClosingHint")}</span>
                 </div>
+
+                {isFeatureFlagEnabled("attentionInbox") && (
+                  <AwayNotifySetting value={settings.away_notify_url || ""} onSave={updateSetting} />
+                )}
               </div>
             )}
 

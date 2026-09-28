@@ -146,8 +146,9 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
 
 /**
  * Subscribe to every session at once (added by F10 for the attention store,
- * which summarises all sessions). The listener hears the session id after
- * that session's own subscribers were woken, on every event and on clear.
+ * which summarises all sessions; F12's inbox uses it to follow sessions it
+ * has not seen yet). The listener hears the session id after that session's
+ * own subscribers were woken, on every event and on clear.
  */
 export function subscribeAllSessionEvents(listener: AnySessionListener): () => void {
   anyListeners.add(listener);

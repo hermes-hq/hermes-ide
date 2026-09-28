@@ -10,6 +10,7 @@ import { AgentStatusTag } from "./AgentStatusTag";
 import { isAgentStatusEnabled } from "../agent/status/flag";
 import { useSessionStatus } from "../agent/status/attentionStore";
 import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
+import { isFeatureFlagEnabled } from "../featureFlags";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
@@ -127,7 +128,8 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
                   <span className="status-capsule-label">{t("status.working")}</span>
                 </span>
               )}
-              {!agentStatus && active.phase === "needs_input" && (
+              {/* With the attention inbox on, its title-bar badge says this. */}
+              {!agentStatus && active.phase === "needs_input" && !isFeatureFlagEnabled("attentionInbox") && (
                 <span className="status-capsule status-capsule-needs" role="status" aria-live="assertive">
                   <span className="status-capsule-pulse" aria-hidden="true" />
                   <span className="status-capsule-label">{t("status.needsInput")}</span>

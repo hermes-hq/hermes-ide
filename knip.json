@@ -19,8 +19,11 @@
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": [
     "lsappinfo",
+    "pmset",
+    "powercfg",
     "reg",
     "sandbox-exec",
+    "systemd-inhibit",
     "xdotool"
   ]
 }

@@ -68,6 +68,7 @@ import { useToastStore } from "./hooks/useToastStore";
 import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { launchFailedMessage } from "./catalog/agentCatalog";
+import { isFeatureFlagEnabled } from "./featureFlags";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
@@ -87,6 +88,8 @@ const ProcessPanel = lazyView("ProcessPanel", () => import("./components/Process
 const FileExplorerPanel = lazyView("FileExplorerPanel", () => import("./components/FileExplorerPanel").then((m) => m.FileExplorerPanel));
 const SearchPanel = lazyView("SearchPanel", () => import("./components/SearchPanel").then((m) => m.SearchPanel));
 const CommandPalette = lazyView("CommandPalette", () => import("./components/CommandPalette").then((m) => m.CommandPalette));
+// 2.0 attention inbox (F12), behind the `attentionInbox` feature flag.
+const AttentionCenter = lazyView("AttentionCenter", () => import("./components/AttentionCenter").then((m) => m.AttentionCenter));
 const SessionGitPanel = lazyView("SessionGitPanel", () => import("./components/SessionGitPanel").then((m) => m.SessionGitPanel));
 // Dialogs that only exist once the user opens them.
 const SessionCreator = lazyView("SessionCreator", () => import("./components/SessionCreator").then((m) => m.SessionCreator));
@@ -859,6 +862,14 @@ function AppContent() {
     flowMode: ui.flowMode,
   });
 
+  // Attention inbox (F12): show a session's pane and give it the keyboard.
+  // Never reorders the sidebar.
+  const jumpToSession = useCallback((sessionId: string) => {
+    if (!state.sessions[sessionId]) return;
+    setActive(sessionId);
+    requestAnimationFrame(() => focusTerminal(sessionId));
+  }, [state.sessions, setActive]);
+
   return (
     <div className={`app ${ui.flowMode ? "flow-mode" : ""}`}>
       {/* Top bar */}
@@ -877,6 +888,12 @@ function AppContent() {
             <span className="topbar-title">HERMES-IDE</span>
           )}
         </div>
+
+        {isFeatureFlagEnabled("attentionInbox") && (
+          <Suspense fallback={null}>
+            <AttentionCenter sessions={state.sessions} activeSessionId={state.activeSessionId} onJump={jumpToSession} />
+          </Suspense>
+        )}
 
       </div>
 

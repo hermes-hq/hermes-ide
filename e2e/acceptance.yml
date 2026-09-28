@@ -608,3 +608,49 @@ features:
       F19-2:
         text: "A contract test runs the same event script against every provider"
         scenarios: []
+  F12:
+    name: "Attention inbox and ⌘I"
+    # Behind the attentionInbox flag. partial until the zero-setup signals
+    # (F11) are on main: the agents are real fake agents at a real approval
+    # prompt, but their status reaches the app through the contract's e2e
+    # injector (docs/adr/004-2.0-contracts.md) instead of their own hooks.
+    # The window's keyboard focus is stated through the test hooks: a
+    # hands-free run must not take the focus from whoever uses the machine.
+    status: partial
+    criteria:
+      F12-1:
+        text: "With 3 blocked sessions, ⌘I visits them oldest first and wraps"
+        scenarios: [F12-attention-inbox.mjs]
+      F12-2:
+        text: "No OS notification fires for the focused session in a focused window"
+        scenarios: [F12-attention-inbox.mjs]
+      F12-3:
+        # macOS reads the dock tile's badge label back, Linux the window's
+        # urgency hint; Windows cannot read a taskbar overlay back, so there
+        # the scenario checks the count the app handed to it.
+        text: "The dock badge equals the Blocked on you count"
+        scenarios: [F12-attention-inbox.mjs]
+      F12-4:
+        text: "The inbox is a listbox with aria-live announcements and is usable by keyboard only"
+        scenarios: [F12-attention-inbox.mjs]
+      F12-5:
+        # The OS's own list is read: pmset -g assertions (macOS),
+        # systemd-inhibit --list (Linux), powercfg /requests (Windows).
+        text: "Sleep is prevented while any session is working and released when all are idle (macOS, Windows, Linux)"
+        scenarios: [F12-attention-inbox.mjs]
+  N16:
+    name: "Notifications when you are away"
+    # Behind the attentionInbox flag; partial for the same reason as F12
+    # (status through the e2e injector until F11 lands). A local server
+    # stands in for the webhook / ntfy / Telegram address.
+    status: partial
+    criteria:
+      N16-1:
+        text: "A blocked agent sends one message to the configured address"
+        scenarios: [N16-away-notifications.mjs]
+      N16-2:
+        text: "With nothing configured, no network call is made"
+        scenarios: [N16-away-notifications.mjs]
+      N16-3:
+        text: "The message never contains prompt text or file content"
+        scenarios: [N16-away-notifications.mjs]

@@ -31,7 +31,21 @@ export const APP_CHORDS: readonly AppChord[] = keymapData.chords;
  * Chords handled by the app's own keyboard listener rather than the menu.
  * They must also be kept away from the terminal on Windows/Linux.
  */
-const EXTRA_PC_APP_CHORDS = ["{ctrl}{shift}P", "{ctrl}{shift}J"];
+const EXTRA_PC_APP_CHORDS = new Set(["{ctrl}{shift}P", "{ctrl}{shift}J"]);
+
+/**
+ * Claim more Windows/Linux chords for the app's own listener, e.g. the
+ * attention inbox's Ctrl+Shift+I / Ctrl+Shift+A, only while the feature
+ * behind them is on (so a flag that is off leaves those keys to the
+ * terminal). Returns the release.
+ */
+export function claimPcAppChords(chords: readonly string[]): () => void {
+  const added = chords.filter((c) => !EXTRA_PC_APP_CHORDS.has(c));
+  for (const c of added) EXTRA_PC_APP_CHORDS.add(c);
+  return () => {
+    for (const c of added) EXTRA_PC_APP_CHORDS.delete(c);
+  };
+}
 
 const byAction = new Map(APP_CHORDS.map((c) => [c.action, c]));
 
@@ -101,7 +115,7 @@ export function isAppChordInTerminal(e: KeyLike, platform: Platform): boolean {
   if (platform === "mac") return false;
   const chord = pcLetterChord(e);
   if (!chord) return false;
-  return EXTRA_PC_APP_CHORDS.includes(chord) || APP_CHORDS.some((c) => c.pc === chord);
+  return EXTRA_PC_APP_CHORDS.has(chord) || APP_CHORDS.some((c) => c.pc === chord);
 }
 
 /** True when keyboard focus is inside a terminal. */

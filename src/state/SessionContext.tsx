@@ -1384,8 +1384,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           const startedAt = busyTimestamps.current.get(session.id);
           busyTimestamps.current.delete(session.id);
           if (startedAt && (Date.now() - startedAt) > LONG_RUNNING_THRESHOLD_MS) {
-            // Only notify if the window is not focused
-            if (document.hidden) {
+            // Only notify if the window is not focused. With the attention
+            // inbox on, "done" notifications come from the inbox instead
+            // (grouped per session, never for the session you look at).
+            if (document.hidden && !isFeatureFlagEnabled("attentionInbox")) {
               notifyLongRunningDone(session.label);
             }
           }

@@ -218,6 +218,10 @@
   margin-bottom: 4px;
 }
 
+.settings-hint-inline.settings-hint-error {
+  color: var(--danger);
+}
+
 .settings-size-row {
   display: flex;
   align-items: center;

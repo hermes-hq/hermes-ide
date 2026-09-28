@@ -5,8 +5,8 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 5 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 6th, retire one first.
+// At most 6 flags may exist at once — enforced by
+// src/__tests__/feature-flags.test.ts. If you need a 7th, retire one first.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -50,6 +50,12 @@ export const FEATURE_FLAGS = [
     label: "Launch helper (hi run), session status and zero-setup signals",
     description:
       "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess, and switch on each agent's own event reporting per launch (nothing written to your global config) with a status line above the session.",
+  },
+  {
+    id: "attentionInbox",
+    label: "Attention inbox",
+    description:
+      "A title-bar badge with the number of agents blocked on you opens the attention inbox (⌘⇧I); ⌘I jumps to the agent waiting longest. Adds grouped notifications, the dock/taskbar badge, keeping the machine awake while an agent works, and optional away messages to a web address.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

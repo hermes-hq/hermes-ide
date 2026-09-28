@@ -203,6 +203,10 @@ export function parseAppShortcuts(doc) {
     if (!Array.isArray(raw.accelerators) || raw.accelerators.length === 0 || raw.accelerators.some((a) => typeof a !== "string" || !a)) {
       throw new Error(`${where} (${raw.id}): "accelerators" must be a non-empty list of strings`);
     }
+    const pc = raw.pcAccelerators;
+    if (pc !== undefined && (!Array.isArray(pc) || pc.length === 0 || pc.some((a) => typeof a !== "string" || !a))) {
+      throw new Error(`${where} (${raw.id}): "pcAccelerators" must be a non-empty list of strings when present`);
+    }
     if (seen.has(raw.id)) throw new Error(`${where}: duplicate id "${raw.id}"`);
     seen.add(raw.id);
     return {
@@ -211,6 +215,8 @@ export function parseAppShortcuts(doc) {
       label: raw.label,
       keys: toCanonicalKeys(raw.accelerators[0]),
       alsoKeys: raw.accelerators.slice(1).map(toCanonicalKeys),
+      // Windows/Linux keys when they differ (a terminal owns Ctrl+letter there).
+      ...(pc ? { pcKeys: toCanonicalKeys(pc[0]), pcAlsoKeys: pc.slice(1).map(toCanonicalKeys) } : {}),
       note: typeof raw.note === "string" && raw.note ? raw.note : undefined,
       source: "app",
     };
@@ -253,6 +259,7 @@ export function combineShortcuts(menuItems, appItems) {
 /** Every canonical key string that triggers the item on one platform family. */
 function platformKeys(item, mac) {
   if (mac) return [item.keys, ...(item.alsoKeys ?? [])];
+  if (item.pcAlsoKeys) return [item.pcKeys, ...item.pcAlsoKeys];
   return [item.pcKeys ?? item.keys, ...(item.pcOutsideTerminal ? [item.pcOutsideTerminal] : []), ...(item.alsoKeys ?? [])];
 }
 

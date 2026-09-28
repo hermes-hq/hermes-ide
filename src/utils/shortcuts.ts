@@ -99,6 +99,9 @@ export interface AppShortcut {
   group: string;
   label: string;
   accelerators: string[];
+  /** Windows/Linux accelerators when they differ from `accelerators` (a
+   *  terminal owns Ctrl+letter there, so an app chord adds Shift). */
+  pcAccelerators?: string[];
   note?: string;
 }
 
@@ -107,7 +110,8 @@ export const APP_SHORTCUTS: AppShortcut[] = appShortcuts.shortcuts;
 /** The id of the declared app shortcut this key event triggers, if any. */
 export function matchAppShortcut(e: KeyEventLike, mac: boolean = isMac, shortcuts: AppShortcut[] = APP_SHORTCUTS): string | null {
   for (const s of shortcuts) {
-    if (s.accelerators.some((acc) => matchesAccelerator(e, acc, mac))) return s.id;
+    const accelerators = !mac && s.pcAccelerators ? s.pcAccelerators : s.accelerators;
+    if (accelerators.some((acc) => matchesAccelerator(e, acc, mac))) return s.id;
   }
   return null;
 }
