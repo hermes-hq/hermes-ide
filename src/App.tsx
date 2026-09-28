@@ -36,7 +36,7 @@ import { useTrackWatching } from "./track/useTrackWatching";
 import { editorCommandFor } from "./track/rules";
 import { getTrackState, noteOwnApproval } from "./track/store";
 import { trackApprove, trackPromote } from "./track/api";
-import { slugFromBranch } from "./components/TrackPanel";
+import { slugFromBranch } from "./track/rules";
 import { writeToSession } from "./api/sessions";
 import { utf8ToBase64 } from "./utils/encoding";
 import { workbenchPixelWidth } from "./utils/workbenchLayout";

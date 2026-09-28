@@ -165,3 +165,14 @@ export function editorCommandFor(shell: string, path: string): string {
   const inner = quoted.replace(/[\\"$`]/g, (c) => `\\${c}`);
   return `eval "\${EDITOR:-vi} ${inner}"`;
 }
+
+/** A slug for "Make it a feature": the branch's, else the folder's name. */
+export function slugFromBranch(branch: string | null, workingDirectory: string): string {
+  const raw = branch?.startsWith("hermes/") ? branch.slice("hermes/".length) : (branch ?? workingDirectory.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "feature");
+  const slug = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return slug || "feature";
+}

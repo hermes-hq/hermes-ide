@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import type { SessionData } from "../types/session";
 import { useTrack, noteOwnApproval, phaseFileOf, hasTurnHistory, type TrackFeatureState } from "../track/store";
 import { trackApprove, trackFilePath, trackPromote, trackReadFile, trackSkip, trackWriteReview } from "../track/api";
-import { attachedSessions, PHASE_LINE_CAP, TRACK_PHASES } from "../track/rules";
+import { attachedSessions, PHASE_LINE_CAP, slugFromBranch, TRACK_PHASES } from "../track/rules";
 import { subscribeSessionEvents } from "../agent/contract/sessionEventStore";
 import { FEATURE_TRACKS, type FeatureTrack } from "../agent/contract/featureFrontMatter";
 import { useToastStore } from "../hooks/useToastStore";
@@ -32,17 +32,6 @@ interface TrackPanelProps {
   /** `r`: deliver one line to the writer session's terminal. */
   onSendToWriter: (writerSessionId: string, line: string) => Promise<void>;
   onClose: () => void;
-}
-
-/** A slug for "Make it a feature": the branch's, else the folder's name. */
-export function slugFromBranch(branch: string | null, workingDirectory: string): string {
-  const raw = branch?.startsWith("hermes/") ? branch.slice("hermes/".length) : (branch ?? workingDirectory.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "feature");
-  const slug = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-  return slug || "feature";
 }
 
 /**
