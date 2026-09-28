@@ -126,3 +126,60 @@ export function sessionRow(bridge, sessionId) {
     };
   `);
 }
+
+/**
+ * Diagnostics for the F24 memory budget, read with the OS's own tools (not
+ * the app's): every process below `pid`, grouped by kind, largest first:
+ * [{ kind, count, mb }]. A web view helper is told apart by its --type
+ * (renderer, gpu-process, ...); command lines are otherwise not kept.
+ * Returns null when the OS tool is not there.
+ */
+export function processTreeByKind(pid) {
+  let rows;
+  try {
+    if (onWindows) {
+      const out = execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, $_.WorkingSetSize, ($_.Name + ' ' + [regex]::Match([string]$_.CommandLine, '--type=[\\w-]+').Value) }",
+        ],
+        { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 30_000 },
+      );
+      rows = out.split(/\r?\n/).filter(Boolean).map((l) => {
+        const [p, pp, ws, kind] = l.split("|");
+        return { pid: Number(p), ppid: Number(pp), bytes: Number(ws), kind: kind.trim() };
+      });
+    } else {
+      const out = execFileSync("ps", ["-Ao", "pid=,ppid=,rss=,comm="], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+      rows = out.split("\n").filter(Boolean).map((l) => {
+        const m = l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+        return m && { pid: Number(m[1]), ppid: Number(m[2]), bytes: Number(m[3]) * 1024, kind: m[4].split("/").pop() };
+      }).filter(Boolean);
+    }
+  } catch {
+    return null;
+  }
+  const children = new Map();
+  for (const r of rows) if (r.pid !== r.ppid) children.set(r.ppid, [...(children.get(r.ppid) || []), r]);
+  const groups = new Map();
+  const seen = new Set();
+  const stack = [...(children.get(pid) || [])];
+  const self = rows.find((r) => r.pid === pid);
+  if (self) stack.push(self);
+  while (stack.length) {
+    const r = stack.pop();
+    if (seen.has(r.pid)) continue;
+    seen.add(r.pid);
+    const g = groups.get(r.kind) || { kind: r.kind, count: 0, bytes: 0 };
+    g.count++;
+    g.bytes += r.bytes;
+    groups.set(r.kind, g);
+    stack.push(...(children.get(r.pid) || []));
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.bytes - a.bytes)
+    .map((g) => ({ kind: g.kind, count: g.count, mb: Math.round((g.bytes / 1048576) * 10) / 10 }));
+}

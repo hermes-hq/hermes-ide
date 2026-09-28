@@ -402,11 +402,18 @@ export async function createTerminal(
 // falls back to the DOM renderer while hidden) and attach takes a new one,
 // so twenty open sessions never run into the limit.
 
-/** Set once WebGL could not be created at all (no GPU, software GL). */
+/** Set once WebGL could not be created at all (no GPU, software GL). With
+ *  the flag off every terminal still tries once, as before. */
 let webglUnavailable = false;
 
+/** The WebGL contexts each addon drew with, so giving the addon back can
+ *  free their graphics memory at once instead of whenever the page's
+ *  garbage collector gets to the canvas. */
+const webglContexts = new WeakMap<WebglAddon, WebGL2RenderingContext[]>();
+
 function acquireWebgl(entry: PoolEntry): void {
-  if (entry.webgl || webglUnavailable) return;
+  if (entry.webgl || (webglUnavailable && budgetGraphicsContexts())) return;
+  const before = new Set(entry.container.querySelectorAll("canvas"));
   try {
     const addon = new WebglAddon();
     addon.onContextLoss(() => {
@@ -415,6 +422,15 @@ function acquireWebgl(entry: PoolEntry): void {
     });
     entry.terminal.loadAddon(addon);
     entry.webgl = addon;
+    // The canvases the addon just added already hold its WebGL2 context, so
+    // asking for it again hands that one back (it never creates a new one).
+    const contexts: WebGL2RenderingContext[] = [];
+    for (const canvas of entry.container.querySelectorAll("canvas")) {
+      if (before.has(canvas)) continue;
+      const gl = canvas.getContext("webgl2");
+      if (gl) contexts.push(gl);
+    }
+    webglContexts.set(addon, contexts);
   } catch {
     // The DOM renderer keeps working.
     webglUnavailable = true;
@@ -428,6 +444,14 @@ function releaseWebgl(entry: PoolEntry): void {
   try {
     addon.dispose();
   } catch { /* already gone with its context */ }
+  // Free the context's graphics memory now rather than at the next garbage
+  // collection, so switching through many terminals does not pile it up.
+  for (const gl of webglContexts.get(addon) ?? []) {
+    try {
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    } catch { /* already lost */ }
+  }
+  webglContexts.delete(addon);
 }
 
 /** Whether only visible terminals may hold a graphics context. */

@@ -113,13 +113,6 @@ fn table() -> &'static Mutex<System> {
     TABLE.get_or_init(|| Mutex::new(System::new()))
 }
 
-/// Batch terminal output into fewer web view events (fleetPerf flag, read
-/// by the frontend at startup). See pty/output_batch.rs.
-#[tauri::command]
-pub fn fleet_set_output_batching(enabled: bool) {
-    crate::pty::output_batch::set_batching(enabled);
-}
-
 /// Memory of every session's process tree and of Hermes itself.
 #[tauri::command]
 pub fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {

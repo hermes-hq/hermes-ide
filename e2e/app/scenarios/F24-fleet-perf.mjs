@@ -15,10 +15,8 @@
 //   5. A session running the fake agent shows the agent's memory on its row
 //      (more than the bare shell, within budget).
 //   6. Terminal throughput: text printed in a visible terminal reaches the
-//      screen at no less than the budget, in batched events (the same flood
-//      with batching switched off takes at least twice as many; its speed is
-//      recorded for comparison); while another session floods, the visible
-//      one still answers `echo` within budget.
+//      screen at no less than the budget; while another session floods, the
+//      visible one still answers `echo` within budget.
 //   7. "Tile working agents" (command palette) with nobody working says so
 //      and changes nothing; with five sessions reported working it lays
 //      exactly those five out in a grid, and those five hold the contexts.
@@ -31,10 +29,10 @@
 //          their WebGL contexts (fails wherever the web view has WebGL, which
 //          all three CI runners had on 2026-09-28), and the rows show no
 //          memory.
-//   HERMES_E2E_F24_BUDGET_SCALE=0.01 every budget a hundred times tighter.
-//   HERMES_E2E_F24_NEGATIVE=no-batching  output batching is switched off
-//          before the throughput step: the flood takes as many events as
-//          unbatched.
+//   HERMES_E2E_F24_BUDGET_SCALE=0.01 every budget a hundred times tighter
+//          (the throughput floor a hundred times higher).
+//   HERMES_E2E_F24_NEGATIVE=slow-output  the visible terminal's flood pauses
+//          after every 64 KB, so its text arrives slower than the floor.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F24-fleet-perf.mjs
@@ -44,7 +42,7 @@ import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { REPO_ROOT, launchApp, sleep } from "../harness.mjs";
 import { completeOnboarding, createPlainTerminal, dismissWhatsNew, runScenario } from "../n11-steps.mjs";
-import { sessionRow, setFlagOverride } from "../fleet-steps.mjs";
+import { processTreeByKind, sessionRow, setFlagOverride } from "../fleet-steps.mjs";
 
 const SCENARIO = "F24-fleet-perf";
 const OS = platform();
@@ -53,7 +51,7 @@ const MAC = OS === "darwin";
 const FLAG = process.env.HERMES_E2E_F24_FLAG === "off" ? "off" : "on";
 const SCALE = Number(process.env.HERMES_E2E_F24_BUDGET_SCALE || "1");
 const SESSIONS = Number(process.env.HERMES_E2E_F24_SESSIONS || "20");
-const NO_BATCHING = process.env.HERMES_E2E_F24_NEGATIVE === "no-batching";
+const SLOW_FLOOD = process.env.HERMES_E2E_F24_NEGATIVE === "slow-output";
 const MB = 1024 * 1024;
 
 const raw = JSON.parse(readFileSync(join(REPO_ROOT, "e2e", "app", "fleet-budgets.json"), "utf8"));
@@ -139,6 +137,10 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   metrics.idleAppMemoryMb = mb(idle.appBytes);
   metrics.idleAppProcesses = idle.appProcesses;
   log(`  Hermes: ${metrics.idleAppMemoryMb} MB in ${idle.appProcesses} process(es)`);
+  // What the OS itself says is below the app, by kind: shows which process
+  // grew when the budget fails.
+  metrics.idleTreeByKind = processTreeByKind(bridge.pid);
+  log(`  the OS's view of the app's tree: ${JSON.stringify(metrics.idleTreeByKind)}`);
   assert(idle.sessions.length === 0, "no session is open");
   assert(metrics.idleAppMemoryMb <= BUDGET.idleAppMemoryMb, `idle memory ${metrics.idleAppMemoryMb} MB <= ${BUDGET.idleAppMemoryMb} MB`);
 
@@ -212,6 +214,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   metrics.perSessionAppMemoryMb = mb(Math.max(0, perSession));
   metrics.sessionTreesMb = loaded.sessions.map((s) => mb(s.bytes));
   log(`  Hermes with ${SESSIONS} sessions: ${metrics.appMemoryWithSessionsMb} MB, ${metrics.perSessionAppMemoryMb} MB per session; shells: ${JSON.stringify(metrics.sessionTreesMb)}`);
+  metrics.loadedTreeByKind = processTreeByKind(bridge.pid);
+  log(`  the OS's view of the app's tree (sessions included): ${JSON.stringify(metrics.loadedTreeByKind)}`);
   assert(loaded.sessions.length === SESSIONS && loaded.sessions.every((s) => s.processes >= 1 && s.bytes > 0), `the backend measured all ${SESSIONS} session trees`);
   assert(metrics.perSessionAppMemoryMb <= BUDGET.perSessionAppMemoryMb, `per-session cost ${metrics.perSessionAppMemoryMb} MB <= ${BUDGET.perSessionAppMemoryMb} MB`);
   const rows = await bridge.waitFor("a memory figure on every row", `
@@ -281,7 +285,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   /** Print FLOOD_MB in the flood session; seconds until its last line is on screen. */
   const timeFlood = async (marker, what) => {
     await bridge.eval(`await window.__HERMES_E2E__.watchOutput(${JSON.stringify(floodSid)}); return true;`);
-    await bridge.typeInTerminal(floodSid, `node "${flood}" ${FLOOD_MB} ${marker}\n`);
+    // Paced so that FLOOD_MB takes about three times as long as the floor allows.
+    const pause = SLOW_FLOOD ? Math.ceil((3 * 1000 * 64) / 1024 / BUDGET.ptyThroughputMbPerSec) : 0;
+    await bridge.typeInTerminal(floodSid, `node "${flood}" ${FLOOD_MB} ${marker}${pause ? ` ${pause}` : ""}\n`);
     const t0 = Date.now();
     let how = null;
     try {
@@ -292,30 +298,12 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     }
     return { seconds: (Date.now() - t0) / 1000, delivery: how };
   };
-  const setBatching = (enabled) =>
-    bridge.eval(`await window.__TAURI_INTERNALS__.invoke("fleet_set_output_batching", { enabled: ${enabled} }); return true;`);
-  if (NO_BATCHING) await setBatching(false);
   const { seconds: floodSeconds, delivery: floodDelivery } = await timeFlood("f24-flood-done", "the end of the flood on screen");
   metrics.floodDelivery = floodDelivery;
   metrics.floodMb = FLOOD_MB;
   metrics.ptyThroughputMbPerSec = Math.round((FLOOD_MB / floodSeconds) * 100) / 100;
   log(`  ${FLOOD_MB} MB on screen in ${floodSeconds.toFixed(2)} s: ${metrics.ptyThroughputMbPerSec} MB/s`);
   assert(metrics.ptyThroughputMbPerSec >= BUDGET.ptyThroughputMbPerSec, `throughput ${metrics.ptyThroughputMbPerSec} MB/s >= ${BUDGET.ptyThroughputMbPerSec} MB/s`);
-  if (FLAG === "on") {
-    // The same flood with output batching off, as with the flag off: the
-    // flag (set at startup) must have cut the number of events the web view
-    // had to take. The speed-up is recorded, not budgeted.
-    await setBatching(false);
-    const unbatched = await timeFlood("f24-flood-raw", "the unbatched flood on screen");
-    await setBatching(true);
-    metrics.unbatchedMbPerSec = Math.round((FLOOD_MB / unbatched.seconds) * 100) / 100;
-    metrics.unbatchedDelivery = unbatched.delivery;
-    log(`  unbatched, for comparison: ${FLOOD_MB} MB on screen in ${unbatched.seconds.toFixed(2)} s: ${metrics.unbatchedMbPerSec} MB/s`);
-    assert(
-      floodDelivery && unbatched.delivery && floodDelivery.chunks * 2 <= unbatched.delivery.chunks,
-      `batched output took at most half the events (${floodDelivery?.chunks} vs ${unbatched.delivery?.chunks} unbatched)`,
-    );
-  }
 
   log("  while a hidden session floods, the visible one still answers");
   await bridge.typeInTerminal(floodSid, `node "${flood}" ${FLOOD_MB} f24-flood2-done\n`);

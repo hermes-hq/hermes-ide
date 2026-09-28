@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
 	created: 0,
 	disposed: 0,
 	lossHandlers: [] as (() => void)[],
+	/** Contexts the fake addon drew with, and how many were freed. */
+	contexts: [] as { lost: boolean }[],
 }));
 
 vi.mock("@xterm/addon-webgl", () => ({
@@ -47,12 +49,29 @@ vi.mock("../featureFlags", () => ({ isFeatureFlagEnabled: (id: string) => id ===
 
 import { pool, attach, detach, webglSessionIds, isWebglAvailable, type PoolEntry } from "../terminal/pool";
 
+/** What loading the real addon does to the page: a canvas with a WebGL2
+ *  context on the terminal's screen (asking the canvas again hands back the
+ *  same context). */
+function drawsWithWebgl(container: HTMLElement) {
+	return vi.fn(() => {
+		const gl = {
+			lost: false,
+			getExtension: (name: string) =>
+				name === "WEBGL_lose_context" ? { loseContext: () => { gl.lost = true; } } : null,
+		};
+		h.contexts.push(gl);
+		const canvas = document.createElement("canvas");
+		canvas.getContext = ((type: string) => (type === "webgl2" ? gl : null)) as never;
+		container.appendChild(canvas);
+	});
+}
+
 function addEntry(id: string): PoolEntry {
 	const container = document.createElement("div");
 	const entry = {
 		terminal: {
 			open: vi.fn(),
-			loadAddon: vi.fn(),
+			loadAddon: drawsWithWebgl(container),
 			focus: vi.fn(),
 			refresh: vi.fn(),
 			scrollToBottom: vi.fn(),
@@ -87,6 +106,8 @@ beforeEach(() => {
 	h.created = 0;
 	h.disposed = 0;
 	h.lossHandlers = [];
+	h.contexts = [];
+	h.webglThrows = false;
 });
 
 describe("with fleetPerf on, only terminals on screen hold a context", () => {
@@ -111,6 +132,18 @@ describe("with fleetPerf on, only terminals on screen hold a context", () => {
 		expect(h.created).toBe(3);
 		expect(h.disposed).toBe(2);
 		expect(b.webgl).toBeNull();
+	});
+
+	it("frees a hidden terminal's graphics memory at once, not at the next garbage collection", () => {
+		addEntry("a");
+		addEntry("b");
+		const pane = viewport();
+		attach("a", pane, false);
+		expect(h.contexts.map((c) => c.lost)).toEqual([false]);
+		attach("b", pane, false);
+		expect(h.contexts.map((c) => c.lost)).toEqual([true, false]);
+		attach("a", pane, false);
+		expect(h.contexts.map((c) => c.lost)).toEqual([true, true, false]);
 	});
 
 	it("twenty terminals shown one after another never hold more than the visible one", () => {
@@ -148,6 +181,18 @@ describe("with fleetPerf off (negative control: the old behaviour)", () => {
 		}
 		expect(webglSessionIds().length).toBe(5);
 		expect(h.disposed).toBe(0);
+		expect(h.contexts.some((c) => c.lost)).toBe(false);
+	});
+
+	it("one terminal failing to get WebGL does not stop the next one from trying", () => {
+		h.flagOn = false;
+		h.webglThrows = true;
+		addEntry("a");
+		attach("a", viewport(), false);
+		h.webglThrows = false;
+		addEntry("b");
+		attach("b", viewport(), false);
+		expect(webglSessionIds()).toEqual(["b"]);
 	});
 });
 
