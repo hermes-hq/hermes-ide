@@ -2,3 +2,7 @@
 # keep them LF on every checkout (Windows runners use core.autocrlf).
 docs/shortcuts.md text eol=lf
 src/generated/shortcuts.ts text eol=lf
+
+# Feature Track phase templates (F28) are compiled into the app and hi with
+# include_str!; keep them LF so every platform writes the same files.
+src-tauri/track/phases/*.md text eol=lf
