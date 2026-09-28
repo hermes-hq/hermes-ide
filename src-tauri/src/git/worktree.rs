@@ -677,12 +677,14 @@ pub fn remove_worktree(
     // without these guards the fallback `remove_dir_all` would
     // recursively destroy the entire project.
 
-    // Guard 1: worktree_path must live under hermes-worktrees/
+    // Guard 1: worktree_path must live under THIS instance's hermes-worktrees/
+    // (another Hermes instance's checkout, reused on purpose, is not ours
+    // to delete either).
     // Normalize separators for cross-platform check (Windows uses backslashes)
     let normalized = worktree_path.replace('\\', "/");
-    if !normalized.contains("hermes-worktrees/") {
+    if !is_instance_worktree_path(worktree_path) {
         return Err(format!(
-            "SAFETY: refusing to remove path outside hermes-worktrees/: '{}'",
+            "SAFETY: refusing to remove path outside this Hermes' hermes-worktrees/: '{}'",
             worktree_path
         ));
     }
@@ -957,22 +959,62 @@ pub fn is_hermes_worktree_path(path: &str) -> bool {
     normalized.contains("hermes-worktrees/")
 }
 
+/// Where THIS instance keeps its worktrees (`{app_data_dir}/hermes-worktrees`),
+/// set once at startup. Unset in unit tests, where every `hermes-worktrees/`
+/// path counts as ours.
+static INSTANCE_WORKTREES_BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Record this instance's worktrees folder; later calls are ignored.
+pub fn set_instance_worktrees_base(app_data_dir: &Path) {
+    let _ = INSTANCE_WORKTREES_BASE.set(worktrees_base_dir(app_data_dir));
+}
+
+/// Whether `path` is a worktree THIS Hermes instance made: under its own
+/// `hermes-worktrees/` folder. A checkout of another instance (the installed
+/// app next to a dev build, or an isolated test instance) is somebody
+/// else's, even though its path also contains `hermes-worktrees/`.
+pub fn is_instance_worktree_path(path: &str) -> bool {
+    is_worktree_of(INSTANCE_WORKTREES_BASE.get().map(PathBuf::as_path), path)
+}
+
+/// `is_instance_worktree_path` for a given base (`None`: any Hermes base).
+fn is_worktree_of(base: Option<&Path>, path: &str) -> bool {
+    if !is_hermes_worktree_path(path) {
+        return false;
+    }
+    let Some(base) = base else { return true };
+    // Hermes builds every worktree path from the same base spelling, so a
+    // plain prefix check covers its own rows; resolving symlinks covers a
+    // row written with another spelling of an existing folder.
+    let base_s = normalize_path_spelling(&base.to_string_lossy());
+    let path_s = normalize_path_spelling(path);
+    if path_s.starts_with(&format!("{}/", base_s)) {
+        return true;
+    }
+    match (fs::canonicalize(base), fs::canonicalize(path)) {
+        (Ok(b), Ok(p)) => p != b && p.starts_with(&b),
+        _ => false,
+    }
+}
+
 /// Whether the session that a `session_worktrees` row belongs to owns that
-/// checkout: a linked worktree Hermes created under `hermes-worktrees/`.
+/// checkout: a linked worktree this Hermes instance created under its
+/// `hermes-worktrees/`.
 ///
 /// Everything else is somebody else's checkout and closing the session must
-/// leave it alone: the project folder (`is_main_worktree`) and a worktree
-/// made outside Hermes (`git worktree add` by hand, or another tool) that
-/// the user chose to reuse through the Branch In Use choice. Only an owned
-/// checkout is removed on close, asked about when it has uncommitted
-/// changes, or recreated when its folder went missing.
+/// leave it alone: the project folder (`is_main_worktree`), a worktree
+/// made outside Hermes (`git worktree add` by hand, or another tool) and a
+/// worktree of another Hermes instance, when the user chose to reuse one
+/// through the Branch In Use choice. Only an owned checkout is removed on
+/// close, asked about when it has uncommitted changes, or recreated when
+/// its folder went missing.
 pub fn is_owned_checkout(is_main_worktree: bool, worktree_path: &str) -> bool {
     if !isolation_fixes_enabled() {
         // Test builds only (negative control): the behaviour before the
         // F09 edge-case fixes, which treated every linked worktree as owned.
         return !is_main_worktree;
     }
-    !is_main_worktree && is_hermes_worktree_path(worktree_path)
+    !is_main_worktree && is_instance_worktree_path(worktree_path)
 }
 
 /// Test builds only: `HERMES_E2E_ISOLATION_FIXES=off` switches the F09
@@ -1014,9 +1056,9 @@ pub fn local_branch_exists(repo_path: &str, branch: &str) -> bool {
 /// Fails when the branch no longer exists (the caller then falls back to
 /// the project folder) or is checked out somewhere else (`BRANCH_IN_USE`).
 pub fn recreate_worktree(repo_path: &str, worktree_path: &str, branch: &str) -> Result<(), String> {
-    if !is_hermes_worktree_path(worktree_path) {
+    if !is_instance_worktree_path(worktree_path) {
         return Err(format!(
-            "refusing to recreate a checkout outside hermes-worktrees/: '{}'",
+            "refusing to recreate a checkout outside this Hermes' hermes-worktrees/: '{}'",
             worktree_path
         ));
     }
@@ -2290,6 +2332,61 @@ mod tests {
         // The project folder, and a worktree made outside Hermes.
         assert!(!is_owned_checkout(true, "/work/repo"));
         assert!(!is_owned_checkout(false, "/work/repo-external-wt"));
+    }
+
+    #[test]
+    fn a_worktree_of_another_hermes_instance_is_not_ours() {
+        // Two instances (the installed app and a dev build, or an isolated
+        // test instance) each keep their own hermes-worktrees/ folder. A
+        // checkout under the other one is reused on purpose at most; it is
+        // never removed, asked about or recreated by this instance.
+        let mine = Path::new("/data/instance-a/hermes-worktrees");
+        assert!(is_worktree_of(
+            Some(mine),
+            "/data/instance-a/hermes-worktrees/abc/s1_main"
+        ));
+        assert!(!is_worktree_of(
+            Some(mine),
+            "/data/instance-b/hermes-worktrees/abc/s1_main"
+        ));
+        assert!(!is_worktree_of(
+            Some(mine),
+            "/data/instance-a/hermes-worktrees-old/abc/s1_main"
+        ));
+        assert!(!is_worktree_of(
+            Some(mine),
+            "/data/instance-a/hermes-worktrees"
+        ));
+        assert!(!is_worktree_of(Some(mine), "/work/repo-external-wt"));
+        // Windows spelling of the same folders.
+        let mine_win = Path::new("C:\\data\\instance-a\\hermes-worktrees");
+        assert!(is_worktree_of(
+            Some(mine_win),
+            "C:\\data\\instance-a\\hermes-worktrees\\abc\\s1_main"
+        ));
+        assert!(!is_worktree_of(
+            Some(mine_win),
+            "C:\\data\\instance-b\\hermes-worktrees\\abc\\s1_main"
+        ));
+        // No base known (unit tests): any Hermes worktree path is ours.
+        assert!(is_worktree_of(
+            None,
+            "/data/instance-b/hermes-worktrees/abc/s1_main"
+        ));
+        assert!(!is_worktree_of(None, "/work/repo-external-wt"));
+
+        // An existing folder reached through another spelling of the base
+        // (a symlinked temp folder) is still recognised.
+        let app_data = create_test_app_data_dir();
+        let base = worktrees_base_dir(app_data.path());
+        let wt = base.join("abc").join("s1_main");
+        fs::create_dir_all(&wt).unwrap();
+        let canonical_wt = fs::canonicalize(&wt).unwrap();
+        assert!(is_worktree_of(Some(&base), canonical_wt.to_str().unwrap()));
+        assert!(is_worktree_of(
+            Some(&fs::canonicalize(&base).unwrap()),
+            wt.to_str().unwrap()
+        ));
     }
 
     #[test]

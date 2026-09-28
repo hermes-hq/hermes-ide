@@ -40,6 +40,7 @@ import {
 import { isFeatureFlagEnabled } from "../featureFlags";
 import {
   createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose, describeBranchHolder,
+  withUnrestoredSessions,
   type BranchConflictChoice, type BranchInUse,
 } from "./isolation";
 import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
@@ -1142,6 +1143,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const lastAutoAttachCwd = useRef<Map<string, string>>(new Map());
   const closingSessionIds = useRef<Set<string>>(new Set());
   const closeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Saved sessions that could not be restored this launch. They go back
+  // into the saved workspace (tried again next start) unless the user
+  // chooses to forget one from the error message.
+  const unrestoredSessions = useRef<SavedSessionInfo[]>([]);
+  useEffect(() => {
+    const onForget = (e: Event) => {
+      const { id } = (e as CustomEvent<{ id: string }>).detail;
+      unrestoredSessions.current = unrestoredSessions.current.filter((s) => s.id !== id);
+      workspaceDirty = true;
+    };
+    window.addEventListener("hermes:session-restore-forget", onForget);
+    return () => window.removeEventListener("hermes:session-restore-forget", onForget);
+  }, []);
   /** sessionId → Claude session UUID returned by spawn_agent_session.
    *  Captured on first spawn (and on every successful respawn) so that a
    *  later model swap can pass `--resume <uuid>` to preserve conversation. */
@@ -1682,10 +1696,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               destroyTerminal(restoreId);
               // The backend announces a session before its shell starts; if
               // the start failed, that entry would stay at "starting" for
-              // ever. Drop it and say why.
+              // ever. Drop it from the list, keep its saved entry for the
+              // next launch, and say why.
               dispatch({ type: "SESSION_REMOVED", id: restoreId });
+              unrestoredSessions.current = [...unrestoredSessions.current.filter((s) => s.id !== saved.id), saved];
               window.dispatchEvent(new CustomEvent("hermes:session-restore-failed", {
-                detail: { label: saved.label, error: err instanceof Error ? err.message : String(err) },
+                detail: { id: saved.id, label: saved.label, error: err instanceof Error ? err.message : String(err) },
               }));
             }
           }
@@ -2151,6 +2167,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Nothing was restored and no session was opened since: the saved
       // workspace is still the user's, not a stale one.
       if (keepSavedWorkspace) return;
+    }
+    if (liveSessions.length === 0 && unrestoredSessions.current.length === 0) {
       // Clear stale workspace so closed sessions don't reappear on next launch
       await setSetting("saved_workspace", "").catch(console.error);
       return;
@@ -2207,7 +2225,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // 3. Serialize workspace state with version stamp
       const workspace: SavedWorkspace = {
         version: SAVED_WORKSPACE_VERSION,
-        sessions: sessionInfos,
+        sessions: withUnrestoredSessions(sessionInfos, unrestoredSessions.current),
         layout: current.layout.root,
         focused_pane_id: current.layout.focusedPaneId,
         active_session_id: current.activeSessionId,

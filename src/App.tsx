@@ -291,11 +291,15 @@ function AppContent() {
       if (cancelled) { u(); } else { unlisten = u; }
     });
     const onRestoreFailed = (e: Event) => {
-      const { label, error } = (e as CustomEvent<{ label: string; error: string }>).detail;
+      const { id, label, error } = (e as CustomEvent<{ id: string; label: string; error: string }>).detail;
       toastStoreRef.current.addToast({
-        message: `Could not restore session '${label}': ${error}`,
+        message: `Could not restore session '${label}': ${error}. It will be tried again next time Hermes starts.`,
         type: "error",
-        duration: 15000,
+        duration: 20000,
+        actions: [{
+          label: "Forget it",
+          onClick: () => window.dispatchEvent(new CustomEvent("hermes:session-restore-forget", { detail: { id } })),
+        }],
       });
     };
     window.addEventListener("hermes:session-restore-failed", onRestoreFailed);

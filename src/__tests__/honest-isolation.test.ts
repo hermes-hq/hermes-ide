@@ -15,6 +15,7 @@ import {
   shouldAskAboutChangesOnClose,
   describeBranchHolder,
   workingDirectoryRecoveryMessage,
+  withUnrestoredSessions,
   type WorktreeDeps,
   type BranchConflictChoice,
 } from "../state/isolation";
@@ -249,5 +250,23 @@ describe("workingDirectoryRecoveryMessage", () => {
       .toBe("The working folder of branch 'hermes/task-a' is gone; the session opened in the project folder instead.");
     expect(workingDirectoryRecoveryMessage({ ...base, branchName: null, outcome: "home", path: "/tmp/home" }))
       .toBe("The working folder '/data/hermes-worktrees/x/s1_a' is gone; the session opened in your home folder instead.");
+    // A folder that exists but is not the project folder is named, not
+    // called "the project folder".
+    expect(workingDirectoryRecoveryMessage({ ...base, outcome: "folder", path: "/work/elsewhere" }))
+      .toBe("The working folder of branch 'hermes/task-a' is gone; the session opened in '/work/elsewhere' instead.");
+  });
+});
+
+describe("withUnrestoredSessions", () => {
+  const s = (id: string) => ({ id, label: id });
+
+  it("keeps saved sessions that could not be restored, after the live ones, without duplicates", () => {
+    const live = [s("a"), s("b")];
+    expect(withUnrestoredSessions(live, [])).toBe(live);
+    expect(withUnrestoredSessions(live, [s("c")]).map((x) => x.id)).toEqual(["a", "b", "c"]);
+    // A live session with the same id wins over the stale entry.
+    expect(withUnrestoredSessions(live, [s("b"), s("c")]).map((x) => x.id)).toEqual(["a", "b", "c"]);
+    // Nothing live: the unrestored entries alone are still saved (retried next launch).
+    expect(withUnrestoredSessions([], [s("c")]).map((x) => x.id)).toEqual(["c"]);
   });
 });

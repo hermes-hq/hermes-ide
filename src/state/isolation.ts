@@ -260,7 +260,7 @@ export interface WorkingDirectoryRecovery {
   branchName: string | null;
   missingPath: string;
   path: string;
-  outcome: "recreated" | "project-folder" | "home";
+  outcome: "recreated" | "project-folder" | "folder" | "home";
 }
 
 /** One line telling the user where a session opened and why. */
@@ -271,7 +271,22 @@ export function workingDirectoryRecoveryMessage(r: WorkingDirectoryRecovery): st
       return `${what} was missing and has been recreated.`;
     case "project-folder":
       return `${what} is gone; the session opened in the project folder instead.`;
+    case "folder":
+      return `${what} is gone; the session opened in '${r.path}' instead.`;
     default:
       return `${what} is gone; the session opened in your home folder instead.`;
   }
+}
+
+/**
+ * The sessions to write into the saved workspace: the live ones, plus the
+ * saved entries that could not be restored this launch (kept, so the next
+ * launch tries them again and nothing is dropped over a passing error),
+ * unless the user chose to forget one. A live session wins over a stale
+ * entry with the same id.
+ */
+export function withUnrestoredSessions<T extends { id: string }>(live: T[], unrestored: T[]): T[] {
+  const seen = new Set(live.map((s) => s.id));
+  const kept = unrestored.filter((s) => !seen.has(s.id));
+  return kept.length === 0 ? live : [...live, ...kept];
 }

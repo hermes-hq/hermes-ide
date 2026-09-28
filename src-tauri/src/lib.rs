@@ -579,6 +579,9 @@ pub fn run() {
             let app_dir = instance::app_data_dir(app.handle())?;
             std::fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+            // Only worktrees under this folder are ours to remove, ask
+            // about or recreate; another instance's are somebody else's.
+            git::worktree::set_instance_worktrees_base(&app_dir);
             std::fs::create_dir_all(app_dir.join("context"))
                 .map_err(|e| format!("Failed to create context dir: {}", e))?;
 
