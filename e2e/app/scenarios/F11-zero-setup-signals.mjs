@@ -465,6 +465,15 @@ try {
   const seen1 = await driveSession(app.bridge, s1, { expectStrip: true });
   assert(seen1.find((s) => s.key === "e")?.detail === "rate_limit", "a failed turn shows the agent's own error as detail");
   assert(seen1.every((s) => s.source === "hook" && s.sourceText === "hook, exact"), "every hook-driven status is hook, exact");
+  // The agent's output so far, with the strip on, read while it is all
+  // still on screen: the second session (strip off) is read at the same
+  // point of its life and must show the same rows. Reading the first
+  // session later would compare scrollback, which on Windows the pseudo
+  // console does not keep faithfully (rows scrolled out of its viewport
+  // can be dropped when it repaints).
+  await app.bridge.waitForTerminal(s1, /turn failed/, { timeoutMs: 10_000 });
+  await sleep(800);
+  const outA = await normalizedRows(app.bridge, s1, vendorId1);
 
   // A denied permission: the agent's PermissionDenied hook puts the strip
   // back to working instead of leaving it on "needs approval".
@@ -548,15 +557,13 @@ try {
   const eventsB = recB.hooksRan.map((h) => `${h.event}:${h.tool ?? ""}:${h.results.length}`);
   const upToFailure = (list) => list.slice(0, list.indexOf("StopFailure::1") + 1);
   assert(JSON.stringify(upToFailure(eventsA)) === JSON.stringify(upToFailure(eventsB)), `both sessions ran the same hooks in the same order (${upToFailure(eventsB).length})`);
-  const outA = (await normalizedRows(app.bridge, s1, vendorId1)).filter((r) => !/sub-agent|OSC 9|marker/.test(r));
   const outB = await normalizedRows(app.bridge, s2, vendorId2);
   // The agent's own output: from its banner to the failed turn. The rows
   // before it are the shell's (a login banner, the prompt with the command
   // wrapped wherever the runner's hostname makes it wrap) and differ per
-  // session. On Windows the pseudo console keeps only what is on screen, so
-  // the first session's banner may have scrolled away: compare the rows both
-  // sessions still hold; the permission prompt through the failed turn (8
-  // rows) is the least that must match.
+  // session. Should a banner row have scrolled out of a small pseudo
+  // console viewport, compare the rows both sessions hold; the permission
+  // prompt through the failed turn (8 rows) is the least that must match.
   const cut = (rows) => {
     const end = rows.findIndex((r) => r.includes("turn failed"));
     const start = rows.findIndex((r) => r.includes("fake-cli"));
