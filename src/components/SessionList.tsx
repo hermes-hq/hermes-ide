@@ -18,6 +18,8 @@ import type { PluginSessionActionContribution } from "../plugins/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionModel } from "../agent/useSessionModel";
 import { agentDisplayName } from "../catalog/agentCatalog";
+import { AgentStatusTag } from "./AgentStatusTag";
+import { isAgentStatusEnabled } from "../agent/status/flag";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -592,6 +594,8 @@ function InlineProjectNameEditor({
 
 export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNewSession, onReconnect, activeView, onViewChange, gitBadge, pluginSessionActions, activePluginPanel, onPluginActionClick }: SessionListProps) {
   const { t } = useI18n();
+  // Flags are read once at startup, so this never changes while mounted.
+  const agentStatus = isAgentStatusEnabled();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
@@ -932,18 +936,24 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
               <SessionAgentTag session={session} />
-              {session.agent_startup?.state === "waiting_at_startup_prompt" && (
-                <span
-                  className="session-startup-tag"
-                  data-startup={session.agent_startup.state}
-                  title={session.agent_startup.detail ?? undefined}
-                >
-                  {t("sessions.startupPrompt")}
-                </span>
+              {agentStatus && session.phase !== "disconnected" ? (
+                <AgentStatusTag sessionId={session.id} />
+              ) : (
+                <>
+                  {session.agent_startup?.state === "waiting_at_startup_prompt" && (
+                    <span
+                      className="session-startup-tag"
+                      data-startup={session.agent_startup.state}
+                      title={session.agent_startup.detail ?? undefined}
+                    >
+                      {t("sessions.startupPrompt")}
+                    </span>
+                  )}
+                  <span className="session-phase-tag" data-phase={session.phase}>
+                    {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
+                  </span>
+                </>
               )}
-              <span className="session-phase-tag" data-phase={session.phase}>
-                {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
-              </span>
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
             {session.phase === "disconnected" && session.ssh_info && onReconnect && (

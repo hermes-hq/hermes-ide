@@ -100,10 +100,17 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
 }
 
 type Listener = () => void;
+/** Told which session changed; for stores that span every session. */
+export type AnySessionListener = (sessionId: string) => void;
 
 const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
+const anyListeners = new Set<AnySessionListener>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
+
+function notifyAny(sessionId: string): void {
+  for (const l of [...anyListeners]) l(sessionId);
+}
 
 /** The current snapshot of a session; stable until an event lands. */
 export function getSessionEventSnapshot(sessionId: string): SessionEventSnapshot {
@@ -130,6 +137,18 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
   };
 }
 
+/**
+ * Subscribe to every session at once (added by F10 for the attention store,
+ * which summarises all sessions). The listener hears the session id after
+ * that session's own subscribers were woken, on every event and on clear.
+ */
+export function subscribeAllSessionEvents(listener: AnySessionListener): () => void {
+  anyListeners.add(listener);
+  return () => {
+    anyListeners.delete(listener);
+  };
+}
+
 /** Fold one event into its session and wake that session's subscribers. */
 export function dispatchSessionEvent(sessionId: string, event: SessionEvent): SessionEventSnapshot {
   const next = reduceSessionEvent(getSessionEventSnapshot(sessionId), event);
@@ -137,6 +156,7 @@ export function dispatchSessionEvent(sessionId: string, event: SessionEvent): Se
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  notifyAny(sessionId);
   return next;
 }
 
@@ -151,6 +171,7 @@ export function clearSessionEvents(sessionId: string): void {
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  notifyAny(sessionId);
 }
 
 /** The snapshot of one session, re-rendering only when that session changes. */
@@ -165,5 +186,6 @@ export function useSessionEvents(sessionId: string): SessionEventSnapshot {
 export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
+  anyListeners.clear();
   emptyCache.clear();
 }

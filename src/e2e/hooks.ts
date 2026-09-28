@@ -20,6 +20,7 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { getAttentionSummary, getSessionStatus } from "../agent/status/attentionStore";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +125,12 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F10: the status each session shows (docs/adr/004 §1) ───────────
+  /** The derived status the sidebar and the status strip render. */
+  sessionStatus: (sessionId: string) => getSessionStatus(sessionId),
+  /** Every session's status at a glance: counts and who needs a person. */
+  attentionSummary: () => getAttentionSummary(),
 };
 
 export type HermesE2EHooks = typeof hooks;
