@@ -137,7 +137,10 @@ try {
 
   // ── 4. Uninstall ─────────────────────────────────────────────────
   log("step 4: winget uninstall --manifest");
-  const uninstall = sh("winget", ["uninstall", "--manifest", dir, ...wingetArgs], { allowFail: true });
+  const uninstall = sh("winget", ["uninstall", "--manifest", dir, "--silent", "--accept-source-agreements", "--disable-interactivity"], {
+    allowFail: true,
+    timeoutMs: 300_000,
+  });
   assert(uninstall.code === 0, `winget finds the app by its product code and uninstalls it (exit ${uninstall.code})`);
   const until = Date.now() + 30_000;
   while (registeredVersion() !== null && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
