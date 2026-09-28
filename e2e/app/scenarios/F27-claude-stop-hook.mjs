@@ -341,7 +341,9 @@ try {
   const stops1 = t1.turns[0].stops;
   log(`  stops: ${JSON.stringify(stops1)}`);
   assert(stops1.length === 4, `the agent tried to stop four times: the first and three continuations (${stops1.length})`);
-  assert(JSON.stringify(stops1.map((s) => s.codes[0])) === "[2,2,2,0]", "the hook refused three stops (exit 2) and then let it stop");
+  // Each stop runs F11's signal hook first and the Done-When check last:
+  // the check's exit code is the last one.
+  assert(JSON.stringify(stops1.map((s) => s.codes.at(-1))) === "[2,2,2,0]", "the hook refused three stops (exit 2) and then let it stop");
   assert(JSON.stringify(stops1.map((s) => s.active)) === "[false,true,true,true]", "continuations carry stop_hook_active");
   const stopRuns = t1.hooksRan.filter((h) => h.event === "Stop").slice(0, 3);
   for (const [i, h] of stopRuns.entries()) {
@@ -377,7 +379,7 @@ try {
   const t2 = await prompt(app.bridge, sid, rec, "try again", 1);
   const stops2 = t2.turns[1].stops;
   log(`  stops: ${JSON.stringify(stops2)}`);
-  assert(JSON.stringify(stops2.map((s) => s.codes[0])) === "[2,2,0]", "two refused stops, then the checks passed and it stopped");
+  assert(JSON.stringify(stops2.map((s) => s.codes.at(-1))) === "[2,2,0]", "two refused stops, then the checks passed and it stopped");
   const c2 = await app.bridge.waitFor("the chip to say tests ✓", `
     const c = e2e.first(".done-when-chip");
     return c && c.getAttribute("data-state") === "passed" ? e2e.norm(c.innerText) : null;

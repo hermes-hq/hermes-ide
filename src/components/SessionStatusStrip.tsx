@@ -13,6 +13,7 @@
 // phase, dimmed, so a session is never labelled with a certainty it does
 // not have.
 
+import { PTY_SOURCE } from "../agent/status/deriveStatus";
 import "../styles/components/SessionStatusStrip.css";
 import { useSessionEvents, type SessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { AgentStatus, AgentStatusKind, Confidence } from "../agent/contract/status";
@@ -52,16 +53,25 @@ export function guessedStatus(phase: string): AgentStatus {
 /** The status the strip shows, and where it came from. */
 export function stripStatus(snapshot: SessionEventSnapshot, phase: string): { status: AgentStatus; source: StatusSource } {
   if (snapshot.version === 0) return { status: guessedStatus(phase), source: "guessed" };
-  const status = snapshot.status;
-  if (status.confidence === "guessed") return { status, source: "guessed" };
+  // The terminal's own heuristics (F10's TerminalProvider, source "pty")
+  // never replace what the agent reported: the strip shows the last status
+  // from anywhere else (or the exit), and the terminal's guess only while
+  // there is none.
+  let status: AgentStatus | null = null;
   let raw: string | undefined;
   for (let i = snapshot.events.length - 1; i >= 0; i--) {
     const e = snapshot.events[i];
-    if (e.type === "status" || e.type === "exit") {
+    if (e.type === "exit" || (e.type === "status" && e.source !== PTY_SOURCE)) {
+      status = e.type === "exit" ? { kind: "exited", confidence: "exact", detail: "" } : e.status;
       raw = e.source;
       break;
     }
   }
+  if (!status) {
+    const guess = snapshot.status;
+    return { status: guess.confidence === "guessed" ? guess : guessedStatus(phase), source: "guessed" };
+  }
+  if (status.confidence === "guessed") return { status, source: "guessed" };
   const source: StatusSource = raw?.startsWith("hook:") ? "hook" : raw === "osc" ? "osc" : raw?.startsWith("stream:") ? "stream" : raw === "e2e" ? "e2e" : status.confidence === "signal" ? "osc" : "hook";
   return { status, source };
 }

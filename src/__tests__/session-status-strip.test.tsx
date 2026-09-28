@@ -87,6 +87,20 @@ describe("guessedStatus / stripStatus", () => {
     expect(stripStatus(getSessionEventSnapshot(SID), "busy").source).toBe("hook");
   });
 
+  it("the terminal's own heuristics (F10, source pty) never replace what the agent reported", () => {
+    dispatchSessionEvent(SID, status("idle", "guessed", "pty"));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({
+      status: { kind: "idle", confidence: "guessed", detail: "" },
+      source: "guessed",
+    });
+    dispatchSessionEvent(SID, status("needs_approval", "exact", "hook:claude", "Bash"));
+    dispatchSessionEvent(SID, status("working", "guessed", "pty"));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({
+      status: { kind: "needs_approval", confidence: "exact", detail: "Bash" },
+      source: "hook",
+    });
+  });
+
   it("has a glyph for every status kind", () => {
     for (const kind of AGENT_STATUS_KINDS) expect(STATUS_GLYPHS[kind], kind).toBeTruthy();
   });

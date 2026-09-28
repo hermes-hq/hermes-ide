@@ -153,7 +153,7 @@ describe("status bridge", () => {
     bridge.stop();
   });
 
-  it("a terminal's guess (F10's PTY statuses) neither raises nor resolves an item", () => {
+  it("the terminal's own heuristics (F10's PTY statuses) neither raise nor resolve an item", () => {
     const bridge = startStatusBridge();
     const guess = (sessionId: string, kind: AgentStatusKind) =>
       dispatchSessionEvent(sessionId, { type: "status", at: clock, source: "pty", status: { kind, confidence: "guessed", detail: "" } });

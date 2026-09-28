@@ -24,12 +24,13 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem, type InboxKind } from "../agent/contract/inbox";
 import type { AgentStatus } from "../agent/contract/status";
 import { inboxKindForStatus } from "./model";
+import { PTY_SOURCE } from "../agent/status/deriveStatus";
 
 const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
 
 /**
- * The last status of a session that did not come from a guess: a terminal's
- * own heuristics (F10's PTY statuses, confidence `guessed`) neither raise
+ * The last status of a session that did not come from the terminal's own
+ * heuristics (F10's TerminalProvider, source "pty"): those neither raise
  * nor resolve an item, so a shell prompt redrawn after an agent asked for
  * approval does not hide the request. An exit counts (it is a fact). Null
  * when the session has reported nothing else.
@@ -38,7 +39,7 @@ export function trustedStatus(snap: SessionEventSnapshot): AgentStatus | null {
   for (let i = snap.events.length - 1; i >= 0; i--) {
     const e = snap.events[i];
     if (e.type === "exit") return EXITED;
-    if (e.type === "status" && e.status.confidence !== "guessed") return e.status;
+    if (e.type === "status" && e.source !== PTY_SOURCE) return e.status;
   }
   return null;
 }
