@@ -68,10 +68,6 @@ export interface SessionHostStatus {
   quit_decision: boolean | null;
 }
 
-export function sessionHostStatus(): Promise<SessionHostStatus> {
-  return invoke<SessionHostStatus>("session_host_status");
-}
-
 /** The answer to "keep running or stop?": the backend acts on it and quits. */
 export function sessionHostQuit(keepRunning: boolean): Promise<void> {
   return invoke("session_host_quit", { keepRunning });

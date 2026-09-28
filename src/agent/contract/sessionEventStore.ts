@@ -107,8 +107,6 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
 }
 
 type Listener = () => void;
-/** Told which session changed; for stores that span every session. */
-export type AnySessionListener = (sessionId: string) => void;
 
 const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
