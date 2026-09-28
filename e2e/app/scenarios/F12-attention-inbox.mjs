@@ -18,7 +18,9 @@
 //   4. ⌘I (Ctrl+Shift+I on Windows/Linux) visits B, C, A and wraps to B,
 //      putting the keyboard in that session's terminal each time
 //   5. ⌘⇧I (Ctrl+Shift+A) opens the inbox: a focused listbox, Blocked on
-//      you oldest first, an aria-live summary; ↓ selects, Space peeks at
+//      you oldest first, an aria-live summary; the window losing and
+//      regaining focus (⌘Tab back, a notification click) leaves the keyboard
+//      in the inbox, never in the terminal behind it; ↓ selects, Space peeks at
 //      the request (read-only), Esc closes the peek, M mutes C for an hour
 //      (badge 2, ⌘I skips it), Enter jumps to A and closes the inbox
 //   6. B's agent is answered in its own terminal ("y"), works, finishes:
@@ -323,6 +325,15 @@ try {
   assert(JSON.stringify(await sidebarOrder(bridge)) === JSON.stringify(order0), "the sidebar did not reorder while jumping");
 
   log("step 6: the inbox, by keyboard only");
+  // Evidence: every element the keyboard moves to from here to the check.
+  await bridge.eval(`
+    window.__f12FocusMoves = [];
+    document.addEventListener("focusin", (e) => {
+      const t = e.target;
+      window.__f12FocusMoves.push(t.closest?.(".xterm") ? "terminal" : t.getAttribute?.("role") || t.tagName);
+    }, true);
+    return true;
+  `);
   await pressKey(bridge, INBOX);
   const listbox = await bridge.waitFor("the inbox listbox to have the keyboard", `
     const lb = e2e.first('.attention-inbox [role="listbox"]');
@@ -344,6 +355,33 @@ try {
     return t.includes("blocked on you") ? t : null;
   `);
   assert(live.includes("3 blocked on you"), `the live region says "${live}"`);
+
+  // Coming back to the window: the app's "give the terminal its keyboard
+  // back" must not take it from the open inbox. Watched on every frame for
+  // half a second, so a steal that is later undone still counts.
+  const regain = await bridge.eval(`
+    const lb = document.querySelector('.attention-inbox [role="listbox"]');
+    const where = () => {
+      const a = document.activeElement;
+      if (a === lb) return "listbox";
+      return a?.closest?.("[data-session-id]") ? "terminal" : (a?.tagName ?? "none");
+    };
+    const seen = new Set();
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new Event("focus"));
+    seen.add(where());
+    document.dispatchEvent(new Event("visibilitychange"));
+    seen.add(where());
+    const end = performance.now() + 500;
+    while (performance.now() < end) {
+      await new Promise((r) => requestAnimationFrame(r));
+      seen.add(where());
+    }
+    return { seen: [...seen], final: where() };
+  `);
+  log(`  after the window regained focus: ${JSON.stringify(regain)}`);
+  log(`  keyboard moves since the inbox opened: ${JSON.stringify(await bridge.eval("return window.__f12FocusMoves;"))}`);
+  assert(regain.final === "listbox" && !regain.seen.includes("terminal"), "the window regaining focus leaves the keyboard in the inbox, never in a terminal");
   const keyInList = (key) => bridge.eval(`
     const lb = document.querySelector('.attention-inbox [role="listbox"]');
     lb.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }));
@@ -352,8 +390,9 @@ try {
   const selectedIs = (sid, what) => bridge.waitFor(what, `
     return e2e.first('.attention-inbox [role="option"][aria-selected="true"]')?.dataset.sessionId === ${JSON.stringify(sid)};
   `);
-  await keyInList("ArrowDown");
-  await selectedIs(C, "↓ to select C");
+  // ↓ sent to whatever has the keyboard: it reaches the inbox, not a terminal.
+  await pressKey(bridge, { key: "ArrowDown", code: "ArrowDown" });
+  await selectedIs(C, "↓ (to whatever has the keyboard) selects C");
   await keyInList(" ");
   const peek = await bridge.waitFor("the peek at C's request", `
     const p = e2e.first('.attention-peek[role="region"]');

@@ -46,6 +46,7 @@ import { isFeatureFlagEnabled } from "../featureFlags";
 import { randomTaskSlug } from "../state/isolation";
 import { SESSION_COLORS } from "./SessionList";
 import { useI18n } from "../i18n/I18nProvider";
+import { rememberUserLabel } from "../attention/userLabels";
 
 // ─── SSH Connection History ──────────────────────────────────────────
 
@@ -629,7 +630,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
       const providerForCreate = isLocal && !isAgent ? aiProvider || undefined : isAgent ? "claude" : undefined;
       const isCustomAgent = providerForCreate === CUSTOM_AGENT_ID;
 
+      // A name typed here may go into an away message; remember it as the
+      // user's (see attention/userLabels.ts).
+      const typedLabel = label.trim();
+      const sessionId = typedLabel ? crypto.randomUUID() : undefined;
+      if (sessionId) rememberUserLabel(sessionId, typedLabel);
       await onCreate({
+        sessionId,
         label: label || (mode === "ssh" ? sshLabel : undefined),
         description: description || undefined,
         group: selectedGroup || undefined,

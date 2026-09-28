@@ -631,6 +631,8 @@ features:
         text: "The dock badge equals the Blocked on you count"
         scenarios: [F12-attention-inbox.mjs]
       F12-4:
+        # Includes the window losing and regaining focus while the inbox is
+        # open: the keyboard stays in the inbox, never in a terminal.
         text: "The inbox is a listbox with aria-live announcements and is usable by keyboard only"
         scenarios: [F12-attention-inbox.mjs]
       F12-5:
@@ -652,5 +654,7 @@ features:
         text: "With nothing configured, no network call is made"
         scenarios: [N16-away-notifications.mjs]
       N16-3:
+        # Includes an Agent view session named after its first prompt: its
+        # message carries no task name.
         text: "The message never contains prompt text or file content"
         scenarios: [N16-away-notifications.mjs]

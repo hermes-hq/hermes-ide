@@ -36,6 +36,7 @@ import type { AgentStatusKind } from "../agent/contract/status";
 import { _resetMutesForTest } from "../attention/mutes";
 import { setWindowFocusOverride } from "../attention/windowFocus";
 import { attentionDebug } from "../attention/debug";
+import { _resetUserLabelsForTest, rememberUserLabel } from "../attention/userLabels";
 import { isMac } from "../utils/platform";
 import type { SessionData } from "../types/session";
 
@@ -95,6 +96,7 @@ beforeEach(() => {
   _resetInboxForTest(() => clock);
   _resetSessionEventStoreForTest();
   _resetMutesForTest(() => clock);
+  _resetUserLabelsForTest();
   setWindowFocusOverride(null);
   attentionDebug.os.length = 0;
   attentionDebug.away.length = 0;
@@ -182,6 +184,7 @@ describe("F12 attention center", () => {
   });
 
   it("never notifies for the session you look at in a focused window; others notify once and go away minimal", () => {
+    rememberUserLabel("B", "bravo-task");
     setup("A");
     setWindowFocusOverride(true);
     status("A", "needs_approval", "Bash: cat notes/zebra-plan.md");
@@ -203,6 +206,85 @@ describe("F12 attention center", () => {
     // The same session asking again while its item is open: grouped.
     status("B", "needs_answer", "Really?");
     expect(h.notifyAttention).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the keyboard when the window regains focus, and tells the app it is open", () => {
+    const onOpenChange = vi.fn();
+    const { ui } = setup("D");
+    ui.rerender(
+      <I18nProvider>
+        <AttentionCenter sessions={SESSIONS} activeSessionId="D" onJump={() => {}} onOpenChange={onOpenChange} />
+      </I18nProvider>,
+    );
+    const xterm = document.createElement("div");
+    xterm.className = "xterm";
+    const terminal = document.createElement("textarea");
+    xterm.appendChild(terminal);
+    document.body.appendChild(xterm);
+    status("B", "needs_approval");
+    pressInbox();
+    const list = screen.getByRole("listbox", { name: "Attention inbox" });
+    expect(list).toHaveFocus();
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+
+    // Something behind the inbox grabs the keyboard as the window comes back.
+    terminal.focus();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(list).toHaveFocus();
+    terminal.focus();
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(list).toHaveFocus();
+
+    // A terminal taking the focus on its own (a pane finishing its layout):
+    // handed back at once, without waiting for a frame.
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    act(() => {
+      terminal.focus();
+    });
+    expect(list).toHaveFocus();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+    // Another dialog's field is left alone.
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    act(() => {
+      field.focus();
+    });
+    expect(field).toHaveFocus();
+    field.remove();
+    act(() => {
+      list.focus();
+    });
+
+    fireEvent.keyDown(list, { key: "Escape" });
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    // Closed, it leaves the keyboard alone.
+    terminal.focus();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(terminal).toHaveFocus();
+    xterm.remove();
+  });
+
+  it("an auto-named session's away message carries no task name", () => {
+    const named = { ...SESSIONS, E: session("E", "Rotate the walrus-prod password") };
+    render(
+      <I18nProvider>
+        <AttentionCenter sessions={named} activeSessionId={null} onJump={() => {}} />
+      </I18nProvider>,
+    );
+    status("E", "needs_approval");
+    expect(h.sendAwayNotification).toHaveBeenCalledTimes(1);
+    const payload = h.sendAwayNotification.mock.calls[0][0] as Record<string, string>;
+    expect(payload.task).toBe("");
+    expect(JSON.stringify(payload)).not.toContain("walrus");
   });
 
   it("reads a ready item when you look at its session", () => {

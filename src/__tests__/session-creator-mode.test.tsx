@@ -64,6 +64,7 @@ vi.mock("../api/git", () => ({
 import { SessionCreator } from "../components/SessionCreator";
 import type { CreateSessionOpts } from "../types/session";
 import { I18nProvider } from "../i18n/I18nProvider";
+import { _resetUserLabelsForTest, shareableLabel } from "../attention/userLabels";
 
 type OnCreate = (opts: CreateSessionOpts) => Promise<void>;
 
@@ -178,6 +179,33 @@ describe("SessionCreator — terminal first", () => {
 
     await finishWizard();
     expect(onCreate.mock.calls[0][0]).toMatchObject({ aiProvider: "gemini", mode: "terminal" });
+  });
+
+  it("a name typed here is remembered as the user's (it may go into an away message); no name, nothing remembered", async () => {
+    _resetUserLabelsForTest();
+    const onCreate = vi.fn<OnCreate>(async () => {});
+    await openCreator(onCreate);
+    fireEvent.click(providerCard("Claude"));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText(/Select folders|Project context|Working directory/);
+    fireEvent.click(screen.getAllByRole("button").find((b) => b.classList.contains("session-creator-btn-primary"))!);
+    const create = await screen.findByRole("button", { name: /Create session/ });
+    const name = document.querySelector<HTMLInputElement>("input.command-palette-input")!;
+    fireEvent.change(name, { target: { value: "billing-fix" } });
+    await act(async () => {
+      fireEvent.click(create);
+    });
+    const opts = onCreate.mock.calls[0][0];
+    expect(opts.label).toBe("billing-fix");
+    expect(opts.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(shareableLabel(opts.sessionId, "billing-fix")).toBe("billing-fix");
+    cleanup();
+
+    const unnamed = vi.fn<OnCreate>(async () => {});
+    await openCreator(unnamed);
+    fireEvent.click(providerCard("Claude"));
+    await finishWizard();
+    expect(unnamed.mock.calls[0][0].sessionId).toBeUndefined();
   });
 
   it("remembers the Agent view choice for Claude and preselects it next time", async () => {

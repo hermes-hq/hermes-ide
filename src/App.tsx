@@ -661,7 +661,8 @@ function AppContent() {
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
   activeSessionIdRef.current = activeSession?.id ?? null;
   const anyOverlayOpenRef = useRef(false);
-  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen);
+  const [attentionInboxOpen, setAttentionInboxOpen] = useState(false);
+  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen || attentionInboxOpen);
 
   useEffect(() => {
     if (!activeSession) return;
@@ -891,7 +892,7 @@ function AppContent() {
 
         {isFeatureFlagEnabled("attentionInbox") && (
           <Suspense fallback={null}>
-            <AttentionCenter sessions={state.sessions} activeSessionId={state.activeSessionId} onJump={jumpToSession} />
+            <AttentionCenter sessions={state.sessions} activeSessionId={state.activeSessionId} onJump={jumpToSession} onOpenChange={setAttentionInboxOpen} />
           </Suspense>
         )}
 

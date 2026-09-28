@@ -26,6 +26,7 @@ import { getSessionEventSnapshot, subscribeAllSessionEvents } from "../agent/con
 import { setAttentionBadge, setKeepAwake, sendAwayNotification } from "../api/attention";
 import { attentionDebug, pushCapped } from "../attention/debug";
 import { agentLabel, awayPayload, itemState, notificationText, stateKey } from "../attention/describe";
+import { forgetUserLabel } from "../attention/userLabels";
 import { blockedCount, groupInbox, inboxKindForStatus, inboxRows, isMuted, nextBlockedSession } from "../attention/model";
 import { muteSession, unmuteSession, useMutes, getMutes } from "../attention/mutes";
 import { createNotifier, type Notifier } from "../attention/notifier";
@@ -43,6 +44,8 @@ interface AttentionCenterProps {
   activeSessionId: string | null;
   /** Show the session's pane and give it the keyboard. */
   onJump: (sessionId: string) => void;
+  /** Told when the inbox opens or closes, so the app leaves its keyboard alone. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** Windows/Linux chords of the two attention shortcuts (see app-shortcuts.json). */
@@ -59,7 +62,7 @@ function optionId(item: InboxItem): string {
   return `attention-option-${item.id}`;
 }
 
-export function AttentionCenter({ sessions, activeSessionId, onJump }: AttentionCenterProps) {
+export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChange }: AttentionCenterProps) {
   const { t } = useI18n();
   const items = useInboxItems();
   const mutes = useMutes();
@@ -69,6 +72,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump }: Attention
   const [peek, setPeek] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<Element | null>(null);
 
   // Latest values for callbacks that outlive a render (notifier, listeners).
@@ -137,6 +141,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump }: Attention
         bridgeRef.current?.forget(id);
         resolveInboxItemsForSession(id);
         unmuteSession(id);
+        forgetUserLabel(id);
       }
     }
     knownSessions.current = now;
@@ -302,6 +307,46 @@ export function AttentionCenter({ sessions, activeSessionId, onJump }: Attention
     if (open) listRef.current?.focus({ preventScroll: true });
   }, [open]);
 
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  useEffect(() => {
+    onOpenChangeRef.current?.(open);
+    // Unmounted while open (flag switched off): the inbox is gone too.
+    return () => {
+      if (open) onOpenChangeRef.current?.(false);
+    };
+  }, [open]);
+
+  // While the inbox is open its keys (M, Enter, Space) must never reach a
+  // terminal behind it: coming back to the window (⌘Tab, a notification
+  // click, a closed dialog) or a terminal taking the focus on its own (a
+  // pane finishing its layout) hands the keyboard back to the inbox. A click
+  // outside closes the inbox first, so this never fights the pointer.
+  useEffect(() => {
+    if (!open) return;
+    const retake = () => {
+      requestAnimationFrame(() => {
+        const list = listRef.current;
+        if (list && !rootRef.current?.contains(document.activeElement)) list.focus({ preventScroll: true });
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") retake();
+    };
+    // At once, not on the next frame: no key may land in the terminal between.
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target instanceof Element && e.target.closest(".xterm")) listRef.current?.focus({ preventScroll: true });
+    };
+    window.addEventListener("focus", retake);
+    document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      window.removeEventListener("focus", retake);
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("focusin", onFocusIn);
+    };
+  }, [open]);
+
   // Keep a valid selection as items come and go.
   const selectedIndex = Math.max(0, rows.findIndex((r) => r.id === selectedId));
   const selected: InboxItem | undefined = rows[selectedIndex];
@@ -382,7 +427,6 @@ export function AttentionCenter({ sessions, activeSessionId, onJump }: Attention
   };
 
   // Close when clicking outside.
-  const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {

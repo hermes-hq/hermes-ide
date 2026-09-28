@@ -130,5 +130,4 @@ claims:
     planned: memory-pins.mjs
   notifications:
     text: "System notifications"
-    unproven: "No real-app scenario proves this yet"
-    planned: N16-notifications.mjs
+    scenarios: [F12-attention-inbox.mjs, N16-away-notifications.mjs]

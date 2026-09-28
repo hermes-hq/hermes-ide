@@ -1,6 +1,7 @@
 import "../styles/components/SessionList.css";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { SessionData } from "../state/SessionContext";
+import { rememberUserLabel } from "../attention/userLabels";
 import { updateSessionGroup, updateSessionLabel, updateSessionDescription, updateSessionColor, sshListTmuxWindows, sshTmuxSelectWindow, sshTmuxNewWindow, sshTmuxRenameWindow } from "../api/sessions";
 import { deleteSessionData } from "../api/context";
 import type { TmuxWindowEntry } from "../types/session";
@@ -328,6 +329,7 @@ function InlineNameEditor({ sessionId, label, triggerEdit, onTriggered }: { sess
   const commit = useCallback(() => {
     setEditing(false);
     if (value.trim() && value.trim() !== label) {
+      rememberUserLabel(sessionId, value.trim());
       updateSessionLabel(sessionId, value.trim()).catch(console.error);
     }
   }, [sessionId, label, value]);
