@@ -861,8 +861,8 @@ pub async fn session_process_argv(
             .get(&session_id)
             .ok_or_else(|| format!("Session {session_id} not found"))?;
         session
-            .child
-            .process_id()
+            .transport
+            .pid()
             .ok_or_else(|| "Shell process ID not available".to_string())?
     };
     let mut sys = state.sys.lock().unwrap_or_else(|e| e.into_inner());
