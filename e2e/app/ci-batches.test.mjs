@@ -49,9 +49,10 @@ function stepScript(name) {
 
 /**
  * The arguments of each `node e2e/app/run.mjs ...` batch in a step script, in
- * order and with $REPEAT filled in: what the node stub records for each batch.
+ * order and with $REPEAT and $FLEET_REPEAT filled in: what the node stub
+ * records for each batch.
  */
-function expectedBatches(script, repeat) {
+function expectedBatches(script, repeat, fleetRepeat = FLEET_REPEAT) {
   return script
     .split("\n")
     .map((l) => l.trim())
@@ -60,7 +61,8 @@ function expectedBatches(script, repeat) {
       l
         .replace(/^node /, "")
         .replace(/\s*\|\|\s*fail=1$/, "")
-        .replace(/"\$REPEAT"/g, repeat),
+        .replace(/"\$REPEAT"/g, repeat)
+        .replace(/"\$FLEET_REPEAT"/g, fleetRepeat),
     );
 }
 
@@ -103,7 +105,7 @@ exec "$@"
 `,
   );
   const res = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", stepScript(name)], {
-    env: { PATH: `${dir}:${process.env.PATH}`, REPEAT, FAIL_ON: failOn.join(" ") },
+    env: { PATH: `${dir}:${process.env.PATH}`, REPEAT, FLEET_REPEAT, FAIL_ON: failOn.join(" ") },
     encoding: "utf8",
   });
   let batches = [];
@@ -116,6 +118,7 @@ exec "$@"
 }
 
 const REPEAT = "20";
+const FLEET_REPEAT = "1";
 const STEPS = ["Run scenarios (Linux, virtual display)", "Run scenarios"];
 
 describe.skipIf(process.platform === "win32")("real-app scenario steps in ci.yml", () => {

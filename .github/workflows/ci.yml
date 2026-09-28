@@ -27,6 +27,10 @@ on:
         description: "How many times to run terminal-echo on each OS"
         required: false
         default: "20"
+      fleet_repeat:
+        description: "How many times to run the fleet performance scenario (F24) on each OS"
+        required: false
+        default: "1"
 
 # Superseded PR pushes are cancelled. Runs on main and in the merge queue are
 # never cancelled: each of those commits must finish its checks.
@@ -45,6 +49,9 @@ env:
   # "20 in a row" the acceptance criteria ask for, so a flaky change is caught
   # before it reaches main. A manual run can choose another count.
   REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat || '20' }}
+  # The fleet scenario measures memory and speed against per-OS budgets; a
+  # manual run can repeat it to show a measurement is stable.
+  FLEET_REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.fleet_repeat || '1' }}
 
 jobs:
   # ── Detect what changed to skip irrelevant jobs ──────────────────────
@@ -407,7 +414,8 @@ jobs:
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
             node e2e/app/run.mjs --keep-going N13-interrupted-resume.mjs || fail=1
             node e2e/app/run.mjs --keep-going F30-instruction-files.mjs F30-agent-view-mcp.mjs F35-safety-default.mjs || fail=1
-            node e2e/app/run.mjs --keep-going F14-context-gauge.mjs F24-fleet-perf.mjs || fail=1
+            node e2e/app/run.mjs --keep-going F14-context-gauge.mjs || fail=1
+            node e2e/app/run.mjs --keep-going --repeat "$FLEET_REPEAT" F24-fleet-perf.mjs || fail=1
             exit "$fail"
           '
 
@@ -429,7 +437,8 @@ jobs:
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
           node e2e/app/run.mjs --keep-going N13-interrupted-resume.mjs || fail=1
           node e2e/app/run.mjs --keep-going F30-instruction-files.mjs F30-agent-view-mcp.mjs F35-safety-default.mjs || fail=1
-          node e2e/app/run.mjs --keep-going F14-context-gauge.mjs F24-fleet-perf.mjs || fail=1
+          node e2e/app/run.mjs --keep-going F14-context-gauge.mjs || fail=1
+          node e2e/app/run.mjs --keep-going --repeat "$FLEET_REPEAT" F24-fleet-perf.mjs || fail=1
           exit "$fail"
 
       # F05: a focused terminal keeps Ctrl+letter. Real OS key presses

@@ -22,7 +22,11 @@
 //      exactly those five out in a grid, and those five hold the contexts.
 //
 // Budgets: e2e/app/fleet-budgets.json (per OS). Measurements go to the
-// evidence folder (metrics.json) and result.json.
+// evidence folder (metrics.json) and result.json. Each memory reading is
+// logged with the backend's own account of what it counted as Hermes (by
+// program) and what it disowned as a stranger left by pid reuse, next to
+// the OS's own view of the app's process tree, so a reading over budget
+// says which processes made it so.
 //
 // Negative controls (each must end in RESULT: FAIL):
 //   HERMES_E2E_F24_FLAG=off          the flag stays off: hidden terminals keep
@@ -109,7 +113,15 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   await bridge.waitFor("the app UI (no onboarding this time)", `return !e2e.first(".onboarding-backdrop");`);
   await dismissWhatsNew(bridge, log);
 
-  const fleet = () => bridge.eval(`return await window.__TAURI_INTERNALS__.invoke("fleet_memory");`);
+  /** The backend's reading, with how long it took and its own account of what it counted as Hermes. */
+  const fleet = async () => {
+    const t0 = Date.now();
+    const f = await bridge.eval(`return await window.__TAURI_INTERNALS__.invoke("fleet_memory");`);
+    f.tookMs = Date.now() - t0;
+    return f;
+  };
+  const programs = (list) => JSON.stringify(list.map((g) => ({ name: g.name, count: g.processes, mb: mb(g.bytes) })));
+  const describeApp = (f) => `${mb(f.appBytes)} MB in ${f.appProcesses} process(es) (read in ${f.tookMs} ms); by program: ${programs(f.appByProgram)}; disowned by pid reuse: ${programs(f.disowned)}`;
   const contexts = () => bridge.eval(`
     const H = window.__HERMES_E2E__;
     const shown = H.terminalIds().filter((id) => H.terminalInfo(id)?.attached);
@@ -136,7 +148,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const idle = await fleet();
   metrics.idleAppMemoryMb = mb(idle.appBytes);
   metrics.idleAppProcesses = idle.appProcesses;
-  log(`  Hermes: ${metrics.idleAppMemoryMb} MB in ${idle.appProcesses} process(es)`);
+  metrics.idleAppByProgram = idle.appByProgram;
+  metrics.idleDisowned = idle.disowned;
+  log(`  Hermes: ${describeApp(idle)}`);
   // What the OS itself says is below the app, by kind: shows which process
   // grew when the budget fails.
   metrics.idleTreeByKind = processTreeByKind(bridge.pid);
@@ -211,9 +225,13 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const loaded = await fleet();
   const perSession = (loaded.appBytes - idle.appBytes) / SESSIONS;
   metrics.appMemoryWithSessionsMb = mb(loaded.appBytes);
+  metrics.appProcessesWithSessions = loaded.appProcesses;
+  metrics.appByProgramWithSessions = loaded.appByProgram;
+  metrics.disownedWithSessions = loaded.disowned;
   metrics.perSessionAppMemoryMb = mb(Math.max(0, perSession));
   metrics.sessionTreesMb = loaded.sessions.map((s) => mb(s.bytes));
-  log(`  Hermes with ${SESSIONS} sessions: ${metrics.appMemoryWithSessionsMb} MB, ${metrics.perSessionAppMemoryMb} MB per session; shells: ${JSON.stringify(metrics.sessionTreesMb)}`);
+  log(`  Hermes with ${SESSIONS} sessions: ${describeApp(loaded)}`);
+  log(`  ${metrics.perSessionAppMemoryMb} MB per session; shells: ${JSON.stringify(metrics.sessionTreesMb)}`);
   metrics.loadedTreeByKind = processTreeByKind(bridge.pid);
   log(`  the OS's view of the app's tree (sessions included): ${JSON.stringify(metrics.loadedTreeByKind)}`);
   assert(loaded.sessions.length === SESSIONS && loaded.sessions.every((s) => s.processes >= 1 && s.bytes > 0), `the backend measured all ${SESSIONS} session trees`);

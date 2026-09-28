@@ -20,6 +20,8 @@ const MB = 1024 * 1024;
 const reading = (sessions: Record<string, number>): FleetMemory => ({
   appBytes: 300 * MB,
   appProcesses: 3,
+  appByProgram: [{ name: "hermes", processes: 3, bytes: 300 * MB }],
+  disowned: [],
   sessions: Object.entries(sessions).map(([sessionId, mb]) => ({ sessionId, bytes: mb * MB, processes: mb > 0 ? 2 : 0 })),
 });
 
