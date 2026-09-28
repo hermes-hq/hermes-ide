@@ -1649,6 +1649,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 launchHelper: isFeatureFlagEnabled("launchHelper"),
                 featureTracks: isFeatureFlagEnabled("featureTracks"),
                 vendorSessionId: saved.vendor_session_id ?? null,
+                // Session host (sessionHost flag): reattach to the program
+                // the host kept running under this id, if it still has it.
+                sessionHost: isFeatureFlagEnabled("sessionHost"),
               });
 
               // Agent-mode restore: spawn the Claude subprocess that the
@@ -1704,12 +1707,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               }
               await Promise.all(metaPromises);
 
-              // Restore scrollback from the snapshot read above
-              if (savedSnapshot) {
+              // Restore scrollback from the snapshot read above — unless the
+              // session host replayed the real output (N20): the terminal
+              // already shows everything, live.
+              if (savedSnapshot && !newSession.reattached) {
                 writeScrollback(newSession.id, savedSnapshot);
               }
 
               dispatch({ type: "SESSION_UPDATED", session: newSession });
+              if (newSession.reattached) {
+                // The replayed output may already have moved the phase on
+                // (the program is busy); the create result is stale by now.
+                getSessions()
+                  .then((all) => {
+                    const fresh = all.find((x) => x.id === newSession.id);
+                    if (fresh) dispatch({ type: "SESSION_UPDATED", session: fresh });
+                  })
+                  .catch(() => {});
+              }
               oldToNew.set(saved.id, newSession.id);
             } catch (err) {
               console.warn("[SessionContext] Failed to restore session:", saved.label, err);
@@ -1936,6 +1951,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         mode,
         launchHelper: isFeatureFlagEnabled("launchHelper"),
         featureTracks: isFeatureFlagEnabled("featureTracks"),
+        sessionHost: isFeatureFlagEnabled("sessionHost"),
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.
@@ -2389,6 +2405,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           launchHelper: isFeatureFlagEnabled("launchHelper"),
           featureTracks: isFeatureFlagEnabled("featureTracks"),
           vendorSessionId: session.vendor_session_id ?? null,
+          sessionHost: isFeatureFlagEnabled("sessionHost"),
         });
       }
       return true;

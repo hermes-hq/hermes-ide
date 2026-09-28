@@ -47,6 +47,8 @@ import { StatusBar } from "./components/StatusBar";
 import { EmptyState } from "./components/EmptyState";
 import { CloseSessionDialog } from "./components/CloseSessionDialog";
 import { LandSheetHost } from "./land/LandSheetHost";
+import { QuitWithAgentsDialog, type WorkingSession } from "./components/QuitWithAgentsDialog";
+import { sessionHostQuit } from "./api/sessions";
 import { FlowToast } from "./components/FlowToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -800,6 +802,39 @@ function AppContent() {
   const saveWorkspaceRef = useRef(saveWorkspace);
   saveWorkspaceRef.current = saveWorkspace;
   const workspaceSavedRef = useRef(false);
+
+  // N20: quitting with a working agent asks "keep running or stop". The
+  // backend holds the quit (the window's close button or an app quit) and
+  // sends `session-host-quit-requested`; either answer goes back to the
+  // backend, which acts on it and quits.
+  const [quitAsk, setQuitAsk] = useState<WorkingSession[] | null>(null);
+  const answerQuit = useCallback(async (keepRunning: boolean) => {
+    setQuitAsk(null);
+    workspaceSavedRef.current = true;
+    try {
+      await saveWorkspaceRef.current();
+    } catch (err) {
+      console.error("[App] Failed to save workspace before quit:", err);
+    }
+    try {
+      await sessionHostQuit(keepRunning);
+    } catch (err) {
+      console.error("[App] session_host_quit failed:", err);
+      workspaceSavedRef.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ id: string; label: string }[]>("session-host-quit-requested", (event) => {
+      if (cancelled) return;
+      setQuitAsk(event.payload.map((s) => ({ id: s.id, label: s.label })));
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   useEffect(() => {
     const onBeforeUnload = () => {
       if (workspaceSavedRef.current) return;
@@ -1578,6 +1613,15 @@ function AppContent() {
             dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip: true });
             setSetting("skip_close_confirm", "true").catch(console.warn);
           }}
+        />
+      )}
+
+      {quitAsk && quitAsk.length > 0 && (
+        <QuitWithAgentsDialog
+          sessions={quitAsk}
+          onKeep={() => { void answerQuit(true); }}
+          onStop={() => { void answerQuit(false); }}
+          onCancel={() => setQuitAsk(null)}
         />
       )}
 

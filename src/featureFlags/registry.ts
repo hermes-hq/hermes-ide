@@ -88,6 +88,12 @@ export const FEATURE_FLAGS = [
     description:
       "Guided work as short files in the repository (.hermes/features/<slug>): phases with gates you approve from the Track panel, the hi helper on PATH in every Hermes shell, and an inbox item when a phase or a blocking question waits on you.",
   },
+  {
+    id: "sessionHost",
+    label: "Sessions survive quit, update and crash",
+    description:
+      "Run terminals in a small background host so agents keep working while Hermes is closed, updated or crashes; Hermes reattaches to them and replays what you missed. Quitting with a working agent asks whether to keep it running. macOS and Linux.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

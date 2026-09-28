@@ -34,6 +34,7 @@ mod quit_flush;
 mod review;
 mod saved_workspace;
 mod self_test;
+mod session_host;
 mod track;
 mod transcript;
 mod turn_ledger;
@@ -553,7 +554,7 @@ fn do_save_workspace(app: &tauri::AppHandle) {
 }
 
 /// Save workspace on close — full save with snapshots, runs once.
-fn save_workspace_state(app: &tauri::AppHandle) {
+pub(crate) fn save_workspace_state(app: &tauri::AppHandle) {
     if WORKSPACE_SAVED.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -662,8 +663,17 @@ pub fn run() {
             pty::shell_integration::cleanup_stale();
 
             // Launch files belong to sessions of the previous run (restored
-            // sessions get new ids), so the folder starts empty.
-            pty::launch::clear_launch_dir(app.handle());
+            // sessions get new ids), so the folder starts empty — except for
+            // sessions the session host kept running (N20), whose agents
+            // still write signals there.
+            let kept = session_host::live_hosted_session_ids(app.handle());
+            if !kept.is_empty() {
+                log::info!(
+                    "[session-host] {} session(s) still running in the host",
+                    kept.len()
+                );
+            }
+            pty::launch::clear_launch_dir(app.handle(), &kept);
 
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
@@ -687,6 +697,7 @@ pub fn run() {
             let track_state = std::sync::Arc::new(track::TrackWatchState::default());
             app.manage(std::sync::Arc::clone(&track_state));
             track::start(app.handle().clone(), track_state);
+            app.manage(session_host::SessionHostState::default());
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
             app.manage(quit_flush::QuitFlush::default());
@@ -708,6 +719,12 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
+                        // Hosted sessions with an agent at work (N20): ask
+                        // "keep running or stop?" first; the answer quits.
+                        if session_host::on_exit_requested(&save_handle) {
+                            api.prevent_close();
+                            return;
+                        }
                         let after = quit_flush::After::CloseWindow("main".into());
                         if quit_flush::hold_for_flush(&save_handle, after) {
                             api.prevent_close();
@@ -1014,6 +1031,11 @@ pub fn run() {
             track::track_file_path,
             track::track_write_review,
             track::track_hi_path,
+            // Session host (N20): status for the UI and the test rig, and
+            // the answer to "keep running or stop?" on quit.
+            session_host::session_host_status,
+            session_host::session_host_quit,
+            session_host::session_host_stop_all,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
@@ -1043,6 +1065,12 @@ pub fn run() {
         .expect("error while building HERMES-IDE")
         .run(|app, event| match &event {
             tauri::RunEvent::ExitRequested { code, api, .. } => {
+                // Hosted sessions with an agent at work (N20): the exit
+                // waits for the user's answer, keep running or stop.
+                if session_host::on_exit_requested(app) {
+                    api.prevent_exit();
+                    return;
+                }
                 // An exit with a code (AppHandle::exit, the Quit menu item)
                 // waits for the frontend to write its workspace. A restart
                 // cannot be held, and without a code the last window is
@@ -1246,6 +1274,8 @@ mod tests {
             ssh_info: None,
             vendor_session_id: None,
             agent_startup: None,
+            hosted: false,
+            reattached: false,
         };
         database.create_session_v2(&update).unwrap();
 

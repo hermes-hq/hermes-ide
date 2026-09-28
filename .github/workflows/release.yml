@@ -462,6 +462,11 @@ jobs:
             "src-tauri/binaries/hermes-pty-setup-${{ matrix.target }}"
           cp "src-tauri/target/hi-build/${{ matrix.target }}/release/hi" \
             "src-tauri/binaries/hi-${{ matrix.target }}"
+          # The session host (src-tauri/pty-host, N20) goes in the same way.
+          cargo build --release --locked --target ${{ matrix.target }} \
+            --manifest-path src-tauri/pty-host/Cargo.toml --target-dir src-tauri/target/pty-host-build
+          cp "src-tauri/target/pty-host-build/${{ matrix.target }}/release/hermes-pty-host" \
+            "src-tauri/binaries/hermes-pty-host-${{ matrix.target }}"
           ls -la src-tauri/binaries/
 
       - name: Build and sign
@@ -484,7 +489,7 @@ jobs:
             npx tauri build --target ${{ matrix.target }} --bundles nsis
           else
             npx tauri build --target ${{ matrix.target }} \
-              --config '{"bundle":{"externalBin":["binaries/hermes-pty-setup","binaries/hi"]}}'
+              --config '{"bundle":{"externalBin":["binaries/hermes-pty-setup","binaries/hi","binaries/hermes-pty-host"]}}'
           fi
 
       - name: Check the macOS bundle carries the PTY and launch helpers
@@ -496,10 +501,13 @@ jobs:
           test -x "$APP/Contents/MacOS/hermes-pty-setup"
           test -x "$APP/Contents/MacOS/hi"
           "$APP/Contents/MacOS/hi" --version
+          test -x "$APP/Contents/MacOS/hermes-pty-host"
+          "$APP/Contents/MacOS/hermes-pty-host" --version
           TAR_GZ=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz | head -1)
           tar -tzf "$TAR_GZ" | grep -q 'Contents/MacOS/hermes-pty-setup$'
           tar -tzf "$TAR_GZ" | grep -q 'Contents/MacOS/hi$'
-          echo "hermes-pty-setup and hi are in the app and in the updater archive"
+          tar -tzf "$TAR_GZ" | grep -q 'Contents/MacOS/hermes-pty-host$'
+          echo "hermes-pty-setup, hi and hermes-pty-host are in the app and in the updater archive"
 
       - name: Notarize DMG
         if: steps.check.outputs.enabled == 'true' && matrix.notarize

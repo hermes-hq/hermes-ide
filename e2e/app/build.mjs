@@ -90,6 +90,11 @@ const helpers = [{ built: buildHelper("hi", "hi"), name: isWindows ? "hi.exe" : 
 if (platform() === "darwin") {
   helpers.push({ built: buildHelper("pty-setup", "hermes-pty-setup"), name: "hermes-pty-setup" });
 }
+// The session host (N20) keeps terminals alive while the app is closed;
+// macOS and Linux for now.
+if (!isWindows) {
+  helpers.push({ built: buildHelper("pty-host", "hermes-pty-host"), name: "hermes-pty-host" });
+}
 
 run(npx, [
   "tauri",

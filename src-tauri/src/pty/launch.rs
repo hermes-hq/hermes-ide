@@ -882,12 +882,41 @@ pub fn launch_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, Stri
 /// Every launch writes its session's folder afresh (a restored session keeps
 /// its id, and gets a new launch file and a new nonce), so whatever is in
 /// the launch folder at startup belongs to the previous run and goes.
-pub fn clear_launch_dir<R: tauri::Runtime>(app: &AppHandle<R>) {
+///
+/// Sessions the session host kept running (`keep`) are the exception: their
+/// agent is still writing signals into its folder.
+pub fn clear_launch_dir<R: tauri::Runtime>(app: &AppHandle<R>, keep: &[String]) {
     if let Ok(dir) = launch_dir(app) {
-        if dir.is_dir() {
-            if let Err(e) = std::fs::remove_dir_all(&dir) {
-                log::warn!("[LAUNCH] could not clear {}: {}", dir.display(), e);
-            }
+        clear_dir_except(&dir, keep);
+    }
+}
+
+fn clear_dir_except(dir: &Path, keep: &[String]) {
+    if !dir.is_dir() {
+        return;
+    }
+    if keep.is_empty() {
+        if let Err(e) = std::fs::remove_dir_all(dir) {
+            log::warn!("[LAUNCH] could not clear {}: {}", dir.display(), e);
+        }
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if keep.iter().any(|k| k == &name) {
+            continue;
+        }
+        let path = entry.path();
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(e) = removed {
+            log::warn!("[LAUNCH] could not remove {}: {}", path.display(), e);
         }
     }
 }
@@ -2878,6 +2907,7 @@ mod tests {
             mode: SessionMode::Terminal,
             vendor_session_id: None,
             agent_startup: None,
+            hosted: false,
             launch_helper: true,
             signal_nonce: None,
         }

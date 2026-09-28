@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{CommandBuilder, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -10,6 +10,7 @@ use crate::db::{Database, SessionWorktreeRow};
 use crate::pty::adapters::now;
 use crate::pty::analyzer::OutputAnalyzer;
 use crate::pty::models::*;
+use crate::pty::transport::{InProcessPty, PtyTransport};
 use crate::pty::{
     ai_launch_command, channels_suffix, detect_shell, get_working_directory, PtySession,
 };
@@ -796,6 +797,10 @@ pub fn create_session(
     // bundled `hi` helper on the terminal's PATH so `hi phase`, `hi status`
     // and friends work in every Hermes shell.
     feature_tracks: Option<bool>,
+    // Feature flag `sessionHost` (evaluated by the frontend): open the
+    // terminal in the background session host, and reattach to a program
+    // the host still has under this session id (see `session_host.rs`).
+    session_host: Option<bool>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -910,6 +915,7 @@ pub fn create_session(
         mode: session_mode,
         vendor_session_id: vendor_session_id.filter(|id| !id.is_empty()),
         agent_startup: None,
+        hosted: false,
         launch_helper: launch_helper.unwrap_or(false),
         signal_nonce: None,
     };
@@ -1004,28 +1010,24 @@ pub fn create_session(
     // because its signal handler isn't installed yet.
     let pty_rows = initial_rows.unwrap_or(24);
     let pty_cols = initial_cols.unwrap_or(80);
-    let pty_system = native_pty_system();
     let pty_size = PtySize {
         rows: pty_rows,
         cols: pty_cols,
         pixel_width: 0,
         pixel_height: 0,
     };
-    let pair = pty_system
-        .openpty(pty_size)
-        .map_err(|e| format!("Failed to open PTY: {}", e))?;
-
-    // Workaround: portable-pty's openpty() does not apply the initial window
-    // size on macOS — get_size() returns (0, 0) right after creation.
-    // Explicitly resize to ensure the PTY starts with the correct dimensions.
-    let _ = pair.master.resize(pty_size);
 
     let is_ssh = ssh_info_clone.is_some();
+
+    // Session host (N20): a program the host still runs under this id is
+    // reattached to instead of started again; it keeps the shell it has.
+    let use_host = session_host.unwrap_or(false) && crate::session_host::supported();
+    let reattach = use_host && crate::session_host::has_session(&app, &session_id);
 
     // Set up shell integration (disables conflicting autosuggestion plugins).
     // Only for local sessions — SSH sessions run on the remote host where we
     // can't create temp files.
-    let shell_integration = if !is_ssh {
+    let shell_integration = if !is_ssh && !reattach {
         crate::pty::shell_integration::setup(&shell, &session_id, disable_native_suggestions)
     } else {
         crate::pty::shell_integration::ShellIntegration::None
@@ -1169,31 +1171,39 @@ pub fn create_session(
         }
     }
 
-    // On macOS, portable-pty's spawn_command() uses fork() + pre_exec which
-    // crashes in multi-threaded processes ("multi-threaded process forked").
-    // Use posix_spawn() instead which atomically creates the child process.
-    // See issue #31 and issue-31-investigation.md.
-    #[cfg(target_os = "macos")]
-    let child = {
-        let tty_path = pair
-            .master
-            .tty_name()
-            .ok_or_else(|| "Failed to get PTY device path for posix_spawn".to_string())?;
-        // Drop the slave end — the child opens the TTY by path via posix_spawn
-        // file actions.  CTT assignment is handled by the --pty-setup trampoline.
-        drop(pair.slave);
-        crate::pty::spawn::posix_spawn_in_pty(&cmd, &tty_path)
-            .map_err(|e| format!("Failed to spawn shell: {}", e))?
+    // Where the terminal lives: the session host when the flag is on (a
+    // host that cannot be reached falls back to this process, with a log
+    // line), otherwise this process as always.
+    let mut ended_before_attach: Option<Option<i32>> = None;
+    let (mut transport, reattached): (Box<dyn PtyTransport>, bool) = if use_host {
+        match crate::session_host::open_hosted(&app, &session_id, Some(&cmd), pty_rows, pty_cols) {
+            Ok(opened) => {
+                ended_before_attach = opened.ended_before_attach;
+                (opened.transport, opened.reattached)
+            }
+            Err(e) => {
+                log::warn!(
+                    "[session-host] {}: falling back to an in-process terminal: {}",
+                    session_id,
+                    e
+                );
+                (Box::new(InProcessPty::spawn(cmd, pty_size)?), false)
+            }
+        }
+    } else {
+        (Box::new(InProcessPty::spawn(cmd, pty_size)?), false)
     };
-
-    #[cfg(not(target_os = "macos"))]
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn shell: {}", e))?;
+    if let Ok(mut s) = session_arc.lock() {
+        s.hosted = transport.hosted();
+        if reattached {
+            // The running agent already has its context; never type it
+            // (or the launch line) into it again.
+            s.context_injected = true;
+        }
+    }
 
     let writer = Arc::new(StdMutex::new(
-        pair.master
+        transport
             .take_writer()
             .map_err(|e| format!("Failed to get PTY writer: {}", e))?,
     ));
@@ -1214,12 +1224,19 @@ pub fn create_session(
     crate::turn_ledger::on_session_started(&app, &session_id, &cwd);
 
     let analyzer = Arc::new(StdMutex::new(OutputAnalyzer::new()));
+    if reattached {
+        if let Ok(mut a) = analyzer.lock() {
+            // A reattached shell had its first prompt long ago: the replay
+            // must not trigger the agent auto-launch or the context nudge.
+            a.shell_ready = true;
+            a.context_injected = true;
+        }
+    }
     let analyzer_clone = Arc::clone(&analyzer);
     let session_clone = Arc::clone(&session_arc);
 
-    let mut reader = pair
-        .master
-        .try_clone_reader()
+    let mut reader = transport
+        .take_reader()
         .map_err(|e| format!("Failed to clone reader: {}", e))?;
     let event_session_id = session_id.clone();
     let app_clone = app.clone();
@@ -1626,19 +1643,42 @@ pub fn create_session(
         });
     }
 
+    if reattached {
+        // A full-screen program only redraws on a size change: nudge it
+        // (one column narrower, then back) so the screen is current again
+        // after the replay. Hermes never types into a terminal on its own.
+        let _ = transport.resize(pty_rows, pty_cols.saturating_sub(1).max(1));
+        let _ = transport.resize(pty_rows, pty_cols);
+        if let Some(code) = ended_before_attach {
+            // The program ended while the app was away: a fact worth
+            // reporting through the 2.0 event contract.
+            crate::contract::emit_session_event(
+                &app,
+                &session_id,
+                crate::contract::SessionEvent::Exit {
+                    at: chrono::Utc::now().timestamp_millis(),
+                    source: Some("host".to_string()),
+                    code,
+                    signal: None,
+                },
+            );
+        }
+    }
+
     let result = {
         let s = session_arc
             .lock()
             .map_err(|e| format!("Lock poisoned: {}", e))?;
-        SessionUpdate::from(&*s)
+        let mut update = SessionUpdate::from(&*s);
+        update.reattached = reattached;
+        update
     };
 
     let pty_session = PtySession {
-        master: pair.master,
+        transport,
         writer,
         session: session_arc,
         analyzer,
-        child,
         shell_integration,
         hermes_suggestions: disable_native_suggestions,
     };
@@ -1789,7 +1829,7 @@ pub fn write_to_session(
         // Send SIGINT to the shell's child processes directly.
         // The shell's PID is known; we enumerate its children via sysctl
         // and send SIGINT to each child's process group.
-        if let Some(shell_pid) = session.child.process_id() {
+        if let Some(shell_pid) = session.transport.pid() {
             let child_pids = enumerate_child_pids(shell_pid);
             if !child_pids.is_empty() {
                 for &cpid in &child_pids {
@@ -1893,13 +1933,10 @@ fn probe_foreground(
         .get(session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
     let shell_pid = session
-        .child
-        .process_id()
+        .transport
+        .pid()
         .ok_or_else(|| "Shell process ID not available".to_string())?;
-    #[cfg(unix)]
-    let from_master = shell_group_is_foreground(session.master.as_ref(), shell_pid);
-    #[cfg(not(unix))]
-    let from_master: Option<bool> = None;
+    let from_master = session.transport.shell_owns_terminal(shell_pid);
     Ok((shell_pid, from_master))
 }
 
@@ -1983,6 +2020,7 @@ mod e2e_slow_foreground {
 /// Whether the shell's process group is the terminal's foreground process
 /// group, or `None` when either cannot be read.
 #[cfg(unix)]
+#[cfg(test)]
 fn shell_group_is_foreground(
     master: &(dyn portable_pty::MasterPty + Send),
     shell_pid: u32,
@@ -2095,13 +2133,8 @@ pub fn resize_session(
         .ok_or_else(|| format!("Session {} not found", session_id))?;
 
     session
-        .master
-        .resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
+        .transport
+        .resize(rows, cols)
         .map_err(|e| format!("Resize failed: {}", e))?;
 
     // Explicitly send SIGWINCH to the child process.
@@ -2113,7 +2146,7 @@ pub fn resize_session(
     // pick up the new terminal dimensions.
     #[cfg(unix)]
     {
-        if let Some(child_pid) = session.child.process_id() {
+        if let Some(child_pid) = session.transport.pid() {
             if child_pid > 0 && child_pid <= i32::MAX as u32 {
                 let pgid = child_pid as i32;
                 unsafe {
@@ -2517,14 +2550,14 @@ pub fn close_session(
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
         // Kill the child shell process FIRST — it may still be using ZDOTDIR
         // temp files. Don't block on wait() since the process may be hung.
-        pty_session.child.kill().ok();
+        pty_session.transport.kill().ok();
 
         // Clean up shell integration temp files after killing the child
         crate::pty::shell_integration::cleanup(&pty_session.shell_integration);
 
-        let mut child = pty_session.child;
+        let mut transport = pty_session.transport;
         thread::spawn(move || {
-            child.wait().ok();
+            transport.wait();
         });
 
         // Save snapshot and persist token data.  Note: status update +

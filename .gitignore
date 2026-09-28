@@ -14,6 +14,7 @@ src-tauri/gen/
 src-tauri/binaries/
 src-tauri/pty-setup/target/
 src-tauri/hi/target/
+src-tauri/pty-host/target/
 # The hi helper as the Windows and Linux bundles pick it up (built by
 # src-tauri/build.rs, listed in tauri.<platform>.conf.json).
 src-tauri/helpers/

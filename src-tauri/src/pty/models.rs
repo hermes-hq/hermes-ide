@@ -268,6 +268,10 @@ pub struct Session {
     /// Startup state of an agent launched through the `hi` helper.
     #[serde(default)]
     pub agent_startup: Option<AgentStartup>,
+    /// The terminal lives in the session host (feature flag `sessionHost`)
+    /// and survives this app: quit, update, crash.
+    #[serde(default)]
+    pub hosted: bool,
     /// Start the agent through the bundled `hi` helper (feature flag
     /// `launchHelper`) instead of typing the vendor command into the shell.
     #[serde(skip)]
@@ -327,6 +331,13 @@ pub struct SessionUpdate {
     pub vendor_session_id: Option<String>,
     #[serde(default)]
     pub agent_startup: Option<AgentStartup>,
+    /// The terminal lives in the session host (N20).
+    #[serde(default)]
+    pub hosted: bool,
+    /// This `create_session` reattached to a program the host kept running
+    /// (its output was replayed), rather than starting a new one.
+    #[serde(default)]
+    pub reattached: bool,
 }
 
 impl From<&Session> for SessionUpdate {
@@ -360,6 +371,8 @@ impl From<&Session> for SessionUpdate {
             mode: s.mode,
             vendor_session_id: s.vendor_session_id.clone(),
             agent_startup: s.agent_startup.clone(),
+            hosted: s.hosted,
+            reattached: false,
         }
     }
 }

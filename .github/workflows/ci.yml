@@ -214,6 +214,8 @@ jobs:
         run: cd src-tauri/hi && cargo fmt --check
       - name: Check formatting (track crate)
         run: cd src-tauri/track && cargo fmt --check
+      - name: Check formatting (session host)
+        run: cd src-tauri/pty-host && cargo fmt --check
 
   # ── Rust Clippy ──────────────────────────────────────────────────────
   rust-clippy:
@@ -261,6 +263,8 @@ jobs:
         run: cd src-tauri/hi && cargo clippy --locked --all-targets -- -D warnings
       - name: Run clippy (track crate)
         run: cd src-tauri/track && cargo clippy --locked --all-targets -- -D warnings
+      - name: Run clippy (session host)
+        run: cd src-tauri/pty-host && cargo clippy --locked --all-targets -- -D warnings
 
   # ── Rust Tests (all three OSes) ──────────────────────────────────────
   rust-test:
@@ -320,6 +324,12 @@ jobs:
       # shared by the app and hi; its tests run git in a temporary repository.
       - name: Test the track crate
         working-directory: src-tauri/track
+        run: cargo test --locked
+      # The session host (src-tauri/pty-host, N20): its tests run the built
+      # host and talk to it over its socket (Unix only; the Windows binary
+      # is a stub that says so).
+      - name: Test the session host
+        working-directory: src-tauri/pty-host
         run: cargo test --locked
 
   # ── Real-app scenarios (all three OSes) ──────────────────────────────

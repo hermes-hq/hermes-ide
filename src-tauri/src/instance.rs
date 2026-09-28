@@ -178,7 +178,7 @@ pub fn touches_production(candidate: &Path, production_dirs: &[PathBuf]) -> bool
 }
 
 /// Deterministic FNV-1a hash, used to name the per-instance temp folder.
-fn fnv1a_hash(input: &[u8]) -> u64 {
+pub(crate) fn fnv1a_hash(input: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in input {
         hash ^= *byte as u64;
@@ -187,11 +187,16 @@ fn fnv1a_hash(input: &[u8]) -> u64 {
     hash
 }
 
+/// A stable hash of an instance's data folder (symlinks resolved), the key
+/// every per-instance folder outside app data is named by.
+pub(crate) fn instance_hash(data_dir: &Path) -> u64 {
+    let canonical = canonical_best_effort(data_dir);
+    fnv1a_hash(canonical.to_string_lossy().as_bytes())
+}
+
 /// `<temp>/hermes-shell-<hash of the data folder>`: one folder per instance.
 pub fn shell_temp_root_for(temp_dir: &Path, data_dir: &Path) -> PathBuf {
-    let canonical = canonical_best_effort(data_dir);
-    let hash = fnv1a_hash(canonical.to_string_lossy().as_bytes());
-    temp_dir.join(format!("hermes-shell-{:016x}", hash))
+    temp_dir.join(format!("hermes-shell-{:016x}", instance_hash(data_dir)))
 }
 
 /// Works out this process's instance. Must run first thing in `run()`, before

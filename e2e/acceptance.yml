@@ -890,3 +890,25 @@ features:
       F28-9:
         text: "Make it a feature creates .hermes/features/<slug>/ and puts the worktree on hermes/<slug>, like hi feature new"
         scenarios: [F28-feature-tracks.mjs]
+  N20:
+    name: "Sessions survive quit, update and crash"
+    # partial: macOS and Linux have the session host (behind the `sessionHost`
+    # flag); on Windows the flag falls back to an in-process terminal (ConPTY
+    # cannot move between processes; a Windows host is a follow-up), which
+    # is all N20-4 proves there. The "update" is the same build reporting a
+    # newer version and reattaching to the host the older version started;
+    # a real installer swap is not exercised by the rig.
+    status: partial
+    criteria:
+      N20-1:
+        text: "Kill the Hermes window while an agent works: on reopen the agent is still running and its output continues"
+        scenarios: ["N20-session-host.mjs@darwin,linux"]
+      N20-2:
+        text: "An app update keeps running agents alive"
+        scenarios: ["N20-session-host.mjs@darwin,linux"]
+      N20-3:
+        text: "Quitting with a working agent asks keep running or stop"
+        scenarios: ["N20-session-host.mjs@darwin,linux"]
+      N20-4:
+        text: "The host runs from a versioned copy under app data with a user-only socket; where there is no host the flag changes nothing"
+        scenarios: [N20-session-host.mjs]

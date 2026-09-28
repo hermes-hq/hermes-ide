@@ -115,6 +115,9 @@ dunce = "1"
 tempfile = "3"
 # Feature Tracks (F28): the .hermes/features files, shared with the hi helper.
 hermes-track = { path = "track" }
+# The session host (src-tauri/pty-host): the app links its protocol and
+# client; the binary itself is built by build.rs and ships next to the app.
+hermes-pty-host = { path = "pty-host" }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

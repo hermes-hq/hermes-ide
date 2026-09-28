@@ -139,6 +139,12 @@ export interface SessionData {
   vendor_session_id?: string | null;
   /** Startup state of an agent started through the `hi` helper. */
   agent_startup?: AgentStartup | null;
+  /** The terminal lives in the background session host (N20) and survives
+   *  quit, update and crash. Absent on older backends. */
+  hosted?: boolean;
+  /** This create reattached to a program the host kept running: its output
+   *  was replayed into the terminal, so no saved scrollback is written. */
+  reattached?: boolean;
 }
 
 export type AgentStartupState = "launching" | "started" | "waiting_at_startup_prompt" | "ended";

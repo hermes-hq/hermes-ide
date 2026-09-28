@@ -43,8 +43,46 @@ export function createSession(opts: {
   /** Feature flag `featureTracks`: put the bundled `hi` helper on the
    *  terminal's PATH so `hi phase`, `hi status` and friends work. */
   featureTracks?: boolean;
+  /** Feature flag `sessionHost`: open the terminal in the background session
+   *  host (it survives quit, update and crash) and reattach to a program the
+   *  host still has under this session id. */
+  sessionHost?: boolean;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
+}
+
+/** What the backend knows about the session host (N20). */
+export interface SessionHostStatus {
+  supported: boolean;
+  running: boolean;
+  pid: number | null;
+  exe: string | null;
+  host_version: string | null;
+  app_version: string;
+  socket: string;
+  bin_dir: string;
+  sessions: { id: string; pid: number; alive: boolean; attached: boolean }[];
+  hosted_session_ids: string[];
+  /** Hosted sessions with an agent at work: the ones a quit asks about. */
+  working_session_ids: string[];
+  quit_decision: boolean | null;
+}
+
+export function sessionHostStatus(): Promise<SessionHostStatus> {
+  return invoke<SessionHostStatus>("session_host_status");
+}
+
+/** The answer to "keep running or stop?": the backend acts on it and quits. */
+export function sessionHostQuit(keepRunning: boolean): Promise<void> {
+  return invoke("session_host_quit", { keepRunning });
+}
+
+/**
+ * Whether a quit has to ask first: the flag is on, a hosted session has an
+ * agent at work, and nobody has answered yet.
+ */
+export function quitMustAsk(status: Pick<SessionHostStatus, "working_session_ids" | "quit_decision">): boolean {
+  return status.working_session_ids.length > 0 && status.quit_decision === null;
 }
 
 export function sshListTmuxSessions(

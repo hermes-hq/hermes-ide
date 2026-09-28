@@ -8,6 +8,10 @@ fn main() {
     build_helper("hi", "hi", "hi");
     #[cfg(target_os = "macos")]
     build_helper("pty-setup", "hermes-pty-setup", "pty-setup");
+    // The session host (src-tauri/pty-host) keeps terminals alive while the
+    // app is closed; macOS and Linux for now.
+    #[cfg(unix)]
+    build_helper("pty-host", "hermes-pty-host", "pty-host");
     tauri_build::build()
 }
 
@@ -88,7 +92,7 @@ fn build_helper(crate_dir: &str, bin_name: &str, build_dir: &str) {
                 // helpers/hi); the macOS release copies it into
                 // Contents/MacOS and signs it (release.yml). Copied before
                 // tauri_build::build() checks that the resource exists.
-                if bin_name == "hi" {
+                if bin_name == "hi" || bin_name == "hermes-pty-host" {
                     let helpers = manifest_dir.join("helpers");
                     if let Err(e) = std::fs::create_dir_all(&helpers)
                         .and_then(|_| std::fs::copy(&built, helpers.join(&exe)))

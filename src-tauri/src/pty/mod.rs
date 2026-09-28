@@ -8,6 +8,7 @@ pub mod osc_signals;
 pub mod patterns;
 pub mod shell_integration;
 pub mod spawn;
+pub mod transport;
 
 // ─── Re-exports ─────────────────────────────────────────────────────
 // Maintain the existing public API so that `lib.rs`, `db/mod.rs`, and other
@@ -18,7 +19,6 @@ pub use models::*;
 // so that `lib.rs` can reference them as `pty::create_session` etc.
 pub use commands::*;
 
-use portable_pty::MasterPty;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -28,11 +28,11 @@ use crate::pty::analyzer::OutputAnalyzer;
 // ─── PTY Session & Manager ──────────────────────────────────────────
 
 pub(crate) struct PtySession {
-    pub(crate) master: Box<dyn MasterPty + Send>,
+    /// Where the terminal lives: this process, or the session host (N20).
+    pub(crate) transport: Box<dyn transport::PtyTransport>,
     pub(crate) writer: Arc<StdMutex<Box<dyn Write + Send>>>,
     pub(crate) session: Arc<StdMutex<Session>>,
     pub(crate) analyzer: Arc<StdMutex<OutputAnalyzer>>,
-    pub(crate) child: Box<dyn portable_pty::Child + Send>,
     /// Shell integration state — tracks temp files for cleanup on session close.
     pub(crate) shell_integration: shell_integration::ShellIntegration,
     /// Whether Hermes inline suggestions were on when this session was
