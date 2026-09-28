@@ -443,7 +443,10 @@ try {
   assert(contWt?.branchName === claudeWt.branchName && samePath(contWt.worktreePath, claudeWt.worktreePath), `same branch and folder (${JSON.stringify(contWt)})`);
   assert(contWt.sharedWithOtherSessions === true, "both sessions know they share that checkout");
   const launchFile = JSON.parse(readFileSync(join(app.dataDir, "launch", contId, "launch.json"), "utf8"));
-  assert(launchFile.agent === "codex" && launchFile.args.includes(contPrompt), "the prompt travels in the launch file hi reads");
+  // The launch file keeps the line breaks; hi makes them spaces only when it
+  // starts a .cmd shim on Windows (see above).
+  const asSpawned = (a) => (onWindows ? a.replace(/\r\n|\r|\n/g, " ") : a);
+  assert(launchFile.agent === "codex" && launchFile.args.some((a) => asSpawned(a) === contPrompt), "the prompt travels in the launch file hi reads");
   // Everything in the terminal before the agent's own first line is the
   // shell and what Hermes typed: no task text may be there. (The typed line
   // itself, `hi run <id>`, can be partly redrawn away by the shell when the
