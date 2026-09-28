@@ -276,6 +276,16 @@ describe("app-handled shortcuts (src/shortcuts/app-shortcuts.json)", () => {
     expect(() => parseAppShortcuts(dup)).toThrow(/duplicate id/);
     expect(() => parseAppShortcuts({ shortcuts: [{ id: "a", group: "G", label: "L", accelerators: [] }] })).toThrow(/accelerators/);
   });
+
+  it("take their own Windows/Linux keys from pcAccelerators, which are checked for clashes on that platform", () => {
+    const doc = { shortcuts: [{ id: "app.z", group: "Session", label: "Z", accelerators: ["CmdOrCtrl+I"], pcAccelerators: ["Ctrl+Shift+I"] }] };
+    const md = renderMarkdown(groupShortcuts(combineShortcuts([], parseAppShortcuts(doc))));
+    expect(md).toContain("| Z | ⌘I | Ctrl+Shift+I |");
+    const menu = extractShortcuts(KEYMAP_FIXTURE, KEYMAP);
+    const clash = { shortcuts: [{ id: "app.w", group: "View", label: "W", accelerators: ["CmdOrCtrl+Alt+W"], pcAccelerators: ["Ctrl+Shift+N"] }] };
+    expect(() => combineShortcuts(menu, parseAppShortcuts(clash))).toThrow(/Ctrl\+Shift\+N \(Windows \/ Linux\) is bound twice/);
+    expect(() => parseAppShortcuts({ shortcuts: [{ ...doc.shortcuts[0], pcAccelerators: [] }] })).toThrow(/pcAccelerators/);
+  });
 });
 
 describe("i18n keys", () => {

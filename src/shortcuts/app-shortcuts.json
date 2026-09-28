@@ -37,6 +37,22 @@
       "accelerators": ["CmdOrCtrl+1-9"]
     },
     {
+      "id": "app.attention-next",
+      "group": "Session",
+      "label": "Jump to Next Waiting Agent",
+      "accelerators": ["CmdOrCtrl+I"],
+      "pcAccelerators": ["Ctrl+Shift+I"],
+      "note": "Beta: attention inbox; oldest first, repeat to cycle"
+    },
+    {
+      "id": "app.attention-inbox",
+      "group": "Session",
+      "label": "Attention Inbox",
+      "accelerators": ["CmdOrCtrl+Shift+I"],
+      "pcAccelerators": ["Ctrl+Shift+A"],
+      "note": "Beta: attention inbox"
+    },
+    {
       "id": "app.focus-next-pane",
       "group": "Panes",
       "label": "Focus Next Pane",

@@ -20,6 +20,8 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { attentionDebug } from "../attention/debug";
+import { setWindowFocusOverride } from "../attention/windowFocus";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +126,22 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F12 / N16: attention inbox ─────────────────────────────────────
+  /**
+   * Say whether the app window has the keyboard focus (null: ask the
+   * window). A hands-free test must not take the focus from whoever uses
+   * the machine, so "you are looking at this window" is stated here.
+   */
+  setWindowFocused: (value: boolean | null): void => setWindowFocusOverride(value),
+  /** What the attention center decided and asked the OS for, oldest first. */
+  attentionState: () => ({
+    decisions: [...(attentionDebug.notifier?.log() ?? [])],
+    os: [...attentionDebug.os],
+    away: attentionDebug.away.map((e) => ({ payload: e.payload, result: e.result })),
+    badge: [...attentionDebug.badge],
+    keepAwake: [...attentionDebug.keepAwake],
+  }),
 };
 
 export type HermesE2EHooks = typeof hooks;

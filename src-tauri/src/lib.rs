@@ -1,6 +1,7 @@
 mod agent;
 mod agent_catalog;
 mod analytics;
+mod attention;
 mod claude_config;
 mod clipboard;
 pub mod contract;
@@ -869,6 +870,11 @@ pub fn run() {
             contract::turns::list_turns,
             contract::turns::get_turn_diff,
             contract::emit_session_event_for_test,
+            // Attention inbox (F12) and away notifications (N16): the OS side.
+            attention::set_attention_badge,
+            attention::set_keep_awake,
+            attention::send_away_notification,
+            attention::attention_state_for_test,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
@@ -900,6 +906,8 @@ pub fn run() {
             tauri::RunEvent::Exit => {
                 log::info!("[hermes] Exit — saving workspace");
                 save_workspace_state(app);
+                // Let the machine sleep again (F12 keep-awake).
+                attention::shutdown();
             }
             tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { .. },

@@ -1938,6 +1938,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "ui_language",
     // Feature flags (per-install debug overrides — see src/featureFlags/)
     "feature_flag_overrides",
+    // Away notifications (N16): webhook / ntfy / Telegram address
+    "away_notify_url",
 ];
 
 #[tauri::command]
@@ -2895,6 +2897,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "ssh_connection_history",
     // Feature flag overrides — per-install debug state, not a real preference
     "feature_flag_overrides",
+    // Away notification address — a Telegram URL carries the bot's token
+    "away_notify_url",
 ];
 
 /// Validate a settings file path for export or import.

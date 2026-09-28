@@ -103,6 +103,8 @@ type Listener = () => void;
 
 const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
+/** Woken for every session (F12's inbox bridge); told which session moved. */
+const anyListeners = new Set<(sessionId: string) => void>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
 
 /** The current snapshot of a session; stable until an event lands. */
@@ -137,7 +139,20 @@ export function dispatchSessionEvent(sessionId: string, event: SessionEvent): Se
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const l of [...anyListeners]) l(sessionId);
   return next;
+}
+
+/**
+ * Listen to every session at once: `listener(sessionId)` runs after any
+ * session's snapshot changed (an event landed or it was cleared). Added by
+ * F12 so the attention inbox can follow sessions it has not seen yet.
+ */
+export function subscribeAllSessionEvents(listener: (sessionId: string) => void): () => void {
+  anyListeners.add(listener);
+  return () => {
+    anyListeners.delete(listener);
+  };
 }
 
 /** Sessions that have at least one event. */
@@ -151,6 +166,7 @@ export function clearSessionEvents(sessionId: string): void {
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const l of [...anyListeners]) l(sessionId);
 }
 
 /** The snapshot of one session, re-rendering only when that session changes. */
@@ -165,5 +181,6 @@ export function useSessionEvents(sessionId: string): SessionEventSnapshot {
 export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
+  anyListeners.clear();
   emptyCache.clear();
 }

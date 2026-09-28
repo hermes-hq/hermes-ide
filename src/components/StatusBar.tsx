@@ -6,6 +6,7 @@ import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
+import { isFeatureFlagEnabled } from "../featureFlags";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
@@ -106,7 +107,8 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
                   <span className="status-capsule-label">{t("status.working")}</span>
                 </span>
               )}
-              {active.phase === "needs_input" && (
+              {/* With the attention inbox on, its title-bar badge says this. */}
+              {active.phase === "needs_input" && !isFeatureFlagEnabled("attentionInbox") && (
                 <span className="status-capsule status-capsule-needs" role="status" aria-live="assertive">
                   <span className="status-capsule-pulse" aria-hidden="true" />
                   <span className="status-capsule-label">{t("status.needsInput")}</span>
