@@ -24,7 +24,7 @@
           "args": ["--settings", "{signals_file}"],
           "events": {
             "session_start": ["SessionStart"],
-            "working": ["UserPromptSubmit", "PostToolUse", "PostToolUseFailure"],
+            "working": ["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "PermissionDenied"],
             "needs_approval": ["PermissionRequest"],
             "needs_answer": ["PreToolUse:AskUserQuestion", "Notification:elicitation_dialog"],
             "plan_ready": ["PreToolUse:ExitPlanMode"],
