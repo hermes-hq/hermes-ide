@@ -3,6 +3,7 @@
   "chords": [
     { "action": "hermes.settings", "mac": "{mod},", "pc": "{ctrl}," },
     { "action": "file.new-session", "mac": "{mod}N", "pc": "{ctrl}{shift}N", "pcOutsideTerminal": "{ctrl}N" },
+    { "action": "file.new-session-advanced", "mac": "{mod}{shift}N", "pc": "{ctrl}{shift}H" },
     { "action": "file.new-session-tab", "mac": "{mod}T", "pc": "{ctrl}{shift}T", "pcOutsideTerminal": "{ctrl}T" },
     { "action": "file.close-pane", "mac": "{mod}W", "pc": "{ctrl}{shift}W", "pcOutsideTerminal": "{ctrl}W" },
     { "action": "file.file-explorer", "mac": "{mod}F", "pc": "{ctrl}{shift}O", "pcOutsideTerminal": "{ctrl}F" },

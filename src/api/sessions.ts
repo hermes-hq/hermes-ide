@@ -40,6 +40,8 @@ export function createSession(opts: {
   launchHelper?: boolean;
   /** A restored session's saved conversation id to resume (helper only). */
   vendorSessionId?: string | null;
+  /** Task launcher (F15): the agent's first prompt (helper only). */
+  initialPrompt?: string | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

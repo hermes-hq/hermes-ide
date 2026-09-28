@@ -66,6 +66,14 @@ import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { launchFailedMessage } from "./catalog/agentCatalog";
 import { OnboardingGate } from "./components/OnboardingGate";
+import { isFeatureFlagEnabled } from "./featureFlags";
+import { getAgent } from "./catalog/agentCatalog";
+import { getProjectsOrdered, getSessionProjects } from "./api/projects";
+import { getSessionWorktreeInfo } from "./api/git";
+import { writeTaskFeatureFile } from "./api/launcher";
+import { launchTask, normalizeRepoPath } from "./launcher/launchTask";
+import { TASK_LAUNCHES_KEY } from "./launcher/taskLauncher";
+import type { TaskLaunchRequest } from "./components/TaskLauncher";
 import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
@@ -87,6 +95,7 @@ const CommandPalette = lazyView("CommandPalette", () => import("./components/Com
 const SessionGitPanel = lazyView("SessionGitPanel", () => import("./components/SessionGitPanel").then((m) => m.SessionGitPanel));
 // Dialogs that only exist once the user opens them.
 const SessionCreator = lazyView("SessionCreator", () => import("./components/SessionCreator").then((m) => m.SessionCreator));
+const TaskLauncher = lazyView("TaskLauncher", () => import("./components/TaskLauncher").then((m) => m.TaskLauncher));
 const PromptComposer = lazyView("PromptComposer", () => import("./components/PromptComposer").then((m) => m.PromptComposer));
 const ShortcutsPanel = lazyView("ShortcutsPanel", () => import("./components/ShortcutsPanel").then((m) => m.ShortcutsPanel));
 const WorkspacePanel = lazyView("WorkspacePanel", () => import("./components/WorkspacePanel").then((m) => m.WorkspacePanel));
@@ -138,6 +147,9 @@ function AppContent() {
     },
     [],
   );
+  // Task launcher (F15, flag taskLauncher): ⌘N opens it; the creator above
+  // stays at ⌘⇧N for SSH, tmux and existing branches.
+  const [taskLauncherOpen, setTaskLauncherOpen] = useState<false | { repo: string | null }>(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
@@ -539,7 +551,7 @@ function AppContent() {
       }
 
       // Suppress session-switch shortcuts while any modal/overlay is open
-      const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
+      const anyOverlayOpen = ui.commandPaletteOpen || !!settingsOpen || ui.composerOpen || sessionCreatorOpen || taskLauncherOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen;
       if (anyOverlayOpen) return;
 
       // Cmd+Shift+J — toggle focus between the active session's pane and
@@ -589,7 +601,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.layout, sidebarSessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, ui.composerOpen, sessionCreatorOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
+  }, [state.layout, sidebarSessions, dispatch, setActive, ui.commandPaletteOpen, settingsOpen, ui.composerOpen, sessionCreatorOpen, taskLauncherOpen, shortcutsOpen, costDashboardOpen, workspaceOpen, projectPickerOpen]);
 
   const handleReconnect = useCallback(async (session: import("./types/session").SessionData) => {
     if (!session.ssh_info) return;
@@ -617,7 +629,7 @@ function AppContent() {
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
   activeSessionIdRef.current = activeSession?.id ?? null;
   const anyOverlayOpenRef = useRef(false);
-  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen);
+  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || taskLauncherOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen);
 
   useEffect(() => {
     if (!activeSession) return;
@@ -787,6 +799,87 @@ function AppContent() {
     return () => { cancelled = true; unlisten?.(); };
   }, [dispatch]);
 
+  // ── Task launcher (F15) ──
+  const launcherOn = isFeatureFlagEnabled("taskLauncher");
+  const activeSessionRef = useRef(activeSession);
+  activeSessionRef.current = activeSession;
+  const layoutRef = useRef(state.layout);
+  layoutRef.current = state.layout;
+
+  /** Show a session the app just created: the focused pane (or the first pane) gets it. */
+  const showSession = useCallback((sessionId: string) => {
+    const layout = layoutRef.current;
+    if (!layout.root) dispatch({ type: "INIT_PANE", sessionId });
+    else if (layout.focusedPaneId) dispatch({ type: "SET_PANE_SESSION", paneId: layout.focusedPaneId, sessionId });
+  }, [dispatch]);
+
+  /** ⌘N: the launcher, on the repository of the active session. */
+  const openTaskLauncher = useCallback(async () => {
+    const s = activeSessionRef.current;
+    let repo: string | null = null;
+    if (s && !s.ssh_info) {
+      try {
+        repo = (await getSessionProjects(s.id))[0]?.path ?? s.working_directory;
+      } catch {
+        repo = s.working_directory;
+      }
+    }
+    setTaskLauncherOpen({ repo });
+  }, []);
+
+  const openNewSession = useCallback(() => {
+    if (launcherOn) void openTaskLauncher();
+    else setSessionCreatorOpen({});
+  }, [launcherOn, openTaskLauncher, setSessionCreatorOpen]);
+
+  /** ⌘⇧N: the full creator. */
+  const openAdvancedCreator = useCallback(() => {
+    setTaskLauncherOpen(false);
+    setSessionCreatorOpen({});
+  }, [setSessionCreatorOpen]);
+
+  /** Sign in: the agent's own CLI in a terminal, where it asks the person to sign in. */
+  const signInAgent = useCallback(async (agentId: string) => {
+    setTaskLauncherOpen(false);
+    const session = await createSession({
+      aiProvider: agentId,
+      mode: "terminal",
+      label: t("agentError.signInSessionLabel", { agent: getAgent(agentId)?.name ?? agentId }),
+    });
+    if (session) showSession(session.id);
+  }, [createSession, showSession, t]);
+
+  const runTaskLaunch = useCallback(async (req: TaskLaunchRequest) => {
+    const result = await launchTask(req, {
+      projectFor: async (root) => {
+        const want = normalizeRepoPath(root, PLATFORM === "win");
+        const known = (await getProjectsOrdered()).find((p) => normalizeRepoPath(p.path, PLATFORM === "win") === want);
+        return known ? known.id : (await createProject(root, null)).id;
+      },
+      createSession,
+      place: (sessionId, index, firstSessionId) => {
+        const paneId = layoutRef.current.focusedPaneId;
+        if (index === 0 || !firstSessionId || !paneId) {
+          showSession(sessionId);
+          return;
+        }
+        // The same task on a second agent opens beside the first. Creating
+        // it put it into the focused pane, so that pane gets the first back.
+        for (const action of splitAfterCreateActions({ paneId, sessionId: firstSessionId }, { paneId, direction: "horizontal" }, sessionId)) {
+          dispatch(action);
+        }
+      },
+      worktreePath: async (sessionId, projectId) => (await getSessionWorktreeInfo(sessionId, projectId))?.worktreePath ?? null,
+      writeFeatureFile: writeTaskFeatureFile,
+      copyText: (text) => navigator.clipboard.writeText(text),
+      readRecords: () => getSetting(TASK_LAUNCHES_KEY).catch(() => ""),
+      writeRecords: (raw) => setSetting(TASK_LAUNCHES_KEY, raw),
+      now: () => Date.now(),
+    });
+    if (result.ok) setTaskLauncherOpen(false);
+    return result.ok;
+  }, [createSession, dispatch, showSession]);
+
   // ── Instant session creation (Cmd+N / Cmd+T) ──
   const createSessionDirect = useCallback(async () => {
     const session = await createSession({});
@@ -802,7 +895,8 @@ function AppContent() {
   // ── Native menu bar event bridge ──
   useNativeMenuEvents({
     dispatch,
-    createSession: () => setSessionCreatorOpen({}),
+    createSession: openNewSession,
+    createSessionAdvanced: openAdvancedCreator,
     createSessionDirect,
     requestCloseSession,
     activeSessionId: state.activeSessionId,
@@ -912,7 +1006,7 @@ function AppContent() {
                 }
               }
             }}
-            topAction={{ icon: PlusIcon, label: `${t("session.new")} (${shortcutLabel("file.new-session")})`, onClick: () => setSessionCreatorOpen({}) }}
+            topAction={{ icon: PlusIcon, label: `${t("session.new")} (${shortcutLabel("file.new-session")})`, onClick: openNewSession }}
             bottomActions={[
               { icon: PluginsIcon, label: t("app.plugins"), onClick: () => setSettingsOpen("plugins") },
               { icon: SettingsIcon, label: t("app.settings"), onClick: () => setSettingsOpen("general") },
@@ -1032,7 +1126,7 @@ function AppContent() {
                   recentSessions={state.recentSessions}
                   onNew={() => {
                     console.log("[opening-overlay] EmptyState 'New Session' clicked");
-                    setSessionCreatorOpen({});
+                    openNewSession();
                   }}
                   onOpenPalette={() => dispatch({ type: "TOGGLE_PALETTE" })}
                   onToggleContext={() => dispatch({ type: "TOGGLE_CONTEXT" })}
@@ -1212,7 +1306,7 @@ function AppContent() {
           onClose={() => dispatch({ type: "TOGGLE_PALETTE" })}
           sessions={sessions}
           onSelectSession={setActive}
-          onNewSession={() => setSessionCreatorOpen({})}
+          onNewSession={openNewSession}
           onToggleContext={() => dispatch({ type: "TOGGLE_CONTEXT" })}
           onToggleSessions={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
           onOpenSettings={(tab) => setSettingsOpen(tab || "general")}
@@ -1261,6 +1355,8 @@ function AppContent() {
           initialTab={settingsOpen}
           pluginRuntime={pluginRuntime}
           pluginRefreshTrigger={pluginUpdater.updateResults.length}
+          onSignInAgent={(agentId) => void signInAgent(agentId)}
+          onOpenAdvancedCreator={openAdvancedCreator}
           onConfirmPluginUpdate={(plugin) => {
             const info = pluginUpdater.updatesAvailable.find((u) => u.id === plugin.id);
             if (info) {
@@ -1320,6 +1416,18 @@ function AppContent() {
           }}
           onCancel={() => setPendingUpdatePlugins(null)}
         />
+      )}
+
+      {taskLauncherOpen && (
+        <Suspense fallback={null}>
+          <TaskLauncher
+            defaultRepo={taskLauncherOpen.repo}
+            onClose={() => setTaskLauncherOpen(false)}
+            onOpenAdvanced={openAdvancedCreator}
+            onSignIn={(agentId) => void signInAgent(agentId)}
+            onLaunch={runTaskLaunch}
+          />
+        </Suspense>
       )}
 
       {sessionCreatorOpen && (
@@ -1391,7 +1499,11 @@ function AppContent() {
         }
       />
 
-      <OnboardingGate />
+      <OnboardingGate
+        onLaunch={runTaskLaunch}
+        onSignIn={(agentId) => void signInAgent(agentId)}
+        onOpenShell={() => void createSessionDirect()}
+      />
       <WhatsNewGate version={__APP_VERSION__} />
 
       {state.pendingCloseSessionId && (

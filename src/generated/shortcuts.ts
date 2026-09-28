@@ -36,6 +36,7 @@ export const GENERATED_SHORTCUT_GROUPS: GeneratedShortcutGroup[] = [
     groupKey: "shortcuts.group.file",
     shortcuts: [
       { id: "file.new-session", label: "New Session", labelKey: "shortcuts.item.file.newSession", keys: "{mod}N", pcKeys: "{ctrl}{shift}N" },
+      { id: "file.new-session-advanced", label: "New Session (Advanced)", labelKey: "shortcuts.item.file.newSessionAdvanced", keys: "{mod}{shift}N", pcKeys: "{ctrl}{shift}H" },
       { id: "file.new-session-tab", label: "New Tab", labelKey: "shortcuts.item.file.newSessionTab", keys: "{mod}T", pcKeys: "{ctrl}{shift}T" },
       { id: "file.close-pane", label: "Close Pane", labelKey: "shortcuts.item.file.closePane", keys: "{mod}W", pcKeys: "{ctrl}{shift}W" },
       { id: "file.file-explorer", label: "File Explorer", labelKey: "shortcuts.item.file.fileExplorer", keys: "{mod}F", pcKeys: "{ctrl}{shift}O" },

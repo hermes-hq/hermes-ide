@@ -5,8 +5,9 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 5 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 6th, retire one first.
+// At most 6 flags may exist at once (5 before the 2.0 build wave) —
+// enforced by src/__tests__/feature-flags.test.ts. If you need a 7th,
+// retire one first.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -50,6 +51,12 @@ export const FEATURE_FLAGS = [
     label: "Launch helper (hi run)",
     description:
       "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt.",
+  },
+  {
+    id: "taskLauncher",
+    label: "Task launcher and agent doctor",
+    description:
+      "New Session (⌘N) opens the task launcher: describe the task and it starts on its own hermes/<name> branch as the agent's first prompt; the full creator moves to ⌘⇧N. First launch shows the three-step welcome with the agent doctor, which also lives in Settings > Agents.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

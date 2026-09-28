@@ -789,6 +789,9 @@ pub fn create_session(
     // A restored session's saved conversation id; with the helper on, the
     // agent resumes it (see `launch.rs`).
     vendor_session_id: Option<String>,
+    // The task launcher's task (F15): handed to the agent as its first
+    // prompt through the `hi` helper.
+    initial_prompt: Option<String>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -910,6 +913,9 @@ pub fn create_session(
         vendor_session_id: vendor_session_id.filter(|id| !id.is_empty()),
         agent_startup: None,
         launch_helper: launch_helper.unwrap_or(false),
+        task_prompt: initial_prompt
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
     };
 
     // ─── Agent-mode short-circuit ───────────────────────────────────────

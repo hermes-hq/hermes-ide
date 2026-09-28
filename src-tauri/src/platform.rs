@@ -260,7 +260,7 @@ fn check_ai_cli_via_login_shell() -> Option<std::collections::HashMap<String, bo
 /// macOS/Linux install locations for CLIs managed by Homebrew, nvm, volta,
 /// pnpm, pip user installs, cargo, and npm global.
 #[cfg(unix)]
-fn well_known_path_dirs() -> Vec<std::path::PathBuf> {
+pub(crate) fn well_known_path_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = vec![
         std::path::PathBuf::from("/opt/homebrew/bin"),
         std::path::PathBuf::from("/usr/local/bin"),

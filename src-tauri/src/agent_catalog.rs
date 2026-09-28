@@ -22,6 +22,15 @@ pub struct Catalog {
 #[derive(Debug, Deserialize)]
 pub struct Agent {
     pub id: String,
+    /// Display name (the agent doctor reports it).
+    #[serde(default)]
+    pub name: String,
+    /// `current`, or `legacy` for a tool its vendor has retired.
+    #[serde(default)]
+    pub status: String,
+    /// Why a `legacy` tool is retired, shown by the agent doctor.
+    #[serde(default)]
+    pub status_note: Option<String>,
     /// `stable` (everyone) or `beta` (behind the agentCatalog flag in the UI).
     pub channel: String,
     /// The "Custom agent" entry: the user types the command.
@@ -29,6 +38,17 @@ pub struct Agent {
     pub custom: bool,
     pub terminal: Terminal,
     pub detect: Option<Detect>,
+    /// How to ask the CLI whether it is signed in (the agent doctor).
+    #[serde(default)]
+    pub auth: Option<Auth>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Auth {
+    /// `[binary, args...]` that exits 0 when signed in, or null when the
+    /// CLI has no such command.
+    #[serde(default)]
+    pub check: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +69,9 @@ pub struct Terminal {
     pub signals: Signals,
     /// Permission mode (`default`, `acceptEdits`, ...) -> extra arguments.
     pub permission_flags: HashMap<String, Vec<String>>,
+    /// Oldest version Hermes supports, or null.
+    #[serde(default)]
+    pub min_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +96,9 @@ pub struct Signals {
     /// Hermes status -> the vendor events that mean it.
     #[serde(default)]
     pub events: HashMap<String, Vec<String>>,
+    /// How sure the status is: `exact`, `signal` or `guessed`.
+    #[serde(default)]
+    pub confidence: String,
 }
 
 #[derive(Debug, Deserialize)]

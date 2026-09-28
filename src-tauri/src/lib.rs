@@ -1,5 +1,6 @@
 mod agent;
 mod agent_catalog;
+mod agent_doctor;
 mod analytics;
 mod claude_config;
 mod clipboard;
@@ -27,6 +28,7 @@ mod project;
 pub mod pty;
 mod saved_workspace;
 mod self_test;
+mod task_launcher;
 mod transcript;
 mod updater;
 mod workspace;
@@ -658,6 +660,10 @@ pub fn run() {
             updater::check_for_update,
             // AI provider detection
             pty::check_ai_providers,
+            // Agent doctor (F16) and the task launcher's repo facts (F15)
+            agent_doctor::agent_doctor,
+            task_launcher::task_repo_probe,
+            task_launcher::task_write_feature_file,
             // Session management
             pty::create_session,
             pty::ssh_list_directory,
