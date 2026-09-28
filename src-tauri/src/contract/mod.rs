@@ -116,6 +116,14 @@ pub enum SessionEvent {
         code: Option<i32>,
         signal: Option<String>,
     },
+    /// F11 (additive): how many of the agent's sub-agents are running right
+    /// now, from the agent's own SubagentStart/SubagentStop hooks.
+    Subagents {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        running: u32,
+    },
 }
 
 /// The one Tauri event every SessionEvent travels on.
@@ -197,7 +205,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 10);
+        assert_eq!(events.len(), 11);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -205,7 +213,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&event).unwrap(), raw);
             seen.insert(raw["type"].as_str().unwrap().to_string());
         }
-        assert_eq!(seen.len(), 8, "every variant appears: {seen:?}");
+        assert_eq!(seen.len(), 9, "every variant appears: {seen:?}");
     }
 
     #[test]

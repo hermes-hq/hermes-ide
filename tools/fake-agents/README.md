@@ -47,8 +47,19 @@ node tools/fake-agents/fake-cli.mjs [--session-id <id>] [--resume <id>] [--setti
 
 Like the real CLI it takes `--session-id` as its conversation id (or invents
 one), continues a conversation with `--resume <id>`, reads the `--settings`
-file and runs its `SessionStart` and `SessionEnd` hooks with the same JSON on
-stdin that Claude Code sends, then behaves as a small TUI (`q` quits).
+file and runs its hooks with the same JSON on stdin that Claude Code sends —
+exec form (`command` + `args`, no shell) or a shell command string, with
+`matcher` applied to the tool name — then behaves as a small TUI (`q` quits).
+
+One key per thing a real agent does, so a scenario can drive every signal
+path (F11): `p` PermissionRequest then `y`/`n` (PostToolUse or
+PermissionDenied), `?` PreToolUse AskUserQuestion, `t` PreToolUse Bash (no
+matcher hit), `l` PreToolUse ExitPlanMode, `w` UserPromptSubmit, `s` Stop,
+`e` StopFailure, `u`/`d` SubagentStart/SubagentStop, `n` Notification
+idle_prompt, `o` an OSC 9 notification (no hook), `m` the OSC 777 Hermes
+marker with this launch's nonce, `x` the same marker with a forged nonce.
+Every hook's stdout is recorded, so a test can see that `hi signal` printed
+nothing (Hermes never answers a hook).
 
 Behaviour per launch, from `HERMES_FAKE_MODE` or the file
 `<HERMES_FAKE_DIR>/mode` (so a scenario can change it between app launches):

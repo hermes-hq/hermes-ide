@@ -127,9 +127,22 @@ pub struct Signals {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// `worktree_file` only: the hook files, relative to the folder the
+    /// agent runs in.
+    #[serde(default)]
+    pub files: Vec<String>,
     /// Hermes status -> the vendor events that mean it.
     #[serde(default)]
     pub events: HashMap<String, Vec<String>>,
+    /// How sure a signal from this agent's hooks is: `exact` (the hook fires
+    /// only when the state is real), `signal` (it can fire for a tool that
+    /// was already approved) or `guessed` (no hooks at all).
+    #[serde(default = "default_confidence")]
+    pub confidence: String,
+}
+
+fn default_confidence() -> String {
+    "guessed".to_string()
 }
 
 #[derive(Debug, Deserialize)]

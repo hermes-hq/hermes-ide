@@ -688,10 +688,10 @@ struct AgentLaunch {
     provider: String,
     /// The project-context prompt travels with the command (no later nudge).
     context_in_args: bool,
-    /// With the `hi` helper: the session's launch folder to watch for
-    /// signals, whether silence means a startup prompt, and the nonce the
-    /// launch's spool lines carry.
-    watch: Option<(std::path::PathBuf, bool, String)>,
+    /// With the `hi` helper: what the spool watcher needs (the session's
+    /// launch folder, whether silence means a startup prompt, the nonce the
+    /// launch's spool lines carry, the agent and its event stream).
+    watch: Option<crate::pty::launch::SignalWatch>,
 }
 
 /// Resolve the launch line once the shell is ready: through the bundled `hi`
@@ -706,11 +706,7 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
             cmd: prepared.line,
             provider,
             context_in_args: prepared.context_in_args,
-            watch: Some((
-                prepared.session_dir,
-                prepared.expects_start_signal,
-                prepared.nonce,
-            )),
+            watch: Some(prepared.watch),
         });
     }
     // Only launch known/allowed AI providers (reject unknown values)
@@ -741,6 +737,13 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
     };
     if provider == "claude" && !s.channels.is_empty() {
         cmd.push_str(&channels_suffix(&s.channels));
+    }
+    // Claude over SSH (flag on): there is no `hi` on the remote host, so the
+    // hooks make Claude print nonce-tagged markers the PTY parser reads.
+    if let Some((settings_arg, nonce)) = crate::pty::launch::ssh_signal_args(&s) {
+        cmd.push(' ');
+        cmd.push_str(&settings_arg);
+        s.signal_nonce = Some(nonce);
     }
     Some(AgentLaunch {
         cmd,
@@ -904,6 +907,7 @@ pub fn create_session(
         vendor_session_id: vendor_session_id.filter(|id| !id.is_empty()),
         agent_startup: None,
         launch_helper: launch_helper.unwrap_or(false),
+        signal_nonce: None,
     };
 
     // ─── Agent-mode short-circuit ───────────────────────────────────────
@@ -1269,6 +1273,40 @@ pub fn create_session(
                                     .emit(&format!("cwd-changed-{}", event_session_id), &new_cwd);
                             }
 
+                            // Terminal notifications (F11): the status
+                            // fallback for agents without hooks. Untrusted
+                            // text, never exact unless it is this launch's
+                            // own nonce-tagged marker.
+                            let notifications = a.take_pending_notifications();
+                            if !notifications.is_empty() {
+                                let (agent, nonce) = session_clone
+                                    .lock()
+                                    .map(|s| {
+                                        (
+                                            s.ai_provider
+                                                .clone()
+                                                .unwrap_or_else(|| "terminal".to_string()),
+                                            s.signal_nonce.clone(),
+                                        )
+                                    })
+                                    .unwrap_or_else(|_| ("terminal".to_string(), None));
+                                let at = crate::pty::opencode_stream::now_millis();
+                                for n in &notifications {
+                                    for event in crate::pty::osc_signals::notification_events(
+                                        n,
+                                        &agent,
+                                        nonce.as_deref(),
+                                        at,
+                                    ) {
+                                        crate::contract::emit_session_event(
+                                            &app_clone,
+                                            &event_session_id,
+                                            event,
+                                        );
+                                    }
+                                }
+                            }
+
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_clone.lock() {
                                     if s.phase.can_transition_to(&new_phase) {
@@ -1338,13 +1376,11 @@ pub fn create_session(
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
                                     }
-                                    if let Some((dir, expects_start_signal, nonce)) = launch.watch {
+                                    if let Some(watch) = launch.watch {
                                         crate::pty::launch::watch_signals(
                                             app_clone.clone(),
                                             Arc::clone(&session_clone),
-                                            dir,
-                                            expects_start_signal,
-                                            nonce,
+                                            watch,
                                         );
                                     }
                                 }
@@ -1547,13 +1583,11 @@ pub fn create_session(
                                 let update = SessionUpdate::from(&*s);
                                 let _ = app_silence.emit("session-updated", &update);
                             }
-                            if let Some((dir, expects_start_signal, nonce)) = launch.watch {
+                            if let Some(watch) = launch.watch {
                                 crate::pty::launch::watch_signals(
                                     app_silence.clone(),
                                     Arc::clone(&session_silence),
-                                    dir,
-                                    expects_start_signal,
-                                    nonce,
+                                    watch,
                                 );
                             }
                         }

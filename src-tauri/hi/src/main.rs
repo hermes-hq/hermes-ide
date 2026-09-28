@@ -702,6 +702,7 @@ fn cmd_run(arg: &str) -> i32 {
 /// (tool inputs, messages, transcripts) stays out of the spool.
 const KEPT_FIELDS: &[&str] = &[
     "hook_event_name",
+    "event",
     "session_id",
     "sessionId",
     "thread-id",
@@ -717,7 +718,12 @@ const KEPT_FIELDS: &[&str] = &[
     "stop_hook_active",
     "transcript_path",
     "title",
+    "message",
     "error",
+    "fullyIdle",
+    "terminationReason",
+    "agent_id",
+    "agent_type",
 ];
 
 fn truncate_chars(s: &str, max: usize) -> String {
@@ -728,9 +734,14 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// One spool line. `event` comes from the payload's `hook_event_name` when
-/// present, else from `--event`, else it is "unknown". `nonce` is the
-/// launch's (from `HERMES_SIGNAL_NONCE`); without it Hermes ignores the line.
+/// One spool line. `event` is the vendor's own name for what happened: the
+/// payload's `hook_event_name` (Claude, Gemini, Copilot), else its `event`
+/// (goose), else `--event` (a hook file that names it), else its `type`
+/// (Codex's notify program), else "unknown". `nonce` is the launch's (from
+/// `HERMES_SIGNAL_NONCE`); without it Hermes ignores the line.
+///
+/// This is the whole of what `hi signal` does with a hook: it never answers
+/// one. Nothing is printed, so no agent ever reads a decision from it.
 pub fn signal_line(
     event_flag: Option<&str>,
     agent: &str,
@@ -755,12 +766,16 @@ pub fn signal_line(
             }
         }
     }
-    let event = kept
-        .get("hook_event_name")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| event_flag.map(str::to_string))
-        .filter(|e| !e.is_empty())
+    let kept_str = |key: &str| {
+        kept.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let event = kept_str("hook_event_name")
+        .or_else(|| kept_str("event"))
+        .or_else(|| event_flag.filter(|e| !e.is_empty()).map(str::to_string))
+        .or_else(|| kept_str("type"))
         .unwrap_or_else(|| "unknown".to_string());
     let mut line = serde_json::json!({
         "v": 1,
@@ -1170,6 +1185,29 @@ mod tests {
         assert_eq!(
             signal_line(None, "codex", "s", None, None)["event"],
             "unknown"
+        );
+        // Codex's notify program: the payload's `type` names the event.
+        let notify = serde_json::json!({"type":"agent-turn-complete","thread-id":"t-1","last-assistant-message":"done"});
+        let line = signal_line(None, "codex", "s", None, Some(&notify));
+        assert_eq!(line["event"], "agent-turn-complete");
+        assert_eq!(line["payload"]["thread-id"], "t-1");
+        assert!(line["payload"].get("last-assistant-message").is_none());
+        // goose names it `event`; Antigravity's Stop carries `fullyIdle`.
+        let goose = serde_json::json!({"event":"Stop","session_id":"g-1"});
+        assert_eq!(
+            signal_line(Some("Other"), "goose", "s", None, Some(&goose))["event"],
+            "Stop"
+        );
+        let agy = serde_json::json!({"fullyIdle":true,"conversationId":"c-1","error":"x"});
+        let line = signal_line(Some("Stop"), "antigravity", "s", None, Some(&agy));
+        assert_eq!(line["event"], "Stop");
+        assert_eq!(line["payload"]["fullyIdle"], true);
+        assert_eq!(line["payload"]["conversationId"], "c-1");
+        // The flag wins over `type` (a hook file that names the event).
+        let typed = serde_json::json!({"type":"something"});
+        assert_eq!(
+            signal_line(Some("Stop"), "x", "s", None, Some(&typed))["event"],
+            "Stop"
         );
         let not_object = serde_json::json!(["a"]);
         assert_eq!(

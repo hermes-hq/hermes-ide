@@ -6,6 +6,9 @@ import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { AgentSetupChips } from "./AgentSetupChips";
 import { TerminalPane } from "./TerminalPane";
+import { SessionStatusStrip } from "./SessionStatusStrip";
+import { useStatusStripEnabled } from "../statusStrip/preference";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { translate } from "../i18n/registry";
 import { CrashProbe } from "./CrashProbe";
@@ -302,6 +305,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
   }, [dispatch, paneId, sessionId, state.layout.root]);
 
   const { showMenu: showPaneMenu } = useContextMenu(handlePaneHeaderAction);
+  const statusStripOn = useStatusStripEnabled();
 
   if (!session) return null;
 
@@ -355,6 +359,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             }
           >
             {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}
+            {session.mode !== "agent" && session.ai_provider && statusStripOn && isFeatureFlagEnabled("launchHelper") && (
+              <SessionStatusStrip sessionId={sessionId} phase={session.phase} />
+            )}
             {session.mode === "agent" ? (
               <Suspense fallback={<div className="split-pane-loading" aria-busy="true" />}>
                 <AgentSessionView sessionId={sessionId} workspacePathCount={session.workspace_paths.length} />

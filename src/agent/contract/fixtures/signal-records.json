@@ -1,0 +1,1030 @@
+{
+  "_comment": "How hi signal spool records map to SessionEvents (F11). Read by src/__tests__/contract-signal.test.ts and src-tauri/src/contract/signal.rs: both sides must produce exactly these events. `confidence` is the agent's catalog confidence. Synthetic data only.",
+  "cases": [
+    {
+      "name": "claude SessionStart names the conversation and is idle",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "SessionStart",
+        "payload": {
+          "session_id": "vs-0001",
+          "permission_mode": "acceptEdits",
+          "source": "startup"
+        }
+      },
+      "events": [
+        {
+          "type": "identity",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "vendorSessionId": "vs-0001",
+          "model": null,
+          "permissionMode": "acceptEdits"
+        },
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "idle",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude UserPromptSubmit",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "UserPromptSubmit",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PreToolUse of an ordinary tool",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PreToolUse",
+        "payload": {
+          "tool_name": "Bash"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PreToolUse AskUserQuestion",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PreToolUse",
+        "payload": {
+          "tool_name": "AskUserQuestion"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "needs_answer",
+            "confidence": "exact",
+            "detail": "AskUserQuestion"
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PreToolUse ExitPlanMode",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PreToolUse",
+        "payload": {
+          "tool_name": "ExitPlanMode"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "plan_ready",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PermissionRequest",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PermissionRequest",
+        "payload": {
+          "tool_name": "Bash"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "needs_approval",
+            "confidence": "exact",
+            "detail": "Bash"
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PermissionDenied",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PermissionDenied",
+        "payload": {
+          "tool_name": "Bash"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PostToolUse",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PostToolUse",
+        "payload": {
+          "tool_name": "Bash"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude PostToolUseFailure",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PostToolUseFailure",
+        "payload": {
+          "tool_name": "Bash"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude Notification permission_prompt",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Notification",
+        "payload": {
+          "notification_type": "permission_prompt",
+          "message": "Claude needs your permission"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "needs_approval",
+            "confidence": "exact",
+            "detail": "Claude needs your permission"
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude Notification elicitation_dialog",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Notification",
+        "payload": {
+          "notification_type": "elicitation_dialog",
+          "message": "Which database?"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "needs_answer",
+            "confidence": "exact",
+            "detail": "Which database?"
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude Notification idle_prompt is attention only",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Notification",
+        "payload": {
+          "notification_type": "idle_prompt",
+          "message": "Claude is waiting for your input"
+        }
+      },
+      "events": [
+        {
+          "type": "attention",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "detail": "Claude is waiting for your input"
+        }
+      ]
+    },
+    {
+      "name": "claude Notification of an unknown type is attention only",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Notification",
+        "payload": {
+          "notification_type": "auth_success",
+          "message": "signed in"
+        }
+      },
+      "events": [
+        {
+          "type": "attention",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "detail": "signed in"
+        }
+      ]
+    },
+    {
+      "name": "claude Stop",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "stop_hook_active": false
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude StopFailure",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "StopFailure",
+        "payload": {
+          "error": "rate_limit"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "error",
+            "confidence": "exact",
+            "detail": "rate_limit"
+          }
+        }
+      ]
+    },
+    {
+      "name": "claude SessionEnd",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "SessionEnd",
+        "payload": {
+          "reason": "other"
+        }
+      },
+      "events": [
+        {
+          "type": "exit",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "code": null,
+          "signal": null
+        }
+      ]
+    },
+    {
+      "name": "claude SubagentStart moves the counter only",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "SubagentStart",
+        "payload": {
+          "agent_type": "Explore"
+        }
+      },
+      "events": [],
+      "subagentDelta": 1
+    },
+    {
+      "name": "claude SubagentStop moves the counter only",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "SubagentStop",
+        "payload": {
+          "agent_type": "Explore"
+        }
+      },
+      "events": [],
+      "subagentDelta": -1
+    },
+    {
+      "name": "the helper's exit report carries the code",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "hermes.exited",
+        "payload": {
+          "exit_code": 130
+        }
+      },
+      "events": [
+        {
+          "type": "exit",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "code": 130,
+          "signal": null
+        }
+      ]
+    },
+    {
+      "name": "the helper's resume fallback names the new conversation",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "hermes.resume_fallback",
+        "payload": {
+          "vendor_session_id": "vs-0002",
+          "exit_code": 1
+        }
+      },
+      "events": [
+        {
+          "type": "identity",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "vendorSessionId": "vs-0002",
+          "model": null,
+          "permissionMode": null
+        },
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "starting",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "codex notify agent-turn-complete names the thread",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "codex",
+        "nonce": "n-abc",
+        "event": "agent-turn-complete",
+        "payload": {
+          "type": "agent-turn-complete",
+          "thread-id": "th-0001"
+        }
+      },
+      "events": [
+        {
+          "type": "identity",
+          "at": 1790000000000,
+          "source": "hook:codex",
+          "vendorSessionId": "th-0001",
+          "model": null,
+          "permissionMode": null
+        },
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:codex",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "gemini Notification ToolPermission",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "gemini",
+        "nonce": "n-abc",
+        "event": "Notification",
+        "payload": {
+          "notification_type": "ToolPermission",
+          "message": "Allow run_shell_command?"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:gemini",
+          "status": {
+            "kind": "needs_approval",
+            "confidence": "exact",
+            "detail": "Allow run_shell_command?"
+          }
+        }
+      ]
+    },
+    {
+      "name": "gemini BeforeAgent",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "gemini",
+        "nonce": "n-abc",
+        "event": "BeforeAgent",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:gemini",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "gemini AfterAgent",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "gemini",
+        "nonce": "n-abc",
+        "event": "AfterAgent",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:gemini",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "gemini SessionEnd",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "gemini",
+        "nonce": "n-abc",
+        "event": "SessionEnd",
+        "payload": {
+          "reason": "exit"
+        }
+      },
+      "events": [
+        {
+          "type": "exit",
+          "at": 1790000000000,
+          "source": "hook:gemini",
+          "code": null,
+          "signal": null
+        }
+      ]
+    },
+    {
+      "name": "copilot notification permission_prompt is a signal, never exact",
+      "nonce": "n-abc",
+      "confidence": "signal",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "copilot",
+        "nonce": "n-abc",
+        "event": "Notification",
+        "payload": {
+          "notification_type": "permission_prompt",
+          "message": "Permission needed"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:copilot",
+          "status": {
+            "kind": "needs_approval",
+            "confidence": "signal",
+            "detail": "Permission needed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "copilot agentStop",
+      "nonce": "n-abc",
+      "confidence": "signal",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "copilot",
+        "nonce": "n-abc",
+        "event": "agentStop",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:copilot",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "signal",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "copilot errorOccurred",
+      "nonce": "n-abc",
+      "confidence": "signal",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "copilot",
+        "nonce": "n-abc",
+        "event": "errorOccurred",
+        "payload": {
+          "message": "boom"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:copilot",
+          "status": {
+            "kind": "error",
+            "confidence": "signal",
+            "detail": "boom"
+          }
+        }
+      ]
+    },
+    {
+      "name": "antigravity Stop fully idle",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "antigravity",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "fullyIdle": true,
+          "conversationId": "cv-1"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:antigravity",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "antigravity Stop not yet idle",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "antigravity",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "fullyIdle": false
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:antigravity",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "antigravity Stop with an error",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "antigravity",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "fullyIdle": true,
+          "error": "quota"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:antigravity",
+          "status": {
+            "kind": "error",
+            "confidence": "exact",
+            "detail": "quota"
+          }
+        }
+      ]
+    },
+    {
+      "name": "goose Stop",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "goose",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "event": "Stop"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:goose",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "opencode permission.asked",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "opencode",
+        "nonce": "n-abc",
+        "event": "permission.asked",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:opencode",
+          "status": {
+            "kind": "needs_approval",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "opencode session.status",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "opencode",
+        "nonce": "n-abc",
+        "event": "session.status",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:opencode",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "opencode session.idle",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "opencode",
+        "nonce": "n-abc",
+        "event": "session.idle",
+        "payload": {}
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:opencode",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "opencode session.error",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "opencode",
+        "nonce": "n-abc",
+        "event": "session.error",
+        "payload": {
+          "message": "provider error"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:opencode",
+          "status": {
+            "kind": "error",
+            "confidence": "exact",
+            "detail": "provider error"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a record with another nonce maps to nothing",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "stale",
+        "event": "PermissionRequest",
+        "payload": {
+          "tool_name": "Bash"
+        }
+      },
+      "events": []
+    },
+    {
+      "name": "an unknown event maps to nothing",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Whatever",
+        "payload": {}
+      },
+      "events": []
+    }
+  ]
+}

@@ -30,7 +30,8 @@
             "plan_ready": ["PreToolUse:ExitPlanMode"],
             "turn_end": ["Stop"],
             "error": ["StopFailure"],
-            "exited": ["SessionEnd"]
+            "exited": ["SessionEnd"],
+            "subagents": ["SubagentStart", "SubagentStop"]
           },
           "confidence": "exact",
           "note": "Hook entries merge with the user's own hooks; nothing is written to the user's settings."
@@ -204,6 +205,7 @@
           "method": "env_file",
           "env": { "GEMINI_CLI_SYSTEM_DEFAULTS_PATH": "{signals_file}" },
           "events": {
+            "working": ["BeforeAgent"],
             "needs_approval": ["Notification:ToolPermission"],
             "turn_end": ["AfterAgent"],
             "exited": ["SessionEnd"]
@@ -257,6 +259,8 @@
           "method": "plugin_dir",
           "args": ["--plugin-dir", "{signals_dir}"],
           "events": {
+            "session_start": ["sessionStart"],
+            "exited": ["sessionEnd"],
             "needs_approval": ["notification:permission_prompt"],
             "needs_answer": ["notification:elicitation_dialog"],
             "turn_end": ["agentStop"],

@@ -687,4 +687,105 @@ fn signal_takes_the_payload_from_the_last_argument_with_argv_json() {
     assert_eq!(line["payload"]["thread-id"], "t-77");
     assert_eq!(line["payload"]["type"], "agent-turn-complete");
     assert!(line["payload"].get("last-assistant-message").is_none());
+    // Codex's notify program names the event in `type`.
+    assert_eq!(line["event"], "agent-turn-complete");
+}
+
+/// The observe-only contract (F11): a permission request never gets an
+/// answer from Hermes. Whatever hook asks, `hi signal` writes one spool
+/// line, prints nothing at all (an agent reads its decision from stdout)
+/// and exits 0 at once.
+#[test]
+fn signal_never_returns_a_permission_decision() {
+    use std::io::Write;
+    use std::time::Instant;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("signals.ndjson");
+    for (event, payload) in [
+        (
+            "PermissionRequest",
+            r#"{"hook_event_name":"PermissionRequest","session_id":"v1","tool_name":"Bash","tool_input":{"command":"rm -rf node_modules"},"permission_suggestions":[{"type":"passthrough"}]}"#,
+        ),
+        (
+            "PreToolUse",
+            r#"{"hook_event_name":"PreToolUse","session_id":"v1","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}"#,
+        ),
+        (
+            "Notification",
+            r#"{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission","title":"Permission needed"}"#,
+        ),
+        (
+            "Elicitation",
+            r#"{"hook_event_name":"Elicitation","session_id":"v1","message":"Which one?"}"#,
+        ),
+    ] {
+        let started = Instant::now();
+        let mut child = Command::new(HI)
+            .args(["signal", "--agent", "claude"])
+            .env("HERMES_SIGNAL_FILE", &file)
+            .env("HERMES_SESSION_ID", "hermes-9")
+            .env("HERMES_SIGNAL_NONCE", "n-9")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{event}: exit 0, never 2 (block)"
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "{event}: stdout must be empty, got {:?}",
+            text(&out.stdout)
+        );
+        assert!(out.stderr.is_empty(), "{event}: stderr must be empty");
+        assert!(
+            started.elapsed().as_millis() < 2000,
+            "{event}: a hook must come back at once"
+        );
+    }
+    let spool = fs::read_to_string(&file).unwrap();
+    let lines: Vec<serde_json::Value> = spool
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 4, "one line per hook, nothing else");
+    for line in &lines {
+        assert_eq!(line["nonce"], "n-9");
+        let text = line.to_string();
+        for forbidden in [
+            "decision",
+            "permissionDecision",
+            "hookSpecificOutput",
+            "continue",
+            "allow",
+            "deny",
+            "tool_input",
+            "permission_suggestions",
+        ] {
+            assert!(
+                !text.contains(&format!("\"{forbidden}\"")),
+                "the spool never carries a decision or a tool input ({forbidden}): {text}"
+            );
+        }
+    }
+    assert_eq!(lines[0]["event"], "PermissionRequest");
+    assert_eq!(lines[0]["payload"]["tool_name"], "Bash");
+    assert_eq!(
+        lines[2]["payload"]["notification_type"],
+        "permission_prompt"
+    );
+    assert_eq!(
+        lines[2]["payload"]["message"],
+        "Claude needs your permission"
+    );
 }

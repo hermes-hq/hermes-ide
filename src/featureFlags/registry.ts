@@ -47,9 +47,9 @@ export const FEATURE_FLAGS = [
   },
   {
     id: "launchHelper",
-    label: "Launch helper (hi run) and session status",
+    label: "Launch helper (hi run), session status and zero-setup signals",
     description:
-      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, and show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess.",
+      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess, and switch on each agent's own event reporting per launch (nothing written to your global config) with a status line above the session.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

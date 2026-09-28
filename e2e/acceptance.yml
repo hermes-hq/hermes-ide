@@ -454,6 +454,35 @@ features:
         # The old id stays until the fresh conversation has started.
         text: "When a failed resume starts a new conversation that is interrupted before it starts, the session keeps the previous conversation"
         scenarios: [N13-interrupted-resume.mjs]
+  F11:
+    name: "Zero-setup signals and status strip"
+    # partial: proven with a fake Claude and the fake terminal agent on all
+    # three OSes. Codex (notify + OSC 9), Gemini (defaults file), Copilot
+    # (plugin folder), Antigravity and goose (worktree hook file) and OpenCode
+    # (event stream) are unit-tested against their documented shapes, not
+    # driven on the real app; the real claude and codex CLIs are exercised
+    # only by the local-only script e2e/app/local/F11-real-agents-local.mjs
+    # (needs the maintainer's logins, so it is not in this ledger; the real
+    # Claude passed, the real Codex could not complete a turn on that
+    # account). Claude over SSH (in-band markers) is unit-tested, not run
+    # against a real host.
+    status: partial
+    criteria:
+      F11-1:
+        text: "A Claude session waiting for permission shows \"needs approval\" with source \"hook, exact\" within one second"
+        scenarios: [F11-zero-setup-signals.mjs]
+      F11-2:
+        text: "Your own ~/.claude/settings.json is byte-identical before and after a session"
+        scenarios: [F11-zero-setup-signals.mjs, N12-launch-and-resume.mjs]
+      F11-3:
+        text: "A notification printed by any program raises attention marked \"signal\", never \"exact\""
+        scenarios: [F11-zero-setup-signals.mjs]
+      F11-4:
+        text: "With the strip on or off, the agent's output is byte-identical"
+        scenarios: [F11-zero-setup-signals.mjs]
+      F11-5:
+        text: "An agent with no signals shows \"guessed\", dimmed"
+        scenarios: [F11-zero-setup-signals.mjs]
   C0:
     name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
     # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).

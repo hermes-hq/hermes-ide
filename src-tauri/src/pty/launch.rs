@@ -108,6 +108,10 @@ pub struct LaunchInput<'a> {
     /// lines without it (an earlier launch of the same session, a stray
     /// process) are ignored.
     pub nonce: &'a str,
+    /// A free loopback port and a per-launch password, for an agent that
+    /// exposes a local event stream (OpenCode). Unused by the others.
+    pub stream_port: u16,
+    pub stream_secret: &'a str,
 }
 
 /// The launch file `hi run` reads. Field names are the wire format.
@@ -165,6 +169,14 @@ pub struct LaunchPlan {
     /// The vendor's "conversation not found" texts to look for in the
     /// terminal while the resume starts (empty when there is no fallback).
     pub not_found_output: Vec<String>,
+    /// Paths written into the session's folder (a Hermes-owned worktree)
+    /// that git must ignore, relative to `spec.cwd`.
+    pub git_excludes: Vec<String>,
+    /// The local event stream to read, for an agent that has one.
+    pub stream: Option<StreamSpec>,
+    /// How sure a signal from this agent's hooks is (the catalog's
+    /// `signals.confidence`).
+    pub confidence: String,
 }
 
 fn split_words(fragment: &str) -> Vec<String> {
@@ -185,16 +197,35 @@ fn hook_path(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// The hook command that reports one event to Hermes.
-fn signal_command(hi: &Path, agent_id: &str, event: &str) -> String {
-    format!(
-        "\"{}\" signal --agent {agent_id} --event {event}",
-        hook_path(hi)
-    )
+/// `hi signal --agent <id> [--event <name>]` as one shell command line, for
+/// hook formats that only take a command string (Gemini, Antigravity,
+/// goose). The quoted path works in sh, bash, PowerShell and cmd.
+fn signal_command(hi: &Path, agent_id: &str, event: Option<&str>) -> String {
+    let mut cmd = format!("\"{}\" signal --agent {agent_id}", hook_path(hi));
+    if let Some(event) = event {
+        cmd.push_str(" --event ");
+        cmd.push_str(event);
+    }
+    cmd
+}
+
+/// The same call in exec form (no shell at all): what Claude's `args` and
+/// Copilot's `exec`/`args` take. Same on every OS, no quoting anywhere.
+fn signal_args(agent_id: &str, event: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "signal".to_string(),
+        "--agent".to_string(),
+        agent_id.to_string(),
+    ];
+    if let Some(event) = event {
+        args.push("--event".to_string());
+        args.push(event.to_string());
+    }
+    args
 }
 
 /// The vendor events the catalog lists for `status` that a hook file can
-/// name directly (an entry with a matcher, `Event:Matcher`, is left to F11).
+/// name directly (without the `Event:Matcher` part).
 fn plain_events<'a>(agent: &'a Agent, status: &str) -> impl Iterator<Item = &'a str> {
     agent
         .terminal
@@ -207,50 +238,178 @@ fn plain_events<'a>(agent: &'a Agent, status: &str) -> impl Iterator<Item = &'a 
         .filter(|e| !e.contains(':'))
 }
 
+/// Every vendor event the catalog names for this agent, with the matchers
+/// listed for it (`PreToolUse:AskUserQuestion` -> `PreToolUse` with matcher
+/// `AskUserQuestion`). An event listed once without a matcher matches
+/// everything (`None`). Sorted, so generated files are stable.
+fn catalog_hooks(agent: &Agent) -> BTreeMap<String, Option<Vec<String>>> {
+    let mut hooks: BTreeMap<String, Option<Vec<String>>> = BTreeMap::new();
+    let mut names: Vec<&String> = agent.terminal.signals.events.values().flatten().collect();
+    names.sort();
+    for name in names {
+        let (event, matcher) = match name.split_once(':') {
+            Some((e, m)) => (e.to_string(), Some(m.to_string())),
+            None => (name.clone(), None),
+        };
+        let entry = hooks.entry(event).or_insert_with(|| Some(Vec::new()));
+        match (entry.as_mut(), matcher) {
+            (Some(list), Some(m)) => {
+                if !list.contains(&m) {
+                    list.push(m);
+                }
+            }
+            _ => *entry = None,
+        }
+    }
+    hooks
+}
+
+/// Hook events whose matcher is a tool name (the only ones where a matcher
+/// narrows anything Hermes wants narrowed: every notification is wanted,
+/// its type is in the payload).
+fn takes_tool_matcher(event: &str) -> bool {
+    matches!(event, "PreToolUse" | "PostToolUse" | "PostToolUseFailure")
+}
+
+/// Hooks whose answer Claude never waits for: tool completions are frequent
+/// and Hermes only counts them.
+fn is_async_hook(event: &str) -> bool {
+    matches!(
+        event,
+        "PostToolUse" | "PostToolUseFailure" | "PostToolBatch"
+    )
+}
+
 /// The per-launch hook file for the `settings_file` method (Claude's
 /// settings shape): hooks only, so it merges on top of the user's own
-/// settings without replacing anything.
+/// settings without replacing anything. Exec form (`command` + `args`): no
+/// shell is involved, on any OS. `hi signal` reads the event's name from the
+/// hook payload (`hook_event_name`).
 pub fn settings_file_json(agent: &Agent, hi: &Path) -> String {
     let mut hooks = serde_json::Map::new();
-    for status in ["session_start", "exited"] {
-        for event in plain_events(agent, status) {
-            hooks.insert(
-                event.to_string(),
-                serde_json::json!([{ "hooks": [{
-                    "type": "command",
-                    "command": signal_command(hi, &agent.id, event),
-                    "timeout": 5
-                }]}]),
-            );
+    for (event, matchers) in catalog_hooks(agent) {
+        let mut hook = serde_json::json!({
+            "type": "command",
+            "command": hook_path(hi),
+            "args": signal_args(&agent.id, None),
+            "timeout": 5
+        });
+        if is_async_hook(&event) {
+            hook["async"] = serde_json::Value::Bool(true);
         }
+        let mut entry = serde_json::json!({ "hooks": [hook] });
+        if let Some(list) = matchers.filter(|_| takes_tool_matcher(&event)) {
+            entry["matcher"] = serde_json::Value::String(list.join("|"));
+        }
+        hooks.insert(event, serde_json::json!([entry]));
     }
     serde_json::to_string_pretty(&serde_json::json!({ "hooks": hooks })).unwrap_or_default()
 }
 
 /// The per-launch defaults file for the `env_file` method (Gemini's
 /// settings shape, lowest precedence). Its hooks run in a sanitized
-/// environment, so the Hermes variables travel in each hook's `env`.
+/// environment, so the Hermes variables travel in each hook's `env`. The
+/// same file switches Gemini's own terminal notifications on (OSC 9), the
+/// fallback Hermes reads from the terminal.
 pub fn env_file_json(agent: &Agent, hi: &Path, env: &BTreeMap<String, String>) -> String {
     let hook_env: serde_json::Map<String, serde_json::Value> = env
         .iter()
         .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
         .collect();
     let mut hooks = serde_json::Map::new();
-    for status in ["session_start", "exited"] {
-        for event in plain_events(agent, status) {
-            hooks.insert(
-                event.to_string(),
-                serde_json::json!([{ "hooks": [{
-                    "name": format!("hermes-{}", event.to_lowercase()),
-                    "type": "command",
-                    "command": signal_command(hi, &agent.id, event),
-                    "env": hook_env,
-                    "timeout": 5000
-                }]}]),
-            );
-        }
+    for event in catalog_hooks(agent).keys() {
+        hooks.insert(
+            event.to_string(),
+            serde_json::json!([{ "hooks": [{
+                "name": format!("hermes-{}", event.to_lowercase()),
+                "type": "command",
+                "command": signal_command(hi, &agent.id, Some(event)),
+                "env": hook_env,
+                "timeout": 5000
+            }]}]),
+        );
     }
-    serde_json::to_string_pretty(&serde_json::json!({ "hooks": hooks })).unwrap_or_default()
+    serde_json::to_string_pretty(&serde_json::json!({
+        "general": { "enableNotifications": true, "notificationMethod": "osc9" },
+        "hooks": hooks
+    }))
+    .unwrap_or_default()
+}
+
+/// The per-launch plugin folder's `hooks.json` for the `plugin_dir` method
+/// (Copilot's shape): exec form, with the Hermes variables in each hook's
+/// `env`.
+pub fn plugin_hooks_json(agent: &Agent, hi: &Path, env: &BTreeMap<String, String>) -> String {
+    let hook_env: serde_json::Map<String, serde_json::Value> = env
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+    let mut hooks = serde_json::Map::new();
+    for event in catalog_hooks(agent).keys() {
+        hooks.insert(
+            event.to_string(),
+            serde_json::json!([{
+                "type": "command",
+                "exec": hook_path(hi),
+                "args": signal_args(&agent.id, Some(event)),
+                "env": hook_env,
+                "timeoutSec": 5
+            }]),
+        );
+    }
+    serde_json::to_string_pretty(&serde_json::json!({ "version": 1, "hooks": hooks }))
+        .unwrap_or_default()
+}
+
+/// The hook entry Hermes adds to a file inside its own worktree
+/// (`worktree_file` method): Antigravity's `.agents/hooks.json` keyed by
+/// hook name, or the Claude-like `{"hooks": {...}}` shape goose plugins use.
+/// `existing` is the file's current content, kept as it is: only the
+/// `hermes-signal` entry is added or replaced.
+pub fn worktree_hooks_json(agent: &Agent, hi: &Path, existing: Option<&str>) -> String {
+    let command = |event: &str| {
+        serde_json::json!({
+            "type": "command",
+            "command": signal_command(hi, &agent.id, Some(event)),
+            "timeout": 5
+        })
+    };
+    let mut events = serde_json::Map::new();
+    for event in catalog_hooks(agent).keys() {
+        events.insert(
+            event.to_string(),
+            serde_json::json!([{ "hooks": [command(event)] }]),
+        );
+    }
+    let mut root = existing
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    if agent.id == "antigravity" {
+        let mut entry = serde_json::Map::new();
+        entry.insert("enabled".to_string(), serde_json::Value::Bool(true));
+        entry.extend(events);
+        root["hermes-signal"] = serde_json::Value::Object(entry);
+    } else {
+        let hooks = root
+            .get_mut("hooks")
+            .and_then(serde_json::Value::as_object_mut)
+            .map(|h| {
+                h.extend(events.clone());
+                serde_json::Value::Object(h.clone())
+            })
+            .unwrap_or(serde_json::Value::Object(events));
+        root["hooks"] = hooks;
+    }
+    serde_json::to_string_pretty(&root).unwrap_or_default()
+}
+
+/// The local event stream an agent exposes for one launch (OpenCode's
+/// server on a loopback port, protected by a per-launch password).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamSpec {
+    pub port: u16,
+    pub secret: String,
 }
 
 /// What the catalog's `signals` block becomes for one launch.
@@ -258,14 +417,20 @@ struct SignalSetup {
     args: Vec<String>,
     env: BTreeMap<String, String>,
     files: Vec<(PathBuf, String)>,
+    /// Paths (relative to the session's folder) written into a Hermes-owned
+    /// worktree, to be kept out of git through `info/exclude`.
+    git_excludes: Vec<String>,
     expects_start_signal: bool,
+    stream: Option<StreamSpec>,
 }
 
 fn signal_setup(
     agent: &Agent,
     hi: &Path,
     session_dir: &Path,
+    cwd: &Path,
     hermes_env: &BTreeMap<String, String>,
+    stream: (u16, &str),
 ) -> SignalSetup {
     let signals = &agent.terminal.signals;
     let has_start = plain_events(agent, "session_start").next().is_some();
@@ -273,8 +438,11 @@ fn signal_setup(
         args: Vec::new(),
         env: BTreeMap::new(),
         files: Vec::new(),
+        git_excludes: Vec::new(),
         expects_start_signal: false,
+        stream: None,
     };
+    let mut signals_dir = session_dir.to_path_buf();
     let file = match signals.method.as_str() {
         "settings_file" => Some((
             session_dir.join(format!("{}.settings.json", agent.id)),
@@ -284,22 +452,59 @@ fn signal_setup(
             session_dir.join(format!("{}.defaults.json", agent.id)),
             env_file_json(agent, hi, hermes_env),
         )),
-        // Config flags carry `{hi}` and need no file. Plugin folders,
-        // worktree files and event streams are F11's work: no signal setup
-        // for them yet, so those agents start with the plain command.
+        "plugin_dir" => {
+            signals_dir = session_dir.join(format!("{}-plugin", agent.id));
+            Some((
+                signals_dir.join("hooks.json"),
+                plugin_hooks_json(agent, hi, hermes_env),
+            ))
+        }
+        // Config flags carry `{hi}` and need no file.
         "config_flags" => None,
+        // The agent has no per-launch flag at all: the hook file goes into
+        // the folder it runs in, but only when that folder is a worktree
+        // Hermes made (never into the user's own checkout), and git is told
+        // to ignore it.
+        "worktree_file" => {
+            if crate::git::worktree::is_hermes_worktree_path(&cwd.to_string_lossy()) {
+                for rel in &signals.files {
+                    let path = cwd.join(rel);
+                    let existing = std::fs::read_to_string(&path).ok();
+                    setup
+                        .files
+                        .push((path, worktree_hooks_json(agent, hi, existing.as_deref())));
+                    // Exclude the plugin's whole folder when it has one.
+                    let exclude = match rel.find("/hooks/") {
+                        Some(at) => format!("{}/", &rel[..at]),
+                        None => rel.clone(),
+                    };
+                    setup.git_excludes.push(exclude);
+                }
+            }
+            None
+        }
+        "event_stream" => {
+            setup.stream = Some(StreamSpec {
+                port: stream.0,
+                secret: stream.1.to_string(),
+            });
+            None
+        }
         _ => return setup,
     };
     let file_str = file
         .as_ref()
         .map(|(p, _)| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let dir_str = session_dir.to_string_lossy().to_string();
+    let dir_str = signals_dir.to_string_lossy().to_string();
     let hi_str = hook_path(hi);
-    let vars: [(&str, &str); 3] = [
+    let port_str = stream.0.to_string();
+    let vars: [(&str, &str); 5] = [
         ("signals_file", file_str.as_str()),
         ("signals_dir", dir_str.as_str()),
         ("hi", hi_str.as_str()),
+        ("port", port_str.as_str()),
+        ("secret", stream.1),
     ];
     setup.args = fill(&signals.args, &vars);
     for (k, v) in &signals.env {
@@ -313,6 +518,78 @@ fn signal_setup(
         setup.expects_start_signal = has_start;
     }
     setup
+}
+
+// ─── Claude over SSH: in-band markers ────────────────────────────────
+
+/// The terminal marker a hook makes Claude print on the remote host, where
+/// there is no `hi`: an OSC 777 notification the PTY parser recognises and
+/// verifies by nonce. `OSC 777 ; notify ; hermes-signal ; v1:<nonce>:<event> BEL`.
+pub fn ssh_marker_sequence(nonce: &str, event: &str) -> String {
+    format!("\u{1b}]777;notify;hermes-signal;v1:{nonce}:{event}\u{7}")
+}
+
+/// Claude's settings for a session over SSH, as a JSON string for
+/// `--settings`: hooks that print the marker (exec form: `printf %s <json>`,
+/// so nothing passes through a shell) for the events Hermes reads.
+pub fn ssh_settings_json(nonce: &str) -> String {
+    let hook = |event: &str| {
+        let output = serde_json::json!({ "terminalSequence": ssh_marker_sequence(nonce, event) });
+        serde_json::json!({
+            "type": "command",
+            "command": "printf",
+            "args": ["%s", output.to_string()],
+            "timeout": 5
+        })
+    };
+    let plain = |event: &str| serde_json::json!([{ "hooks": [hook(event)] }]);
+    let hooks = serde_json::json!({
+        "SessionStart": plain("SessionStart"),
+        "UserPromptSubmit": plain("UserPromptSubmit"),
+        "PermissionRequest": plain("PermissionRequest"),
+        "PreToolUse": [
+            { "matcher": "AskUserQuestion", "hooks": [hook("AskUserQuestion")] },
+            { "matcher": "ExitPlanMode", "hooks": [hook("ExitPlanMode")] }
+        ],
+        "Stop": plain("Stop"),
+        "StopFailure": plain("StopFailure"),
+        "SessionEnd": plain("SessionEnd")
+    });
+    serde_json::json!({ "hooks": hooks }).to_string()
+}
+
+/// `json` as one double-quoted argument for the remote login shell. Double
+/// quotes are the one quoting bash, zsh and fish agree on: `\"` and `\\`
+/// are the escapes, `$` and a backtick are escaped so nothing expands.
+pub fn ssh_settings_argument(json: &str) -> String {
+    let mut out = String::with_capacity(json.len() + 2);
+    out.push('"');
+    for c in json.chars() {
+        match c {
+            '"' | '\\' | '$' | '`' => {
+                out.push('\\');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The `--settings` argument for a Claude session over SSH (the flag on),
+/// or None for anything else. Nothing is written anywhere: the settings
+/// travel on the command line.
+pub(crate) fn ssh_signal_args(s: &Session) -> Option<(String, String)> {
+    if !s.launch_helper || s.ssh_info.is_none() || s.ai_provider.as_deref() != Some("claude") {
+        return None;
+    }
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let arg = format!(
+        "--settings {}",
+        ssh_settings_argument(&ssh_settings_json(&nonce))
+    );
+    Some((arg, nonce))
 }
 
 /// Build the launch plan for a session, or None when the provider has no
@@ -355,7 +632,14 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             .to_string_lossy()
             .to_string(),
     );
-    let signals = signal_setup(agent, input.hi, input.session_dir, &env);
+    let signals = signal_setup(
+        agent,
+        input.hi,
+        input.session_dir,
+        Path::new(input.cwd),
+        &env,
+        (input.stream_port, input.stream_secret),
+    );
     env.extend(signals.env.iter().map(|(k, v)| (k.clone(), v.clone())));
 
     // Claude reads a positional argument after --channels as another
@@ -462,7 +746,53 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         context_in_args: context_in_args && !resumes,
         nonce: input.nonce.to_string(),
         not_found_output,
+        git_excludes: signals.git_excludes,
+        stream: signals.stream,
+        confidence: agent.terminal.signals.confidence.clone(),
     })
+}
+
+/// Keep the hook files Hermes wrote into its own worktree out of git:
+/// append each pattern to `<git common dir>/info/exclude` unless it is
+/// there already. The user's tracked files and `.gitignore` are untouched.
+pub fn add_git_excludes(cwd: &Path, patterns: &[String]) -> std::io::Result<()> {
+    if patterns.is_empty() {
+        return Ok(());
+    }
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["rev-parse", "--git-common-dir"])
+        .output()?;
+    if !out.status.success() {
+        return Err(std::io::Error::other("not a git repository"));
+    }
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let common = if Path::new(&common).is_absolute() {
+        PathBuf::from(common)
+    } else {
+        cwd.join(common)
+    };
+    let info = common.join("info");
+    std::fs::create_dir_all(&info)?;
+    let exclude = info.join("exclude");
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    let present: std::collections::HashSet<&str> = existing.lines().map(str::trim).collect();
+    let mut text = existing.clone();
+    for pattern in patterns {
+        if present.contains(pattern.as_str()) {
+            continue;
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(pattern);
+        text.push('\n');
+    }
+    if text != existing {
+        std::fs::write(&exclude, text)?;
+    }
+    Ok(())
 }
 
 // ─── Locations ───────────────────────────────────────────────────────
@@ -536,9 +866,39 @@ pub(crate) struct PreparedLaunch {
     /// The shell-neutral line to type: `hi run <session id>`.
     pub line: String,
     pub context_in_args: bool,
+    pub watch: SignalWatch,
+}
+
+/// Everything the spool watcher needs for one launch.
+#[derive(Debug, Clone)]
+pub(crate) struct SignalWatch {
     pub session_dir: PathBuf,
     pub expects_start_signal: bool,
+    /// The nonce every spool line of this launch must carry.
     pub nonce: String,
+    /// Catalog agent id, for the events' `source`.
+    pub agent: String,
+    /// How sure a hook signal from this agent is.
+    pub confidence: crate::contract::Confidence,
+    pub stream: Option<StreamSpec>,
+}
+
+fn confidence_of(name: &str) -> crate::contract::Confidence {
+    match name {
+        "exact" => crate::contract::Confidence::Exact,
+        "signal" => crate::contract::Confidence::Signal,
+        _ => crate::contract::Confidence::Guessed,
+    }
+}
+
+/// A loopback port nothing listens on right now, for an agent's local
+/// event stream. 0 when none could be found (the agent then picks its own,
+/// and Hermes reads nothing).
+fn free_loopback_port() -> u16 {
+    std::net::TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .unwrap_or(0)
 }
 
 /// Write the launch file for a session and return the line to type, or None
@@ -570,6 +930,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
     };
     let new_session_id = uuid::Uuid::new_v4().to_string();
     let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let stream_secret = uuid::Uuid::new_v4().simple().to_string();
     let plan = plan_launch(&LaunchInput {
         session_id: &s.id,
         provider: &provider,
@@ -584,6 +945,8 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         session_dir: &session_dir,
         new_session_id: &new_session_id,
         nonce: &nonce,
+        stream_port: free_loopback_port(),
+        stream_secret: &stream_secret,
     })?;
 
     if let Err(e) = write_plan(&session_dir, &plan) {
@@ -610,6 +973,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         start_output_watch(&s.id, &plan.not_found_output, evidence, &plan.nonce);
     }
     s.vendor_session_id = plan.vendor_session_id.clone();
+    s.signal_nonce = Some(plan.nonce.clone());
     s.agent_startup = Some(AgentStartup {
         state: AgentStartupState::Launching,
         since: now(),
@@ -621,16 +985,33 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
     Some(PreparedLaunch {
         line: format!("hi run {}", s.id),
         context_in_args: plan.context_in_args,
-        session_dir,
-        expects_start_signal: plan.expects_start_signal,
-        nonce: plan.nonce,
+        watch: SignalWatch {
+            session_dir,
+            expects_start_signal: plan.expects_start_signal,
+            nonce: plan.nonce,
+            agent: plan.spec.agent.clone(),
+            confidence: confidence_of(&plan.confidence),
+            stream: plan.stream,
+        },
     })
 }
 
 fn write_plan(session_dir: &Path, plan: &LaunchPlan) -> std::io::Result<()> {
     std::fs::create_dir_all(session_dir)?;
     for (path, contents) in &plan.files {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         std::fs::write(path, contents)?;
+    }
+    if !plan.git_excludes.is_empty() {
+        if let Err(e) = add_git_excludes(Path::new(&plan.spec.cwd), &plan.git_excludes) {
+            log::warn!(
+                "[LAUNCH] could not exclude the hook files from git in {}: {}",
+                plan.spec.cwd,
+                e
+            );
+        }
     }
     let json = serde_json::to_string_pretty(&plan.spec)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -1113,25 +1494,61 @@ impl PromptGuess {
 
 /// Watch a session's signal spool from the launch until the agent process
 /// is gone (or the session is): start and end signals, the resume fallback,
-/// `hi run`'s own exit report, and the "no start signal yet" guess.
-pub(crate) fn watch_signals(
-    app: AppHandle,
-    session: Arc<StdMutex<Session>>,
-    session_dir: PathBuf,
-    expects_start_signal: bool,
-    nonce: String,
-) {
+/// `hi run`'s own exit report, and the "no start signal yet" guess. Every
+/// nonce-verified line also becomes the SessionEvents it means (F11), on
+/// the one channel the frontend store reads; sub-agent hooks move a
+/// counter that is reported as a `subagents` event.
+pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, watch: SignalWatch) {
+    let SignalWatch {
+        session_dir,
+        expects_start_signal,
+        nonce,
+        agent,
+        confidence,
+        stream,
+    } = watch;
+    let session_id = session.lock().map(|s| s.id.clone()).unwrap_or_default();
+    if let Some(stream) = stream {
+        super::opencode_stream::watch(app.clone(), Arc::clone(&session), stream, confidence);
+    }
     std::thread::spawn(move || {
+        use crate::contract::signal::{map_signal_record, parse_signal_line, subagent_delta};
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
         let mut watch = LaunchWatch::new(expects_start_signal);
         let mut guess = PromptGuess::new(Instant::now());
-        let session_id = session.lock().map(|s| s.id.clone()).unwrap_or_default();
+        let source = format!("hook:{agent}");
+        let mut subagents: i32 = 0;
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
             let mut changed = false;
             let mut stop = false;
             let mut guess_waiting = false;
+            // The events first (they do not need the session lock), so the
+            // store is right before the session list is.
+            for line in &lines {
+                let Ok(record) = parse_signal_line(line) else {
+                    continue;
+                };
+                for event in map_signal_record(&record, &nonce, confidence, &source) {
+                    crate::contract::emit_session_event(&app, &session_id, event);
+                }
+                if record.nonce == nonce {
+                    let delta = subagent_delta(&record);
+                    if delta != 0 {
+                        subagents = (subagents + delta).max(0);
+                        crate::contract::emit_session_event(
+                            &app,
+                            &session_id,
+                            crate::contract::SessionEvent::Subagents {
+                                at: record.ts.saturating_mul(1000),
+                                source: Some(source.clone()),
+                                running: subagents as u32,
+                            },
+                        );
+                    }
+                }
+            }
             if let Ok(mut s) = session.lock() {
                 if matches!(
                     s.phase,
@@ -1223,6 +1640,8 @@ mod tests {
             session_dir,
             new_session_id: "11111111-2222-4333-8444-555555555555",
             nonce: "n0nce",
+            stream_port: 4321,
+            stream_secret: "s3cret",
         }
     }
 
@@ -1260,7 +1679,8 @@ mod tests {
         assert_eq!(plan.spec.cwd, "/fixture-home/repo");
         assert_eq!(plan.spec.v, SPEC_VERSION);
 
-        // The settings file holds hooks only, both calling hi.
+        // The settings file holds hooks only, all calling hi in exec form
+        // (no shell), for every event the catalog names.
         let (path, contents) = &plan.files[0];
         assert_eq!(path, &dir.join("claude.settings.json"));
         let json: serde_json::Value = serde_json::from_str(contents).unwrap();
@@ -1268,13 +1688,319 @@ mod tests {
             json.as_object().unwrap().keys().collect::<Vec<_>>(),
             vec!["hooks"]
         );
-        let start = &json["hooks"]["SessionStart"][0]["hooks"][0];
-        assert_eq!(start["type"], "command");
+        let hooks = json["hooks"].as_object().unwrap();
+        let mut events: Vec<&String> = hooks.keys().collect();
+        events.sort();
         assert_eq!(
-            start["command"],
-            "\"/app/hi\" signal --agent claude --event SessionStart"
+            events,
+            vec![
+                "Notification",
+                "PermissionRequest",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "PreToolUse",
+                "SessionEnd",
+                "SessionStart",
+                "Stop",
+                "StopFailure",
+                "SubagentStart",
+                "SubagentStop",
+                "UserPromptSubmit",
+            ]
         );
-        assert!(json["hooks"]["SessionEnd"].is_array());
+        let start = &hooks["SessionStart"][0]["hooks"][0];
+        assert_eq!(start["type"], "command");
+        assert_eq!(start["command"], "/app/hi");
+        assert_eq!(
+            start["args"],
+            serde_json::json!(["signal", "--agent", "claude"])
+        );
+        assert_eq!(start["timeout"], 5);
+        assert!(hooks["SessionStart"][0].get("matcher").is_none());
+        // Tool hooks only for the tools Hermes reads; every notification.
+        assert_eq!(
+            hooks["PreToolUse"][0]["matcher"],
+            "AskUserQuestion|ExitPlanMode"
+        );
+        assert!(hooks["Notification"][0].get("matcher").is_none());
+        // Tool completions are only counted: Claude need not wait for them.
+        assert_eq!(hooks["PostToolUse"][0]["hooks"][0]["async"], true);
+        assert!(hooks["PermissionRequest"][0]["hooks"][0]
+            .get("async")
+            .is_none());
+        // Observe only: no hook is anything but `hi signal`, and nothing in
+        // the file could answer a permission.
+        for (event, entries) in hooks {
+            for hook in entries[0]["hooks"].as_array().unwrap() {
+                assert_eq!(hook["command"], "/app/hi", "{event}");
+                assert_eq!(hook["args"][0], "signal", "{event}");
+            }
+        }
+        for word in ["decision", "permissionDecision", "allow", "deny"] {
+            assert!(!contents.contains(word), "{word} in the settings file");
+        }
+    }
+
+    #[test]
+    fn copilot_gets_a_plugin_folder_and_opencode_a_port_and_password() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let plan = plan_launch(&input("copilot", None, hi, dir)).unwrap();
+        let plugin_dir = dir.join("copilot-plugin");
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w[0] == "--plugin-dir" && w[1] == plugin_dir.to_string_lossy()));
+        assert_eq!(plan.files[0].0, plugin_dir.join("hooks.json"));
+        let json: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
+        assert_eq!(json["version"], 1);
+        let hook = &json["hooks"]["notification"][0];
+        assert_eq!(hook["type"], "command");
+        assert_eq!(hook["exec"], "/app/hi");
+        assert_eq!(
+            hook["args"],
+            serde_json::json!(["signal", "--agent", "copilot", "--event", "notification"])
+        );
+        assert_eq!(hook["env"]["HERMES_SIGNAL_NONCE"], "n0nce");
+        assert_eq!(hook["timeoutSec"], 5);
+        assert!(json["hooks"]["agentStop"].is_array());
+        assert!(json["hooks"]["errorOccurred"].is_array());
+        assert!(json["hooks"]["sessionStart"].is_array());
+        assert_eq!(plan.confidence, "signal");
+        assert!(plan.stream.is_none());
+        assert!(plan.expects_start_signal);
+
+        let plan = plan_launch(&input("opencode", None, hi, dir)).unwrap();
+        assert!(plan.files.is_empty());
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w[0] == "--port" && w[1] == "4321"));
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w[0] == "--hostname" && w[1] == "127.0.0.1"));
+        assert_eq!(plan.spec.env["OPENCODE_SERVER_PASSWORD"], "s3cret");
+        assert_eq!(
+            plan.stream,
+            Some(StreamSpec {
+                port: 4321,
+                secret: "s3cret".into()
+            })
+        );
+        assert_eq!(plan.confidence, "exact");
+    }
+
+    #[test]
+    fn gemini_defaults_switch_notifications_on_and_hook_every_catalog_event() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let plan = plan_launch(&input("gemini", None, hi, dir)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
+        assert_eq!(json["general"]["enableNotifications"], true);
+        assert_eq!(json["general"]["notificationMethod"], "osc9");
+        let hooks = json["hooks"].as_object().unwrap();
+        let mut events: Vec<&String> = hooks.keys().collect();
+        events.sort();
+        assert_eq!(
+            events,
+            vec!["AfterAgent", "BeforeAgent", "Notification", "SessionEnd"]
+        );
+        let n = &hooks["Notification"][0]["hooks"][0];
+        assert_eq!(
+            n["command"],
+            "\"/app/hi\" signal --agent gemini --event Notification"
+        );
+        assert_eq!(n["name"], "hermes-notification");
+        assert_eq!(n["env"]["HERMES_SESSION_ID"], "hermes-1");
+    }
+
+    /// Antigravity and goose take no per-launch flag: the hook file goes
+    /// into the folder the agent runs in, only when it is a worktree Hermes
+    /// made, and git is told to ignore it there.
+    #[test]
+    fn worktree_file_agents_get_hooks_only_inside_a_hermes_worktree_and_git_ignores_them() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        // The user's own checkout: nothing is written there.
+        let plain = plan_launch(&input("antigravity", None, hi, dir)).unwrap();
+        assert!(plain.files.is_empty());
+        assert!(plain.git_excludes.is_empty());
+        assert_eq!(plain.spec.args, Vec::<String>::new());
+
+        // A Hermes-owned worktree (a real git repository, so the exclude
+        // file can be written and checked).
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp
+            .path()
+            .join("hermes-worktrees")
+            .join("abc")
+            .join("s1_task");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        // A hooks file the repository already carries is merged, not replaced.
+        std::fs::create_dir_all(repo.join(".agents")).unwrap();
+        std::fs::write(
+            repo.join(".agents/hooks.json"),
+            r#"{"team-lint":{"enabled":true,"PostToolUse":[{"hooks":[{"type":"command","command":"lint"}]}]}}"#,
+        )
+        .unwrap();
+        let cwd = repo.to_string_lossy().to_string();
+        let mut inp = input("antigravity", None, hi, dir);
+        inp.cwd = &cwd;
+        let plan = plan_launch(&inp).unwrap();
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].0, repo.join(".agents/hooks.json"));
+        let json: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
+        assert_eq!(
+            json["team-lint"]["enabled"], true,
+            "the repository's own entry survives"
+        );
+        assert_eq!(json["hermes-signal"]["enabled"], true);
+        assert_eq!(
+            json["hermes-signal"]["Stop"][0]["hooks"][0]["command"],
+            "\"/app/hi\" signal --agent antigravity --event Stop"
+        );
+        assert!(json["hermes-signal"]["PreToolUse"].is_array());
+        assert_eq!(plan.git_excludes, vec![".agents/hooks.json".to_string()]);
+        assert!(!plan.expects_start_signal);
+
+        // Writing the plan writes the file and excludes it from git.
+        write_plan(&tmp.path().join("launch").join("hermes-1"), &plan).unwrap();
+        let written: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.join(".agents/hooks.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(written.get("hermes-signal").is_some());
+        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert!(
+            exclude.lines().any(|l| l == ".agents/hooks.json"),
+            "{exclude}"
+        );
+        assert_eq!(git(&["status", "--porcelain"]), "", "git sees nothing new");
+        // A second launch does not duplicate the exclude line.
+        write_plan(&tmp.path().join("launch").join("hermes-1"), &plan).unwrap();
+        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude.matches(".agents/hooks.json").count(), 1);
+
+        // goose: its own plugin folder, excluded as a folder.
+        let mut inp = input("goose", None, hi, dir);
+        inp.cwd = &cwd;
+        let goose = plan_launch(&inp).unwrap();
+        assert_eq!(
+            goose.files[0].0,
+            repo.join(".agents/plugins/hermes-signal/hooks/hooks.json")
+        );
+        let json: serde_json::Value = serde_json::from_str(&goose.files[0].1).unwrap();
+        assert_eq!(
+            json["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "\"/app/hi\" signal --agent goose --event Stop"
+        );
+        assert_eq!(
+            goose.git_excludes,
+            vec![".agents/plugins/hermes-signal/".to_string()]
+        );
+        write_plan(&tmp.path().join("launch").join("hermes-2"), &goose).unwrap();
+        assert_eq!(git(&["status", "--porcelain"]), "");
+        assert_eq!(goose.confidence, "guessed");
+    }
+
+    /// Claude over SSH: the settings travel on the command line and every
+    /// hook prints the nonce-tagged marker through `printf`, in exec form.
+    #[test]
+    fn ssh_settings_print_nonce_tagged_markers_and_quote_for_every_login_shell() {
+        let json = ssh_settings_json("n0nce");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let hooks = v["hooks"].as_object().unwrap();
+        let mut events: Vec<&String> = hooks.keys().collect();
+        events.sort();
+        assert_eq!(
+            events,
+            vec![
+                "PermissionRequest",
+                "PreToolUse",
+                "SessionEnd",
+                "SessionStart",
+                "Stop",
+                "StopFailure",
+                "UserPromptSubmit"
+            ]
+        );
+        let stop = &hooks["Stop"][0]["hooks"][0];
+        assert_eq!(stop["command"], "printf");
+        assert_eq!(stop["args"][0], "%s");
+        let printed: serde_json::Value =
+            serde_json::from_str(stop["args"][1].as_str().unwrap()).unwrap();
+        assert_eq!(
+            printed["terminalSequence"],
+            "\u{1b}]777;notify;hermes-signal;v1:n0nce:Stop\u{7}"
+        );
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], "AskUserQuestion");
+        assert_eq!(hooks["PreToolUse"][1]["matcher"], "ExitPlanMode");
+        assert!(
+            !json.contains('\''),
+            "no single quote: the argument is double-quoted"
+        );
+        for word in ["decision", "permissionDecision", "allow", "deny"] {
+            assert!(!json.contains(word));
+        }
+
+        let arg = ssh_settings_argument(&json);
+        assert!(arg.starts_with('"') && arg.ends_with('"'));
+        // What a POSIX login shell hands Claude is the JSON itself.
+        #[cfg(unix)]
+        {
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("printf %s {arg}"))
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout), json);
+            // And the hook, run as Claude runs it, prints the marker.
+            let out = std::process::Command::new("printf")
+                .arg("%s")
+                .arg(stop["args"][1].as_str().unwrap())
+                .output()
+                .unwrap();
+            let printed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert!(printed["terminalSequence"]
+                .as_str()
+                .unwrap()
+                .contains("hermes-signal;v1:n0nce:Stop"));
+        }
+        let mut s = test_session();
+        assert!(ssh_signal_args(&s).is_none(), "local sessions use hi");
+        s.ssh_info = Some(super::super::models::SshConnectionInfo {
+            host: "h".into(),
+            user: "u".into(),
+            port: 22,
+            tmux_session: None,
+            identity_file: None,
+            jump_host: None,
+            port_forwards: Vec::new(),
+        });
+        let (arg, nonce) = ssh_signal_args(&s).unwrap();
+        assert!(arg.starts_with("--settings \""));
+        assert!(arg.contains(&format!("v1:{nonce}:PermissionRequest")));
+        s.launch_helper = false;
+        assert!(ssh_signal_args(&s).is_none(), "the flag gates it");
     }
 
     #[test]
@@ -1520,12 +2246,15 @@ mod tests {
             .unwrap()
             .ends_with(NOT_FOUND_EVIDENCE_FILE));
         assert!(json["env"]["HERMES_SIGNAL_FILE"].is_string());
-        // Hook command paths use forward slashes so cmd, PowerShell and bash
-        // all accept them inside quotes.
+        // Hook paths use forward slashes; exec form needs no quoting at all.
         let settings: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
         assert_eq!(
             settings["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            "\"C:/Program Files/Hermes/hi.exe\" signal --agent claude --event SessionStart"
+            "C:/Program Files/Hermes/hi.exe"
+        );
+        assert_eq!(
+            settings["hooks"]["SessionStart"][0]["hooks"][0]["args"],
+            serde_json::json!(["signal", "--agent", "claude"])
         );
     }
 
@@ -2014,6 +2743,7 @@ mod tests {
             vendor_session_id: None,
             agent_startup: None,
             launch_helper: true,
+            signal_nonce: None,
         }
     }
 }

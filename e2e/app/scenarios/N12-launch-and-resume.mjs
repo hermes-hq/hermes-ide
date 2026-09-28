@@ -486,7 +486,10 @@ try {
   assert(settingsFile && settingsFile.startsWith(join(app.dataDir, "launch", s1)), `the settings file lives under the app's data folder (${settingsFile})`);
   assert(rec1.settings && Object.keys(rec1.settings).join() === "hooks", "the settings file holds hooks and nothing else");
   const startHook = rec1.settings.hooks.SessionStart?.[0]?.hooks?.[0];
-  assert(startHook?.type === "command" && /\bhi(\.exe)?" signal --agent claude --event SessionStart$/.test(startHook.command), `the SessionStart hook calls hi signal ("${startHook?.command}")`);
+  assert(
+    startHook?.type === "command" && /\bhi(\.exe)?$/.test(startHook.command) && JSON.stringify(startHook.args) === JSON.stringify(["signal", "--agent", "claude"]),
+    `the SessionStart hook calls hi signal in exec form ("${startHook?.command}" ${JSON.stringify(startHook?.args)})`,
+  );
   assert(rec1.env.HERMES_SESSION_ID === s1, "HERMES_SESSION_ID is the Hermes session id");
   assert(rec1.env.HERMES_AGENT === "claude", "HERMES_AGENT names the agent");
   assert(typeof rec1.env.HERMES_SIGNAL_FILE === "string" && rec1.env.HERMES_SIGNAL_FILE.endsWith("signals.ndjson"), "HERMES_SIGNAL_FILE points at the session's signal spool");

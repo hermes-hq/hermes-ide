@@ -109,7 +109,8 @@
         "turn_end",
         "error",
         "exited",
-        "session_start"
+        "session_start",
+        "subagents"
       ]
     },
     "signals": {

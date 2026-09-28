@@ -13,7 +13,16 @@
 //     the hook's stdin, the same shape Claude Code sends) — but only after a
 //     startup prompt was answered, when it shows one;
 //   - then behaves as a small TUI: echoes keys, `q` or Ctrl-C quits (running
-//     the `SessionEnd` hooks first).
+//     the `SessionEnd` hooks first). Hooks run in exec form (`args`) or
+//     through the shell, with matchers, as Claude Code runs them.
+//
+// One key per thing a real agent does, so a test can drive every signal
+// path (F11): `p` PermissionRequest then y/n (PostToolUse / PermissionDenied),
+// `?` PreToolUse AskUserQuestion, `t` PreToolUse Bash (no matcher hit),
+// `l` PreToolUse ExitPlanMode, `w` UserPromptSubmit, `s` Stop, `e` StopFailure,
+// `u`/`d` SubagentStart/SubagentStop, `n` Notification idle_prompt,
+// `o` an OSC 9 notification (no hook), `m` the OSC 777 Hermes marker with this
+// launch's nonce, `x` the same marker with a forged nonce.
 //
 // Behaviour is chosen per launch with HERMES_FAKE_MODE, or the file
 // `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches).
@@ -224,11 +233,26 @@ function nextKey() {
 
 // ─── Hooks (the settings file's `hooks` block, Claude Code shape) ────
 
-function hookCommands(event) {
+/**
+ * The command hooks configured for `event`. Like Claude Code, an entry's
+ * `matcher` (absent, "" or "*": everything; otherwise a regex, or exact
+ * names joined by "|") is tested against the tool name for tool events.
+ */
+function hookCommands(event, matchContext = "") {
 	const groups = settings?.hooks?.[event];
 	if (!Array.isArray(groups)) return [];
 	const cmds = [];
 	for (const g of groups) {
+		const matcher = typeof g?.matcher === "string" ? g.matcher.trim() : "";
+		if (matcher && matcher !== "*") {
+			let matches = false;
+			try {
+				matches = new RegExp(`^(?:${matcher})$`).test(matchContext);
+			} catch {
+				matches = matcher.split("|").map((m) => m.trim()).includes(matchContext);
+			}
+			if (!matches) continue;
+		}
 		for (const h of g?.hooks ?? []) {
 			if (h && h.type === "command" && typeof h.command === "string") cmds.push(h);
 		}
@@ -236,10 +260,20 @@ function hookCommands(event) {
 	return cmds;
 }
 
+/**
+ * Run one hook the way Claude Code does: exec form (`args` present) spawns
+ * the command directly with no shell; otherwise the command string goes
+ * through the shell. The JSON payload is on stdin; stdout is recorded so a
+ * test can see that the hook printed nothing (Hermes never answers a hook).
+ */
 function runHook(hook, payload) {
 	return new Promise((resolve) => {
 		const timeoutMs = Math.max(1, Number(hook.timeout) || 5) * 1000;
-		const child = spawn(hook.command, { shell: true, stdio: ["pipe", "pipe", "pipe"], env: process.env, cwd: process.cwd() });
+		const exec = Array.isArray(hook.args);
+		const child = exec
+			? spawn(hook.command, hook.args, { shell: false, stdio: ["pipe", "pipe", "pipe"], env: process.env, cwd: process.cwd() })
+			: spawn(hook.command, { shell: true, stdio: ["pipe", "pipe", "pipe"], env: process.env, cwd: process.cwd() });
+		const started = Date.now();
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (d) => (stdout += d));
@@ -247,11 +281,11 @@ function runHook(hook, payload) {
 		const timer = setTimeout(() => child.kill(), timeoutMs);
 		child.on("close", (code) => {
 			clearTimeout(timer);
-			resolve({ command: hook.command, code, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 500) });
+			resolve({ command: hook.command, args: exec ? hook.args : undefined, exec, code, ms: Date.now() - started, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 500) });
 		});
 		child.on("error", (e) => {
 			clearTimeout(timer);
-			resolve({ command: hook.command, code: null, error: String(e.message || e) });
+			resolve({ command: hook.command, args: exec ? hook.args : undefined, exec, code: null, error: String(e.message || e) });
 		});
 		child.stdin.end(JSON.stringify(payload));
 	});
@@ -267,11 +301,18 @@ async function runHooks(event, extra = {}) {
 		...extra,
 	};
 	const results = [];
-	for (const hook of hookCommands(event)) results.push(await runHook(hook, payload));
-	record.hooksRan.push({ event, results });
+	for (const hook of hookCommands(event, typeof extra.tool_name === "string" ? extra.tool_name : "")) results.push(await runHook(hook, payload));
+	record.hooksRan.push({ event, tool: extra.tool_name, results });
 	note("hooks", { event, count: results.length });
 	return results;
 }
+
+// ─── Terminal notifications (the fallback path, no hook involved) ────
+
+const BEL = "\x07";
+const nonceFromEnv = () => process.env.HERMES_SIGNAL_NONCE || "";
+/** The in-band marker a Hermes hook makes Claude print over SSH. */
+const marker = (nonce, event) => `${ESC}]777;notify;hermes-signal;v1:${nonce}:${event}${BEL}`;
 
 // ─── Behaviour ───────────────────────────────────────────────────────
 
@@ -361,6 +402,85 @@ async function main() {
 		if (key === "q") {
 			await quit("q");
 			return;
+		}
+		// One key per thing a real agent does, so a test can drive every
+		// signal path (see the header comment).
+		switch (key) {
+			case "p": {
+				out("\r\nfake-cli: asking permission for Bash: rm -rf node_modules  [y/n]\r\n");
+				await runHooks("PermissionRequest", { tool_name: "Bash", tool_input: { command: "rm -rf node_modules" } });
+				for (;;) {
+					const answer = await nextKey();
+					if (answer === null || answer === "\x03") {
+						await quit("interrupted-at-permission");
+						return;
+					}
+					if (answer === "y" || answer === "Y") {
+						out("fake-cli: allowed\r\n");
+						await runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "rm -rf node_modules" }, tool_response: {} });
+						break;
+					}
+					if (answer === "n" || answer === "N") {
+						out("fake-cli: denied\r\n");
+						await runHooks("PermissionDenied", { tool_name: "Bash" });
+						break;
+					}
+				}
+				continue;
+			}
+			case "?":
+				out("\r\nfake-cli: asking a question\r\n");
+				await runHooks("PreToolUse", { tool_name: "AskUserQuestion", tool_input: { questions: [] } });
+				continue;
+			case "t":
+				out("\r\nfake-cli: running an ordinary tool\r\n");
+				await runHooks("PreToolUse", { tool_name: "Bash", tool_input: { command: "ls" } });
+				continue;
+			case "l":
+				out("\r\nfake-cli: plan ready\r\n");
+				await runHooks("PreToolUse", { tool_name: "ExitPlanMode", tool_input: {} });
+				continue;
+			case "w":
+				out("\r\nfake-cli: prompt submitted\r\n");
+				await runHooks("UserPromptSubmit", { prompt: "hello" });
+				continue;
+			case "s":
+				out("\r\nfake-cli: turn done\r\n");
+				await runHooks("Stop", { stop_hook_active: false, last_assistant_message: "done" });
+				continue;
+			case "e":
+				out("\r\nfake-cli: turn failed\r\n");
+				await runHooks("StopFailure", { error: "rate_limit", error_details: "429 Too Many Requests" });
+				continue;
+			case "u":
+				out("\r\nfake-cli: sub-agent started\r\n");
+				await runHooks("SubagentStart", { agent_id: "sub-1", agent_type: "Explore" });
+				continue;
+			case "d":
+				out("\r\nfake-cli: sub-agent stopped\r\n");
+				await runHooks("SubagentStop", { agent_id: "sub-1", agent_type: "Explore", last_assistant_message: "found it" });
+				continue;
+			case "n":
+				out("\r\nfake-cli: idle notification\r\n");
+				await runHooks("Notification", { notification_type: "idle_prompt", message: "Claude is waiting for your input", title: "Claude Code" });
+				continue;
+			case "o":
+				// A vendor notification, as any program could print it.
+				out(`\r\nfake-cli: printing an OSC 9 notification\r\n${ESC}]9;Approval requested: rm -rf node_modules${BEL}`);
+				note("osc9");
+				continue;
+			case "m":
+				// The in-band marker with this launch's nonce (Claude over SSH).
+				out(`\r\nfake-cli: printing the Hermes marker\r\n${marker(nonceFromEnv(), "Stop")}`);
+				note("marker", { nonce: "env" });
+				continue;
+			case "x":
+				// The same marker with a nonce Hermes never minted.
+				out(`\r\nfake-cli: printing a forged marker\r\n${marker("deadbeefdeadbeef", "PermissionRequest")}`);
+				note("marker", { nonce: "forged" });
+				continue;
+			default:
+				break;
 		}
 		if (key === "\r") out("\r\n");
 		else if (key >= " ") out(key);

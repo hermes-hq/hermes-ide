@@ -272,6 +272,12 @@ pub struct Session {
     /// `launchHelper`) instead of typing the vendor command into the shell.
     #[serde(skip)]
     pub launch_helper: bool,
+    /// The per-launch secret the agent's signals must carry (F11). Set when
+    /// the launch configured the agent's hooks; an in-band terminal marker
+    /// (`OSC 777 ... hermes-signal;v1:<nonce>:<Event>`) is only exact when
+    /// it carries this nonce.
+    #[serde(skip)]
+    pub signal_nonce: Option<String>,
     /// Deferred nudge: stored when context is applied while the agent is busy.
     /// Delivered when the session phase transitions to NeedsInput.
     #[serde(skip)]

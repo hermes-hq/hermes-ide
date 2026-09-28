@@ -3,6 +3,8 @@ pub mod analyzer;
 pub mod commands;
 pub mod launch;
 pub mod models;
+pub mod opencode_stream;
+pub mod osc_signals;
 pub mod patterns;
 pub mod shell_integration;
 pub mod spawn;

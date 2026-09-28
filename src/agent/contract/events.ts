@@ -62,6 +62,12 @@ export interface ExitEvent extends EventBase {
   readonly signal: string | null;
 }
 
+/** F11 (additive): how many sub-agents the agent has running right now. */
+export interface SubagentsEvent extends EventBase {
+  readonly type: "subagents";
+  readonly running: number;
+}
+
 export type SessionEvent =
   | StatusEvent
   | TurnStartEvent
@@ -70,7 +76,8 @@ export type SessionEvent =
   | TurnInterruptedEvent
   | AttentionEvent
   | IdentityEvent
-  | ExitEvent;
+  | ExitEvent
+  | SubagentsEvent;
 
 export type SessionEventType = SessionEvent["type"];
 
@@ -83,6 +90,7 @@ export const SESSION_EVENT_TYPES: readonly SessionEventType[] = [
   "attention",
   "identity",
   "exit",
+  "subagents",
 ];
 
 function optionalString(v: unknown): string | null | undefined {
@@ -140,6 +148,11 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       if (code !== null && !(typeof code === "number" && Number.isInteger(code) && code >= -2147483648 && code <= 2147483647)) return null;
       if (signal !== null && typeof signal !== "string") return null;
       return { ...base, type: "exit", code, signal };
+    }
+    case "subagents": {
+      const running = v.running;
+      if (typeof running !== "number" || !Number.isInteger(running) || running < 0 || running > 4294967295) return null;
+      return { ...base, type: "subagents", running };
     }
     default:
       return null;

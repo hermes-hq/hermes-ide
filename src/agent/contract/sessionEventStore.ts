@@ -40,6 +40,8 @@ export interface SessionEventSnapshot {
   /** The last attention detail, or null when none was raised. */
   readonly attention: string | null;
   readonly exit: { readonly code: number | null; readonly signal: string | null } | null;
+  /** Sub-agents the agent reports as running (F11); 0 when none or unknown. */
+  readonly subagents: number;
   /** The most recent events, oldest first, at most SESSION_EVENT_CAP. */
   readonly events: readonly SessionEvent[];
   /** Bumps on every accepted event; 0 for a session nothing reported on. */
@@ -57,6 +59,7 @@ function emptySnapshot(sessionId: string): SessionEventSnapshot {
     turn: NO_TURN,
     attention: null,
     exit: null,
+    subagents: 0,
     events: Object.freeze([]) as readonly SessionEvent[],
     version: 0,
   });
@@ -87,8 +90,12 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
     case "identity":
       next.identity = { vendorSessionId: event.vendorSessionId, model: event.model, permissionMode: event.permissionMode };
       break;
+    case "subagents":
+      next.subagents = event.running;
+      break;
     case "exit":
       next.exit = { code: event.code, signal: event.signal };
+      next.subagents = 0;
       // The detail stays empty on purpose: the store holds no user-facing
       // text. A renderer (F10) builds the line from `snapshot.exit` with the
       // localised agentError.exitCode / agentError.exitSignal strings.

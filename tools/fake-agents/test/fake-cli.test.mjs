@@ -268,4 +268,61 @@ describe("fake vendor CLI", () => {
 		expect(res.stdout).not.toContain("ready");
 		expect(records(dir)[0].exit.why).toBe("declined-trust");
 	});
+
+	it("runs exec-form hooks without a shell, honours matchers, and drives every signal path by key (F11)", async () => {
+		const dir = tmp();
+		const marks = join(dir, "hooks.log");
+		const script = join(dir, "hook.mjs");
+		writeFileSync(
+			script,
+			[
+				"import fs from 'node:fs';",
+				"let s=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',(d)=>s+=d);",
+				`process.stdin.on('end',()=>{const p=JSON.parse(s); fs.appendFileSync(${JSON.stringify(marks)}, process.argv.slice(2).join(' ')+' '+p.hook_event_name+' '+(p.tool_name||'')+'\\n');});`,
+			].join("\n"),
+		);
+		// Exec form: `command` is the program, `args` its arguments; a matcher
+		// narrows PreToolUse to two tools, like the file Hermes writes.
+		const hook = (...args) => ({ type: "command", command: process.execPath, args: [script, ...args], timeout: 5 });
+		const file = join(dir, "settings.json");
+		writeFileSync(
+			file,
+			JSON.stringify({
+				hooks: {
+					SessionStart: [{ hooks: [hook("signal")] }],
+					PreToolUse: [{ matcher: "AskUserQuestion|ExitPlanMode", hooks: [hook("signal")] }],
+					PermissionRequest: [{ hooks: [hook("signal")] }],
+					PostToolUse: [{ hooks: [hook("signal")] }],
+					Stop: [{ hooks: [hook("signal")] }],
+					SubagentStart: [{ hooks: [hook("signal")] }],
+					SessionEnd: [{ hooks: [hook("signal")] }],
+				},
+			}),
+		);
+		const res = await run(["--session-id", "k-1", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_SIGNAL_NONCE: "n0nce" },
+			keys: "pyt?usomxq",
+			afterMs: 600,
+		});
+		expect(res.code).toBe(0);
+		const log = readFileSync(marks, "utf8").split("\n").filter((l) => l !== "");
+		expect(log).toEqual([
+			"signal SessionStart ",
+			"signal PermissionRequest Bash",
+			"signal PostToolUse Bash",
+			"signal PreToolUse AskUserQuestion",
+			"signal SubagentStart ",
+			"signal Stop ",
+			"signal SessionEnd ",
+		]);
+		const rec = records(dir)[0];
+		// `t` (PreToolUse Bash) reached the fake but matched no hook.
+		expect(rec.hooksRan.find((h) => h.event === "PreToolUse" && h.tool === "Bash").results).toEqual([]);
+		expect(rec.hooksRan.every((h) => h.results.every((r) => r.exec === true && r.code === 0))).toBe(true);
+		// The notification and the markers went to the terminal, not to a hook.
+		expect(res.stdout).toContain("\x1b]9;Approval requested: rm -rf node_modules\x07");
+		expect(res.stdout).toContain("\x1b]777;notify;hermes-signal;v1:n0nce:Stop\x07");
+		expect(res.stdout).toContain("\x1b]777;notify;hermes-signal;v1:deadbeefdeadbeef:PermissionRequest\x07");
+		expect(rec.events.filter((e) => e.ev === "marker").map((e) => e.nonce)).toEqual(["env", "forged"]);
+	});
 });
