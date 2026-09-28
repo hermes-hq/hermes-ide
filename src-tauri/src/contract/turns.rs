@@ -29,7 +29,9 @@ pub struct Turn {
     pub ended_at: Option<i64>,
     pub diffstat: Diffstat,
     /// Done-When result at the end of this turn (F27, additive): None when
-    /// no check ran. F20 fills it from `crate::done_when::checks_for_turn`.
+    /// no check ran. F20 fills it from the frontend's Done-When store
+    /// (`checksForTurn` in `src/doneWhen/store.ts`), the one place that
+    /// knows which turn a Stop-hook report belongs to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checks: Option<TurnChecks>,
 }

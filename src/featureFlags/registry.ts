@@ -49,7 +49,7 @@ export const FEATURE_FLAGS = [
     id: "launchHelper",
     label: "Launch helper (hi run)",
     description:
-      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt. Also Done-When checks: the repository's done_when commands run when a turn ends (Claude is sent back while they fail, at most 3 times) and a chip shows the result.",
+      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt. Also Done-When checks: a repository's done_when commands run on their own when a turn ends, like its hooks do (Claude is sent back while they fail, at most 3 times and within 30 minutes of retrying), and a chip shows the result.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

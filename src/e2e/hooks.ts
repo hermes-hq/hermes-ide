@@ -21,6 +21,7 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
 import { checksForTurn, getDoneWhenSnapshot } from "../doneWhen/store";
+import { sendFailuresBack } from "../doneWhen/controller";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -129,6 +130,9 @@ const hooks = {
   // ── F27 Done-When: what the chip reads, and the result kept per turn ──
   doneWhenSnapshot: (sessionId: string) => getDoneWhenSnapshot(sessionId),
   doneWhenForTurn: (sessionId: string, n: number) => checksForTurn(sessionId, n),
+  /** What "Send failures back" does when clicked now (F27 step 7 asks with
+   *  no agent running, where it must refuse). */
+  doneWhenSendBack: (sessionId: string) => sendFailuresBack(sessionId),
 };
 
 export type HermesE2EHooks = typeof hooks;
