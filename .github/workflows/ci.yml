@@ -383,6 +383,7 @@ jobs:
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs F09-isolation-edge-cases.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
             node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N13-interrupted-resume.mjs || fail=1
             exit "$fail"
           '
 
@@ -402,6 +403,7 @@ jobs:
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs F09-isolation-edge-cases.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
           node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N13-interrupted-resume.mjs || fail=1
           exit "$fail"
 
       # F05: a focused terminal keeps Ctrl+letter. Real OS key presses

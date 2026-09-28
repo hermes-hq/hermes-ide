@@ -421,6 +421,11 @@ features:
       N12-3:
         text: "Hermes never writes to the vendor's global config"
         scenarios: [N12-launch-and-resume.mjs]
+      N12-4:
+        # Review finding: the report was only ever cleared by a start or end
+        # signal, so an agent that went on without one stayed "waiting".
+        text: "The startup-prompt report clears when the prompt is answered, even when the agent sends no start signal, and when the agent exits"
+        scenarios: [N13-interrupted-resume.mjs, N12-launch-and-resume.mjs]
   N13:
     name: "Resume every agent after a restart or crash"
     # partial: N13-2 is covered indirectly (a restored plain terminal keeps
@@ -439,6 +444,11 @@ features:
       N13-3:
         text: "A failed resume prints one line and starts a new conversation"
         scenarios: [N12-launch-and-resume.mjs]
+      N13-4:
+        # Only the vendor's own "no such conversation" (catalog: exit code and
+        # message) replaces a conversation; an interrupt never does.
+        text: "Ctrl-C at a resumed agent's startup prompt keeps the conversation: the next launch resumes the same one"
+        scenarios: [N13-interrupted-resume.mjs]
   C0:
     name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
     # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).

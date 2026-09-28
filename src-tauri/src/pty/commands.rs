@@ -1255,6 +1255,7 @@ pub fn create_session(
                             break;
                         }
                         let data = &buf[..n];
+                        crate::pty::launch::observe_output(&event_session_id, data);
 
                         if let Ok(mut a) = analyzer_clone.lock() {
                             a.process(data);
@@ -1672,6 +1673,7 @@ fn enumerate_child_pids(parent_pid: u32) -> Vec<u32> {
 
 #[tauri::command]
 pub fn write_to_session(
+    app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
     data: String,
@@ -1699,6 +1701,14 @@ pub fn write_to_session(
         w.write_all(&bytes)
             .map_err(|e| format!("Write failed: {}", e))?;
         w.flush().map_err(|e| format!("Flush failed: {}", e))?;
+    }
+
+    // A key typed at an agent's startup prompt answers it: the "waiting at
+    // a startup prompt" report must not outlive the prompt.
+    if let Ok(mut s) = session.session.lock() {
+        if crate::pty::launch::note_user_input(&mut s, &bytes) {
+            let _ = app.emit("session-updated", SessionUpdate::from(&*s));
+        }
     }
 
     // ── Direct SIGINT delivery (macOS/Unix) ──

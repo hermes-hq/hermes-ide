@@ -157,6 +157,70 @@ describe("fake vendor CLI", () => {
 		expect(code).toBe(0);
 	});
 
+	it("Ctrl-C at the trust prompt exits 130 (or 1 with interrupt-exit-1) without a hook or a not-found message", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir);
+		const env = { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "trust-prompt" };
+		const res = await run(["--resume", "old-1", "--settings", file], { env, keys: "\x03" });
+		expect(res.code).toBe(130);
+		expect(res.stdout).toContain("Do you trust the files in this folder?");
+		expect(res.stdout).not.toContain("ready");
+
+		const res1 = await run(["--resume", "old-1", "--settings", file], {
+			env: { ...env, HERMES_FAKE_MODE: "trust-prompt interrupt-exit-1" },
+			keys: "\x03",
+		});
+		expect(res1.code).toBe(1);
+		expect(res1.stdout + res1.stderr).not.toContain("No conversation found");
+		let hookLog = "";
+		try {
+			hookLog = readFileSync(marks, "utf8");
+		} catch {
+			/* no hook ran: no file */
+		}
+		expect(hookLog).toBe("");
+		expect(records(dir).map((r) => r.exit.why).sort()).toEqual(["ctrl-c-at-trust-prompt", "ctrl-c-at-trust-prompt"]);
+	});
+
+	it.skipIf(process.platform === "win32")("SIGINT at the trust prompt is the same as the key", async () => {
+		const dir = tmp();
+		const child = spawn(process.execPath, [FAKE, "--resume", "old-1"], {
+			env: { ...process.env, HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "trust-prompt interrupt-exit-1" },
+		});
+		let stdout = "";
+		child.stdout.on("data", (d) => (stdout += d));
+		await new Promise((r) => setTimeout(r, 800));
+		expect(stdout).toContain("Do you trust the files in this folder?");
+		child.kill("SIGINT");
+		const code = await new Promise((r) => child.on("close", r));
+		expect(code).toBe(1);
+		expect(records(dir)[0].exit.why).toBe("sigint-at-trust-prompt");
+	});
+
+	it("no-start-hook: past the prompt it starts without running the SessionStart hook", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir);
+		const child = spawn(process.execPath, [FAKE, "--session-id", "t-3", "--settings", file], {
+			env: { ...process.env, HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "trust-prompt no-start-hook" },
+		});
+		let stdout = "";
+		child.stdout.on("data", (d) => (stdout += d));
+		await new Promise((r) => setTimeout(r, 800));
+		child.stdin.write("y");
+		await new Promise((r) => setTimeout(r, 1000));
+		expect(stdout).toContain("fake-cli: ready");
+		let hookLog = "";
+		try {
+			hookLog = readFileSync(marks, "utf8");
+		} catch {
+			/* no hook ran: no file */
+		}
+		expect(hookLog).not.toContain("SessionStart");
+		child.stdin.write("q");
+		expect(await new Promise((r) => child.on("close", r))).toBe(0);
+		expect(records(dir)[0].events.map((e) => e.ev)).toContain("start-hook-skipped");
+	});
+
 	it("declining the trust prompt exits without starting", async () => {
 		const dir = tmp();
 		const res = await run(["--session-id", "t-2"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "trust-prompt" }, keys: "n" });

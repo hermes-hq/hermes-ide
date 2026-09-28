@@ -12,7 +12,11 @@
       "channel": "stable",
       "terminal": {
         "argv": ["claude"],
-        "resume": { "by_id": ["--resume", "{session_id}"], "latest": ["--continue"] },
+        "resume": {
+          "by_id": ["--resume", "{session_id}"],
+          "latest": ["--continue"],
+          "not_found": { "exit_codes": [1], "output": ["No conversation found with session ID"] }
+        },
         "new_session_id": ["--session-id", "{session_id}"],
         "initial_prompt": ["{prompt}"],
         "signals": {
@@ -61,7 +65,11 @@
       "channel": "stable",
       "terminal": {
         "argv": ["codex"],
-        "resume": { "by_id": ["resume", "{session_id}"], "latest": ["resume", "--last"] },
+        "resume": {
+          "by_id": ["resume", "{session_id}"],
+          "latest": ["resume", "--last"],
+          "not_found": { "output": ["No saved session found with ID"] }
+        },
         "new_session_id": null,
         "initial_prompt": ["{prompt}"],
         "signals": {
@@ -149,7 +157,11 @@
       "channel": "stable",
       "terminal": {
         "argv": ["gemini"],
-        "resume": { "by_id": ["--resume", "{session_id}"], "latest": ["--resume", "latest"] },
+        "resume": {
+          "by_id": ["--resume", "{session_id}"],
+          "latest": ["--resume", "latest"],
+          "not_found": { "exit_codes": [42], "output": ["Error resuming session"] }
+        },
         "new_session_id": ["--session-id", "{session_id}"],
         "initial_prompt": ["{prompt}"],
         "signals": {

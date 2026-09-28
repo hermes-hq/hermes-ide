@@ -57,6 +57,22 @@ pub struct Resume {
     pub by_id: Option<Vec<String>>,
     #[serde(default)]
     pub latest: Option<Vec<String>>,
+    /// How the vendor says the conversation to resume does not exist. Only a
+    /// resume that ends this way is replaced by a fresh start; without it a
+    /// failed resume is left to the user.
+    #[serde(default)]
+    pub not_found: Option<NotFound>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct NotFound {
+    /// Exit codes the vendor uses for it; empty means any code that is not an
+    /// interrupt.
+    #[serde(default)]
+    pub exit_codes: Vec<i32>,
+    /// Text the vendor prints for it; one must appear in the terminal.
+    #[serde(default)]
+    pub output: Vec<String>,
 }
 
 /// The per-launch hook setup of an agent (see `pty::launch`). Placeholders

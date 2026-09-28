@@ -41,14 +41,37 @@ fn spec_json(
         "args": args,
     });
     if let Some((program, args, vendor)) = fallback {
+        // The catalog's Claude entry: exit 1, plus the "not found" text that
+        // Hermes reports by writing the evidence file (see evidence()).
         v["fallback"] = serde_json::json!({
             "program": program,
             "args": args,
             "after_ms": 3000,
             "vendor_session_id": vendor,
+            "not_found": {
+                "exit_codes": [1],
+                "evidence_file": cwd.join(EVIDENCE).to_string_lossy(),
+                "evidence_wait_ms": 300,
+            },
         });
     }
     serde_json::to_string(&v).unwrap()
+}
+
+const EVIDENCE: &str = "resume-not-found";
+
+/// What Hermes writes when it saw the vendor's "not found" text in the
+/// terminal: the launch's nonce, in the file the launch file names.
+fn evidence(dir: &Path, nonce: &str) {
+    fs::write(dir.join(EVIDENCE), format!("{nonce}\n")).unwrap();
+}
+
+fn spool(file: &Path) -> Vec<serde_json::Value> {
+    fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
 }
 
 fn write_launch(dir: &Path, session: &str, json: &str) -> PathBuf {
@@ -160,6 +183,7 @@ fn a_resume_that_fails_at_once_prints_one_line_records_it_and_starts_fresh() {
         Some((&program, &fresh_args, "new-vendor-id")),
     );
     write_launch(dir.path(), "s3", &json);
+    evidence(dir.path(), "n-3");
 
     let out = hi_run(dir.path(), "s3");
     let stdout = text(&out.stdout);
@@ -360,10 +384,177 @@ fn a_cmd_shim_hands_a_json_argument_with_quotes_to_the_program_intact() {
     );
 }
 
+/// Ctrl-C at a resumed agent's trust prompt ends it early too, but the
+/// conversation is still there: no fallback, no new conversation, and Hermes
+/// hears only that the agent exited. Even the "not found" evidence does not
+/// turn an interrupt into a missing conversation.
+#[test]
+fn an_interrupted_resume_keeps_the_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let signals = dir.path().join("signals.ndjson");
+    let sig = signals.to_string_lossy().to_string();
+    let (program, args) = shell("exit 130", "exit 130");
+    let (_, fresh) = shell("echo must-not-run", "echo must-not-run");
+    let json = spec_json(
+        "s10",
+        &program,
+        &args,
+        dir.path(),
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-10"),
+        ],
+        Some((&program, &fresh, "fresh-id")),
+    );
+    write_launch(dir.path(), "s10", &json);
+    evidence(dir.path(), "n-10");
+    let out = hi_run(dir.path(), "s10");
+    assert_eq!(out.status.code(), Some(130));
+    assert!(!text(&out.stdout).contains("must-not-run"));
+    assert!(!text(&out.stdout).contains("hermes:"));
+    let lines = spool(&signals);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["event"], "hermes.exited");
+    assert_eq!(lines[0]["payload"]["exit_code"], 130);
+}
+
+/// A vendor whose Ctrl-C exits 1, the same code as its "not found": without
+/// the "not found" text on screen the resume is kept.
+#[test]
+fn an_early_exit_without_the_not_found_text_keeps_the_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let signals = dir.path().join("signals.ndjson");
+    let sig = signals.to_string_lossy().to_string();
+    let (program, args) = shell("exit 1", "exit 1");
+    let (_, fresh) = shell("echo must-not-run", "echo must-not-run");
+    let json = spec_json(
+        "s11",
+        &program,
+        &args,
+        dir.path(),
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-11"),
+        ],
+        Some((&program, &fresh, "fresh-id")),
+    );
+    write_launch(dir.path(), "s11", &json);
+    // Evidence from another launch does not count either.
+    evidence(dir.path(), "n-earlier");
+    let out = hi_run(dir.path(), "s11");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!text(&out.stdout).contains("must-not-run"));
+    assert!(!text(&out.stdout).contains("hermes:"));
+    let lines = spool(&signals);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["event"], "hermes.exited");
+    assert_eq!(lines[0]["payload"]["exit_code"], 1);
+}
+
+/// Killed by a signal (the terminal hung up, SIGINT to the agent's group).
+#[cfg(unix)]
+#[test]
+fn a_resume_ended_by_a_signal_keeps_the_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let signals = dir.path().join("signals.ndjson");
+    let sig = signals.to_string_lossy().to_string();
+    let (program, args) = shell("kill -TERM $$", "");
+    let (_, fresh) = shell("echo must-not-run", "");
+    let json = spec_json(
+        "s12",
+        &program,
+        &args,
+        dir.path(),
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-12"),
+        ],
+        Some((&program, &fresh, "fresh-id")),
+    );
+    write_launch(dir.path(), "s12", &json);
+    evidence(dir.path(), "n-12");
+    let out = hi_run(dir.path(), "s12");
+    assert_eq!(out.status.code(), Some(128 + 15));
+    assert!(!text(&out.stdout).contains("must-not-run"));
+    let lines = spool(&signals);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["payload"]["exit_code"], 143);
+}
+
+/// A resume without a catalog "not found" entry is never replaced, whatever
+/// its exit.
+#[test]
+fn without_a_not_found_entry_a_failed_resume_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (program, args) = shell("exit 1", "exit 1");
+    let (_, fresh) = shell("echo must-not-run", "echo must-not-run");
+    let mut json: serde_json::Value = serde_json::from_str(&spec_json(
+        "s13",
+        &program,
+        &args,
+        dir.path(),
+        &[],
+        Some((&program, &fresh, "x")),
+    ))
+    .unwrap();
+    json["fallback"]
+        .as_object_mut()
+        .unwrap()
+        .remove("not_found");
+    write_launch(dir.path(), "s13", &json.to_string());
+    let out = hi_run(dir.path(), "s13");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!text(&out.stdout).contains("must-not-run"));
+}
+
+/// Once the fresh agent is past the quick-failure window, hi says so, so
+/// Hermes can adopt the new conversation even from an agent that sends no
+/// start signal of its own.
+#[test]
+fn a_fresh_agent_that_keeps_running_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let signals = dir.path().join("signals.ndjson");
+    let sig = signals.to_string_lossy().to_string();
+    let (program, resume) = shell("exit 1", "exit 1");
+    let (_, fresh) = shell("sleep 1; exit 0", "ping -n 2 127.0.0.1 >nul & exit 0");
+    let mut json: serde_json::Value = serde_json::from_str(&spec_json(
+        "s14",
+        &program,
+        &resume,
+        dir.path(),
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-14"),
+        ],
+        Some((&program, &fresh, "fresh-id")),
+    ))
+    .unwrap();
+    json["fallback"]["after_ms"] = serde_json::json!(300);
+    write_launch(dir.path(), "s14", &json.to_string());
+    evidence(dir.path(), "n-14");
+    let out = hi_run(dir.path(), "s14");
+    assert_eq!(out.status.code(), Some(0));
+    let events: Vec<String> = spool(&signals)
+        .iter()
+        .map(|l| l["event"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        events,
+        [
+            "hermes.resume_fallback",
+            "hermes.fallback_running",
+            "hermes.exited"
+        ]
+    );
+    let running = &spool(&signals)[1];
+    assert_eq!(running["nonce"], "n-14");
+    assert_eq!(running["payload"]["vendor_session_id"], "fresh-id");
+}
+
 #[test]
 fn a_failure_after_the_window_is_not_a_failed_resume() {
     let dir = tempfile::tempdir().unwrap();
-    let (program, args) = shell("sleep 1; exit 3", "ping -n 3 127.0.0.1 >nul & exit 3");
+    let (program, args) = shell("sleep 1; exit 1", "ping -n 3 127.0.0.1 >nul & exit 1");
     let (_, fresh) = shell("echo must-not-run", "echo must-not-run");
     let mut json: serde_json::Value = serde_json::from_str(&spec_json(
         "s4",
@@ -376,9 +567,10 @@ fn a_failure_after_the_window_is_not_a_failed_resume() {
     .unwrap();
     json["fallback"]["after_ms"] = serde_json::json!(300);
     write_launch(dir.path(), "s4", &json.to_string());
+    evidence(dir.path(), "any");
 
     let out = hi_run(dir.path(), "s4");
-    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(out.status.code(), Some(1));
     assert!(!text(&out.stdout).contains("must-not-run"));
     assert!(!text(&out.stdout).contains("hermes:"));
 }

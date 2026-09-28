@@ -262,6 +262,27 @@
             },
             "latest": {
               "$ref": "#/definitions/shellArgsOrNull"
+            },
+            "not_found": {
+              "description": "How the vendor says a resumed conversation does not exist. A resume that ends this way, within a few seconds, is replaced by a fresh start; any other early exit (Ctrl-C at a prompt, a crash) keeps the conversation. Without it a failed resume is never replaced.",
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "exit_codes": {
+                  "description": "Exit codes the vendor uses for it. Empty or absent: any code except an interrupt.",
+                  "type": "array",
+                  "items": { "type": "integer", "minimum": 1, "maximum": 128 },
+                  "uniqueItems": true
+                },
+                "output": {
+                  "description": "Text the vendor prints for it (to the terminal, either stream); matched ignoring case, spaces and colours. One must appear.",
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 8, "maxLength": 200 },
+                  "uniqueItems": true
+                }
+              }
             }
           }
         },

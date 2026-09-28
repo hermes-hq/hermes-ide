@@ -13,14 +13,19 @@
 //! `SessionStart` hook in a settings file passed with `--settings`; Gemini:
 //! a defaults file named by an environment variable). Nothing is written to
 //! any vendor's global config. On restore the launch file carries the resume
-//! command plus a fresh-start fallback; when the resume fails at once `hi`
-//! prints one line, starts fresh and reports the new id through the signal
-//! spool this module watches.
+//! command plus a fresh-start fallback for agents whose catalog entry says
+//! how the vendor reports a missing conversation (`resume.not_found`: an
+//! exit code and the text it prints). This module watches the terminal
+//! output for that text and leaves `hi` a note when it appears; only a resume
+//! that ends that way is replaced, so Ctrl-C at a resumed agent's trust
+//! prompt keeps the conversation. The fallback prints one line, starts fresh
+//! and reports the new id through the signal spool; Hermes keeps the old id
+//! until the fresh conversation has actually started.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -35,10 +40,19 @@ pub const SPEC_VERSION: u64 = 1;
 /// No start signal within this long after the launch line was typed means
 /// the agent is most likely sitting at a startup prompt.
 pub const STARTUP_PROMPT_GUESS_AFTER: Duration = Duration::from_secs(5);
-/// A resume that exits non-zero within this window is a failed resume.
+/// A resume that ends the vendor's "not found" way within this window is a
+/// failed resume.
 pub const RESUME_FALLBACK_AFTER_MS: u64 = 3000;
 const LAUNCH_FILE: &str = "launch.json";
 const SIGNALS_FILE: &str = "signals.ndjson";
+/// Written (holding the launch's nonce) when the terminal showed the
+/// vendor's "conversation not found" text; `hi` needs it to fall back.
+const NOT_FOUND_EVIDENCE_FILE: &str = "resume-not-found";
+/// How long the terminal output is searched for that text after the launch
+/// line was typed (the shell starting, then `hi`, then the vendor's check).
+const NOT_FOUND_WATCH_FOR: Duration = Duration::from_secs(30);
+/// How much recent output is kept to find text split across reads.
+const NOT_FOUND_TAIL_BYTES: usize = 8 * 1024;
 const SPOOL_POLL: Duration = Duration::from_millis(250);
 
 // ─── Recipes (the agent catalog) ─────────────────────────────────────
@@ -118,6 +132,18 @@ pub struct FallbackSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vendor_session_id: Option<String>,
     pub message: String,
+    /// How the vendor says the conversation does not exist; `hi` falls back
+    /// only on that.
+    pub not_found: NotFoundSpec,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct NotFoundSpec {
+    /// Empty: any exit code but an interrupt.
+    pub exit_codes: Vec<i32>,
+    /// Set when the vendor's "not found" text must also have been seen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +162,9 @@ pub struct LaunchPlan {
     pub context_in_args: bool,
     /// The nonce every spool line of this launch must carry.
     pub nonce: String,
+    /// The vendor's "conversation not found" texts to look for in the
+    /// terminal while the resume starts (empty when there is no fallback).
+    pub not_found_output: Vec<String>,
 }
 
 fn split_words(fragment: &str) -> Vec<String> {
@@ -372,6 +401,15 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         _ => None,
     };
 
+    let evidence_file = input
+        .session_dir
+        .join(NOT_FOUND_EVIDENCE_FILE)
+        .to_string_lossy()
+        .to_string();
+    let not_found = terminal.resume.not_found.as_ref().map(|nf| NotFoundSpec {
+        exit_codes: nf.exit_codes.clone(),
+        evidence_file: (!nf.output.is_empty()).then(|| evidence_file.clone()),
+    });
     let (args, fallback, vendor_session_id, resumes) = match resume {
         Some((resume_args, id)) => {
             let mut args = head.clone();
@@ -383,19 +421,27 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             args.extend(signals.args.iter().cloned());
             args.extend(channel_args.iter().cloned());
             args.extend(suffix.iter().cloned());
-            let fallback = FallbackSpec {
+            // Only a vendor that says how it reports a missing conversation
+            // gets a fallback: an early exit alone (Ctrl-C at a trust
+            // prompt) must never cost the user the conversation.
+            let fallback = not_found.map(|not_found| FallbackSpec {
                 program: program.clone(),
                 args: fresh_args.clone(),
                 after_ms: RESUME_FALLBACK_AFTER_MS,
                 vendor_session_id: fresh_id.clone(),
                 message: "could not resume the previous conversation; starting a new one"
                     .to_string(),
-            };
-            (args, Some(fallback), Some(id.to_string()), true)
+                not_found,
+            });
+            (args, fallback, Some(id.to_string()), true)
         }
         None => (fresh_args, None, fresh_id, false),
     };
 
+    let not_found_output = match (&fallback, &terminal.resume.not_found) {
+        (Some(fb), Some(nf)) if fb.not_found.evidence_file.is_some() => nf.output.clone(),
+        _ => Vec::new(),
+    };
     Some(LaunchPlan {
         spec: LaunchSpec {
             v: SPEC_VERSION,
@@ -415,6 +461,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         // only on the fresh command (which the fallback also carries).
         context_in_args: context_in_args && !resumes,
         nonce: input.nonce.to_string(),
+        not_found_output,
     })
 }
 
@@ -555,6 +602,13 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         if plan.resumes { "resume " } else { "new" },
         plan.vendor_session_id.as_deref().unwrap_or("")
     );
+    let evidence = session_dir.join(NOT_FOUND_EVIDENCE_FILE);
+    let _ = std::fs::remove_file(&evidence);
+    if plan.not_found_output.is_empty() {
+        end_output_watch(&s.id);
+    } else {
+        start_output_watch(&s.id, &plan.not_found_output, evidence, &plan.nonce);
+    }
     s.vendor_session_id = plan.vendor_session_id.clone();
     s.agent_startup = Some(AgentStartup {
         state: AgentStartupState::Launching,
@@ -583,6 +637,138 @@ fn write_plan(session_dir: &Path, plan: &LaunchPlan) -> std::io::Result<()> {
     std::fs::write(session_dir.join(LAUNCH_FILE), json)
 }
 
+// ─── The vendor's "conversation not found" text ──────────────────────
+
+/// Terminal text reduced to what matching needs: escape sequences (colours,
+/// cursor moves, titles) removed, every blank and control character dropped,
+/// lower case. A message the terminal wrapped, coloured or redrew with
+/// cursor moves between its words still matches its catalog text.
+pub fn squash(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.next() {
+                // CSI: parameters up to a final byte.
+                Some('[') => {
+                    for n in chars.by_ref() {
+                        if ('\x40'..='\x7e').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                // OSC, DCS, APC, PM: up to BEL or ESC \.
+                Some(']') | Some('P') | Some('_') | Some('^') => {
+                    while let Some(n) = chars.next() {
+                        if n == '\x07' {
+                            break;
+                        }
+                        if n == '\x1b' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                // Character-set designations carry one more character.
+                Some('(') | Some(')') | Some('*') | Some('+') => {
+                    chars.next();
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if c.is_whitespace() || c.is_control() {
+            continue;
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
+/// Whether `output` shows one of the vendor's "not found" texts.
+pub fn shows_not_found(output: &str, patterns: &[String]) -> bool {
+    let seen = squash(output);
+    patterns.iter().any(|p| {
+        let p = squash(p);
+        !p.is_empty() && seen.contains(&p)
+    })
+}
+
+/// A resume whose terminal output is being searched for the vendor's "not
+/// found" text.
+struct OutputWatch {
+    patterns: Vec<String>,
+    evidence: PathBuf,
+    nonce: String,
+    tail: Vec<u8>,
+    until: Instant,
+}
+
+fn output_watches() -> &'static StdMutex<HashMap<String, OutputWatch>> {
+    static WATCHES: OnceLock<StdMutex<HashMap<String, OutputWatch>>> = OnceLock::new();
+    WATCHES.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+fn start_output_watch(session_id: &str, patterns: &[String], evidence: PathBuf, nonce: &str) {
+    if let Ok(mut w) = output_watches().lock() {
+        w.insert(
+            session_id.to_string(),
+            OutputWatch {
+                patterns: patterns.to_vec(),
+                evidence,
+                nonce: nonce.to_string(),
+                tail: Vec::new(),
+                until: Instant::now() + NOT_FOUND_WATCH_FOR,
+            },
+        );
+    }
+}
+
+fn end_output_watch(session_id: &str) {
+    if let Ok(mut w) = output_watches().lock() {
+        w.remove(session_id);
+    }
+}
+
+/// Feed a session's terminal output (called for every read of its PTY).
+/// While its resume is starting, look for the vendor's "not found" text and,
+/// when it shows, write the evidence `hi` waits for.
+pub(crate) fn observe_output(session_id: &str, data: &[u8]) {
+    let Ok(mut watches) = output_watches().lock() else {
+        return;
+    };
+    if watches.is_empty() {
+        return;
+    }
+    let Some(watch) = watches.get_mut(session_id) else {
+        return;
+    };
+    if Instant::now() > watch.until {
+        watches.remove(session_id);
+        return;
+    }
+    watch.tail.extend_from_slice(data);
+    if watch.tail.len() > NOT_FOUND_TAIL_BYTES {
+        let cut = watch.tail.len() - NOT_FOUND_TAIL_BYTES;
+        watch.tail.drain(..cut);
+    }
+    if !shows_not_found(&String::from_utf8_lossy(&watch.tail), &watch.patterns) {
+        return;
+    }
+    match std::fs::write(&watch.evidence, format!("{}\n", watch.nonce)) {
+        Ok(()) => log::info!(
+            "[LAUNCH] {} the vendor says the conversation to resume does not exist",
+            session_id
+        ),
+        Err(e) => log::warn!(
+            "[LAUNCH] {} could not note the missing conversation for hi: {}",
+            session_id,
+            e
+        ),
+    }
+    watches.remove(session_id);
+}
+
 /// A parsed spool line; only the events this module acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpoolEvent {
@@ -592,6 +778,9 @@ pub enum SpoolEvent {
     ResumeFallback {
         vendor_session_id: Option<String>,
     },
+    /// The fresh agent `hi` started after a failed resume is still running
+    /// past the quick-failure window.
+    FallbackRunning,
     Ended,
     /// `hi run` itself reporting that the agent process is gone (it is the
     /// agent's parent, so this comes even when no SessionEnd hook ran: a
@@ -630,6 +819,7 @@ pub fn parse_spool_line(line: &str, nonce: &str) -> Option<SpoolEvent> {
         "hermes.resume_fallback" => SpoolEvent::ResumeFallback {
             vendor_session_id: payload_str("vendor_session_id"),
         },
+        "hermes.fallback_running" => SpoolEvent::FallbackRunning,
         "SessionEnd" => SpoolEvent::Ended,
         "hermes.exited" => SpoolEvent::Exited {
             exit_code: payload
@@ -642,24 +832,80 @@ pub fn parse_spool_line(line: &str, nonce: &str) -> Option<SpoolEvent> {
     })
 }
 
+fn is_starting(s: &Session) -> bool {
+    matches!(
+        s.agent_startup.as_ref().map(|a| a.state),
+        Some(AgentStartupState::Launching | AgentStartupState::WaitingAtStartupPrompt)
+    )
+}
+
+fn started(s: &mut Session) {
+    s.agent_startup = Some(AgentStartup {
+        state: AgentStartupState::Started,
+        since: now(),
+        confidence: "exact".to_string(),
+        detail: None,
+    });
+}
+
+/// What the spool watcher of one launch remembers between lines.
+#[derive(Debug, Default)]
+pub struct LaunchWatch {
+    /// The agent sends a start signal of its own (its hook file has one).
+    pub expects_start_signal: bool,
+    /// After a fallback: the fresh conversation's id (None when the vendor
+    /// cannot pre-assign one), adopted once that conversation has started.
+    /// Until then the session keeps the conversation it had.
+    pending_fresh_id: Option<Option<String>>,
+}
+
+impl LaunchWatch {
+    pub fn new(expects_start_signal: bool) -> Self {
+        Self {
+            expects_start_signal,
+            pending_fresh_id: None,
+        }
+    }
+
+    fn adopt_fresh_id(&mut self, s: &mut Session) -> bool {
+        match self.pending_fresh_id.take() {
+            Some(id) => {
+                let changed = s.vendor_session_id != id;
+                s.vendor_session_id = id;
+                changed
+            }
+            None => false,
+        }
+    }
+
+    /// Apply one spool event to the session. Returns true when something
+    /// the frontend shows changed.
+    pub fn apply(&mut self, s: &mut Session, event: &SpoolEvent) -> bool {
+        apply_spool_event(self, s, event)
+    }
+}
+
 /// Apply one spool event to the session. Returns true when something the
 /// frontend shows changed.
-pub fn apply_spool_event(s: &mut Session, event: &SpoolEvent) -> bool {
+fn apply_spool_event(w: &mut LaunchWatch, s: &mut Session, event: &SpoolEvent) -> bool {
     match event {
         SpoolEvent::Started { vendor_session_id } => {
-            if let Some(id) = vendor_session_id {
-                s.vendor_session_id = Some(id.clone());
+            match vendor_session_id {
+                Some(id) => {
+                    w.pending_fresh_id = None;
+                    s.vendor_session_id = Some(id.clone());
+                }
+                None => {
+                    w.adopt_fresh_id(s);
+                }
             }
-            s.agent_startup = Some(AgentStartup {
-                state: AgentStartupState::Started,
-                since: now(),
-                confidence: "exact".to_string(),
-                detail: None,
-            });
+            started(s);
             true
         }
         SpoolEvent::ResumeFallback { vendor_session_id } => {
-            s.vendor_session_id = vendor_session_id.clone();
+            // The old id stays until the fresh conversation has started:
+            // if the fresh agent never gets going, nothing is lost.
+            w.pending_fresh_id = Some(vendor_session_id.clone());
             s.agent_startup = Some(AgentStartup {
                 state: AgentStartupState::Launching,
                 since: now(),
@@ -670,6 +916,10 @@ pub fn apply_spool_event(s: &mut Session, event: &SpoolEvent) -> bool {
             });
             true
         }
+        // An agent with no start signal of its own: still running past the
+        // quick-failure window is the best sign its conversation started.
+        SpoolEvent::FallbackRunning if !w.expects_start_signal => w.adopt_fresh_id(s),
+        SpoolEvent::FallbackRunning => false,
         SpoolEvent::Ended => {
             s.agent_startup = Some(AgentStartup {
                 state: AgentStartupState::Ended,
@@ -693,8 +943,82 @@ pub fn apply_spool_event(s: &mut Session, event: &SpoolEvent) -> bool {
             });
             true
         }
-        SpoolEvent::Other => false,
+        // Any other signal from the agent is the agent at work: whatever
+        // startup prompt there was is behind it.
+        SpoolEvent::Other => {
+            let adopted = w.adopt_fresh_id(s);
+            if is_starting(s) {
+                started(s);
+                true
+            } else {
+                adopted
+            }
+        }
     }
+}
+
+/// Whether terminal input is something a person typed: a key, Enter,
+/// Ctrl-C, Escape. The terminal's own answers to the agent's queries
+/// (cursor position, device attributes, focus reports) and arrow keys, which
+/// only move a selection, do not count.
+pub fn is_keystroke(bytes: &[u8]) -> bool {
+    if bytes == b"\x1b" {
+        return true;
+    }
+    let text = String::from_utf8_lossy(bytes);
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.next() {
+                Some('[') | Some('O') => {
+                    for n in chars.by_ref() {
+                        if ('\x40'..='\x7e').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') | Some('P') | Some('_') | Some('^') => {
+                    while let Some(n) = chars.next() {
+                        if n == '\x07' {
+                            break;
+                        }
+                        if n == '\x1b' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if matches!(c, '\r' | '\n' | '\x03' | '\x04') || !c.is_control() {
+            return true;
+        }
+    }
+    false
+}
+
+/// The user typed into the session while its agent was starting. At a
+/// startup prompt that answers it: the "waiting" report goes (back to
+/// launching; the start signal or the exit report settles it). Before the
+/// report, it restarts the wait, so a prompt answered in time is never
+/// reported. Returns true when the state the frontend shows changed.
+pub fn note_user_input(s: &mut Session, bytes: &[u8]) -> bool {
+    if !is_starting(s) || !is_keystroke(bytes) {
+        return false;
+    }
+    let was_waiting = matches!(
+        s.agent_startup.as_ref().map(|a| a.state),
+        Some(AgentStartupState::WaitingAtStartupPrompt)
+    );
+    s.agent_startup = Some(AgentStartup {
+        state: AgentStartupState::Launching,
+        since: now(),
+        confidence: "exact".to_string(),
+        detail: was_waiting.then(|| "the startup prompt was answered".to_string()),
+    });
+    was_waiting
 }
 
 /// Reads whole lines appended to the spool since the last call.
@@ -738,6 +1062,55 @@ impl SpoolReader {
     }
 }
 
+/// When to guess that a starting agent sits at a startup prompt: no start
+/// signal for `STARTUP_PROMPT_GUESS_AFTER` since the agent last entered
+/// "launching" (the launch, a fallback, the user typing), and at most once
+/// per launch attempt. Once the user answered a prompt only a signal from
+/// the agent or its exit changes the state again, so an agent whose start
+/// signal never comes is not reported as waiting for ever.
+struct PromptGuess {
+    launched_at: Instant,
+    timed_since: Option<String>,
+    guessed: bool,
+}
+
+impl PromptGuess {
+    fn new(now: Instant) -> Self {
+        Self {
+            launched_at: now,
+            timed_since: None,
+            guessed: false,
+        }
+    }
+
+    /// A fallback started another agent: it gets its own guess.
+    fn new_attempt(&mut self, now: Instant) {
+        self.launched_at = now;
+        self.guessed = false;
+    }
+
+    /// Whether to report the startup prompt now.
+    fn due(&mut self, s: &Session, now: Instant) -> bool {
+        let Some(since) = s
+            .agent_startup
+            .as_ref()
+            .filter(|a| a.state == AgentStartupState::Launching)
+            .map(|a| &a.since)
+        else {
+            return false;
+        };
+        if self.timed_since.as_ref() != Some(since) {
+            self.timed_since = Some(since.clone());
+            self.launched_at = now;
+        }
+        if self.guessed || now.duration_since(self.launched_at) < STARTUP_PROMPT_GUESS_AFTER {
+            return false;
+        }
+        self.guessed = true;
+        true
+    }
+}
+
 /// Watch a session's signal spool from the launch until the agent process
 /// is gone (or the session is): start and end signals, the resume fallback,
 /// `hi run`'s own exit report, and the "no start signal yet" guess.
@@ -750,7 +1123,9 @@ pub(crate) fn watch_signals(
 ) {
     std::thread::spawn(move || {
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
-        let mut launched_at = Instant::now();
+        let mut watch = LaunchWatch::new(expects_start_signal);
+        let mut guess = PromptGuess::new(Instant::now());
+        let session_id = session.lock().map(|s| s.id.clone()).unwrap_or_default();
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
@@ -767,7 +1142,12 @@ pub(crate) fn watch_signals(
                 for line in &lines {
                     if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
-                            launched_at = Instant::now();
+                            guess.new_attempt(Instant::now());
+                        }
+                        if !matches!(event, SpoolEvent::Other) {
+                            // Started, gone or replaced: the resume's own
+                            // output is no longer of interest.
+                            end_output_watch(&session_id);
                         }
                         if let SpoolEvent::Exited { exit_code, error } = &event {
                             log::info!(
@@ -782,18 +1162,10 @@ pub(crate) fn watch_signals(
                             // and no guess may follow.
                             stop = true;
                         }
-                        changed |= apply_spool_event(&mut s, &event);
+                        changed |= watch.apply(&mut s, &event);
                     }
                 }
-                let launching = matches!(
-                    s.agent_startup.as_ref().map(|a| a.state),
-                    Some(AgentStartupState::Launching)
-                );
-                if expects_start_signal
-                    && launching
-                    && !stop
-                    && launched_at.elapsed() >= STARTUP_PROMPT_GUESS_AFTER
-                {
+                if expects_start_signal && !stop && guess.due(&s, Instant::now()) {
                     s.agent_startup = Some(AgentStartup {
                         state: AgentStartupState::WaitingAtStartupPrompt,
                         since: now(),
@@ -820,6 +1192,7 @@ pub(crate) fn watch_signals(
                 );
             }
             if stop {
+                end_output_watch(&session_id);
                 break;
             }
         }
@@ -934,6 +1307,37 @@ mod tests {
             Some("11111111-2222-4333-8444-555555555555")
         );
         assert!(fb.message.contains("starting a new one"));
+        // Only Claude's own "not found" (exit 1 and its message, which
+        // Hermes watches the terminal for) replaces the conversation.
+        let evidence = dir.join("resume-not-found").to_string_lossy().to_string();
+        assert_eq!(
+            fb.not_found,
+            NotFoundSpec {
+                exit_codes: vec![1],
+                evidence_file: Some(evidence),
+            }
+        );
+        assert_eq!(
+            plan.not_found_output,
+            vec!["No conversation found with session ID"]
+        );
+        // A fresh launch watches for nothing.
+        let fresh = plan_launch(&input("claude", None, hi, dir)).unwrap();
+        assert!(fresh.not_found_output.is_empty());
+    }
+
+    #[test]
+    fn a_resume_without_a_catalog_not_found_entry_has_no_fallback() {
+        // Kiro and goose resume by id but the catalog does not say how they
+        // report a missing conversation: an early exit is left alone.
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        for agent in ["kiro", "goose"] {
+            let plan = plan_launch(&input(agent, Some("x-1"), hi, dir)).unwrap();
+            assert!(plan.resumes, "{agent}");
+            assert!(plan.spec.fallback.is_none(), "{agent}");
+            assert!(plan.not_found_output.is_empty(), "{agent}");
+        }
     }
 
     #[test]
@@ -963,8 +1367,17 @@ mod tests {
             .any(|a| a == r#"notify=["/app/hi","signal","--agent","codex","--argv-json"]"#));
         assert!(plan.files.is_empty());
         assert!(!plan.expects_start_signal);
-        // Codex cannot pre-assign an id: a fresh start carries none.
-        assert_eq!(plan.spec.fallback.unwrap().vendor_session_id, None);
+        // Codex cannot pre-assign an id: a fresh start carries none. Its
+        // "not found" is known by its text only, so any exit code but an
+        // interrupt qualifies once Hermes saw the text.
+        let fb = plan.spec.fallback.unwrap();
+        assert_eq!(fb.vendor_session_id, None);
+        assert!(fb.not_found.exit_codes.is_empty());
+        assert!(fb.not_found.evidence_file.is_some());
+        assert_eq!(
+            plan.not_found_output,
+            vec!["No saved session found with ID"]
+        );
         let fresh_codex = plan_launch(&input("codex", None, hi, dir)).unwrap();
         assert_eq!(fresh_codex.vendor_session_id, None);
         assert_eq!(fresh_codex.spec.args[0], "-c");
@@ -972,6 +1385,10 @@ mod tests {
 
         let gemini = plan_launch(&input("gemini", Some("g-1"), hi, dir)).unwrap();
         assert_eq!(gemini.spec.args, vec!["--resume", "g-1"]);
+        assert_eq!(
+            gemini.spec.fallback.as_ref().unwrap().not_found.exit_codes,
+            vec![42]
+        );
         // Gemini takes its hooks from a defaults file named by an
         // environment variable; the hooks carry the Hermes variables
         // themselves (Gemini runs hooks in a sanitized environment).
@@ -1018,7 +1435,7 @@ mod tests {
         let kiro = plan_launch(&input("kiro", Some("k-1"), hi, dir)).unwrap();
         assert_eq!(kiro.spec.program, "kiro-cli");
         assert_eq!(kiro.spec.args, vec!["chat", "--resume-id", "k-1"]);
-        assert_eq!(kiro.spec.fallback.unwrap().args, vec!["chat"]);
+        assert!(kiro.spec.fallback.is_none());
         // goose: `goose session --resume --session-id <id>`.
         let goose = plan_launch(&input("goose", Some("g-9"), hi, dir)).unwrap();
         assert_eq!(goose.spec.program, "goose");
@@ -1097,6 +1514,11 @@ mod tests {
         assert_eq!(json["program"], "claude");
         assert_eq!(json["args"][0], "--resume");
         assert_eq!(json["fallback"]["after_ms"], 3000);
+        assert_eq!(json["fallback"]["not_found"]["exit_codes"][0], 1);
+        assert!(json["fallback"]["not_found"]["evidence_file"]
+            .as_str()
+            .unwrap()
+            .ends_with(NOT_FOUND_EVIDENCE_FILE));
         assert!(json["env"]["HERMES_SIGNAL_FILE"].is_string());
         // Hook command paths use forward slashes so cmd, PowerShell and bash
         // all accept them inside quotes.
@@ -1164,23 +1586,33 @@ mod tests {
             None
         );
 
+        assert_eq!(
+            parse_spool_line(
+                r#"{"v":1,"nonce":"n0nce","event":"hermes.fallback_running","payload":{"vendor_session_id":"new"}}"#,
+                N
+            ),
+            Some(SpoolEvent::FallbackRunning)
+        );
+
+        let mut w = LaunchWatch::new(true);
         let mut s = test_session();
         s.vendor_session_id = Some("old".into());
-        assert!(apply_spool_event(&mut s, &fallback));
-        assert_eq!(s.vendor_session_id.as_deref(), Some("new"));
+        assert!(w.apply(&mut s, &fallback));
+        // The fresh conversation has not started yet: the old one stays.
+        assert_eq!(s.vendor_session_id.as_deref(), Some("old"));
         assert_eq!(
             s.agent_startup.as_ref().unwrap().state,
             AgentStartupState::Launching
         );
-        assert!(apply_spool_event(&mut s, &started));
+        assert!(w.apply(&mut s, &started));
         assert_eq!(s.vendor_session_id.as_deref(), Some("abc"));
         assert_eq!(
             s.agent_startup.as_ref().unwrap().state,
             AgentStartupState::Started
         );
         assert_eq!(s.agent_startup.as_ref().unwrap().confidence, "exact");
-        assert!(!apply_spool_event(&mut s, &SpoolEvent::Other));
-        assert!(apply_spool_event(&mut s, &SpoolEvent::Ended));
+        assert!(!w.apply(&mut s, &SpoolEvent::Other));
+        assert!(w.apply(&mut s, &SpoolEvent::Ended));
         assert_eq!(
             s.agent_startup.as_ref().unwrap().state,
             AgentStartupState::Ended
@@ -1199,7 +1631,8 @@ mod tests {
             confidence: "guessed".into(),
             detail: None,
         });
-        assert!(apply_spool_event(
+        let mut w = LaunchWatch::new(true);
+        assert!(w.apply(
             &mut s,
             &SpoolEvent::Exited {
                 exit_code: 0,
@@ -1211,7 +1644,7 @@ mod tests {
         assert_eq!(st.confidence, "exact");
         assert_eq!(st.detail, None);
 
-        apply_spool_event(
+        w.apply(
             &mut s,
             &SpoolEvent::Exited {
                 exit_code: 130,
@@ -1222,7 +1655,7 @@ mod tests {
             s.agent_startup.as_ref().unwrap().detail.as_deref(),
             Some("the agent exited with status 130")
         );
-        apply_spool_event(
+        w.apply(
             &mut s,
             &SpoolEvent::Exited {
                 exit_code: 127,
@@ -1233,6 +1666,280 @@ mod tests {
             s.agent_startup.as_ref().unwrap().detail.as_deref(),
             Some("claude: command not found")
         );
+    }
+
+    fn starting(state: AgentStartupState) -> Session {
+        let mut s = test_session();
+        s.vendor_session_id = Some("old".into());
+        s.agent_startup = Some(AgentStartup {
+            state,
+            since: now(),
+            confidence: "exact".into(),
+            detail: None,
+        });
+        s
+    }
+
+    fn state(s: &Session) -> AgentStartupState {
+        s.agent_startup.as_ref().unwrap().state
+    }
+
+    #[test]
+    fn a_fallback_whose_fresh_agent_never_starts_keeps_the_old_conversation() {
+        // The fresh agent after a fallback is stopped at its own trust
+        // prompt (Ctrl-C there): Hermes must still resume the old id.
+        let mut w = LaunchWatch::new(true);
+        let mut s = starting(AgentStartupState::Launching);
+        w.apply(
+            &mut s,
+            &SpoolEvent::ResumeFallback {
+                vendor_session_id: Some("fresh".into()),
+            },
+        );
+        // Still running past the window proves nothing for an agent that
+        // sends its own start signal.
+        assert!(!w.apply(&mut s, &SpoolEvent::FallbackRunning));
+        w.apply(
+            &mut s,
+            &SpoolEvent::Exited {
+                exit_code: 130,
+                error: None,
+            },
+        );
+        assert_eq!(s.vendor_session_id.as_deref(), Some("old"));
+        assert_eq!(state(&s), AgentStartupState::Ended);
+        w.apply(&mut s, &SpoolEvent::Ended);
+        assert_eq!(s.vendor_session_id.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn a_fresh_conversation_is_adopted_once_it_started() {
+        // Claude's start signal carries its id; one without an id adopts
+        // the pre-assigned one.
+        let mut w = LaunchWatch::new(true);
+        let mut s = starting(AgentStartupState::Launching);
+        w.apply(
+            &mut s,
+            &SpoolEvent::ResumeFallback {
+                vendor_session_id: Some("fresh".into()),
+            },
+        );
+        w.apply(
+            &mut s,
+            &SpoolEvent::Started {
+                vendor_session_id: None,
+            },
+        );
+        assert_eq!(s.vendor_session_id.as_deref(), Some("fresh"));
+
+        // An agent without a start signal (Gemini): still running past the
+        // quick-failure window is when its conversation counts as started.
+        let mut w = LaunchWatch::new(false);
+        let mut s = starting(AgentStartupState::Launching);
+        w.apply(
+            &mut s,
+            &SpoolEvent::ResumeFallback {
+                vendor_session_id: Some("g-fresh".into()),
+            },
+        );
+        assert_eq!(s.vendor_session_id.as_deref(), Some("old"));
+        assert!(w.apply(&mut s, &SpoolEvent::FallbackRunning));
+        assert_eq!(s.vendor_session_id.as_deref(), Some("g-fresh"));
+        assert!(!w.apply(&mut s, &SpoolEvent::FallbackRunning), "once");
+
+        // A vendor that cannot pre-assign an id (Codex): the dead id goes
+        // once the fresh conversation runs, so the next launch starts fresh
+        // instead of failing the same resume again.
+        let mut w = LaunchWatch::new(false);
+        let mut s = starting(AgentStartupState::Launching);
+        w.apply(
+            &mut s,
+            &SpoolEvent::ResumeFallback {
+                vendor_session_id: None,
+            },
+        );
+        assert_eq!(s.vendor_session_id.as_deref(), Some("old"));
+        w.apply(&mut s, &SpoolEvent::FallbackRunning);
+        assert_eq!(s.vendor_session_id, None);
+    }
+
+    #[test]
+    fn any_signal_from_the_agent_ends_the_startup_prompt_report() {
+        for from in [
+            AgentStartupState::WaitingAtStartupPrompt,
+            AgentStartupState::Launching,
+        ] {
+            let mut w = LaunchWatch::new(true);
+            let mut s = starting(from);
+            assert!(w.apply(&mut s, &SpoolEvent::Other), "{from:?}");
+            assert_eq!(state(&s), AgentStartupState::Started);
+            assert_eq!(s.agent_startup.as_ref().unwrap().confidence, "exact");
+        }
+        // An ended agent stays ended.
+        let mut w = LaunchWatch::new(true);
+        let mut s = starting(AgentStartupState::Ended);
+        assert!(!w.apply(&mut s, &SpoolEvent::Other));
+        assert_eq!(state(&s), AgentStartupState::Ended);
+    }
+
+    #[test]
+    fn typing_at_a_startup_prompt_clears_the_report() {
+        let mut s = starting(AgentStartupState::WaitingAtStartupPrompt);
+        assert!(note_user_input(&mut s, b"y"));
+        assert_eq!(state(&s), AgentStartupState::Launching);
+        assert_eq!(
+            s.agent_startup.as_ref().unwrap().detail.as_deref(),
+            Some("the startup prompt was answered")
+        );
+        for key in [&b"\r"[..], b"\x03", b"\x1b", b"1", "\u{e9}".as_bytes()] {
+            let mut s = starting(AgentStartupState::WaitingAtStartupPrompt);
+            assert!(note_user_input(&mut s, key), "{key:?}");
+        }
+        // The terminal answering the agent's own queries, focus reports and
+        // arrow keys (which only move a selection) are not an answer.
+        for noise in [
+            &b"\x1b[12;40R"[..],
+            b"\x1b[?62;22c",
+            b"\x1b[>0;276;0c",
+            b"\x1b[I",
+            b"\x1b[O",
+            b"\x1b]11;rgb:0000/0000/0000\x1b\\",
+            b"\x1b[A",
+            b"\x1bOB",
+        ] {
+            let mut s = starting(AgentStartupState::WaitingAtStartupPrompt);
+            assert!(!note_user_input(&mut s, noise), "{noise:?}");
+            assert_eq!(state(&s), AgentStartupState::WaitingAtStartupPrompt);
+        }
+        // Typing before the report restarts its wait (no visible change);
+        // after the start, typing changes nothing.
+        let mut s = starting(AgentStartupState::Launching);
+        let before = s.agent_startup.clone().unwrap().since;
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(!note_user_input(&mut s, b"x"));
+        assert_eq!(state(&s), AgentStartupState::Launching);
+        assert_ne!(s.agent_startup.as_ref().unwrap().since, before);
+        let mut s = starting(AgentStartupState::Started);
+        assert!(!note_user_input(&mut s, b"y"));
+        assert_eq!(state(&s), AgentStartupState::Started);
+    }
+
+    #[test]
+    fn the_startup_prompt_guess_comes_once_and_waits_for_typing() {
+        let t0 = Instant::now();
+        let at = |secs: u64| t0 + Duration::from_secs(secs);
+        let mut g = PromptGuess::new(t0);
+        let mut s = starting(AgentStartupState::Launching);
+        assert!(!g.due(&s, at(0)));
+        assert!(!g.due(&s, at(4)));
+        assert!(g.due(&s, at(5)), "no start signal for 5 s");
+        // The report is shown; the user answers the prompt.
+        s.agent_startup.as_mut().unwrap().state = AgentStartupState::WaitingAtStartupPrompt;
+        assert!(!g.due(&s, at(6)));
+        std::thread::sleep(Duration::from_millis(2));
+        note_user_input(&mut s, b"y");
+        // An agent whose start signal never comes (hooks turned off) is
+        // not reported as waiting again.
+        assert!(!g.due(&s, at(7)));
+        assert!(!g.due(&s, at(60)));
+
+        // Typing before the report restarts the wait.
+        let mut g = PromptGuess::new(t0);
+        let mut s = starting(AgentStartupState::Launching);
+        assert!(!g.due(&s, at(0)));
+        std::thread::sleep(Duration::from_millis(2));
+        note_user_input(&mut s, b"y");
+        assert!(!g.due(&s, at(4)), "timer restarted at 4 s");
+        assert!(!g.due(&s, at(8)));
+        assert!(g.due(&s, at(9)));
+
+        // A fallback's fresh agent gets its own guess.
+        g.new_attempt(at(10));
+        let mut w = LaunchWatch::new(true);
+        std::thread::sleep(Duration::from_millis(2));
+        w.apply(
+            &mut s,
+            &SpoolEvent::ResumeFallback {
+                vendor_session_id: None,
+            },
+        );
+        assert!(!g.due(&s, at(10)));
+        assert!(g.due(&s, at(15)));
+
+        // Nothing is due once the agent started or ended.
+        let mut g = PromptGuess::new(t0);
+        for st in [AgentStartupState::Started, AgentStartupState::Ended] {
+            assert!(!g.due(&starting(st), at(30)));
+        }
+    }
+
+    #[test]
+    fn the_not_found_text_is_found_through_colours_wraps_and_redraws() {
+        let claude = vec!["No conversation found with session ID".to_string()];
+        let id = "0b6f5a1e-1111-4222-8333-444455556666";
+        let cases = [
+            // Plain, as a vendor printing to stderr does.
+            format!("No conversation found with session ID: {id}\r\n"),
+            // Coloured, as Claude's own error screen draws it.
+            format!("\x1b[31mNo conversation found with session ID: {id}\x1b[39m\r\n"),
+            // Wrapped by a narrow terminal.
+            format!("No conversation found with\r\nsession ID: {id}"),
+            // A redraw with cursor moves and a title between the words
+            // (Windows' pseudo console does this).
+            format!(
+                "\x1b]0;claude\x07\x1b[1;1HNo conversation\x1b[1Cfound with session\x1b[K ID: {id}"
+            ),
+        ];
+        for text in &cases {
+            assert!(shows_not_found(text, &claude), "{text:?}");
+        }
+        for text in [
+            "Do you trust the files in this folder?",
+            "No conversation to continue",
+            "fake-cli: bye (SIGINT)",
+            "",
+        ] {
+            assert!(!shows_not_found(text, &claude), "{text:?}");
+        }
+        assert!(!shows_not_found("anything", &[String::new()]));
+        assert_eq!(squash("\x1b(B A\tb\x1b[0m C"), "abc");
+    }
+
+    #[test]
+    fn the_terminal_output_leaves_hi_the_evidence_once_the_text_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        let evidence = dir.path().join(NOT_FOUND_EVIDENCE_FILE);
+        let patterns = vec!["No conversation found with session ID".to_string()];
+        start_output_watch("hermes-ev-1", &patterns, evidence.clone(), "n-ev");
+        observe_output("hermes-ev-1", b"$ hi run hermes-ev-1\r\n\x1b[31mNo conver");
+        assert!(!evidence.exists(), "half the text is not the text");
+        // Another session's output is not this one's.
+        observe_output(
+            "hermes-ev-other",
+            b"No conversation found with session ID: x",
+        );
+        assert!(!evidence.exists());
+        observe_output(
+            "hermes-ev-1",
+            b"sation found with session ID: abc\x1b[39m\r\n",
+        );
+        assert_eq!(std::fs::read_to_string(&evidence).unwrap(), "n-ev\n");
+        // The watch is over: it is not written again.
+        std::fs::remove_file(&evidence).unwrap();
+        observe_output("hermes-ev-1", b"No conversation found with session ID: abc");
+        assert!(!evidence.exists());
+
+        // A trust prompt interrupted with Ctrl-C shows no such text.
+        start_output_watch("hermes-ev-2", &patterns, evidence.clone(), "n-ev2");
+        observe_output(
+            "hermes-ev-2",
+            "Do you trust the files in this folder?\r\n^C".as_bytes(),
+        );
+        assert!(!evidence.exists());
+        // A watch that ended (the agent started or exited) writes nothing.
+        end_output_watch("hermes-ev-2");
+        observe_output("hermes-ev-2", b"No conversation found with session ID: abc");
+        assert!(!evidence.exists());
     }
 
     #[test]
