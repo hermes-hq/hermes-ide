@@ -154,7 +154,7 @@ try {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
 } finally {
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

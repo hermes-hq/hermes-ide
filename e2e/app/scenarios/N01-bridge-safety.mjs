@@ -214,7 +214,7 @@ try {
       child.kill("SIGKILL");
       const until = Date.now() + 5_000;
       while (!exited && Date.now() < until) await sleep(100);
-      rmSync(privateTmp, { recursive: true, force: true });
+      rmSync(privateTmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       log(`  plain app stopped: ${JSON.stringify(exited)}`);
     }
   } else {

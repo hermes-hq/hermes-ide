@@ -150,7 +150,7 @@ const VENDOR_C = VENDOR_C_CANDIDATES.find((v) => !realBinaryOf(v.bin));
 if (!VENDOR_C) {
   log(`every no-prompt-hook vendor (${VENDOR_C_CANDIDATES.map((v) => v.bin).join(", ")}) is really installed here; a real CLI must never be started by a test`);
   log("RESULT: SKIP (no vendor free for the fake)");
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   process.exit(0);
 }
 const FAKE_NAMES = ["claude", VENDOR_C.bin];
@@ -189,7 +189,7 @@ function addFakeBinToRegistryPath() {
 if (onWindows && !canEditRegistryPath) {
   log("this scenario needs the fake claude on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
   log("RESULT: SKIP (Windows outside CI)");
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   process.exit(0);
 }
 let undoRegistryPath = null;
@@ -793,7 +793,7 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

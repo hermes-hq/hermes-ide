@@ -545,8 +545,8 @@ try {
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
   }
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
-  rmSync(work, { recursive: true, force: true });
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details });

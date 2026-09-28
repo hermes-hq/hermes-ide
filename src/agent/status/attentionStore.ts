@@ -20,6 +20,7 @@ import {
 } from "../contract/sessionEventStore";
 import { AGENT_STATUS_KINDS, BLOCKING_STATUS_KINDS, type AgentStatusKind } from "../contract/status";
 import { deriveStatus, type DerivedStatus } from "./deriveStatus";
+import { userInputTimes } from "./userInput";
 
 type Listener = () => void;
 
@@ -28,7 +29,7 @@ let viewed: string | null = null;
 const seenAt = new Map<string, number>();
 const seenListeners = new Map<string, Set<Listener>>();
 const summaryListeners = new Set<Listener>();
-const cache = new Map<string, { version: number; seen: number | null; value: DerivedStatus }>();
+const cache = new Map<string, { version: number; seen: number | null; inputs: readonly number[]; value: DerivedStatus }>();
 
 /** When a person last saw the session; Infinity while it is on screen. */
 export function seenAtOf(sessionId: string): number | null {
@@ -46,9 +47,10 @@ function notifySeen(sessionId: string): void {
 export function getSessionStatus(sessionId: string): DerivedStatus {
   const snapshot = getSessionEventSnapshot(sessionId);
   const seen = seenAtOf(sessionId);
+  const inputs = userInputTimes(sessionId);
   const hit = cache.get(sessionId);
-  if (hit && hit.version === snapshot.version && hit.seen === seen) return hit.value;
-  const value = deriveStatus({ snapshot, seenAt: seen });
+  if (hit && hit.version === snapshot.version && hit.seen === seen && hit.inputs === inputs) return hit.value;
+  const value = deriveStatus({ snapshot, seenAt: seen, inputTimes: inputs });
   // Keep the old object when the answer did not change (a new event that
   // left the status as it was must not re-render the row).
   const same =
@@ -59,7 +61,7 @@ export function getSessionStatus(sessionId: string): DerivedStatus {
     hit.value.at === value.at &&
     hit.value.source === value.source;
   const kept = same ? hit.value : value;
-  cache.set(sessionId, { version: snapshot.version, seen, value: kept });
+  cache.set(sessionId, { version: snapshot.version, seen, inputs, value: kept });
   return kept;
 }
 

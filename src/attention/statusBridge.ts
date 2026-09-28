@@ -24,9 +24,11 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem, type InboxKind } from "../agent/contract/inbox";
 import type { AgentStatus } from "../agent/contract/status";
 import { inboxKindForStatus } from "./model";
-import { PTY_SOURCE } from "../agent/status/deriveStatus";
+import { PTY_SOURCE, resumedIndex } from "../agent/status/deriveStatus";
+import { userInputTimes } from "../agent/status/userInput";
 
 const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
+const QUIET: AgentStatus = Object.freeze({ kind: "idle", confidence: "guessed", detail: "" });
 
 /**
  * The last status of a session that did not come from the terminal's own
@@ -34,12 +36,25 @@ const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact",
  * nor resolve an item, so a shell prompt redrawn after an agent asked for
  * approval does not hide the request. An exit counts (it is a fact). Null
  * when the session has reported nothing else.
+ *
+ * One exception (deriveStatus, rule 6): once the agent visibly resumed
+ * after a signal the person answered, the terminal's working guess stands in
+ * for the signal (it resolves the item), and anything the terminal guesses
+ * after it reads as quiet (a guess never raises an item).
  */
-export function trustedStatus(snap: SessionEventSnapshot): AgentStatus | null {
+export function trustedStatus(snap: SessionEventSnapshot, inputTimes: readonly number[] = userInputTimes(snap.sessionId)): AgentStatus | null {
+  let latestGuess: AgentStatus | null = null;
   for (let i = snap.events.length - 1; i >= 0; i--) {
     const e = snap.events[i];
     if (e.type === "exit") return EXITED;
-    if (e.type === "status" && e.source !== PTY_SOURCE) return e.status;
+    if (e.type === "status" && e.source === PTY_SOURCE) {
+      latestGuess ??= e.status;
+      continue;
+    }
+    if (e.type === "status") {
+      if (latestGuess && resumedIndex(snap.events, i, inputTimes) >= 0) return latestGuess.kind === "working" ? latestGuess : QUIET;
+      return e.status;
+    }
   }
   return null;
 }

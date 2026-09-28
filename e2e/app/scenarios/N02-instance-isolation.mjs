@@ -43,7 +43,7 @@ const startedAt = Date.now();
 const PRODUCTION_IDENTIFIER = "com.hermes-ide.terminal";
 const REFUSAL_EXIT_CODE = 78;
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", "N02-instance-isolation");
-rmSync(evidenceDir, { recursive: true, force: true });
+rmSync(evidenceDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 const log = createLogger(join(evidenceDir, "scenario.log"));
 
 function assert(condition, message) {
@@ -372,13 +372,13 @@ try {
     }
   }
   // Only what this run created.
-  rmSync(decoyZsh, { recursive: true, force: true });
+  rmSync(decoyZsh, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   rmSync(decoyBash, { force: true });
-  rmSync(decoyOldZsh, { recursive: true, force: true });
+  rmSync(decoyOldZsh, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   for (const root of rootsToRemove) {
-    if (basename(root).startsWith("hermes-shell-")) rmSync(root, { recursive: true, force: true });
+    if (basename(root).startsWith("hermes-shell-")) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
-  if (basename(scratch).startsWith("hermes-n02-")) rmSync(scratch, { recursive: true, force: true });
+  if (basename(scratch).startsWith("hermes-n02-")) rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

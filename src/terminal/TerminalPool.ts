@@ -11,6 +11,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { writeToSession } from "../api/sessions";
+import { noteUserInput } from "../agent/status/userInput";
 import { suggest } from "./intelligence/suggestionEngine";
 import { resolveIntent, getIntentSuggestions } from "./intentCommands";
 import { type ProjectContext, getCachedContext } from "./intelligence/contextAnalyzer";
@@ -131,6 +132,8 @@ export async function createTerminal(sessionId: string, color: string): Promise<
 function handleTerminalInput(sessionId: string, data: string): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
+  // The session status needs to know a person answered (deriveStatus, rule 6).
+  noteUserInput(sessionId, data);
 
   const overlayVisible = entry.suggestionState?.visible ?? false;
 

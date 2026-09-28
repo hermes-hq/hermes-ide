@@ -36,7 +36,7 @@ await runScenario("N11-workbench-notes-restore", async ({ evidenceDir, log, asse
   // One private home + data folder shared by both launches.
   const shared = mkdtempSync(join(tmpdir(), "hermes-e2e-"));
   onCleanup(() => {
-    if (basename(shared).startsWith("hermes-e2e-")) rmSync(shared, { recursive: true, force: true });
+    if (basename(shared).startsWith("hermes-e2e-")) rmSync(shared, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   });
   {
     // ── 1. First launch ────────────────────────────────────────────

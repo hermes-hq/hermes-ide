@@ -132,7 +132,7 @@ async function runSelfTest(name, extraEnv = {}, { screenshot = false } = {}) {
   }
   log(`  exited after ${Date.now() - started} ms: ${JSON.stringify(exit)}`);
   const json = existsSync(report) ? JSON.parse(readFileSync(report, "utf8")) : null;
-  rmSync(privateTmp, { recursive: true, force: true });
+  rmSync(privateTmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   return { code: exit.code, report: json, dataDir, home, appLog, screenshot: shot };
 }
 

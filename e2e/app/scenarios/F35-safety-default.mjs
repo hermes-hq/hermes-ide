@@ -39,7 +39,7 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   const fake = writeFakeAgent("f35");
   onCleanup(fake.cleanup);
   const root = mkdtempSync(join(tmpdir(), "hermes-e2e-f35-"));
-  onCleanup(() => rmSync(root, { recursive: true, force: true }));
+  onCleanup(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const project = join(root, "f35-project");
   mkdirSync(project, { recursive: true });
   const homeDir = onWindows ? undefined : join(root, "home");

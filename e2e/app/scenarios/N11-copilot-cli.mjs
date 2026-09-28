@@ -22,7 +22,7 @@ const MARKER = "fake-copilot started";
 await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, onCleanup }) => {
   log("step 1: prepare a private home whose shells put ~/.local/bin on PATH");
   const tmp = mkdtempSync(join(tmpdir(), "hermes-e2e-"));
-  onCleanup(() => rmSync(tmp, { recursive: true, force: true }));
+  onCleanup(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const home = join(tmp, "home");
   const bin = join(home, ".local", "bin");
   mkdirSync(bin, { recursive: true });

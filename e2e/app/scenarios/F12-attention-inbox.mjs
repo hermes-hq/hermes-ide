@@ -29,6 +29,10 @@
 //      Hermes's hold: pmset / systemd-inhibit / powercfg); when nothing
 //      works the hold is gone
 //   The sidebar order never changes, from the first step to the last.
+//   8. an agent that only reports through its own terminal notifications
+//      (the fake agent as it ships: OSC 9 / 99 / 777) blocks itself; answered
+//      in its terminal, it leaves Blocked on you although it never says it
+//      went back to work (its status is no longer "needs approval").
 //
 // The window's keyboard focus is stated through the test hooks
 // (setWindowFocused): a hands-free test must not take the focus from
@@ -176,6 +180,15 @@ function patientApprovalScenario() {
       .filter((step) => !["osc9", "osc99", "osc777", "split"].includes(step.do))
       .map((step) => (step.branches ? { ...step, branches: Object.fromEntries(Object.entries(step.branches).map(([k, b]) => [k, { ...b, steps: quiet(b.steps ?? []) }])) } : step));
   scenario.steps = quiet(scenario.steps);
+  for (const step of scenario.steps) if (step.do === "waitKey") step.timeoutMs = 600_000;
+  writeFileSync(file, JSON.stringify(scenario, null, 2));
+  return file;
+}
+
+/** The fake agent's approval scenario as it ships (its notifications included), waiting long enough. */
+function oscApprovalScenario() {
+  const file = join(evidenceDir, "approval-notifications.json");
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, "tools", "fake-agents", "scenarios", "approval.json"), "utf8"));
   for (const step of scenario.steps) if (step.do === "waitKey") step.timeoutMs = 600_000;
   writeFileSync(file, JSON.stringify(scenario, null, 2));
   return file;
@@ -483,6 +496,29 @@ try {
       && !window.__HERMES_E2E__.inboxItems().some((i) => i.kind === "ready");
   `);
   assert(JSON.stringify(await sidebarOrder(bridge)) === JSON.stringify(order0), "the sidebar order is the same as at the start");
+
+  log("step 11: an agent that only reports through terminal notifications: answered in its terminal, it leaves Blocked on you");
+  // The fake agent's approval scenario as it ships, notifications included:
+  // nothing but its own OSC 9 / 99 / 777 says it needs approval, and
+  // nothing says it went back to work.
+  const E = await createPlainTerminal(bridge);
+  await startFakeAgent(bridge, E, "E (notifications only)", oscApprovalScenario());
+  const asked = await bridge.waitFor("E's notification in Blocked on you", `
+    return window.__HERMES_E2E__.inboxItems().find((i) => i.sessionId === ${JSON.stringify(E)} && i.kind === "blocked") ?? null;
+  `, { timeoutMs: 10_000 });
+  const askedStatus = await bridge.eval(`return window.__HERMES_E2E__.sessionStatus(${JSON.stringify(E)});`);
+  assert(askedStatus.kind === "needs_approval" && askedStatus.confidence === "signal", `E's own notification blocks it ("${asked.detail}", ${askedStatus.kind} · ${askedStatus.confidence})`);
+  await bridge.screenshot(join(evidenceDir, "05-osc-agent-blocked.png"));
+  await bridge.typeInTerminal(E, "y");
+  await bridge.waitForTerminal(E, /fake-agent: approval granted/, { timeoutMs: 15_000 });
+  const resumed = await bridge.waitFor("E to leave Blocked on you once answered", `
+    const s = window.__HERMES_E2E__.sessionStatus(${JSON.stringify(E)});
+    const blocked = window.__HERMES_E2E__.inboxItems().some((i) => i.sessionId === ${JSON.stringify(E)} && i.kind === "blocked");
+    return !blocked && s.kind !== "needs_approval" ? s : null;
+  `, { timeoutMs: 5_000 });
+  assert(resumed.kind === "working" || resumed.kind === "done_unread" || resumed.kind === "idle", `answered in its terminal, E's approval is resolved and its status moved on (${resumed.kind} · ${resumed.confidence}, from ${resumed.source})`);
+  await bridge.screenshot(join(evidenceDir, "06-osc-agent-answered.png"));
+
   const shot = MAC ? await osState(bridge) : null;
   if (shot) log(`  OS state at the end: ${JSON.stringify(shot)}`);
   await bridge.screenshot(join(evidenceDir, "04-end.png"));
@@ -503,7 +539,7 @@ try {
       log("FAILED: the app did not quit cleanly");
     }
   }
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

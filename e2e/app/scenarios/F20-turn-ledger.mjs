@@ -659,8 +659,8 @@ try {
     }
   }
   try {
-    rmSync(workDir, { recursive: true, force: true });
-    rmSync(fakeDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    rmSync(fakeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch { /* leave it */ }
 }
 

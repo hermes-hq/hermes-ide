@@ -43,7 +43,7 @@ await runScenario("F30-instruction-files", async ({ evidenceDir, log, assert, ap
 
   log("step 1: synthetic folders and a private home");
   const root = mkdtempSync(join(tmpdir(), "hermes-e2e-f30-"));
-  onCleanup(() => rmSync(root, { recursive: true, force: true }));
+  onCleanup(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const project = join(root, "f30-project");
   const shared = join(root, "f30-shared");
   mkdirSync(project, { recursive: true });

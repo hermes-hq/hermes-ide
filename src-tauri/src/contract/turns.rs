@@ -36,8 +36,9 @@ pub struct Turn {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub degraded: bool,
     /// Done-When result at the end of this turn (F27, additive): None when
-    /// no check ran. F20 fills it from the frontend's Done-When store
-    /// (`checksForTurn` in `src/doneWhen/store.ts`), the one place that
+    /// no check ran. F20 fills it in the frontend from the Done-When store
+    /// (`withTurnChecks` in `src/agent/turns/turnChecks.ts`, reading
+    /// `checksForTurn` in `src/doneWhen/store.ts`), the one place that
     /// knows which turn a Stop-hook report belongs to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checks: Option<TurnChecks>,

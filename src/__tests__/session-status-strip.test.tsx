@@ -101,6 +101,26 @@ describe("guessedStatus / stripStatus", () => {
     });
   });
 
+  it("an answered signal gives way to the terminal's guess once the agent resumes; an exact status never does", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("needs_approval", "signal", "osc", "Approval requested"), 10));
+    dispatchSessionEvent(SID, at(status("needs_answer", "guessed", "pty"), 12));
+    dispatchSessionEvent(SID, at(status("working", "guessed", "pty"), 30));
+    // Nobody typed: the notification stands.
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toMatchObject({ status: { kind: "needs_approval", confidence: "signal" }, source: "osc" });
+    // The person answered at 20: the terminal's working guess shows, dimmed.
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", [20])).toEqual({ status: { kind: "working", confidence: "guessed", detail: "" }, source: "guessed" });
+    // Later terminal guesses follow until the agent reports again.
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "pty"), 40));
+    expect(stripStatus(getSessionEventSnapshot(SID), "shell_ready", [20]).status.kind).toBe("idle");
+    dispatchSessionEvent(SID, at(status("done_unread", "signal", "osc"), 50));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", [20])).toMatchObject({ status: { kind: "done_unread" }, source: "osc" });
+    // An exact approval, answered and followed by work, stays.
+    dispatchSessionEvent(SID, at(status("needs_approval", "exact", "hook:claude", "Bash"), 60));
+    dispatchSessionEvent(SID, at(status("working", "guessed", "pty"), 80));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", [20, 70])).toMatchObject({ status: { kind: "needs_approval", confidence: "exact" }, source: "hook" });
+  });
+
   it("has a glyph for every status kind", () => {
     for (const kind of AGENT_STATUS_KINDS) expect(STATUS_GLYPHS[kind], kind).toBeTruthy();
   });

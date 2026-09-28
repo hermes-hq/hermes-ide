@@ -391,7 +391,7 @@ try {
   assert((await bridge.terminalIds()).includes(sessionA), "session A is still open");
   await bridge.screenshot(join(evidenceDir, "06-after-delete-session-data.png"));
 
-  if (stateRoot) rmSync(join(stateRoot, sessionB), { recursive: true, force: true });
+  if (stateRoot) rmSync(join(stateRoot, sessionB), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
   // ── 7. Relaunch while opted in: analytics starts with the app ─────
   log("step 7: opt in, quit, and relaunch on the same profile");

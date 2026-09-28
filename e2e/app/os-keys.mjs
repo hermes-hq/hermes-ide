@@ -226,6 +226,6 @@ function pressWindows(pid, chords, delayMs, clickAt) {
     const line = (res.stdout || "").trim().split(/\r?\n/).pop();
     return { driver: "SendInput", ...JSON.parse(line) };
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }

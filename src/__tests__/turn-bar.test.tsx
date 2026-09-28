@@ -35,6 +35,9 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { TurnBar } from "../components/TurnBar";
 import type { Turn } from "../agent/contract/turns";
+import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
+import { _resetDoneWhenStoreForTest, recordDoneWhen } from "../doneWhen/store";
+import type { CheckRecord } from "../doneWhen/types";
 
 const turn = (n: number, extra: Partial<Turn> = {}): Turn => ({
   sessionId: "s1",
@@ -49,6 +52,8 @@ const turn = (n: number, extra: Partial<Turn> = {}): Turn => ({
 let turns: Turn[] = [];
 
 beforeEach(() => {
+  _resetSessionEventStoreForTest();
+  _resetDoneWhenStoreForTest();
   h.invoke.mockReset();
   h.listeners.clear();
   turns = [];
@@ -161,5 +166,48 @@ describe("TurnBar", () => {
       h.listeners.get("hermes:turn-ledger")!({ payload: { sessionId: "s1", restoredTo: 1 } });
     });
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Restored to T1"));
+  });
+
+  it("marks a turn with its Done-When result (Turn.checks), and follows a new result", async () => {
+    // Agent turns 1 and 2 ended at 1500 and 2500: the ledger's T1 and T2.
+    dispatchSessionEvent("s1", { type: "turn_end", at: 1500, source: "hook:x", n: 1 });
+    dispatchSessionEvent("s1", { type: "turn_end", at: 2500, source: "hook:x", n: 2 });
+    const result = (n: number, state: "passed" | "failed"): CheckRecord => ({
+      session_id: "s1",
+      turn: n,
+      run: {
+        state,
+        trigger: "turn_end",
+        source: null,
+        error: null,
+        commands: [{ command: "npm test", exit_code: state === "passed" ? 0 : 1, timed_out: false, duration_ms: 1, output_tail: "" }],
+        started_at: 1,
+        duration_ms: 1,
+        attempt: null,
+        max_attempts: null,
+        blocking: false,
+        final: true,
+        gave_up: false,
+      },
+      check_failed: state === "failed",
+      failed_turns: 0,
+      hook: false,
+    });
+    recordDoneWhen(result(1, "passed"));
+    turns = [turn(1), turn(2)];
+    const { container } = render(<TurnBar sessionId="s1" />);
+    await waitFor(() => expect(chips()).toHaveLength(2));
+    const t1 = container.querySelector('[data-turn-n="1"]') as HTMLElement;
+    expect(t1.dataset.checks).toBe("passed");
+    expect(t1.getAttribute("title")).toContain("tests ✓");
+    expect(t1.querySelector(".turn-bar-checks")?.textContent).toBe("✓");
+    const t2 = () => container.querySelector('[data-turn-n="2"]') as HTMLElement;
+    expect(t2().dataset.checks).toBeUndefined();
+    act(() => {
+      recordDoneWhen(result(2, "failed"));
+    });
+    await waitFor(() => expect(t2().dataset.checks).toBe("failed"));
+    expect(t2().getAttribute("title")).toContain("npm test");
+    expect(t2().querySelector(".turn-bar-checks")?.textContent).toBe("✗");
   });
 });

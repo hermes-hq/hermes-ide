@@ -15,7 +15,10 @@ import {
   confidenceOfSource,
   deriveStatus,
   foldStatus,
+  resumedIndex,
+  resumesAfterInput,
   statusOfEvent,
+  typedBetween,
 } from "../agent/status/deriveStatus";
 
 const EMPTY: SessionEventSnapshot = {
@@ -143,6 +146,72 @@ describe("deriveStatus: precedence", () => {
 
   it("an exact working holds against later pty guesses (documented limit, F11 reconciles)", () => {
     expect(derive([status(1, "working", "exact", "hook:x"), status(2, "idle", "guessed", "pty")]).kind).toBe("working");
+  });
+});
+
+describe("deriveStatus: an answered signal yields when the agent resumes (rule 6)", () => {
+  // An OSC-only agent (e.g. Codex): it asks through a terminal notification
+  // and never says it went back to work. The person answers in its terminal
+  // at `input`; the terminal then guesses working.
+  const asked = status(10, "needs_approval", "signal", "osc", "Approval requested: rm -rf node_modules");
+  const box = status(12, "needs_answer", "guessed", "pty"); // the box sits silent
+  const works = (at: number) => status(at, "working", "guessed", "pty");
+  // [name, events, input times, expected kind, expected source]
+  const table: [string, SessionEvent[], number[], AgentStatusKind, string][] = [
+    ["answered, then working: leaves needs approval", [asked, box, works(30)], [20], "working", "pty"],
+    ["answered at the same ms as the signal", [asked, works(30)], [10], "working", "pty"],
+    ["working at the same ms as the answer", [asked, works(20)], [20], "working", "pty"],
+    ["no input at all: stays", [asked, box, works(30)], [], "needs_approval", "osc"],
+    ["typed before the signal only: stays", [asked, box, works(30)], [5], "needs_approval", "osc"],
+    ["typed after the working guess only: stays", [asked, works(30)], [40], "needs_approval", "osc"],
+    ["answered, but the terminal guesses no work (idle): stays", [asked, status(30, "idle", "guessed", "pty")], [20], "needs_approval", "osc"],
+    ["answered, but the terminal guesses a question: stays", [asked, status(30, "needs_answer", "guessed", "pty")], [20], "needs_approval", "osc"],
+    ["an exact approval never yields to a guess", [status(10, "needs_approval", "exact", "hook:claude", "Bash"), works(30)], [20], "needs_approval", "hook:claude"],
+    ["an exact report from the e2e injector never yields either", [status(10, "needs_approval", "exact", "e2e"), works(30)], [20], "needs_approval", "e2e"],
+    ["an attention notification (signal) yields the same way", [{ type: "attention", at: 10, source: "osc", detail: "?" }, works(30)], [20], "working", "pty"],
+    ["a signal 'done' yields to the next task's work", [status(10, "done_unread", "signal", "osc"), works(30)], [20], "working", "pty"],
+    ["a helper's named guess is not a signal: stays", [status(10, "startup_prompt", "guessed", "hi"), works(30)], [20], "startup_prompt", "hi"],
+    ["after resuming, later terminal guesses rule until the agent reports again", [asked, works(30), status(40, "idle", "guessed", "pty")], [20], "idle", "pty"],
+    ["the agent's next signal replaces the guess", [asked, works(30), status(50, "needs_approval", "signal", "osc", "again")], [20], "needs_approval", "osc"],
+    ["asked again and answered again: yields again", [asked, works(30), status(50, "needs_approval", "signal", "osc"), status(55, "needs_answer", "guessed", "pty"), works(70)], [20, 60], "working", "pty"],
+    ["asked again, not answered yet: stays (an old answer does not count)", [asked, works(30), status(50, "needs_approval", "signal", "osc"), works(70)], [20], "needs_approval", "osc"],
+  ];
+
+  it.each(table)("%s", (_name, events, inputs, kind, source) => {
+    const d = deriveStatus({ snapshot: snapshotOf(events), seenAt: null, inputTimes: inputs });
+    expect(d.kind).toBe(kind);
+    expect(d.source).toBe(source);
+  });
+
+  it("without input times the rule never applies (the old behaviour)", () => {
+    expect(derive([asked, box, works(30)]).kind).toBe("needs_approval");
+  });
+
+  it("typedBetween is inclusive at both ends", () => {
+    expect(typedBetween([10], 10, 20)).toBe(true);
+    expect(typedBetween([20], 10, 20)).toBe(true);
+    expect(typedBetween([9, 21], 10, 20)).toBe(false);
+    expect(typedBetween([], 0, 100)).toBe(false);
+  });
+
+  it("resumesAfterInput needs a signal before and the terminal's working guess after", () => {
+    const sig = { kind: "needs_approval", confidence: "signal", source: "osc", at: 10 } as const;
+    const work = { kind: "working", confidence: "guessed", source: "pty", at: 30 } as const;
+    expect(resumesAfterInput(sig, work, [20])).toBe(true);
+    expect(resumesAfterInput({ ...sig, confidence: "exact" }, work, [20])).toBe(false);
+    expect(resumesAfterInput({ ...sig, source: "pty" }, work, [20])).toBe(false);
+    expect(resumesAfterInput({ ...sig, at: null }, work, [20])).toBe(false);
+    expect(resumesAfterInput(sig, { ...work, kind: "idle" }, [20])).toBe(false);
+    expect(resumesAfterInput(sig, { ...work, source: "hi" }, [20])).toBe(false);
+  });
+
+  it("resumedIndex finds the terminal's working guess that superseded a status event", () => {
+    const events = [asked, box, works(30), works(40)];
+    expect(resumedIndex(events, 0, [20])).toBe(2);
+    expect(resumedIndex(events, 0, [35])).toBe(3);
+    expect(resumedIndex(events, 0, [])).toBe(-1);
+    expect(resumedIndex(events, 0, [50])).toBe(-1);
+    expect(resumedIndex([status(10, "needs_approval", "exact", "hook:x"), works(30)], 0, [20])).toBe(-1);
   });
 });
 

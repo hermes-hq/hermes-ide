@@ -39,7 +39,7 @@ await runScenario("F30-agent-view-mcp", async ({ evidenceDir, log, assert, apps,
 
   log("step 1: synthetic project, private home and a fake Claude bridge");
   const root = mkdtempSync(join(tmpdir(), "hermes-e2e-f30mcp-"));
-  onCleanup(() => rmSync(root, { recursive: true, force: true }));
+  onCleanup(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const project = join(root, "f30-mcp-project");
   mkdirSync(project, { recursive: true });
   const projectMcp = join(project, ".mcp.json");

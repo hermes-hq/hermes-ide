@@ -17,6 +17,7 @@ import {
   _resetSessionEventStoreForTest,
   clearSessionEvents,
   dispatchSessionEvent,
+  getSessionEventSnapshot,
   subscribeAllSessionEvents,
 } from "../agent/contract/sessionEventStore";
 import type { AgentStatusKind } from "../agent/contract/status";
@@ -29,7 +30,8 @@ import {
   nextBlockedSession,
   sectionOf,
 } from "../attention/model";
-import { startStatusBridge } from "../attention/statusBridge";
+import { startStatusBridge, trustedStatus } from "../attention/statusBridge";
+import { _resetUserInputForTest, noteUserInput } from "../agent/status/userInput";
 import { createNotifier, type AwayPayload, type NotifierDeps } from "../attention/notifier";
 import { awayPayload, itemState, notificationText } from "../attention/describe";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
@@ -55,6 +57,7 @@ beforeEach(() => {
   _resetInboxForTest(now);
   _resetSessionEventStoreForTest();
   _resetMutesForTest(now);
+  _resetUserInputForTest();
 });
 
 describe("sections, badge count and ⌘I order", () => {
@@ -165,6 +168,43 @@ describe("status bridge", () => {
     expect(listInboxItems().map((i) => [i.sessionId, i.detail])).toEqual([["B", "Which database?"]]);
     status("B", "working");
     expect(listInboxItems()).toEqual([]);
+    bridge.stop();
+  });
+
+  it("an OSC-only agent's approval is resolved once the person answers and the agent visibly resumes", () => {
+    const bridge = startStatusBridge();
+    const ev = (kind: AgentStatusKind, confidence: "signal" | "guessed" | "exact", source: string, at: number, detail = "") =>
+      dispatchSessionEvent("A", { type: "status", at, source, status: { kind, confidence, detail } });
+    ev("needs_approval", "signal", "osc", 10, "Approval requested: rm -rf node_modules");
+    expect(listInboxItems().map((i) => [i.kind, i.detail])).toEqual([["blocked", "Approval requested: rm -rf node_modules"]]);
+    ev("needs_answer", "guessed", "pty", 12); // the box sits silent
+    expect(listInboxItems()).toHaveLength(1);
+    // The terminal guesses work, but nobody answered: the request stays.
+    ev("working", "guessed", "pty", 14);
+    expect(listInboxItems()).toHaveLength(1);
+    expect(trustedStatus(getSessionEventSnapshot("A"), [])?.kind).toBe("needs_approval");
+    // The person answers in the terminal at 20; the agent works at 30.
+    ev("idle", "guessed", "pty", 16);
+    noteUserInput("A", "y", 20);
+    ev("working", "guessed", "pty", 30);
+    expect(trustedStatus(getSessionEventSnapshot("A"))).toMatchObject({ kind: "working", confidence: "guessed" });
+    expect(listInboxItems()).toEqual([]);
+    // A later terminal guess never raises an item (and reads as quiet, not working).
+    ev("needs_answer", "guessed", "pty", 40);
+    expect(listInboxItems()).toEqual([]);
+    expect(trustedStatus(getSessionEventSnapshot("A"))?.kind).toBe("idle");
+    // The agent's next notification raises again.
+    ev("needs_approval", "signal", "osc", 50, "again");
+    expect(listInboxItems().map((i) => i.detail)).toEqual(["again"]);
+    bridge.stop();
+  });
+
+  it("an exact approval is never resolved by the terminal's guess, answered or not", () => {
+    const bridge = startStatusBridge();
+    status("A", "needs_approval", "Bash", 10);
+    noteUserInput("A", "y", 20);
+    dispatchSessionEvent("A", { type: "status", at: 30, source: "pty", status: { kind: "working", confidence: "guessed", detail: "" } });
+    expect(listInboxItems().map((i) => i.detail)).toEqual(["Bash"]);
     bridge.stop();
   });
 

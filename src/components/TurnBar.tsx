@@ -1,8 +1,11 @@
 import "../styles/components/TurnBar.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { translate } from "../i18n/registry";
-import { getTurnDiff, listTurns, type Turn } from "../agent/contract/turns";
+import { getTurnDiff, listTurns, type Turn, type TurnChecks } from "../agent/contract/turns";
+import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
+import { withTurnChecks } from "../agent/turns/turnChecks";
+import { useDoneWhen } from "../doneWhen/store";
 import {
   previewRestoreTurn,
   restoreTurn,
@@ -18,7 +21,8 @@ import {
  * the turn's diff; from there "Restore to Tn" previews what restoring would
  * change and only restores after a confirmation. Turns arrive from the
  * backend ledger (`hermes:turn-ledger`); the bar renders nothing while a
- * session has no turn.
+ * session has no turn. A turn whose Done-When checks ran (F27) carries
+ * their result (`Turn.checks`): a mark on the chip and a line in its title.
  */
 
 interface TurnBarProps {
@@ -30,6 +34,13 @@ type Sheet =
   | { kind: "restore"; turn: Turn; preview: RestorePreview | null; error: string | null; busy: boolean };
 
 const NOTICE_MS = 4000;
+
+/** The Done-When result of a turn, for its chip's title. */
+function checksText(checks: TurnChecks): string {
+  if (checks.state === "passed") return translate("doneWhen.chip.passed");
+  if (checks.state === "error") return translate("doneWhen.chip.error");
+  return translate("doneWhen.inboxFailed", { commands: checks.failed.join(", ") });
+}
 
 function diffLineClass(line: string): string {
   if (line.startsWith("@@")) return "turn-diff-line turn-diff-line-hunk";
@@ -54,7 +65,13 @@ function Patch({ patch }: { patch: string }) {
 }
 
 export function TurnBar({ sessionId }: TurnBarProps) {
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [ledgerTurns, setTurns] = useState<Turn[]>([]);
+  const doneWhen = useDoneWhen(sessionId);
+  // Turn.checks (F20 x F27): the Done-When result of each recorded turn.
+  const turns = useMemo(
+    () => withTurnChecks(ledgerTurns, getSessionEventSnapshot(sessionId).events, (n) => doneWhen.byTurn[n] ?? null),
+    [ledgerTurns, doneWhen, sessionId],
+  );
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,9 +185,10 @@ export function TurnBar({ sessionId }: TurnBarProps) {
         <div className="turn-bar-turns">
           {turns.map((turn) => {
             const { files, insertions, deletions } = turn.diffstat;
-            const title = turn.degraded
+            const base = turn.degraded
               ? translate("turnBar.summaryOnly", { n: turn.n })
               : translate("turnBar.turnTitle", { n: turn.n, files, insertions, deletions });
+            const title = turn.checks ? `${base} · ${checksText(turn.checks)}` : base;
             return (
               <button
                 key={turn.n}
@@ -178,6 +196,7 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                 className={`turn-bar-turn${turn.degraded ? " turn-bar-turn-degraded" : ""}`}
                 data-turn-n={turn.n}
                 data-files={files}
+                data-checks={turn.checks?.state}
                 title={title}
                 aria-label={title}
                 disabled={turn.degraded}
@@ -188,6 +207,11 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                   <span className="turn-bar-add">+{insertions}</span>
                   <span className="turn-bar-del">−{deletions}</span>
                 </span>
+                {turn.checks && (
+                  <span className={`turn-bar-checks turn-bar-checks-${turn.checks.state}`} aria-hidden="true">
+                    {turn.checks.state === "passed" ? "✓" : "✗"}
+                  </span>
+                )}
               </button>
             );
           })}

@@ -18,6 +18,11 @@
 //      (the launch helper's "ended", not the process exiting) stays
 //      "exited" while the shell sits idle, and yields to any other
 //      evidence that something runs there again.
+//   6. A report at signal confidence (a terminal notification any program
+//      could print, e.g. an OSC-only agent's "approval requested") yields
+//      when the agent visibly resumes: the terminal's working guess, made
+//      after the person typed into the session after that report. An exact
+//      report never yields to a guess.
 // Certainty tiers, highest first: exact, signal, guessed, and below every
 // named guess the terminal's generic heuristics (source "pty"), so a
 // helper's specific guess is never overwritten by shell-output shapes.
@@ -113,26 +118,72 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
   }
 }
 
+const NO_INPUT: readonly number[] = Object.freeze([]);
+
+/** Whether the person typed into the session between `from` and `to` (epoch ms, inclusive). */
+export function typedBetween(inputTimes: readonly number[], from: number, to: number): boolean {
+  return inputTimes.some((t) => t >= from && t <= to);
+}
+
+type Report = Pick<DerivedStatus, "kind" | "confidence" | "source" | "at">;
+
+/**
+ * Rule 6: `next` is the agent visibly resuming after `current`, a signal:
+ * the terminal's working guess, made after the person typed into the
+ * session after the signal.
+ */
+export function resumesAfterInput(current: Report, next: Report, inputTimes: readonly number[]): boolean {
+  return (
+    current.confidence === "signal" &&
+    current.source !== PTY_SOURCE &&
+    current.at !== null &&
+    next.kind === "working" &&
+    next.source === PTY_SOURCE &&
+    next.at !== null &&
+    typedBetween(inputTimes, current.at, next.at)
+  );
+}
+
+/**
+ * For readers that show the last report from anywhere but the terminal's
+ * heuristics (the status strip, the inbox): the index of the terminal's
+ * working guess that superseded the status event at `index` by rule 6, or
+ * -1 when nothing did.
+ */
+export function resumedIndex(events: readonly SessionEvent[], index: number, inputTimes: readonly number[]): number {
+  const e = events[index];
+  if (!e || !inputTimes.length) return -1;
+  const report = statusOfEvent(e);
+  if (!report) return -1;
+  for (let j = index + 1; j < events.length; j++) {
+    const later = events[j];
+    if (later.type !== "status" || later.source !== PTY_SOURCE) continue;
+    if (resumesAfterInput(report, { ...later.status, at: later.at, source: PTY_SOURCE }, inputTimes)) return j;
+  }
+  return -1;
+}
+
 /** Whether `next` replaces `current` (see the precedence rules above). */
-export function replaces(current: DerivedStatus, next: DerivedStatus, nextIsExit: boolean): boolean {
+export function replaces(current: DerivedStatus, next: DerivedStatus, nextIsExit: boolean, inputTimes: readonly number[] = NO_INPUT): boolean {
   if (nextIsExit) return true;
   if (current.source !== null && current.source === next.source) return true;
   const cur = certaintyRank(current.confidence, current.source);
   const nxt = certaintyRank(next.confidence, next.source);
   if (nxt >= cur) return true;
   if (current.kind === "exited" && !current.processExited) return next.kind !== "idle";
+  if (resumesAfterInput(current, next, inputTimes)) return true;
   return YIELDING.has(current.kind);
 }
 
 const NOTHING: DerivedStatus = Object.freeze({ ...UNKNOWN_STATUS, at: null, source: null });
 
 /** Fold a list of events, oldest first, from `start`. */
-export function foldStatus(events: readonly SessionEvent[], start: DerivedStatus = NOTHING): DerivedStatus {
+export function foldStatus(events: readonly SessionEvent[], start: DerivedStatus = NOTHING, inputTimes: readonly number[] = NO_INPUT): DerivedStatus {
   let current = start;
   for (const event of events) {
     const next = statusOfEvent(event);
     if (!next) continue;
-    if (current === NOTHING || replaces(current, next, event.type === "exit")) current = next;
+    if (current === NOTHING || replaces(current, next, event.type === "exit", inputTimes)) current = next;
   }
   return current;
 }
@@ -145,18 +196,23 @@ export interface DeriveStatusInput {
    * while the session is on screen in a focused window.
    */
   readonly seenAt: number | null;
+  /**
+   * When a person typed into the session (epoch ms, oldest first), for
+   * rule 6. Empty or absent: no signal yields to a terminal guess.
+   */
+  readonly inputTimes?: readonly number[];
 }
 
 /**
  * The status a session shows. Pure: the same snapshot and seen time always
  * give the same answer.
  */
-export function deriveStatus({ snapshot, seenAt }: DeriveStatusInput): DerivedStatus {
+export function deriveStatus({ snapshot, seenAt, inputTimes = NO_INPUT }: DeriveStatusInput): DerivedStatus {
   // The store keeps the last SESSION_EVENT_CAP events. When older ones were
   // dropped, start from the last status the store recorded.
   const truncated = snapshot.version > snapshot.events.length;
   const start: DerivedStatus = truncated ? { ...snapshot.status, at: null, source: null } : NOTHING;
-  const folded = foldStatus(snapshot.events, start);
+  const folded = foldStatus(snapshot.events, start, inputTimes);
   if (folded.kind === "done_unread" && seenAt !== null && (folded.at === null || seenAt >= folded.at)) {
     return { ...folded, kind: "idle" };
   }

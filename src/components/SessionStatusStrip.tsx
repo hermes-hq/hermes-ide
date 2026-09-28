@@ -13,7 +13,8 @@
 // phase, dimmed, so a session is never labelled with a certainty it does
 // not have.
 
-import { PTY_SOURCE } from "../agent/status/deriveStatus";
+import { PTY_SOURCE, resumedIndex } from "../agent/status/deriveStatus";
+import { userInputTimes } from "../agent/status/userInput";
 import "../styles/components/SessionStatusStrip.css";
 import { useSessionEvents, type SessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { AgentStatus, AgentStatusKind, Confidence } from "../agent/contract/status";
@@ -50,13 +51,17 @@ export function guessedStatus(phase: string): AgentStatus {
   return { kind, confidence: "guessed", detail: "" };
 }
 
-/** The status the strip shows, and where it came from. */
-export function stripStatus(snapshot: SessionEventSnapshot, phase: string): { status: AgentStatus; source: StatusSource } {
+/**
+ * The status the strip shows, and where it came from. `inputTimes`: when a
+ * person typed into the session (see deriveStatus, rule 6).
+ */
+export function stripStatus(snapshot: SessionEventSnapshot, phase: string, inputTimes: readonly number[] = []): { status: AgentStatus; source: StatusSource } {
   if (snapshot.version === 0) return { status: guessedStatus(phase), source: "guessed" };
   // The terminal's own heuristics (F10's TerminalProvider, source "pty")
   // never replace what the agent reported: the strip shows the last status
   // from anywhere else (or the exit), and the terminal's guess only while
-  // there is none.
+  // there is none, or once the agent visibly resumed after a signal that
+  // the person answered (deriveStatus, rule 6).
   let status: AgentStatus | null = null;
   let raw: string | undefined;
   for (let i = snapshot.events.length - 1; i >= 0; i--) {
@@ -64,6 +69,7 @@ export function stripStatus(snapshot: SessionEventSnapshot, phase: string): { st
     if (e.type === "exit" || (e.type === "status" && e.source !== PTY_SOURCE)) {
       status = e.type === "exit" ? { kind: "exited", confidence: "exact", detail: "" } : e.status;
       raw = e.source;
+      if (resumedIndex(snapshot.events, i, inputTimes) >= 0) status = null;
       break;
     }
   }
@@ -84,7 +90,7 @@ interface SessionStatusStripProps {
 export function SessionStatusStrip({ sessionId, phase }: SessionStatusStripProps) {
   const { t } = useI18n();
   const snapshot = useSessionEvents(sessionId);
-  const { status, source } = stripStatus(snapshot, phase);
+  const { status, source } = stripStatus(snapshot, phase, userInputTimes(sessionId));
   const confidence: Confidence = status.confidence;
   const guessed = confidence === "guessed";
   const sourceText = guessed ? t("status.source.guessed") : `${t(`status.source.${source}`)}, ${t(`status.confidence.${confidence}`)}`;

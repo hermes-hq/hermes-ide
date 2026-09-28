@@ -56,7 +56,7 @@ const logFile = join(evidenceDir, "scenario.log");
 mkdirSync(evidenceDir, { recursive: true });
 for (const name of readdirSync(evidenceDir)) {
   if (name === "scenario.log" || name === "result.json" || name === "fake-launch-records" || name.endsWith(".png") || /^run-\w+$/.test(name)) {
-    rmSync(join(evidenceDir, name), { recursive: true, force: true });
+    rmSync(join(evidenceDir, name), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 const log = createLogger(logFile);

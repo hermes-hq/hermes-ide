@@ -70,6 +70,10 @@
 }
 .turn-bar-add { color: var(--green); }
 .turn-bar-del { color: var(--red); }
+.turn-bar-checks { margin-left: 4px; }
+.turn-bar-checks-passed { color: var(--green); }
+.turn-bar-checks-failed,
+.turn-bar-checks-error { color: var(--red); }
 
 .turn-bar-notice {
   flex-shrink: 0;

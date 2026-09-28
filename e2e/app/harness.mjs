@@ -60,7 +60,7 @@ export function resetE2eDataDir() {
   if (basename(dir) !== E2E_IDENTIFIER || !dir.endsWith(".e2e")) {
     throw new Error(`refusing to reset unexpected directory: ${dir}`);
   }
-  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 // ─── Logging ─────────────────────────────────────────────────────────
@@ -596,7 +596,7 @@ export async function launchApp({
 
   const cleanTmp = () => {
     // Only ever the folder this run created.
-    if (basename(privateTmp).startsWith("hermes-e2e-")) rmSync(privateTmp, { recursive: true, force: true });
+    if (basename(privateTmp).startsWith("hermes-e2e-")) rmSync(privateTmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   };
 
   // keepFiles: leave the private folders (and the data in them) for the

@@ -380,7 +380,7 @@ async function partC() {
       copyFileSync(live, dbPath);
       copyFileSync(`${live}-wal`, walPath);
       writer.close();
-      rmSync(scratch, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       filesBefore = dbFilesIn(dir);
       dbHash = sha256(dbPath);
       walHash = sha256(walPath);

@@ -183,7 +183,7 @@ try {
     const exit = await app.stop();
     log(`quit ${name}: ${JSON.stringify(exit)}`);
   }
-  rmSync(scratch, { recursive: true, force: true });
+  rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

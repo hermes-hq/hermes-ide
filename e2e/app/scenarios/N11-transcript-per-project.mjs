@@ -31,7 +31,7 @@ const toolUse = (name) =>
 await runScenario("N11-transcript-per-project", async ({ evidenceDir, log, assert, apps, onCleanup }) => {
   const shared = mkdtempSync(join(tmpdir(), "hermes-e2e-"));
   onCleanup(() => {
-    if (basename(shared).startsWith("hermes-e2e-")) rmSync(shared, { recursive: true, force: true });
+    if (basename(shared).startsWith("hermes-e2e-")) rmSync(shared, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   });
   const home = join(shared, "home");
   mkdirSync(home, { recursive: true });

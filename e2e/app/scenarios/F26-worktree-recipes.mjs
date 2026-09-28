@@ -520,8 +520,8 @@ web = ${base}
     }
   }
   busy?.close();
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
-  rmSync(workDir, { recursive: true, force: true });
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

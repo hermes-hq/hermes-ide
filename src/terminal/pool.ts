@@ -8,6 +8,7 @@ import { isMac, PLATFORM } from "../utils/platform";
 import { isAppChordInTerminal } from "../utils/keymap";
 import { isHermesWorktreePath } from "../utils/worktree";
 import { resizeSession, isShellForeground } from "../api/sessions";
+import { noteSessionOutput } from "../agent/status/resumeOnOutput";
 import { createHistoryProvider, type HistoryProvider } from "./intelligence/historyProvider";
 import { type SuggestionState } from "./intelligence/SuggestionOverlay";
 import { clearShellEnvironment } from "./intelligence/shellEnvironment";
@@ -339,6 +340,7 @@ export async function createTerminal(
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         terminal.write(bytes);
+        noteSessionOutput(sessionId, bytes);
       } catch {
         // Corrupted base64 — silently drop to avoid garbled output
         console.warn(`[TerminalPool] Failed to decode base64 PTY output for ${sessionId}, dropping chunk`);

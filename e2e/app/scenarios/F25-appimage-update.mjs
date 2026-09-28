@@ -91,7 +91,7 @@ async function selfTest(appImage, name) {
     child.kill("SIGKILL");
     throw new Error(`the self-test did not finish within 180 s — see ${join(runDir, "app.log")}`);
   }
-  rmSync(home, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   const json = existsSync(report) ? JSON.parse(readFileSync(report, "utf8")) : null;
   log(`  ${name}: exit ${JSON.stringify(exit)}; report ok=${json?.ok} version=${json?.version}`);
   log(`  bridge check: ${JSON.stringify(json?.checks?.bridge_resources ?? null)}`);
@@ -346,7 +346,7 @@ try {
     await removeWhenUnmounted(() => app.cleanup(), app.tmpDir);
   }
   if (http) http.server.close();
-  await removeWhenUnmounted(() => rmSync(work, { recursive: true, force: true }), work);
+  await removeWhenUnmounted(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }), work);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details: { sabotage: SABOTAGE } });

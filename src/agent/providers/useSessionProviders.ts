@@ -14,6 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import { clearSessionEvents, dispatchSessionEvent } from "../contract/sessionEventStore";
 import { getOrCreateAgentSessionStore } from "../agentSessionStore";
 import { forgetSessionStatus, markSessionSeen, setViewedSession } from "../status/attentionStore";
+import { forgetUserInput } from "../status/userInput";
 import type { SessionData } from "../../types/session";
 import { ProviderRegistry } from "./types";
 import { terminalObservationOf, terminalProvider } from "./terminalProvider";
@@ -43,6 +44,7 @@ export function syncTerminalSessions(sessions: readonly SessionData[], known: Se
     agentViewRegistry.forget(id);
     clearSessionEvents(id);
     forgetSessionStatus(id);
+    forgetUserInput(id);
   }
   for (const id of live) known.add(id);
 }

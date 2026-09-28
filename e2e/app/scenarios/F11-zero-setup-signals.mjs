@@ -30,6 +30,9 @@
 //            off gets the same hooks and shows the same output as the first;
 //          - a Custom agent (the fake terminal agent, no hooks) shows a
 //            dimmed "guessed" strip, then "signal" from its notification;
+//            once the person answers its approval box in the terminal and
+//            it works again, the strip leaves "needs approval" (a dimmed
+//            "working · guessed") although the agent never said so;
 //          - ~/.claude/settings.json (a seeded user file) is byte-identical
 //            before and after, and nothing appeared under ~/.claude.
 //
@@ -603,8 +606,9 @@ try {
   // A Custom agent without hooks: guessed, then a signal from its notification.
   log("run 1, custom agent: no hooks, so a dimmed guess, then a notification");
   // A fake terminal agent that works quietly for a while (no signal at all),
-  // then asks for approval with a notification, then finishes with one that
-  // arrives split across writes.
+  // then asks for approval with a notification, works again once answered
+  // (without saying so: an OSC-only agent never reports "working"), then
+  // finishes with one that arrives split across writes.
   const agentScenario = join(work, "f11-agent.json");
   writeFileSync(
     agentScenario,
@@ -616,6 +620,8 @@ try {
         { do: "box", lines: ["Allow Bash: rm -rf node_modules ?", "[y] yes   [n] no"] },
         { do: "osc9", text: "Approval requested: rm -rf node_modules" },
         { do: "waitKey", expect: ["y", "n"], timeoutMs: 60000 },
+        { do: "print", text: "fake-agent: approval granted, working\n" },
+        { do: "sleep", ms: 4000 },
         { do: "print", text: "fake-agent: task done\n" },
         { do: "split", parts: ["1b5d393b41", "67656e74207475726e20636f6d706c657465", "07"], gapMs: 20 },
         { do: "exit", code: 0 },
@@ -633,7 +639,19 @@ try {
   const { strip: fromOsc } = await waitForStrip(app.bridge, s3, { kind: "needs_approval", confidence: "signal" });
   assert(fromOsc.source === "osc" && !fromOsc.guessed, `its OSC notification raises "${fromOsc.word} · ${fromOsc.sourceText}"`);
   await app.bridge.screenshot(join(evidenceDir, "07-custom-agent-guessed-then-signal.png"));
+  // The box sits silent for a while: the terminal's own guesses do not hide the request.
+  await sleep(2500);
+  const stillAsking = await stripOf(app.bridge, s3);
+  assert(stillAsking.kind === "needs_approval" && stillAsking.confidence === "signal", `while nobody answers the strip keeps "${stillAsking.word} · ${stillAsking.sourceText}"`);
+  // Answered: the agent works again and the strip leaves "needs approval"
+  // (the terminal's working guess, dimmed) although the agent never said so.
   await app.bridge.typeInTerminal(s3, "y");
+  await app.bridge.waitForTerminal(s3, /approval granted, working/, { timeoutMs: 15_000 });
+  const { strip: resumed, ms: resumedMs } = await waitForStrip(app.bridge, s3, { kind: "working", confidence: "guessed" }, { timeoutMs: 3_000 });
+  assert(resumed.guessed && resumed.sourceText === "guessed", `once answered the strip leaves needs approval: "${resumed.word} · ${resumed.sourceText}" (${resumedMs} ms)`);
+  const resumedStatus = await app.bridge.eval(`return window.__HERMES_E2E__.sessionStatus(${JSON.stringify(s3)});`);
+  assert(resumedStatus.kind === "working" && resumedStatus.source === "pty", `and so does the session's status (${JSON.stringify(resumedStatus)})`);
+  await app.bridge.screenshot(join(evidenceDir, "07b-custom-agent-answered-working.png"));
   await app.bridge.waitForTerminal(s3, /fake-agent: task done/, { timeoutMs: 15_000 });
   const { strip: turnDone } = await waitForStrip(app.bridge, s3, { kind: "done_unread", confidence: "signal" });
   assert(turnDone.source === "osc", `its "Agent turn complete" notification (split across writes) says "${turnDone.word} · ${turnDone.sourceText}"`);
@@ -680,7 +698,7 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

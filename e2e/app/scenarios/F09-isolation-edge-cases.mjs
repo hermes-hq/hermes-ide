@@ -517,7 +517,7 @@ try {
   await quit(app);
 
   log("step 8 (C): delete R's worktree folder behind Hermes' back, relaunch");
-  rmSync(wtR.worktreePath, { recursive: true, force: true });
+  rmSync(wtR.worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   assert(!existsSync(wtR.worktreePath), "the folder is gone");
   app = await launch(3);
   await waitForReturningLaunch(app.bridge);
@@ -543,7 +543,7 @@ try {
   await quit(app);
 
   log("step 9 (C): delete R's folder AND its branch, relaunch");
-  rmSync(wtR.worktreePath, { recursive: true, force: true });
+  rmSync(wtR.worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   git("worktree", "prune");
   git("branch", "-D", wtR.branchName);
   assert(!git("branch", "--list", wtR.branchName), "the branch is gone");
@@ -595,8 +595,8 @@ try {
   try {
     log(`final git worktree list: ${JSON.stringify(worktrees())}`);
   } catch { /* repo may be gone */ }
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
-  rmSync(workDir, { recursive: true, force: true });
+  if (homeDir) rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
