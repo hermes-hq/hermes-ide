@@ -373,6 +373,26 @@ features:
       FIX-close-before-quit-2:
         text: "Closing a session drops it from the saved workspace within 2 s, even when the app is killed right after the close"
         scenarios: [FIX-close-before-quit.mjs]
+  FIX-sessions-survive-quit:
+    # A bug fix, not new 2.0 work, so it is not behind a feature flag.
+    # Negative controls (run by hand, see the scenario header): a build of
+    # main before the fix ends in RESULT: FAIL at run 3, and one where
+    # quitting does not wait for the frontend at run 4.
+    # Not driven: a real Cmd+Q key press (the rig never sends OS input on
+    # macOS; the menu item is chosen through its own handler) and quits the
+    # OS forces (logging out, the Dock's Quit), which no app can hold.
+    name: "Sessions are never lost on quit"
+    status: shipped
+    criteria:
+      FIX-sessions-survive-quit-1:
+        text: "Save one session, relaunch, quit 500 ms after the UI shows it, relaunch: the session is there"
+        scenarios: [FIX-sessions-survive-quit.mjs]
+      FIX-sessions-survive-quit-2:
+        text: "A session created 100 ms before quitting comes back, whether the quit is the app menu's Quit, closing the window, or an exit the app asks for"
+        scenarios: [FIX-sessions-survive-quit.mjs]
+      FIX-sessions-survive-quit-3:
+        text: "A session closed just before quitting still stays closed"
+        scenarios: [FIX-sessions-survive-quit.mjs, FIX-close-before-quit.mjs]
   N12:
     name: "Agents start reliably, with no typing into your shell"
     # partial: fish is not covered by a scenario yet (zsh and bash on macOS

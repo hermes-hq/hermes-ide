@@ -119,6 +119,11 @@ export class Bridge {
     }
   }
 
+  /** Choose an item of the app's native menu (by id) the way clicking it does. */
+  async chooseMenuItem(id) {
+    await this.request("POST", "/menu", { id });
+  }
+
   /**
    * Run JavaScript inside the app's main webview.
    * `script` is the body of an async function; `return` a JSON-serialisable

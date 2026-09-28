@@ -25,6 +25,7 @@ mod project;
 /// Exposed for benchmarks — not part of the public API.
 #[doc(hidden)]
 pub mod pty;
+mod quit_flush;
 mod saved_workspace;
 mod self_test;
 mod transcript;
@@ -602,6 +603,7 @@ pub fn run() {
             app.manage(state);
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
+            app.manage(quit_flush::QuitFlush::default());
             app.manage(inline_pty::InlinePtyManager::new());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
@@ -611,11 +613,20 @@ pub fn run() {
                 "[prewarm] agent bridge warm-up deferred until an Agent-view session exists"
             );
 
-            // Save workspace when the main window is about to close
+            // Save workspace when the main window is about to close. The
+            // close waits until the frontend has written its workspace.
             let save_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| match event {
-                    tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        let after = quit_flush::After::CloseWindow("main".into());
+                        if quit_flush::hold_for_flush(&save_handle, after) {
+                            api.prevent_close();
+                        } else {
+                            save_workspace_state(&save_handle);
+                        }
+                    }
+                    tauri::WindowEvent::Destroyed => {
                         save_workspace_state(&save_handle);
                     }
                     _ => {}
@@ -869,6 +880,8 @@ pub fn run() {
             contract::turns::list_turns,
             contract::turns::get_turn_diff,
             contract::emit_session_event_for_test,
+            quit_flush::workspace_flush_ready,
+            quit_flush::workspace_flush_done,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
@@ -893,19 +906,24 @@ pub fn run() {
         .build(context)
         .expect("error while building HERMES-IDE")
         .run(|app, event| match &event {
-            tauri::RunEvent::ExitRequested { .. } => {
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                // An exit with a code (AppHandle::exit, the Quit menu item)
+                // waits for the frontend to write its workspace. A restart
+                // cannot be held, and without a code the last window is
+                // already gone.
+                let holdable = matches!(code, Some(c) if *c != tauri::RESTART_EXIT_CODE);
+                if holdable
+                    && quit_flush::hold_for_flush(app, quit_flush::After::Exit(code.unwrap_or(0)))
+                {
+                    log::info!("[hermes] ExitRequested — held while the workspace is saved");
+                    api.prevent_exit();
+                    return;
+                }
                 log::info!("[hermes] ExitRequested — saving workspace");
                 save_workspace_state(app);
             }
             tauri::RunEvent::Exit => {
                 log::info!("[hermes] Exit — saving workspace");
-                save_workspace_state(app);
-            }
-            tauri::RunEvent::WindowEvent {
-                event: tauri::WindowEvent::CloseRequested { .. },
-                ..
-            } => {
-                log::info!("[hermes] WindowCloseRequested — saving workspace");
                 save_workspace_state(app);
             }
             tauri::RunEvent::WindowEvent {
