@@ -409,3 +409,18 @@ features:
       N13-3:
         text: "A failed resume prints one line and starts a new conversation"
         scenarios: [N12-launch-and-resume.mjs]
+  C0:
+    name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
+    # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).
+    # The one thing to prove on the real app is that an event reaches the
+    # per-session store the app reads, through the frontend injector and
+    # through the Rust side of the channel, and that malformed events are
+    # refused on both sides. Everything else is unit-tested (vitest, cargo).
+    status: shipped
+    criteria:
+      C0-1:
+        text: "A SessionEvent injected through the test bridge, or emitted by Rust, is visible in the session's store snapshot; a malformed one is refused and changes nothing"
+        scenarios: [C0-session-event-bridge.mjs]
+      C0-2:
+        text: "The inbox seam raises, lists oldest first and resolves; the turn ledger commands answer with nothing"
+        scenarios: [C0-session-event-bridge.mjs]

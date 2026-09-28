@@ -3,6 +3,7 @@ mod agent_catalog;
 mod analytics;
 mod claude_config;
 mod clipboard;
+pub mod contract;
 mod db;
 #[cfg(feature = "e2e")]
 mod e2e_bridge;
@@ -863,6 +864,11 @@ pub fn run() {
             agent::read_image_for_attachment,
             agent::update_hermes_state,
             agent::prewarm::warm_agent_bridge,
+            // 2.0 contracts (docs/adr/004-2.0-contracts.md): turn ledger seam
+            // and the test-build-only session-event injector.
+            contract::turns::list_turns,
+            contract::turns::get_turn_diff,
+            contract::emit_session_event_for_test,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

@@ -38,6 +38,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "drop execution_nodes",
         apply: drop_execution_nodes,
     },
+    Migration {
+        version: 3,
+        name: "create agent_turns (turn ledger)",
+        apply: create_agent_turns,
+    },
 ];
 
 /// The schema version this build writes.
@@ -721,6 +726,32 @@ fn drop_execution_nodes(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+// ─── Step 3: agent_turns ─────────────────────────────────────────────
+
+/// The turn ledger (contract C0, filled by F20): one row per agent turn,
+/// pointing at the hidden git ref `refs/hermes/<session>/turn/<n>` that
+/// holds the worktree snapshot. Additive: nothing existing changes.
+/// Timestamps are epoch milliseconds, like the frontend's `Turn`.
+fn create_agent_turns(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS agent_turns (
+            session_id TEXT NOT NULL,
+            n INTEGER NOT NULL,
+            git_ref TEXT NOT NULL,
+            started_at INTEGER NOT NULL,
+            ended_at INTEGER,
+            files INTEGER NOT NULL DEFAULT 0,
+            insertions INTEGER NOT NULL DEFAULT 0,
+            deletions INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (session_id, n)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_turns_session
+            ON agent_turns(session_id, started_at);
+        ",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,9 +940,11 @@ mod tests {
                 !after.contains_key("execution_nodes"),
                 "{release}: execution_nodes is dropped"
             );
+            // Step 3 adds agent_turns (empty); nothing else comes or goes.
+            assert_eq!(after.get("agent_turns"), Some(&0), "{release}: agent_turns");
             assert_eq!(
                 after.len(),
-                before.len() - usize::from(before.contains_key("execution_nodes")),
+                before.len() - usize::from(before.contains_key("execution_nodes")) + 1,
                 "{release}: no other table added or removed: {after:?}"
             );
             assert_eq!(
@@ -1254,6 +1287,7 @@ mod tests {
         let after = row_counts(&path);
         let mut expected = before.clone();
         expected.remove("execution_nodes");
+        expected.insert("agent_turns".to_string(), 0); // added, empty, by step 3
         assert_eq!(after, expected, "every other table and row is kept");
         let conn = Connection::open(&path).unwrap();
         let leftovers: i64 = conn
@@ -1283,7 +1317,7 @@ mod tests {
         let before = row_counts(&path);
 
         let report = migrate(&conn, Some(&path), MIGRATIONS).unwrap();
-        assert_eq!((report.from, report.to), (1, 2));
+        assert_eq!((report.from, report.to), (1, SCHEMA_VERSION));
         let backup = report.backup.expect("a backup before dropping data");
         assert!(backup.to_string_lossy().ends_with("-from-v1.db"));
         assert_eq!(row_counts(&backup), before);
@@ -1293,6 +1327,51 @@ mod tests {
     #[test]
     fn a_new_database_has_no_execution_nodes_table() {
         assert!(!fresh_schema().0.contains_key("execution_nodes"));
+    }
+
+    #[test]
+    fn step_3_adds_agent_turns_to_new_and_migrated_databases_and_touches_nothing_else() {
+        let fresh = fresh_schema();
+        let turns = fresh.0.get("agent_turns").expect("agent_turns table");
+        for col in [
+            "session_id",
+            "n",
+            "git_ref",
+            "started_at",
+            "ended_at",
+            "files",
+            "insertions",
+            "deletions",
+        ] {
+            assert!(
+                turns.iter().any(|c| c.starts_with(&format!("{col} "))),
+                "{col} in {turns:?}"
+            );
+        }
+        assert!(fresh.1.contains(&"idx_agent_turns_session".to_string()));
+
+        // A 1.4.0 database migrated through steps 1 and 2 only, then to 3.
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let conn = Connection::open(&path).unwrap();
+        migrate(&conn, None, &MIGRATIONS[..2]).unwrap();
+        let before = schema_of(&path);
+        let rows_before = row_counts(&path);
+        assert!(!before.0.contains_key("agent_turns"));
+
+        let report = migrate(&conn, Some(&path), MIGRATIONS).unwrap();
+        assert_eq!((report.from, report.to), (2, 3));
+        let after = schema_of(&path);
+        let mut expected_tables = before.0.clone();
+        expected_tables.insert("agent_turns".to_string(), turns.clone());
+        assert_eq!(after.0, expected_tables, "only agent_turns was added");
+        let mut expected_indexes = before.1.clone();
+        expected_indexes.push("idx_agent_turns_session".to_string());
+        expected_indexes.sort();
+        assert_eq!(after.1, expected_indexes, "only its index was added");
+        let mut rows_after = row_counts(&path);
+        assert_eq!(rows_after.remove("agent_turns"), Some(0));
+        assert_eq!(rows_after, rows_before, "every existing row is kept");
     }
 
     #[test]

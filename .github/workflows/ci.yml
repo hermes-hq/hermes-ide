@@ -381,7 +381,7 @@ jobs:
             node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
-            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
             exit "$fail"
           '
@@ -400,7 +400,7 @@ jobs:
           node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
-          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
           exit "$fail"
 

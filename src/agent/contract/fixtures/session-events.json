@@ -1,0 +1,42 @@
+{
+  "_comment": "Wire format of every SessionEvent variant. Read by src/__tests__/contract-events.test.ts and by src-tauri/src/contract/mod.rs (include_str): both sides must parse every entry and serialise it back to exactly this JSON. Synthetic data only.",
+  "statuses": [
+    { "kind": "needs_approval", "confidence": "exact", "detail": "Bash: npm test" },
+    { "kind": "needs_answer", "confidence": "exact", "detail": "Which database?" },
+    { "kind": "gate", "confidence": "exact", "detail": "plan" },
+    { "kind": "check_failed", "confidence": "exact", "detail": "npm test (3 attempts)" },
+    { "kind": "error", "confidence": "exact", "detail": "could not start" },
+    { "kind": "limited", "confidence": "exact", "detail": "resets at 14:00" },
+    { "kind": "plan_ready", "confidence": "exact", "detail": "" },
+    { "kind": "done_unread", "confidence": "exact", "detail": "" },
+    { "kind": "working", "confidence": "signal", "detail": "" },
+    { "kind": "startup_prompt", "confidence": "guessed", "detail": "Trust this folder?" },
+    { "kind": "starting", "confidence": "guessed", "detail": "" },
+    { "kind": "idle", "confidence": "guessed", "detail": "" },
+    { "kind": "exited", "confidence": "exact", "detail": "exit code 0" }
+  ],
+  "events": [
+    { "type": "status", "at": 1790000000000, "source": "hook:claude", "status": { "kind": "needs_approval", "confidence": "exact", "detail": "Bash: npm test" } },
+    { "type": "turn_start", "at": 1790000001000, "n": 1 },
+    { "type": "turn_end", "at": 1790000002000, "source": "hook:codex", "n": 1 },
+    { "type": "turn_failed", "at": 1790000003000, "n": 2, "detail": "tool error" },
+    { "type": "turn_interrupted", "at": 1790000004000, "n": 3 },
+    { "type": "attention", "at": 1790000005000, "source": "osc", "detail": "Claude is waiting for your input" },
+    { "type": "identity", "at": 1790000006000, "vendorSessionId": "vs-0001", "model": "fake-model-1", "permissionMode": "default" },
+    { "type": "identity", "at": 1790000006500, "vendorSessionId": null, "model": null, "permissionMode": null },
+    { "type": "exit", "at": 1790000007000, "source": "pty", "code": 0, "signal": null },
+    { "type": "exit", "at": 1790000008000, "code": null, "signal": "SIGTERM" }
+  ],
+  "rejected": [
+    { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
+    { "type": "status", "at": 1790000000000, "status": { "kind": "working", "confidence": "sure", "detail": "" } },
+    { "type": "turn_start", "at": 1790000001000, "n": 0 },
+    { "type": "turn_failed", "at": 1790000003000, "n": 2 },
+    { "type": "attention", "at": 1790000005000 },
+    { "type": "identity", "at": 1790000006000, "vendorSessionId": 7, "model": null, "permissionMode": null },
+    { "type": "exit", "at": 1790000007000, "code": "zero", "signal": null },
+    { "type": "status", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
+    { "type": "nope", "at": 1790000000000 },
+    "not an object"
+  ]
+}
