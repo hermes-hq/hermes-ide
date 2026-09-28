@@ -550,7 +550,13 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  // Windows may still hold a file in the repository just after the app
+  // quit: retry, and never let the cleanup decide the result.
+  try {
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (e) {
+    log(`  (could not remove the scratch folder: ${e.message})`);
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

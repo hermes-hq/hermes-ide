@@ -306,12 +306,24 @@ function readSheet(bridge) {
 }
 
 async function pickMode(bridge, mode) {
-  await bridge.clickWhenReady(`
-    const input = e2e.first('.land-sheet-option[data-mode="${mode}"] input');
-    if (!input || input.disabled) return null;
-    return e2e.click(input);
-  `);
-  await bridge.waitFor(`the ${mode} option to be chosen`, `return e2e.first('.land-sheet-option[data-mode="${mode}"] input')?.checked === true;`);
+  // The sheet settles its default pick once the GitHub CLI status arrives;
+  // on a slow runner that can land right after the click, so click again
+  // until the choice holds.
+  const chosen = `return e2e.first('.land-sheet-option[data-mode="${mode}"] input')?.checked === true;`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await bridge.clickWhenReady(`
+      const input = e2e.first('.land-sheet-option[data-mode="${mode}"] input');
+      if (!input || input.disabled) return null;
+      return e2e.click(input);
+    `);
+    try {
+      await bridge.waitFor(`the ${mode} option to be chosen`, chosen, { timeoutMs: 5_000 });
+      return;
+    } catch {
+      /* clicked too early: try again */
+    }
+  }
+  await bridge.waitFor(`the ${mode} option to be chosen`, chosen);
 }
 
 async function closeSheet(bridge) {

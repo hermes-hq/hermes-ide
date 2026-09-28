@@ -566,7 +566,12 @@ try {
   log("step 4: by turn — T1 is Agent A's, T2 is Agent B's, T3 is Agent C's; comments are routed to the agent that made the turn");
   await bridge.click('.review-group-btn[data-group="turn"]');
   await bridge.waitFor("the turn list", `return e2e.all(".review-turn-row").length === 3;`);
-  const turns = await turnRows(bridge);
+  // The list can re-render as the turns load again; read it once it holds three.
+  let turns = await turnRows(bridge);
+  for (let i = 0; i < 20 && turns.length !== 3; i++) {
+    await sleep(250);
+    turns = await turnRows(bridge);
+  }
   log(`  turns: ${JSON.stringify(turns)}`);
   assert(turns[0].n === 1 && turns[0].session === idA && turns[0].agent === "Agent A", "T1 belongs to Agent A");
   assert(turns[1].n === 2 && turns[1].session === idB && turns[1].agent === "Agent B", "T2 belongs to Agent B");
