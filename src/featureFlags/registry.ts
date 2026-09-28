@@ -5,8 +5,10 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 5 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 6th, retire one first.
+// At most 6 flags may exist at once — enforced by
+// src/__tests__/feature-flags.test.ts. If you need a 7th, retire one first.
+// (Raised from 5 for the 2.0 wave, where several features ship to beta at
+// the same time.)
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -50,6 +52,12 @@ export const FEATURE_FLAGS = [
     label: "Launch helper (hi run)",
     description:
       "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt.",
+  },
+  {
+    id: "pluginApiV2",
+    label: "Plugin API v2",
+    description:
+      "Plugins can declare \"apiVersion\": 2 to react to every agent's status, add inbox items, read feature tracks and add review checks; plugins built for v1 keep working and are marked as using the old API.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

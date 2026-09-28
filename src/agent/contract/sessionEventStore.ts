@@ -105,6 +105,15 @@ const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
 
+/** Told about every accepted event of every session (F36 addition). */
+export type AnySessionEventListener = (
+  sessionId: string,
+  event: SessionEvent,
+  snapshot: SessionEventSnapshot,
+  previous: SessionEventSnapshot,
+) => void;
+const anyListeners = new Set<AnySessionEventListener>();
+
 /** The current snapshot of a session; stable until an event lands. */
 export function getSessionEventSnapshot(sessionId: string): SessionEventSnapshot {
   const known = snapshots.get(sessionId);
@@ -132,12 +141,32 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
 
 /** Fold one event into its session and wake that session's subscribers. */
 export function dispatchSessionEvent(sessionId: string, event: SessionEvent): SessionEventSnapshot {
-  const next = reduceSessionEvent(getSessionEventSnapshot(sessionId), event);
+  const prev = getSessionEventSnapshot(sessionId);
+  const next = reduceSessionEvent(prev, event);
   snapshots.set(sessionId, next);
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const l of [...anyListeners]) {
+    try {
+      l(sessionId, event, next, prev);
+    } catch (err) {
+      console.warn("[session-event] a listener for every session threw", err);
+    }
+  }
   return next;
+}
+
+/**
+ * Listen to the events of every session, after they are folded into the
+ * store (F36: the plugin API fans them out to plugins). A listener that
+ * throws is logged and never stops the others or the store.
+ */
+export function subscribeAllSessionEvents(listener: AnySessionEventListener): () => void {
+  anyListeners.add(listener);
+  return () => {
+    anyListeners.delete(listener);
+  };
 }
 
 /** Sessions that have at least one event. */
@@ -166,4 +195,5 @@ export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
   emptyCache.clear();
+  anyListeners.clear();
 }

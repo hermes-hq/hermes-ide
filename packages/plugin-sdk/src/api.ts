@@ -17,6 +17,12 @@ export interface PluginManifest {
 	version: string;
 	description: string;
 	author: string;
+	/**
+	 * The plugin API the plugin is built for. Leave it out (or 1) for the
+	 * original API, which is deprecated and stops loading in Hermes 2.2; set 2
+	 * for HermesPluginAPIv2.
+	 */
+	apiVersion?: 1 | 2;
 	activationEvents: ActivationEvent[];
 	contributes: PluginContributions;
 	permissions?: PluginPermission[];
@@ -74,7 +80,11 @@ export type PluginPermission =
 	| "sessions.read"
 	| "notifications"
 	| "network"
-	| "shell.exec";
+	| "shell.exec"
+	// Plugin API v2
+	| "inbox.raise"
+	| "features.read"
+	| "review.checks";
 
 // ─── Settings Schema ─────────────────────────────────────
 
@@ -182,11 +192,161 @@ export interface HermesPluginAPI {
 		focus(sessionId: string): Promise<void>;
 	};
 	agents: {
-		/** Watch a session's AI agent transcript in real time. Requires "sessions.read" permission. */
+		/**
+		 * Watch a session's AI agent transcript in real time. Requires "sessions.read" permission.
+		 * @deprecated Claude-shaped. In plugin API v2 use `agents.onEvent`, which reports every agent the same way.
+		 */
 		watchTranscript(
 			sessionId: string,
 			callback: (event: { type: string; tool_name?: string; timestamp: number; session_id: string }) => void,
 		): Promise<Disposable>;
 	};
 	subscriptions: Disposable[];
+	/** 1 for this (original) API. */
+	apiVersion: 1 | 2;
+}
+
+// ─── Plugin API v2 ───────────────────────────────────────
+//
+// Declare `"apiVersion": 2` in hermes-plugin.json to get these. The shapes
+// mirror Hermes' 2.0 contracts (docs/adr/004-2.0-contracts.md in the Hermes
+// repository): one status vocabulary and one event stream for every agent.
+
+export type AgentStatusKind =
+	| "needs_approval"
+	| "needs_answer"
+	| "gate"
+	| "check_failed"
+	| "error"
+	| "limited"
+	| "plan_ready"
+	| "done_unread"
+	| "working"
+	| "startup_prompt"
+	| "starting"
+	| "idle"
+	| "exited";
+
+export interface AgentStatus {
+	readonly kind: AgentStatusKind;
+	/** exact: the agent said so; signal: a notification; guessed: a heuristic. */
+	readonly confidence: "exact" | "signal" | "guessed";
+	readonly detail: string;
+}
+
+interface SessionEventBase {
+	/** Epoch milliseconds. */
+	readonly at: number;
+	readonly source?: string;
+}
+
+/** Newer Hermes versions may add event types: ignore the ones you do not know. */
+export type SessionEvent =
+	| (SessionEventBase & { readonly type: "status"; readonly status: AgentStatus })
+	| (SessionEventBase & { readonly type: "turn_start" | "turn_end" | "turn_interrupted"; readonly n: number })
+	| (SessionEventBase & { readonly type: "turn_failed"; readonly n: number; readonly detail: string })
+	| (SessionEventBase & { readonly type: "attention"; readonly detail: string })
+	| (SessionEventBase & {
+			readonly type: "identity";
+			readonly vendorSessionId: string | null;
+			readonly model: string | null;
+			readonly permissionMode: string | null;
+	  })
+	| (SessionEventBase & { readonly type: "exit"; readonly code: number | null; readonly signal: string | null });
+
+export interface AgentSessionState {
+	readonly sessionId: string;
+	readonly status: AgentStatus;
+	readonly identity: { readonly vendorSessionId: string | null; readonly model: string | null; readonly permissionMode: string | null };
+	readonly turn: { readonly current: number | null; readonly completed: number };
+	readonly attention: string | null;
+	readonly exit: { readonly code: number | null; readonly signal: string | null } | null;
+	/** 0 when nothing has been reported about the session yet. */
+	readonly version: number;
+}
+
+export type InboxKind = "blocked" | "ready" | "gate" | "error" | "limit";
+
+export interface InboxItem {
+	readonly id: string;
+	readonly kind: InboxKind;
+	readonly sessionId: string | null;
+	readonly detail: string;
+	readonly createdAt: number;
+	/** Always "plugin:<your id>" for items you raise. */
+	readonly source: string;
+}
+
+export interface FeatureTrackMeta {
+	readonly slug: string;
+	readonly track: "Quick" | "Light" | "Full";
+	readonly phase: "questions" | "research" | "design" | "structure" | "plan" | "implement" | "done";
+	readonly gate: "none" | "waiting" | "approved";
+	readonly doneWhen: readonly string[];
+	readonly ignored: readonly string[];
+}
+
+export type FeatureTrack =
+	| { readonly slug: string; readonly ok: true; readonly meta: FeatureTrackMeta; readonly body: string }
+	| { readonly slug: string; readonly ok: false; readonly error: string; readonly line: number | null };
+
+export interface ReviewFile {
+	readonly path: string;
+	readonly oldPath: string | null;
+	readonly status: "added" | "modified" | "deleted" | "renamed";
+	readonly binary: boolean;
+	readonly added: readonly { readonly line: number; readonly text: string }[];
+	readonly removed: number;
+}
+
+export interface ReviewCheckInput {
+	readonly sessionId: string;
+	/** The turn under review, or null for the whole session. */
+	readonly turn: number | null;
+	/** Unified diff, as git prints it. */
+	readonly patch: string;
+	readonly files: readonly ReviewFile[];
+}
+
+export interface ReviewCheckResult {
+	readonly outcome: "pass" | "warn" | "fail";
+	readonly summary: string;
+	readonly findings: readonly { readonly file: string; readonly line: number | null; readonly message: string }[];
+}
+
+export interface ReviewCheck {
+	/** Lowercase letters, digits, ".", "_" and "-". */
+	readonly id: string;
+	readonly title: string;
+	readonly description?: string;
+	/** Answer within 10 seconds; a throw or a timeout shows as an error. */
+	run(input: ReviewCheckInput): ReviewCheckResult | Promise<ReviewCheckResult>;
+}
+
+export interface HermesPluginAPIv2 extends Omit<HermesPluginAPI, "agents" | "apiVersion"> {
+	apiVersion: 2;
+	agents: HermesPluginAPI["agents"] & {
+		/** A session's status, identity and turns. Requires "sessions.read". */
+		getStatus(sessionId: string): AgentSessionState;
+		/** Every event of every session, whatever the agent. Requires "sessions.read". */
+		onEvent(listener: (e: { sessionId: string; event: SessionEvent }) => void): Disposable;
+		/** Status transitions only. Requires "sessions.read". */
+		onStatusChange(listener: (e: { sessionId: string; status: AgentStatus; previous: AgentStatus }) => void): Disposable;
+	};
+	/** Requires "inbox.raise". At most 20 open items per plugin; they go when the plugin is turned off. */
+	inbox: {
+		raise(item: { kind: InboxKind; sessionId?: string | null; detail: string }): InboxItem;
+		/** Only items you raised. */
+		resolve(id: string): boolean;
+		list(): readonly InboxItem[];
+	};
+	/** Read-only. Requires "features.read". */
+	features: {
+		list(sessionId: string): Promise<readonly FeatureTrack[]>;
+		get(sessionId: string, slug: string): Promise<FeatureTrack | null>;
+	};
+	/** Requires "review.checks". */
+	review: {
+		registerCheck(check: ReviewCheck): Disposable;
+	};
 }

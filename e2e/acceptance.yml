@@ -424,3 +424,19 @@ features:
       C0-2:
         text: "The inbox seam raises, lists oldest first and resolves; the turn ledger commands answer with nothing"
         scenarios: [C0-session-event-bridge.mjs]
+  F36:
+    name: "Plugin API v2: react to any agent, raise inbox items, add review checks"
+    # Behind the pluginApiV2 flag (on for beta). partial: the inbox list (F12)
+    # and the Review Desk (F21) are not built yet, so the scenario reads the
+    # inbox store and runs the review checks through the e2e hooks, at the
+    # same seams those views will use (docs/adr/004, sections 5 and 7). What
+    # a person sees today is Settings > Plugins: the old-API mark, the
+    # "not loaded" reason and the review checks each plugin registered.
+    status: partial
+    criteria:
+      F36-1:
+        text: "A sample plugin raises an inbox item and registers a Review check"
+        scenarios: [F36-plugin-api-v2.mjs]
+      F36-2:
+        text: "v1 plugins keep working for one minor with a deprecation warning"
+        scenarios: [F36-plugin-api-v2.mjs]

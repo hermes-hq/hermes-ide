@@ -20,6 +20,7 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { listReviewChecks, reviewInputFromPatch, runReviewChecks } from "../agent/contract/reviewChecks";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +125,16 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F36: review checks (the seam F21's Review Desk runs) ──────────
+  /** Checks registered so far (by plugins through review.registerCheck). */
+  reviewChecks: () => listReviewChecks(),
+  /**
+   * Run every registered check over a diff, the way the Review Desk runs
+   * them over a turn's patch (get_turn_diff). Stands in for F21 until it lands.
+   */
+  runReviewChecks: (sessionId: string, turn: number | null, patch: string, timeoutMs?: number) =>
+    runReviewChecks(reviewInputFromPatch(sessionId, turn, patch), { timeoutMs }),
 };
 
 export type HermesE2EHooks = typeof hooks;

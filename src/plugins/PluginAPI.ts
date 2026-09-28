@@ -2,6 +2,7 @@ import type { Disposable, PluginSettingsSchema, HermesEvent, SessionInfo, Transc
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { bindPluginInvoke } from "./identity";
+import { createPluginApiV2, type AgentsAPIv2, type FeaturesAPI, type InboxAPI, type ReviewAPI } from "./apiV2";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
 	getCurrentLanguage,
@@ -67,7 +68,16 @@ export interface HermesPluginAPI {
 		list(): Promise<SessionInfo[]>;
 		focus(sessionId: string): Promise<void>;
 	};
-	agents: AgentsAPI;
+	/** The plugin API this plugin runs against: 1, or 2 when its manifest says `"apiVersion": 2`. */
+	apiVersion: 1 | 2;
+	/** v1: watchTranscript only (Claude-shaped, deprecated). v2 adds the normalised events of every agent. */
+	agents: AgentsAPI & Partial<AgentsAPIv2>;
+	/** v2 only: the attention inbox. */
+	inbox?: InboxAPI;
+	/** v2 only: the repository's feature tracks, read-only. */
+	features?: FeaturesAPI;
+	/** v2 only: checks the Review Desk runs over a diff. */
+	review?: ReviewAPI;
 	// NOTE: setLanguage is intentionally not permission-gated for now — the
 	// built-in language pack is the intended consumer of this API.
 	i18n: {
@@ -107,6 +117,8 @@ export interface PluginAPICallbacks {
 	onSessionsList?: () => Promise<SessionInfo[]>;
 	onSessionFocus?: (sessionId: string) => void;
 	onFileHandlerRegistered?: () => void;
+	/** v2: the working directory of a session the app knows (features.list). */
+	onSessionWorkingDirectory?: (sessionId: string) => string | null | undefined;
 }
 
 /**
@@ -124,6 +136,7 @@ export function createPluginAPI(
 	commandHandlers: Map<string, () => void | Promise<void>>,
 	panelComponents: Map<string, React.ComponentType<PluginPanelProps>>,
 	fileHandlers?: Map<string, { pluginId: string; component: React.ComponentType<FileHandlerProps> }>,
+	apiVersion: 1 | 2 = 1,
 ): HermesPluginAPI {
 	const subscriptions: Disposable[] = [];
 	const schema = settingsSchema ?? {};
@@ -131,8 +144,10 @@ export function createPluginAPI(
 	// from a plugin id in the arguments.
 	const call = bindPluginInvoke(pluginToken);
 	const settingsChangeListeners = new Map<string, Set<(value: string | number | boolean) => void>>();
+	let warnedTranscript = false;
 
-	return {
+	const api: HermesPluginAPI = {
+		apiVersion,
 		_notifySettingChanged(key: string, value: string | number | boolean) {
 			const listeners = settingsChangeListeners.get(key);
 			if (listeners) {
@@ -431,6 +446,12 @@ export function createPluginAPI(
 				if (!permissions.has("sessions.read")) {
 					throw new PermissionDeniedError(pluginId, "sessions.read");
 				}
+				if (apiVersion === 2 && !warnedTranscript) {
+					warnedTranscript = true;
+					console.warn(
+						`[Plugin:${pluginId}] agents.watchTranscript is deprecated in plugin API v2: its events only come from Claude transcripts. Use agents.onEvent, which reports every agent the same way.`,
+					);
+				}
 				try {
 					const watcherId: string = await invoke("start_transcript_watcher", { sessionId });
 					const eventName = `transcript-event:${watcherId}`;
@@ -460,4 +481,20 @@ export function createPluginAPI(
 		},
 		subscriptions,
 	};
+
+	if (apiVersion === 2) {
+		const v2 = createPluginApiV2({
+			pluginId,
+			permissions,
+			call,
+			subscriptions,
+			workingDirectory: (sessionId) => callbacks.onSessionWorkingDirectory?.(sessionId) ?? null,
+			deny: (permission) => new PermissionDeniedError(pluginId, permission),
+		});
+		Object.assign(api.agents, v2.agents);
+		api.inbox = v2.inbox;
+		api.features = v2.features;
+		api.review = v2.review;
+	}
+	return api;
 }

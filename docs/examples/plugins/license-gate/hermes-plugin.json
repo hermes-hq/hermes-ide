@@ -1,0 +1,12 @@
+{
+  "id": "example.license-gate",
+  "name": "License Gate (sample)",
+  "version": "1.0.0",
+  "description": "Sample plugin for plugin API v2. Adds a License scan to code review that flags copyleft licenses in added code, and puts a gate in your inbox when it finds one.",
+  "author": "Hermes",
+  "apiVersion": 2,
+  "main": "index.js",
+  "activationEvents": [{ "type": "onStartup" }],
+  "contributes": {},
+  "permissions": ["sessions.read", "inbox.raise", "features.read", "review.checks"]
+}

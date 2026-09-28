@@ -18,6 +18,7 @@ mod inline_pty;
 mod instance;
 mod menu;
 mod platform;
+mod plugin_features;
 mod plugin_identity;
 mod plugins;
 mod process;
@@ -845,6 +846,7 @@ pub fn run() {
             plugins::plugin_fetch_url,
             plugins::plugin_post_json,
             plugins::plugin_exec_command,
+            plugin_features::plugin_read_feature_tracks,
             // Plugin identity (host key + per-plugin tokens)
             plugin_identity::claim_plugin_host_key,
             plugin_identity::issue_plugin_token,
