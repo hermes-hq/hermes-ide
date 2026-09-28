@@ -52,7 +52,8 @@ rmSync(logFile, { force: true });
 mkdirSync(evidenceDir, { recursive: true });
 const log = createLogger(logFile);
 const onWindows = platform() === "win32";
-const onMac = platform() === "darwin";
+// HERMES_E2E_PLATFORM=linux|win runs the frontend with that platform's key rules (test builds only).
+const onMac = platform() === "darwin" && !process.env.HERMES_E2E_PLATFORM;
 const FLAG_ON = (process.env.HERMES_E2E_F15_FLAG || "on") !== "off";
 
 function assert(condition, message) {
@@ -178,7 +179,9 @@ function worktrees() {
 const homeDir = onWindows ? undefined : mkdtempSync(join(tmpdir(), "hermes-e2e-f15-home-"));
 function launch(run, { first = false, env = {} } = {}) {
   const runDir = join(evidenceDir, `run-${run}`);
-  const common = { runDir, log, env: { HERMES_FAKE_DIR: recordDir, ...env } };
+  // The doctor looks for agents in the fakes' folder only (a test-build
+  // override), so no CLI installed on the machine is ever run.
+  const common = { runDir, log, env: { HERMES_FAKE_DIR: recordDir, HERMES_E2E_AGENT_PATH: fakeBin, ...env } };
   return onWindows ? launchApp({ ...common, home: "real", resetData: first }) : launchApp({ ...common, home: "private", homeDir });
 }
 
@@ -320,6 +323,12 @@ try {
   app = await launch(2);
   const { bridge } = app;
   await waitForReturningLaunch(bridge);
+  if (process.env.HERMES_E2E_PLATFORM) {
+    log(`  switching the frontend to ${process.env.HERMES_E2E_PLATFORM} keyboard rules and reloading`);
+    await bridge.eval(`localStorage.setItem("hermes-e2e-platform", ${JSON.stringify(process.env.HERMES_E2E_PLATFORM)}); setTimeout(() => location.reload(), 50); return true;`);
+    await sleep(1500);
+    await bridge.waitFor("the app UI to render again", `return document.readyState === "complete" && !!window.__HERMES_E2E__ && !!e2e.first(".topbar, .activity-bar");`, { timeoutMs: 30_000 });
+  }
 
   log("step 1: ⌘N opens the task launcher");
   await openLauncher(bridge);
@@ -350,7 +359,8 @@ try {
   const [taskSession] = await newTerminals(bridge, before, 1, "the task's terminal");
   const [rec1] = await waitForRecords(1);
   log(`  fake claude record: ${JSON.stringify({ argv: rec1.argv, cwd: rec1.cwd, prompt: rec1.prompt })}`);
-  assert(rec1.argv[rec1.argv.length - 1] === TASK, "the task is the agent's first prompt (its last argument, one piece)");
+  const firstPrompt = (rec) => String(rec.argv[rec.argv.length - 1]).split(/\r?\n\r?\n|\s+Read the file at /)[0];
+  assert(firstPrompt(rec1) === TASK, "the task is the agent's first prompt (its last argument; the project-context pointer follows it)");
   assert(rec1.sessionIdArg && rec1.settingsFile, "it was started by Hermes' launch helper (session id and hook settings passed)");
   const pid = await projectIdOf(bridge);
   const wt = await invoke(bridge, "git_session_worktree_info", { sessionId: taskSession, projectId: pid });
@@ -417,7 +427,7 @@ try {
   const pair = await newTerminals(bridge, before, 2, "two new terminals");
   const recs = (await waitForRecords(recsBefore + 2)).slice(recsBefore);
   log(`  records: ${JSON.stringify(recs.map((r) => ({ argv: r.argv, cwd: r.cwd })))}`);
-  assert(recs.every((r) => r.argv[r.argv.length - 1] === "Existing task"), "both agents got the task as their first prompt");
+  assert(recs.every((r) => firstPrompt(r) === "Existing task"), "both agents got the task as their first prompt");
   const wtPair = [];
   for (const id of pair) wtPair.push(await invoke(bridge, "git_session_worktree_info", { sessionId: id, projectId: pid }));
   const branches = wtPair.map((w) => w.branchName).sort();
@@ -454,7 +464,7 @@ try {
 
   // ── run 3: low disk ──────────────────────────────────────────────
   log("run 3: with 2 GB free, a low-disk row blocks Launch");
-  app = await launch(3, { env: { HERMES_E2E_FREE_SPACE_BYTES: String(2 * 1024 ** 3) } });
+  app = await launch(3, { env: { HERMES_E2E_FREE_SPACE_BYTES: String(2e9) } });
   await waitForReturningLaunch(app.bridge);
   await openLauncher(app.bridge);
   await typeInto(app.bridge, ".task-launcher-repo", repo);

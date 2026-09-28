@@ -152,11 +152,11 @@ export function canLaunch(task: string, gitRoot: string | null | undefined, rows
   return task.trim().length > 0 && !!gitRoot && rows.length === 0;
 }
 
-/** "12.3 GB" */
+/** "12.3 GB", in decimal units like the disk guard's "10 GB". */
 export function formatBytes(bytes: number): string {
-  const gb = bytes / 1024 ** 3;
+  const gb = bytes / 1e9;
   if (gb >= 1) return `${gb.toFixed(gb >= 100 ? 0 : 1)} GB`;
-  return `${Math.max(0, Math.round(bytes / 1024 ** 2))} MB`;
+  return `${Math.max(0, Math.round(bytes / 1e6))} MB`;
 }
 
 // ─── Full track: the first feature.md ─────────────────────────────────

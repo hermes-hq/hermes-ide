@@ -80,6 +80,8 @@
   align-self: center;
 }
 
+.task-launcher-body > .task-launcher-label { align-self: flex-start; }
+
 .task-launcher-task {
   width: 100%;
   resize: vertical;

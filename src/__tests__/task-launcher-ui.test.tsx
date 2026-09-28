@@ -147,7 +147,7 @@ describe("TaskLauncher", () => {
   });
 
   it("low disk blocks Launch", async () => {
-    h.disk = { free_bytes: 2 * 1024 ** 3, required_bytes: 10 * 1024 ** 3, below_threshold: true };
+    h.disk = { free_bytes: 2e9, required_bytes: 10e9, below_threshold: true };
     await open();
     fireEvent.change(task(), { target: { value: "Fix it" } });
     expect(blocks()).toEqual(["low-disk"]);

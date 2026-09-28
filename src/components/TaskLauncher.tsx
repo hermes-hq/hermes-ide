@@ -68,8 +68,11 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, defa
   const agentIds = useMemo(() => agents.map((a) => a.id), [agents]);
 
   const [task, setTask] = useState("");
-  const [lastUsed, setLastUsed] = useState<string | null>(null);
+  // undefined until the setting has been read.
+  const [lastUsed, setLastUsed] = useState<string | null | undefined>(undefined);
   const [agentId, setAgentId] = useState<string | null>(null);
+  // Once the person picks an agent, the doctor's answer no longer changes it.
+  const [agentPicked, setAgentPicked] = useState(false);
   const [modePrefs, setModePrefs] = useState<SessionModeByProvider>({});
   const [mode, setMode] = useState<SessionMode>("terminal");
   const [repoPath, setRepoPath] = useState(defaultRepo ?? "");
@@ -100,12 +103,13 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, defa
     taskRef.current?.focus();
   }, []);
 
-  // Preselect an agent once the doctor has answered (or right away with what we know).
+  // Preselect an agent from what is known (the one used last), and again
+  // when the doctor answers, until the person picks one.
   useEffect(() => {
-    if (agentId !== null) return;
-    if (!doctor.rows && doctor.loading) return;
-    setAgentId(pickDefaultAgent(lastUsed, agentIds, byId));
-  }, [agentId, doctor.rows, doctor.loading, lastUsed, agentIds, byId]);
+    if (agentPicked || lastUsed === undefined) return;
+    const pick = pickDefaultAgent(lastUsed, agentIds, byId);
+    if (pick !== agentId) setAgentId(pick);
+  }, [agentPicked, agentId, lastUsed, agentIds, byId]);
 
   // The remembered Terminal / Agent view choice for the chosen agent.
   useEffect(() => {
@@ -331,7 +335,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, defa
               id="task-launcher-agent"
               className="task-launcher-agent"
               value={agentId ?? ""}
-              onChange={(e) => setAgentId(e.target.value)}
+              onChange={(e) => {
+                setAgentPicked(true);
+                setAgentId(e.target.value);
+              }}
             >
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>

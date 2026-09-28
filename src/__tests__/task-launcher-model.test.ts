@@ -174,8 +174,9 @@ describe("blocking rows", () => {
   });
 
   it("formats sizes for people", () => {
-    expect(formatBytes(12.34 * GB)).toBe("12.3 GB");
-    expect(formatBytes(512 * 1024 ** 2)).toBe("512 MB");
+    expect(formatBytes(12.34e9)).toBe("12.3 GB");
+    expect(formatBytes(10e9)).toBe("10.0 GB");
+    expect(formatBytes(512e6)).toBe("512 MB");
   });
 });
 

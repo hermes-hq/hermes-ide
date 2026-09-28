@@ -165,7 +165,9 @@ function newHome() {
 }
 function launch(run, homeDir, { first = false, env = {} } = {}) {
   const runDir = join(evidenceDir, `run-${run}`);
-  const common = { runDir, log, env: { HERMES_FAKE_DIR: recordDir, ...env } };
+  // The doctor looks for agents in the fakes' folder only (a test-build
+  // override), so no CLI installed on the machine is ever run.
+  const common = { runDir, log, env: { HERMES_FAKE_DIR: recordDir, HERMES_E2E_AGENT_PATH: fakeBin, ...env } };
   return onWindows ? launchApp({ ...common, home: "real", resetData: first }) : launchApp({ ...common, home: "private", homeDir });
 }
 const invoke = (bridge, cmd, args) =>
@@ -246,7 +248,7 @@ try {
   assert(codex.cells["signed-in"] === "No" && codex.actions.includes("Sign in"), "Codex: signed out, with Sign in");
   assert(opencode.installed === "true" && opencode.cells.version === "1.18.2" && opencode.cells["signed-in"] === "Yes", "OpenCode: installed, 1.18.2, signed in");
   const gemini = await doctorRow(bridge, "gemini");
-  if (gemini) log(`  gemini (retired tool): ${JSON.stringify(gemini)}`);
+  assert(gemini && gemini.installed === "false" && gemini.actions.includes("Copy install command"), "an agent that is not installed offers its install command");
   assert(await bridge.eval(`return !!document.querySelector('tr.agent-doctor-row[data-agent-id="gemini"] .agent-doctor-badge.retired');`), "the retired Gemini CLI is flagged");
   assert(await bridge.eval(`return !!document.querySelector('tr.agent-doctor-row.custom');`), "the Custom agent has a row");
   const texts = await bridge.eval(`return { usage: e2e.norm(e2e.first(".setup-usage")?.innerText), all: document.querySelector(".setup-dialog").innerText };`);
@@ -315,7 +317,7 @@ try {
     return ids.length === 1 ? ids[0] : null;
   `, { timeoutMs: 30_000 });
   const rec = (await waitForRecords(recsBefore + 1)).at(-1);
-  assert(rec.argv.at(-1) === TASK, "Claude got the task as its first prompt");
+  assert(String(rec.argv.at(-1)).split(/\r?\n\r?\n|\s+Read the file at /)[0] === TASK, "Claude got the task as its first prompt");
   const projects = await invoke(bridge, "get_registered_projects");
   const project = projects.find((p) => samePath(p.path, repo));
   const wt = await invoke(bridge, "git_session_worktree_info", { sessionId: taskId, projectId: project.id });

@@ -49,6 +49,7 @@
 }
 .agent-doctor-table td {
   padding: 5px 6px;
+  white-space: nowrap;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -56,7 +57,7 @@
 .agent-doctor-row.missing td { color: var(--text-3); }
 .agent-doctor-row.missing .agent-doctor-name { color: var(--text-2); }
 .agent-doctor-name { color: var(--text-0); white-space: nowrap; }
-.agent-doctor-muted { color: var(--text-3); }
+.agent-doctor-muted { color: var(--text-3); white-space: normal; }
 .agent-doctor-actions { text-align: right; }
 
 .agent-doctor-badge {
