@@ -192,14 +192,21 @@ try {
   const assetName = next.builtAs;
   copyFileSync(next.file, join(release, assetName));
   copyFileSync(next.sig, join(release, `${assetName}.sig`));
+  // The .deb of the same version is published next to it, as in a real
+  // release: the AppImage must pick its own entry, never the .deb's.
+  copyFileSync(next.deb, join(release, next.debName));
+  copyFileSync(`${next.deb}.sig`, join(release, `${next.debName}.sig`));
   const tag = `v${next.version}`;
   const repo = "example-org/example-app";
   const { latest } = buildManifests(release, { tag, repo });
-  assert(!!latest.platforms["linux-x86_64-appimage"] && !!latest.platforms["linux-x86_64"], `the manifest has the AppImage keys (${Object.keys(latest.platforms).join(", ")})`);
-  const problems = lintManifests(release, { tag, pubkey, expect: ["linux-x86_64-appimage", "linux-x86_64"] });
+  assert(
+    ["linux-x86_64-appimage", "linux-x86_64", "linux-x86_64-deb"].every((k) => latest.platforms[k]),
+    `the manifest has the AppImage and .deb keys (${Object.keys(latest.platforms).join(", ")})`,
+  );
+  const problems = lintManifests(release, { tag, pubkey, expect: ["linux-x86_64-appimage", "linux-x86_64", "linux-x86_64-deb"] });
   assert(problems.length === 0, `the release lint passes, signature verified with the test key (${problems.join("; ") || "clean"})`);
 
-  http = await startServer({ [assetName]: join(release, assetName) });
+  http = await startServer({ [assetName]: join(release, assetName), [next.debName]: join(release, next.debName) });
   const base = `http://127.0.0.1:${http.port}/`;
   const local = (manifest, signature) => {
     const copy = structuredClone(manifest);
@@ -235,7 +242,8 @@ try {
   await app.bridge.screenshot(join(evidenceDir, "01-update-offered.png"));
   await app.bridge.clickByName("Update Now", { within: ".update-dialog" });
   await app.bridge.waitFor("the download to be refused", `return !!e2e.first(".update-dialog-error");`, { timeoutMs: 120_000 });
-  assert(http.requests.includes(assetName), "the app did download the AppImage");
+  assert(http.requests.includes(assetName), "the app downloaded the AppImage");
+  assert(!http.requests.includes(next.debName), "and not the .deb");
   assert(sha256(installed) === old.sha256, "the installed AppImage is untouched after the refused update");
   await app.bridge.screenshot(join(evidenceDir, "02-bad-signature-refused.png"));
   await app.bridge.clickByName("Later", { within: ".update-dialog" });

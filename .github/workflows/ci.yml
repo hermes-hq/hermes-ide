@@ -463,7 +463,8 @@ jobs:
           # The release builds Linux installers on 22.04 (glibc floor).
           - os: ubuntu-22.04
             name: linux
-          - os: windows-2022
+          # Newer image: ships winget (ensure-winget.ps1 installs it otherwise).
+          - os: windows-2025
             name: windows
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -540,14 +541,7 @@ jobs:
       - name: Make sure winget is available (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-            Write-Host "winget not found — installing the Windows Package Manager"
-            Install-PackageProvider -Name NuGet -Force | Out-Null
-            Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope AllUsers | Out-Null
-            Repair-WinGetPackageManager -AllUsers -Force
-          }
-          winget --version
+        run: ./scripts/ci/ensure-winget.ps1
 
       - name: winget installs Hermes from the generated manifests (Windows)
         if: runner.os == 'Windows'

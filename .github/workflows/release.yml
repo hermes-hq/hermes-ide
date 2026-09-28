@@ -983,7 +983,7 @@ jobs:
   winget:
     needs: [config, publish-beta]
     if: needs.config.outputs.dry_run == 'false' && needs.config.outputs.build_windows == 'true'
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 20
     permissions:
       contents: read
@@ -994,6 +994,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: 22
+      - name: Make sure winget is available
+        shell: pwsh
+        run: ./scripts/ci/ensure-winget.ps1
       - name: winget install --manifest, then uninstall
         shell: bash
         env:

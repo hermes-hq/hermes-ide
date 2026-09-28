@@ -10,7 +10,9 @@
 //
 // Writes, into the output folder:
 //   hermes-e2e-old.AppImage (+ .sig), hermes-e2e-new.AppImage (+ .sig)
-//   appimages.json   { pubkey, old: { version, file, sig, stamp, sha256 }, new: {…} }
+//   the .deb of each version (+ .sig), so the scenario can publish a full
+//   Linux release: the AppImage must pick its own entry, not the .deb's
+//   appimages.json   { pubkey, old: { version, file, sig, deb, stamp, sha256 }, new: {…} }
 //
 // The bridge runtime is packed with a fast zstd level: the scenario is about
 // the AppImage and its updater, not the archive size.
@@ -69,6 +71,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.
 
   const distHash = hashTree(join(REPO_ROOT, "dist"));
   const bundleDir = join(cargoTargetDir(), "debug", "bundle", "appimage");
+  const debDir = join(cargoTargetDir(), "debug", "bundle", "deb");
   const info = { pubkey };
   for (const { name, version } of APPIMAGE_VERSIONS) {
     const stamp = `${buildStamp({ repoRoot: REPO_ROOT, distHash })}-${name}`;
@@ -80,13 +83,13 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.
         // No spaces in the file name: release asset names never have any, and
         // the release manifest tools are run on these files as they are.
         productName: "Hermes-IDE-E2E",
-        bundle: { active: true, targets: ["appimage"], createUpdaterArtifacts: true },
+        bundle: { active: true, targets: ["appimage", "deb"], createUpdaterArtifacts: true },
         plugins: { updater: { pubkey } },
       }),
     );
     run(
       "npx",
-      ["tauri", "build", "--debug", "--features", "e2e", "--bundles", "appimage", "--ignore-version-mismatches", "--config", "src-tauri/tauri.e2e.conf.json", "--config", conf],
+      ["tauri", "build", "--debug", "--features", "e2e", "--bundles", "appimage,deb", "--ignore-version-mismatches", "--config", "src-tauri/tauri.e2e.conf.json", "--config", conf],
       {
         env: {
           ...process.env,
@@ -101,10 +104,18 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.
       console.error(`[appimage build] no signed ${version} AppImage in ${bundleDir}: ${readdirSync(bundleDir).join(", ")}`);
       process.exit(1);
     }
+    const deb = readdirSync(debDir).find((f) => f.endsWith(".deb") && f.includes(`_${version}_`));
+    if (!deb || !existsSync(join(debDir, `${deb}.sig`))) {
+      console.error(`[appimage build] no signed ${version} .deb in ${debDir}: ${readdirSync(debDir).join(", ")}`);
+      process.exit(1);
+    }
     const file = join(out, `hermes-e2e-${name}.AppImage`);
     copyFileSync(join(bundleDir, built), file);
     copyFileSync(join(bundleDir, `${built}.sig`), `${file}.sig`);
-    info[name] = { version, file, sig: `${file}.sig`, builtAs: built, stamp, sha256: sha256(file) };
+    const debFile = join(out, deb);
+    copyFileSync(join(debDir, deb), debFile);
+    copyFileSync(join(debDir, `${deb}.sig`), `${debFile}.sig`);
+    info[name] = { version, file, sig: `${file}.sig`, builtAs: built, deb: debFile, debName: deb, stamp, sha256: sha256(file) };
     console.log(`[appimage build] ${name}: ${built} → ${file}`);
   }
   writeFileSync(join(out, "appimages.json"), JSON.stringify(info, null, 2) + "\n");
