@@ -250,7 +250,7 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
               {t("track.makeFeature")}
             </button>
           </div>
-          <p className="text-muted mono">hermes/{slugFromBranch(state.branch, worktree)}</p>
+          <p className="text-muted mono">{`hermes/${slugFromBranch(state.branch, worktree)}`}</p>
         </section>
       )}
 
@@ -287,7 +287,7 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
             {meta.phase === "done" && (
               <li className="track-phase track-phase-done" data-phase="done" data-state="done">
                 <span className="track-phase-mark">✓</span>
-                <span className="track-phase-name">done</span>
+                <span className="track-phase-name">{meta.phase}</span>
               </li>
             )}
           </ol>
