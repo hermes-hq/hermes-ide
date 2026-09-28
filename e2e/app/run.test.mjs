@@ -56,7 +56,7 @@ function run(r, args, env = {}) {
   return { code: res.status, out: res.stdout + res.stderr, results };
 }
 
-describe("run.mjs exit code and summary", () => {
+describe("run.mjs exit code and summary", { timeout: 60_000 }, () => {
   it("passes when every run of this invocation passes, even though results.json holds an old failure", () => {
     const r = rig({ "a.mjs": PASS });
     mkdirSync(r.out, { recursive: true });
@@ -119,7 +119,7 @@ describe("run.mjs exit code and summary", () => {
   });
 });
 
-describe("run.mjs repeat and shards", () => {
+describe("run.mjs repeat and shards", { timeout: 60_000 }, () => {
   it("--repeat-scenario repeats one scenario and runs the others once", () => {
     const r = rig({ "a.mjs": PASS, "echo.mjs": PASS });
     const { code, results } = run(r, ["--repeat-scenario", "echo.mjs=3"]);

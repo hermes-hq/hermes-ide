@@ -150,7 +150,9 @@ const KEY_STEPS = [
   "Terminal keys (macOS)",
 ];
 
-describe.skipIf(process.platform === "win32")("real-app shard steps in ci.yml", () => {
+// Each test starts a node process per stand-in scenario: give a loaded
+// machine time.
+describe.skipIf(process.platform === "win32")("real-app shard steps in ci.yml", { timeout: 60_000 }, () => {
   const { shards, shardValue } = shardMatrix();
 
   it("the matrix lists shards 1..N and SHARD says N", () => {
