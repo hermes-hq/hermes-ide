@@ -1667,6 +1667,7 @@ pub fn create_session(
                 crate::contract::SessionEvent::Exit {
                     at: chrono::Utc::now().timestamp_millis(),
                     source: Some("host".to_string()),
+                    tags: None,
                     code,
                     signal: None,
                 },
