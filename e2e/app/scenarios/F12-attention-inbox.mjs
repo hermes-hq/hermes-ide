@@ -160,10 +160,22 @@ async function detectShell(bridge, sessionId) {
   return classifyProbe(line);
 }
 
-/** The fake agent's approval scenario, waiting long enough for this run. */
+/**
+ * The fake agent's approval scenario, waiting long enough for this run. Its
+ * own terminal notifications (OSC 9 / 99 / 777, and the "Agent turn
+ * complete" one it writes in pieces) are left out: with the
+ * zero-setup signals (F11) each would make its session blocked by itself,
+ * and this scenario sets the order the agents block in through the e2e
+ * injector.
+ */
 function patientApprovalScenario() {
   const file = join(evidenceDir, "approval-patient.json");
   const scenario = JSON.parse(readFileSync(join(REPO_ROOT, "tools", "fake-agents", "scenarios", "approval.json"), "utf8"));
+  const quiet = (steps) =>
+    steps
+      .filter((step) => !["osc9", "osc99", "osc777", "split"].includes(step.do))
+      .map((step) => (step.branches ? { ...step, branches: Object.fromEntries(Object.entries(step.branches).map(([k, b]) => [k, { ...b, steps: quiet(b.steps ?? []) }])) } : step));
+  scenario.steps = quiet(scenario.steps);
   for (const step of scenario.steps) if (step.do === "waitKey") step.timeoutMs = 600_000;
   writeFileSync(file, JSON.stringify(scenario, null, 2));
   return file;
@@ -444,7 +456,7 @@ try {
   `);
   assert(!!ready, "B's finished turn is listed in Ready for you");
   state = await attention(bridge);
-  assert(state.decisions.some((d) => d.itemId === ready.id && d.decision === "sent"), "B's finished turn notified (you were looking at A)");
+  assert(state.decisions.some((d) => d.itemId === ready.id && d.decision === "sent"), `B's finished turn notified (you were looking at A) (${JSON.stringify(state.decisions.filter((d) => d.sessionId === B))})`);
 
   log("step 9: nothing works any more: the hold is released");
   const released = await bridge.waitFor("the hold to be released", `

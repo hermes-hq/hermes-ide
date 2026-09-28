@@ -41,7 +41,7 @@
 // Evidence (log, screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/F10-agent-status.
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
@@ -347,6 +347,12 @@ try {
   await bridge.waitFor("the app UI to be ready (no onboarding this time)", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop");`);
   await dismissWhatsNew(bridge);
   await bridge.waitFor("the status hooks", `return typeof window.__HERMES_E2E__?.sessionStatus === "function";`);
+  // Quitting now saves the workspace first, so run 1's session comes back:
+  // let it be restored before the new session is told apart from it.
+  await bridge
+    .waitFor("run 1's session to be restored", `return e2e.all(".session-item").length >= 1;`, { timeoutMs: 10_000 })
+    .then(() => log("  run 1's session was restored"))
+    .catch(() => log("  run 1's session was not restored (nothing to wait for)"));
 
   // A — Agent view: waiting on approval
   log("A: an Agent-view session waiting on approval says so, exactly");
@@ -423,7 +429,19 @@ try {
   assert(endedRow.tag.status === "exited" && endedRow.tag.confidence === "exact" && endedRow.tag.title.startsWith("F10 the agent ended"), `the idle shell keeps "${endedRow.tag.glyph} ${endedRow.tag.word}" with the helper's detail`);
   const agentLog = join(evidenceDir, "fake-agent.jsonl");
   rmSync(agentLog, { force: true });
-  await bridge.typeInTerminal(termId, commandLine(shell, process.execPath, [FAKE_AGENT, "--scenario", "approval", "--log", agentLog]) + "\n");
+  // Part B is about the terminal's own heuristics, so the fake agent's own
+  // notifications (OSC 9 / 99 / 777, and the "Agent turn complete" one it
+  // writes in pieces, which F11 reads as a signal that ranks
+  // above any terminal guess) are left out of its approval scenario.
+  const quietApproval = join(evidenceDir, "approval-no-osc.json");
+  const quietSteps = JSON.parse(readFileSync(join(REPO_ROOT, "tools", "fake-agents", "scenarios", "approval.json"), "utf8"));
+  const quiet = (steps) =>
+    steps
+      .filter((step) => !["osc9", "osc99", "osc777", "split"].includes(step.do))
+      .map((step) => (step.branches ? { ...step, branches: Object.fromEntries(Object.entries(step.branches).map(([k, b]) => [k, { ...b, steps: quiet(b.steps ?? []) }])) } : step));
+  quietSteps.steps = quiet(quietSteps.steps);
+  writeFileSync(quietApproval, JSON.stringify(quietSteps, null, 2));
+  await bridge.typeInTerminal(termId, commandLine(shell, process.execPath, [FAKE_AGENT, "--scenario", quietApproval, "--log", agentLog]) + "\n");
   await bridge.waitForTerminal(termId, /Allow Bash: rm -rf node_modules \?/, { timeoutMs: 20_000 });
   const whileBox = await bridge.waitFor("the row to stop saying working while the box waits", `
     const s = e2e.first(${JSON.stringify(ROW(termId) + " .agent-status-tag")})?.getAttribute("data-status");
