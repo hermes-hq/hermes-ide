@@ -441,11 +441,12 @@ features:
         scenarios:
           - F25-winget-install.mjs@win32
       F25-3:
-        # Measured: the macOS installer drops from 122 MB to 98 MB and the
-        # installed app from 310 MB to 118 MB (the runtime ships as one
-        # 79 MB archive). Downloads are already compressed, so the installer
-        # itself cannot shrink by 150 MB while the runtime is bundled; the
-        # criterion stays open.
+        # Measured against 1.4.0 (release dry run): macOS DMG 122 -> 98 MB,
+        # macOS update archive 120 -> 96 MB, .deb 133 -> 107 MB, installed
+        # macOS app 310 -> 118 MB; the Windows installer grows 94 -> 103 MB
+        # (its LZMA packed the raw runtime better than zstd does). Downloads
+        # were already compressed, so no installer can shrink by 150 MB while
+        # the runtime is bundled; the criterion stays open.
         text: "The installer is at least 150 MB smaller"
         scenarios: []
       F25-4:

@@ -178,11 +178,14 @@ Option A, with these differences from the sketch above:
   spawn) unpacks, on the blocking pool, in about 2 seconds.
 - **Self-test.** `--self-test` unpacks the runtime and imports the SDK from it
   with node, so the release smoke proves the archive on every installer.
-- **Size.** The installed macOS app drops from 310 MB to 118 MB and its DMG
-  from 122 MB to 98 MB. The download shrinks less than the 210 MB this ADR
-  hoped for: installers were already compressed, and the runtime is still
-  shipped. The unpacked runtime (256 MB) lands in the data folder once the
-  Agent view is first used.
+- **Size** (1.4.0 against a release dry run of this change). macOS DMG
+  122 -> 98 MB, macOS update archive 120 -> 96 MB, `.deb` 133 -> 107 MB,
+  installed macOS app 310 -> 118 MB. The Windows NSIS installer grows
+  94 -> 103 MB: its LZMA compressed the raw runtime better than zstd does.
+  Downloads shrink far less than the 210 MB this ADR hoped for: installers
+  were already compressed, and the runtime is still shipped. The unpacked
+  runtime (256 MB) lands in the data folder once the Agent view is first
+  used.
 - **AppImage and updates.** AppImages are built again, and each Linux
   installer is its own updater bundle: `linux-*-deb` for `.deb` installs,
   `linux-*-appimage` and the plain `linux-*` keys for AppImages.
