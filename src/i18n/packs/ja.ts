@@ -391,7 +391,6 @@ export const jaPack: LanguagePack = {
     "settings.flags.default": "チャンネルの既定値",
     "settings.flags.forceOn": "強制的にオン",
     "settings.flags.forceOff": "強制的にオフ",
-    "featureFlags.badgeTitle": "機能フラグ: {id}",
     "settings.defaultShell": "デフォルトシェル",
     "settings.systemDefault": "システムデフォルト",
     "settings.terminalScrollback": "ターミナルスクロールバック",

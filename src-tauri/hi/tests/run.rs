@@ -146,7 +146,10 @@ fn a_resume_that_fails_at_once_prints_one_line_records_it_and_starts_fresh() {
         &program,
         &resume_args,
         dir.path(),
-        &[("HERMES_SIGNAL_FILE", sig.as_str())],
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-3"),
+        ],
         Some((&program, &fresh_args, "new-vendor-id")),
     );
     write_launch(dir.path(), "s3", &json);
@@ -173,11 +176,158 @@ fn a_resume_that_fails_at_once_prints_one_line_records_it_and_starts_fresh() {
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
-    assert_eq!(lines.len(), 1);
+    assert_eq!(lines.len(), 2, "fallback, then the fresh agent's exit");
     assert_eq!(lines[0]["event"], "hermes.resume_fallback");
     assert_eq!(lines[0]["session"], "s3");
+    assert_eq!(lines[0]["nonce"], "n-3");
     assert_eq!(lines[0]["payload"]["vendor_session_id"], "new-vendor-id");
     assert_eq!(lines[0]["payload"]["exit_code"], 1);
+    assert_eq!(lines[1]["event"], "hermes.exited");
+    assert_eq!(lines[1]["nonce"], "n-3");
+    assert_eq!(lines[1]["payload"]["exit_code"], 0);
+}
+
+/// Hermes learns that the agent is gone from hi itself, whatever the agent
+/// did or did not do before it ended (no hook ran here).
+#[test]
+fn the_agents_exit_is_reported_to_hermes_with_its_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let signals = dir.path().join("signals.ndjson");
+    let sig = signals.to_string_lossy().to_string();
+    let (program, args) = shell("exit 130", "exit 130");
+    let json = spec_json(
+        "s6",
+        &program,
+        &args,
+        dir.path(),
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-6"),
+        ],
+        None,
+    );
+    write_launch(dir.path(), "s6", &json);
+    let out = hi_run(dir.path(), "s6");
+    assert_eq!(out.status.code(), Some(130));
+    let lines: Vec<serde_json::Value> = fs::read_to_string(&signals)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["event"], "hermes.exited");
+    assert_eq!(lines[0]["session"], "s6");
+    assert_eq!(lines[0]["agent"], "fake");
+    assert_eq!(lines[0]["nonce"], "n-6");
+    assert_eq!(lines[0]["payload"]["exit_code"], 130);
+    assert!(lines[0]["payload"].get("error").is_none());
+
+    // A command that is not installed ends the same way, with the reason.
+    let json = spec_json(
+        "s7",
+        "no-such-agent-binary-xyz",
+        &[],
+        dir.path(),
+        &[
+            ("HERMES_SIGNAL_FILE", sig.as_str()),
+            ("HERMES_SIGNAL_NONCE", "n-7"),
+        ],
+        None,
+    );
+    write_launch(dir.path(), "s7", &json);
+    let out = hi_run(dir.path(), "s7");
+    assert_eq!(out.status.code(), Some(127));
+    let last: serde_json::Value = serde_json::from_str(
+        fs::read_to_string(&signals)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(last["event"], "hermes.exited");
+    assert_eq!(last["nonce"], "n-7");
+    assert_eq!(last["payload"]["exit_code"], 127);
+    assert_eq!(
+        last["payload"]["error"],
+        "no-such-agent-binary-xyz: command not found"
+    );
+}
+
+/// No spool named in the launch file (a file run by hand): nothing is
+/// written anywhere, the exit status still comes through.
+#[test]
+fn without_a_spool_the_exit_is_only_a_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let (program, args) = shell("exit 4", "exit 4");
+    let json = spec_json("s8", &program, &args, dir.path(), &[], None);
+    write_launch(dir.path(), "s8", &json);
+    let out = Command::new(HI)
+        .args(["run", "s8"])
+        .env("HERMES_LAUNCH_DIR", dir.path())
+        .env_remove("HERMES_SIGNAL_FILE")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(4));
+    assert!(text(&out.stderr).is_empty(), "{}", text(&out.stderr));
+    assert_eq!(
+        fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name() != "s8")
+            .count(),
+        0
+    );
+}
+
+/// An npm-installed vendor CLI on Windows is a `.cmd` shim. Codex gets its
+/// notify program as one JSON argument with quotes inside, so the batch
+/// file must receive that argument intact through hi and the standard
+/// library's batch-file quoting.
+#[cfg(windows)]
+#[test]
+fn a_cmd_shim_receives_a_json_argument_with_quotes_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let record = dir.path().join("argv.txt");
+    // Like the npm shim: forward every argument to a program; here the
+    // program is cmd's own echo, writing what it got to a file.
+    fs::write(
+        bin.join("codex.cmd"),
+        format!("@echo %*> \"{}\"\r\n", record.display()),
+    )
+    .unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let notify =
+        r#"notify=["C:/Program Files/Hermes/hi.exe","signal","--agent","codex","--argv-json"]"#;
+    let args: Vec<String> = vec![
+        "-c".into(),
+        notify.into(),
+        "--sandbox".into(),
+        "workspace-write".into(),
+    ];
+    let json = spec_json("s9", "codex", &args, dir.path(), &[], None);
+    write_launch(dir.path(), "s9", &json);
+    let out = Command::new(HI)
+        .args(["run", "s9"])
+        .env("HERMES_LAUNCH_DIR", dir.path())
+        .env("PATH", &path)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", text(&out.stderr));
+    let got = fs::read_to_string(&record).unwrap();
+    assert!(
+        got.contains(notify),
+        "the batch file saw the notify argument changed: {got:?}"
+    );
+    assert!(got.contains("--sandbox workspace-write"), "{got:?}");
 }
 
 #[test]

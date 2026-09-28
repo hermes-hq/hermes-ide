@@ -689,8 +689,9 @@ struct AgentLaunch {
     /// The project-context prompt travels with the command (no later nudge).
     context_in_args: bool,
     /// With the `hi` helper: the session's launch folder to watch for
-    /// signals, and whether silence means a startup prompt.
-    watch: Option<(std::path::PathBuf, bool)>,
+    /// signals, whether silence means a startup prompt, and the nonce the
+    /// launch's spool lines carry.
+    watch: Option<(std::path::PathBuf, bool, String)>,
 }
 
 /// Resolve the launch line once the shell is ready: through the bundled `hi`
@@ -705,7 +706,11 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
             cmd: prepared.line,
             provider,
             context_in_args: prepared.context_in_args,
-            watch: Some((prepared.session_dir, prepared.expects_start_signal)),
+            watch: Some((
+                prepared.session_dir,
+                prepared.expects_start_signal,
+                prepared.nonce,
+            )),
         });
     }
     // Only launch known/allowed AI providers (reject unknown values)
@@ -1135,23 +1140,27 @@ pub fn create_session(
         }
         cmd.env("HERMES_SESSION_ID", &session_id);
 
-        // The bundled `hi` helper: on PATH for this terminal (the shell
-        // integration re-adds it after the user's profile ran), plus where
-        // it finds the session's launch file.
-        if let Some(dir) =
-            crate::pty::launch::hi_path(&app).and_then(|hi| hi.parent().map(|d| d.to_path_buf()))
-        {
-            let mut paths = vec![dir.clone()];
-            if let Some(existing) = std::env::var_os("PATH") {
-                paths.extend(std::env::split_paths(&existing));
+        // The bundled `hi` helper, only while the `launchHelper` flag is on
+        // (a stable user's PATH stays exactly as it was): first on PATH for
+        // this terminal so `hi run` is unambiguous (the shell integration
+        // re-adds it after the user's profile ran), plus where it finds the
+        // session's launch file.
+        if launch_helper.unwrap_or(false) {
+            if let Some(dir) = crate::pty::launch::hi_path(&app)
+                .and_then(|hi| hi.parent().map(|d| d.to_path_buf()))
+            {
+                let mut paths = vec![dir.clone()];
+                if let Some(existing) = std::env::var_os("PATH") {
+                    paths.extend(std::env::split_paths(&existing));
+                }
+                if let Ok(joined) = std::env::join_paths(paths) {
+                    cmd.env("PATH", joined);
+                }
+                cmd.env("HERMES_BIN_DIR", dir.as_os_str());
             }
-            if let Ok(joined) = std::env::join_paths(paths) {
-                cmd.env("PATH", joined);
+            if let Ok(launch_dir) = crate::pty::launch::launch_dir(&app) {
+                cmd.env("HERMES_LAUNCH_DIR", launch_dir.as_os_str());
             }
-            cmd.env("HERMES_BIN_DIR", dir.as_os_str());
-        }
-        if let Ok(launch_dir) = crate::pty::launch::launch_dir(&app) {
-            cmd.env("HERMES_LAUNCH_DIR", launch_dir.as_os_str());
         }
     }
 
@@ -1331,12 +1340,13 @@ pub fn create_session(
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
                                     }
-                                    if let Some((dir, expects_start_signal)) = launch.watch {
+                                    if let Some((dir, expects_start_signal, nonce)) = launch.watch {
                                         crate::pty::launch::watch_signals(
                                             app_clone.clone(),
                                             Arc::clone(&session_clone),
                                             dir,
                                             expects_start_signal,
+                                            nonce,
                                         );
                                     }
                                 }
@@ -1539,12 +1549,13 @@ pub fn create_session(
                                 let update = SessionUpdate::from(&*s);
                                 let _ = app_silence.emit("session-updated", &update);
                             }
-                            if let Some((dir, expects_start_signal)) = launch.watch {
+                            if let Some((dir, expects_start_signal, nonce)) = launch.watch {
                                 crate::pty::launch::watch_signals(
                                     app_silence.clone(),
                                     Arc::clone(&session_silence),
                                     dir,
                                     expects_start_signal,
+                                    nonce,
                                 );
                             }
                         }

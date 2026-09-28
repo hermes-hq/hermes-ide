@@ -391,7 +391,6 @@ export const frPack: LanguagePack = {
     "settings.flags.default": "Valeur par défaut du canal",
     "settings.flags.forceOn": "Forcer l’activation",
     "settings.flags.forceOff": "Forcer la désactivation",
-    "featureFlags.badgeTitle": "Feature flag : {id}",
     "settings.defaultShell": "Shell par défaut",
     "settings.systemDefault": "Défaut système",
     "settings.terminalScrollback": "Historique du terminal",

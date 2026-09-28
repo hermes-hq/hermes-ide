@@ -421,7 +421,6 @@ const ENGLISH_PACK: LanguagePack = {
     "settings.flags.default": "Default for channel",
     "settings.flags.forceOn": "Force on",
     "settings.flags.forceOff": "Force off",
-    "featureFlags.badgeTitle": "Feature flag: {id}",
     "settings.defaultShell": "Default Shell",
     "settings.systemDefault": "System default",
     "settings.terminalScrollback": "Terminal Scrollback",

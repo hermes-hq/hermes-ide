@@ -391,7 +391,6 @@ export const ruPack: LanguagePack = {
     "settings.flags.default": "По умолчанию для канала",
     "settings.flags.forceOn": "Принудительно вкл.",
     "settings.flags.forceOff": "Принудительно выкл.",
-    "featureFlags.badgeTitle": "Флаг функции: {id}",
     "settings.defaultShell": "Оболочка по умолчанию",
     "settings.systemDefault": "Системная по умолчанию",
     "settings.terminalScrollback": "История терминала",

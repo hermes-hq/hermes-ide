@@ -17,7 +17,13 @@
 //! `hi run` stays the parent of the agent so it can notice a resume that
 //! fails right away (the vendor rejects the old session id) and start a
 //! fresh conversation instead, saying so in one visible line. Ctrl-C is left
-//! to the agent: `hi` ignores it and only reports the agent's exit status.
+//! to the agent: `hi` ignores it and only reports the agent's exit status —
+//! to the shell, and to Hermes as a `hermes.exited` spool line, so Hermes
+//! knows the agent is gone even when it ended without running any hook
+//! (a declined trust prompt, Ctrl-C at a prompt, a command not found).
+//!
+//! Every spool line carries the launch's nonce (`HERMES_SIGNAL_NONCE`, set
+//! by Hermes per launch); Hermes ignores lines without the current one.
 //!
 //! `hi signal` is what agents call from their hooks. It reads the hook's JSON
 //! from stdin, keeps a few small fields and appends one line to the spool
@@ -40,6 +46,7 @@ const LAUNCH_DIR_ENV: &str = "HERMES_LAUNCH_DIR";
 const SIGNAL_FILE_ENV: &str = "HERMES_SIGNAL_FILE";
 const SESSION_ID_ENV: &str = "HERMES_SESSION_ID";
 const AGENT_ENV: &str = "HERMES_AGENT";
+const NONCE_ENV: &str = "HERMES_SIGNAL_NONCE";
 const LAUNCH_FILE_NAME: &str = "launch.json";
 const EXIT_USAGE: i32 = 2;
 const EXIT_NOT_FOUND: i32 = 127;
@@ -339,6 +346,65 @@ fn append_signal(file: &Path, line: &serde_json::Value) -> std::io::Result<()> {
     f.write_all(text.as_bytes())
 }
 
+/// Where `hi run` reports to Hermes: the session's spool file, with the
+/// session, agent and nonce every line carries. Silent when the launch file
+/// names no spool (a launch file run by hand).
+struct Reporter {
+    file: Option<PathBuf>,
+    session: String,
+    agent: String,
+    nonce: Option<String>,
+}
+
+impl Reporter {
+    fn for_spec(spec: &LaunchSpec) -> Reporter {
+        let from_spec_or_env = |name: &str| {
+            spec.env
+                .get(name)
+                .cloned()
+                .or_else(|| std::env::var(name).ok())
+                .filter(|v| !v.is_empty())
+        };
+        Reporter {
+            file: from_spec_or_env(SIGNAL_FILE_ENV).map(PathBuf::from),
+            session: spec.session_id.clone(),
+            agent: spec.agent.clone(),
+            nonce: from_spec_or_env(NONCE_ENV),
+        }
+    }
+
+    fn report(&self, event: &str, payload: serde_json::Value) {
+        let Some(file) = &self.file else {
+            return;
+        };
+        let mut line = serde_json::json!({
+            "v": 1,
+            "ts": now_unix(),
+            "session": self.session,
+            "agent": self.agent,
+            "event": event,
+            "payload": payload,
+        });
+        if let Some(nonce) = &self.nonce {
+            line["nonce"] = serde_json::Value::String(nonce.clone());
+        }
+        if let Err(e) = append_signal(file, &line) {
+            eprintln!("hi: could not report {event} to Hermes: {e}");
+        }
+    }
+
+    /// The agent process is gone: tell Hermes how, and return the code to
+    /// exit with.
+    fn exited(&self, code: i32, error: Option<&str>) -> i32 {
+        let mut payload = serde_json::json!({ "exit_code": code });
+        if let Some(error) = error {
+            payload["error"] = serde_json::Value::String(error.to_string());
+        }
+        self.report("hermes.exited", payload);
+        code
+    }
+}
+
 fn cmd_run(arg: &str) -> i32 {
     let launch_dir = std::env::var_os(LAUNCH_DIR_ENV).map(PathBuf::from);
     let spec_path = match locate_spec(arg, launch_dir.as_deref()) {
@@ -376,24 +442,27 @@ fn cmd_run(arg: &str) -> i32 {
     };
     let path = std::env::var_os("PATH");
     let pathext = std::env::var_os("PATHEXT");
+    let reporter = Reporter::for_spec(&spec);
 
     ignore_interrupts();
 
     let Some(resolved) = resolve_program(&spec.program, path.as_deref(), pathext.as_deref()) else {
-        eprintln!("hi: {}: command not found", spec.program);
-        return EXIT_NOT_FOUND;
+        let error = format!("{}: command not found", spec.program);
+        eprintln!("hi: {error}");
+        return reporter.exited(EXIT_NOT_FOUND, Some(&error));
     };
     let started = Instant::now();
     let status = match run_child(&resolved, &spec.args, &spec.env, cwd.as_deref()) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("hi: cannot start {}: {e}", resolved.display());
-            return EXIT_NOT_FOUND;
+            let error = format!("cannot start {}: {e}", resolved.display());
+            eprintln!("hi: {error}");
+            return reporter.exited(EXIT_NOT_FOUND, Some(&error));
         }
     };
     let elapsed = started.elapsed();
     if !should_fall_back(status.success(), elapsed, spec.fallback.as_ref()) {
-        return exit_code(status);
+        return reporter.exited(exit_code(status), None);
     }
 
     // The resume failed right away: say so once, tell Hermes, start fresh.
@@ -405,38 +474,26 @@ fn cmd_run(arg: &str) -> i32 {
     let mut out = std::io::stdout();
     let _ = write!(out, "\r\nhermes: {message}\r\n");
     let _ = out.flush();
-    let signal_file = spec
-        .env
-        .get(SIGNAL_FILE_ENV)
-        .cloned()
-        .or_else(|| std::env::var(SIGNAL_FILE_ENV).ok());
-    if let Some(file) = signal_file {
-        let line = serde_json::json!({
-            "v": 1,
-            "ts": now_unix(),
-            "session": spec.session_id,
-            "agent": spec.agent,
-            "event": "hermes.resume_fallback",
-            "payload": {
-                "exit_code": code,
-                "elapsed_ms": elapsed.as_millis() as u64,
-                "vendor_session_id": fallback.vendor_session_id,
-            },
-        });
-        if let Err(e) = append_signal(Path::new(&file), &line) {
-            eprintln!("hi: could not record the restart for Hermes: {e}");
-        }
-    }
+    reporter.report(
+        "hermes.resume_fallback",
+        serde_json::json!({
+            "exit_code": code,
+            "elapsed_ms": elapsed.as_millis() as u64,
+            "vendor_session_id": fallback.vendor_session_id,
+        }),
+    );
     let Some(resolved) = resolve_program(&fallback.program, path.as_deref(), pathext.as_deref())
     else {
-        eprintln!("hi: {}: command not found", fallback.program);
-        return EXIT_NOT_FOUND;
+        let error = format!("{}: command not found", fallback.program);
+        eprintln!("hi: {error}");
+        return reporter.exited(EXIT_NOT_FOUND, Some(&error));
     };
     match run_child(&resolved, &fallback.args, &spec.env, cwd.as_deref()) {
-        Ok(s) => exit_code(s),
+        Ok(s) => reporter.exited(exit_code(s), None),
         Err(e) => {
-            eprintln!("hi: cannot start {}: {e}", resolved.display());
-            EXIT_NOT_FOUND
+            let error = format!("cannot start {}: {e}", resolved.display());
+            eprintln!("hi: {error}");
+            reporter.exited(EXIT_NOT_FOUND, Some(&error))
         }
     }
 }
@@ -474,11 +531,13 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// One spool line. `event` comes from the payload's `hook_event_name` when
-/// present, else from `--event`, else it is "unknown".
+/// present, else from `--event`, else it is "unknown". `nonce` is the
+/// launch's (from `HERMES_SIGNAL_NONCE`); without it Hermes ignores the line.
 pub fn signal_line(
     event_flag: Option<&str>,
     agent: &str,
     session: &str,
+    nonce: Option<&str>,
     payload: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let mut kept = serde_json::Map::new();
@@ -505,14 +564,18 @@ pub fn signal_line(
         .or_else(|| event_flag.map(str::to_string))
         .filter(|e| !e.is_empty())
         .unwrap_or_else(|| "unknown".to_string());
-    serde_json::json!({
+    let mut line = serde_json::json!({
         "v": 1,
         "ts": now_unix(),
         "session": session,
         "agent": agent,
         "event": truncate_chars(&event, 64),
         "payload": serde_json::Value::Object(kept),
-    })
+    });
+    if let Some(nonce) = nonce.filter(|n| !n.is_empty()) {
+        line["nonce"] = serde_json::Value::String(truncate_chars(nonce, 128));
+    }
+    line
 }
 
 fn stdin_is_terminal() -> bool {
@@ -571,6 +634,7 @@ fn cmd_signal(args: &[String]) -> i32 {
         .or_else(|| std::env::var(AGENT_ENV).ok())
         .unwrap_or_else(|| "unknown".to_string());
     let session = std::env::var(SESSION_ID_ENV).unwrap_or_default();
+    let nonce = std::env::var(NONCE_ENV).ok();
     let payload = if argv_json {
         args.last()
             .filter(|a| a.len() <= MAX_STDIN_BYTES)
@@ -578,7 +642,13 @@ fn cmd_signal(args: &[String]) -> i32 {
     } else {
         read_stdin_json()
     };
-    let line = signal_line(event.as_deref(), &agent, &session, payload.as_ref());
+    let line = signal_line(
+        event.as_deref(),
+        &agent,
+        &session,
+        nonce.as_deref(),
+        payload.as_ref(),
+    );
     // A hook must never fail the agent, so errors are swallowed on purpose.
     let _ = append_signal(Path::new(&file), &line);
     0
@@ -755,10 +825,17 @@ mod tests {
             "transcript_path": big,
             "stop_hook_active": false,
         });
-        let line = signal_line(Some("Other"), "claude", "hermes-1", Some(&payload));
+        let line = signal_line(
+            Some("Other"),
+            "claude",
+            "hermes-1",
+            Some("abc123"),
+            Some(&payload),
+        );
         assert_eq!(line["event"], "SessionStart");
         assert_eq!(line["agent"], "claude");
         assert_eq!(line["session"], "hermes-1");
+        assert_eq!(line["nonce"], "abc123");
         assert_eq!(line["v"], 1);
         let kept = line["payload"].as_object().unwrap();
         assert_eq!(kept["session_id"], "abc");
@@ -775,14 +852,25 @@ mod tests {
     #[test]
     fn signal_event_falls_back_to_the_flag_then_unknown() {
         assert_eq!(
-            signal_line(Some("Stop"), "codex", "s", None)["event"],
+            signal_line(Some("Stop"), "codex", "s", None, None)["event"],
             "Stop"
         );
-        assert_eq!(signal_line(None, "codex", "s", None)["event"], "unknown");
+        assert_eq!(
+            signal_line(None, "codex", "s", None, None)["event"],
+            "unknown"
+        );
         let not_object = serde_json::json!(["a"]);
         assert_eq!(
-            signal_line(Some("E"), "x", "s", Some(&not_object))["event"],
+            signal_line(Some("E"), "x", "s", None, Some(&not_object))["event"],
             "E"
         );
+    }
+
+    #[test]
+    fn a_line_without_a_nonce_has_no_nonce_field() {
+        let line = signal_line(Some("Stop"), "x", "s", None, None);
+        assert!(line.get("nonce").is_none());
+        let empty = signal_line(Some("Stop"), "x", "s", Some(""), None);
+        assert!(empty.get("nonce").is_none());
     }
 }

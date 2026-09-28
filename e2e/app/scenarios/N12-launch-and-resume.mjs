@@ -23,7 +23,16 @@
 //          new id is what Hermes remembers. Then a second session against a
 //          vendor that sits at a trust prompt: "waiting at a startup prompt"
 //          shows in the session list within a few seconds and clears once
-//          the prompt is answered.
+//          the prompt is answered. A third session declines the prompt: the
+//          agent is gone without ever having started, and Hermes says so
+//          (ended) instead of leaving "waiting" on a shell that is back at
+//          its prompt. A fourth session starts with the vendor CLI removed:
+//          `hi` reports "command not found" and the state ends with it.
+//
+// Negative controls (each must end in RESULT: FAIL):
+//   HERMES_E2E_N12_RESUME_MODE=ignore-resume   run 2's vendor accepts --resume
+//          but starts a new conversation anyway; the resume checks fail.
+//   HERMES_E2E_EXPECT_NOTICE=something-else     the failed-resume line check.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N12-launch-and-resume.mjs
@@ -48,6 +57,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 // check can fail (HERMES_E2E_EXPECT_NOTICE=something-else must end in
 // RESULT: FAIL).
 const EXPECT_NOTICE = process.env.HERMES_E2E_EXPECT_NOTICE || "hermes: could not resume the previous conversation";
+// The vendor's behaviour for run 2's resume; "ignore-resume" is the
+// behavioural negative control (a vendor that starts fresh despite --resume).
+const RESUME_MODE = process.env.HERMES_E2E_N12_RESUME_MODE || "normal";
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -370,6 +382,7 @@ try {
   assert(rec1.env.HERMES_SESSION_ID === s1, "HERMES_SESSION_ID is the Hermes session id");
   assert(rec1.env.HERMES_AGENT === "claude", "HERMES_AGENT names the agent");
   assert(typeof rec1.env.HERMES_SIGNAL_FILE === "string" && rec1.env.HERMES_SIGNAL_FILE.endsWith("signals.ndjson"), "HERMES_SIGNAL_FILE points at the session's signal spool");
+  assert(/^[0-9a-f]{32}$/.test(rec1.env.HERMES_SIGNAL_NONCE || ""), "HERMES_SIGNAL_NONCE carries this launch's nonce for the spool lines");
   assert(rec1.env.TERM_PROGRAM === "HERMES-IDE", "the agent runs inside the Hermes terminal");
   assert(sameFolder(rec1.cwd, d1.working_directory), `the agent started in the session's folder (${rec1.cwd})`);
   const hookRun = rec1.hooksRan.find((h) => h.event === "SessionStart");
@@ -388,6 +401,7 @@ try {
   await app.bridge.screenshot(join(evidenceDir, "01-hi-run-started.png"));
   await waitForSavedVendorId(app.bridge, s1, vendorId1);
   assert(JSON.stringify(vendorConfigSnapshot()) === JSON.stringify(vendorBefore), "nothing changed under the vendor's global config (~/.claude, ~/.claude.json, ~/.codex, ~/.gemini)");
+  if (RESUME_MODE !== "normal") setFakeMode(RESUME_MODE);
   await quit(app);
 
   // ── run 2: relaunch, the conversation resumes ─────────────────────
@@ -470,6 +484,31 @@ try {
   await app.bridge.waitFor("the startup-prompt tag to clear", `return !e2e.first(".session-startup-tag");`);
   assert((await startupTag(app.bridge)) === null, "once the prompt is answered the agent counts as started and the tag is gone");
   await app.bridge.screenshot(join(evidenceDir, "05-trust-answered.png"));
+
+  log("run 3, third session: the trust prompt is declined — the agent ends without ever starting");
+  const s5 = await createClaudeSession(app.bridge);
+  await app.bridge.waitForTerminal(s5, /Do you trust the files in this folder\?/, { timeoutMs: 30_000 });
+  await waitForStartup(app.bridge, s5, "waiting_at_startup_prompt", { timeoutMs: 15_000 });
+  log("  answering the prompt with n");
+  await app.bridge.typeInTerminal(s5, "n");
+  const endedIn = await waitForStartup(app.bridge, s5, "ended", { timeoutMs: 15_000 });
+  const d5 = await sessionData(app.bridge, s5);
+  assert(d5.agent_startup.confidence === "exact", `the end is exact (reported by the helper, ${endedIn} ms after n)`);
+  const declined = (await waitForRecords(7)).at(-1);
+  assert(declined.exit?.why === "declined-trust" && !declined.hooksRan.some((h) => h.event === "SessionStart"), "the vendor exited at the prompt without running any hook");
+  await app.bridge.waitFor("the startup-prompt tag to clear after the decline", `return !e2e.first(".session-startup-tag");`);
+  assert((await app.bridge.eval(`return e2e.all(".session-item").map((el) => el.getAttribute("data-startup"));`)).every((v) => v !== "waiting_at_startup_prompt"), "no session is still reported as waiting at a startup prompt");
+  await app.bridge.screenshot(join(evidenceDir, "06-trust-declined-ended.png"));
+
+  log("run 3, fourth session: the vendor CLI is not installed");
+  rmSync(join(fakeBin, onWindows ? "claude.cmd" : "claude"), { force: true });
+  const s6 = await createClaudeSession(app.bridge);
+  await app.bridge.waitForTerminal(s6, /hi: claude: command not found/, { timeoutMs: 30_000 });
+  await waitForStartup(app.bridge, s6, "ended", { timeoutMs: 15_000 });
+  const d6 = await sessionData(app.bridge, s6);
+  assert(d6.agent_startup.confidence === "exact" && /command not found/.test(d6.agent_startup.detail ?? ""), `the state says why the agent is gone ("${d6.agent_startup.detail}")`);
+  assert((await startupTag(app.bridge)) === null, "a missing command never shows as a startup prompt");
+  await app.bridge.screenshot(join(evidenceDir, "07-command-not-found-ended.png"));
   assert(JSON.stringify(vendorConfigSnapshot()) === JSON.stringify(vendorBefore), "still nothing under the vendor's global config");
 } catch (e) {
   failed = true;

@@ -391,7 +391,6 @@ export const ptBRPack: LanguagePack = {
     "settings.flags.default": "Padrão do canal",
     "settings.flags.forceOn": "Forçar ligado",
     "settings.flags.forceOff": "Forçar desligado",
-    "featureFlags.badgeTitle": "Feature flag: {id}",
     "settings.defaultShell": "Shell padrão",
     "settings.systemDefault": "Padrão do sistema",
     "settings.terminalScrollback": "Histórico do terminal",

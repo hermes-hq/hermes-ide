@@ -391,7 +391,6 @@ export const zhCNPack: LanguagePack = {
     "settings.flags.default": "跟随渠道默认值",
     "settings.flags.forceOn": "强制开启",
     "settings.flags.forceOff": "强制关闭",
-    "featureFlags.badgeTitle": "功能开关：{id}",
     "settings.defaultShell": "默认 Shell",
     "settings.systemDefault": "系统默认",
     "settings.terminalScrollback": "终端回滚",

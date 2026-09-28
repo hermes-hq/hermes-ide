@@ -231,7 +231,6 @@ export const hiPack: LanguagePack = {
     "settings.flags.default": "चैनल का डिफ़ॉल्ट",
     "settings.flags.forceOn": "ज़बरदस्ती चालू",
     "settings.flags.forceOff": "ज़बरदस्ती बंद",
-    "featureFlags.badgeTitle": "फ़ीचर फ़्लैग: {id}",
     "settings.pluginUpdates": "प्लगइन अपडेट",
     "settings.checkPluginUpdates": "प्लगइन अपडेट जांचें",
     "settings.onStartup": "स्टार्टअप पर",

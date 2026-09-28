@@ -391,7 +391,6 @@ export const dePack: LanguagePack = {
     "settings.flags.default": "Standard für den Kanal",
     "settings.flags.forceOn": "Erzwungen an",
     "settings.flags.forceOff": "Erzwungen aus",
-    "featureFlags.badgeTitle": "Feature-Flag: {id}",
     "settings.defaultShell": "Standard-Shell",
     "settings.systemDefault": "Systemstandard",
     "settings.terminalScrollback": "Terminal-Verlauf",

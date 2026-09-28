@@ -90,6 +90,10 @@ pub struct LaunchInput<'a> {
     pub session_dir: &'a Path,
     /// Pre-assigned conversation id for a fresh start (a UUID v4).
     pub new_session_id: &'a str,
+    /// Per-launch secret that `hi` copies into every spool line it writes;
+    /// lines without it (an earlier launch of the same session, a stray
+    /// process) are ignored.
+    pub nonce: &'a str,
 }
 
 /// The launch file `hi run` reads. Field names are the wire format.
@@ -130,6 +134,8 @@ pub struct LaunchPlan {
     pub expects_start_signal: bool,
     /// True when the project-context prompt travels as an argument.
     pub context_in_args: bool,
+    /// The nonce every spool line of this launch must carry.
+    pub nonce: String,
 }
 
 fn split_words(fragment: &str) -> Vec<String> {
@@ -311,6 +317,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         input.session_id.to_string(),
     );
     env.insert("HERMES_AGENT".to_string(), agent.id.clone());
+    env.insert("HERMES_SIGNAL_NONCE".to_string(), input.nonce.to_string());
     env.insert(
         "HERMES_SIGNAL_FILE".to_string(),
         input
@@ -407,6 +414,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         // A resumed conversation already has its context; the prompt is
         // only on the fresh command (which the fallback also carries).
         context_in_args: context_in_args && !resumes,
+        nonce: input.nonce.to_string(),
     })
 }
 
@@ -452,8 +460,9 @@ pub fn launch_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, Stri
     Ok(crate::instance::app_data_dir(app)?.join("launch"))
 }
 
-/// Sessions get new ids on every start, so whatever is left in the launch
-/// folder belongs to a previous run.
+/// Every launch writes its session's folder afresh (a restored session keeps
+/// its id, and gets a new launch file and a new nonce), so whatever is in
+/// the launch folder at startup belongs to the previous run and goes.
 pub fn clear_launch_dir<R: tauri::Runtime>(app: &AppHandle<R>) {
     if let Ok(dir) = launch_dir(app) {
         if dir.is_dir() {
@@ -482,6 +491,7 @@ pub(crate) struct PreparedLaunch {
     pub context_in_args: bool,
     pub session_dir: PathBuf,
     pub expects_start_signal: bool,
+    pub nonce: String,
 }
 
 /// Write the launch file for a session and return the line to type, or None
@@ -512,6 +522,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         None
     };
     let new_session_id = uuid::Uuid::new_v4().to_string();
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
     let plan = plan_launch(&LaunchInput {
         session_id: &s.id,
         provider: &provider,
@@ -525,6 +536,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         hi: &hi,
         session_dir: &session_dir,
         new_session_id: &new_session_id,
+        nonce: &nonce,
     })?;
 
     if let Err(e) = write_plan(&session_dir, &plan) {
@@ -557,6 +569,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         context_in_args: plan.context_in_args,
         session_dir,
         expects_start_signal: plan.expects_start_signal,
+        nonce: plan.nonce,
     })
 }
 
@@ -573,14 +586,31 @@ fn write_plan(session_dir: &Path, plan: &LaunchPlan) -> std::io::Result<()> {
 /// A parsed spool line; only the events this module acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpoolEvent {
-    Started { vendor_session_id: Option<String> },
-    ResumeFallback { vendor_session_id: Option<String> },
+    Started {
+        vendor_session_id: Option<String>,
+    },
+    ResumeFallback {
+        vendor_session_id: Option<String>,
+    },
     Ended,
+    /// `hi run` itself reporting that the agent process is gone (it is the
+    /// agent's parent, so this comes even when no SessionEnd hook ran: a
+    /// declined trust prompt, Ctrl-C at a prompt, a command not found).
+    Exited {
+        exit_code: i64,
+        error: Option<String>,
+    },
     Other,
 }
 
-pub fn parse_spool_line(line: &str) -> Option<SpoolEvent> {
+/// Parse one spool line. Only lines that carry this launch's `nonce` count;
+/// anything else (a line from an earlier launch of the same session, or a
+/// stray writer) is None, like a line that is not JSON.
+pub fn parse_spool_line(line: &str, nonce: &str) -> Option<SpoolEvent> {
     let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("nonce").and_then(|n| n.as_str()) != Some(nonce) {
+        return None;
+    }
     let event = v.get("event")?.as_str()?;
     let payload = v.get("payload");
     let payload_str = |key: &str| {
@@ -601,6 +631,13 @@ pub fn parse_spool_line(line: &str) -> Option<SpoolEvent> {
             vendor_session_id: payload_str("vendor_session_id"),
         },
         "SessionEnd" => SpoolEvent::Ended,
+        "hermes.exited" => SpoolEvent::Exited {
+            exit_code: payload
+                .and_then(|p| p.get("exit_code"))
+                .and_then(|x| x.as_i64())
+                .unwrap_or(-1),
+            error: payload_str("error"),
+        },
         _ => SpoolEvent::Other,
     })
 }
@@ -639,6 +676,20 @@ pub fn apply_spool_event(s: &mut Session, event: &SpoolEvent) -> bool {
                 since: now(),
                 confidence: "exact".to_string(),
                 detail: None,
+            });
+            true
+        }
+        SpoolEvent::Exited { exit_code, error } => {
+            let detail = match (error, *exit_code) {
+                (Some(e), _) => Some(e.clone()),
+                (None, 0) => None,
+                (None, code) => Some(format!("the agent exited with status {code}")),
+            };
+            s.agent_startup = Some(AgentStartup {
+                state: AgentStartupState::Ended,
+                since: now(),
+                confidence: "exact".to_string(),
+                detail,
             });
             true
         }
@@ -687,13 +738,15 @@ impl SpoolReader {
     }
 }
 
-/// Watch a session's signal spool for the life of the session: start and
-/// end signals, the resume fallback, and the "no start signal yet" guess.
+/// Watch a session's signal spool from the launch until the agent process
+/// is gone (or the session is): start and end signals, the resume fallback,
+/// `hi run`'s own exit report, and the "no start signal yet" guess.
 pub(crate) fn watch_signals(
     app: AppHandle,
     session: Arc<StdMutex<Session>>,
     session_dir: PathBuf,
     expects_start_signal: bool,
+    nonce: String,
 ) {
     std::thread::spawn(move || {
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
@@ -712,9 +765,22 @@ pub(crate) fn watch_signals(
                     stop = true;
                 }
                 for line in &lines {
-                    if let Some(event) = parse_spool_line(line) {
+                    if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             launched_at = Instant::now();
+                        }
+                        if let SpoolEvent::Exited { exit_code, error } = &event {
+                            log::info!(
+                                "[LAUNCH] {} agent exited (status {exit_code}{})",
+                                s.id,
+                                error
+                                    .as_deref()
+                                    .map(|e| format!(", {e}"))
+                                    .unwrap_or_default()
+                            );
+                            // The process is gone: nothing more will come,
+                            // and no guess may follow.
+                            stop = true;
                         }
                         changed |= apply_spool_event(&mut s, &event);
                     }
@@ -725,6 +791,7 @@ pub(crate) fn watch_signals(
                 );
                 if expects_start_signal
                     && launching
+                    && !stop
                     && launched_at.elapsed() >= STARTUP_PROMPT_GUESS_AFTER
                 {
                     s.agent_startup = Some(AgentStartup {
@@ -782,6 +849,7 @@ mod tests {
             hi,
             session_dir,
             new_session_id: "11111111-2222-4333-8444-555555555555",
+            nonce: "n0nce",
         }
     }
 
@@ -813,6 +881,8 @@ mod tests {
         assert!(plan.spec.fallback.is_none());
         assert_eq!(plan.spec.env["HERMES_SESSION_ID"], "hermes-1");
         assert_eq!(plan.spec.env["HERMES_AGENT"], "claude");
+        assert_eq!(plan.spec.env["HERMES_SIGNAL_NONCE"], "n0nce");
+        assert_eq!(plan.nonce, "n0nce");
         assert!(plan.spec.env["HERMES_SIGNAL_FILE"].ends_with(SIGNALS_FILE));
         assert_eq!(plan.spec.cwd, "/fixture-home/repo");
         assert_eq!(plan.spec.v, SPEC_VERSION);
@@ -918,6 +988,7 @@ mod tests {
             "\"/app/hi\" signal --agent gemini --event SessionEnd"
         );
         assert_eq!(end["env"]["HERMES_SESSION_ID"], "hermes-1");
+        assert_eq!(end["env"]["HERMES_SIGNAL_NONCE"], "n0nce");
         assert!(end["env"]["HERMES_SIGNAL_FILE"]
             .as_str()
             .unwrap()
@@ -1038,8 +1109,10 @@ mod tests {
 
     #[test]
     fn spool_lines_drive_the_startup_state_and_the_vendor_id() {
+        const N: &str = "n0nce";
         let started = parse_spool_line(
-            r#"{"v":1,"event":"SessionStart","payload":{"session_id":"abc","cwd":"/x"}}"#,
+            r#"{"v":1,"nonce":"n0nce","event":"SessionStart","payload":{"session_id":"abc","cwd":"/x"}}"#,
+            N,
         )
         .unwrap();
         assert_eq!(
@@ -1049,19 +1122,47 @@ mod tests {
             }
         );
         let fallback = parse_spool_line(
-            r#"{"v":1,"event":"hermes.resume_fallback","payload":{"vendor_session_id":"new","exit_code":1}}"#,
+            r#"{"v":1,"nonce":"n0nce","event":"hermes.resume_fallback","payload":{"vendor_session_id":"new","exit_code":1}}"#,
+            N,
         )
         .unwrap();
         assert_eq!(
-            parse_spool_line(r#"{"v":1,"event":"SessionEnd"}"#),
+            parse_spool_line(r#"{"v":1,"nonce":"n0nce","event":"SessionEnd"}"#, N),
             Some(SpoolEvent::Ended)
         );
         assert_eq!(
-            parse_spool_line(r#"{"v":1,"event":"Stop"}"#),
+            parse_spool_line(r#"{"v":1,"nonce":"n0nce","event":"Stop"}"#, N),
             Some(SpoolEvent::Other)
         );
-        assert_eq!(parse_spool_line("garbage"), None);
-        assert_eq!(parse_spool_line(r#"{"v":1}"#), None);
+        assert_eq!(
+            parse_spool_line(
+                r#"{"v":1,"nonce":"n0nce","event":"hermes.exited","payload":{"exit_code":127,"error":"claude: command not found"}}"#,
+                N
+            ),
+            Some(SpoolEvent::Exited {
+                exit_code: 127,
+                error: Some("claude: command not found".into())
+            })
+        );
+        assert_eq!(parse_spool_line("garbage", N), None);
+        assert_eq!(parse_spool_line(r#"{"v":1,"nonce":"n0nce"}"#, N), None);
+        // A line without this launch's nonce is not this launch's: an
+        // earlier launch of the same session, or something else writing to
+        // the spool, must not change what Hermes shows or resumes.
+        assert_eq!(
+            parse_spool_line(
+                r#"{"v":1,"event":"SessionStart","payload":{"session_id":"other"}}"#,
+                N
+            ),
+            None
+        );
+        assert_eq!(
+            parse_spool_line(
+                r#"{"v":1,"nonce":"stale","event":"SessionStart","payload":{"session_id":"other"}}"#,
+                N
+            ),
+            None
+        );
 
         let mut s = test_session();
         s.vendor_session_id = Some("old".into());
@@ -1083,6 +1184,54 @@ mod tests {
         assert_eq!(
             s.agent_startup.as_ref().unwrap().state,
             AgentStartupState::Ended
+        );
+    }
+
+    #[test]
+    fn the_helpers_exit_report_ends_the_startup_state_with_the_reason() {
+        // An agent that never sent a start signal (declined trust prompt,
+        // Ctrl-C at a prompt, command not found) still ends: hi run is its
+        // parent and reports the exit.
+        let mut s = test_session();
+        s.agent_startup = Some(AgentStartup {
+            state: AgentStartupState::WaitingAtStartupPrompt,
+            since: now(),
+            confidence: "guessed".into(),
+            detail: None,
+        });
+        assert!(apply_spool_event(
+            &mut s,
+            &SpoolEvent::Exited {
+                exit_code: 0,
+                error: None
+            }
+        ));
+        let st = s.agent_startup.clone().unwrap();
+        assert_eq!(st.state, AgentStartupState::Ended);
+        assert_eq!(st.confidence, "exact");
+        assert_eq!(st.detail, None);
+
+        apply_spool_event(
+            &mut s,
+            &SpoolEvent::Exited {
+                exit_code: 130,
+                error: None,
+            },
+        );
+        assert_eq!(
+            s.agent_startup.as_ref().unwrap().detail.as_deref(),
+            Some("the agent exited with status 130")
+        );
+        apply_spool_event(
+            &mut s,
+            &SpoolEvent::Exited {
+                exit_code: 127,
+                error: Some("claude: command not found".into()),
+            },
+        );
+        assert_eq!(
+            s.agent_startup.as_ref().unwrap().detail.as_deref(),
+            Some("claude: command not found")
         );
     }
 

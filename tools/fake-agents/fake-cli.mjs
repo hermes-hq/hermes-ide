@@ -23,6 +23,9 @@
 //                 does in a folder it has not seen
 //   resume-fails  reject `--resume` at once (exit 1), as a vendor does for an
 //                 id it does not know; a fresh start still works
+//   ignore-resume accept `--resume` but start a new conversation under a new
+//                 id anyway — a broken vendor, used as the negative control
+//                 that proves the resume checks can fail
 //
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
@@ -38,6 +41,7 @@ const KEPT_ENV = [
 	"HERMES_SESSION_ID",
 	"HERMES_AGENT",
 	"HERMES_SIGNAL_FILE",
+	"HERMES_SIGNAL_NONCE",
 	"HERMES_LAUNCH_DIR",
 	"HERMES_BIN_DIR",
 	"HERMES_CONTEXT",
@@ -236,8 +240,8 @@ async function runHooks(event, extra = {}) {
 
 // ─── Behaviour ───────────────────────────────────────────────────────
 
-const resumed = !!args.resumeId;
-const sessionId = args.resumeId || args.sessionId || randomUUID();
+const resumed = !!args.resumeId && mode !== "ignore-resume";
+const sessionId = (resumed ? args.resumeId : args.sessionId) || randomUUID();
 let quitting = false;
 
 async function quit(why) {

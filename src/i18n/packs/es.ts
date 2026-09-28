@@ -391,7 +391,6 @@ export const esPack: LanguagePack = {
     "settings.flags.default": "Predeterminado del canal",
     "settings.flags.forceOn": "Forzar activado",
     "settings.flags.forceOff": "Forzar desactivado",
-    "featureFlags.badgeTitle": "Feature flag: {id}",
     "settings.defaultShell": "Shell predeterminado",
     "settings.systemDefault": "Predeterminado del sistema",
     "settings.terminalScrollback": "Historial del terminal",

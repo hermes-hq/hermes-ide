@@ -117,6 +117,15 @@ describe("fake vendor CLI", () => {
 		expect(fresh.stdout).toContain("session new-1 (new)");
 	});
 
+	it("in ignore-resume mode it accepts --resume but starts a new conversation under a new id", async () => {
+		const dir = tmp();
+		const res = await run(["--resume", "old-1"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "ignore-resume" }, keys: "q" });
+		expect(res.code).toBe(0);
+		expect(res.stdout).not.toContain("resumed from");
+		expect(res.stdout).toMatch(/session [0-9a-f-]{36} \(new\)/);
+		expect(res.stdout).not.toContain("session old-1");
+	});
+
 	it("holds every hook back while the trust prompt waits, then starts on y", async () => {
 		const dir = tmp();
 		const { file, marks } = hookSettings(dir);
