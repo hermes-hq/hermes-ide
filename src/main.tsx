@@ -9,6 +9,7 @@ import { startSessionEventChannel } from "./agent/contract/channel";
 import { getSettings } from "./api/settings";
 import { initStatusStripPreference } from "./statusStrip/preference";
 import { startTurnLedgerBridge } from "./agent/turns/turnLedgerBridge";
+import { startDoneWhen } from "./doneWhen/controller";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -67,6 +68,14 @@ void getStartupProblem().then((problem) => {
     // Turn ledger (F20): forward turn boundaries to the backend snapshots
     // while the flag is on; tell the backend to stay off otherwise.
     startTurnLedgerBridge(isFeatureFlagEnabled("turnLedger"));
+    // Done-When checks (F27) run through the launch helper, so they share
+    // its flag. Attached before the workspace renders so no turn end is
+    // missed.
+    if (isFeatureFlagEnabled("launchHelper")) {
+      void import("@tauri-apps/api/event")
+        .then(({ listen }) => startDoneWhen({ listen }))
+        .catch((e) => console.warn("[done-when] not started:", e));
+    }
     root.render(
       <React.StrictMode>
         <App />

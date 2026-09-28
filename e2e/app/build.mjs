@@ -66,9 +66,12 @@ const targetDir = cargoTargetDir();
 // Helpers that live next to the app binary: `hi` (agent launch and signals,
 // every OS) and, on macOS, `hermes-pty-setup`. Built explicitly here into
 // their own target folders and staged next to the binary below, so the rig
-// never depends on where the app's build script managed to put them.
+// never depends on where the app's build script managed to put them. Those
+// folders are inside this checkout: a target folder shared with other
+// checkouts could hand the rig another checkout's helper between the build
+// and the copy (the helpers carry no stamp).
 function buildHelper(crateDir, binName) {
-  const helperTarget = join(targetDir, `${crateDir}-build`);
+  const helperTarget = join(REPO_ROOT, "src-tauri", "target", `${crateDir}-e2e-build`);
   run("cargo", [
     "build",
     "--manifest-path",

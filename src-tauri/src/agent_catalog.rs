@@ -139,6 +139,11 @@ pub struct Signals {
     /// was already approved) or `guessed` (no hooks at all).
     #[serde(default = "default_confidence")]
     pub confidence: String,
+    /// Done-When (F27): the hook event whose command can refuse the agent's
+    /// stop and hand the failures back (Claude's `Stop`, exit code 2). Only
+    /// meaningful for the `settings_file` method.
+    #[serde(default)]
+    pub check_hook: Option<String>,
 }
 
 fn default_confidence() -> String {

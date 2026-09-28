@@ -385,4 +385,78 @@ describe("fake vendor CLI", () => {
 		expect(res.stdout).toContain("\x1b]777;notify;hermes-signal;v1:deadbeefdeadbeef:PermissionRequest\x07");
 		expect(rec.events.filter((e) => e.ev === "marker").map((e) => e.nonce)).toEqual(["env", "forged"]);
 	});
+
+	it("in the prompts mode a prompt is a turn whose stop a Stop hook can refuse with exit 2, like Claude Code", async () => {
+		const dir = tmp();
+		const work = tmp();
+		// Refuses the first two stops (stderr is the feedback), then allows.
+		const hook = join(dir, "stop.mjs");
+		const counter = join(dir, "stops");
+		const payloads = join(dir, "payloads.log");
+		writeFileSync(
+			hook,
+			[
+				"import fs from 'node:fs';",
+				"let s=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',(d)=>s+=d);",
+				"process.stdin.on('end',()=>{",
+				`  fs.appendFileSync(${JSON.stringify(payloads)}, s+'\\n');`,
+				`  let n=0; try { n=Number(fs.readFileSync(${JSON.stringify(counter)},'utf8')); } catch {}`,
+				`  fs.writeFileSync(${JSON.stringify(counter)}, String(n+1));`,
+				"  if (n < 2) { process.stderr.write('nope '+(n+1)+'\\nmore detail\\n'); process.exit(2); }",
+				"});",
+			].join("\n"),
+		);
+		const settings = join(dir, "settings.json");
+		writeFileSync(
+			settings,
+			JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: `"${process.execPath}" "${hook}"`, timeout: 5 }] }] } }),
+		);
+		const res = await run(["--session-id", "t-3", "--settings", settings], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "prompts work-log" },
+			keys: "fix it\rq",
+			afterMs: 600,
+			cwd: work,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("Stop hook feedback: nope 1");
+		expect(res.stdout).toContain("Stop hook feedback: nope 2");
+		expect(res.stdout).toContain("fake-cli: turn done");
+		expect(readFileSync(join(work, ".fake-work.log"), "utf8").trim().split("\n")).toEqual([
+			"turn 1: fix it",
+			"continue 1",
+			"continue 2",
+		]);
+		const sent = readFileSync(payloads, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		expect(sent.map((p) => [p.hook_event_name, p.stop_hook_active])).toEqual([
+			["Stop", false],
+			["Stop", true],
+			["Stop", true],
+		]);
+		const [rec] = records(dir);
+		expect(rec.turns).toHaveLength(1);
+		expect(rec.turns[0].prompt).toBe("fix it");
+		expect(rec.turns[0].stops).toEqual([
+			{ active: false, codes: [2] },
+			{ active: true, codes: [2] },
+			{ active: true, codes: [0] },
+		]);
+	});
+
+	it("a bracketed paste and Enter is one prompt; q inside a line does not quit", async () => {
+		const dir = tmp();
+		const work = tmp();
+		const res = await run(["--session-id", "t-4"], {
+			env: { HERMES_FAKE_DIR: dir },
+			keys: "\x1b[200~quick fix\nsecond line\x1b[201~\rq",
+			afterMs: 500,
+			cwd: work,
+		});
+		expect(res.code).toBe(0);
+		const [rec] = records(dir);
+		expect(rec.turns.map((t) => t.prompt)).toEqual(["quick fix\nsecond line"]);
+		expect(rec.turns[0].stops).toEqual([{ active: false, codes: [] }]);
+		expect(rec.exit.why).toBe("q");
+		// Without the work-log mode nothing is written into the agent's folder.
+		expect(readdirSync(work)).toEqual([]);
+	});
 });

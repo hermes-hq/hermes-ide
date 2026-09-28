@@ -29,6 +29,7 @@ import { getReviewState } from "../review/reviewStore";
 import { setFakeLandTurnsForTest } from "../land/turnSource";
 import type { Turn } from "../agent/contract/turns";
 import { defaultDoneWhen, listRecipeRuns } from "../state/worktreeRecipes";
+import { checksForTurn, getDoneWhenSnapshot } from "../doneWhen/store";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -178,6 +179,9 @@ const hooks = {
   worktreeRecipeRuns: () => listRecipeRuns(),
   /** The done_when checks a session's worktree.toml declared. */
   defaultDoneWhen: (sessionId: string) => defaultDoneWhen(sessionId),
+  // ── F27 Done-When: what the chip reads, and the result kept per turn ──
+  doneWhenSnapshot: (sessionId: string) => getDoneWhenSnapshot(sessionId),
+  doneWhenForTurn: (sessionId: string, n: number) => checksForTurn(sessionId, n),
 };
 
 export type HermesE2EHooks = typeof hooks;

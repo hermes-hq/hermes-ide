@@ -55,7 +55,7 @@ Like the real CLI it takes `--session-id` as its conversation id (or invents
 one), continues a conversation with `--resume <id>`, reads the `--settings`
 file and runs its hooks with the same JSON on stdin that Claude Code sends —
 exec form (`command` + `args`, no shell) or a shell command string, with
-`matcher` applied to the tool name — then behaves as a small TUI (`q` quits).
+`matcher` applied to the tool name — then behaves as a small TUI (`q` on an empty line quits).
 
 One key per thing a real agent does, so a scenario can drive every signal
 path (F11): `p` PermissionRequest then `y`/`n` (PostToolUse or
@@ -67,20 +67,33 @@ marker with this launch's nonce, `x` the same marker with a forged nonce.
 Every hook's stdout is recorded, so a test can see that `hi signal` printed
 nothing (Hermes never answers a hook).
 
+A bracketed paste and Enter is a prompt (in the `prompts` mode a typed line
+is one too, and the keys above are plain text). A prompt runs one turn the
+way Claude Code does: the `UserPromptSubmit` hooks, one step of "work" (with
+the `work-log` mode, a line appended to `.fake-work.log` in its folder, so a
+check can tell how far it got), then a stop. The `Stop` hooks may refuse the
+stop by exiting 2; the fake then shows the hook's stderr as feedback, works
+once more and stops again with `stop_hook_active: true`. Each turn's prompt
+and stops are in the launch record (`turns`).
+
 Behaviour per launch, from `HERMES_FAKE_MODE` or the file
 `<HERMES_FAKE_DIR>/mode` (so a scenario can change it between app launches):
 
 | mode | behaviour |
 |---|---|
-| `normal` | starts at once |
+| `normal` | starts at once (words combine: `prompts work-log`) |
 | `trust-prompt` | shows a "Do you trust the files in this folder?" dialog and holds every hook back until a key is pressed (`y` continues, `n` exits), as a vendor does in a folder it has not seen |
 | `resume-fails` | rejects `--resume` at once (exit 1), as a vendor does for an id it does not know |
 | `ignore-resume` | accepts `--resume` but starts a new conversation under a new id anyway (a broken vendor; the negative control of the resume checks) |
+| `prompts` | a typed line and Enter is a prompt; the signal keys are plain text |
+| `no-prompt-hooks` | takes prompts (as `prompts`) but never runs the `UserPromptSubmit` hooks (a vendor without that hook; the negative control of the Review Desk's delivery receipt) |
+| `work-log` | each turn's work appends a line to `.fake-work.log` in the agent's folder |
+| `ignore-stop-hooks` | runs the `Stop` hooks but stops even when one refuses (a vendor without blocking stops; the negative control of the Done-When scenario) |
 
 With `HERMES_FAKE_DIR` set, every launch is recorded to
 `<HERMES_FAKE_DIR>/launch-<n>.json`: argv, cwd, the Hermes environment it
 saw, the settings file's contents, which hooks ran and how it ended.
-`e2e/app/scenarios/N12-launch-and-resume.mjs` puts a `claude` shim that runs
+`e2e/app/scenarios/N12-launch-and-resume.mjs` and `F27-claude-stop-hook.mjs` put a `claude` shim that runs
 this file first on the app's PATH and reads those records. Tests:
 `tools/fake-agents/test/fake-cli.test.mjs`.
 

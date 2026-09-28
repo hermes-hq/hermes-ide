@@ -184,6 +184,22 @@ export function subscribeAllSessionEvents(listener: AnySessionEventListener): ()
   };
 }
 
+/** Called with every accepted event of every session (after the snapshot
+ *  moved). For features that act on events wherever they happen, like the
+ *  Done-When checks at a turn end (F27). Additive to the C0 contract. */
+export type SessionEventTap = (sessionId: string, event: SessionEvent, snapshot: SessionEventSnapshot) => void;
+
+/**
+ * Watch every session's events; returns the unsubscribe (F27). The same
+ * subscription as subscribeAllSessionEvents, without the cleared-session
+ * calls: a tap only ever hears events.
+ */
+export function tapSessionEvents(tap: SessionEventTap): () => void {
+  return subscribeAllSessionEvents((sessionId, event, snapshot) => {
+    if (event) tap(sessionId, event, snapshot);
+  });
+}
+
 /** Fold one event into its session and wake that session's subscribers. */
 export function dispatchSessionEvent(sessionId: string, event: SessionEvent): SessionEventSnapshot {
   const prev = getSessionEventSnapshot(sessionId);

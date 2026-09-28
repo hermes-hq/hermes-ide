@@ -35,6 +35,21 @@ pub struct Turn {
     /// diffed or restored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub degraded: bool,
+    /// Done-When result at the end of this turn (F27, additive): None when
+    /// no check ran. F20 fills it from `crate::done_when::checks_for_turn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checks: Option<TurnChecks>,
+}
+
+/// What the Done-When checks said about a turn (F27): "tests ✓" or the
+/// commands that failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnChecks {
+    /// `passed`, `failed` or `error` (a done_when file could not be read).
+    pub state: String,
+    /// The commands that failed, in order; empty when they all passed.
+    pub failed: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,6 +150,7 @@ mod tests {
             ended_at: None,
             diffstat: Diffstat::default(),
             degraded: false,
+            checks: None,
         };
         assert_eq!(
             serde_json::to_value(&turn).unwrap(),
@@ -160,5 +176,33 @@ mod tests {
             !back.degraded,
             "an older row without the field reads as a full snapshot"
         );
+    }
+
+    #[test]
+    fn a_turns_checks_are_an_optional_additive_field() {
+        let with = Turn {
+            session_id: "s1".into(),
+            n: 1,
+            git_ref: turn_ref("s1", 1).unwrap(),
+            started_at: 1,
+            ended_at: Some(2),
+            diffstat: Diffstat::default(),
+            degraded: false,
+            checks: Some(TurnChecks {
+                state: "failed".into(),
+                failed: vec!["npm test".into()],
+            }),
+        };
+        let v = serde_json::to_value(&with).unwrap();
+        assert_eq!(
+            v["checks"],
+            serde_json::json!({ "state": "failed", "failed": ["npm test"] })
+        );
+        // A reader from before F27 (no `checks`) still reads it, and an old
+        // row without it reads as None.
+        let mut old = v.clone();
+        old.as_object_mut().unwrap().remove("checks");
+        let back: Turn = serde_json::from_value(old).unwrap();
+        assert_eq!(back.checks, None);
     }
 }

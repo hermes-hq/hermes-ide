@@ -830,3 +830,24 @@ features:
       F26-4:
         text: "Secrets in copied files never appear in the log, the settings export or any file Hermes stores"
         scenarios: [F26-worktree-recipes.mjs]
+  F27:
+    name: "Done-When contracts: your checks decide when an agent is done"
+    # Behind the launchHelper flag (the checks run through the bundled hi
+    # helper). partial: the Land sheet (F22) is not on this branch. The
+    # runner answers a run "before Land" (trigger land, proved in
+    # F27-turn-end-chip), but showing it in the sheet with "Land anyway" as
+    # the secondary action needs the sheet itself.
+    # Turn ends of agents other than Claude come from the turn ledger (F20),
+    # which is not on this branch either; the chip scenario feeds them through
+    # the C0 test injector.
+    status: partial
+    criteria:
+      F27-1:
+        text: "A Claude session with a failing check continues automatically at most 3 times, then raises check_failed"
+        scenarios: [F27-claude-stop-hook.mjs]
+      F27-2:
+        text: "A terminal agent's turn end shows a check chip within the check's runtime"
+        scenarios: [F27-turn-end-chip.mjs]
+      F27-3:
+        text: "The Land sheet shows Done-When status and makes Land anyway secondary when failing"
+        scenarios: []

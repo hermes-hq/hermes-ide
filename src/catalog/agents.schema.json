@@ -168,6 +168,11 @@
             }
           }
         },
+        "check_hook": {
+          "description": "Done-When (F27): the hook event, in the per-launch settings file, whose command can refuse the agent's stop and feed failures back (exit code 2). Only for method settings_file.",
+          "type": "string",
+          "pattern": "^[A-Za-z]+$"
+        },
         "confidence": {
           "enum": [
             "exact",

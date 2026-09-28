@@ -12,12 +12,16 @@
 //   - reads the `--settings` file and runs its `SessionStart` hooks (JSON on
 //     the hook's stdin, the same shape Claude Code sends) — but only after a
 //     startup prompt was answered, when it shows one;
-//   - then behaves as a small TUI: echoes keys, `q` or Ctrl-C quits (running
-//     the `SessionEnd` hooks first); a bracketed paste followed by Enter is
-//     a prompt, which runs the `UserPromptSubmit` hooks with `{prompt}` — the
-//     Review Desk's delivery receipt rides on that — and then the `Stop`
-//     hooks, as the turn ends. Hooks run in exec form (`args`) or through
-//     the shell, with matchers, as Claude Code runs them.
+//   - then behaves as a small TUI: echoes keys, `q` on an empty line or
+//     Ctrl-C quits (running the `SessionEnd` hooks first); a bracketed paste
+//     followed by Enter is a prompt. Hooks run in exec form (`args`) or
+//     through the shell, with matchers, as Claude Code runs them.
+//   - a prompt is one turn: the `UserPromptSubmit` hooks run with
+//     `{prompt}` — the Review Desk's delivery receipt rides on that — then
+//     the turn's "work", then a stop that the settings file's `Stop` hooks
+//     may refuse with exit code 2, like Claude Code — the fake then shows
+//     the feedback, works once more and stops again with
+//     `stop_hook_active: true` (F27).
 //
 // One key per thing a real agent does, so a test can drive every signal
 // path (F11): `p` PermissionRequest then y/n (PostToolUse / PermissionDenied),
@@ -27,8 +31,8 @@
 // `o` an OSC 9 notification (no hook), `m` the OSC 777 Hermes marker with this
 // launch's nonce, `x` the same marker with a forged nonce.
 //
-// In the `prompts` mode (F21) those keys are plain text instead: a line of
-// typed text followed by Enter is a prompt too. A prompt of the form
+// In the `prompts` mode (F21, F27) those keys are plain text instead: a line
+// of typed text followed by Enter is a prompt too. A prompt of the form
 // `work <ms>` keeps the agent on its turn for that long first; keys typed
 // meanwhile are queued and read only after the turn, as the real CLI does
 // (the Review Desk must not type into a working agent).
@@ -53,6 +57,12 @@
 //                 `UserPromptSubmit` hooks — a vendor without that hook, the
 //                 negative control that proves the Review Desk's "not
 //                 delivered" is real
+//   work-log      each turn's work appends a line to `.fake-work.log` in the
+//                 folder the agent runs in, so a check can tell how far the
+//                 agent got (F27)
+//   ignore-stop-hooks runs the Stop hooks but stops even when one refuses
+//                 (exit 2) — a vendor without blocking stops, the negative
+//                 control of the Done-When scenario
 // and, with trust-prompt:
 //   interrupt-exit-1  Ctrl-C at the prompt exits 1 instead — the same code
 //                 as a rejected resume, but without its message
@@ -144,6 +154,7 @@ const record = {
 	/** Prompts submitted while running (typed or pasted, then Enter). */
 	prompts: [],
 	hooksRan: [],
+	turns: [],
 	events: [],
 	exit: null,
 };
@@ -298,7 +309,7 @@ function runHook(hook, payload) {
 		const timer = setTimeout(() => child.kill(), timeoutMs);
 		child.on("close", (code) => {
 			clearTimeout(timer);
-			resolve({ command: hook.command, args: exec ? hook.args : undefined, exec, code, ms: Date.now() - started, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 500) });
+			resolve({ command: hook.command, args: exec ? hook.args : undefined, exec, code, ms: Date.now() - started, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 2000) });
 		});
 		child.on("error", (e) => {
 			clearTimeout(timer);
@@ -532,7 +543,10 @@ async function main() {
 			continue;
 		}
 		if (key === "\x7f" || key === "\b") {
-			line = line.slice(0, -1);
+			if (line) {
+				line = line.slice(0, -1);
+				out("\b \b");
+			}
 			continue;
 		}
 		if (key >= " ") {
@@ -544,14 +558,38 @@ async function main() {
 	}
 }
 
+// ─── Turns (a prompt, some work, a stop the Stop hooks may refuse) ───
+//
+// Like Claude Code: each prompt runs the `UserPromptSubmit` hooks, does its
+// "work" (with `work-log`, appends one line to `.fake-work.log` in the
+// current folder, so a check can tell how far the agent got), then tries to
+// stop. The `Stop` hooks run with `stop_hook_active` false the first time; a
+// hook that exits 2 refuses the stop and its stderr is the feedback: the fake
+// shows it, works once more and tries to stop again with `stop_hook_active`
+// true.
+
+/** Most stops a turn may have refused before the fake gives up by itself
+ *  (only a broken hook would get here; Claude has no such cap). */
+const MAX_REFUSED_STOPS = 10;
+
+/** One step of work; returns how many steps the work log holds (0 without `work-log`). */
+function workStep(label) {
+	if (!has("work-log")) return 0;
+	const file = path.join(process.cwd(), ".fake-work.log");
+	fs.appendFileSync(file, `${label}\n`);
+	return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length;
+}
+
 async function submitPrompt(text) {
 	record.prompts.push(text);
 	note("prompt", { chars: text.length });
 	out(`fake-cli: prompt received (${text.length} chars)\r\n`);
-	if (has("no-prompt-hooks")) return;
-	await runHooks("UserPromptSubmit", { prompt: text });
-	// The turn: `work <ms>` keeps the agent busy (nothing is read from the
-	// terminal meanwhile); every turn ends with the Stop hooks.
+	const entry = { prompt: text.slice(0, 2000), stops: [] };
+	record.turns = record.turns ?? [];
+	record.turns.push(entry);
+	if (!has("no-prompt-hooks")) await runHooks("UserPromptSubmit", { prompt: text });
+	// `work <ms>` keeps the agent busy (nothing is read from the terminal
+	// meanwhile); every turn ends with the Stop hooks.
 	const work = /^work (\d+)$/.exec(text.trim());
 	if (work) {
 		const ms = Number(work[1]);
@@ -559,9 +597,27 @@ async function submitPrompt(text) {
 		note("working", { ms });
 		await new Promise((resolve) => setTimeout(resolve, ms));
 	}
-	await runHooks("Stop", { stop_hook_active: false });
+	let steps = workStep(`turn ${record.turns.length}: ${text.split("\n")[0].slice(0, 80)}`);
+	out(`fake-cli: worked (step ${steps})\r\n`);
+	let active = false;
+	for (let i = 0; i <= MAX_REFUSED_STOPS; i++) {
+		const results = await runHooks("Stop", { stop_hook_active: active, last_assistant_message: `step ${steps}` });
+		// A vendor without blocking stops (the negative control) stops anyway.
+		const refused = has("ignore-stop-hooks") ? undefined : results.find((r) => r.code === 2);
+		entry.stops.push({ active, codes: results.map((r) => r.code) });
+		save();
+		if (!refused) break;
+		const first = (refused.stderr || "").split("\n").find((l) => l.trim()) ?? "";
+		out(`fake-cli: Stop hook feedback: ${first.slice(0, 160)}\r\n`);
+		note("stop-refused", { attempt: i + 1 });
+		active = true;
+		steps = workStep(`continue ${i + 1}`);
+		out(`fake-cli: worked (step ${steps})\r\n`);
+	}
 	note("turn-end");
 	out("fake-cli: turn ended\r\n");
+	out("fake-cli: turn done\r\n");
+	note("turn-done", { stops: entry.stops.length });
 }
 
 main().catch((e) => {

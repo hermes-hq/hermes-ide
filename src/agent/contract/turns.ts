@@ -34,6 +34,17 @@ export interface Turn {
    * or restored. Absent on a full snapshot.
    */
   readonly degraded?: boolean;
+  /** Done-When result at the end of this turn (F27, additive); absent when
+   *  no check ran. */
+  readonly checks?: TurnChecks;
+}
+
+/** What the Done-When checks said about a turn (F27). */
+export interface TurnChecks {
+  /** "passed", "failed", or "error" (a done_when file could not be read). */
+  readonly state: "passed" | "failed" | "error";
+  /** The commands that failed, in order; empty when they all passed. */
+  readonly failed: readonly string[];
 }
 
 export interface TurnDiff {

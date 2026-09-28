@@ -7,6 +7,7 @@ mod claude_config;
 mod clipboard;
 pub mod contract;
 mod db;
+pub mod done_when;
 #[cfg(feature = "e2e")]
 mod e2e_bridge;
 #[cfg(any(test, feature = "e2e"))]
@@ -683,6 +684,7 @@ pub fn run() {
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
             app.manage(quit_flush::QuitFlush::default());
+            app.manage(done_when::DoneWhenState::default());
             app.manage(inline_pty::InlinePtyManager::new());
             // Turn ledger (F20): off until the frontend says the flag is on.
             app.manage(turn_ledger::TurnLedger::default());
@@ -991,6 +993,9 @@ pub fn run() {
             land::land_undo,
             land::land_pr_checks,
             land::land_ci_log,
+            // Done-When checks (F27).
+            done_when::done_when_run,
+            done_when::done_when_history,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

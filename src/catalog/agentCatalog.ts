@@ -25,6 +25,8 @@ export interface AgentSignals {
 	env?: Readonly<Record<string, string>>;
 	files?: readonly string[];
 	events?: Readonly<Record<string, readonly string[]>>;
+	/** Done-When (F27): the settings-file hook that can refuse a stop. */
+	check_hook?: string;
 	confidence: "exact" | "signal" | "guessed";
 	note?: string;
 }

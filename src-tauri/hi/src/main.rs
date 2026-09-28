@@ -6,6 +6,9 @@
 //! hi signal [--agent A] [--event E]    append one line to $HERMES_SIGNAL_FILE
 //!           [--argv-json <json>]       (payload from the last argument, as
 //!                                       Codex's notify program gets it)
+//! hi check [--json] [--feature <slug>] run the repository's Done-When checks
+//!          [--stop-hook]               (as an agent's Stop hook: block the
+//!                                       stop while they fail, see below)
 //! hi --version
 //! ```
 //!
@@ -33,6 +36,16 @@
 //! from stdin, keeps a few small fields and appends one line to the spool
 //! file Hermes watches. It prints nothing and always exits 0, so a hook can
 //! never break an agent.
+//!
+//! `hi check` runs the `done_when` commands of the checkout it is in
+//! (`.hermes/features/<slug>/feature.md`, else `.hermes/worktree.toml`; see
+//! `done_when.rs`) and says which failed: exit 0 when they pass or there are
+//! none, 1 when one fails, 3 when a file cannot be read. Hermes injects
+//! `hi check --stop-hook` as Claude's per-launch Stop hook: while the checks
+//! fail it exits 2 with the failures on stderr, which sends Claude back to
+//! work with them, at most three times per turn and within a time budget;
+//! then it lets Claude stop and reports the result, which Hermes shows as
+//! `check_failed`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -40,6 +53,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+mod done_when;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The launch-file format this build understands.
@@ -922,12 +937,270 @@ fn cmd_signal(args: &[String]) -> i32 {
     0
 }
 
+// ─── Checks (Done-When) ──────────────────────────────────────────────
+
+const EXIT_CHECK_FAILED: i32 = 1;
+const EXIT_CHECK_UNREADABLE: i32 = 3;
+/// `--stop-hook`: exit 2 makes Claude continue, with stderr as feedback.
+const EXIT_BLOCK_STOP: i32 = 2;
+const CHECK_EVENT: &str = "hermes.check";
+const CHECK_STATE_FILE: &str = "done-when-state.json";
+/// A spool line stays under the 8 KB signal cap.
+const CHECK_SPOOL_CAP: usize = 7 * 1024;
+
+fn check_exit_code(state: done_when::State) -> i32 {
+    match state {
+        done_when::State::Passed | done_when::State::None => 0,
+        done_when::State::Failed => EXIT_CHECK_FAILED,
+        done_when::State::Error => EXIT_CHECK_UNREADABLE,
+    }
+}
+
+/// The spool payload of a check run: the report with short output tails,
+/// plus what the Stop hook decided.
+fn check_payload(
+    report: &done_when::Report,
+    extra: &[(&str, serde_json::Value)],
+) -> serde_json::Value {
+    let n = report.commands.len().max(1);
+    let mut tail = (4000 / n).clamp(160, 1200);
+    loop {
+        let mut v = report.to_json(tail);
+        for (k, val) in extra {
+            v[*k] = val.clone();
+        }
+        let size = serde_json::to_string(&v).map(|t| t.len()).unwrap_or(0);
+        if size <= CHECK_SPOOL_CAP || tail == 0 {
+            return v;
+        }
+        tail = if tail < 80 { 0 } else { tail / 2 };
+    }
+}
+
+/// Report a check run to Hermes when this runs inside a launched agent (the
+/// spool and the nonce are in the environment). Errors are swallowed: a
+/// check never fails because Hermes is not listening.
+fn report_check(payload: serde_json::Value) {
+    let Some(file) = std::env::var_os(SIGNAL_FILE_ENV).filter(|f| !f.is_empty()) else {
+        return;
+    };
+    let mut line = serde_json::json!({
+        "v": 1,
+        "ts": now_unix(),
+        "session": std::env::var(SESSION_ID_ENV).unwrap_or_default(),
+        "agent": std::env::var(AGENT_ENV).unwrap_or_else(|_| "unknown".to_string()),
+        "event": CHECK_EVENT,
+        "payload": payload,
+    });
+    if let Ok(nonce) = std::env::var(NONCE_ENV) {
+        if !nonce.is_empty() {
+            line["nonce"] = serde_json::Value::String(nonce);
+        }
+    }
+    let _ = append_signal(Path::new(&file), &line);
+}
+
+fn secs(ms: u64) -> String {
+    format!("{:.1} s", ms as f64 / 1000.0)
+}
+
+/// What a person sees after `hi check` at a terminal.
+fn report_text(report: &done_when::Report) -> String {
+    use done_when::State;
+    let mut out = String::new();
+    match report.state {
+        State::None => out.push_str(
+            "hi check: no Done-When checks here (add done_when to .hermes/worktree.toml or to a feature.md)\n",
+        ),
+        State::Error => out.push_str(&format!(
+            "hi check: {}\n",
+            report
+                .error
+                .as_deref()
+                .unwrap_or("a done_when file can't be read")
+        )),
+        State::Passed | State::Failed => {
+            let from = report
+                .source
+                .as_ref()
+                .map(|s| s.path.as_str())
+                .unwrap_or("?");
+            let n = report.commands.len();
+            out.push_str(&format!(
+                "hi check: {n} check{} from {from}\n",
+                if n == 1 { "" } else { "s" }
+            ));
+            for c in &report.commands {
+                if c.passed() {
+                    out.push_str(&format!(
+                        "  ok      {}  ({})\n",
+                        c.command,
+                        secs(c.duration_ms)
+                    ));
+                    continue;
+                }
+                let how = if c.timed_out {
+                    "timed out".to_string()
+                } else {
+                    format!("exit {}", c.exit_code.unwrap_or(-1))
+                };
+                out.push_str(&format!(
+                    "  FAILED  {}  ({how}, {})\n",
+                    c.command,
+                    secs(c.duration_ms)
+                ));
+                let lines: Vec<&str> = c.output_tail.trim_end().lines().collect();
+                for l in &lines[lines.len().saturating_sub(15)..] {
+                    out.push_str(&format!("          {l}\n"));
+                }
+            }
+            let failed = report.failed_commands().len();
+            if failed == 0 {
+                out.push_str("All checks passed.\n");
+            } else {
+                out.push_str(&format!("{failed} of {n} checks failed.\n"));
+            }
+        }
+    }
+    out
+}
+
+fn cmd_check(args: &[String]) -> i32 {
+    let mut json = false;
+    let mut stop_hook = false;
+    let mut feature: Option<String> = None;
+    let mut trigger: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--stop-hook" => stop_hook = true,
+            "--feature" if i + 1 < args.len() => {
+                feature = Some(args[i + 1].clone());
+                i += 1;
+            }
+            "--trigger" if i + 1 < args.len() => {
+                trigger = Some(args[i + 1].clone());
+                i += 1;
+            }
+            _ => return usage(),
+        }
+        i += 1;
+    }
+    let run_budget =
+        done_when::budget_from_env(done_when::RUN_BUDGET_ENV, done_when::DEFAULT_RUN_BUDGET);
+    if stop_hook {
+        return check_stop_hook(feature.as_deref(), run_budget);
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let trigger = trigger.unwrap_or_else(|| if json { "manual" } else { "cli" }.to_string());
+    // At a terminal the checks stay in the terminal's process group so
+    // Ctrl-C stops them; run for Hermes (--json) they get a group of their
+    // own, so a timeout ends everything they started.
+    let report = done_when::check(&cwd, feature.as_deref(), &trigger, run_budget, json);
+    if json {
+        let v = report.to_json(done_when::OUTPUT_TAIL_BYTES);
+        println!("{}", serde_json::to_string(&v).unwrap_or_default());
+    } else {
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all(report_text(&report).as_bytes());
+        let _ = stdout.flush();
+        if report.state != done_when::State::None {
+            report_check(check_payload(&report, &[]));
+        }
+    }
+    check_exit_code(report.state)
+}
+
+/// `hi check --stop-hook`: Claude's Stop hook. Reads the hook payload on
+/// stdin, runs the checks and decides whether the agent may stop.
+fn check_stop_hook(feature: Option<&str>, run_budget: Duration) -> i32 {
+    let payload = read_stdin_json().unwrap_or(serde_json::Value::Null);
+    let continuing = payload
+        .get("stop_hook_active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let cwd = payload
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let report = done_when::check(&cwd, feature, "stop_hook", run_budget, true);
+    if report.state == done_when::State::None {
+        return 0;
+    }
+    // The attempt count lives next to the session's spool. Without one this
+    // was not started by Hermes; with nowhere to count attempts it must
+    // never block (it could send the agent back forever).
+    let state_file = std::env::var_os(SIGNAL_FILE_ENV)
+        .filter(|f| !f.is_empty())
+        .and_then(|f| PathBuf::from(f).parent().map(|d| d.join(CHECK_STATE_FILE)));
+    let Some(state_file) = state_file else {
+        return 0;
+    };
+    let mut state = std::fs::read_to_string(&state_file)
+        .map(|t| done_when::HookState::parse(&t))
+        .unwrap_or_default();
+    let retry_budget =
+        done_when::budget_from_env(done_when::RETRY_BUDGET_ENV, done_when::DEFAULT_RETRY_BUDGET);
+    let decision = done_when::decide(
+        &mut state,
+        continuing,
+        report.state,
+        done_when::now_ms(),
+        done_when::MAX_ATTEMPTS,
+        retry_budget,
+    );
+    let _ = std::fs::write(&state_file, state.to_json());
+    let max = serde_json::json!(done_when::MAX_ATTEMPTS);
+    match decision {
+        done_when::Decision::Allow => {
+            report_check(check_payload(
+                &report,
+                &[("blocking", false.into()), ("final", true.into())],
+            ));
+            0
+        }
+        done_when::Decision::Block { attempt } => {
+            report_check(check_payload(
+                &report,
+                &[
+                    ("attempt", attempt.into()),
+                    ("max_attempts", max),
+                    ("blocking", true.into()),
+                    ("final", false.into()),
+                ],
+            ));
+            let feedback = report.feedback(Some((attempt, done_when::MAX_ATTEMPTS)));
+            let mut err = std::io::stderr();
+            let _ = err.write_all(feedback.as_bytes());
+            let _ = err.flush();
+            EXIT_BLOCK_STOP
+        }
+        done_when::Decision::GiveUp { attempt } => {
+            report_check(check_payload(
+                &report,
+                &[
+                    ("attempt", attempt.into()),
+                    ("max_attempts", max),
+                    ("blocking", false.into()),
+                    ("final", true.into()),
+                    ("gave_up", true.into()),
+                ],
+            ));
+            0
+        }
+    }
+}
+
 // ─── Entry point ─────────────────────────────────────────────────────
 
 fn usage() -> i32 {
     eprintln!(
-        "hi {VERSION} — Hermes launch and signal helper\n\n\
-         usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n  hi --version"
+        "hi {VERSION} — Hermes launch, signal and check helper\n\n\
+         usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n  hi check [--json] [--feature <slug>] [--stop-hook]\n  hi --version"
     );
     EXIT_USAGE
 }
@@ -940,6 +1213,7 @@ fn main() {
             _ => usage(),
         },
         Some("signal") => cmd_signal(&args[1..]),
+        Some("check") => cmd_check(&args[1..]),
         Some("--version") | Some("-V") | Some("version") => {
             println!("hi {VERSION} (launch file v{SPEC_VERSION})");
             0

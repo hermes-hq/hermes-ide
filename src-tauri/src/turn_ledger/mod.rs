@@ -501,6 +501,7 @@ impl TurnLedger {
             ended_at: Some(ended_at),
             diffstat,
             degraded: false,
+            checks: None,
         };
         {
             let d = db.lock().map_err(|_| "database lock poisoned")?;
@@ -529,6 +530,7 @@ impl TurnLedger {
             ended_at: Some(ended_at),
             diffstat,
             degraded: true,
+            checks: None,
         };
         store::insert_turn(&d, &turn)?;
         drop(d);
@@ -973,7 +975,13 @@ pub fn list_turns_for(app: &AppHandle, session_id: &str) -> Result<Vec<Turn>, St
         return Ok(Vec::new());
     };
     let d = state.db.lock().map_err(|_| "database lock poisoned")?;
-    store::list_turns(&d, session_id)
+    let mut turns = store::list_turns(&d, session_id)?;
+    drop(d);
+    // The Done-When result of each turn (F27), when its checks ran.
+    for turn in &mut turns {
+        turn.checks = crate::done_when::checks_for_turn(app, session_id, turn.n);
+    }
+    Ok(turns)
 }
 
 /// Filled contract command: the diff of one turn.

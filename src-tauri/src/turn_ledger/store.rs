@@ -50,6 +50,9 @@ pub fn list_turns(db: &Database, session_id: &str) -> Result<Vec<Turn>, String> 
                     insertions: r.get(6)?,
                     deletions: r.get(7)?,
                 },
+                // Not stored: Done-When results live with the checks (F27);
+                // list_turns_for puts them on.
+                checks: None,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -180,6 +183,7 @@ mod tests {
                 deletions: 0,
             },
             degraded: git_ref.is_empty(),
+            checks: None,
         }
     }
 
