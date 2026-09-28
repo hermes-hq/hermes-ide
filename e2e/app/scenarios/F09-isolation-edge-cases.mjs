@@ -17,6 +17,9 @@
 //             put an uncommitted file there, close X: no dialog, no
 //             "failed to clean up / retried on next startup" warning, the
 //             folder, its file and git's record of it are untouched.
+//             Then the same with a checkout of ANOTHER Hermes instance (a
+//             folder under some other hermes-worktrees/): task Y reuses
+//             it, and closing Y asks nothing and removes nothing.
 //          C. task R gets its own worktree; quit with R open
 //   run 3  R's worktree folder was deleted meanwhile (by hand). R is
 //          restored anyway: its worktree is recreated on its branch, a
@@ -65,6 +68,9 @@ function assert(condition, message) {
 const workDir = realpathSync.native(mkdtempSync(join(tmpdir(), "hermes-e2e-f09e-")));
 const repo = join(workDir, "f09e-repo");
 const externalWt = join(workDir, "f09e-external-wt");
+// What another Hermes instance's worktree looks like: under a
+// hermes-worktrees/ folder that is not this instance's.
+const foreignWt = join(workDir, "other-hermes", "hermes-worktrees", "abc123", "s9_foreign-branch");
 const gitEnv = {
   ...process.env,
   GIT_AUTHOR_NAME: "Hermes Test",
@@ -86,6 +92,7 @@ git("worktree", "add", "-q", "-b", "external-branch", externalWt);
 writeFileSync(join(externalWt, "external-committed.txt"), "made outside Hermes\n");
 execFileSync("git", ["-C", externalWt, "add", "."], { env: gitEnv });
 execFileSync("git", ["-C", externalWt, "commit", "-q", "-m", "external work"], { env: gitEnv });
+git("worktree", "add", "-q", "-b", "foreign-branch", foreignWt);
 
 /** { path, branch } for every checkout git knows about. */
 function worktrees() {
@@ -187,9 +194,7 @@ async function clickPrimary(bridge, what) {
  */
 async function startTask(bridge, { label, pickBranch = null }) {
   await bridge.click(".activity-bar-action");
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, { timeoutMs: 20_000 });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await clickPrimary(bridge, "mode");
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.clickWhenReady(`
     const cards = e2e.all(".session-creator-provider-card");
@@ -371,7 +376,7 @@ try {
   const { bridge } = app;
   await waitForReturningLaunch(bridge);
   const checkoutsAtStart = worktrees().length;
-  assert(checkoutsAtStart === 2, "git starts with two checkouts: the project folder and the external one");
+  assert(checkoutsAtStart === 3, "git starts with three checkouts: the project folder, the external one and another instance's");
 
   // A ─────────────────────────────────────────────────────────────
   log("step 2 (A): task A with the default branch");
@@ -451,6 +456,28 @@ try {
   assert(worktrees().some((w) => samePath(w.path, externalWt) && w.branch === "external-branch"), "git still has the external checkout on external-branch");
   assert((await worktreeOf(bridge, idX, pid)) === null, "task X's link to it is gone");
   await bridge.screenshot(join(evidenceDir, "04-after-close-x.png"));
+
+  log("step 6b (B): task Y reuses a checkout of ANOTHER Hermes instance; uncommitted work; close Y");
+  const reuseY = await reuseCheckoutOf(bridge, { label: "F09 task Y", branch: "foreign-branch" });
+  assert(samePath(reuseY.shownPath, foreignWt), `the choice names the other instance's folder (${reuseY.shownPath})`);
+  const idY = reuseY.id;
+  const wtY = await worktreeOf(bridge, idY, pid);
+  log(`  task Y: ${JSON.stringify(wtY)}`);
+  assert(wtY && samePath(wtY.worktreePath, foreignWt) && wtY.ownedBySession === false, "task Y is linked to it and does not own it");
+  const yWork = join(foreignWt, "f09e-foreign-work.txt");
+  writeFileSync(yWork, "work in another Hermes instance's checkout\n");
+  await closeSessionByLabel(bridge, "F09 task Y");
+  await sleep(800);
+  assert(!(await bridge.exists(".dirty-wt-modal")), "closing task Y shows no Uncommitted Changes dialog for another instance's checkout");
+  await confirmCloseIfAsked(bridge);
+  await waitSessionGone(bridge, "F09 task Y");
+  await sleep(2500);
+  toastText = (await toasts(bridge)).join(" | ");
+  log(`  toasts after closing Y: ${JSON.stringify(toastText)}`);
+  assert(!/clean up|retried on next startup|project folder/i.test(toastText), "no cleanup warning after closing Y");
+  assert(existsSync(foreignWt) && existsSync(yWork), "the other instance's checkout and its uncommitted file are untouched");
+  assert(worktrees().some((w) => samePath(w.path, foreignWt) && w.branch === "foreign-branch"), "git still has the other instance's checkout");
+  assert((await worktreeOf(bridge, idY, pid)) === null, "task Y's link to it is gone");
 
   // C ─────────────────────────────────────────────────────────────
   log("step 7 (C): task R with the default branch, then quit with R open");

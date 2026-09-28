@@ -210,7 +210,7 @@ features:
       # HERMES_E2E_ISOLATION_FIXES=off (test builds only) the app behaves as
       # before the fixes and the scenario must end in RESULT: FAIL.
       F09-6:
-        text: "A session that reuses a checkout made outside Hermes is closed like a shared checkout: no Uncommitted Changes dialog, no cleanup, no warning; the Branch In Use choice names that checkout's folder"
+        text: "A session that reuses a checkout made outside Hermes, or one of another Hermes instance, is closed like a shared checkout: no Uncommitted Changes dialog, no cleanup, no warning; the Branch In Use choice names that checkout's folder"
         scenarios: [F09-isolation-edge-cases.mjs]
       F09-7:
         text: "A restored session whose worktree folder was deleted never hangs at starting: the worktree is recreated on its branch, or the session opens in the project folder, and a message says which"

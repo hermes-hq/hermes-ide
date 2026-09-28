@@ -2114,7 +2114,9 @@ pub struct WorkingDirectoryRecovery {
     pub path: String,
     /// `recreated`: the worktree was put back at `path` on its branch.
     /// `project-folder`: the branch is gone (or there was no worktree), so
-    /// the session opens in the project folder. `home`: nothing else exists.
+    /// the session opens in the project folder. `folder`: it opens in the
+    /// folder it was asked for, which is not the project folder. `home`:
+    /// nothing else exists.
     pub outcome: &'static str,
 }
 
@@ -2200,13 +2202,20 @@ pub fn resolve_session_cwd(
     }
 
     if Path::new(&requested_cwd).is_dir() {
+        use crate::git::worktree::same_dir;
         return match missing {
-            // The worktree is gone, but the folder asked for is the project
-            // folder (or another folder that exists): say so.
-            Some((gone, branch)) if !crate::git::worktree::same_dir(&gone, &requested_cwd) => (
-                requested_cwd.clone(),
-                recovered(&gone, branch.as_deref(), requested_cwd, "project-folder"),
-            ),
+            // The worktree is gone, but the folder asked for exists: say
+            // which folder that is (the project folder, or another one).
+            Some((gone, branch)) if !same_dir(&gone, &requested_cwd) => {
+                let outcome = match &fallback_project {
+                    Some(project) if same_dir(project, &requested_cwd) => "project-folder",
+                    _ => "folder",
+                };
+                (
+                    requested_cwd.clone(),
+                    recovered(&gone, branch.as_deref(), requested_cwd, outcome),
+                )
+            }
             _ => (requested_cwd, None),
         };
     }
@@ -3823,6 +3832,41 @@ mod tests {
             db.get_session_worktrees("s1").unwrap().is_empty(),
             "the stale link is dropped"
         );
+    }
+
+    #[test]
+    fn resolve_session_cwd_says_which_folder_replaced_a_gone_worktree() {
+        // The branch is gone, and the folder the session asked for exists
+        // but is not the project folder: the message must not call it the
+        // project folder.
+        let db = test_db();
+        let (repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);
+        let repo_path = repo.path().to_str().unwrap().to_string();
+        std::fs::remove_dir_all(&wt_path).unwrap();
+        for args in [
+            &["worktree", "prune"][..],
+            &["branch", "-D", "hermes/task"][..],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&repo_path)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let elsewhere = tempfile::tempdir().unwrap();
+        let elsewhere_path = elsewhere.path().to_str().unwrap().to_string();
+
+        let (cwd, recovery) = resolve_session_cwd(&db, "s1", elsewhere_path.clone(), None);
+        assert_eq!(cwd, elsewhere_path);
+        assert_eq!(recovery.unwrap().outcome, "folder");
+
+        // The same, asked for the project folder itself.
+        db.insert_session_worktree("wt2", "s2", "proj-1", &wt_path, Some("hermes/task"), false)
+            .unwrap();
+        let (cwd, recovery) = resolve_session_cwd(&db, "s2", repo_path.clone(), None);
+        assert_eq!(cwd, repo_path);
+        assert_eq!(recovery.unwrap().outcome, "project-folder");
     }
 
     #[test]
