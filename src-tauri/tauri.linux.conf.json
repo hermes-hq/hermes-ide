@@ -16,7 +16,8 @@
       "bridge/bridgeRuntimeHelpers.mjs",
       "bridge/package.json",
       "bridge/node_modules",
-      "helpers/hi"
+      "helpers/hi",
+      "helpers/hermes-pty-host"
     ]
   }
 }

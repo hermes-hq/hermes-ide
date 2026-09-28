@@ -188,6 +188,8 @@ jobs:
         run: cd src-tauri && cargo fmt --check
       - name: Check formatting (hi helper)
         run: cd src-tauri/hi && cargo fmt --check
+      - name: Check formatting (session host)
+        run: cd src-tauri/pty-host && cargo fmt --check
 
   # ── Rust Clippy ──────────────────────────────────────────────────────
   rust-clippy:
@@ -233,6 +235,8 @@ jobs:
         run: cd src-tauri && cargo clippy --locked --all-targets -- -D warnings
       - name: Run clippy (hi helper)
         run: cd src-tauri/hi && cargo clippy --locked --all-targets -- -D warnings
+      - name: Run clippy (session host)
+        run: cd src-tauri/pty-host && cargo clippy --locked --all-targets -- -D warnings
 
   # ── Rust Tests (all three OSes) ──────────────────────────────────────
   rust-test:
@@ -287,6 +291,12 @@ jobs:
       # run the built binary the way a Hermes terminal does, on every OS.
       - name: Test the hi helper
         working-directory: src-tauri/hi
+        run: cargo test --locked
+      # The session host (src-tauri/pty-host, N20): its tests run the built
+      # host and talk to it over its socket (Unix only; the Windows binary
+      # is a stub that says so).
+      - name: Test the session host
+        working-directory: src-tauri/pty-host
         run: cargo test --locked
 
   # ── Real-app scenarios (all three OSes) ──────────────────────────────
@@ -382,7 +392,7 @@ jobs:
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
             node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
-            node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
+            node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs N20-session-host.mjs || fail=1
             exit "$fail"
           '
 
@@ -401,7 +411,7 @@ jobs:
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
           node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
-          node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
+          node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs N20-session-host.mjs || fail=1
           exit "$fail"
 
       # F05: a focused terminal keeps Ctrl+letter. Real OS key presses

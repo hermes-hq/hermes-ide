@@ -1,0 +1,94 @@
+/* ─── Quit with working agents (N20) ───────────────────────── */
+
+.quit-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 210;
+  backdrop-filter: blur(2px);
+}
+
+.quit-dialog {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: overlayIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.quit-dialog-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 8px;
+}
+
+.quit-dialog-body {
+  font-size: var(--text-lg);
+  color: var(--text-2);
+  margin-bottom: 12px;
+}
+
+.quit-dialog-sessions {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.quit-dialog-session {
+  padding: 6px 10px;
+  font-size: var(--text-md);
+  color: var(--text-1);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quit-dialog-session:last-child {
+  border-bottom: none;
+}
+
+.quit-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.quit-dialog-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.quit-dialog-btn:hover {
+  background: var(--bg-3);
+}
+
+.quit-dialog-btn-stop {
+  color: var(--danger, #e5484d);
+}
+
+.quit-dialog-btn-keep {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+
+.quit-dialog-btn-keep:hover {
+  filter: brightness(1.1);
+}

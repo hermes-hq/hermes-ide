@@ -99,6 +99,9 @@ tar = "0.4"
 anyhow = "1"
 notify = "8"
 dunce = "1"
+# The session host (src-tauri/pty-host): the app links its protocol and
+# client; the binary itself is built by build.rs and ships next to the app.
+hermes-pty-host = { path = "pty-host" }
 
 [dev-dependencies]
 tempfile = "3"

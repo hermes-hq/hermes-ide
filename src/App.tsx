@@ -38,6 +38,9 @@ import type { SessionView } from "./components/SessionList";
 import { StatusBar } from "./components/StatusBar";
 import { EmptyState } from "./components/EmptyState";
 import { CloseSessionDialog } from "./components/CloseSessionDialog";
+import { QuitWithAgentsDialog, type WorkingSession } from "./components/QuitWithAgentsDialog";
+import { quitMustAsk, sessionHostQuit, sessionHostStatus } from "./api/sessions";
+import { isFeatureFlagEnabled } from "./featureFlags";
 import { FlowToast } from "./components/FlowToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -727,11 +730,60 @@ function AppContent() {
   const saveWorkspaceRef = useRef(saveWorkspace);
   saveWorkspaceRef.current = saveWorkspace;
   const workspaceSavedRef = useRef(false);
+
+  // N20: quitting with a working agent asks "keep running or stop". The
+  // question comes from two places: the window's close button (asked here,
+  // before the window goes) and an app quit (the backend holds the exit and
+  // sends `session-host-quit-requested`). Either answer goes back to the
+  // backend, which acts on it and quits.
+  const [quitAsk, setQuitAsk] = useState<WorkingSession[] | null>(null);
+  const sessionsRef = useRef(state.sessions);
+  sessionsRef.current = state.sessions;
+  const labelsFor = useCallback((ids: string[]): WorkingSession[] =>
+    ids.map((id) => ({ id, label: sessionsRef.current[id]?.label ?? id })), []);
+  const answerQuit = useCallback(async (keepRunning: boolean) => {
+    setQuitAsk(null);
+    workspaceSavedRef.current = true;
+    try {
+      await saveWorkspaceRef.current();
+    } catch (err) {
+      console.error("[App] Failed to save workspace before quit:", err);
+    }
+    try {
+      await sessionHostQuit(keepRunning);
+    } catch (err) {
+      console.error("[App] session_host_quit failed:", err);
+      workspaceSavedRef.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ id: string; label: string }[]>("session-host-quit-requested", (event) => {
+      if (cancelled) return;
+      setQuitAsk(event.payload.map((s) => ({ id: s.id, label: s.label })));
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     getCurrentWindow().onCloseRequested(async (event) => {
       if (workspaceSavedRef.current) return; // Already saved, let it close
       event.preventDefault();
+      if (isFeatureFlagEnabled("sessionHost")) {
+        try {
+          const status = await sessionHostStatus();
+          if (quitMustAsk(status)) {
+            setQuitAsk(labelsFor(status.working_session_ids));
+            return;
+          }
+        } catch (err) {
+          console.warn("[App] session host status unavailable:", err);
+        }
+      }
       workspaceSavedRef.current = true;
       try {
         await saveWorkspaceRef.current();
@@ -753,7 +805,7 @@ function AppContent() {
       unlisten?.();
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, []);
+  }, [labelsFor]);
 
   // Tauri drag-drop for empty container (no panes) — session drop creates first pane
   const layoutRootRef = useRef(state.layout.root);
@@ -1407,6 +1459,15 @@ function AppContent() {
             dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip: true });
             setSetting("skip_close_confirm", "true").catch(console.warn);
           }}
+        />
+      )}
+
+      {quitAsk && quitAsk.length > 0 && (
+        <QuitWithAgentsDialog
+          sessions={quitAsk}
+          onKeep={() => { void answerQuit(true); }}
+          onStop={() => { void answerQuit(false); }}
+          onCancel={() => setQuitAsk(null)}
         />
       )}
 

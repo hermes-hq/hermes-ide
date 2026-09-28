@@ -27,6 +27,7 @@ mod project;
 pub mod pty;
 mod saved_workspace;
 mod self_test;
+mod session_host;
 mod transcript;
 mod updater;
 mod workspace;
@@ -474,7 +475,7 @@ fn do_save_workspace(app: &tauri::AppHandle) {
 }
 
 /// Save workspace on close — full save with snapshots, runs once.
-fn save_workspace_state(app: &tauri::AppHandle) {
+pub(crate) fn save_workspace_state(app: &tauri::AppHandle) {
     if WORKSPACE_SAVED.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -580,8 +581,17 @@ pub fn run() {
             pty::shell_integration::cleanup_stale();
 
             // Launch files belong to sessions of the previous run (restored
-            // sessions get new ids), so the folder starts empty.
-            pty::launch::clear_launch_dir(app.handle());
+            // sessions get new ids), so the folder starts empty — except for
+            // sessions the session host kept running (N20), whose agents
+            // still write signals there.
+            let kept = session_host::live_hosted_session_ids(app.handle());
+            if !kept.is_empty() {
+                log::info!(
+                    "[session-host] {} session(s) still running in the host",
+                    kept.len()
+                );
+            }
+            pty::launch::clear_launch_dir(app.handle(), &kept);
 
             let mut sys = sysinfo::System::new();
             sys.refresh_all(); // baseline for CPU delta computation
@@ -600,6 +610,7 @@ pub fn run() {
             };
 
             app.manage(state);
+            app.manage(session_host::SessionHostState::default());
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
             app.manage(inline_pty::InlinePtyManager::new());
@@ -869,6 +880,11 @@ pub fn run() {
             contract::turns::list_turns,
             contract::turns::get_turn_diff,
             contract::emit_session_event_for_test,
+            // Session host (N20): status for the UI and the test rig, and
+            // the answer to "keep running or stop?" on quit.
+            session_host::session_host_status,
+            session_host::session_host_quit,
+            session_host::session_host_stop_all,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
@@ -893,7 +909,13 @@ pub fn run() {
         .build(context)
         .expect("error while building HERMES-IDE")
         .run(|app, event| match &event {
-            tauri::RunEvent::ExitRequested { .. } => {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                // Hosted sessions with an agent at work (N20): the exit
+                // waits for the user's answer, keep running or stop.
+                if session_host::on_exit_requested(app) {
+                    api.prevent_exit();
+                    return;
+                }
                 log::info!("[hermes] ExitRequested — saving workspace");
                 save_workspace_state(app);
             }
@@ -1090,6 +1112,8 @@ mod tests {
             ssh_info: None,
             vendor_session_id: None,
             agent_startup: None,
+            hosted: false,
+            reattached: false,
         };
         database.create_session_v2(&update).unwrap();
 
