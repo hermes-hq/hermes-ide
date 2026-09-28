@@ -800,6 +800,7 @@ export const ptBRPack: LanguagePack = {
     "doneWhen.popover.sendBack": "Devolver as falhas",
     "doneWhen.popover.sent": "Enviado ao agente",
     "doneWhen.popover.rerun": "Verificar de novo",
+    "doneWhen.popover.noAgent": "Nenhum agente está rodando neste terminal. Inicie-o de novo para enviar as falhas.",
     "doneWhen.popover.hookNote": "Enquanto essas verificações falharem, o agente volta ao trabalho sozinho, no máximo {max} vezes por turno.",
     "doneWhen.inboxFailed": "Verificações falharam: {commands}",
     "language.panel.title": "Idioma da interface",

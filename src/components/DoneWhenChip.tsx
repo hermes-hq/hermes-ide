@@ -2,7 +2,7 @@ import "../styles/components/DoneWhenChip.css";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
 import { useDoneWhen } from "../doneWhen/store";
-import { runChecksNow, sendFailuresBack } from "../doneWhen/controller";
+import { agentOwnsTerminal, runChecksNow, sendFailuresBack } from "../doneWhen/controller";
 import { failedCommands, isPassed, type CheckRecord } from "../doneWhen/types";
 
 type ChipState = "running" | "passed" | "failed" | "retrying" | "check_failed" | "error";
@@ -24,7 +24,8 @@ export function chipState(last: CheckRecord | null, running: boolean): ChipState
  * Done-When chip in a pane header (F27): "tests ✓" when the repository's
  * checks pass, what failed when they do not. Clicking it lists every check
  * with the end of the failing ones' output, and offers "Send failures
- * back" (pastes them into the agent's terminal) and "Run checks again".
+ * back" (pastes them into the agent's terminal, only while an agent runs
+ * there) and "Run checks again".
  * Nothing renders until a check ran for the session.
  */
 export function DoneWhenChip({ sessionId }: { sessionId: string }) {
@@ -32,7 +33,22 @@ export function DoneWhenChip({ sessionId }: { sessionId: string }) {
   const { last, running, sentAt } = useDoneWhen(sessionId);
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  // Whether an agent owns the terminal, asked each time the list opens or
+  // shows a new result; null until answered.
+  const [agentUp, setAgentUp] = useState<boolean | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    setAgentUp(null);
+    void agentOwnsTerminal(sessionId).then((up) => {
+      if (current) setAgentUp(up);
+    });
+    return () => {
+      current = false;
+    };
+  }, [open, last, sessionId]);
 
   useEffect(() => {
     if (!open) return;
@@ -77,12 +93,13 @@ export function DoneWhenChip({ sessionId }: { sessionId: string }) {
       label = t("doneWhen.chip.failed", { failed, total });
   }
   const title = run?.source ? t("doneWhen.chip.title", { path: run.source.path }) : label;
-  const canSend = run?.state === "failed" && !(run.blocking && !run.final);
+  const failing = run?.state === "failed" && !(run.blocking && !run.final);
+  const canSend = failing && agentUp === true;
 
   const onSend = async () => {
     setSending(true);
     try {
-      await sendFailuresBack(sessionId);
+      if ((await sendFailuresBack(sessionId)) === "no_agent") setAgentUp(false);
     } catch (e) {
       console.warn("[done-when] could not send the failures back:", e);
     } finally {
@@ -131,6 +148,9 @@ export function DoneWhenChip({ sessionId }: { sessionId: string }) {
           </ul>
           {last.hook && run.state === "failed" && (
             <div className="done-when-note">{t("doneWhen.popover.hookNote", { max: run.max_attempts ?? 3 })}</div>
+          )}
+          {failing && agentUp === false && (
+            <div className="done-when-note done-when-note-no-agent">{t("doneWhen.popover.noAgent")}</div>
           )}
           <div className="done-when-actions">
             {canSend && (

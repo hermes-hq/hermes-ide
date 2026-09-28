@@ -800,6 +800,7 @@ export const esPack: LanguagePack = {
     "doneWhen.popover.sendBack": "Devolver los fallos",
     "doneWhen.popover.sent": "Enviado al agente",
     "doneWhen.popover.rerun": "Volver a comprobar",
+    "doneWhen.popover.noAgent": "No hay ningún agente en esta terminal. Vuelve a iniciarlo para enviarle los fallos.",
     "doneWhen.popover.hookNote": "Mientras estas comprobaciones fallen, el agente vuelve a trabajar solo, como máximo {max} veces por turno.",
     "doneWhen.inboxFailed": "Comprobaciones fallidas: {commands}",
     "language.panel.title": "Idioma de la interfaz",

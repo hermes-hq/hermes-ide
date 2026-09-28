@@ -26,7 +26,10 @@
 //! (`land`, for the Land sheet, F22).
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -151,7 +154,8 @@ pub enum StatusChange {
     CheckFailed {
         detail: String,
     },
-    /// A `check_failed` session whose checks now pass is done.
+    /// A `check_failed` session whose checks now pass at the agent's stop
+    /// (`turn_end`, `stop_hook`) is done.
     Cleared,
 }
 
@@ -184,7 +188,13 @@ pub fn fold_run(
             sc.failed_turns = 0;
             if sc.check_failed {
                 sc.check_failed = false;
-                change = Some(StatusChange::Cleared);
+                // Only a run at the agent's stop says the agent is done now.
+                // A manual run or one before Land can come while the agent
+                // works again; the frontend clears those only while the
+                // session still shows check_failed (controller.ts).
+                if run.trigger == "turn_end" || run.trigger == "stop_hook" {
+                    change = Some(StatusChange::Cleared);
+                }
             }
         }
         "failed" => {
@@ -250,25 +260,6 @@ pub fn set_hook(app: &AppHandle, session_id: &str, hook: bool) {
     if let Some(state) = app.try_state::<DoneWhenState>() {
         state.with(session_id, |sc| sc.hook = hook);
     }
-}
-
-/// The checks recorded for turn `n` of a session (F20 puts them on the turn).
-pub fn checks_for_turn(
-    app: &AppHandle,
-    session_id: &str,
-    n: u32,
-) -> Option<contract::turns::TurnChecks> {
-    let state = app.try_state::<DoneWhenState>()?;
-    state.with(session_id, |sc| {
-        sc.history
-            .iter()
-            .rev()
-            .find(|r| r.turn == Some(n) && r.run.is_final)
-            .map(|r| contract::turns::TurnChecks {
-                state: r.run.state.clone(),
-                failed: r.run.failed_commands(),
-            })
-    })
 }
 
 fn now_ms() -> i64 {
@@ -348,11 +339,111 @@ fn session_folder(app: &AppHandle, session_id: &str) -> Result<(String, bool), S
     Ok((s.working_directory.clone(), s.ssh_info.is_some()))
 }
 
-/// Run `hi check --json` in `cwd` and read its report.
-pub fn run_hi_check(hi: &std::path::Path, cwd: &str, trigger: &str) -> Result<CheckRun, String> {
+/// The PATH the checks run with. An app started from the Dock or a desktop
+/// launcher gets a bare PATH (`/usr/bin:/bin:…` on macOS), so a check naming
+/// `node`, `npm` or `cargo` would fail with "command not found" although it
+/// runs in the person's terminal. The Stop hook runs inside the terminal and
+/// has its PATH; this gives the runs Hermes starts the same one: the login
+/// shell's PATH (asked once), then the app's own with the usual install
+/// folders (`agent::enriched_path_var`).
+pub fn check_path_var() -> OsString {
+    static LOGIN: OnceLock<Option<OsString>> = OnceLock::new();
+    let login = LOGIN.get_or_init(|| login_shell_path(&crate::pty::detect_shell(), None));
+    merge_path_vars(login.as_deref(), &crate::agent::enriched_path_var())
+}
+
+/// `first`'s folders, then `rest`'s, each once.
+pub fn merge_path_vars(first: Option<&OsStr>, rest: &OsStr) -> OsString {
+    let mut seen = std::collections::HashSet::new();
+    let dirs: Vec<PathBuf> = first
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .chain(std::env::split_paths(rest))
+        .filter(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()))
+        .collect();
+    std::env::join_paths(dirs).unwrap_or_else(|_| rest.to_os_string())
+}
+
+#[cfg(unix)]
+const PATH_MARKER: &str = "__HERMES_DONE_WHEN_PATH__=";
+/// A login shell whose profile hangs must not hold the checks up for long.
+#[cfg(unix)]
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The PATH line a login shell printed, among whatever its profile printed.
+#[cfg(unix)]
+fn parse_login_path(stdout: &str) -> Option<OsString> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|l| l.trim_end_matches('\r').strip_prefix(PATH_MARKER))
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(OsString::from)
+}
+
+/// The PATH an interactive login `shell` sets up (its profile and rc files,
+/// where nvm, volta, pnpm or cargo add theirs), or None when it cannot say
+/// within [`LOGIN_SHELL_TIMEOUT`]. `home` runs it with that home folder's
+/// files instead of the app's (tests).
+#[cfg(unix)]
+pub fn login_shell_path(shell: &str, home: Option<&Path>) -> Option<OsString> {
+    use std::io::Read;
+    let script = format!("printf '\\n{PATH_MARKER}%s\\n' \"$PATH\"");
+    let mut cmd = std::process::Command::new(shell);
+    cmd.args(["-l", "-i", "-c", &script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        // Headless: no prompt, nothing written to the history.
+        .env("PS1", "")
+        .env("PROMPT", "")
+        .env("RPROMPT", "")
+        .env("HISTFILE", "/dev/null");
+    if let Some(home) = home {
+        cmd.env("HOME", home).env_remove("ZDOTDIR");
+    }
+    let mut child = cmd.spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        let _ = tx.send(out);
+    });
+    let deadline = std::time::Instant::now() + LOGIN_SHELL_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::warn!("[done-when] the login shell {shell} did not give its PATH in time");
+                return None;
+            }
+        }
+    }
+    // Something the profile started in the background can keep the pipe
+    // open; the PATH line is printed before the shell exits.
+    let out = rx.recv_timeout(Duration::from_millis(500)).ok()?;
+    parse_login_path(&String::from_utf8_lossy(&out))
+}
+
+/// Windows apps get the user's PATH from the registry; nothing to ask.
+#[cfg(not(unix))]
+pub fn login_shell_path(_shell: &str, _home: Option<&Path>) -> Option<OsString> {
+    None
+}
+
+/// Run `hi check --json` in `cwd` with `path` as PATH and read its report.
+pub fn run_hi_check(hi: &Path, cwd: &str, trigger: &str, path: &OsStr) -> Result<CheckRun, String> {
     let mut cmd = std::process::Command::new(hi);
     cmd.args(["check", "--json", "--trigger", trigger])
         .current_dir(cwd)
+        .env("PATH", path)
         .stdin(std::process::Stdio::null());
     #[cfg(windows)]
     {
@@ -418,7 +509,7 @@ pub async fn done_when_run(
     let hi = crate::pty::launch::hi_path(&app);
     let trigger_for_run = trigger.clone();
     let result = tauri::async_runtime::spawn_blocking(move || match hi {
-        Some(hi) => run_hi_check(&hi, &cwd, &trigger_for_run),
+        Some(hi) => run_hi_check(&hi, &cwd, &trigger_for_run, &check_path_var()),
         None => Err("the hi helper is missing from this build".to_string()),
     })
     .await
@@ -504,11 +595,26 @@ mod tests {
         // Once is enough: a fourth failure does not raise it again.
         let (_, change) = fold_run(&mut sc, "s", run("failed", "turn_end"), Some(4));
         assert_eq!(change, None);
-        // Passing (from any trigger) clears it and the count.
-        let (rec, change) = fold_run(&mut sc, "s", run("passed", "manual"), None);
+        // A passing turn end clears it and the count, and the agent is done.
+        let (rec, change) = fold_run(&mut sc, "s", run("passed", "turn_end"), Some(5));
         assert_eq!(change, Some(StatusChange::Cleared));
         assert!(!rec.check_failed && rec.failed_turns == 0);
         assert_eq!(sc.history.len(), 7);
+    }
+
+    #[test]
+    fn a_passing_manual_or_land_run_clears_check_failed_without_saying_done() {
+        for trigger in ["manual", "land"] {
+            let mut sc = SessionChecks::default();
+            for n in 1..=3 {
+                fold_run(&mut sc, "s", run("failed", "turn_end"), Some(n));
+            }
+            assert!(sc.check_failed);
+            // The agent may be working again: no done status from here.
+            let (rec, change) = fold_run(&mut sc, "s", run("passed", trigger), None);
+            assert_eq!(change, None, "{trigger}");
+            assert!(!rec.check_failed && rec.failed_turns == 0, "{trigger}");
+        }
     }
 
     #[test]
@@ -589,6 +695,150 @@ mod tests {
         assert_eq!(v["run"]["state"], "failed");
         assert_eq!(v["run"]["final"], true);
         assert_eq!(v["run"]["commands"][1]["exit_code"], 1);
+    }
+
+    #[test]
+    fn the_login_path_comes_first_and_every_folder_once() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let login =
+            OsString::from(["/opt/test-nvm/versions/node/v22.0.0/bin", "/usr/bin"].join(sep));
+        let app = OsString::from(["/usr/bin", "/bin", "", "/opt/homebrew/bin"].join(sep));
+        let merged: Vec<PathBuf> =
+            std::env::split_paths(&merge_path_vars(Some(&login), &app)).collect();
+        let want: Vec<PathBuf> = [
+            "/opt/test-nvm/versions/node/v22.0.0/bin",
+            "/usr/bin",
+            "/bin",
+            "/opt/homebrew/bin",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        assert_eq!(merged, want);
+        // Without a login shell answer the app's PATH is used as it is.
+        let alone: Vec<PathBuf> = std::env::split_paths(&merge_path_vars(None, &app)).collect();
+        assert_eq!(alone.len(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_path_line_is_found_among_what_a_profile_prints() {
+        let out = format!(
+            "Welcome back!\r\nnvm: using node v22\n\n{PATH_MARKER}/a/bin:/usr/bin\r\nbye\n"
+        );
+        assert_eq!(
+            parse_login_path(&out),
+            Some(OsString::from("/a/bin:/usr/bin"))
+        );
+        assert_eq!(parse_login_path("no marker here\n"), None);
+        assert_eq!(parse_login_path(&format!("{PATH_MARKER}\n")), None);
+    }
+
+    /// The `hi` helper build.rs built from this checkout (its own target
+    /// folder, so a target folder shared between checkouts cannot hand out
+    /// another checkout's helper).
+    #[cfg(unix)]
+    fn built_hi() -> PathBuf {
+        let profile = if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        };
+        let hi = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/hi-build")
+            .join(profile)
+            .join("hi");
+        assert!(
+            hi.is_file(),
+            "build.rs did not build the hi helper at {}",
+            hi.display()
+        );
+        hi
+    }
+
+    /// A repository whose check names a tool that lives where a version
+    /// manager puts it (`~/.nvm/versions/node/<v>/bin`), which only the
+    /// login shell's profile adds to PATH, as on a real machine.
+    #[cfg(unix)]
+    fn repo_and_home_with_a_node_managed_tool() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let tools = home.join(".nvm/versions/node/v22.0.0/bin");
+        std::fs::create_dir_all(&tools).unwrap();
+        let tool = tools.join("f27-lint");
+        std::fs::write(&tool, "#!/bin/sh\necho lint ok\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let profile = format!("export PATH=\"{}:$PATH\"\n", tools.display());
+        for rc in [
+            ".profile",
+            ".bash_profile",
+            ".bashrc",
+            ".zprofile",
+            ".zshrc",
+        ] {
+            std::fs::write(home.join(rc), &profile).unwrap();
+        }
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".hermes")).unwrap();
+        std::fs::write(
+            repo.join(".hermes/worktree.toml"),
+            "done_when = [\"f27-lint --all\"]\n",
+        )
+        .unwrap();
+        (tmp, home, tools, repo)
+    }
+
+    /// The PATH an app started from the Dock gets on macOS.
+    #[cfg(unix)]
+    const BARE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+    #[cfg(unix)]
+    #[test]
+    fn with_the_bare_app_path_a_node_managed_tool_is_not_found() {
+        let (_tmp, _home, _tools, repo) = repo_and_home_with_a_node_managed_tool();
+        let run = run_hi_check(
+            &built_hi(),
+            repo.to_str().unwrap(),
+            "turn_end",
+            OsStr::new(BARE_PATH),
+        )
+        .unwrap();
+        assert_eq!(run.state, "failed");
+        assert_eq!(run.commands[0].exit_code, Some(127), "{:?}", run.commands);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_checks_find_a_tool_the_login_shell_puts_on_path() {
+        let (_tmp, home, tools, repo) = repo_and_home_with_a_node_managed_tool();
+        for shell in ["/bin/bash", "/bin/zsh", "/bin/sh"] {
+            if !Path::new(shell).exists() {
+                continue;
+            }
+            let login = login_shell_path(shell, Some(&home))
+                .unwrap_or_else(|| panic!("{shell} gave no PATH"));
+            assert!(
+                std::env::split_paths(&login).any(|d| d == tools),
+                "{shell}: {login:?}"
+            );
+            let path = merge_path_vars(Some(&login), OsStr::new(BARE_PATH));
+            let run = run_hi_check(&built_hi(), repo.to_str().unwrap(), "turn_end", &path).unwrap();
+            assert_eq!(run.state, "passed", "{shell}: {:?}", run.commands);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_login_shell_that_hangs_gives_up_in_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shell = tmp.path().join("slow-shell");
+        std::fs::write(&shell, "#!/bin/sh\nsleep 30\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let t0 = std::time::Instant::now();
+        assert_eq!(login_shell_path(shell.to_str().unwrap(), None), None);
+        assert!(t0.elapsed() < LOGIN_SHELL_TIMEOUT + Duration::from_secs(2));
     }
 
     #[test]

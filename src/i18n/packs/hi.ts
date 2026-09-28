@@ -833,6 +833,7 @@ export const hiPack: LanguagePack = {
     "doneWhen.popover.sendBack": "विफलताएँ वापस भेजें",
     "doneWhen.popover.sent": "एजेंट को भेजा गया",
     "doneWhen.popover.rerun": "फिर से जाँचें",
+    "doneWhen.popover.noAgent": "इस टर्मिनल में कोई एजेंट नहीं चल रहा है। विफलताएँ भेजने के लिए उसे फिर से शुरू करें।",
     "doneWhen.popover.hookNote": "जब तक ये जाँच विफल हैं, एजेंट अपने आप काम पर वापस भेजा जाता है, हर टर्न में अधिकतम {max} बार।",
     "doneWhen.inboxFailed": "जाँच विफल: {commands}",
     "language.panel.selectLabel": "भाषा",

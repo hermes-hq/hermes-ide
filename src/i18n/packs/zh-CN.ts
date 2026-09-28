@@ -800,6 +800,7 @@ export const zhCNPack: LanguagePack = {
     "doneWhen.popover.sendBack": "把失败发回去",
     "doneWhen.popover.sent": "已发送给代理",
     "doneWhen.popover.rerun": "重新检查",
+    "doneWhen.popover.noAgent": "此终端中没有正在运行的代理。请重新启动它以发送失败信息。",
     "doneWhen.popover.hookNote": "这些检查失败时，代理会自动被送回继续工作，每轮最多 {max} 次。",
     "doneWhen.inboxFailed": "检查失败：{commands}",
     "language.panel.title": "界面语言",

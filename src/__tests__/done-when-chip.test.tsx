@@ -50,6 +50,7 @@ let container: HTMLDivElement;
 let root: Root;
 let runMock: ReturnType<typeof vi.fn>;
 let writeMock: ReturnType<typeof vi.fn>;
+let shellForeground: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   _resetDoneWhenStoreForTest();
@@ -57,7 +58,15 @@ beforeEach(async () => {
   _resetSessionEventStoreForTest();
   runMock = vi.fn(async (): Promise<RunOutcome> => ({ skipped: null, record: null }));
   writeMock = vi.fn(async () => {});
-  await startDoneWhen({ listen: () => Promise.resolve(() => {}), run: runMock, write: writeMock, now: () => 7 });
+  // An agent owns the terminal unless a test says otherwise.
+  shellForeground = vi.fn(async () => false);
+  await startDoneWhen({
+    listen: () => Promise.resolve(() => {}),
+    run: runMock,
+    write: writeMock,
+    shellForeground,
+    now: () => 7,
+  });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -125,6 +134,7 @@ describe("DoneWhenChip", () => {
       recordDoneWhen(record("failed"));
     });
     click(chip());
+    await act(async () => {});
     const rows = [...container.querySelectorAll(".done-when-command")];
     expect(rows.map((r) => r.getAttribute("data-ok"))).toEqual(["true", "false"]);
     expect(rows[1].querySelector(".done-when-command-result")?.textContent).toBe("exit 1");
@@ -137,6 +147,39 @@ describe("DoneWhenChip", () => {
     });
     expect(writeMock).toHaveBeenCalledTimes(1);
     expect(container.querySelector(".done-when-send")?.textContent).toBe("Sent to the agent");
+  });
+
+  it("with the shell at its prompt (the agent quit) it offers no send and says why", async () => {
+    shellForeground.mockResolvedValue(true);
+    act(() => {
+      recordDoneWhen(record("failed"));
+    });
+    click(chip());
+    await act(async () => {});
+    expect(shellForeground).toHaveBeenCalledWith("s1");
+    expect(container.querySelector(".done-when-send")).toBeNull();
+    expect(container.querySelector(".done-when-note-no-agent")?.textContent).toBe(
+      "No agent is running in this terminal. Start it again to send it the failures.",
+    );
+    expect(container.querySelector(".done-when-rerun")).not.toBeNull();
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it("an agent that quits after the list opened: the click sends nothing and the button goes", async () => {
+    act(() => {
+      recordDoneWhen(record("failed"));
+    });
+    click(chip());
+    await act(async () => {});
+    const send = container.querySelector(".done-when-send");
+    expect(send).not.toBeNull();
+    shellForeground.mockResolvedValue(true);
+    await act(async () => {
+      send?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(container.querySelector(".done-when-send")).toBeNull();
+    expect(container.querySelector(".done-when-note-no-agent")).not.toBeNull();
   });
 
   it("Run checks again asks for a manual run", async () => {

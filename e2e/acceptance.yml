@@ -839,7 +839,10 @@ features:
     # the secondary action needs the sheet itself.
     # Turn ends of agents other than Claude come from the turn ledger (F20),
     # which is not on this branch either; the chip scenario feeds them through
-    # the C0 test injector.
+    # the C0 test injector. On macOS and Linux it starts the app with the bare
+    # PATH of an app opened from the Dock, so its checks prove they run with
+    # the login shell's PATH, and it proves "Send failures back" is refused
+    # once the agent quit (the shell would run the text).
     status: partial
     criteria:
       F27-1:

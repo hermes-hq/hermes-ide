@@ -800,6 +800,7 @@ export const frPack: LanguagePack = {
     "doneWhen.popover.sendBack": "Renvoyer les échecs",
     "doneWhen.popover.sent": "Envoyé à l'agent",
     "doneWhen.popover.rerun": "Relancer les vérifications",
+    "doneWhen.popover.noAgent": "Aucun agent ne tourne dans ce terminal. Relancez-le pour lui envoyer les échecs.",
     "doneWhen.popover.hookNote": "Tant que ces vérifications échouent, l'agent est renvoyé au travail de lui-même, au plus {max} fois par tour.",
     "doneWhen.inboxFailed": "Vérifications échouées : {commands}",
     "language.panel.title": "Langue de l'interface",

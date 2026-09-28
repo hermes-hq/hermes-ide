@@ -6,7 +6,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetInboxForTest, listInboxItems } from "../agent/contract/inbox";
-import { _resetDoneWhenControllerForTest, runChecksNow, sendFailuresBack, startDoneWhen } from "../doneWhen/controller";
+import {
+  _resetDoneWhenControllerForTest,
+  agentOwnsTerminal,
+  runChecksNow,
+  sendFailuresBack,
+  startDoneWhen,
+} from "../doneWhen/controller";
+import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import { _resetDoneWhenStoreForTest, checksForTurn, getDoneWhenSnapshot } from "../doneWhen/store";
 import { DONE_WHEN_EVENT, parseCheckRecord, type CheckRecord, type RunOutcome } from "../doneWhen/types";
 import { failureFeedback, sendBackPayload } from "../doneWhen/feedback";
@@ -67,6 +74,7 @@ function record(overrides: Partial<CheckRecord> & { state?: string; trigger?: st
 let bus: ReturnType<typeof fakeBus>;
 let run: ReturnType<typeof vi.fn>;
 let write: ReturnType<typeof vi.fn>;
+let shellForeground: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   _resetSessionEventStoreForTest();
@@ -76,7 +84,9 @@ beforeEach(async () => {
   bus = fakeBus();
   run = vi.fn(async (): Promise<RunOutcome> => ({ skipped: null, record: null }));
   write = vi.fn(async () => {});
-  await startDoneWhen({ listen: bus.listen, run, write, now: () => 42 });
+  // The agent owns the terminal unless a test says otherwise.
+  shellForeground = vi.fn(async () => false);
+  await startDoneWhen({ listen: bus.listen, run, write, shellForeground, now: () => 42 });
 });
 
 afterEach(() => {
@@ -161,7 +171,8 @@ describe("Done-When controller", () => {
 
   it("Send failures back pastes the failures into the agent's terminal as one message and presses Enter", async () => {
     bus.emit(DONE_WHEN_EVENT, record());
-    expect(await sendFailuresBack("s1")).toBe(true);
+    expect(await sendFailuresBack("s1")).toBe("sent");
+    expect(shellForeground).toHaveBeenCalledWith("s1");
     expect(write).toHaveBeenCalledTimes(1);
     const [sessionId, b64] = write.mock.calls[0] as [string, string];
     expect(sessionId).toBe("s1");
@@ -179,10 +190,48 @@ describe("Done-When controller", () => {
   });
 
   it("there is nothing to send back when the checks pass or never ran", async () => {
-    expect(await sendFailuresBack("s1")).toBe(false);
+    expect(await sendFailuresBack("s1")).toBe("nothing");
     bus.emit(DONE_WHEN_EVENT, record({ state: "passed" }));
-    expect(await sendFailuresBack("s1")).toBe(false);
+    expect(await sendFailuresBack("s1")).toBe("nothing");
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it("never pastes the failures at a shell prompt, where they would run as commands", async () => {
+    bus.emit(DONE_WHEN_EVENT, record());
+    // The agent quit: the shell owns the terminal again.
+    shellForeground.mockResolvedValue(true);
+    expect(await sendFailuresBack("s1")).toBe("no_agent");
+    expect(write).not.toHaveBeenCalled();
+    expect(getDoneWhenSnapshot("s1").sentAt).toBeNull();
+    // Unable to tell counts as no agent.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    shellForeground.mockRejectedValue(new Error("Session s1 not found"));
+    expect(await agentOwnsTerminal("s1")).toBe(false);
+    expect(await sendFailuresBack("s1")).toBe("no_agent");
+    expect(write).not.toHaveBeenCalled();
+    warn.mockRestore();
+    // Back in the agent, it sends.
+    shellForeground.mockResolvedValue(false);
+    expect(await sendFailuresBack("s1")).toBe("sent");
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("a passing manual or Land run says done only while the session still shows check_failed", () => {
+    const checkFailed = { kind: "check_failed", confidence: "exact", detail: "npm test" } as const;
+    dispatchSessionEvent("s1", { type: "status", at: 1, source: "checks", status: checkFailed });
+    bus.emit(DONE_WHEN_EVENT, record({ state: "passed", trigger: "manual", failed_turns: 0 }));
+    expect(getSessionEventSnapshot("s1").status).toEqual({ kind: "done_unread", confidence: "exact", detail: "" });
+    expect(getSessionEventSnapshot("s1").events.at(-1)).toMatchObject({ type: "status", source: "checks", at: 42 });
+    // The agent went back to work: a pass before Land leaves it working.
+    dispatchSessionEvent("s2", { type: "status", at: 1, source: "checks", status: checkFailed });
+    dispatchSessionEvent("s2", { type: "status", at: 2, status: { kind: "working", confidence: "exact", detail: "" } });
+    bus.emit(DONE_WHEN_EVENT, record({ session_id: "s2", state: "passed", trigger: "land", failed_turns: 0 }));
+    expect(getSessionEventSnapshot("s2").status.kind).toBe("working");
+    // A pass at a turn end is the backend's to report (it emits the status).
+    dispatchSessionEvent("s3", { type: "status", at: 1, source: "checks", status: checkFailed });
+    const before = getSessionEventSnapshot("s3").version;
+    bus.emit(DONE_WHEN_EVENT, record({ session_id: "s3", state: "passed", trigger: "turn_end", failed_turns: 0 }));
+    expect(getSessionEventSnapshot("s3").version).toBe(before);
   });
 
   it("a run that fails to start leaves the chip as it was", async () => {

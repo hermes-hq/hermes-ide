@@ -6,8 +6,16 @@
 // started by hand as `fakeagent` in a plain shell session), whose turn ends
 // are fed through the C0 test injector (the turn ledger, F20, is not on this
 // branch). The test repository's `.hermes/worktree.toml` says
-// `done_when = ["node check.mjs"]`; check.mjs takes about 1.5 s and passes
+// `done_when = ["f27node check.mjs"]`; check.mjs takes about 1.5 s and passes
 // once `pass-at.txt` is at or below the fake's work steps.
+//
+// On macOS and Linux the app starts with the bare PATH an app opened from
+// the Dock or a desktop launcher gets (/usr/bin:/bin:/usr/sbin:/sbin), and
+// `f27node` (node under another name, like a tool nvm or volta installs)
+// lives in a folder only the private home's shell profile puts on PATH. So
+// every check Hermes runs proves it uses the login shell's PATH, as the
+// person's own terminal does. (Windows apps get the user's PATH from the
+// registry; there the check names node by its full path.)
 //
 //   run 1  launchHelper flag OFF (negative control): a turn end runs nothing
 //          and shows no chip. Turn the flag on.
@@ -26,10 +34,16 @@
 //             clear.
 //          6. `hi check` typed at the shell prompt lists the checks and says
 //             whether they pass.
+//          7. With the agent gone (the shell at its prompt), a failing result
+//             offers no "Send failures back" and says why; asking the
+//             controller to send anyway writes nothing to the shell.
 //
-// Negative control (must end in RESULT: FAIL):
+// Negative controls (each must end in RESULT: FAIL):
 //   HERMES_E2E_F27_CHIP_NEGATIVE=1   the check passes from the start, so the
 //          failing chip of step 1 never shows.
+//   HERMES_E2E_F27_CHIP_NO_PROFILE_PATH=1   (macOS/Linux) the profile does
+//          not add f27node's folder, so the check fails at once with exit
+//          127 (command not found) and step 1 never sees it running.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F27-turn-end-chip.mjs
@@ -48,7 +62,10 @@ rmSync(logFile, { force: true });
 const log = createLogger(logFile);
 const onWindows = platform() === "win32";
 const NEGATIVE = process.env.HERMES_E2E_F27_CHIP_NEGATIVE === "1";
+const NO_PROFILE_PATH = process.env.HERMES_E2E_F27_CHIP_NO_PROFILE_PATH === "1";
 const CHECK_MS = 1500;
+/** The PATH an app opened from the Dock gets on macOS. */
+const BARE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -59,8 +76,9 @@ const work = realpathSync(mkdtempSync(join(tmpdir(), "hermes-e2e-f27b-")));
 const fakeBin = join(work, "bin");
 const recordDir = join(work, "records");
 const privateHome = join(work, "home");
+const toolBin = join(privateHome, "tools", "bin");
 const repo = join(work, "f27b-repo");
-for (const d of [fakeBin, recordDir, privateHome, repo]) mkdirSync(d, { recursive: true });
+for (const d of [fakeBin, recordDir, privateHome, toolBin, repo]) mkdirSync(d, { recursive: true });
 const FAKE_CLI = join(REPO_ROOT, "tools", "fake-agents", "fake-cli.mjs");
 if (onWindows) {
   writeFileSync(join(fakeBin, "fakeagent.cmd"), `@"${process.execPath}" "${FAKE_CLI}" %*\r\n`);
@@ -69,6 +87,15 @@ if (onWindows) {
   chmodSync(join(fakeBin, "fakeagent"), 0o755);
 }
 process.env.PATH = [fakeBin, ...(process.env.PATH || "").split(delimiter).filter(Boolean)].join(delimiter);
+if (!onWindows) {
+  // node under another name, reachable only through the shell profile.
+  writeFileSync(join(toolBin, "f27node"), `#!/bin/sh\nexec "${process.execPath}" "$@"\n`);
+  chmodSync(join(toolBin, "f27node"), 0o755);
+  const dirs = NO_PROFILE_PATH ? [fakeBin] : [toolBin, fakeBin];
+  const profile = `export PATH="${dirs.join(":")}:$PATH"\n`;
+  for (const rc of [".profile", ".bash_profile", ".bashrc", ".zprofile", ".zshrc"]) writeFileSync(join(privateHome, rc), profile);
+}
+const CHECK_COMMAND = onWindows ? `"${process.execPath}" check.mjs` : "f27node check.mjs";
 
 const CHECK_JS = `import fs from "node:fs";
 await new Promise((r) => setTimeout(r, ${CHECK_MS}));
@@ -87,7 +114,7 @@ function makeRepo() {
   git("config", "user.name", "Hermes e2e");
   git("config", "commit.gpgsign", "false");
   mkdirSync(join(repo, ".hermes"), { recursive: true });
-  writeFileSync(join(repo, ".hermes", "worktree.toml"), `done_when = ['"${process.execPath}" check.mjs']\n`);
+  writeFileSync(join(repo, ".hermes", "worktree.toml"), `done_when = ['${CHECK_COMMAND}']\n`);
   writeFileSync(join(repo, "check.mjs"), CHECK_JS);
   writeFileSync(join(repo, "pass-at.txt"), NEGATIVE ? "0\n" : "99\n");
   writeFileSync(join(repo, ".gitignore"), ".fake-work.log\n");
@@ -149,7 +176,7 @@ async function waitForRecord(pred, what, { timeoutMs = 30_000 } = {}) {
 
 function launch(run, { first = false } = {}) {
   const runDir = join(evidenceDir, `run-${run}`);
-  const env = { HERMES_FAKE_DIR: recordDir };
+  const env = onWindows ? { HERMES_FAKE_DIR: recordDir } : { HERMES_FAKE_DIR: recordDir, PATH: BARE_PATH };
   return onWindows
     ? launchApp({ runDir, log, env, home: "real", resetData: first })
     : launchApp({ runDir, log, env, home: "private", homeDir: privateHome });
@@ -275,7 +302,8 @@ let app;
 let failed = false;
 
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL" : ""}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL" : ""}${NO_PROFILE_PATH ? "   NEGATIVE CONTROL (no profile PATH)" : ""}`);
+  if (!onWindows) log(`  the app starts with PATH=${BARE_PATH}; the check runs "${CHECK_COMMAND}"`);
   makeRepo();
   undoRegistryPath = addFakeBinToRegistryPath();
 
@@ -336,6 +364,7 @@ try {
   `);
   assert(pop.rows.join() === "false" && pop.result === "exit 1", `one failing check, exit 1`);
   assert(/expected at least 99 work steps/.test(pop.out), "its output is shown");
+  await app.bridge.waitFor("Send failures back (the agent owns the terminal)", `return !!e2e.first(".done-when-send");`);
   await app.bridge.screenshot(join(evidenceDir, "02-popover.png"));
   await app.bridge.click(".done-when-send");
   const sent = await waitForRecord((r) => r.file === rec.file && (r.turns ?? []).length >= 1, "the prompt Hermes pasted");
@@ -415,6 +444,29 @@ try {
   assert(lines.some((l) => /hi check: 1 check from \.hermes\/worktree\.toml/.test(l)), "it names where the checks come from");
   assert(lines.some((l) => /FAILED .*check\.mjs/.test(l)), "and which one failed");
   await app.bridge.screenshot(join(evidenceDir, "05-hi-check.png"));
+
+  // 7. no agent, no send
+  log("step 7: with the agent gone, a failing result offers no Send failures back");
+  await app.bridge.eval(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); return true;`);
+  await app.bridge.waitFor("the check list to close", `return !e2e.first(".done-when-popover");`);
+  await app.bridge.click(".done-when-chip");
+  mark = Date.now();
+  await app.bridge.click(".done-when-rerun");
+  const noAgent = await waitResult(app.bridge, sid, mark);
+  assert(noAgent.run.trigger === "manual" && noAgent.run.state === "failed", "a manual run failed");
+  const note = await app.bridge.waitFor("the list to say no agent is running", `
+    const p = e2e.first(".done-when-popover");
+    const n = p && e2e.first(".done-when-note-no-agent", p);
+    return n ? { note: e2e.norm(n.innerText), send: !!e2e.first(".done-when-send", p), rerun: !!e2e.first(".done-when-rerun", p) } : null;
+  `);
+  assert(!note.send && note.rerun, "no Send failures back button, Run checks again stays");
+  assert(/No agent is running in this terminal/.test(note.note), `it says why: "${note.note}"`);
+  await app.bridge.screenshot(join(evidenceDir, "06-no-agent.png"));
+  const forced = await app.bridge.eval(`return await window.__HERMES_E2E__.doneWhenSendBack(${JSON.stringify(sid)});`);
+  assert(forced === "no_agent", `asking the controller to send anyway is refused (${forced})`);
+  await sleep(1000);
+  const tail = await app.bridge.readTerminal(sid);
+  assert(!tail.some((l) => l.includes("Hermes Done-When checks failed")), "nothing was pasted at the shell prompt");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

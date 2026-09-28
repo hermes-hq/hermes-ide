@@ -830,6 +830,7 @@ const ENGLISH_PACK: LanguagePack = {
     "doneWhen.popover.sendBack": "Send failures back",
     "doneWhen.popover.sent": "Sent to the agent",
     "doneWhen.popover.rerun": "Run checks again",
+    "doneWhen.popover.noAgent": "No agent is running in this terminal. Start it again to send it the failures.",
     "doneWhen.popover.hookNote": "While these checks fail the agent is sent back to work on its own, at most {max} times per turn.",
     "doneWhen.inboxFailed": "Checks failed: {commands}",
     "language.panel.title": "Interface language",

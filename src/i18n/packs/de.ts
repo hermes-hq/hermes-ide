@@ -800,6 +800,7 @@ export const dePack: LanguagePack = {
     "doneWhen.popover.sendBack": "Fehler zurückschicken",
     "doneWhen.popover.sent": "An den Agenten geschickt",
     "doneWhen.popover.rerun": "Erneut prüfen",
+    "doneWhen.popover.noAgent": "In diesem Terminal läuft kein Agent. Starte ihn erneut, um ihm die Fehler zu schicken.",
     "doneWhen.popover.hookNote": "Solange diese Prüfungen fehlschlagen, wird der Agent von selbst weiterarbeiten geschickt, höchstens {max}-mal pro Runde.",
     "doneWhen.inboxFailed": "Prüfungen fehlgeschlagen: {commands}",
     "language.panel.title": "Oberflächensprache",

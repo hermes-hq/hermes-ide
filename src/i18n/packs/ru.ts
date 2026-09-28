@@ -800,6 +800,7 @@ export const ruPack: LanguagePack = {
     "doneWhen.popover.sendBack": "Отправить ошибки обратно",
     "doneWhen.popover.sent": "Отправлено агенту",
     "doneWhen.popover.rerun": "Проверить снова",
+    "doneWhen.popover.noAgent": "В этом терминале не запущен агент. Запустите его снова, чтобы отправить ему ошибки.",
     "doneWhen.popover.hookNote": "Пока эти проверки не проходят, агент сам возвращается к работе, не более {max} раз за ход.",
     "doneWhen.inboxFailed": "Проверки не пройдены: {commands}",
     "language.panel.title": "Язык интерфейса",

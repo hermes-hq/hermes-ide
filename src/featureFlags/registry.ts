@@ -50,7 +50,7 @@ export const FEATURE_FLAGS = [
     id: "launchHelper",
     label: "Launch helper (hi run), session status and zero-setup signals",
     description:
-      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess, and switch on each agent's own event reporting per launch (nothing written to your global config) with a status line above the session. Also Done-When checks: the repository's done_when commands run when a turn ends (Claude is sent back while they fail, at most 3 times) and a chip shows the result.",
+      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess, and switch on each agent's own event reporting per launch (nothing written to your global config) with a status line above the session. Also Done-When checks: a repository's done_when commands run on their own when a turn ends, like its hooks do (Claude is sent back while they fail, at most 3 times and within 30 minutes of retrying), and a chip shows the result.",
   },
   {
     id: "attentionInbox",

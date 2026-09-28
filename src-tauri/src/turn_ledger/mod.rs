@@ -975,13 +975,7 @@ pub fn list_turns_for(app: &AppHandle, session_id: &str) -> Result<Vec<Turn>, St
         return Ok(Vec::new());
     };
     let d = state.db.lock().map_err(|_| "database lock poisoned")?;
-    let mut turns = store::list_turns(&d, session_id)?;
-    drop(d);
-    // The Done-When result of each turn (F27), when its checks ran.
-    for turn in &mut turns {
-        turn.checks = crate::done_when::checks_for_turn(app, session_id, turn.n);
-    }
-    Ok(turns)
+    store::list_turns(&d, session_id)
 }
 
 /// Filled contract command: the diff of one turn.

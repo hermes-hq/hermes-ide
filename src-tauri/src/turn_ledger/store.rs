@@ -50,8 +50,8 @@ pub fn list_turns(db: &Database, session_id: &str) -> Result<Vec<Turn>, String> 
                     insertions: r.get(6)?,
                     deletions: r.get(7)?,
                 },
-                // Not stored: Done-When results live with the checks (F27);
-                // list_turns_for puts them on.
+                // Not stored: Done-When results are attributed to turns by
+                // the frontend's Done-When store (F27, checksForTurn).
                 checks: None,
             })
         })

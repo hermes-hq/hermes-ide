@@ -800,6 +800,7 @@ export const jaPack: LanguagePack = {
     "doneWhen.popover.sendBack": "失敗を送り返す",
     "doneWhen.popover.sent": "エージェントに送信しました",
     "doneWhen.popover.rerun": "もう一度チェック",
+    "doneWhen.popover.noAgent": "このターミナルでエージェントが動いていません。失敗内容を送るにはもう一度起動してください。",
     "doneWhen.popover.hookNote": "これらのチェックが失敗している間、エージェントは自動的に作業へ戻されます（1ターンにつき最大 {max} 回）。",
     "doneWhen.inboxFailed": "チェック失敗: {commands}",
     "language.panel.title": "表示言語",
