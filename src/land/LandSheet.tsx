@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { loadLandTurns, type LandTurn } from "./turnSource";
 import {
+  baseBranchNote,
   ciLogRequest,
   doneWhenCommands,
   doneWhenLabel,
@@ -293,6 +294,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         ? preview.merge.files
         : null;
   const failing = doneWhen.kind === "failing";
+  const baseNote = baseBranchNote(preview?.base?.name ?? null);
   const showResult = !!(outcome && outcome.status !== "conflict") || !!archived || !!undone;
 
   return (
@@ -315,6 +317,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         <div className="land-sheet-body">
           {loadError && <div className="land-sheet-error">{loadError}</div>}
           {!preview && !loadError && <div className="land-sheet-loading">Reading the worktree…</div>}
+          {baseNote && <div className="land-sheet-note land-sheet-base-note">{baseNote}</div>}
 
           {preview && (
             <div className="land-sheet-summary">

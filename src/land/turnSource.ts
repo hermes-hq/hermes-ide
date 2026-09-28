@@ -6,7 +6,9 @@
 //
 // Real-app scenarios put a session into any state without a real agent
 // (docs/adr/004): `setFakeLandTurnsForTest` is called only by the e2e hooks
-// (src/e2e/hooks.ts, test builds) and stands in for the ledger's answer.
+// (src/e2e/hooks.ts, test builds) and stands in for the ledger's answer. The
+// stand-in is read only in test builds (VITE_HERMES_E2E=1), so normal builds
+// compile it out and always ask the ledger.
 
 import { getTurnDiff, listTurns, type Turn } from "../agent/contract/turns";
 
@@ -41,7 +43,7 @@ export function filesInPatch(patch: string): string[] {
 
 /** The session's turns, oldest first; [] when the ledger has none. */
 export async function loadLandTurns(sessionId: string): Promise<LandTurn[]> {
-  const fake = fakeTurns.get(sessionId);
+  const fake = import.meta.env.VITE_HERMES_E2E === "1" ? fakeTurns.get(sessionId) : undefined;
   if (fake) return fake.map((f) => ({ turn: f.turn, files: filesInPatch(f.patch) }));
   let turns: Turn[] = [];
   try {

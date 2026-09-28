@@ -3,12 +3,13 @@
  * The git side is covered in src-tauri/src/land/, the whole journey on the
  * real app in e2e/app/scenarios/F22-land-sheet.mjs.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const h = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
 
 import {
+  baseBranchNote,
   branchStem,
   ciLogRequest,
   doneWhenCommands,
@@ -228,9 +229,42 @@ describe("turns for the sheet", () => {
     expect(await loadLandTurns("broken")).toEqual([]);
   });
 
-  it("uses the stand-in turns a test build injects", async () => {
-    setFakeLandTurnsForTest("fake", [{ turn: turn(1, 1, 2, 0), patch: "diff --git a/a b/a\n" }]);
-    expect(await loadLandTurns("fake")).toEqual([{ turn: turn(1, 1, 2, 0), files: ["a"] }]);
-    expect(h.invoke).not.toHaveBeenCalled();
+  describe("stand-in turns", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("uses the stand-in turns a test build injects", async () => {
+      vi.stubEnv("VITE_HERMES_E2E", "1");
+      setFakeLandTurnsForTest("fake", [{ turn: turn(1, 1, 2, 0), patch: "diff --git a/a b/a\n" }]);
+      expect(await loadLandTurns("fake")).toEqual([{ turn: turn(1, 1, 2, 0), files: ["a"] }]);
+      expect(h.invoke).not.toHaveBeenCalled();
+    });
+
+    it("ignores stand-in turns outside a test build and asks the ledger", async () => {
+      vi.stubEnv("VITE_HERMES_E2E", "");
+      setFakeLandTurnsForTest("fake-normal", [{ turn: turn(1, 1, 2, 0), patch: "diff --git a/a b/a\n" }]);
+      h.invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "list_turns") return [];
+        throw new Error(cmd);
+      });
+      expect(await loadLandTurns("fake-normal")).toEqual([]);
+      expect(h.invoke).toHaveBeenCalledWith("list_turns", { sessionId: "fake-normal" });
+    });
+  });
+});
+
+describe("which branch landing goes to", () => {
+  it("says nothing when the project folder is on a main line", () => {
+    expect(baseBranchNote("main")).toBeNull();
+    expect(baseBranchNote("master")).toBeNull();
+    expect(baseBranchNote("trunk")).toBeNull();
+    expect(baseBranchNote(null)).toBeNull();
+  });
+
+  it("warns when the project folder is on another branch", () => {
+    expect(baseBranchNote("release-1")).toBe(
+      "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
+    );
   });
 });

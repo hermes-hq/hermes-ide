@@ -299,6 +299,8 @@ function readSheet(bridge) {
       land: (() => { const b = e2e.first(".land-sheet-land"); return b ? { text: e2e.norm(b.innerText), className: b.className, disabled: b.disabled } : null; })(),
       conflict: e2e.norm(e2e.first(".land-sheet-conflict")?.innerText ?? ""),
       ghLink: e2e.norm(e2e.first(".land-sheet-gh-link")?.innerText ?? ""),
+      title: e2e.norm(e2e.first(".land-sheet-title")?.innerText ?? ""),
+      baseNote: e2e.first(".land-sheet-base-note") ? e2e.norm(e2e.first(".land-sheet-base-note").innerText) : null,
     };
   `);
 }
@@ -413,6 +415,7 @@ try {
   assert(Number(sheet.diskBytes) > 0 && /^disk/i.test(sheet.disk), `the disk used is shown ("${sheet.disk}")`);
   assert(sheet.message.startsWith("Add merge notes\n\n2 turns:\n- Turn 1: 1 file, +2 -0 (notes/merge.txt)"), "the message is drafted from the plan and the turns");
   assert(!sheet.merge.disabled && /fast-forward/.test(sheet.merge.text), "the merge option says it is a fast-forward");
+  assert(sheet.title.endsWith("into main") && sheet.baseNote === null, "the sheet lands into main and adds no branch warning");
   await bridge.screenshot(join(evidenceDir, "01-land-sheet.png"));
 
   log("step 4: squash-merge into main locally");
@@ -601,9 +604,38 @@ try {
   await bridge.waitFor("the restored session in the list", `
     return e2e.all(".session-item").some((el) => el.innerText.includes("Task B"));
   `, { timeoutMs: 20_000 });
+  const restoredId = restoredRow.session_id;
+  const live = await invoke(bridge, "get_sessions");
+  const restoredLive = live.find((x) => x.id === restoredId);
+  log(`  restored session working directory: ${restoredLive?.working_directory}`);
+  assert(restoredLive && samePath(restoredLive.working_directory, pathB), "the new session starts in the restored worktree");
+  await bridge.waitFor("the restored shell to start", `
+    const info = window.__HERMES_E2E__.terminalInfo(${JSON.stringify(restoredId)});
+    const lines = window.__HERMES_E2E__.readTerminal(${JSON.stringify(restoredId)}) || [];
+    return info && info.opened && lines.some((l) => l.trim().length > 0);
+  `, { timeoutMs: 30_000 });
+  await sleep(800);
+  // The test (not Hermes) types into the shell: the same line runs in bash,
+  // zsh, PowerShell and cmd, and prints the folder the shell is in.
+  await bridge.typeInTerminal(restoredId, "git rev-parse --show-toplevel\n");
+  const shellDir = await (async () => {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      const lines = (await bridge.readTerminal(restoredId)) ?? [];
+      const hit = lines.map((l) => l.trim()).find((l) => l && !l.includes("rev-parse") && samePath(l, pathB));
+      if (hit) return hit;
+      if (Date.now() > deadline) throw new Error(`the restored shell never printed its folder; last content:\n${lines.join("\n")}`);
+      await sleep(150);
+    }
+  })();
+  assert(samePath(shellDir, pathB), `the restored shell runs in the worktree ("${shellDir}")`);
   await bridge.screenshot(join(evidenceDir, "10-archive-undone.png"));
   await closeSheet(bridge);
   await quit(app);
+
+  // The project folder moves to another branch while the app is closed: the
+  // sheet must say that landing goes there, not to main.
+  git("checkout", "-q", "-b", "release-1");
 
   // ── run 3: gh not installed ────────────────────────────────────────
   log("step 14: relaunch with gh not installed");
@@ -616,6 +648,12 @@ try {
   log(`  pr option: ${JSON.stringify(sheet.pr)}; link: "${sheet.ghLink}"`);
   assert(sheet.pr.disabled && sheet.pr.text.includes("GitHub CLI (gh) is not installed."), "the PR option is disabled: gh is not installed");
   assert(sheet.ghLink === "Install GitHub CLI", "an install link is offered");
+  log(`  title: "${sheet.title}"; branch note: "${sheet.baseNote}"`);
+  assert(sheet.title.endsWith("into release-1"), "the sheet lands into the branch the project folder has checked out");
+  assert(
+    sheet.baseNote === "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
+    "the sheet warns that landing goes to release-1, not main",
+  );
   await app.bridge.screenshot(join(evidenceDir, "11-gh-missing.png"));
   await closeSheet(app.bridge);
 } catch (e) {
