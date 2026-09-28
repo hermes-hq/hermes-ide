@@ -45,6 +45,7 @@ import {
 } from "./isolation";
 import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
 import { useWorkspaceFlushOnQuit } from "./useWorkspaceFlushOnQuit";
+import { runWorktreeRecipes, type CreatedWorktree } from "./worktreeRecipes";
 import { BranchConflictDialog } from "../components/BranchConflictDialog";
 import type { SessionWorktree } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
@@ -1800,8 +1801,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // keeps its old behaviour of sharing that checkout — now recorded
         // as shared, so closing this session can never delete it.
         const askUser = isFeatureFlagEnabled("honestIsolation");
+        const created: CreatedWorktree[] = [];
         const outcome = await createSessionWorktrees(preSessionId, opts.projectIds, opts.branchSelections, {
-          createWorktree,
+          createWorktree: async (sessionId, projectId, branch, createNew, fromRemote, baseBranch) => {
+            const r = await createWorktree(sessionId, projectId, branch, createNew, fromRemote, baseBranch);
+            if (!r.isMainWorktree) created.push({ projectId, branch: r.branchName, worktreePath: r.worktreePath });
+            return r;
+          },
           attachWorktree,
           removeWorktree,
           detachWorktree,
@@ -1839,6 +1845,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             detail: { errors: worktreeErrors, sessionLabel: opts?.label, fatal: true },
           }));
           return null;
+        }
+
+        // Worktree recipes (.hermes/worktree.toml): prepare each new
+        // worktree before anything starts in it. Part of honest isolation,
+        // so it ships behind the same flag. No file: nothing happens.
+        if (created.length > 0 && isFeatureFlagEnabled("honestIsolation")) {
+          await runWorktreeRecipes(preSessionId, created);
         }
       } else if (opts?.branchName && opts?.projectIds?.length) {
         // Legacy: single branch for first project (backward compatibility)

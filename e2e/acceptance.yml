@@ -805,3 +805,26 @@ features:
       F22-5:
         text: "Undo after a local merge restores main to the commit it had before"
         scenarios: [F22-land-sheet.mjs]
+  F26:
+    name: "Worktree recipes: new worktrees come up ready to work (#108)"
+    # .hermes/worktree.toml: setup commands, copy of git-ignored files,
+    # default done_when, [ports]. Behind the honestIsolation flag (recipes
+    # prepare the worktrees that feature creates); the scenario turns it on.
+    # Negative control: HERMES_E2E_F26_FLAG=off must end in RESULT: FAIL.
+    # The file's commands never run without the user's "Run setup" once per
+    # version of the file; secrets from copied files are masked in the log
+    # and never stored (the scenario scans the app's data folder and log).
+    status: partial
+    criteria:
+      F26-1:
+        text: "Creating a worktree runs setup and shows the log; a failure raises an inbox error"
+        scenarios: [F26-worktree-recipes.mjs]
+      F26-2:
+        text: "A copy pattern matching a tracked file is refused with a message"
+        scenarios: [F26-worktree-recipes.mjs]
+      F26-3:
+        text: "No worktree.toml means behaviour is unchanged"
+        scenarios: [F26-worktree-recipes.mjs]
+      F26-4:
+        text: "Secrets in copied files never appear in the log, the settings export or any file Hermes stores"
+        scenarios: [F26-worktree-recipes.mjs]

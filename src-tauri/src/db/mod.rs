@@ -2903,6 +2903,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "feature_flag_overrides",
     // Away notification address — a Telegram URL carries the bot's token
     "away_notify_url",
+    // Worktree recipes the user allowed to run (project id -> file hash)
+    "worktree_recipe_trust",
 ];
 
 /// Validate a settings file path for export or import.

@@ -28,6 +28,7 @@ import { clearFakeTurns, injectFakeTurns, type InjectedTurn } from "../review/tu
 import { getReviewState } from "../review/reviewStore";
 import { setFakeLandTurnsForTest } from "../land/turnSource";
 import type { Turn } from "../agent/contract/turns";
+import { defaultDoneWhen, listRecipeRuns } from "../state/worktreeRecipes";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -172,6 +173,11 @@ const hooks = {
   /** The turns (and each turn's diff) the Land sheet reads for a session. */
   setFakeLandTurns: (sessionId: string, turns: Array<{ turn: Turn; patch: string }>): void =>
     setFakeLandTurnsForTest(sessionId, turns),
+  // ── F26 worktree recipes ───────────────────────────────────────────
+  /** Recipe runs the panel shows (state, log lines, ports, failure). */
+  worktreeRecipeRuns: () => listRecipeRuns(),
+  /** The done_when checks a session's worktree.toml declared. */
+  defaultDoneWhen: (sessionId: string) => defaultDoneWhen(sessionId),
 };
 
 export type HermesE2EHooks = typeof hooks;

@@ -44,7 +44,7 @@ export const FEATURE_FLAGS = [
     id: "honestIsolation",
     label: "Honest isolation",
     description:
-      "New tasks get their own hermes/<name> branch, a branch already in use asks before it is shared, and closing a session with changes commits them to its branch or archives them instead of stashing.",
+      "New tasks get their own hermes/<name> branch, a branch already in use asks before it is shared, and closing a session with changes commits them to its branch or archives them instead of stashing. A repository's .hermes/worktree.toml prepares each new worktree (setup commands, git-ignored files, ports) after asking once.",
   },
   {
     id: "launchHelper",

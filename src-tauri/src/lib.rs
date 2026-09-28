@@ -900,6 +900,10 @@ pub fn run() {
             git::search_project,
             // Git worktree management
             git::git_create_worktree,
+            // Worktree recipes (.hermes/worktree.toml)
+            git::recipe::worktree_recipe_read,
+            git::recipe::worktree_recipe_run,
+            git::recipe::worktree_recipe_stop,
             git::git_remove_worktree,
             git::git_list_worktrees,
             git::git_check_branch_available,

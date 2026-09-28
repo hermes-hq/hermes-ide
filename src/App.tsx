@@ -65,6 +65,7 @@ import { listen } from "@tauri-apps/api/event";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { PluginUpdateBanner } from "./components/PluginUpdateBanner";
 import { ToastContainer } from "./components/ToastContainer";
+import { WorktreeRecipePanel } from "./components/WorktreeRecipePanel";
 import { useToastStore } from "./hooks/useToastStore";
 import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
@@ -1488,6 +1489,7 @@ function AppContent() {
       )}
 
       <ToastContainer toasts={toastStore.toasts} onDismiss={toastStore.dismissToast} />
+      <WorktreeRecipePanel />
 
     </div>
   );
