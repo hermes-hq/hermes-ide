@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 src-tauri/bridge/node_modules/
+# Packed by scripts/pack-bridge-runtime.mjs (npm run prepare:bridge)
+src-tauri/bridge/runtime/*
+!src-tauri/bridge/runtime/README.md
 
 # Build outputs
 dist/

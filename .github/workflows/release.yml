@@ -14,8 +14,9 @@ name: Release
 #   3. A DRAFT release is created (nobody can see or download it), assets and
 #      manifests are uploaded and linted (every updater bundle must carry a
 #      signature that verifies against the app's public key).
-#   4. Every installer is installed on a clean runner of its own platform and
-#      the app is started with `--self-test`, which must exit 0.
+#   4. Every installer (DMG, .deb, AppImage, NSIS) is installed on a clean
+#      runner of its own platform and the app is started with `--self-test`,
+#      which must exit 0.
 #   5. Only then is the tag created on the merged commit and the release
 #      published as a PRERELEASE: the beta channel (channels/beta.json) points
 #      at it, while `releases/latest` (stable clients) is untouched.
@@ -174,7 +175,7 @@ jobs:
           echo "windows=$W" >> "$GITHUB_OUTPUT"
           KEYS=""
           [[ "$M" == true ]] && KEYS="$KEYS,darwin-aarch64,darwin-x86_64"
-          [[ "$L" == true ]] && KEYS="$KEYS,linux-x86_64-deb,linux-aarch64-deb"
+          [[ "$L" == true ]] && KEYS="$KEYS,linux-x86_64-deb,linux-aarch64-deb,linux-x86_64-appimage,linux-aarch64-appimage,linux-x86_64,linux-aarch64"
           [[ "$W" == true ]] && KEYS="$KEYS,windows-x86_64,windows-aarch64"
           echo "expect_keys=${KEYS#,}" >> "$GITHUB_OUTPUT"
 
@@ -284,8 +285,9 @@ jobs:
             sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           fi
 
-      # Stages bridge runtime deps into src-tauri/bridge/node_modules/, which
-      # the Tauri build script validates whenever cargo compiles the crate.
+      # Stages the bridge's deps into src-tauri/bridge/node_modules/; the
+      # build (prepare:bridge) packs them into the runtime archive the
+      # bundle ships (scripts/pack-bridge-runtime.mjs, ADR 002).
       - name: Install npm deps + stage bridge runtime
         if: matrix.enabled == 'true'
         run: npm ci
@@ -404,6 +406,14 @@ jobs:
       - run: npm ci
         if: steps.check.outputs.enabled == 'true'
 
+      # linuxdeploy and appimagetool are AppImages themselves: they need FUSE 2
+      # (libfuse2 on 22.04, libfuse2t64 on 24.04).
+      - name: FUSE for the AppImage tools (Linux)
+        if: steps.check.outputs.enabled == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
+
       - name: Import macOS signing certificate
         if: steps.check.outputs.enabled == 'true' && matrix.sign && runner.os == 'macOS'
         env:
@@ -462,13 +472,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "${{ matrix.sign && secrets.APPLE_SIGNING_IDENTITY || '' }}"
-        # Linux: .deb only. AppImage's `linuxdeploy` step OOMs on the bridge
-        # runtime we ship as a resource; the .deb is also the updater bundle.
+        # Linux: .deb and AppImage, each its own updater bundle. The bridge
+        # runtime ships as one packed archive (ADR 002), which is what lets
+        # linuxdeploy bundle the AppImage again.
         # Windows: NSIS only. The updater installs with NSIS, so an MSI install
         # would end up with two copies after its first update.
         run: |
           if [[ "${{ matrix.platform_group }}" == 'linux' ]]; then
-            npx tauri build --target ${{ matrix.target }} --bundles deb
+            npx tauri build --target ${{ matrix.target }} --bundles deb,appimage
           elif [[ "${{ matrix.platform_group }}" == 'windows' ]]; then
             npx tauri build --target ${{ matrix.target }} --bundles nsis
           else
@@ -537,8 +548,9 @@ jobs:
           shopt -s nullglob
           # macOS DMG
           for f in "$TARGET_DIR"/dmg/*.dmg; do cp "$f" installer-artifacts/; done
-          # Linux .deb — Tauri signs it at build time; it is the updater bundle too.
-          for f in "$TARGET_DIR"/deb/*.deb; do
+          # Linux .deb and AppImage — Tauri signs both at build time; each is
+          # the updater bundle for its own installs.
+          for f in "$TARGET_DIR"/deb/*.deb "$TARGET_DIR"/appimage/*.AppImage; do
             cp "$f" installer-artifacts/
             [ -f "$f.sig" ] && cp "$f.sig" installer-artifacts/
           done
@@ -646,6 +658,27 @@ jobs:
           node scripts/ci/release-manifests.mjs lint release-files \
             --tag "$TAG" --expect "${{ needs.config.outputs.expect_keys }}"
 
+      # Prepared for a person to submit to microsoft/winget-pkgs (a one-time
+      # CLA); never submitted from here. The `winget` job below installs the
+      # published release through them.
+      # Informational: a problem here never holds a release back.
+      - name: winget manifests
+        if: needs.config.outputs.build_windows == 'true'
+        continue-on-error: true
+        run: |
+          node scripts/ci/winget-manifests.mjs release-files \
+            --tag "$TAG" --repo "${{ github.repository }}" --out winget --version "$VERSION"
+          find winget -type f -print -exec cat {} \;
+
+      - name: Upload winget manifests
+        if: needs.config.outputs.build_windows == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: winget-manifests
+          path: winget/
+          retention-days: 30
+
       - name: Prepare release notes
         run: |
           set -euo pipefail
@@ -722,6 +755,8 @@ jobs:
           - { key: darwin-x86_64,   os: macos-15-intel,    kind: dmg,  group: macos }
           - { key: linux-x86_64,    os: ubuntu-24.04,      kind: deb,  group: linux }
           - { key: linux-aarch64,   os: ubuntu-24.04-arm,  kind: deb,  group: linux }
+          - { key: linux-x86_64,    os: ubuntu-24.04,      kind: appimage, group: linux }
+          - { key: linux-aarch64,   os: ubuntu-24.04-arm,  kind: appimage, group: linux }
           - { key: windows-x86_64,  os: windows-2022,      kind: nsis, group: windows }
           - { key: windows-aarch64, os: windows-11-arm,    kind: nsis, group: windows }
     runs-on: ${{ matrix.os }}
@@ -788,6 +823,40 @@ jobs:
           which hermes-ide
           xvfb-run -a dbus-run-session -- hermes-ide --self-test="$RUNNER_TEMP/self-test.json"
 
+      - name: Install and self-test (Linux AppImage)
+        if: steps.check.outputs.enabled == 'true' && matrix.kind == 'appimage'
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(ls dl/*.AppImage | head -1)
+          echo "Installing $APPIMAGE"
+          sudo apt-get update
+          sudo apt-get install -y xvfb dbus-x11
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
+          # An AppImage leaves the graphics and font stack (libEGL, libGL,
+          # libgbm, libdrm, fontconfig, freetype, harfbuzz) to the system, as
+          # every desktop has it (linuxdeploy's excludelist); a runner does not.
+          sudo apt-get install -y libegl1 libgl1 libgbm1 libdrm2 libfontconfig1 libfreetype6 libharfbuzz0b
+          # What a person does: put it somewhere and make it executable.
+          mkdir -p "$HOME/Applications"
+          cp "$APPIMAGE" "$HOME/Applications/"
+          INSTALLED="$HOME/Applications/$(basename "$APPIMAGE")"
+          chmod +x "$INSTALLED"
+          # Name any library the system still lacks, so a failure below says
+          # which one instead of stopping at the first.
+          (cd "$RUNNER_TEMP" && "$INSTALLED" --appimage-extract >/dev/null)
+          ROOT="$RUNNER_TEMP/squashfs-root"
+          LIBS=$(find "$ROOT" -name '*.so*' -type f -printf '%h\n' | sort -u | paste -sd:)
+          MISSING=$(find "$ROOT/usr/bin" "$ROOT/usr/lib" -type f \( -perm -u+x -o -name '*.so*' \) | while read -r f; do
+            file -b "$f" | grep -q ELF || continue
+            LD_LIBRARY_PATH="$LIBS" ldd "$f" 2>/dev/null | grep "not found" || true
+          done | sort -u || true)
+          if [ -n "$MISSING" ]; then echo "::warning::libraries the system lacks:"; echo "$MISSING"; fi
+          rm -rf "$ROOT"
+          xvfb-run -a dbus-run-session -- "$INSTALLED" --self-test="$RUNNER_TEMP/self-test.json"
+
       - name: Install and self-test (Windows)
         if: steps.check.outputs.enabled == 'true' && matrix.kind == 'nsis'
         shell: pwsh
@@ -829,7 +898,7 @@ jobs:
         if: always() && steps.check.outputs.enabled == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: self-test-${{ matrix.key }}
+          name: self-test-${{ matrix.key }}-${{ matrix.kind }}
           path: ${{ runner.temp }}/self-test.json
           if-no-files-found: ignore
           retention-days: 30
@@ -925,6 +994,54 @@ jobs:
           git commit -m "beta: $TAG" || echo "beta.json unchanged"
           git push origin HEAD:channels
           echo "Beta clients now read $TAG from channels/beta.json"
+
+  # ── winget installs the published release ──────────────────────────
+  # Installs the release just published through the winget manifests the
+  # draft step generated (same generator, same installer) and checks that
+  # winget lists it.
+  # Informational: the release is already out when this runs.
+  winget:
+    needs: [config, publish-beta]
+    if: needs.config.outputs.dry_run == 'false' && needs.config.outputs.build_windows == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - name: Make sure winget is available
+        shell: pwsh
+        run: ./scripts/ci/ensure-winget.ps1
+      # Unsigned installers: Windows checks them before they start and
+      # nobody can answer on a runner (see ci.yml, e2e-installers).
+      - name: Let unsigned installers start on the runner
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v SmartScreenEnabled /t REG_SZ /d Off /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Associations" /v LowRiskFileTypes /t REG_SZ /d ".exe;.msi" /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1806 /t REG_DWORD /d 0 /f
+          echo "SEE_MASK_NOZONECHECKS=1" >> $env:GITHUB_ENV
+      - name: winget install --manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HERMES_E2E_RELEASE_TAG: ${{ needs.config.outputs.tag }}
+          HERMES_E2E_EVIDENCE: ${{ runner.temp }}/winget-evidence
+        run: node e2e/app/scenarios/F25-winget-install.mjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: winget-install-evidence
+          path: ${{ runner.temp }}/winget-evidence
+          if-no-files-found: warn
+          retention-days: 30
 
   # ── Dry runs leave nothing behind ──────────────────────────────────
   dry-run-cleanup:

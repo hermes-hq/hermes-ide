@@ -23,8 +23,9 @@ On the merge, `.github/workflows/release.yml`:
    lints them: every updater bundle must carry a signature that verifies
    against the app's public key, every installer must be listed;
 4. installs each installer on a clean runner of its platform (macOS arm64
-   and Intel, Ubuntu x64 and arm64, Windows x64 and arm64) and runs
-   `hermes-ide --self-test=<report.json>`, which must exit 0;
+   and Intel, Ubuntu x64 and arm64 as `.deb` and as AppImage, Windows x64
+   and arm64) and runs `hermes-ide --self-test=<report.json>`, which must
+   exit 0;
 5. creates the tag `v1.4.1` on the merged commit and publishes the release
    as a **prerelease**. Beta clients pick it up (see channels). Stable
    clients do not: `releases/latest` only ever points at a non-prerelease.
@@ -88,7 +89,8 @@ prerelease.
 ## Self-test
 
 `hermes-ide --self-test=<report.json>` starts the real app, opens the
-database, checks the bundled bridge runtime, waits for the UI to render, runs
+database, unpacks the bundled bridge runtime if needed and imports the Claude
+Agent SDK from it with node, waits for the UI to render, runs
 an echo through a real shell in a PTY, writes the report and exits 0 or 1. It
 is what the release smoke runs and what to ask a user for when an install
 misbehaves.
@@ -103,7 +105,35 @@ a release, then deletes the draft. Nothing is published and no tag is created.
 
 `scripts/ci/release-manifests.mjs build <dir>` writes both manifests from the
 files in a release folder; `lint <dir>` checks them (also run in the workflow).
-Linux updates use the `.deb` itself, signed at build time, under the
-`linux-*-deb` keys. Windows ships the NSIS installer only: the updater installs
+Linux updates use the installers themselves, signed at build time: the `.deb`
+under the `linux-*-deb` keys, the AppImage under `linux-*-appimage` and the
+plain `linux-*` keys (read by AppImages that do not report their bundle type).
+The lint refuses a plain Linux key without its `-deb` twin, and any key that
+points at the other kind of bundle. Windows ships the NSIS installer only: the updater installs
 with NSIS, so an MSI install would end up with two copies after its first
 update.
+
+The plain `linux-x86_64` / `linux-aarch64` keys used to be absent (1.1.3 to
+1.4.x shipped no AppImage). Every current client looks up its `-deb` or
+`-appimage` key first, and 1.4.x `.deb` installs already read `-deb`. A `.deb`
+install old enough not to report its bundle type would now be offered the
+AppImage under the plain key, which it cannot install, instead of no update;
+such a user updates by installing the new `.deb` by hand.
+
+## Bridge runtime
+
+The Claude bridge and its `node_modules` (the Agent SDK and its native
+`claude` binary, about 256 MB in 6 000 files) ship as one zstd archive,
+`bridge/runtime/bridge-runtime.tar.zst`, written by
+`scripts/pack-bridge-runtime.mjs` during `npm run prepare:bridge` (part of
+every `tauri build`). The app checks it against `manifest.json` and unpacks it
+into `<data folder>/runtime/<id>/` the first time an Agent-view session needs
+the bridge (ADR 002). This is what lets linuxdeploy build the AppImage.
+
+## winget
+
+The draft step writes winget manifests (`HermesHQ.HermesIDE`, unsigned NSIS
+installers) as the `winget-manifests` workflow artifact, and the `winget` job
+installs every published release through them on a Windows runner.
+Submitting them to `microsoft/winget-pkgs` is a human
+step: the first pull request there needs the Microsoft CLA signed once.

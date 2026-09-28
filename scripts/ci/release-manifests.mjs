@@ -10,6 +10,7 @@
 // by the release workflow:
 //   installers (unprefixed):   HERMES-IDE_1.4.1_aarch64.dmg, HERMES-IDE_1.4.1_x64.dmg,
 //                              HERMES-IDE_1.4.1_amd64.deb (+ .sig), HERMES-IDE_1.4.1_arm64.deb (+ .sig),
+//                              HERMES-IDE_1.4.1_amd64.AppImage (+ .sig), HERMES-IDE_1.4.1_aarch64.AppImage (+ .sig),
 //                              HERMES-IDE_1.4.1_x64-setup.exe, HERMES-IDE_1.4.1_arm64-setup.exe
 //   updater bundles (prefixed with the platform key, because the macOS
 //   archive has the same name on both architectures):
@@ -17,8 +18,9 @@
 //                              darwin-x86_64-HERMES-IDE.app.tar.gz (+ .sig)
 //                              windows-x86_64-HERMES-IDE_1.4.1_x64-setup.exe (+ .sig)
 //                              windows-aarch64-HERMES-IDE_1.4.1_arm64-setup.exe (+ .sig)
-//   The .deb is its own updater bundle (Tauri signs it at build time), so it
-//   is uploaded once and referenced by both manifests.
+//   The .deb and the AppImage are their own updater bundles (Tauri signs
+//   them at build time), so each is uploaded once and referenced by both
+//   manifests.
 //
 // Zero dependencies (Node 20+).
 
@@ -32,10 +34,17 @@ export const UPDATER_PLATFORMS = [
   { key: "darwin-aarch64", pattern: /^darwin-aarch64-.*\.app\.tar\.gz$/ },
   { key: "darwin-x86_64", pattern: /^darwin-x86_64-.*\.app\.tar\.gz$/ },
   // The updater looks up `{os}-{arch}-{bundle}` first, then `{os}-{arch}`.
-  // Only the `-deb` keys exist for Linux: a plain `linux-x86_64` key would
-  // make .deb installs try to install whatever it pointed at.
+  // A .deb install asks for `-deb`, an AppImage for `-appimage`. An
+  // AppImage that does not report its bundle type (older builds) asks only
+  // for the plain `linux-*` key, so that points at the AppImage too. The
+  // lint makes sure a `-deb` key always exists next to a plain one, or .deb
+  // installs would fall back to the plain key and fetch an AppImage.
   { key: "linux-x86_64-deb", pattern: /^[^/]*_amd64\.deb$/ },
   { key: "linux-aarch64-deb", pattern: /^[^/]*_arm64\.deb$/ },
+  { key: "linux-x86_64-appimage", pattern: /^[^/]*_amd64\.AppImage$/ },
+  { key: "linux-aarch64-appimage", pattern: /^[^/]*_aarch64\.AppImage$/ },
+  { key: "linux-x86_64", pattern: /^[^/]*_amd64\.AppImage$/ },
+  { key: "linux-aarch64", pattern: /^[^/]*_aarch64\.AppImage$/ },
   { key: "windows-x86_64", pattern: /^windows-x86_64-.*-setup\.exe$/ },
   { key: "windows-aarch64", pattern: /^windows-aarch64-.*-setup\.exe$/ },
 ];
@@ -47,6 +56,8 @@ export const DOWNLOADS = [
   { platform: "macos", arch: "x86_64", format: "dmg", pattern: /_x64\.dmg$/ },
   { platform: "linux", arch: "x86_64", format: "deb", pattern: /_amd64\.deb$/ },
   { platform: "linux", arch: "aarch64", format: "deb", pattern: /_arm64\.deb$/ },
+  { platform: "linux", arch: "x86_64", format: "appimage", pattern: /_amd64\.AppImage$/ },
+  { platform: "linux", arch: "aarch64", format: "appimage", pattern: /_aarch64\.AppImage$/ },
   { platform: "windows", arch: "x86_64", format: "exe", pattern: /_x64-setup\.exe$/ },
   { platform: "windows", arch: "aarch64", format: "exe", pattern: /_arm64-setup\.exe$/ },
 ];
@@ -158,6 +169,8 @@ export function lintManifests(dir, { tag, expect = UPDATER_PLATFORMS.map((p) => 
       }
       const name = basename(new URL(entry.url).pathname);
       if (!entry.url.includes(`/releases/download/${tag}/`)) problems.push(`latest.json: ${key}: url does not point at release ${tag}`);
+      const def = UPDATER_PLATFORMS.find((p) => p.key === key);
+      if (def && !def.pattern.test(name)) problems.push(`latest.json: ${key}: points at ${name}, which is not a bundle for ${key}`);
       if (!files.includes(name)) {
         problems.push(`latest.json: ${key}: ${name} is not among the release files`);
         continue;
@@ -214,7 +227,6 @@ export function lintManifests(dir, { tag, expect = UPDATER_PLATFORMS.map((p) => 
   // Nothing we no longer ship.
   for (const f of files) {
     if (/\.msi(\.sig)?$/.test(f)) problems.push(`${f}: MSI installers are not shipped any more (the updater installs with NSIS)`);
-    if (/\.AppImage(\.sig)?$/.test(f)) problems.push(`${f}: AppImage is not shipped; a plain linux key would break .deb updates`);
   }
   // Checksums, when present, must cover every file.
   if (files.includes("SHA256SUMS.txt")) {

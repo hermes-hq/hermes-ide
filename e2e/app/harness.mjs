@@ -502,8 +502,10 @@ export async function launchApp({
   // Called with the app's (empty) data folder before the app starts, e.g. to
   // put a database from an older release there.
   prepareDataDir,
+  // Another test-app executable to start, e.g. an installed test AppImage
+  // (F25). Its build stamp is checked against a build.json next to it, if any.
+  binary = appBinaryPath(),
 } = {}) {
-  const binary = appBinaryPath();
   if (!existsSync(binary)) {
     throw new Error(`test app not built: ${binary} is missing — run \`node e2e/app/build.mjs\` first`);
   }

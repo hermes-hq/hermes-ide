@@ -1,6 +1,6 @@
 # ADR 002 — Bridge runtime as a first-launch tarball (v1.2 candidate)
 
-**Status:** Proposed
+**Status:** Accepted — implemented (F25); see "As built" at the end
 **Date:** 2026-05-09
 **Deciders:** TBD
 **Supersedes:** the "ship `bridge/node_modules` raw" approach in v1.1.3
@@ -154,3 +154,53 @@ These are tracked as part of #1/#2 of the punch list (post-v1.1.3 follow-up note
 - `appimage` block in `tauri.conf.json` linux config → still there, just ignored; no change needed.
 - `downloads.json` in release.yml → re-add the `linux/x86_64/appimage` and `linux/aarch64/appimage` entries on the same retag.
 - "AppImage builds are temporarily paused" line in RELEASE_NOTES.md → drop.
+
+## As built (F25)
+
+Option A, with these differences from the sketch above:
+
+- **Archive.** `scripts/pack-bridge-runtime.mjs` packs the bridge `.mjs`
+  files, `package.json` and `node_modules` (minus npm's `.bin` links) into a
+  deterministic tar (sorted entries, fixed timestamps, pax headers for long
+  names), compressed with zstd level 19 on several threads: 256 MB in 5 944
+  files becomes one 79 MB file. `manifest.json` records the archive's size and
+  SHA-256, the file count, the SDK version and an id (from the tar's hash).
+  The only bundle resource is the `bridge/runtime` folder.
+- **Unpacking.** `src-tauri/src/agent/runtime.rs`, pure Rust (`ruzstd` +
+  `tar`, no C toolchain). The archive is checked against the manifest before
+  anything is written, unpacked into a temporary folder, counted, marked
+  complete and renamed into `<data folder>/runtime/<id>/` (the instance's own
+  data folder, not `~/.hermes-ide`). Entries outside the folder, links and
+  special files are refused. A runtime missing its marker or a key file is
+  unpacked again; other runtimes are removed once the new one is ready.
+- **When.** Hermes is terminal-first (ADR 003), so nothing is unpacked at
+  startup: the first bridge lookup (the Agent-view warm-up or a session
+  spawn) unpacks, on the blocking pool, in about 2 seconds.
+- **Self-test.** `--self-test` unpacks the runtime and imports the SDK from it
+  with node, so the release smoke proves the archive on every installer.
+- **Size** (1.4.0 against a release dry run of this change). macOS DMG
+  122 -> 98 MB, macOS update archive 120 -> 96 MB, `.deb` 133 -> 107 MB,
+  installed macOS app 310 -> 118 MB. The Windows NSIS installer grows
+  94 -> 103 MB: its LZMA compressed the raw runtime better than zstd does.
+  Downloads shrink far less than the 210 MB this ADR hoped for: installers
+  were already compressed, and the runtime is still shipped.
+- **Windows compression, measured.** NSIS compresses the whole installer
+  with solid LZMA (8 MB dictionary), which cannot shrink an archive that is
+  already compressed. Measured on the runtime tar (260 MB) with the same
+  LZMA settings: the raw tar packs to 71.1 MB, the zstd-19 archive to
+  79.7 MB, a zstd-1 archive to 109.4 MB; zstd 22 alone reaches 75.6 MB
+  (7x slower to pack, and a window over the 100 MB the unpacker allows).
+  Shipping an uncompressed tar on Windows would bring the installer back to
+  about 95 MB, but leave a 260 MB file in the install folder instead of
+  79 MB, on top of the unpacked copy. We keep zstd 19 everywhere: 8 MB more
+  download on Windows against 180 MB less disk, one archive format.
+- **Disk footprint.** An Agent-view user now keeps both the 79 MB archive
+  (in the app bundle) and the unpacked runtime (256 MB, in the data folder):
+  about 335 MB, more than the old raw tree (256 MB) on every platform. The
+  unpacked copy is per instance (each instance has its own data folder), so
+  running several instances that use the Agent view means one 256 MB copy
+  each. Users who never open the Agent view (the default, terminal first)
+  never unpack it and keep only the 79 MB archive.
+- **AppImage and updates.** AppImages are built again, and each Linux
+  installer is its own updater bundle: `linux-*-deb` for `.deb` installs,
+  `linux-*-appimage` and the plain `linux-*` keys for AppImages.

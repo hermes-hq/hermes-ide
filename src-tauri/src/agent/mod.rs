@@ -9,6 +9,7 @@
 
 pub mod prewarm;
 mod respawn;
+pub mod runtime;
 pub use respawn::AgentError;
 use respawn::SpawnGate;
 
@@ -198,6 +199,46 @@ fn node_spawn_paths_with(
     }
 }
 
+/// Where the bridge comes from: a packed runtime folder to unpack, or a
+/// bridge script already on disk.
+#[derive(Debug, PartialEq, Eq)]
+enum BridgeSource {
+    Packed(std::path::PathBuf),
+    File(std::path::PathBuf),
+}
+
+/// The packed runtime when there is one, else the first candidate script
+/// that exists; with `prefer_source`, an existing candidate wins over the
+/// packed runtime.
+fn pick_bridge_source(
+    prefer_source: bool,
+    packed: Option<std::path::PathBuf>,
+    candidates: &[std::path::PathBuf],
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> Option<BridgeSource> {
+    let file = candidates.iter().find(|c| exists(c)).cloned();
+    match (prefer_source, packed, file) {
+        (true, _, Some(file)) => Some(BridgeSource::File(file)),
+        (_, Some(bundle), _) => Some(BridgeSource::Packed(bundle)),
+        (_, None, file) => file.map(BridgeSource::File),
+    }
+}
+
+/// `HERMES_BRIDGE_RUNTIME_DIR`: a folder holding a packed bridge runtime
+/// (`manifest.json` + archive) to use instead of the bundle's. Read by test
+/// and debug builds only, so a stray variable cannot point an installed app
+/// at another archive.
+fn runtime_dir_override() -> Option<String> {
+    if cfg!(any(debug_assertions, feature = "e2e")) {
+        std::env::var("HERMES_BRIDGE_RUNTIME_DIR").ok()
+    } else {
+        None
+    }
+}
+
+/// Where the bridge script is, unpacking the bundled runtime first when
+/// needed (which can take a few seconds once). Blocking: call it from a
+/// blocking context, e.g. [`resolve_bridge_path_blocking`].
 pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     // Honor an explicit override even if it's broken — surface the
     // misconfiguration loudly rather than silently falling through.
@@ -212,14 +253,26 @@ pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf,
         ));
     }
 
-    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let resource_dir = app.path().resource_dir().ok();
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let candidates = bridge_path_candidates(None, &manifest, resource_dir.as_deref());
+    let override_dir = runtime_dir_override();
+    let packed = runtime::bundle_dir(resource_dir.as_deref(), override_dir.as_deref());
+    // `tauri dev` runs the bridge straight from the source tree, so edits to
+    // it apply without repacking (a packed runtime left in the resources by
+    // an earlier build would be stale). Installed apps and test builds use
+    // the packed runtime.
+    let prefer_source = cfg!(debug_assertions) && !cfg!(feature = "e2e") && override_dir.is_none();
 
-    for c in &candidates {
-        if c.exists() {
-            return Ok(c.clone());
+    match pick_bridge_source(prefer_source, packed, &candidates, |p| p.exists()) {
+        // An installed app carries the bridge as one packed archive (ADR
+        // 002): unpack it into the data folder on first use, run it there.
+        Some(BridgeSource::Packed(bundle)) => {
+            let root = crate::instance::app_data_dir(app)?.join("runtime");
+            return runtime::ensure_unpacked(&bundle, &root).map(|u| u.bridge);
         }
+        Some(BridgeSource::File(path)) => return Ok(path),
+        None => {}
     }
     Err(format!(
         "could not locate hermes-claude-bridge.mjs (looked at: {})",
@@ -229,6 +282,17 @@ pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf,
             .collect::<Vec<_>>()
             .join(", ")
     ))
+}
+
+/// [`resolve_bridge_path`] on the blocking pool, so a first-use unpack of
+/// the runtime never stalls an async worker.
+pub(crate) async fn resolve_bridge_path_blocking(
+    app: &AppHandle,
+) -> Result<std::path::PathBuf, String> {
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || resolve_bridge_path(&app))
+        .await
+        .map_err(|e| format!("bridge lookup failed: {}", e))?
 }
 
 // ─── Node resolution ──────────────────────────────────────────────
@@ -644,7 +708,11 @@ async fn spawn_child(
         bridge: bridge_path,
         working_dir,
         add_dirs: dirs,
-    } = node_spawn_paths(&resolve_bridge_path(app)?, &working_dir, &add_dirs);
+    } = node_spawn_paths(
+        &resolve_bridge_path_blocking(app).await?,
+        &working_dir,
+        &add_dirs,
+    );
     let claude_session_id = match (prior_uuid.as_deref(), fork) {
         (Some(uuid), false) => uuid.to_string(),
         (Some(_), true) | (None, _) => uuid::Uuid::new_v4().to_string(),
@@ -1409,6 +1477,40 @@ mod e2e_tests;
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn installed_apps_use_the_packed_runtime_and_dev_builds_the_source_tree() {
+        let packed = Some(PathBuf::from("/res/bridge/runtime"));
+        let candidates = vec![
+            PathBuf::from("/src/bridge/hermes-claude-bridge.mjs"),
+            PathBuf::from("/res/bridge/hermes-claude-bridge.mjs"),
+        ];
+        let only_source = |p: &std::path::Path| p.starts_with("/src");
+        let nothing = |_: &std::path::Path| false;
+
+        // Installed app (and test builds): the packed runtime, even when a
+        // source tree happens to exist at the build path.
+        assert_eq!(
+            pick_bridge_source(false, packed.clone(), &candidates, only_source),
+            Some(BridgeSource::Packed(PathBuf::from("/res/bridge/runtime")))
+        );
+        // `tauri dev`: the live source tree wins over a stale packed copy…
+        assert_eq!(
+            pick_bridge_source(true, packed.clone(), &candidates, only_source),
+            Some(BridgeSource::File(candidates[0].clone()))
+        );
+        // …and the packed runtime is still used when there is no source.
+        assert_eq!(
+            pick_bridge_source(true, packed.clone(), &candidates, nothing),
+            Some(BridgeSource::Packed(PathBuf::from("/res/bridge/runtime")))
+        );
+        // No packed runtime: the first script that exists, else nothing.
+        assert_eq!(
+            pick_bridge_source(false, None, &candidates, |p| p.starts_with("/res")),
+            Some(BridgeSource::File(candidates[1].clone()))
+        );
+        assert_eq!(pick_bridge_source(false, None, &candidates, nothing), None);
+    }
 
     fn fixture(name: &str) -> PathBuf {
         let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

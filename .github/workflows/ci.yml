@@ -58,6 +58,7 @@ jobs:
       rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
       ci: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ci == 'true' }}
       workflows: ${{ github.event_name != 'pull_request' || steps.filter.outputs.workflows == 'true' }}
+      packaging: ${{ github.event_name != 'pull_request' || steps.filter.outputs.packaging == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -87,6 +88,8 @@ jobs:
               - 'scripts/generate-shortcuts.mjs'
               - 'scripts/check-readme-claims.mjs'
               - 'docs/readme-claims.yml'
+              - 'scripts/pack-bridge-runtime*.mjs'
+              - 'scripts/ci/**'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -96,9 +99,28 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'scripts/ci-gate.mjs'
               - 'scripts/stage-bridge-deps.mjs'
+              - 'scripts/pack-bridge-runtime.mjs'
+              - 'scripts/ci/**'
               - 'e2e/**'
             workflows:
               - '.github/workflows/**'
+            # What the installer jobs build or install from: the app, its
+            # bundled runtime, the installer scripts and their scenarios.
+            packaging:
+              - 'src-tauri/**'
+              - 'rust-toolchain.toml'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/stage-bridge-deps.mjs'
+              - 'scripts/pack-bridge-runtime.mjs'
+              - 'scripts/ci/**'
+              - 'e2e/app/build-appimage.mjs'
+              - 'e2e/app/harness.mjs'
+              - 'e2e/app/run.mjs'
+              - 'e2e/app/scenarios/F25-appimage-update.mjs'
+              - 'e2e/app/scenarios/F25-winget-install.mjs'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
 
   # ── Dev and test builds never run as the installed app ───────────────
   instance-identifiers:
@@ -381,7 +403,7 @@ jobs:
             node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs F09-isolation-edge-cases.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
-            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs F25-bridge-runtime.mjs F25-agent-session-runtime.mjs || fail=1
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
             node e2e/app/run.mjs --keep-going N13-interrupted-resume.mjs || fail=1
             node e2e/app/run.mjs --keep-going F30-instruction-files.mjs F30-agent-view-mcp.mjs F35-safety-default.mjs || fail=1
@@ -402,7 +424,7 @@ jobs:
           node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs F09-isolation-edge-cases.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
-          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs F25-bridge-runtime.mjs F25-agent-session-runtime.mjs || fail=1
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs FIX-sessions-survive-quit.mjs || fail=1
           node e2e/app/run.mjs --keep-going N13-interrupted-resume.mjs || fail=1
           node e2e/app/run.mjs --keep-going F30-instruction-files.mjs F30-agent-view-mcp.mjs F35-safety-default.mjs || fail=1
@@ -446,13 +468,154 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # ── Installers: AppImage self-update (Linux), winget (Windows) ───────
+  # F25. Linux builds two real AppImages of the test app (0.9.0 and 0.9.1,
+  # signed with a throwaway updater key), installs the old one, and lets it
+  # update itself through the UI; a sabotaged run (wrong signature) must
+  # fail. Windows installs the newest release through the winget manifests
+  # the release workflow generates. Evidence joins the acceptance gate.
+  # Two full AppImage builds are slow, so on pull requests this runs only
+  # when something that goes into an installer changed (`packaging`).
+  e2e-installers:
+    name: Installers on ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The release builds Linux installers on 22.04 (glibc floor).
+          - os: ubuntu-22.04
+            name: linux
+          # Newer image: ships winget (ensure-winget.ps1 installs it otherwise).
+          - os: windows-2025
+            name: windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Choose the output folder
+        shell: bash
+        run: echo "HERMES_E2E_OUT=$RUNNER_TEMP/hermes-e2e" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb libfuse2 file
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        if: runner.os == 'Linux'
+
+      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        if: runner.os == 'Linux'
+        with:
+          workspaces: src-tauri
+          shared-key: e2e-appimage
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install npm deps + stage bridge runtime (Linux)
+        if: runner.os == 'Linux'
+        run: npm ci
+
+      - name: Build the old and new test AppImages
+        if: runner.os == 'Linux'
+        run: node e2e/app/build-appimage.mjs
+
+      - name: AppImage installs, self-tests and updates itself (virtual display)
+        if: runner.os == 'Linux'
+        env:
+          CI: "true"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          NO_AT_BRIDGE: "1"
+          GTK_A11Y: "none"
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs F25-appimage-update.mjs
+
+      # Negative control: the same scenario, served an update signed for
+      # another file, must FAIL. Its evidence stays out of the gate's results.
+      - name: Negative control — a wrongly signed update fails the scenario
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        env:
+          CI: "true"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          NO_AT_BRIDGE: "1"
+          GTK_A11Y: "none"
+          HERMES_E2E_F25_SABOTAGE: "1"
+        run: |
+          export HERMES_E2E_EVIDENCE="$RUNNER_TEMP/hermes-e2e/negative-control/F25-appimage-update"
+          if xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/scenarios/F25-appimage-update.mjs; then
+            echo "::error::the sabotaged update was installed — the scenario cannot tell a bad update from a good one"; exit 1
+          fi
+          grep -q "the update downloaded and its signature verified (error)" "$HERMES_E2E_EVIDENCE/scenario.log"
+          grep -q '"status": "fail"' "$HERMES_E2E_EVIDENCE/result.json"
+          echo "negative control: the scenario failed on the wrongly signed update, as it must"
+
+      - name: Make sure winget is available (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/ci/ensure-winget.ps1
+
+      # The installers are unsigned (no Windows signing identity yet). winget
+      # marks its download as coming from the internet, and Windows then
+      # checks an unsigned program before starting it (SmartScreen, and the
+      # "publisher could not be verified" prompt). On a runner nobody can
+      # answer, so the checks are switched off there. A person installing an
+      # unsigned build sees those prompts; code signing (F25-1) removes them.
+      - name: Let unsigned installers start on the runner (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v SmartScreenEnabled /t REG_SZ /d Off /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Associations" /v LowRiskFileTypes /t REG_SZ /d ".exe;.msi" /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1806 /t REG_DWORD /d 0 /f
+          echo "SEE_MASK_NOZONECHECKS=1" >> $env:GITHUB_ENV
+
+      - name: winget installs Hermes from the generated manifests (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          CI: "true"
+          GH_TOKEN: ${{ github.token }}
+        run: node e2e/app/run.mjs F25-winget-install.mjs
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-evidence-installers-${{ matrix.name }}
+          path: ${{ runner.temp }}/hermes-e2e/evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload negative-control evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: f25-negative-control-${{ matrix.name }}
+          path: ${{ runner.temp }}/hermes-e2e/negative-control
+          if-no-files-found: warn
+          retention-days: 14
+
   # ── Acceptance ledger ────────────────────────────────────────────────
   # Every feature marked shipped in e2e/acceptance.yml needs a green
   # scenario on every OS it must run on. Runs even when a scenario runner
   # failed, so the report says which feature lost its proof.
   acceptance:
     name: Acceptance gate
-    needs: [changes, e2e-app]
+    needs: [changes, e2e-app, e2e-installers]
     if: >-
       always()
       && needs.changes.result == 'success'
@@ -538,7 +701,7 @@ jobs:
   gate:
     name: gate
     if: always()
-    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, acceptance, privacy, instance-identifiers, actionlint]
+    needs: [changes, frontend, rust-fmt, rust-clippy, rust-test, e2e-app, e2e-installers, acceptance, privacy, instance-identifiers, actionlint]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

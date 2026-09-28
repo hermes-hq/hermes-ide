@@ -25,6 +25,9 @@ export const JOB_TRIGGERS = {
   "rust-clippy": ["rust", "ci"],
   "rust-test": ["rust", "ci"],
   "e2e-app": ["frontend", "rust", "ci"],
+  // Builds two AppImages and installs through winget: only when something
+  // that goes into an installer changed.
+  "e2e-installers": ["packaging"],
   acceptance: ["frontend", "rust", "ci"],
   actionlint: ["workflows"],
 };
