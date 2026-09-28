@@ -77,19 +77,26 @@ fn runs_the_program_with_its_args_env_and_cwd_and_reports_its_exit_code() {
     let dir = tempfile::tempdir().unwrap();
     let work = dir.path().join("work dir");
     fs::create_dir_all(&work).unwrap();
-    let (program, args) = shell(
-        "echo \"args=$1 $2 env=$HERMES_AGENT_TEST\"; pwd; exit 7",
-        "echo args=%1 %2 env=%HERMES_AGENT_TEST%& cd & exit 7",
-    );
-    let mut args = args;
-    if cfg!(windows) {
-        args.push("one".into());
-        args.push("two words".into());
+    // `%1`/`%2` only exist inside a batch file, so on Windows the program
+    // is a small .cmd (like an npm shim); on Unix `sh -c` sees $1/$2.
+    let (program, mut args) = if cfg!(windows) {
+        let bat = dir.path().join("echo-args.cmd");
+        fs::write(
+            &bat,
+            "@echo args=%~1 %~2 env=%HERMES_AGENT_TEST%\r\n@cd\r\n@exit /b 7\r\n",
+        )
+        .unwrap();
+        (bat.to_string_lossy().to_string(), Vec::<String>::new())
     } else {
+        let (program, mut args) = shell(
+            "echo \"args=$1 $2 env=$HERMES_AGENT_TEST\"; pwd; exit 7",
+            "",
+        );
         args.push("sh".into()); // $0
-        args.push("one".into());
-        args.push("two words".into());
-    }
+        (program, args)
+    };
+    args.push("one".into());
+    args.push("two words".into());
     let json = spec_json(
         "s1",
         &program,
@@ -281,22 +288,40 @@ fn without_a_spool_the_exit_is_only_a_status() {
     );
 }
 
-/// An npm-installed vendor CLI on Windows is a `.cmd` shim. Codex gets its
-/// notify program as one JSON argument with quotes inside, so the batch
-/// file must receive that argument intact through hi and the standard
-/// library's batch-file quoting.
+/// An npm-installed vendor CLI on Windows is a `.cmd` shim in front of a
+/// Node program. Codex gets its notify program as one JSON argument with
+/// quotes inside; the Node program must receive every argument exactly as
+/// the launch file lists it, through hi, the standard library's batch-file
+/// quoting and cmd.exe.
 #[cfg(windows)]
 #[test]
-fn a_cmd_shim_receives_a_json_argument_with_quotes_intact() {
+fn a_cmd_shim_hands_a_json_argument_with_quotes_to_the_program_intact() {
+    let node_ok = Command::new("node")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !node_ok {
+        eprintln!("node is not on PATH; skipping");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("bin");
     fs::create_dir_all(&bin).unwrap();
-    let record = dir.path().join("argv.txt");
-    // Like the npm shim: forward every argument to a program; here the
-    // program is cmd's own echo, writing what it got to a file.
+    let record = dir.path().join("argv.json");
+    let script = dir.path().join("argv.mjs");
+    fs::write(
+        &script,
+        format!(
+            "import fs from 'node:fs'; fs.writeFileSync({}, JSON.stringify(process.argv.slice(2)));\n",
+            serde_json::to_string(&record.to_string_lossy()).unwrap()
+        ),
+    )
+    .unwrap();
+    // The npm shim shape: forward every argument to the Node program.
     fs::write(
         bin.join("codex.cmd"),
-        format!("@echo %*> \"{}\"\r\n", record.display()),
+        format!("@node \"{}\" %*\r\n", script.display()),
     )
     .unwrap();
     let path = std::env::join_paths(
@@ -304,13 +329,13 @@ fn a_cmd_shim_receives_a_json_argument_with_quotes_intact() {
             .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
     )
     .unwrap();
-    let notify =
-        r#"notify=["C:/Program Files/Hermes/hi.exe","signal","--agent","codex","--argv-json"]"#;
     let args: Vec<String> = vec![
         "-c".into(),
-        notify.into(),
+        r#"notify=["C:/Program Files/Hermes/hi.exe","signal","--agent","codex","--argv-json"]"#
+            .into(),
         "--sandbox".into(),
         "workspace-write".into(),
+        "a prompt with spaces".into(),
     ];
     let json = spec_json("s9", "codex", &args, dir.path(), &[], None);
     write_launch(dir.path(), "s9", &json);
@@ -321,13 +346,18 @@ fn a_cmd_shim_receives_a_json_argument_with_quotes_intact() {
         .stdin(Stdio::null())
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", text(&out.stderr));
-    let got = fs::read_to_string(&record).unwrap();
-    assert!(
-        got.contains(notify),
-        "the batch file saw the notify argument changed: {got:?}"
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {}\nstderr: {}",
+        text(&out.stdout),
+        text(&out.stderr)
     );
-    assert!(got.contains("--sandbox workspace-write"), "{got:?}");
+    let got: Vec<String> = serde_json::from_str(&fs::read_to_string(&record).unwrap()).unwrap();
+    assert_eq!(
+        got, args,
+        "the program behind the .cmd shim saw different arguments"
+    );
 }
 
 #[test]
