@@ -60,6 +60,13 @@ Behaviour per launch, from `HERMES_FAKE_MODE` or the file
 | `resume-fails` | rejects `--resume` at once (exit 1), as a vendor does for an id it does not know |
 | `ignore-resume` | accepts `--resume` but starts a new conversation under a new id anyway (a broken vendor; the negative control of the resume checks) |
 
+With `HERMES_FAKE_DIR` set, the conversation's transcript is
+`<HERMES_FAKE_DIR>/transcripts/<id>.jsonl` (Claude Code's JSONL shape), and
+that path is the `transcript_path` its hooks receive. In the TUI, `u` appends
+a model call whose usage comes from `<HERMES_FAKE_DIR>/usage-next.json`, and
+`k` appends a compaction (`compact_boundary`); the F14 context-gauge
+scenario drives both.
+
 With `HERMES_FAKE_DIR` set, every launch is recorded to
 `<HERMES_FAKE_DIR>/launch-<n>.json`: argv, cwd, the Hermes environment it
 saw, the settings file's contents, which hooks ran and how it ended.

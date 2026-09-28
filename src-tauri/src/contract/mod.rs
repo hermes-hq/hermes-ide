@@ -116,6 +116,27 @@ pub enum SessionEvent {
         code: Option<i32>,
         signal: Option<String>,
     },
+    /// How full the context window is, as the agent reports it (F14): the
+    /// input tokens of its last model call. `context_limit` is None when the
+    /// model's window is unknown, so nobody shows a percentage for it.
+    #[serde(rename_all = "camelCase")]
+    Usage {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        used_tokens: u32,
+        context_limit: Option<NonZeroU32>,
+        model: Option<String>,
+    },
+    /// The agent compacted its context (F14).
+    #[serde(rename_all = "camelCase")]
+    Compacted {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        trigger: Option<String>,
+        pre_tokens: Option<u32>,
+    },
 }
 
 /// The one Tauri event every SessionEvent travels on.
@@ -197,7 +218,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 10);
+        assert_eq!(events.len(), 14);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -205,7 +226,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&event).unwrap(), raw);
             seen.insert(raw["type"].as_str().unwrap().to_string());
         }
-        assert_eq!(seen.len(), 8, "every variant appears: {seen:?}");
+        assert_eq!(seen.len(), 10, "every variant appears: {seen:?}");
     }
 
     #[test]

@@ -7,7 +7,7 @@
  * Everything else (clicking, typing) goes through the real DOM on purpose.
  * The one write is a crash switch, used to prove crash containment.
  */
-import { pool, getFocusedSessionId } from "../terminal/pool";
+import { pool, getFocusedSessionId, isWebglAvailable, webglSessionIds } from "../terminal/pool";
 import { armCrash } from "../components/CrashProbe";
 import { loadedViews } from "../utils/lazyView";
 import { getI18nSnapshot } from "../i18n/registry";
@@ -62,6 +62,18 @@ const hooks = {
   focusedSessionId: (): string | null => getFocusedSessionId(),
   /** Logical lines of the terminal buffer (scrollback + screen). */
   readTerminal: (sessionId: string): string[] | null => readLines(sessionId),
+  /** The last `count` rows of the buffer, cheap enough to poll during a
+   *  flood of output (F24 throughput). Wrapped rows are not joined. */
+  terminalTail: (sessionId: string, count = 5): string[] | null => {
+    const entry = pool.get(sessionId);
+    if (!entry) return null;
+    const buffer = entry.terminal.buffer.active;
+    const rows: string[] = [];
+    for (let i = Math.max(0, buffer.length - count); i < buffer.length; i++) {
+      rows.push(buffer.getLine(i)?.translateToString(true) ?? "");
+    }
+    return rows;
+  },
   terminalInfo: (sessionId: string) => {
     const entry = pool.get(sessionId);
     if (!entry) return null;
@@ -72,8 +84,15 @@ const hooks = {
       opened: entry.opened,
       cwd: entry.cwd,
       phase: entry.sessionPhase,
+      /** F24: this terminal holds a WebGL context right now. */
+      webgl: entry.webgl !== null,
+      /** Canvases the terminal's renderer put on its screen (WebGL only). */
+      canvases: entry.container.querySelectorAll(".xterm-screen canvas").length,
     };
   },
+  /** F24: sessions whose terminal holds a WebGL context, and whether this
+   *  web view can create one at all. */
+  graphicsContexts: () => ({ available: isWebglAvailable(), sessions: webglSessionIds() }),
   /**
    * N10 (updates wait for idle): force `useAutoUpdater` to see an update as
    * ready, without reaching a real update server. `useAutoUpdater` reads

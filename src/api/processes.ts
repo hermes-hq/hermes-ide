@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ProcessInfo, ProcessSnapshot } from "../types/process";
+import type { FleetMemory, ProcessInfo, ProcessSnapshot } from "../types/process";
 
 export function listProcesses(): Promise<ProcessSnapshot> {
   return invoke<ProcessSnapshot>("list_processes");
@@ -19,4 +19,9 @@ export function getProcessDetail(pid: number): Promise<ProcessInfo> {
 
 export function revealProcessInFinder(path: string): Promise<void> {
   return invoke("reveal_process_in_finder", { path });
+}
+
+/** F24: memory of every session's process tree and of Hermes itself. */
+export function getFleetMemory(): Promise<FleetMemory> {
+  return invoke<FleetMemory>("fleet_memory");
 }

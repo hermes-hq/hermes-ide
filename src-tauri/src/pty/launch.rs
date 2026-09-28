@@ -1121,6 +1121,14 @@ pub(crate) fn watch_signals(
     expects_start_signal: bool,
     nonce: String,
 ) {
+    // F14: the same spool names the agent's transcript; its own watcher
+    // reads the context usage from there.
+    crate::context_usage::watch(
+        app.clone(),
+        Arc::clone(&session),
+        session_dir.join(SIGNALS_FILE),
+        nonce.clone(),
+    );
     std::thread::spawn(move || {
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
         let mut watch = LaunchWatch::new(expects_start_signal);

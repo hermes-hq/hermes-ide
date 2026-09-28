@@ -62,6 +62,28 @@ export interface ExitEvent extends EventBase {
   readonly signal: string | null;
 }
 
+/**
+ * How full the agent's context window is, as the agent itself reports it
+ * (F14): the input tokens of its last model call, read from the transcript
+ * file it names. `contextLimit` is null when Hermes does not know the
+ * model's window; a reader then shows no percentage rather than a guess.
+ */
+export interface UsageEvent extends EventBase {
+  readonly type: "usage";
+  readonly usedTokens: number;
+  readonly contextLimit: number | null;
+  readonly model: string | null;
+}
+
+/** The agent compacted its context (F14). Unknown parts are null. */
+export interface CompactedEvent extends EventBase {
+  readonly type: "compacted";
+  /** "auto" or "manual" as the agent says; free text. */
+  readonly trigger: string | null;
+  /** Tokens in the context just before it was compacted. */
+  readonly preTokens: number | null;
+}
+
 export type SessionEvent =
   | StatusEvent
   | TurnStartEvent
@@ -70,7 +92,9 @@ export type SessionEvent =
   | TurnInterruptedEvent
   | AttentionEvent
   | IdentityEvent
-  | ExitEvent;
+  | ExitEvent
+  | UsageEvent
+  | CompactedEvent;
 
 export type SessionEventType = SessionEvent["type"];
 
@@ -83,11 +107,22 @@ export const SESSION_EVENT_TYPES: readonly SessionEventType[] = [
   "attention",
   "identity",
   "exit",
+  "usage",
+  "compacted",
 ];
 
 function optionalString(v: unknown): string | null | undefined {
   if (v === undefined || v === null) return null;
   return typeof v === "string" ? v : undefined;
+}
+
+/** Largest token count on the wire; the Rust side reads it as a u32. */
+const MAX_TOKENS = 4294967295;
+
+/** A token count (an integer 0..u32::MAX), null, or undefined when malformed. */
+function tokenCount(v: unknown, { nullable, min }: { nullable: boolean; min: number }): number | null | undefined {
+  if (v === undefined || v === null) return nullable ? null : undefined;
+  return typeof v === "number" && Number.isInteger(v) && v >= min && v <= MAX_TOKENS ? v : undefined;
 }
 
 function turnNumber(v: unknown): number | null {
@@ -140,6 +175,19 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       if (code !== null && !(typeof code === "number" && Number.isInteger(code) && code >= -2147483648 && code <= 2147483647)) return null;
       if (signal !== null && typeof signal !== "string") return null;
       return { ...base, type: "exit", code, signal };
+    }
+    case "usage": {
+      const usedTokens = tokenCount(v.usedTokens, { nullable: false, min: 0 });
+      const contextLimit = tokenCount(v.contextLimit, { nullable: true, min: 1 });
+      const model = optionalString(v.model);
+      if (usedTokens === undefined || usedTokens === null || contextLimit === undefined || model === undefined) return null;
+      return { ...base, type: "usage", usedTokens, contextLimit, model };
+    }
+    case "compacted": {
+      const trigger = optionalString(v.trigger);
+      const preTokens = tokenCount(v.preTokens, { nullable: true, min: 0 });
+      if (trigger === undefined || preTokens === undefined) return null;
+      return { ...base, type: "compacted", trigger, preTokens };
     }
     default:
       return null;

@@ -25,7 +25,11 @@
     { "type": "identity", "at": 1790000006000, "vendorSessionId": "vs-0001", "model": "fake-model-1", "permissionMode": "default" },
     { "type": "identity", "at": 1790000006500, "vendorSessionId": null, "model": null, "permissionMode": null },
     { "type": "exit", "at": 1790000007000, "source": "pty", "code": 0, "signal": null },
-    { "type": "exit", "at": 1790000008000, "code": null, "signal": "SIGTERM" }
+    { "type": "exit", "at": 1790000008000, "code": null, "signal": "SIGTERM" },
+    { "type": "usage", "at": 1790000009000, "source": "transcript:claude", "usedTokens": 83003, "contextLimit": 200000, "model": "fake-model-1" },
+    { "type": "usage", "at": 1790000009500, "usedTokens": 0, "contextLimit": null, "model": null },
+    { "type": "compacted", "at": 1790000010000, "source": "transcript:claude", "trigger": "auto", "preTokens": 190000 },
+    { "type": "compacted", "at": 1790000010500, "trigger": null, "preTokens": null }
   ],
   "rejected": [
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
@@ -38,6 +42,14 @@
     { "type": "exit", "at": 1790000007000, "code": 2147483648, "signal": null },
     { "type": "turn_start", "at": 1790000001000.5, "n": 1 },
     { "type": "status", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
+    { "type": "usage", "at": 1790000009000, "usedTokens": -1, "contextLimit": 200000, "model": null },
+    { "type": "usage", "at": 1790000009000, "usedTokens": 4294967296, "contextLimit": 200000, "model": null },
+    { "type": "usage", "at": 1790000009000, "usedTokens": 10, "contextLimit": 0, "model": null },
+    { "type": "usage", "at": 1790000009000, "contextLimit": 200000, "model": null },
+    { "type": "usage", "at": 1790000009000, "usedTokens": 1.5, "contextLimit": 200000, "model": null },
+    { "type": "usage", "at": 1790000009000, "usedTokens": 10, "contextLimit": 200000, "model": 7 },
+    { "type": "compacted", "at": 1790000010000, "trigger": "auto", "preTokens": "many" },
+    { "type": "compacted", "at": 1790000010000, "trigger": 5, "preTokens": null },
     { "type": "nope", "at": 1790000000000 },
     "not an object"
   ]

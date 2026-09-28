@@ -50,3 +50,17 @@ export interface ProcessFilter {
   showHermesOnly: boolean;
   showZombiesOnly: boolean;
 }
+
+/** F24: resident memory of one session's process tree (src-tauri/src/fleet.rs). */
+export interface SessionMemory {
+  sessionId: string;
+  bytes: number;
+  processes: number;
+}
+
+/** F24: Hermes's own memory without its sessions, and each session's. */
+export interface FleetMemory {
+  appBytes: number;
+  appProcesses: number;
+  sessions: SessionMemory[];
+}

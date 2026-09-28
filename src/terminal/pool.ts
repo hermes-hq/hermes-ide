@@ -14,6 +14,7 @@ import { clearShellEnvironment } from "./intelligence/shellEnvironment";
 import { invalidateContext } from "./intelligence/contextAnalyzer";
 import { THEMES, FONT_FAMILIES } from "./themes";
 import { clearGhostOverlay } from "./ghostText";
+import { isFeatureFlagEnabled } from "../featureFlags";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -44,6 +45,8 @@ export interface PoolEntry {
   shellIsForeground: boolean;
   shellFgPollTimer: ReturnType<typeof setInterval> | null;
   cwd: string;
+  /** The WebGL renderer while this terminal holds a graphics context. */
+  webgl: WebglAddon | null;
 }
 
 export type SuggestionCallback = (state: SuggestionState | null) => void;
@@ -381,6 +384,7 @@ export async function createTerminal(
     shellIsForeground: false,
     shellFgPollTimer: null,
     cwd: "",
+    webgl: null,
   };
 
   pool.set(sessionId, entry);
@@ -388,6 +392,57 @@ export async function createTerminal(
 
   // Shell foreground polling is started on-demand when a terminal is focused,
   // not here. See focusShellFgPolling() / blurShellFgPolling().
+}
+
+// ─── Graphics contexts (F24) ─────────────────────────────────────────
+//
+// A web view only lets a page keep a limited number of WebGL contexts alive
+// (WebKit: 16), and every one costs GPU memory. With the fleetPerf flag on,
+// only terminals on screen hold one: detach gives it back (the terminal
+// falls back to the DOM renderer while hidden) and attach takes a new one,
+// so twenty open sessions never run into the limit.
+
+/** Set once WebGL could not be created at all (no GPU, software GL). */
+let webglUnavailable = false;
+
+function acquireWebgl(entry: PoolEntry): void {
+  if (entry.webgl || webglUnavailable) return;
+  try {
+    const addon = new WebglAddon();
+    addon.onContextLoss(() => {
+      if (entry.webgl === addon) entry.webgl = null;
+      addon.dispose();
+    });
+    entry.terminal.loadAddon(addon);
+    entry.webgl = addon;
+  } catch {
+    // The DOM renderer keeps working.
+    webglUnavailable = true;
+  }
+}
+
+function releaseWebgl(entry: PoolEntry): void {
+  const addon = entry.webgl;
+  if (!addon) return;
+  entry.webgl = null;
+  try {
+    addon.dispose();
+  } catch { /* already gone with its context */ }
+}
+
+/** Whether only visible terminals may hold a graphics context. */
+function budgetGraphicsContexts(): boolean {
+  return isFeatureFlagEnabled("fleetPerf");
+}
+
+/** Sessions whose terminal holds a WebGL context right now. */
+export function webglSessionIds(): string[] {
+  return [...pool].filter(([, e]) => e.webgl !== null).map(([id]) => id);
+}
+
+/** False once this web view refused to create WebGL. */
+export function isWebglAvailable(): boolean {
+  return !webglUnavailable;
 }
 
 // ─── Attach / Detach / Destroy ───────────────────────────────────────
@@ -421,14 +476,14 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
       });
     });
 
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      entry.terminal.loadAddon(webgl);
-    } catch { /* canvas fallback */ }
-  } else if (entry.viewport !== viewport) {
-    // Re-parent
-    viewport.appendChild(entry.container);
+    acquireWebgl(entry);
+  } else {
+    if (entry.viewport !== viewport) {
+      // Re-parent
+      viewport.appendChild(entry.container);
+    }
+    // Shown again: take a graphics context back (the redraw below paints it).
+    if (budgetGraphicsContexts()) acquireWebgl(entry);
   }
 
   entry.viewport = viewport;
@@ -498,6 +553,7 @@ export function detach(sessionId: string): void {
   clearGhostText(sessionId);
   entry.container.style.display = "none";
   entry.attached = false;
+  if (budgetGraphicsContexts()) releaseWebgl(entry);
   if (_focusedSessionId === sessionId) {
     _focusedSessionId = null;
     // Stop polling shell foreground — no terminal is focused

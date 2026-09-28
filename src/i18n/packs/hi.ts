@@ -653,6 +653,12 @@ export const hiPack: LanguagePack = {
     "sessions.starting": "शुरू हो रहा है",
     "sessions.disconnected": "डिस्कनेक्ट हुआ",
     "sessions.startupPrompt": "स्टार्टअप प्रॉम्प्ट पर प्रतीक्षा में",
+    "fleet.contextShort": "{percent}% संदर्भ",
+    "fleet.contextTitle": "संदर्भ विंडो: {limit} में से {used} टोकन उपयोग में ({percent}%), एजेंट के अनुसार",
+    "fleet.memoryTitle": "इस सत्र की प्रक्रियाओं द्वारा उपयोग की गई मेमोरी: {size}",
+    "fleet.tileWorkingAgents": "काम कर रहे एजेंटों को टाइल करें",
+    "fleet.noWorkingAgents": "अभी कोई एजेंट काम नहीं कर रहा है",
+    "agent.contextCompacted": "संदर्भ संक्षिप्त किया गया",
     "language.panel.selectLabel": "भाषा",
   },
 };

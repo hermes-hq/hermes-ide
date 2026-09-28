@@ -21,6 +21,8 @@
 //               (assistant error "authentication_failed", then an error
 //               result "Not logged in · Please run /login") and exits 0
 //   garbage     prints a line that is not JSON and stays up
+//   compact     compacts the context (a compact_boundary event), then
+//               replies like ok
 //
 // The replies are synthetic; nothing here was recorded from a real account.
 
@@ -110,6 +112,17 @@ function onUserMessage(text) {
   if (mode === "garbage") {
     process.stdout.write("fake-bridge: this line is not JSON {\n");
     return;
+  }
+  if (mode === "compact") {
+    // What Claude Code streams when it compacts the context (/compact, or
+    // automatically near the window's end), before the turn's reply.
+    out({
+      type: "system",
+      subtype: "compact_boundary",
+      session_id: sessionId,
+      uuid: `fake-compact-${process.pid}-${turn}`,
+      compact_metadata: { trigger: "manual", pre_tokens: 150000 },
+    });
   }
   const reply = `fake reply: ${text}`;
   out({

@@ -4,6 +4,7 @@ mod agent_setup;
 mod analytics;
 mod claude_config;
 mod clipboard;
+mod context_usage;
 pub mod contract;
 mod db;
 #[cfg(feature = "e2e")]
@@ -14,6 +15,7 @@ mod e2e_evidence;
 #[cfg(any(test, feature = "e2e"))]
 #[cfg_attr(not(feature = "e2e"), allow(dead_code))]
 mod e2e_protocol;
+mod fleet;
 mod git;
 mod inline_pty;
 mod instance;
@@ -956,6 +958,7 @@ pub fn run() {
             contract::emit_session_event_for_test,
             quit_flush::workspace_flush_ready,
             quit_flush::workspace_flush_done,
+            fleet::fleet_memory,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

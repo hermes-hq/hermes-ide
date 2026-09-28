@@ -32,6 +32,16 @@ export interface SessionTurnState {
   readonly completed: number;
 }
 
+/** The agent's last context report (F14): tokens in use and the window. */
+export interface SessionUsage {
+  readonly usedTokens: number;
+  /** Null when the model's window is unknown: show no percentage. */
+  readonly contextLimit: number | null;
+  readonly model: string | null;
+  /** When the agent reported it (epoch ms). */
+  readonly at: number;
+}
+
 export interface SessionEventSnapshot {
   readonly sessionId: string;
   readonly status: AgentStatus;
@@ -40,6 +50,10 @@ export interface SessionEventSnapshot {
   /** The last attention detail, or null when none was raised. */
   readonly attention: string | null;
   readonly exit: { readonly code: number | null; readonly signal: string | null } | null;
+  /** The last context-window report, or null when the agent reported none. */
+  readonly usage: SessionUsage | null;
+  /** How many times the agent compacted its context. */
+  readonly compactions: number;
   /** The most recent events, oldest first, at most SESSION_EVENT_CAP. */
   readonly events: readonly SessionEvent[];
   /** Bumps on every accepted event; 0 for a session nothing reported on. */
@@ -57,6 +71,8 @@ function emptySnapshot(sessionId: string): SessionEventSnapshot {
     turn: NO_TURN,
     attention: null,
     exit: null,
+    usage: null,
+    compactions: 0,
     events: Object.freeze([]) as readonly SessionEvent[],
     version: 0,
   });
@@ -94,6 +110,12 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       // localised agentError.exitCode / agentError.exitSignal strings.
       next.status = { kind: "exited", confidence: "exact", detail: "" };
       next.turn = { current: null, completed: prev.turn.completed + (prev.turn.current === null ? 0 : 1) };
+      break;
+    case "usage":
+      next.usage = Object.freeze({ usedTokens: event.usedTokens, contextLimit: event.contextLimit, model: event.model, at: event.at });
+      break;
+    case "compacted":
+      next.compactions = prev.compactions + 1;
       break;
   }
   return Object.freeze(next);

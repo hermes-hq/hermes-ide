@@ -18,6 +18,7 @@ import type { PluginSessionActionContribution } from "../plugins/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionModel } from "../agent/useSessionModel";
 import { agentDisplayName } from "../catalog/agentCatalog";
+import { SessionContextGauge, SessionMemoryTag } from "./SessionFleetTags";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -944,6 +945,8 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               <span className="session-phase-tag" data-phase={session.phase}>
                 {session.phase === "busy" ? t("sessions.working") : session.phase === "needs_input" ? t("sessions.needsInput") : session.phase === "shell_ready" ? t("sessions.ready") : session.phase === "creating" ? t("sessions.starting") : session.phase === "disconnected" ? t("sessions.disconnected") : session.phase}
               </span>
+              <SessionContextGauge sessionId={session.id} />
+              <SessionMemoryTag sessionId={session.id} />
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
             {session.phase === "disconnected" && session.ssh_info && onReconnect && (

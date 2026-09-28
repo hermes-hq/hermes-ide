@@ -62,6 +62,18 @@ export interface RenderedMessage {
   timestamp?: number;
 }
 
+/**
+ * F14: the agent compacted its context (a `system`/`compact_boundary`
+ * event). The view draws a divider after the message that was last when it
+ * happened (`afterMessageId`, null when there was none yet).
+ */
+export interface CompactionMark {
+  afterMessageId: string | null;
+  trigger: string | null;
+  preTokens: number | null;
+  at: number;
+}
+
 export interface AgentSessionState {
   initialized: boolean;
   initEvent: InitEvent | null;
@@ -155,10 +167,13 @@ export interface AgentSessionState {
    *  the last message in `messages` is still the user's prompt.
    *  Null until the first `result` event arrives. */
   resultEventAt: number | null;
+  /** Context compactions, oldest first (F14). */
+  compactions: CompactionMark[];
 }
 
 export function emptyState(): AgentSessionState {
   return {
+    compactions: [],
     cumulativeCostUsd: 0,
     cumulativeInputTokens: 0,
     cumulativeOutputTokens: 0,
@@ -716,6 +731,24 @@ function reduceStreamPartial(
   return state;
 }
 
+/** Where a compact_boundary lands: after the last top-level message. */
+function compactionMark(state: AgentSessionState, event: AgentEvent): CompactionMark {
+  const meta = (event as { compact_metadata?: { trigger?: unknown; pre_tokens?: unknown } }).compact_metadata;
+  let afterMessageId: string | null = null;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    if (!state.messages[i].parentToolUseId) {
+      afterMessageId = state.messages[i].id;
+      break;
+    }
+  }
+  return {
+    afterMessageId,
+    trigger: typeof meta?.trigger === "string" ? meta.trigger : null,
+    preTokens: typeof meta?.pre_tokens === "number" && Number.isFinite(meta.pre_tokens) ? meta.pre_tokens : null,
+    at: Date.now(),
+  };
+}
+
 /**
  * Pure reducer — given the previous state and an incoming event,
  * return the next state. Never mutates the input.
@@ -774,6 +807,9 @@ export function reduceEvent(
             ? state.streamingThinkingText
             : new Map(),
       };
+    }
+    if ((event as { subtype?: unknown }).subtype === "compact_boundary") {
+      return { ...state, compactions: [...state.compactions, compactionMark(state, event)] };
     }
     // Other system events (status, etc.) are flow markers — ignore quietly.
     return state;

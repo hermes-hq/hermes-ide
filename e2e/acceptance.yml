@@ -540,3 +540,32 @@ features:
       F25-6:
         text: "An Agent view session starts its bridge from the unpacked runtime, imports the SDK from it and answers; with a damaged archive no bridge starts and the view says why"
         scenarios: [F25-agent-session-runtime.mjs]
+  F14:
+    name: "Real context gauge"
+    # The gauge reads the transcript the agent names in its own hook signal,
+    # so it needs the launch helper (launchHelper flag); nothing to show
+    # without it. The fake claude writes a Claude-shaped transcript.
+    status: partial
+    criteria:
+      F14-1:
+        text: "The gauge matches reported input tokens / model limit to within 1 point"
+        scenarios: [F14-context-gauge.mjs]
+      F14-2:
+        text: "A compact_boundary event renders a divider in the transcript"
+        scenarios: [F14-context-gauge.mjs]
+      F14-3:
+        text: "Terminal sessions show no gauge rather than a guess"
+        scenarios: [F14-context-gauge.mjs]
+  F24:
+    name: "Fleet performance: many terminals"
+    # Behind the fleetPerf flag. Budgets per OS: e2e/app/fleet-budgets.json.
+    # "Only visible terminals hold a WebGL context" is asserted where the web
+    # view has WebGL (macOS, Windows); Linux CI renders without it.
+    status: partial
+    criteria:
+      F24-1:
+        text: "20 open terminal sessions stay responsive on all three OSes"
+        scenarios: [F24-fleet-perf.mjs]
+      F24-2:
+        text: "Idle and per-agent memory stay within the CI budgets"
+        scenarios: [F24-fleet-perf.mjs]
