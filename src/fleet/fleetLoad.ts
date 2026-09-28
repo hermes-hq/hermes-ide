@@ -5,7 +5,6 @@
 // Polled only while the queue needs it: a cap is set.
 
 import { invoke } from "@tauri-apps/api/core";
-import { useSyncExternalStore } from "react";
 
 export interface AgentLoadRow {
   readonly sessionId: string;
@@ -45,10 +44,6 @@ export function applyAgentLoad(rows: readonly AgentLoadRow[]): void {
   for (const l of [...listeners]) l();
 }
 
-export function getSessionLoad(sessionId: string): SessionLoad | null {
-  return loads.get(sessionId) ?? null;
-}
-
 export function getAllLoads(): ReadonlyMap<string, SessionLoad> {
   return loads;
 }
@@ -58,10 +53,6 @@ export function subscribeAgentLoad(listener: Listener): () => void {
   return () => {
     listeners.delete(listener);
   };
-}
-
-export function useAgentLoads(): ReadonlyMap<string, SessionLoad> {
-  return useSyncExternalStore(subscribeAgentLoad, getAllLoads, getAllLoads);
 }
 
 export function _resetAgentLoadForTest(): void {
