@@ -157,7 +157,9 @@ fn non_empty_str(v: Option<&Value>) -> Option<String> {
 /// Parse one transcript line. Claude Code (`assistant` records with
 /// `message.usage`, `system`/`compact_boundary`) and Codex rollouts
 /// (`event_msg`/`token_count`, `turn_context`, `compacted`) are understood;
-/// anything else is None.
+/// anything else is None. Note: only a hook payload's `transcript_path`
+/// (Claude's shape) names a transcript today, so a Codex session gets no
+/// gauge until something reports its rollout file.
 pub fn parse_transcript_line(line: &str) -> Option<TranscriptRecord> {
     let v: Value = serde_json::from_str(line).ok()?;
     match v.get("type")?.as_str()? {
@@ -297,6 +299,32 @@ impl UsageTracker {
     }
 }
 
+/// The events for a batch of transcript lines. Lines that were already in
+/// the file when Hermes started reading it (`history`, e.g. a resumed
+/// conversation) only set where the gauge stands: of those, just the latest
+/// usage goes out, not a replay of every past call and compaction.
+pub fn events_for_lines(
+    tracker: &mut UsageTracker,
+    lines: &[String],
+    at: i64,
+    source: &str,
+    history: bool,
+) -> Vec<SessionEvent> {
+    let events = lines
+        .iter()
+        .filter_map(|line| parse_transcript_line(line))
+        .filter_map(|record| tracker.feed(record, at, source));
+    if history {
+        events
+            .filter(|e| matches!(e, SessionEvent::Usage { .. }))
+            .last()
+            .into_iter()
+            .collect()
+    } else {
+        events.collect()
+    }
+}
+
 // ─── The spool: where the transcript is ──────────────────────────────
 
 /// What a spool line tells this module.
@@ -355,7 +383,9 @@ pub(crate) fn watch(
     };
     std::thread::spawn(move || {
         let mut spool = LineTail::new(spool_file);
-        let mut transcript: Option<(LineTail, String)> = None;
+        // The transcript's tail, the event source, and whether the next read
+        // is the history already in the file.
+        let mut transcript: Option<(LineTail, String, bool)> = None;
         let mut tracker = UsageTracker::default();
         loop {
             std::thread::sleep(POLL);
@@ -370,7 +400,9 @@ pub(crate) fn watch(
             for line in spool.poll() {
                 match parse_spool_note(&line, &nonce) {
                     Some(SpoolNote::Transcript { path, agent }) => {
-                        let same = transcript.as_ref().is_some_and(|(t, _)| t.path() == path);
+                        let same = transcript
+                            .as_ref()
+                            .is_some_and(|(t, _, _)| t.path() == path);
                         if !same {
                             log::info!(
                                 "[CONTEXT] {session_id}: reading usage from the agent's transcript"
@@ -378,6 +410,7 @@ pub(crate) fn watch(
                             transcript = Some((
                                 LineTail::near_end(path, TRANSCRIPT_BACKLOG_BYTES),
                                 format!("transcript:{agent}"),
+                                true,
                             ));
                             tracker = UsageTracker::default();
                         }
@@ -386,14 +419,12 @@ pub(crate) fn watch(
                     None => {}
                 }
             }
-            if let Some((tail, source)) = transcript.as_mut() {
-                for line in tail.poll() {
-                    if let Some(record) = parse_transcript_line(&line) {
-                        if let Some(event) = tracker.feed(record, now_ms(), source) {
-                            emit_session_event(&app, &session_id, event);
-                        }
-                    }
+            if let Some((tail, source, history)) = transcript.as_mut() {
+                let lines = tail.poll();
+                for event in events_for_lines(&mut tracker, &lines, now_ms(), source, *history) {
+                    emit_session_event(&app, &session_id, event);
                 }
+                *history = false;
             }
             if gone || exited {
                 break;
@@ -582,6 +613,39 @@ mod tests {
         assert!(
             t.feed(call(90_000), 14, "transcript:claude").is_some(),
             "after a compaction the next call is news"
+        );
+    }
+
+    #[test]
+    fn a_transcript_found_with_history_sends_only_where_the_gauge_stands() {
+        let compact = json!({"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":150000}}).to_string();
+        let history = vec![
+            claude_assistant(3, 1_000, 9_000, "claude-fake-1"),
+            compact.clone(),
+            claude_assistant(3, 2_000, 40_000, "claude-fake-1"),
+            claude_assistant(3, 2_000, 50_000, "claude-fake-1"),
+            "not json".to_string(),
+        ];
+        let mut t = UsageTracker::default();
+        let seeded = events_for_lines(&mut t, &history, 1, "transcript:claude", true);
+        assert_eq!(seeded.len(), 1, "one event, not a replay: {seeded:?}");
+        assert!(matches!(
+            seeded[0],
+            SessionEvent::Usage {
+                used_tokens: 52_003,
+                ..
+            }
+        ));
+        // What is written after that is news, every call and compaction.
+        let live = vec![compact, claude_assistant(3, 1_000, 20_000, "claude-fake-1")];
+        let events = events_for_lines(&mut t, &live, 2, "transcript:claude", false);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], SessionEvent::Compacted { .. }));
+        // The same history read as live lines would have sent every change.
+        let mut fresh = UsageTracker::default();
+        assert_eq!(
+            events_for_lines(&mut fresh, &history, 1, "transcript:claude", false).len(),
+            4
         );
     }
 
