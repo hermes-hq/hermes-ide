@@ -27,7 +27,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tokio::process::Command;
 
-use super::{resolve_bridge_path, which_node};
+use super::{resolve_bridge_path_blocking, which_node};
 
 /// Set once the single warm-up of this app run has been claimed.
 static WARM_UP_CLAIMED: AtomicBool = AtomicBool::new(false);
@@ -58,7 +58,7 @@ pub async fn warm_agent_bridge(app: AppHandle) -> bool {
 fn prewarm_bridge_runtime(app: &AppHandle) {
     let app = app.clone();
     tokio::spawn(async move {
-        let bridge_path = match resolve_bridge_path(&app) {
+        let bridge_path = match resolve_bridge_path_blocking(&app).await {
             Ok(p) => p,
             Err(e) => {
                 log::debug!("[prewarm] skipping — bridge not resolvable: {}", e);

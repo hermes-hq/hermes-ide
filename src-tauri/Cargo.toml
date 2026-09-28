@@ -96,6 +96,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 flate2 = "1"
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 tar = "0.4"
+# Unpacks the bridge runtime archive (zstd), pure Rust: no C toolchain on any target.
+ruzstd = "0.9"
+sha2 = "0.10"
 anyhow = "1"
 notify = "8"
 dunce = "1"
@@ -107,3 +110,12 @@ criterion = { version = "0.8", features = ["html_reports"] }
 [[bench]]
 name = "analyzer"
 harness = false
+
+# Unpacking the bridge runtime (about 80 MB of zstd, 256 MB out) takes ~13 s
+# with these crates unoptimised and ~2 s optimised; debug and test builds
+# (the e2e rig, `tauri dev`) unpack it too.
+[profile.dev.package.ruzstd]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3

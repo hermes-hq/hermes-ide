@@ -424,3 +424,34 @@ features:
       C0-2:
         text: "The inbox seam raises, lists oldest first and resolves; the turn ledger commands answer with nothing"
         scenarios: [C0-session-event-bridge.mjs]
+  F25:
+    name: "Windows signing, winget and AppImage"
+    # Windows code signing needs a signing identity only a person can obtain,
+    # so it is not part of this work; the other criteria are proven here.
+    status: partial
+    criteria:
+      F25-1:
+        text: "Windows installers show a verified publisher"
+        scenarios: []
+      F25-2:
+        # Installs the newest published release's real installer through the
+        # manifests the release workflow generates (submitting them to
+        # microsoft/winget-pkgs is a one-time human step).
+        text: "\"winget install\" works"
+        scenarios:
+          - F25-winget-install.mjs@win32
+      F25-3:
+        # Measured: the macOS installer drops from 122 MB to 98 MB and the
+        # installed app from 310 MB to 118 MB (the runtime ships as one
+        # 79 MB archive). Downloads are already compressed, so the installer
+        # itself cannot shrink by 150 MB while the runtime is bundled; the
+        # criterion stays open.
+        text: "The installer is at least 150 MB smaller"
+        scenarios: []
+      F25-4:
+        text: "The Claude bridge runtime ships as one archive, unpacks on first use, is reused after that, repaired when damaged and replaced on update; a damaged archive is refused"
+        scenarios: [F25-bridge-runtime.mjs]
+      F25-5:
+        text: "The Linux AppImage installs, passes its self-test and updates itself to a newer release; an update with a wrong signature is refused"
+        scenarios:
+          - F25-appimage-update.mjs@linux

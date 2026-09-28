@@ -34,11 +34,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "resources": [
-      "bridge/hermes-claude-bridge.mjs",
-      "bridge/canUseToolHelpers.mjs",
-      "bridge/bridgeRuntimeHelpers.mjs",
-      "bridge/package.json",
-      "bridge/node_modules"
+      "bridge/runtime"
     ],
     "icon": [
       "icons/32x32.png",

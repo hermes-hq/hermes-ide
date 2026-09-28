@@ -25,6 +25,7 @@ export const JOB_TRIGGERS = {
   "rust-clippy": ["rust", "ci"],
   "rust-test": ["rust", "ci"],
   "e2e-app": ["frontend", "rust", "ci"],
+  "e2e-installers": ["frontend", "rust", "ci"],
   acceptance: ["frontend", "rust", "ci"],
   actionlint: ["workflows"],
 };

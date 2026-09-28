@@ -186,6 +186,8 @@ fn check_database(app: &AppHandle, db_path: &Path) -> Value {
 }
 
 fn check_bridge_resources(app: &AppHandle) -> Value {
+    let started = Instant::now();
+    // In an installed app this unpacks the packed runtime on first use.
     let bridge = match crate::agent::resolve_bridge_path(app) {
         Ok(p) => p,
         Err(e) => return json!({ "ok": false, "error": e }),
@@ -202,14 +204,117 @@ fn check_bridge_resources(app: &AppHandle) -> Value {
         .filter(|rel| !dir.join(rel).exists())
         .map(|rel| rel.to_string())
         .collect();
-    let node = crate::agent::which_node().map(|p| display_path(&p));
+    // A runtime unpacked from the installer's archive carries its manifest
+    // as a marker; a dev checkout runs the bridge folder itself.
+    let packed: Option<Value> =
+        std::fs::read_to_string(dir.join(crate::agent::runtime::MARKER_FILE))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok());
+    let node = crate::agent::which_node();
+    // The import the bridge does first, run the way the bridge runs it: node
+    // resolves the SDK from the bridge's own folder. Skipped without node,
+    // which comes from the user's machine, not the bundle.
+    let sdk_import = match &node {
+        Some(_) if !missing.is_empty() => json!({ "ok": false, "skipped": "files missing" }),
+        Some(node) => import_sdk(node, &dir, SDK_IMPORT_TIMEOUT),
+        None => json!({ "ok": true, "skipped": "node not found" }),
+    };
+    let field = |key: &str| {
+        packed
+            .as_ref()
+            .and_then(|m| m.get(key))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
     json!({
-        "ok": missing.is_empty(),
+        "ok": missing.is_empty() && sdk_import.get("ok") == Some(&Value::Bool(true)),
         "bridge": display_path(&bridge),
         "missing": missing,
+        "packed": packed.is_some(),
+        "runtime_id": field("id"),
+        "sdk_version": field("sdkVersion"),
+        "sdk_import": sdk_import,
+        "ms": started.elapsed().as_millis() as u64,
         // Informational: node comes from the user's machine, not the bundle.
-        "node": node,
+        "node": node.map(|p| display_path(&p)),
     })
+}
+
+const SDK_IMPORT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The line of node's stderr that says what went wrong: the first one that
+/// names an error, else the last non-empty one. Paths are shortened like
+/// every other path in the report.
+fn node_error_line(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("Node.js v") && !l.starts_with("at "))
+        .collect();
+    let line = lines
+        .iter()
+        .find(|l| l.contains("Error") || l.contains("error"))
+        .or(lines.last())
+        .copied()
+        .unwrap_or("");
+    match dirs::home_dir() {
+        Some(home) if !home.as_os_str().is_empty() => line.replace(&*home.to_string_lossy(), "~"),
+        _ => line.to_string(),
+    }
+}
+
+/// Run `import("@anthropic-ai/claude-agent-sdk")` with `node` from `dir`,
+/// the way the bridge resolves it. `{ ok, ms, error }`.
+pub fn import_sdk(node: &Path, dir: &Path, timeout: Duration) -> Value {
+    let started = Instant::now();
+    let script = "const m = await import('@anthropic-ai/claude-agent-sdk'); \
+                  if (typeof m.query !== 'function') { console.error('the SDK has no query()'); process.exit(3); }";
+    let mut cmd = std::process::Command::new(node);
+    cmd.args(["--input-type=module", "-e", script])
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return json!({ "ok": false, "error": format!("cannot start node: {}", e) }),
+    };
+    let deadline = started + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut err = String::new();
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_string(&mut err);
+                }
+                return json!({
+                    "ok": status.success(),
+                    "ms": started.elapsed().as_millis() as u64,
+                    "error": if status.success() {
+                        Value::Null
+                    } else {
+                        Value::String(format!("{}: {}", status, node_error_line(&err)))
+                    },
+                });
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return json!({
+                    "ok": false,
+                    "error": format!("importing the SDK did not finish within {} s", timeout.as_secs()),
+                });
+            }
+            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
+        }
+    }
 }
 
 /// A path for the report. The report leaves the machine, so the home
@@ -603,6 +708,76 @@ fn check_pty_echo(timeout: Duration, stage: &Mutex<String>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder laid out like the bridge's, with a stand-in SDK whose entry
+    /// module has `source` as its body.
+    fn fake_bridge_dir(source: Option<&str>) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(source) = source {
+            let sdk = dir
+                .path()
+                .join("node_modules/@anthropic-ai/claude-agent-sdk");
+            std::fs::create_dir_all(&sdk).unwrap();
+            std::fs::write(
+                sdk.join("package.json"),
+                r#"{"name":"@anthropic-ai/claude-agent-sdk","type":"module","exports":{".":"./sdk.mjs"}}"#,
+            )
+            .unwrap();
+            std::fs::write(sdk.join("sdk.mjs"), source).unwrap();
+        }
+        dir
+    }
+
+    fn node_or_skip() -> Option<PathBuf> {
+        let node = crate::agent::which_node();
+        if node.is_none() {
+            // Every CI runner has node; only a bare dev machine may not.
+            assert!(std::env::var("CI").is_err(), "node is required on CI");
+            eprintln!("skipping: node not found");
+        }
+        node
+    }
+
+    #[test]
+    fn sdk_import_passes_when_the_sdk_resolves_from_the_bridge_folder() {
+        let Some(node) = node_or_skip() else { return };
+        let dir = fake_bridge_dir(Some("export function query() {}\n"));
+        let r = import_sdk(&node, dir.path(), Duration::from_secs(30));
+        assert_eq!(r["ok"], Value::Bool(true), "{r}");
+    }
+
+    #[test]
+    fn sdk_import_fails_when_the_sdk_is_missing_or_wrong() {
+        let Some(node) = node_or_skip() else { return };
+        let missing = fake_bridge_dir(None);
+        let r = import_sdk(&node, missing.path(), Duration::from_secs(30));
+        assert_eq!(r["ok"], Value::Bool(false), "{r}");
+        assert!(
+            r["error"].as_str().unwrap().contains("claude-agent-sdk"),
+            "{r}"
+        );
+
+        let wrong = fake_bridge_dir(Some("export const other = 1;\n"));
+        let r = import_sdk(&node, wrong.path(), Duration::from_secs(30));
+        assert_eq!(r["ok"], Value::Bool(false), "{r}");
+        assert!(r["error"].as_str().unwrap().contains("no query()"), "{r}");
+    }
+
+    #[test]
+    fn sdk_import_gives_up_after_the_timeout() {
+        let Some(node) = node_or_skip() else { return };
+        let dir = fake_bridge_dir(Some(
+            "await new Promise(() => setInterval(() => {}, 1000));\n",
+        ));
+        let started = Instant::now();
+        let r = import_sdk(&node, dir.path(), Duration::from_secs(2));
+        assert_eq!(r["ok"], Value::Bool(false), "{r}");
+        assert!(
+            r["error"].as_str().unwrap().contains("did not finish"),
+            "{r}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
 
     #[test]
     fn parses_equals_form() {

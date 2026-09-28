@@ -47,6 +47,8 @@ function fullRelease() {
   asset("HERMES-IDE_1.4.1_x64.dmg");
   asset("HERMES-IDE_1.4.1_amd64.deb", { sign: true });
   asset("HERMES-IDE_1.4.1_arm64.deb", { sign: true });
+  asset("HERMES-IDE_1.4.1_amd64.AppImage", { sign: true });
+  asset("HERMES-IDE_1.4.1_aarch64.AppImage", { sign: true });
   asset("HERMES-IDE_1.4.1_x64-setup.exe");
   asset("HERMES-IDE_1.4.1_arm64-setup.exe");
   asset("darwin-aarch64-HERMES-IDE.app.tar.gz", { sign: true });
@@ -91,7 +93,11 @@ describe("release manifests: build", () => {
     expect(Object.keys(latest.platforms).sort()).toEqual([
       "darwin-aarch64",
       "darwin-x86_64",
+      "linux-aarch64",
+      "linux-aarch64-appimage",
       "linux-aarch64-deb",
+      "linux-x86_64",
+      "linux-x86_64-appimage",
       "linux-x86_64-deb",
       "windows-aarch64",
       "windows-x86_64",
@@ -101,14 +107,23 @@ describe("release manifests: build", () => {
     );
     expect(latest.platforms["linux-x86_64-deb"].signature).toBe(String(written.get("HERMES-IDE_1.4.1_amd64.deb.sig")).trim());
     expect(latest.platforms["darwin-x86_64"].url.endsWith("/darwin-x86_64-HERMES-IDE.app.tar.gz")).toBe(true);
-    // No plain linux key: a .deb client must find the -deb one.
-    expect(latest.platforms["linux-x86_64"]).toBeUndefined();
+    // An AppImage asks for -appimage (or the plain key when it does not
+    // report its bundle type); a .deb install finds its own -deb key first.
+    const appImageUrl = `https://github.com/${REPO}/releases/download/${TAG}/HERMES-IDE_1.4.1_amd64.AppImage`;
+    expect(latest.platforms["linux-x86_64-appimage"].url).toBe(appImageUrl);
+    expect(latest.platforms["linux-x86_64"].url).toBe(appImageUrl);
+    expect(latest.platforms["linux-x86_64-appimage"].signature).toBe(String(written.get("HERMES-IDE_1.4.1_amd64.AppImage.sig")).trim());
+    expect(latest.platforms["linux-aarch64-appimage"].url.endsWith("/HERMES-IDE_1.4.1_aarch64.AppImage")).toBe(true);
+    expect(latest.platforms["linux-aarch64-deb"].url.endsWith("/HERMES-IDE_1.4.1_arm64.deb")).toBe(true);
 
     expect(downloads).toEqual({
       version: "1.4.1",
       platforms: {
         macos: { aarch64: { dmg: "HERMES-IDE_1.4.1_aarch64.dmg" }, x86_64: { dmg: "HERMES-IDE_1.4.1_x64.dmg" } },
-        linux: { x86_64: { deb: "HERMES-IDE_1.4.1_amd64.deb" }, aarch64: { deb: "HERMES-IDE_1.4.1_arm64.deb" } },
+        linux: {
+          x86_64: { deb: "HERMES-IDE_1.4.1_amd64.deb", appimage: "HERMES-IDE_1.4.1_amd64.AppImage" },
+          aarch64: { deb: "HERMES-IDE_1.4.1_arm64.deb", appimage: "HERMES-IDE_1.4.1_aarch64.AppImage" },
+        },
         windows: { x86_64: { exe: "HERMES-IDE_1.4.1_x64-setup.exe" }, aarch64: { exe: "HERMES-IDE_1.4.1_arm64-setup.exe" } },
       },
     });
@@ -202,6 +217,35 @@ describe("release manifests: lint", () => {
       expect.arrayContaining([
         expect.stringContaining("missing platform linux-x86_64-deb"),
         expect.stringContaining("linux-x86_64 exists without linux-x86_64-deb"),
+      ]),
+    );
+  });
+
+  it("rejects a Linux key that points at the other kind of bundle", () => {
+    fullRelease();
+    const latest = structuredClone(buildManifests(dir, { tag: TAG, repo: REPO }).latest);
+    // A .deb install must never be handed the AppImage, nor the other way round.
+    const deb = latest.platforms["linux-x86_64-deb"];
+    latest.platforms["linux-x86_64-deb"] = latest.platforms["linux-x86_64-appimage"];
+    latest.platforms["linux-x86_64-appimage"] = deb;
+    writeFileSync(join(dir, "latest.json"), JSON.stringify(latest));
+    expect(lintManifests(dir, { tag: TAG, pubkey: keys.pubkeyB64 })).toEqual([
+      expect.stringContaining("linux-x86_64-deb: points at HERMES-IDE_1.4.1_amd64.AppImage"),
+      expect.stringContaining("linux-x86_64-appimage: points at HERMES-IDE_1.4.1_amd64.deb"),
+    ]);
+  });
+
+  it("requires the AppImage on the download page and in the updater when Linux is built", () => {
+    fullRelease();
+    rmSync(join(dir, "HERMES-IDE_1.4.1_aarch64.AppImage"));
+    rmSync(join(dir, "HERMES-IDE_1.4.1_aarch64.AppImage.sig"));
+    buildManifests(dir, { tag: TAG, repo: REPO });
+    const problems = lintManifests(dir, { tag: TAG, pubkey: keys.pubkeyB64 });
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        "latest.json: missing platform linux-aarch64-appimage",
+        "latest.json: missing platform linux-aarch64",
+        "downloads.json: missing linux/aarch64/appimage",
       ]),
     );
   });

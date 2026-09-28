@@ -9,6 +9,7 @@
 
 pub mod prewarm;
 mod respawn;
+pub mod runtime;
 pub use respawn::AgentError;
 use respawn::SpawnGate;
 
@@ -198,6 +199,21 @@ fn node_spawn_paths_with(
     }
 }
 
+/// `HERMES_BRIDGE_RUNTIME_DIR`: a folder holding a packed bridge runtime
+/// (`manifest.json` + archive) to use instead of the bundle's. Read by test
+/// and debug builds only, so a stray variable cannot point an installed app
+/// at another archive.
+fn runtime_dir_override() -> Option<String> {
+    if cfg!(any(debug_assertions, feature = "e2e")) {
+        std::env::var("HERMES_BRIDGE_RUNTIME_DIR").ok()
+    } else {
+        None
+    }
+}
+
+/// Where the bridge script is, unpacking the bundled runtime first when
+/// needed (which can take a few seconds once). Blocking: call it from a
+/// blocking context, e.g. [`resolve_bridge_path_blocking`].
 pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     // Honor an explicit override even if it's broken — surface the
     // misconfiguration loudly rather than silently falling through.
@@ -212,8 +228,18 @@ pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf,
         ));
     }
 
-    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let resource_dir = app.path().resource_dir().ok();
+
+    // An installed app carries the bridge as one packed archive (ADR 002):
+    // unpack it into the data folder on first use and run it from there.
+    if let Some(bundle) =
+        runtime::bundle_dir(resource_dir.as_deref(), runtime_dir_override().as_deref())
+    {
+        let root = crate::instance::app_data_dir(app)?.join("runtime");
+        return runtime::ensure_unpacked(&bundle, &root).map(|u| u.bridge);
+    }
+
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let candidates = bridge_path_candidates(None, &manifest, resource_dir.as_deref());
 
     for c in &candidates {
@@ -229,6 +255,17 @@ pub(crate) fn resolve_bridge_path(app: &AppHandle) -> Result<std::path::PathBuf,
             .collect::<Vec<_>>()
             .join(", ")
     ))
+}
+
+/// [`resolve_bridge_path`] on the blocking pool, so a first-use unpack of
+/// the runtime never stalls an async worker.
+pub(crate) async fn resolve_bridge_path_blocking(
+    app: &AppHandle,
+) -> Result<std::path::PathBuf, String> {
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || resolve_bridge_path(&app))
+        .await
+        .map_err(|e| format!("bridge lookup failed: {}", e))?
 }
 
 // ─── Node resolution ──────────────────────────────────────────────
@@ -644,7 +681,11 @@ async fn spawn_child(
         bridge: bridge_path,
         working_dir,
         add_dirs: dirs,
-    } = node_spawn_paths(&resolve_bridge_path(app)?, &working_dir, &add_dirs);
+    } = node_spawn_paths(
+        &resolve_bridge_path_blocking(app).await?,
+        &working_dir,
+        &add_dirs,
+    );
     let claude_session_id = match (prior_uuid.as_deref(), fork) {
         (Some(uuid), false) => uuid.to_string(),
         (Some(_), true) | (None, _) => uuid::Uuid::new_v4().to_string(),
