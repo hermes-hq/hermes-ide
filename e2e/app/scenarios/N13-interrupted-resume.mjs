@@ -267,8 +267,10 @@ async function waitForStartup(bridge, sessionId, state, { timeoutMs = 20_000 } =
   `, { timeoutMs });
   return Date.now() - t0;
 }
-/** The "waiting at a startup prompt" tags in the session list. */
-const startupTags = (bridge) => bridge.eval(`return e2e.all(".session-startup-tag").map((t) => e2e.norm(t.innerText));`);
+/** The "waiting at a startup prompt" tags in the session list: the old tag,
+ *  or with the flag on the one status tag (F10) saying startup_prompt. */
+const STARTUP_TAGS = `.session-startup-tag, .session-item .agent-status-tag[data-status="startup_prompt"]`;
+const startupTags = (bridge) => bridge.eval(`return e2e.all(${JSON.stringify(STARTUP_TAGS)}).map((t) => e2e.norm(t.innerText));`);
 async function firstRestoredTerminal(bridge) {
   return bridge.waitFor("the restored session's terminal", `
     const ids = window.__HERMES_E2E__.terminalIds();
@@ -448,9 +450,11 @@ try {
   const s4 = await createClaudeSession(app.bridge);
   await app.bridge.waitForTerminal(s4, /Do you trust the files in this folder\?/, { timeoutMs: 30_000 });
   await waitForStartup(app.bridge, s4, "waiting_at_startup_prompt", { timeoutMs: 15_000 });
+  // With the flag on, the session list shows one status per session (F10):
+  // a startup prompt is the status tag with data-status="startup_prompt".
   const tag = await app.bridge.waitFor("the startup-prompt tag", `
-    const t = e2e.first(".session-startup-tag");
-    return t ? e2e.norm(t.innerText) : null;
+    const t = e2e.first('.session-item .agent-status-tag[data-status="startup_prompt"]');
+    return t ? e2e.norm(t.querySelector(".agent-status-word")?.innerText) : null;
   `);
   assert(tag === "waiting at a startup prompt", `the session list says "${tag}"`);
   await app.bridge.screenshot(join(evidenceDir, "05-waiting.png"));
@@ -458,7 +462,7 @@ try {
   await app.bridge.typeInTerminal(s4, "y");
   await app.bridge.waitForTerminal(s4, /fake-cli: ready/, { timeoutMs: 20_000 });
   const t4 = Date.now();
-  await app.bridge.waitFor("the startup-prompt tag to clear", `return !e2e.first(".session-startup-tag");`, { timeoutMs: 5_000 });
+  await app.bridge.waitFor("the startup-prompt tag to clear", `return !e2e.first(${JSON.stringify(STARTUP_TAGS)});`, { timeoutMs: 5_000 });
   log(`  the tag cleared ${Date.now() - t4} ms after the agent was ready`);
   const d4 = await sessionData(app.bridge, s4);
   assert(d4.agent_startup.state === "launching", `once answered the state is "${d4.agent_startup.state}", not waiting`);
@@ -477,7 +481,7 @@ try {
   await waitForStartup(app.bridge, s5, "waiting_at_startup_prompt", { timeoutMs: 15_000 });
   await pressCtrlC(app.bridge, s5);
   await waitForStartup(app.bridge, s5, "ended", { timeoutMs: 15_000 });
-  await app.bridge.waitFor("the startup-prompt tag to clear after the exit", `return !e2e.first(".session-startup-tag");`, { timeoutMs: 5_000 });
+  await app.bridge.waitFor("the startup-prompt tag to clear after the exit", `return !e2e.first(${JSON.stringify(STARTUP_TAGS)});`, { timeoutMs: 5_000 });
   const rec5 = await waitForExit(records().at(-1).file);
   assert(rec5.exit.code === 130 && /at-trust-prompt$/.test(rec5.exit.why), `the vendor exited at the prompt (${rec5.exit.code}, ${rec5.exit.why})`);
   assert((await startupTags(app.bridge)).length === 0, "after the exit no session is reported as waiting");
