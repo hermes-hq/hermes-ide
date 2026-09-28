@@ -28,8 +28,8 @@
 //
 // Negative controls (each must end in RESULT: FAIL):
 //   HERMES_E2E_F24_FLAG=off          the flag stays off: hidden terminals keep
-//          their WebGL contexts (fails where the web view has WebGL — macOS
-//          and Windows; Linux CI renders without WebGL), and the rows show no
+//          their WebGL contexts (fails wherever the web view has WebGL, which
+//          all three CI runners had on 2026-09-28), and the rows show no
 //          memory.
 //   HERMES_E2E_F24_BUDGET_SCALE=0.01 every budget a hundred times tighter.
 //   HERMES_E2E_F24_NEGATIVE=no-batching  output batching is switched off

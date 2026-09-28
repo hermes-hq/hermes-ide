@@ -560,7 +560,8 @@ features:
     name: "Fleet performance: many terminals"
     # Behind the fleetPerf flag. Budgets per OS: e2e/app/fleet-budgets.json.
     # "Only visible terminals hold a WebGL context" is asserted where the web
-    # view has WebGL (macOS, Windows); Linux CI renders without it.
+    # view has WebGL (all three CI runners); without WebGL it checks that no
+    # terminal holds one. Terminal output is batched behind the same flag.
     status: partial
     criteria:
       F24-1:
