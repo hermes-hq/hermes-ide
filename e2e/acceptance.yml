@@ -425,3 +425,10 @@ features:
       C0-2:
         text: "The inbox seam raises, lists oldest first and resolves; the turn ledger commands answer with nothing"
         scenarios: [C0-session-event-bridge.mjs]
+  CIFAST:
+    name: "THROWAWAY negative control (reverted before merge)"
+    status: planned
+    criteria:
+      CIFAST-1:
+        text: "A scenario that always fails"
+        scenarios: [CIFAST-negative-control.mjs]
