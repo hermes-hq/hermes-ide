@@ -142,9 +142,15 @@ try {
     timeoutMs: 300_000,
   });
   assert(uninstall.code === 0, `winget finds the app by its product code and uninstalls it (exit ${uninstall.code})`);
-  const until = Date.now() + 30_000;
-  while (registeredVersion() !== null && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
-  assert(registeredVersion() === null && !existsSync(exePath()), "the app is gone");
+  // An NSIS uninstaller hands over to a copy of itself and returns at once;
+  // the files and the Apps & features entry go a moment later.
+  const until = Date.now() + 120_000;
+  while ((registeredVersion() !== null || existsSync(exePath())) && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  log(`  after uninstall: registered=${registeredVersion()} exe=${existsSync(exePath())}`);
+  assert(registeredVersion() === null, "Windows no longer lists the app");
+  assert(!existsSync(exePath()), "the executable is gone");
   installedDir = null;
 } catch (e) {
   failed = true;
