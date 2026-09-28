@@ -1,0 +1,8 @@
+{
+  "files": [
+    "src/agent/agentErrors.ts",
+    "src/components/SessionCreator.tsx",
+    "src/hooks/useContextMenu.ts",
+    "src/state/SessionContext.tsx"
+  ]
+}

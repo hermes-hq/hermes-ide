@@ -55,6 +55,8 @@ import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
 import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
 import { useBusyAgentSessionCount } from "./agent/useBusyAgentSessionCount";
+import { useSessionProviders } from "./agent/providers/useSessionProviders";
+import { isAgentStatusEnabled } from "./agent/status/flag";
 import { usePluginUpdateChecker } from "./hooks/usePluginUpdateChecker";
 import { useSessionGitSummary } from "./hooks/useSessionGitSummary";
 import { hasAgentSession, useAgentBridgeWarmup } from "./hooks/useAgentBridgeWarmup";
@@ -151,6 +153,9 @@ function AppContent() {
     [sessions],
   );
   const updater = useAutoUpdater(busyAgentSessionCount + busyTerminalSessionCount);
+  // F10/F19: every session reports into the one event store; the sidebar
+  // and the status strip show the status derived from it.
+  useSessionProviders(sessions, state.activeSessionId, isAgentStatusEnabled());
   const activeGitSummary = useSessionGitSummary(state.activeSessionId, !!activeSession, activeSession?.working_directory);
 
   // Load command palette shortcut setting (reload when settings panel closes)

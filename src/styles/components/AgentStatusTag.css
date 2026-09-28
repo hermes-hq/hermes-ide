@@ -1,0 +1,49 @@
+/* A session's status (F10): glyph + word always; colour is a third cue. */
+.agent-status-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-snug);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.agent-status-glyph {
+  font-family: var(--font-numeric);
+  font-weight: var(--weight-medium);
+  min-width: 1ch;
+  text-align: center;
+}
+
+.agent-status-tag[data-tone="attention"] { color: var(--warning); }
+.agent-status-tag[data-status="error"],
+.agent-status-tag[data-status="check_failed"] { color: var(--danger); }
+.agent-status-tag[data-tone="ready"] { color: var(--accent); }
+.agent-status-tag[data-tone="active"] { color: var(--success); }
+.agent-status-tag[data-tone="quiet"] { color: var(--text-3); }
+
+/* A guess is dimmed and says so in words. */
+.agent-status-tag[data-confidence="guessed"] { opacity: 0.62; }
+/* Same colour as the word: the whole tag is already dimmed, and the word
+   "guessed" must stay readable. */
+.agent-status-guessed {
+  font-style: italic;
+}
+.agent-status-guessed::before { content: "· "; }
+
+.agent-status-tag-strip {
+  font-size: var(--text-xs, var(--text-2xs));
+  font-weight: var(--weight-medium);
+}
+
+.agent-status-tag[data-status="working"] .agent-status-glyph {
+  animation: agent-status-spin 1.6s linear infinite;
+  display: inline-block;
+}
+@keyframes agent-status-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-status-tag[data-status="working"] .agent-status-glyph { animation: none; }
+}

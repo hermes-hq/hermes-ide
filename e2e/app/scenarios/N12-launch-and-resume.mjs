@@ -330,10 +330,15 @@ async function waitForStartup(bridge, sessionId, state, { timeoutMs = 20_000 } =
   `, { timeoutMs });
   return Date.now() - t0;
 }
-const startupTag = (bridge) => bridge.eval(`
-  const tag = e2e.first(".session-startup-tag");
-  return tag ? { text: e2e.norm(tag.innerText), startup: tag.getAttribute("data-startup") } : null;
-`);
+// With the flag on, the session list shows one status per session (F10): a
+// startup prompt is the status tag with data-status="startup_prompt", its
+// word is the text, and the row keeps the helper's raw state in data-startup.
+const STARTUP_TAG = `.session-item .agent-status-tag[data-status="startup_prompt"]`;
+const READ_STARTUP_TAG = `
+  const tag = e2e.first(${JSON.stringify(STARTUP_TAG)});
+  return tag ? { text: e2e.norm(tag.querySelector(".agent-status-word")?.innerText), startup: tag.closest(".session-item")?.getAttribute("data-startup") } : null;
+`;
+const startupTag = (bridge) => bridge.eval(READ_STARTUP_TAG);
 // A restored terminal shows its old scrollback too (replayed while the new
 // shell may already be printing), so every wait on a restored terminal
 // looks for a line only this run can produce, never for a generic one.
@@ -579,17 +584,14 @@ try {
   const d4 = await sessionData(app.bridge, s4);
   assert(d4.agent_startup.confidence === "guessed", "the startup-prompt report is marked as a guess");
   assert(sinceLaunchLine >= 4_000 && sinceLaunchLine <= 9_000, "the report came about 5 seconds after the launch, not sooner and not much later");
-  const tag = await app.bridge.waitFor("the startup-prompt tag in the session list", `
-    const tag = e2e.first(".session-startup-tag");
-    return tag ? { text: e2e.norm(tag.innerText), startup: tag.getAttribute("data-startup") } : null;
-  `);
+  const tag = await app.bridge.waitFor("the startup-prompt tag in the session list", READ_STARTUP_TAG);
   assert(tag.text === "waiting at a startup prompt" && tag.startup === "waiting_at_startup_prompt", `the session list says "${tag.text}"`);
   await app.bridge.screenshot(join(evidenceDir, "04-waiting-at-startup-prompt.png"));
   log("  answering the prompt with y");
   await app.bridge.typeInTerminal(s4, "y");
   await app.bridge.waitForTerminal(s4, /fake-cli: ready/, { timeoutMs: 20_000 });
   await waitForStartup(app.bridge, s4, "started");
-  await app.bridge.waitFor("the startup-prompt tag to clear", `return !e2e.first(".session-startup-tag");`);
+  await app.bridge.waitFor("the startup-prompt tag to clear", `return !e2e.first(${JSON.stringify(STARTUP_TAG)});`);
   assert((await startupTag(app.bridge)) === null, "once the prompt is answered the agent counts as started and the tag is gone");
   await app.bridge.screenshot(join(evidenceDir, "05-trust-answered.png"));
 
@@ -604,7 +606,7 @@ try {
   assert(d5.agent_startup.confidence === "exact", `the end is exact (reported by the helper, ${endedIn} ms after n)`);
   const declined = (await waitForRecords(7)).at(-1);
   assert(declined.exit?.why === "declined-trust" && !declined.hooksRan.some((h) => h.event === "SessionStart"), "the vendor exited at the prompt without running any hook");
-  await app.bridge.waitFor("the startup-prompt tag to clear after the decline", `return !e2e.first(".session-startup-tag");`);
+  await app.bridge.waitFor("the startup-prompt tag to clear after the decline", `return !e2e.first(${JSON.stringify(STARTUP_TAG)});`);
   assert((await app.bridge.eval(`return e2e.all(".session-item").map((el) => el.getAttribute("data-startup"));`)).every((v) => v !== "waiting_at_startup_prompt"), "no session is still reported as waiting at a startup prompt");
   await app.bridge.screenshot(join(evidenceDir, "06-trust-declined-ended.png"));
 

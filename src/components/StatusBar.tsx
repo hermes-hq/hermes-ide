@@ -6,6 +6,8 @@ import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
+import { AgentStatusTag } from "./AgentStatusTag";
+import { isAgentStatusEnabled } from "../agent/status/flag";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
@@ -37,6 +39,8 @@ interface StatusBarProps {
 export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, updateDownloading, updateProgress, onShowUpdate, onCheckForUpdates }: StatusBarProps) {
   const { t } = useI18n();
   const active = useActiveSession();
+  // Read once at startup (flags never change while the app runs).
+  const agentStatus = isAgentStatusEnabled();
   const sessions = useSessionList();
   const totalCost = useTotalCost();
   const totalTokens = useTotalTokens();
@@ -100,18 +104,26 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
                    active.permission_mode === "bypassPermissions" ? t("permission.bypassPermissions.shortLabel") : ""}
                 </span>
               )}
-              {active.phase === "busy" && (
+              {!agentStatus && active.phase === "busy" && (
                 <span className="status-capsule status-capsule-busy" role="status" aria-live="polite">
                   <span className="status-capsule-pulse" aria-hidden="true" />
                   <span className="status-capsule-label">{t("status.working")}</span>
                 </span>
               )}
-              {active.phase === "needs_input" && (
+              {!agentStatus && active.phase === "needs_input" && (
                 <span className="status-capsule status-capsule-needs" role="status" aria-live="assertive">
                   <span className="status-capsule-pulse" aria-hidden="true" />
                   <span className="status-capsule-label">{t("status.needsInput")}</span>
                 </span>
               )}
+            </span>
+          </>
+        )}
+        {agentStatus && active && active.phase !== "disconnected" && (
+          <>
+            <span className="status-bar-divider" />
+            <span className="status-bar-item status-bar-agent-status" role="status" aria-live="polite">
+              <AgentStatusTag sessionId={active.id} variant="strip" />
             </span>
           </>
         )}

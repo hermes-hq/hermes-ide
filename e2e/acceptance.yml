@@ -541,3 +541,41 @@ features:
       F25-6:
         text: "An Agent view session starts its bridge from the unpacked runtime, imports the SDK from it and answers; with a damaged archive no bridge starts and the view says why"
         scenarios: [F25-agent-session-runtime.mjs]
+  F10:
+    name: "One status vocabulary (AgentStatus)"
+    # Behind the launchHelper flag (the flag registry is full; see
+    # src/agent/status/flag.ts). Run 1 of the scenario is the flag-off control.
+    status: shipped
+    criteria:
+      F10-1:
+        text: "An agent session waiting on a permission shows 'needs approval', not 'ready'"
+        scenarios: [F10-agent-status.mjs]
+      F10-2:
+        text: "Every status has a glyph and a word; nothing is conveyed by colour alone"
+        scenarios: [F10-agent-status.mjs]
+      F10-3:
+        text: "Heuristic statuses render dimmed with 'guessed'"
+        scenarios: [F10-agent-status.mjs]
+      F10-4:
+        # The table tests are src/__tests__/agent-status-derive.test.ts (every
+        # kind, precedence, done-until-seen); the scenario shows every kind
+        # derived and rendered on the real app.
+        text: "deriveStatus is covered by table tests for every status"
+        scenarios: [F10-agent-status.mjs]
+  F19:
+    name: "One event contract for every session"
+    # The real-app scenario F10-agent-status shows the TerminalProvider, the
+    # Agent view provider and the Rust session-event channel feeding the one
+    # status the sidebar and the status strip render. The two criteria below
+    # are code properties, not app behaviour: F19-1 is enforced by the lint
+    # rule hermes-vendor/no-vendor-id-checks (npx eslint ., and
+    # src/__tests__/lint-no-vendor-id-checks.test.ts), F19-2 is
+    # src/__tests__/session-providers.test.ts.
+    status: partial
+    criteria:
+      F19-1:
+        text: "The inbox and status strip contain no vendor-specific code"
+        scenarios: []
+      F19-2:
+        text: "A contract test runs the same event script against every provider"
+        scenarios: []

@@ -15,10 +15,20 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import { readFileSync } from "node:fs";
 import noSourceReadingTests from "./eslint-rules/no-source-reading-tests.js";
+import noVendorIdChecks from "./eslint-rules/no-vendor-id-checks.js";
 
 // Existing tests that read files. The list may only shrink.
 const sourceReadingAllowlist = JSON.parse(
   readFileSync(new URL("./eslint-rules/source-reading-tests.allowlist.json", import.meta.url), "utf8"),
+).files;
+
+// Agent ids come from the catalog, so a new agent is covered automatically.
+const vendorIds = JSON.parse(readFileSync(new URL("./src/catalog/agents.json", import.meta.url), "utf8"))
+  .agents.map((a) => a.id)
+  .filter((id) => id !== "custom");
+// Files that branched on an agent id before the rule existed. May only shrink.
+const vendorIdAllowlist = JSON.parse(
+  readFileSync(new URL("./eslint-rules/vendor-id-checks.allowlist.json", import.meta.url), "utf8"),
 ).files;
 
 export default [
@@ -61,6 +71,18 @@ export default [
       // Stale-deps warnings.  Kept at warn so a missed dependency
       // doesn't block the build, but it surfaces in PR review.
       "react-hooks/exhaustive-deps": "warn",
+    },
+  },
+  {
+    // Vendor-neutral core (F19): only src/agent/providers may branch on an
+    // agent's id. Tests may name agents freely.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/**/*.test.{ts,tsx}", "src/**/__tests__/**"],
+    plugins: {
+      "hermes-vendor": { rules: { "no-vendor-id-checks": noVendorIdChecks } },
+    },
+    rules: {
+      "hermes-vendor/no-vendor-id-checks": ["error", { vendorIds, allowlist: vendorIdAllowlist }],
     },
   },
   {
