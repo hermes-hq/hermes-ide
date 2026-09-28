@@ -128,7 +128,15 @@ const records = () =>
   readdirSync(recordDir)
     .filter((f) => f.startsWith("launch-"))
     .sort()
-    .map((f) => ({ file: f, ...JSON.parse(readFileSync(join(recordDir, f), "utf8")) }));
+    .map((f) => {
+      // A record being replaced right now is skipped until the next look.
+      try {
+        return { file: f, ...JSON.parse(readFileSync(join(recordDir, f), "utf8")) };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
 async function waitForRecord(pred, what, { timeoutMs = 30_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -444,7 +452,9 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  // A process the app started can still be writing its last line (an
+  // agent reporting its exit) while the folder goes: retry briefly.
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
