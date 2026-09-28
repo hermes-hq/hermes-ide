@@ -113,15 +113,17 @@ async function waitForReturningLaunch(bridge) {
 async function openAgentStep(bridge) {
   if (await bridge.exists("button.es-tile-primary")) await bridge.click("button.es-tile-primary");
   else await bridge.clickByName("New session");
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, {
-    timeoutMs: 20_000,
-  });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await bridge.waitFor("terminal mode to be selected", `
-    return e2e.first('.session-creator-mode-card[data-category="universal"]')?.getAttribute("aria-checked") === "true";
-  `);
-  await bridge.click(".session-creator-actions .session-creator-btn-primary");
-  await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
+  // Terminal is the default for every agent (N09); an older wizard started
+  // with a mode step, where terminal has to be picked first.
+  if (await bridge.exists(".session-creator-mode-step")) {
+    await bridge.click('.session-creator-mode-card[data-category="universal"]');
+    await bridge.waitFor("terminal mode to be selected", `
+      return e2e.first('.session-creator-mode-card[data-category="universal"]')?.getAttribute("aria-checked") === "true";
+    `);
+    await bridge.click(".session-creator-actions .session-creator-btn-primary");
+  }
+  await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`, { timeoutMs: 20_000 });
 }
 
 async function closeWizard(bridge) {
