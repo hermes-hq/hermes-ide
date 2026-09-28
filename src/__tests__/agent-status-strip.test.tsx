@@ -54,7 +54,7 @@ function session(phase: string): SessionData {
     color: "",
     group: null,
     phase,
-    working_directory: "/Users/test/p",
+    working_directory: "/work/p",
     shell: "/bin/zsh",
     created_at: new Date().toISOString(),
     last_activity_at: new Date().toISOString(),

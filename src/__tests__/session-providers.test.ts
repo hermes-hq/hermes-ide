@@ -50,7 +50,7 @@ function session(over: Partial<SessionData> = {}): SessionData {
     color: "",
     group: null,
     phase: "creating",
-    working_directory: "/Users/test/project",
+    working_directory: "/work/project",
     shell: "/bin/zsh",
     created_at: "2026-01-01T00:00:00Z",
     last_activity_at: "2026-01-01T00:00:00Z",
@@ -164,7 +164,7 @@ describe("TerminalProvider", () => {
 const INIT = {
   type: "system",
   subtype: "init",
-  cwd: "/Users/test/project",
+  cwd: "/work/project",
   session_id: "vs-agent-1",
   uuid: "u0",
   tools: ["Bash"],
