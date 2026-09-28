@@ -127,6 +127,6 @@ the bridge (ADR 002). This is what lets linuxdeploy build the AppImage.
 
 The draft step writes winget manifests (`HermesHQ.HermesIDE`, unsigned NSIS
 installers) as the `winget-manifests` workflow artifact, and the `winget` job
-installs every published release through them on a Windows runner and
-uninstalls it again. Submitting them to `microsoft/winget-pkgs` is a human
+installs every published release through them on a Windows runner.
+Submitting them to `microsoft/winget-pkgs` is a human
 step: the first pull request there needs the Microsoft CLA signed once.

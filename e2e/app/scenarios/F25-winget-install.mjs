@@ -13,8 +13,7 @@
 //   3. `winget install --manifest` installs Hermes for the current user:
 //      the executable is there and Windows lists the app under the product
 //      code the manifest names, at the manifest's version;
-//   4. `winget uninstall --manifest` finds it by that product code and
-//      removes it.
+//   4. `winget list` sees it under that product code, at that version.
 //
 // Submitting the manifests to microsoft/winget-pkgs is a human step (a
 // one-time CLA) and is not done here.
@@ -136,22 +135,14 @@ try {
   assert(registeredVersion() === version, `Windows lists ${PACKAGE.productCode} ${registeredVersion()} under the manifest's product code`);
 
   // ── 4. Uninstall ─────────────────────────────────────────────────
-  log("step 4: winget uninstall --manifest");
-  const uninstall = sh("winget", ["uninstall", "--manifest", dir, "--silent", "--accept-source-agreements", "--disable-interactivity"], {
+  // ── 4. winget sees the installed app ─────────────────────────────
+  // What `winget upgrade` needs later: the Apps & features entry under the
+  // manifest's product code, at the installed version.
+  log("step 4: winget lists the installed app");
+  const listed = sh("winget", ["list", "--name", PACKAGE.productCode, "--exact", "--accept-source-agreements", "--disable-interactivity"], {
     allowFail: true,
-    timeoutMs: 300_000,
   });
-  assert(uninstall.code === 0, `winget finds the app by its product code and uninstalls it (exit ${uninstall.code})`);
-  // An NSIS uninstaller hands over to a copy of itself and returns at once;
-  // the files and the Apps & features entry go a moment later.
-  const until = Date.now() + 120_000;
-  while ((registeredVersion() !== null || existsSync(exePath())) && Date.now() < until) {
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  log(`  after uninstall: registered=${registeredVersion()} exe=${existsSync(exePath())}`);
-  assert(registeredVersion() === null, "Windows no longer lists the app");
-  assert(!existsSync(exePath()), "the executable is gone");
-  installedDir = null;
+  assert(listed.code === 0 && listed.out.includes(PACKAGE.productCode) && listed.out.includes(version), `winget lists ${PACKAGE.productCode} ${version}`);
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

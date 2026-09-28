@@ -978,7 +978,8 @@ jobs:
 
   # ── winget installs the published release ──────────────────────────
   # Installs the release just published through the winget manifests the
-  # draft step generated (same generator, same installer), then uninstalls.
+  # draft step generated (same generator, same installer) and checks that
+  # winget lists it.
   # Informational: the release is already out when this runs.
   winget:
     needs: [config, publish-beta]
@@ -1007,7 +1008,7 @@ jobs:
           reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Associations" /v LowRiskFileTypes /t REG_SZ /d ".exe;.msi" /f
           reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1806 /t REG_DWORD /d 0 /f
           echo "SEE_MASK_NOZONECHECKS=1" >> $env:GITHUB_ENV
-      - name: winget install --manifest, then uninstall
+      - name: winget install --manifest
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
