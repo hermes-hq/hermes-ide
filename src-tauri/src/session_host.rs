@@ -542,11 +542,14 @@ mod unix {
             .map_err(|e| format!("read host token: {e}"))
     }
 
-    /// Connects to a running host; never starts one.
+    /// Connects to a running host; never starts one. The socket's folders
+    /// are verified first (as `connect_or_start` does), so a folder planted
+    /// under a shared root never receives the token.
     pub fn connect(paths: &HostPaths, timeout: Duration) -> Result<Connection, String> {
-        if !paths.socket.exists() {
+        if std::fs::symlink_metadata(&paths.socket).is_err() {
             return Err("no host socket".to_string());
         }
+        ensure_socket_dirs(paths)?;
         let token = read_token(paths)?;
         Connection::connect(&paths.socket, &token, timeout).map_err(|e| e.to_string())
     }
@@ -616,6 +619,17 @@ mod unix {
                 ) =>
             {
                 Found::NobodyListening
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                Found::Unusable(format!(
+                    "it did not answer within {} s",
+                    timeout.as_secs_f64()
+                ))
             }
             Err(e) => Found::Unusable(e.to_string()),
         }
@@ -851,7 +865,7 @@ mod tests {
 
 #[cfg(all(test, unix))]
 mod unix_tests {
-    use super::unix::{connect_or_start_with, ensure_socket_dirs};
+    use super::unix::{connect, connect_or_start_with, ensure_socket_dirs};
     use super::*;
     use hermes_pty_host::protocol::{read_frame, write_frame, Frame, Msg, PROTOCOL_VERSION};
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -952,6 +966,12 @@ mod unix_tests {
                 Err(e) => e,
             };
             assert!(err.contains("cannot be used"), "{err}");
+            if matches!(answer, Answer::Hang) {
+                assert!(
+                    err.contains("did not answer within 2 s") && !err.contains("os error"),
+                    "a hung handshake is reported in plain words: {err}"
+                );
+            }
             assert!(
                 paths.socket.exists(),
                 "the live host's socket is never unlinked (its sessions would be orphaned)"
@@ -993,6 +1013,59 @@ mod unix_tests {
             Ok(())
         })
         .expect("connects to the host it started");
+    }
+
+    #[test]
+    fn a_plain_connect_verifies_the_socket_folders_and_never_sends_the_token_behind_a_symlink() {
+        // A good host reachable only through a planted `hermes-host-<uid>`
+        // symlink: `connect` (startup listing, has_session) refuses it
+        // before any byte is written, just as `connect_or_start` does.
+        let root = short_root();
+        let paths = test_paths(root.path());
+        let theirs = root.path().join("theirs");
+        let hash = paths.socket_dir.file_name().unwrap();
+        std::fs::create_dir_all(theirs.join(hash)).unwrap();
+        std::os::unix::fs::symlink(&theirs, paths.socket_dir.parent().unwrap()).unwrap();
+        std::fs::write(&paths.token_file, format!("{TOKEN}\n")).unwrap();
+        let hellos = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&hellos);
+        let listener = UnixListener::bind(theirs.join(hash).join("host.sock")).unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                seen.fetch_add(1, Ordering::SeqCst);
+                let _ = read_frame(&mut stream);
+            }
+        });
+        assert!(
+            paths.socket.exists(),
+            "the fake host is reachable through the link"
+        );
+        let err = match connect(&paths, Duration::from_secs(1)) {
+            Ok(_) => panic!("connected through a planted symlink"),
+            Err(e) => e,
+        };
+        assert!(err.contains("symlink"), "{err}");
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            hellos.load(Ordering::SeqCst),
+            0,
+            "nothing was sent to the planted host"
+        );
+
+        // The same folders, real: the connection goes through.
+        let root = short_root();
+        let paths = test_paths(root.path());
+        ensure_socket_dirs(&paths).unwrap();
+        std::fs::write(&paths.token_file, format!("{TOKEN}\n")).unwrap();
+        let _listener = fake_host(&paths.socket, Answer::Good);
+        assert_eq!(
+            connect(&paths, Duration::from_secs(1))
+                .unwrap()
+                .info()
+                .version,
+            "0.0.0-test"
+        );
     }
 
     #[test]

@@ -247,6 +247,29 @@ async function waitForPid(pid, alive, { timeoutMs = 10_000 } = {}) {
   while (pidAlive(pid) !== alive && Date.now() < deadline) await sleep(100);
   return pidAlive(pid) === alive;
 }
+// How a program in an app-owned terminal ends when the app is SIGKILLed:
+// normally it is gone within a second ("exited"). On macOS the orphaned
+// shell can wedge in the kernel while it closes a terminal whose reader
+// died with output still queued, and the program hangs with it: alive as
+// a pid, blocked in a write or an open, never working again ("cut off").
+// Both mean the app took the program down; a hosted program keeps ticking.
+async function waitForEnd(pid, stateFile, { timeoutMs = 10_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let last = { tick: -1, at: Date.now() };
+  while (Date.now() < deadline) {
+    if (!pidAlive(pid)) return "exited";
+    let tick = last.tick;
+    try {
+      tick = readState(stateFile).tick;
+    } catch {
+      /* the state file is written by the program; it may be mid-write */
+    }
+    if (tick !== last.tick) last = { tick, at: Date.now() };
+    else if (Date.now() - last.at >= 2_000) return "cut off";
+    await sleep(100);
+  }
+  return null;
+}
 
 async function waitForSavedWorkspace(bridge, sessionId) {
   // The frontend saves the workspace every 10 s once something changed.
@@ -313,6 +336,7 @@ let failed = false;
 let dataDir = null;
 let streamerPid = null;
 let hostPid = null;
+let legacyPid = null;
 /** Windows: the flag fell back to an in-process terminal; that is all that was proven. */
 let fallbackOnly = false;
 
@@ -338,7 +362,12 @@ async function run() {
   await waitForSavedWorkspace(app.bridge, legacyId);
   await app.bridge.screenshot(join(evidenceDir, "run0-streaming-flag-off.png"));
   await killApp(app);
-  assert(await waitForPid(legacy.pid, false), `flag off: the program (pid ${legacy.pid}) ended with the app`);
+  const legacyEnd = await waitForEnd(legacy.pid, legacyState);
+  assert(
+    legacyEnd !== null,
+    `flag off: the program (pid ${legacy.pid}) ${legacyEnd ?? "kept working after the app was killed; it should have ended"} with the app`,
+  );
+  legacyPid = legacy.pid;
 
   app = await launch(0.5);
   await waitForReturningLaunch(app.bridge);
@@ -524,7 +553,7 @@ try {
   }
   if (dataDir) saveHostLog(dataDir, "host.log");
   // Never leave a streamer or a host behind.
-  for (const pid of [streamerPid, hostPid]) {
+  for (const pid of [streamerPid, hostPid, legacyPid]) {
     if (pid && pidAlive(pid)) {
       try {
         process.kill(pid, "SIGKILL");

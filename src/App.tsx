@@ -302,7 +302,7 @@ function AppContent() {
       toastStoreRef.current.addToast({
         message: `Failed to clean up branch worktree '${branchName}'. It will be retried on next startup.`,
         type: "warning",
-        duration: 10_000,
+        duration: 8000,
       });
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
