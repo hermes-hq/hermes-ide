@@ -516,6 +516,9 @@ mod tests {
         let repo = dir.path().join("repo");
         fs::create_dir_all(&repo).unwrap();
         run(&repo, &["init", "-q", "-b", "main"]);
+        // Windows runners check files out with CRLF by default; the tests
+        // compare exact file text.
+        run(&repo, &["config", "core.autocrlf", "false"]);
         run(&repo, &["config", "user.name", "Test"]);
         run(&repo, &["config", "user.email", "test@example.com"]);
         fs::create_dir_all(repo.join("src")).unwrap();
@@ -622,9 +625,9 @@ mod tests {
             .filter(|o| !objects_before.contains(o))
             .collect();
         assert!(
-            new_objects
-                .iter()
-                .all(|o| o.ends_with("e6/9de29bb2d1d6434b8b29ae775ad8c2e48c5391")),
+            new_objects.iter().all(|o| o
+                .replace('\\', "/")
+                .ends_with("e6/9de29bb2d1d6434b8b29ae775ad8c2e48c5391")),
             "only the empty blob may appear: {new_objects:?}"
         );
     }
