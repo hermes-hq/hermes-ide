@@ -182,7 +182,10 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     await bridge.click(".session-composer-send-btn");
     await bridge.waitFor(`the reply to "${text}"`, `
       const v = document.querySelector('.agent-session-view[data-session-id="${view}"]');
-      return v && v.innerText.includes(${JSON.stringify(`fake reply: ${text}`)});
+      // textContent, not innerText: messages below the fold skip rendering
+      // (content-visibility: auto), and WebKit leaves their text out of
+      // innerText, so a reply that arrived off screen would read as missing.
+      return !!v && v.textContent.includes(${JSON.stringify(`fake reply: ${text}`)});
     `, { timeoutMs: 20_000 });
     log(`  sent "${text}" and got its reply`);
   };
@@ -198,7 +201,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     const v = document.querySelector('.agent-session-view[data-session-id="${view}"]');
     const d = v.querySelector(".agent-compaction-divider");
     if (!d) return null;
-    const text = v.querySelector(".agent-session-messages").innerText;
+    const text = v.querySelector(".agent-session-messages").textContent;
     return {
       text: e2e.norm(d.innerText),
       trigger: d.dataset.trigger,
