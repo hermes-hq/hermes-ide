@@ -478,6 +478,7 @@ export const ptBRPack: LanguagePack = {
     "quit.keep.body": "{count} sessão(ões) ainda têm um agente trabalhando. Mantê-las em execução enquanto o Hermes está fechado e retomar de onde estavam ao abrir de novo, ou pará-las agora?",
     "quit.keep.keep": "Manter em execução",
     "quit.keep.stop": "Parar e sair",
+    "sessionHost.fallback": "Não foi possível abrir um terminal no host em segundo plano, então ele não sobreviverá ao fechamento do Hermes ({reason})",
     "common.cancel": "Cancelar",
     "status.active": "{count} ativas",
     "status.working": "TRABALHANDO",

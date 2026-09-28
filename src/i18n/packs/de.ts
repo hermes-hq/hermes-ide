@@ -478,6 +478,7 @@ export const dePack: LanguagePack = {
     "quit.keep.body": "In {count} Sitzung(en) arbeitet noch ein Agent. Sollen sie weiterlaufen, während Hermes geschlossen ist, und beim nächsten Start dort weitermachen, oder jetzt gestoppt werden?",
     "quit.keep.keep": "Weiterlaufen lassen",
     "quit.keep.stop": "Stoppen und beenden",
+    "sessionHost.fallback": "Ein Terminal konnte nicht im Hintergrund-Host geöffnet werden und überlebt das Beenden von Hermes daher nicht ({reason})",
     "common.cancel": "Abbrechen",
     "status.active": "{count} aktiv",
     "status.working": "ARBEITET",

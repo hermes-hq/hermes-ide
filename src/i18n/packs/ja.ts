@@ -478,6 +478,7 @@ export const jaPack: LanguagePack = {
     "quit.keep.body": "{count} 個のセッションでエージェントがまだ作業中です。Hermes を閉じている間も実行を続け、次に開いたときに続きから再開しますか？それとも今すぐ停止しますか？",
     "quit.keep.keep": "実行を続ける",
     "quit.keep.stop": "停止して終了",
+    "sessionHost.fallback": "ターミナルをバックグラウンドホストで開けなかったため、Hermes を終了すると失われます（{reason}）",
     "common.cancel": "キャンセル",
     "status.active": "{count} 件アクティブ",
     "status.working": "作業中",

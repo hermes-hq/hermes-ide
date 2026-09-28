@@ -1187,6 +1187,15 @@ pub fn create_session(
                     session_id,
                     e
                 );
+                // The user asked for a terminal that survives the app and
+                // is not getting one: say so (the frontend shows a notice).
+                let _ = app.emit(
+                    crate::session_host::FALLBACK_EVENT,
+                    crate::session_host::HostFallback {
+                        session_id: session_id.clone(),
+                        reason: e,
+                    },
+                );
                 (Box::new(InProcessPty::spawn(cmd, pty_size)?), false)
             }
         }

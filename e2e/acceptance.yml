@@ -910,5 +910,5 @@ features:
         text: "Quitting with a working agent asks keep running or stop"
         scenarios: ["N20-session-host.mjs@darwin,linux"]
       N20-4:
-        text: "The host runs from a versioned copy under app data with a user-only socket; where there is no host the flag changes nothing"
+        text: "The host runs from a versioned copy under app data with a user-only socket; where there is no host the flag changes nothing, and a host that cannot be used is reported in a notice"
         scenarios: [N20-session-host.mjs]

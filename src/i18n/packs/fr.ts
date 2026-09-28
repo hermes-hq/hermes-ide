@@ -478,6 +478,7 @@ export const frPack: LanguagePack = {
     "quit.keep.body": "{count} session(s) ont encore un agent au travail. Les laisser tourner pendant que Hermes est fermé et les reprendre là où elles en étaient à la réouverture, ou les arrêter maintenant ?",
     "quit.keep.keep": "Laisser tourner",
     "quit.keep.stop": "Arrêter et quitter",
+    "sessionHost.fallback": "Un terminal n'a pas pu être ouvert dans l'hôte en arrière-plan ; il ne survivra donc pas à la fermeture de Hermes ({reason})",
     "common.cancel": "Annuler",
     "status.active": "{count} actives",
     "status.working": "EN COURS",

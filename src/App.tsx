@@ -302,7 +302,7 @@ function AppContent() {
       toastStoreRef.current.addToast({
         message: `Failed to clean up branch worktree '${branchName}'. It will be retried on next startup.`,
         type: "warning",
-        duration: 8000,
+        duration: 10_000,
       });
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
@@ -834,6 +834,23 @@ function AppContent() {
     });
     return () => { cancelled = true; unlisten?.(); };
   }, []);
+  // The flag is on but a terminal had to open in-process (the host could
+  // not be reached): the user must know it will not survive a quit.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ session_id: string; reason: string }>("session-host-fallback", (event) => {
+      if (cancelled) return;
+      toastStoreRef.current.addToast({
+        message: t("sessionHost.fallback", { reason: event.payload.reason }),
+        type: "warning",
+        duration: 8000,
+      });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, [t]);
 
   useEffect(() => {
     const onBeforeUnload = () => {

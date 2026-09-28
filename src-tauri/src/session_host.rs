@@ -11,10 +11,14 @@
 //! from the install folder, so replacing the app (an update) leaves the
 //! running host untouched. It exits on its own once it has no sessions.
 //!
-//! Security: the socket lives in a folder only the user can enter (0700),
-//! every connection must present the token from `<data>/host/token` (0600),
-//! and the host checks the connecting process's uid. Anyone who could
-//! connect could type into an agent.
+//! Security: the socket lives in folders only the user can enter (0700),
+//! each one created and verified (not a symlink, this uid, no group/other
+//! bits) before use because the root may be the shared `/tmp`; every
+//! connection must present the token from `<data>/host/token` (0600), and
+//! the host checks the connecting process's uid. Anyone who could connect
+//! could type into an agent. A socket that answers but cannot be used is
+//! left alone (a live host may be behind it); only one nobody listens on
+//! is replaced.
 //!
 //! macOS and Linux first; on Windows this module reports "unsupported" and
 //! sessions stay in-process (ConPTY cannot move between processes; a
@@ -31,6 +35,16 @@ use crate::AppState;
 
 /// Frontend event asking whether to keep working agents running on quit.
 pub const QUIT_REQUESTED_EVENT: &str = "session-host-quit-requested";
+
+/// Frontend event: the flag is on but this session had to open in-process
+/// (the host could not be reached or used), so it will not survive the app.
+pub const FALLBACK_EVENT: &str = "session-host-fallback";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HostFallback {
+    pub session_id: String,
+    pub reason: String,
+}
 
 /// What this app decided about hosted sessions on quit: `Some(true)` keeps
 /// them running, `Some(false)` stops them, `None` is not decided yet.
@@ -53,21 +67,56 @@ pub struct HostPaths {
     pub socket: PathBuf,
 }
 
-/// The socket root: `HERMES_HOST_SOCKET_ROOT`, or the system's temp root.
-/// Not `TMPDIR`: a test run gives every launch a fresh one, and the socket
-/// has to be found again after a relaunch.
+/// The socket root: `HERMES_HOST_SOCKET_ROOT` (the test rig), else the
+/// user's own runtime folder — `$XDG_RUNTIME_DIR` on Linux, the per-user
+/// temp folder (`confstr(_CS_DARWIN_USER_TEMP_DIR)`) on macOS — and only
+/// when neither exists the shared `/tmp`, where every folder Hermes owns is
+/// verified before use (`unix::ensure_socket_dirs`). Not `TMPDIR`: a test
+/// run gives every launch a fresh one, and the socket has to be found again
+/// after a relaunch.
 pub fn socket_root() -> PathBuf {
     if let Some(root) = std::env::var_os("HERMES_HOST_SOCKET_ROOT").filter(|v| !v.is_empty()) {
         return PathBuf::from(root);
     }
     #[cfg(unix)]
     {
-        PathBuf::from("/tmp")
+        user_runtime_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
     }
     #[cfg(not(unix))]
     {
         std::env::temp_dir()
     }
+}
+
+/// A folder the system already keeps private to this user, when it has one.
+#[cfg(target_os = "linux")]
+fn user_runtime_dir() -> Option<PathBuf> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty())?;
+    let dir = PathBuf::from(dir);
+    dir.is_dir().then_some(dir)
+}
+
+#[cfg(target_os = "macos")]
+fn user_runtime_dir() -> Option<PathBuf> {
+    let mut buf = vec![0u8; libc::PATH_MAX as usize];
+    let len = unsafe {
+        libc::confstr(
+            libc::_CS_DARWIN_USER_TEMP_DIR,
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+        )
+    };
+    if len == 0 || len > buf.len() {
+        return None;
+    }
+    buf.truncate(len - 1); // the NUL
+    let dir = PathBuf::from(String::from_utf8(buf).ok()?);
+    dir.is_dir().then_some(dir)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn user_runtime_dir() -> Option<PathBuf> {
+    None
 }
 
 pub fn paths_for(data_dir: &Path, socket_root: &Path) -> HostPaths {
@@ -92,7 +141,15 @@ pub fn paths_for(data_dir: &Path, socket_root: &Path) -> HostPaths {
 
 pub fn paths(app: &AppHandle) -> Result<HostPaths, String> {
     let data_dir = crate::instance::app_data_dir(app)?;
-    Ok(paths_for(&data_dir, &socket_root()))
+    let paths = paths_for(&data_dir, &socket_root());
+    // Unix socket paths are limited to about 100 bytes: a long user folder
+    // falls back to the shared temp root (verified before use). A root the
+    // rig chose is used as given.
+    let rig_root = std::env::var_os("HERMES_HOST_SOCKET_ROOT").is_some_and(|v| !v.is_empty());
+    if cfg!(unix) && !rig_root && paths.socket.as_os_str().len() > 100 {
+        return Ok(paths_for(&data_dir, Path::new("/tmp")));
+    }
+    Ok(paths)
 }
 
 /// The app version the host copy is keyed by. A test build can pretend to
@@ -321,8 +378,10 @@ pub fn on_exit_requested(app: &AppHandle) -> bool {
     }
 }
 
+/// Async: it talks to the host with a timeout, and a hung host must not
+/// freeze the window (the close button asks this before it closes).
 #[tauri::command]
-pub fn session_host_status(
+pub async fn session_host_status(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<HostStatus, String> {
@@ -342,6 +401,8 @@ pub fn session_host_status(
         .try_state::<SessionHostState>()
         .and_then(|s| s.quit_decision.lock().ok().map(|d| *d))
         .unwrap_or(None);
+    // Only a Unix build fills the host part in below.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut status = HostStatus {
         supported: supported(),
         running: false,
@@ -490,19 +551,26 @@ mod unix {
         Connection::connect(&paths.socket, &token, timeout).map_err(|e| e.to_string())
     }
 
-    fn ensure_private_dir(dir: &Path) -> Result<(), String> {
-        std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| format!("chmod {}: {e}", dir.display()))?;
-        let meta = std::fs::metadata(dir).map_err(|e| e.to_string())?;
-        use std::os::unix::fs::MetadataExt;
-        if meta.uid() != unsafe { libc::getuid() } {
-            return Err(format!(
-                "{} belongs to another user; refusing to use it",
-                dir.display()
-            ));
+    /// Creates and verifies every folder Hermes owns on the way to the
+    /// socket: `<root>/hermes-host-<uid>` and its `<hash>` child. Each must
+    /// be a real folder (not a symlink) of this user, mode 0700; anything
+    /// else is refused, because a folder another user planted under the
+    /// shared root could point the app at a fake host. The root itself
+    /// (`/tmp`, the user's runtime folder, or the rig's) is not ours.
+    pub(super) fn ensure_socket_dirs(paths: &HostPaths) -> Result<(), String> {
+        use hermes_pty_host::privdir::ensure_private_dir;
+        if let Some(parent) = paths.socket_dir.parent() {
+            ensure_private_dir(parent).map_err(|e| e.to_string())?;
         }
-        Ok(())
+        ensure_private_dir(&paths.socket_dir).map_err(|e| e.to_string())
+    }
+
+    fn ensure_private_dir(dir: &Path) -> Result<(), String> {
+        if let Some(parent) = dir.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
+        hermes_pty_host::privdir::ensure_private_dir(dir).map_err(|e| e.to_string())
     }
 
     fn ensure_token(paths: &HostPaths) -> Result<String, String> {
@@ -526,19 +594,85 @@ mod unix {
         Ok(token)
     }
 
+    /// What a connection attempt found at the socket.
+    pub(super) enum Found {
+        Host(Connection),
+        /// No socket file, or nobody listening behind it: safe to start a
+        /// host (and to remove the file).
+        NobodyListening,
+        /// Something answered but the connection could not be used: another
+        /// protocol version, a bad token, a handshake timeout. A live host
+        /// may be behind it, so its socket must be left alone.
+        Unusable(String),
+    }
+
+    pub(super) fn try_connect(socket: &Path, token: &str, timeout: Duration) -> Found {
+        match Connection::connect(socket, token, timeout) {
+            Ok(conn) => Found::Host(conn),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                Found::NobodyListening
+            }
+            Err(e) => Found::Unusable(e.to_string()),
+        }
+    }
+
     /// Connects to the host, starting it (from a versioned copy) if needed.
     pub fn connect_or_start(app: &AppHandle) -> Result<Connection, String> {
         let paths = paths(app)?;
         ensure_private_dir(&paths.host_dir)?;
-        ensure_private_dir(&paths.socket_dir)?;
+        ensure_socket_dirs(&paths)?;
         let token = ensure_token(&paths)?;
-        if let Ok(conn) = Connection::connect(&paths.socket, &token, Duration::from_secs(2)) {
-            return Ok(conn);
+        connect_or_start_with(&paths, &token, || start_host(app, &paths))
+    }
+
+    /// The connect-or-start decision, apart from the app: a socket nobody
+    /// listens on is stale and replaced by a new host; a socket that
+    /// answers but cannot be used (another protocol, a bad token, a slow
+    /// handshake) is left alone and reported, so an update never unlinks
+    /// the socket of a host that is still running the user's agents.
+    pub(super) fn connect_or_start_with(
+        paths: &HostPaths,
+        token: &str,
+        start: impl FnOnce() -> Result<(), String>,
+    ) -> Result<Connection, String> {
+        match try_connect(&paths.socket, token, Duration::from_secs(2)) {
+            Found::Host(conn) => return Ok(conn),
+            Found::Unusable(why) => {
+                return Err(format!(
+                    "a session host is listening on {} but cannot be used ({why}); \
+                     its sessions are left as they are",
+                    paths.socket.display()
+                ));
+            }
+            Found::NobodyListening => {}
         }
         if paths.socket.exists() {
-            log::info!("[session-host] stale socket, removing it");
+            log::info!("[session-host] stale socket (nobody listening), removing it");
             let _ = std::fs::remove_file(&paths.socket);
         }
+        start()?;
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match try_connect(&paths.socket, token, Duration::from_secs(2)) {
+                Found::Host(conn) => return Ok(conn),
+                Found::Unusable(why) => {
+                    return Err(format!("the session host just started refused us: {why}"))
+                }
+                Found::NobodyListening if Instant::now() >= deadline => {
+                    return Err("the session host did not answer".to_string())
+                }
+                Found::NobodyListening => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+    }
+
+    /// Starts a host from a versioned copy of the shipped binary.
+    fn start_host(app: &AppHandle, paths: &HostPaths) -> Result<(), String> {
         let shipped = shipped_host_binary(app)
             .ok_or_else(|| "the session host binary is missing from this install".to_string())?;
         let copy = install_copy(&shipped, &paths.bin_dir, &app_version(app))?;
@@ -565,16 +699,7 @@ mod unix {
         );
         // Not waited for: the host outlives this process on purpose.
         std::mem::drop(child);
-        let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
-            match Connection::connect(&paths.socket, &token, Duration::from_secs(2)) {
-                Ok(conn) => return Ok(conn),
-                Err(e) if Instant::now() >= deadline => {
-                    return Err(format!("the session host did not answer: {e}"))
-                }
-                Err(_) => std::thread::sleep(Duration::from_millis(50)),
-            }
-        }
+        Ok(())
     }
 
     /// Whether a running host still has `session_id` (no host is started).
@@ -682,6 +807,16 @@ mod tests {
     }
 
     #[test]
+    fn socket_root_prefers_the_rig_then_a_user_private_folder() {
+        // The rig's root wins; otherwise a folder that exists.
+        let root = socket_root();
+        assert!(root.is_absolute());
+        if std::env::var_os("HERMES_HOST_SOCKET_ROOT").is_none() && cfg!(unix) {
+            assert!(root.is_dir(), "{root:?}");
+        }
+    }
+
+    #[test]
     fn install_copy_is_idempotent_versioned_and_prunes_old_copies() {
         let tmp = tempfile::tempdir().unwrap();
         let shipped = tmp.path().join("hermes-pty-host");
@@ -711,5 +846,203 @@ mod tests {
         let dirs = std::fs::read_dir(&bin).unwrap().count();
         assert!(dirs <= 3, "kept {dirs} copies");
         assert!(!first.is_file(), "the oldest copy was pruned");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::unix::{connect_or_start_with, ensure_socket_dirs};
+    use super::*;
+    use hermes_pty_host::protocol::{read_frame, write_frame, Frame, Msg, PROTOCOL_VERSION};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::net::UnixListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    const TOKEN: &str = "unit-test-token-0123456789abcdef";
+
+    /// A short root under /tmp (socket paths are limited to ~100 bytes).
+    fn short_root() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("hsh-")
+            .tempdir_in("/tmp")
+            .unwrap()
+    }
+
+    fn test_paths(root: &Path) -> HostPaths {
+        let paths = paths_for(&root.join("data"), root);
+        std::fs::create_dir_all(&paths.host_dir).unwrap();
+        paths
+    }
+
+    /// What a fake host answers the hello with.
+    #[derive(Clone, Copy)]
+    enum Answer {
+        /// A refusal, as a real host of another protocol version sends it.
+        ProtocolError,
+        /// A hello-ack claiming another protocol version.
+        OtherProtoAck,
+        /// Silence: the handshake times out.
+        Hang,
+        /// A proper host.
+        Good,
+    }
+
+    /// Listens on `socket` and answers every hello as `answer` says.
+    fn fake_host(socket: &Path, answer: Answer) -> UnixListener {
+        let listener = UnixListener::bind(socket).unwrap();
+        let accept = listener.try_clone().unwrap();
+        std::thread::spawn(move || {
+            for stream in accept.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let _ = read_frame(&mut stream);
+                let reply = match answer {
+                    Answer::ProtocolError => Msg::Error {
+                        message: format!(
+                            "protocol {} not supported (host speaks {})",
+                            PROTOCOL_VERSION,
+                            PROTOCOL_VERSION + 1
+                        ),
+                    },
+                    Answer::OtherProtoAck => Msg::HelloAck {
+                        proto: PROTOCOL_VERSION + 1,
+                        version: "9.9.9".into(),
+                        pid: 1,
+                        exe: String::new(),
+                        started_at: 0,
+                    },
+                    Answer::Hang => {
+                        std::thread::sleep(Duration::from_secs(4));
+                        continue;
+                    }
+                    Answer::Good => Msg::HelloAck {
+                        proto: PROTOCOL_VERSION,
+                        version: "0.0.0-test".into(),
+                        pid: std::process::id(),
+                        exe: String::new(),
+                        started_at: 0,
+                    },
+                };
+                let _ = write_frame(&mut stream, &Frame::Msg(reply));
+                // Keep the good connection open until the client drops it.
+                if matches!(answer, Answer::Good) {
+                    let _ = read_frame(&mut stream);
+                }
+            }
+        });
+        listener
+    }
+
+    #[test]
+    fn a_host_that_answers_but_cannot_be_used_keeps_its_socket_and_starts_nothing() {
+        for answer in [Answer::ProtocolError, Answer::OtherProtoAck, Answer::Hang] {
+            let root = short_root();
+            let paths = test_paths(root.path());
+            ensure_socket_dirs(&paths).unwrap();
+            let _listener = fake_host(&paths.socket, answer);
+            let started = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&started);
+            let result = connect_or_start_with(&paths, TOKEN, move || {
+                flag.store(true, Ordering::SeqCst);
+                Ok(())
+            });
+            let err = match result {
+                Ok(_) => panic!("an unusable host was accepted"),
+                Err(e) => e,
+            };
+            assert!(err.contains("cannot be used"), "{err}");
+            assert!(
+                paths.socket.exists(),
+                "the live host's socket is never unlinked (its sessions would be orphaned)"
+            );
+            assert!(
+                !started.load(Ordering::SeqCst),
+                "no second host is started next to a live one"
+            );
+        }
+    }
+
+    #[test]
+    fn a_socket_nobody_listens_on_is_stale_and_a_host_is_started() {
+        let root = short_root();
+        let paths = test_paths(root.path());
+        ensure_socket_dirs(&paths).unwrap();
+        // A file left by a host that is gone: bind, then drop the listener.
+        drop(UnixListener::bind(&paths.socket).unwrap());
+        assert!(paths.socket.exists());
+        let socket = paths.socket.clone();
+        let conn = connect_or_start_with(&paths, TOKEN, move || {
+            assert!(
+                !socket.exists(),
+                "the stale file was removed before the start"
+            );
+            std::mem::forget(fake_host(&socket, Answer::Good));
+            Ok(())
+        })
+        .expect("connects to the host it started");
+        assert_eq!(conn.info().version, "0.0.0-test");
+
+        // No socket at all: the same, without anything to remove.
+        let root = short_root();
+        let paths = test_paths(root.path());
+        ensure_socket_dirs(&paths).unwrap();
+        let socket = paths.socket.clone();
+        connect_or_start_with(&paths, TOKEN, move || {
+            std::mem::forget(fake_host(&socket, Answer::Good));
+            Ok(())
+        })
+        .expect("connects to the host it started");
+    }
+
+    #[test]
+    fn socket_folders_are_created_user_only_and_a_planted_parent_is_refused() {
+        let root = short_root();
+        let paths = test_paths(root.path());
+        ensure_socket_dirs(&paths).unwrap();
+        let uid = unsafe { libc::getuid() };
+        for dir in [paths.socket_dir.parent().unwrap(), &paths.socket_dir] {
+            let meta = std::fs::symlink_metadata(dir).unwrap();
+            assert!(meta.is_dir() && !meta.file_type().is_symlink());
+            assert_eq!(meta.uid(), uid);
+            assert_eq!(meta.permissions().mode() & 0o777, 0o700, "{dir:?}");
+        }
+
+        // Another user pre-created `<root>/hermes-host-<uid>` as a symlink
+        // to a folder of theirs (sticky /tmp lets anyone create names):
+        // refused, nothing is created behind it.
+        let root = short_root();
+        let paths = test_paths(root.path());
+        let elsewhere = root.path().join("theirs");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, paths.socket_dir.parent().unwrap()).unwrap();
+        let err = ensure_socket_dirs(&paths).unwrap_err();
+        assert!(err.contains("symlink"), "{err}");
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
+
+        // The parent is ours but open to everyone (an older build's umask):
+        // tightened before use.
+        let root = short_root();
+        let paths = test_paths(root.path());
+        let parent = paths.socket_dir.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ensure_socket_dirs(&paths).unwrap();
+        assert_eq!(
+            std::fs::metadata(parent).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        // A parent that belongs to another user: refused. `/` is root's.
+        if uid != 0 {
+            let paths = paths_for(Path::new("/nonexistent-data"), Path::new("/"));
+            let planted = HostPaths {
+                socket_dir: PathBuf::from("/"),
+                socket: PathBuf::from("/host.sock"),
+                ..paths
+            };
+            let err = ensure_socket_dirs(&planted).unwrap_err();
+            assert!(err.contains("belongs to uid 0"), "{err}");
+        }
     }
 }

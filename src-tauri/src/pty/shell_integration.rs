@@ -320,11 +320,13 @@ pub fn cleanup(integration: &ShellIntegration) {
 ///
 /// Only this instance's temp folder is looked at, so another Hermes on the
 /// same machine (installed app, dev, beta or test build) keeps its files. An
-/// entry is removed only when the process that created it is gone.
-pub fn cleanup_stale() {
+/// entry is removed only when the process that created it is gone — and
+/// its session is not one of `keep_sessions`, the sessions the session host
+/// kept running (their shells are still configured with these files).
+pub fn cleanup_stale(keep_sessions: &[String]) {
     let root = crate::instance::shell_temp_root();
     let mut sys = sysinfo::System::new();
-    let removed = cleanup_stale_in(&root, std::process::id(), |pid| {
+    let removed = cleanup_stale_in(&root, std::process::id(), keep_sessions, |pid| {
         let pid = sysinfo::Pid::from_u32(pid);
         sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         sys.process(pid).is_some()
@@ -402,9 +404,10 @@ fn sweep_legacy_in(
     removed
 }
 
-/// Process id that created a temp entry, from its name: `zsh-<pid>-<session>`
-/// (folder) or `bash-<pid>-<session>.sh` (file). `None` for anything else.
-fn owner_pid(name: &str, is_dir: bool) -> Option<u32> {
+/// Process id and session id that a temp entry was created for, from its
+/// name: `zsh-<pid>-<session>` (folder) or `bash-<pid>-<session>.sh`
+/// (file). `None` for anything else.
+fn owner(name: &str, is_dir: bool) -> Option<(u32, &str)> {
     let rest = if is_dir {
         name.strip_prefix("zsh-")?
     } else {
@@ -414,13 +417,18 @@ fn owner_pid(name: &str, is_dir: bool) -> Option<u32> {
     if session.is_empty() {
         return None;
     }
-    pid.parse().ok()
+    Some((pid.parse().ok()?, session))
 }
 
 /// Removes entries in `root` whose creating process is neither `own_pid` nor
-/// alive. Entries it does not recognise are left alone. Returns how many
-/// entries were removed.
-fn cleanup_stale_in(root: &Path, own_pid: u32, mut is_alive: impl FnMut(u32) -> bool) -> usize {
+/// alive, except those of `keep_sessions`. Entries it does not recognise are
+/// left alone. Returns how many entries were removed.
+fn cleanup_stale_in(
+    root: &Path,
+    own_pid: u32,
+    keep_sessions: &[String],
+    mut is_alive: impl FnMut(u32) -> bool,
+) -> usize {
     let Ok(entries) = std::fs::read_dir(root) else {
         return 0;
     };
@@ -429,10 +437,12 @@ fn cleanup_stale_in(root: &Path, own_pid: u32, mut is_alive: impl FnMut(u32) -> 
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        let Some(pid) = owner_pid(&entry.file_name().to_string_lossy(), file_type.is_dir()) else {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some((pid, session)) = owner(&name, file_type.is_dir()) else {
             continue;
         };
-        if pid == own_pid || is_alive(pid) {
+        if pid == own_pid || keep_sessions.iter().any(|k| k == session) || is_alive(pid) {
             continue;
         }
         let path = entry.path();
@@ -468,8 +478,8 @@ mod tests {
                 let bname = rcfile.file_name().unwrap().to_string_lossy().to_string();
                 assert_eq!(zname, format!("zsh-{}-owner-zsh", pid));
                 assert_eq!(bname, format!("bash-{}-owner-bash.sh", pid));
-                assert_eq!(owner_pid(&zname, true), Some(pid));
-                assert_eq!(owner_pid(&bname, false), Some(pid));
+                assert_eq!(owner(&zname, true), Some((pid, "owner-zsh")));
+                assert_eq!(owner(&bname, false), Some((pid, "owner-bash")));
             }
             _ => panic!("expected zsh and bash integrations"),
         }
@@ -492,6 +502,10 @@ mod tests {
         mk_dir(&root.join("zsh-222-live"));
         std::fs::write(root.join("bash-222-live.sh"), "x").unwrap();
         mk_dir(&root.join("zsh-333-own"));
+        // A dead owner whose shell the session host kept running: its files
+        // are still in use.
+        mk_dir(&root.join("zsh-111-hosted"));
+        std::fs::write(root.join("bash-111-hosted.sh"), "x").unwrap();
         // Things it does not recognise stay.
         mk_dir(&root.join("zsh-notapid-x"));
         std::fs::write(root.join("notes.txt"), "x").unwrap();
@@ -503,7 +517,7 @@ mod tests {
         mk_dir(&tmp.path().join("hermes-shell-other").join("zsh-111-other"));
 
         let mut asked = Vec::new();
-        let removed = cleanup_stale_in(&root, 333, |pid| {
+        let removed = cleanup_stale_in(&root, 333, &["hosted".to_string()], |pid| {
             asked.push(pid);
             pid == 222
         });
@@ -511,6 +525,8 @@ mod tests {
         assert_eq!(removed, 2);
         assert!(!root.join("zsh-111-dead").exists());
         assert!(!root.join("bash-111-dead.sh").exists());
+        assert!(root.join("zsh-111-hosted/.zshrc").exists());
+        assert!(root.join("bash-111-hosted.sh").exists());
         assert!(root.join("zsh-222-live").exists());
         assert!(root.join("bash-222-live.sh").exists());
         assert!(root.join("zsh-333-own").exists());
@@ -588,7 +604,7 @@ mod tests {
     fn stale_cleanup_of_a_missing_folder_is_a_no_op() {
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(
-            cleanup_stale_in(&tmp.path().join("absent"), 1, |_| false),
+            cleanup_stale_in(&tmp.path().join("absent"), 1, &[], |_| false),
             0
         );
     }

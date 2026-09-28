@@ -659,13 +659,9 @@ pub fn run() {
             // Clean up stale worktrees from previous sessions that no longer exist
             cleanup_stale_worktrees(app.handle(), &database);
 
-            // Clean up stale shell integration temp files from previous sessions
-            pty::shell_integration::cleanup_stale();
-
-            // Launch files belong to sessions of the previous run (restored
-            // sessions get new ids), so the folder starts empty — except for
-            // sessions the session host kept running (N20), whose agents
-            // still write signals there.
+            // Sessions the session host kept running (N20): their shells
+            // are still configured with the previous run's shell-integration
+            // files, and their agents still write launch signals.
             let kept = session_host::live_hosted_session_ids(app.handle());
             if !kept.is_empty() {
                 log::info!(
@@ -673,6 +669,13 @@ pub fn run() {
                     kept.len()
                 );
             }
+
+            // Clean up stale shell integration temp files from previous sessions
+            pty::shell_integration::cleanup_stale(&kept);
+
+            // Launch files belong to sessions of the previous run (restored
+            // sessions get new ids), so the folder starts empty — except for
+            // the kept sessions'.
             pty::launch::clear_launch_dir(app.handle(), &kept);
 
             let mut sys = sysinfo::System::new();

@@ -478,6 +478,7 @@ export const zhCNPack: LanguagePack = {
     "quit.keep.body": "{count} 个会话中仍有代理在工作。在 Hermes 关闭期间让它们继续运行，并在下次打开时从原处继续，还是现在停止？",
     "quit.keep.keep": "继续运行",
     "quit.keep.stop": "停止并退出",
+    "sessionHost.fallback": "无法在后台宿主中打开终端，因此退出 Hermes 后它不会保留（{reason}）",
     "common.cancel": "取消",
     "status.active": "{count} 个活跃",
     "status.working": "工作中",

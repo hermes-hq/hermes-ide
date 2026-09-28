@@ -35,24 +35,10 @@ impl Host {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(dir.join("token"), format!("{TOKEN}\n")).unwrap();
-        let socket = tmp.path().join("host.sock");
+        // The socket gets a folder of its own, as it does under Hermes.
+        let socket = tmp.path().join("sock").join("host.sock");
         let log = std::fs::File::create(dir.join("host.log")).unwrap();
-        let child = Command::new(HOST)
-            .arg("--dir")
-            .arg(&dir)
-            .arg("--socket")
-            .arg(&socket)
-            .arg("--empty-exit-ms")
-            .arg(empty_exit_ms.to_string())
-            .arg("--startup-grace-ms")
-            .arg(startup_grace_ms.to_string())
-            .arg("--exited-keep-ms")
-            .arg("2000")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(log)
-            .spawn()
-            .unwrap();
+        let child = Self::spawn(&dir, &socket, empty_exit_ms, startup_grace_ms, log);
         let host = Host {
             child,
             dir,
@@ -73,6 +59,31 @@ impl Host {
             std::thread::sleep(Duration::from_millis(50));
         }
         host
+    }
+
+    fn spawn(
+        dir: &Path,
+        socket: &Path,
+        empty_exit_ms: u64,
+        startup_grace_ms: u64,
+        log: std::fs::File,
+    ) -> Child {
+        Command::new(HOST)
+            .arg("--dir")
+            .arg(&dir)
+            .arg("--socket")
+            .arg(&socket)
+            .arg("--empty-exit-ms")
+            .arg(empty_exit_ms.to_string())
+            .arg("--startup-grace-ms")
+            .arg(startup_grace_ms.to_string())
+            .arg("--exited-keep-ms")
+            .arg("2000")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(log)
+            .spawn()
+            .unwrap()
     }
 
     fn connect(&self) -> std::io::Result<Connection> {
@@ -355,10 +366,63 @@ fn bad_token_wrong_protocol_and_junk_are_refused() {
         other => panic!("expected a hello error, got {other:?}"),
     }
 
-    // A refused client changes nothing: the host still serves a good one.
+    // A refused client changes nothing: the socket is still there and the
+    // host still serves a good one. (An app that took a protocol refusal
+    // for a stale socket would unlink it and orphan every session.)
+    assert!(host.socket.exists(), "a refusal never removes the socket");
     let mut c = host.connect().unwrap();
     c.ping().unwrap();
     assert!(c.list().unwrap().is_empty());
+    assert!(
+        pid_alive(host.child.id()),
+        "the host is still running:\n{}",
+        host.log()
+    );
+}
+
+#[test]
+fn a_socket_folder_that_is_a_symlink_or_open_to_others_is_refused_or_fixed() {
+    let tmp = tempfile::Builder::new()
+        .prefix("hph-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let dir = tmp.path().join("host");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("token"), format!("{TOKEN}\n")).unwrap();
+
+    // A symlink where the socket folder should be: the host refuses to
+    // bind there and exits.
+    let elsewhere = tmp.path().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let linked = tmp.path().join("sock-link");
+    std::os::unix::fs::symlink(&elsewhere, &linked).unwrap();
+    let log = std::fs::File::create(dir.join("host.log")).unwrap();
+    let mut child = Host::spawn(&dir, &linked.join("host.sock"), 500, 200, log);
+    let status = child.wait().unwrap();
+    assert!(
+        !status.success(),
+        "the host must not start in a symlinked folder"
+    );
+    let text = std::fs::read_to_string(dir.join("host.log")).unwrap();
+    assert!(text.contains("symlink"), "the host says why:\n{text}");
+    assert!(!elsewhere.join("host.sock").exists());
+
+    // A folder of ours that others can enter: tightened to 0700, not used
+    // as it was.
+    let open = tmp.path().join("sock-open");
+    std::fs::create_dir_all(&open).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let log = std::fs::File::create(dir.join("host.log")).unwrap();
+    let mut child = Host::spawn(&dir, &open.join("host.sock"), 500, 200, log);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !open.join("host.sock").exists() {
+        assert!(Instant::now() < deadline, "host never bound its socket");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let mode = std::fs::metadata(&open).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700, "the open folder was tightened");
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]
@@ -380,4 +444,8 @@ fn a_host_with_nothing_to_do_exits_and_the_socket_folder_is_private() {
         host.log()
     );
     assert!(!Path::new(&host.socket).exists());
+    assert!(
+        !host.socket.parent().unwrap().exists(),
+        "the socket's folder goes with the host when it is empty"
+    );
 }

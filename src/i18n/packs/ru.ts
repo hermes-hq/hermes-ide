@@ -478,6 +478,7 @@ export const ruPack: LanguagePack = {
     "quit.keep.body": "В {count} сеанс(ах) агент ещё работает. Оставить их работать, пока Hermes закрыт, и продолжить с того же места при следующем запуске, или остановить сейчас?",
     "quit.keep.keep": "Оставить работать",
     "quit.keep.stop": "Остановить и выйти",
+    "sessionHost.fallback": "Не удалось открыть терминал в фоновом хосте, поэтому он не переживёт выход из Hermes ({reason})",
     "common.cancel": "Отмена",
     "status.active": "Активно: {count}",
     "status.working": "РАБОТАЕТ",

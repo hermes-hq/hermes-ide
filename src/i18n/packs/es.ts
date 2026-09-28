@@ -478,6 +478,7 @@ export const esPack: LanguagePack = {
     "quit.keep.body": "{count} sesión(es) todavía tienen un agente trabajando. ¿Mantenerlas en marcha mientras Hermes está cerrado y retomarlas donde estaban al volver a abrirlo, o detenerlas ahora?",
     "quit.keep.keep": "Mantener en marcha",
     "quit.keep.stop": "Detener y salir",
+    "sessionHost.fallback": "No se pudo abrir un terminal en el host en segundo plano, así que no sobrevivirá al cierre de Hermes ({reason})",
     "common.cancel": "Cancelar",
     "status.active": "{count} activas",
     "status.working": "TRABAJANDO",

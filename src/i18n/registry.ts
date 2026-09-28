@@ -508,6 +508,7 @@ const ENGLISH_PACK: LanguagePack = {
     "quit.keep.body": "{count} session(s) still have an agent at work. Keep them running while Hermes is closed and pick up where they were when it opens again, or stop them now?",
     "quit.keep.keep": "Keep running",
     "quit.keep.stop": "Stop and quit",
+    "sessionHost.fallback": "A terminal could not be opened in the background host, so it will not survive quitting Hermes ({reason})",
     "common.cancel": "Cancel",
     "status.active": "{count} active",
     "status.working": "WORKING",

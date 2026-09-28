@@ -775,6 +775,7 @@ export const hiPack: LanguagePack = {
     "quit.keep.body": "{count} सत्र(ों) में अभी भी एक एजेंट काम कर रहा है। Hermes बंद रहने के दौरान उन्हें चलने दें और दोबारा खोलने पर वहीं से जारी रखें, या उन्हें अभी रोक दें?",
     "quit.keep.keep": "चलने दें",
     "quit.keep.stop": "रोकें और बाहर निकलें",
+    "sessionHost.fallback": "एक टर्मिनल को बैकग्राउंड होस्ट में नहीं खोला जा सका, इसलिए Hermes बंद करने पर वह नहीं बचेगा ({reason})",
     "status.active": "{count} सक्रिय",
     "status.working": "कार्यरत",
     "status.needsInput": "इनपुट चाहिए",
