@@ -113,6 +113,8 @@ notify = "8"
 dunce = "1"
 # Private index files and patch files for the Review Desk (src/review).
 tempfile = "3"
+# Feature Tracks (F28): the .hermes/features files, shared with the hi helper.
+hermes-track = { path = "track" }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

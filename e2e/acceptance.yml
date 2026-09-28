@@ -854,3 +854,33 @@ features:
       F27-3:
         text: "The Land sheet shows Done-When status and makes Land anyway secondary when failing"
         scenarios: []
+  F28:
+    name: "Feature Tracks: guided phases as short files any agent drives from a terminal"
+    # Behind the featureTracks flag (off on stable until proven); the scenario
+    # turns it on. A fake agent drives a whole Light track from inside a
+    # Hermes terminal with nothing but the files and the bundled hi helper;
+    # a second fake session reads it. Negative control:
+    # HERMES_E2E_F28_GATE_BUDGET_MS=0 must end in RESULT: FAIL.
+    status: partial
+    criteria:
+      F28-1:
+        text: "Setting gate: waiting in feature.md raises a ◆ inbox item within 2 s; an open blocking question raises one too"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-2:
+        text: "⌘⏎ on a gate sets gate: approved and advances phase in the file"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-3:
+        text: "A Quick task creates no .hermes/features folder"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-4:
+        text: "Editing plan.md and pressing r sends the diff to the writer agent"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-5:
+        text: "Malformed front matter shows 'feature.md can't be read (line n)' with Open"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-6:
+        text: "An agent editing gate: approved during its own turn is reverted and raises an inbox alert; hi approve exits non-zero inside an agent process"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-7:
+        text: "hi phase prints the phase prompt and creates the phase file from its template; hi status --all lists blocked items as plain text; hi land archives the track files to refs/hermes/archive/<slug>, keeps them out of the merge and writes the PR body from feature.md + plan.md"
+        scenarios: [F28-feature-tracks.mjs]

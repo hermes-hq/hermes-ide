@@ -25,6 +25,10 @@ interface CommandPaletteProps {
   /** F21: label the git entry "Review Desk" when the flag routes ⌘G there. */
   reviewDesk?: boolean;
   onToggleSearch?: () => void;
+  /** Feature Tracks (F28), only while the flag is on. */
+  onToggleTrack?: () => void;
+  onApproveGate?: () => void;
+  onMakeFeature?: () => void;
   pluginCommands?: { command: string; title: string; category?: string; pluginId: string; pluginName: string }[];
   pluginsWithSettings?: { pluginId: string; pluginName: string }[];
   onPluginCommand?: (commandId: string) => void;
@@ -41,7 +45,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
+  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -77,6 +81,9 @@ export function CommandPalette({
     ...(onOpenShortcuts ? [{ id: "shortcuts", label: t("palette.keyboardShortcuts"), category: t("app.help"), shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
     ...(onToggleGit ? [{ id: "git", label: reviewDesk ? t("palette.reviewDesk") : t("palette.toggleGitPanel"), category: t("app.view"), shortcut: shortcutLabel("view.git-panel"), action: () => { onToggleGit(); onClose(); } }] : []),
     ...(onToggleSearch ? [{ id: "search", label: t("palette.searchInFolder"), category: t("app.view"), shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
+    ...(onToggleTrack ? [{ id: "track", label: "Toggle Track panel", category: t("app.view"), action: () => { onToggleTrack(); onClose(); } }] : []),
+    ...(onApproveGate ? [{ id: "track-approve", label: "Approve gate", category: "Track", shortcut: fmt("{mod}⏎"), action: () => { onApproveGate(); onClose(); } }] : []),
+    ...(onMakeFeature ? [{ id: "track-make-feature", label: "Make it a feature", category: "Track", action: () => { onMakeFeature(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,
       label: s.label,
@@ -94,7 +101,7 @@ export function CommandPalette({
   // currentLanguage is intentionally in the deps: t() is referentially stable,
   // so without it the memoized labels would never update on a language switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

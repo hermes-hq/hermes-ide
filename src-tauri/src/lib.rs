@@ -34,6 +34,7 @@ mod quit_flush;
 mod review;
 mod saved_workspace;
 mod self_test;
+mod track;
 mod transcript;
 mod turn_ledger;
 mod updater;
@@ -681,6 +682,11 @@ pub fn run() {
             };
 
             app.manage(state);
+            // Feature Tracks (F28): one thread polls the worktrees sessions
+            // are attached to and reports changes under .hermes/features.
+            let track_state = std::sync::Arc::new(track::TrackWatchState::default());
+            app.manage(std::sync::Arc::clone(&track_state));
+            track::start(app.handle().clone(), track_state);
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
             app.manage(quit_flush::QuitFlush::default());
@@ -996,6 +1002,18 @@ pub fn run() {
             // Done-When checks (F27).
             done_when::done_when_run,
             done_when::done_when_history,
+            // Feature Tracks (F28)
+            track::track_watch,
+            track::track_unwatch,
+            track::track_snapshot,
+            track::track_approve,
+            track::track_skip,
+            track::track_revert_gate,
+            track::track_promote,
+            track::track_read_file,
+            track::track_file_path,
+            track::track_write_review,
+            track::track_hi_path,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

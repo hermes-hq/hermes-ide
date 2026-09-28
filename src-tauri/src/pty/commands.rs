@@ -792,6 +792,10 @@ pub fn create_session(
     // A restored session's saved conversation id; with the helper on, the
     // agent resumes it (see `launch.rs`).
     vendor_session_id: Option<String>,
+    // Feature flag `featureTracks` (evaluated by the frontend): put the
+    // bundled `hi` helper on the terminal's PATH so `hi phase`, `hi status`
+    // and friends work in every Hermes shell.
+    feature_tracks: Option<bool>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -1146,7 +1150,7 @@ pub fn create_session(
         // session's launch file. The PATH it goes in front of is the one the
         // terminal would get anyway (on Windows the terminal library rebuilds
         // it from the registry, not from this process).
-        if launch_helper.unwrap_or(false) {
+        if launch_helper.unwrap_or(false) || feature_tracks.unwrap_or(false) {
             if let Some(dir) = crate::pty::launch::hi_path(&app)
                 .and_then(|hi| hi.parent().map(|d| d.to_path_buf()))
             {

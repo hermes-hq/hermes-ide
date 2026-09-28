@@ -212,6 +212,8 @@ jobs:
         run: cd src-tauri && cargo fmt --check
       - name: Check formatting (hi helper)
         run: cd src-tauri/hi && cargo fmt --check
+      - name: Check formatting (track crate)
+        run: cd src-tauri/track && cargo fmt --check
 
   # ── Rust Clippy ──────────────────────────────────────────────────────
   rust-clippy:
@@ -257,6 +259,8 @@ jobs:
         run: cd src-tauri && cargo clippy --locked --all-targets -- -D warnings
       - name: Run clippy (hi helper)
         run: cd src-tauri/hi && cargo clippy --locked --all-targets -- -D warnings
+      - name: Run clippy (track crate)
+        run: cd src-tauri/track && cargo clippy --locked --all-targets -- -D warnings
 
   # ── Rust Tests (all three OSes) ──────────────────────────────────────
   rust-test:
@@ -311,6 +315,11 @@ jobs:
       # run the built binary the way a Hermes terminal does, on every OS.
       - name: Test the hi helper
         working-directory: src-tauri/hi
+        run: cargo test --locked
+      # Feature Tracks (src-tauri/track): the files, phases, gates and land,
+      # shared by the app and hi; its tests run git in a temporary repository.
+      - name: Test the track crate
+        working-directory: src-tauri/track
         run: cargo test --locked
 
   # ── Real-app scenarios (all three OSes) ──────────────────────────────

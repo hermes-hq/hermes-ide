@@ -31,6 +31,7 @@ import type { Turn } from "../agent/contract/turns";
 import { defaultDoneWhen, listRecipeRuns } from "../state/worktreeRecipes";
 import { checksForTurn, getDoneWhenSnapshot } from "../doneWhen/store";
 import { sendFailuresBack } from "../doneWhen/controller";
+import { getTrackState, trackWorktreePaths } from "../track/store";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -186,6 +187,9 @@ const hooks = {
   /** What "Send failures back" does when clicked now (F27 step 7 asks with
    *  no agent running, where it must refuse). */
   doneWhenSendBack: (sessionId: string) => sendFailuresBack(sessionId),
+  // ── F28 Feature Tracks: what the store holds for a worktree ────────
+  trackState: (worktreePath: string) => getTrackState(worktreePath),
+  trackWorktreePaths: (): string[] => trackWorktreePaths(),
 };
 
 export type HermesE2EHooks = typeof hooks;

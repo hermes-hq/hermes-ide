@@ -1998,6 +1998,7 @@ dependencies = [
  "flate2",
  "git2",
  "gtk",
+ "hermes-track",
  "ignore",
  "image",
  "lazy_static",
@@ -2034,6 +2035,10 @@ dependencies = [
  "walkdir",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "hermes-track"
+version = "0.1.0"
 
 [[package]]
 name = "hermit-abi"

@@ -31,7 +31,14 @@ import { getSetting } from "./api/settings";
 import { workingDirectoryRecoveryMessage, reusedCheckoutMessage, type WorkingDirectoryRecovery, type ReusedCheckout } from "./state/isolation";
 import { SessionList } from "./components/SessionList";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
-import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon, TrackIcon } from "./components/ActivityBar";
+import { useTrackWatching } from "./track/useTrackWatching";
+import { editorCommandFor } from "./track/rules";
+import { getTrackState, noteOwnApproval } from "./track/store";
+import { trackApprove, trackPromote } from "./track/api";
+import { slugFromBranch } from "./components/TrackPanel";
+import { writeToSession } from "./api/sessions";
+import { utf8ToBase64 } from "./utils/encoding";
 import { workbenchPixelWidth } from "./utils/workbenchLayout";
 import { DEFAULT_SIDEBAR_WIDTH_PX, DEFAULT_SIDE_PANEL_WIDTH_PX, fitLeftRail, leftRailVisibility, leftRailWidth, resizeSidebar, resizeSidePanel } from "./utils/pluginPanelLayout";
 import type { SessionView } from "./components/SessionList";
@@ -83,6 +90,7 @@ const Settings = lazyView("Settings", () => import("./components/Settings").then
 const FilePreviewPanel = lazyView("FilePreviewPanel", () => import("./components/FilePreviewPanel").then((m) => m.FilePreviewPanel));
 const SessionComposer = lazyView("SessionComposer", () => import("./components/SessionComposer").then((m) => m.SessionComposer));
 const WorkbenchPanel = lazyView("WorkbenchPanel", () => import("./components/WorkbenchPanel").then((m) => m.WorkbenchPanel));
+const TrackPanel = lazyView("TrackPanel", () => import("./components/TrackPanel").then((m) => m.TrackPanel));
 // Side panels and the command palette: fetched the first time they open.
 const ContextPanel = lazyView("ContextPanel", () => import("./components/ContextPanel").then((m) => m.ContextPanel));
 const UsagePanel = lazyView("UsagePanel", () => import("./components/UsagePanel").then((m) => m.UsagePanel));
@@ -108,6 +116,10 @@ function AppContent() {
   const { state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace } = useSession();
   const activeSession = useActiveSession();
   const sessions = useSessionList();
+  // Feature Tracks (F28): every local session is attached to the watcher of
+  // its worktree; the Track panel and the inbox read from the store.
+  const featureTracksOn = isFeatureFlagEnabled("featureTracks");
+  useTrackWatching(sessions, featureTracksOn);
   useAgentBridgeWarmup(sessions);
   const sidebarSessions = useSidebarOrderedSessions();
   const { ui } = state;
@@ -845,6 +857,58 @@ function AppContent() {
     }
   }, [createSession, state.layout.root, state.layout.focusedPaneId, dispatch]);
 
+  // ── Feature Tracks (F28): the person's actions from the panel and the palette ──
+  /** ⇧O in the Track panel: the file in $EDITOR, in a split next to this pane. */
+  const openTrackFileInSplit = useCallback(async (path: string) => {
+    if (!activeSession) return;
+    const focusedBefore = focusedPaneSnapshot(state.layout);
+    const session = await createSession({
+      workingDirectory: activeSession.working_directory,
+      aiProvider: "custom",
+      agentName: "editor",
+      agentCommand: editorCommandFor(activeSession.shell, path),
+      mode: "terminal",
+      label: `edit ${path.split(/[\\/]/).pop() ?? "file"}`,
+    });
+    if (!session) return;
+    if (state.layout.root && state.layout.focusedPaneId) {
+      for (const action of splitAfterCreateActions(focusedBefore, { paneId: state.layout.focusedPaneId, direction: "horizontal" }, session.id)) dispatch(action);
+    } else if (!state.layout.root) {
+      dispatch({ type: "INIT_PANE", sessionId: session.id });
+    }
+  }, [activeSession, createSession, state.layout, dispatch]);
+  /** `r` in the Track panel: one tagged line to the writer's terminal. */
+  const sendLineToSession = useCallback((sessionId: string, line: string) => writeToSession(sessionId, utf8ToBase64(`${line}\r`)), []);
+  /** Palette: approve the active worktree's waiting gate. */
+  const approveActiveGate = useCallback(async () => {
+    if (!activeSession) return;
+    const track = getTrackState(activeSession.working_directory);
+    const feature = track.features.find((f) => f.slug === track.slug) ?? (track.features.length === 1 ? track.features[0] : undefined);
+    if (!feature?.meta || feature.meta.gate !== "waiting") {
+      toastStore.addToast({ message: "No gate is waiting in this worktree", type: "info", duration: 3000 });
+      return;
+    }
+    try {
+      noteOwnApproval(activeSession.working_directory, feature.slug);
+      const move = await trackApprove(activeSession.working_directory, feature.slug);
+      toastStore.addToast({ message: `${feature.slug}: approved ${move.from}; next phase ${move.to}`, type: "success", duration: 4000 });
+    } catch (e) {
+      toastStore.addToast({ message: String(e), type: "error", duration: 5000 });
+    }
+  }, [activeSession, toastStore]);
+  /** Palette: "Make it a feature" for the active worktree (Light track). */
+  const makeActiveFeature = useCallback(async () => {
+    if (!activeSession) return;
+    const track = getTrackState(activeSession.working_directory);
+    try {
+      const out = await trackPromote(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", null);
+      toastStore.addToast({ message: `Feature ${out.slug} created (Light track)`, type: "success", duration: 4000 });
+      if (!ui.trackPanelOpen) dispatch({ type: "TOGGLE_TRACK" });
+    } catch (e) {
+      toastStore.addToast({ message: String(e), type: "error", duration: 5000 });
+    }
+  }, [activeSession, toastStore, ui.trackPanelOpen, dispatch]);
+
   // ── Native menu bar event bridge ──
   useNativeMenuEvents({
     dispatch,
@@ -1139,6 +1203,22 @@ function AppContent() {
               </Suspense>
             </PanelErrorBoundary>
           )}
+          {featureTracksOn && ui.trackPanelOpen && !ui.flowMode && activeSession && (
+            <>
+              <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
+              <PanelErrorBoundary panelName="Track">
+                <Suspense fallback={null}>
+                  <TrackPanel
+                    session={activeSession}
+                    sessions={sessions}
+                    onOpenInEditorSplit={(path) => { void openTrackFileInSplit(path); }}
+                    onSendToWriter={sendLineToSession}
+                    onClose={() => dispatch({ type: "TOGGLE_TRACK" })}
+                  />
+                </Suspense>
+              </PanelErrorBoundary>
+            </>
+          )}
           {ui.contextPanelOpen && !ui.flowMode && activeSession && activeSession.mode !== "agent" && (
             <>
               <PanelResizeHandle direction="horizontal" onResize={handleRightResize} onResizeEnd={refitActive} />
@@ -1191,8 +1271,9 @@ function AppContent() {
         {!ui.flowMode && (
           <ActivityBar
             side="right"
-            tabs={
-              activeSession?.mode === "agent"
+            tabs={[
+              ...(featureTracksOn && activeSession ? [{ id: "track", label: "Track", icon: TrackIcon }] : []),
+              ...(activeSession?.mode === "agent"
                 ? [
                     {
                       id: "workbench",
@@ -1204,10 +1285,12 @@ function AppContent() {
                 : [
                     { id: "context", label: `${t("app.context")} (${shortcutLabel("view.context-panel")})`, icon: ContextIcon },
                     { id: "usage", label: t("app.usage"), icon: UsageIcon },
-                  ]
-            }
+                  ]),
+            ]}
             activeTabId={
-              activeSession?.mode === "agent"
+              featureTracksOn && ui.trackPanelOpen && activeSession
+                ? "track"
+                : activeSession?.mode === "agent"
                 ? ui.workbench.open
                   ? "workbench"
                   : ui.usagePanelOpen
@@ -1225,8 +1308,14 @@ function AppContent() {
               // panel.  TOGGLE_USAGE / TOGGLE_CONTEXT / TOGGLE_WORKBENCH
               // are independent flags in state, so we mirror the mutex
               // here in the dispatch handler.
-              if (tabId === "workbench") {
+              if (tabId === "track") {
                 if (ui.usagePanelOpen) dispatch({ type: "TOGGLE_USAGE" });
+                if (ui.contextPanelOpen) dispatch({ type: "TOGGLE_CONTEXT" });
+                if (!ui.trackPanelOpen && ui.workbench.open) dispatch({ type: "SET_WORKBENCH_OPEN", open: false });
+                dispatch({ type: "TOGGLE_TRACK" });
+              } else if (tabId === "workbench") {
+                if (ui.usagePanelOpen) dispatch({ type: "TOGGLE_USAGE" });
+                if (ui.trackPanelOpen) dispatch({ type: "TOGGLE_TRACK" });
                 dispatch({ type: "TOGGLE_WORKBENCH" });
               } else if (tabId === "context") {
                 if (ui.usagePanelOpen) dispatch({ type: "TOGGLE_USAGE" });
@@ -1293,6 +1382,9 @@ function AppContent() {
           onToggleGit={reviewDeskEnabled ? toggleReviewDesk : () => dispatch({ type: "TOGGLE_GIT_PANEL" })}
           reviewDesk={reviewDeskEnabled}
           onToggleSearch={() => dispatch({ type: "TOGGLE_SEARCH_PANEL" })}
+          onToggleTrack={featureTracksOn ? () => dispatch({ type: "TOGGLE_TRACK" }) : undefined}
+          onApproveGate={featureTracksOn ? () => { void approveActiveGate(); } : undefined}
+          onMakeFeature={featureTracksOn ? () => { void makeActiveFeature(); } : undefined}
           onScanCwd={() => {
             if (activeSession?.working_directory) {
               createProject(activeSession.working_directory, null).catch(console.error);

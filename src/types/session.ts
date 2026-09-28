@@ -349,6 +349,7 @@ export type SessionAction =
   | { type: "SET_RECENT"; entries: SessionHistoryEntry[] }
   | { type: "TOGGLE_CONTEXT" }
   | { type: "TOGGLE_USAGE" }
+  | { type: "TOGGLE_TRACK" }
   | { type: "TOGGLE_SIDEBAR" }
   | { type: "TOGGLE_PALETTE" }
   | { type: "CLOSE_PALETTE" }

@@ -9,6 +9,10 @@
 //! hi check [--json] [--feature <slug>] run the repository's Done-When checks
 //!          [--stop-hook]               (as an agent's Stop hook: block the
 //!                                       stop while they fail, see below)
+//! hi feature new <slug> ...             Feature Tracks (F28): see track_cmd.rs
+//! hi feature check                      (the track files' caps and front matter)
+//! hi phase [name|done|skip]
+//! hi approve | land | status
 //! hi --version
 //! ```
 //!
@@ -46,6 +50,8 @@
 //! work with them, at most three times per turn and within a time budget;
 //! then it lets Claude stop and reports the result, which Hermes shows as
 //! `check_failed`.
+
+mod track_cmd;
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -1200,13 +1206,19 @@ fn check_stop_hook(feature: Option<&str>, run_budget: Duration) -> i32 {
 fn usage() -> i32 {
     eprintln!(
         "hi {VERSION} — Hermes launch, signal and check helper\n\n\
-         usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n  hi check [--json] [--feature <slug>] [--stop-hook]\n  hi --version"
+         usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n  hi check [--json] [--feature <slug>] [--stop-hook]\n\
+         \n  hi feature new <slug> [--track Quick|Light|Full] [--title <text>] [--no-branch]\n\
+         \x20 hi feature check\n\
+         \x20 hi phase [questions|research|design|structure|plan|implement|done|skip]\n\
+         \x20 hi approve            (people only: refuses when HERMES_AGENT is set)\n\
+         \x20 hi land [--body-file <path>]\n  hi status [--all]\n  hi --version"
     );
     EXIT_USAGE
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let code = match args.first().map(String::as_str) {
         Some("run") => match args.get(1) {
             Some(arg) if args.len() == 2 => cmd_run(arg),
@@ -1214,6 +1226,11 @@ fn main() {
         },
         Some("signal") => cmd_signal(&args[1..]),
         Some("check") => cmd_check(&args[1..]),
+        Some("feature") => track_cmd::cmd_feature(&cwd, &args[1..]),
+        Some("phase") => track_cmd::cmd_phase(&cwd, &args[1..]),
+        Some("approve") => track_cmd::cmd_approve(&cwd, &args[1..]),
+        Some("land") => track_cmd::cmd_land(&cwd, &args[1..]),
+        Some("status") => track_cmd::cmd_status(&cwd, &args[1..]),
         Some("--version") | Some("-V") | Some("version") => {
             println!("hi {VERSION} (launch file v{SPEC_VERSION})");
             0

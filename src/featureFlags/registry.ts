@@ -82,6 +82,12 @@ export const FEATURE_FLAGS = [
     description:
       "A Land button in the session's Git panel: commit, open a pull request or squash-merge locally in one step, archive the worktree, and undo any of it.",
   },
+  {
+    id: "featureTracks",
+    label: "Feature Tracks",
+    description:
+      "Guided work as short files in the repository (.hermes/features/<slug>): phases with gates you approve from the Track panel, the hi helper on PATH in every Hermes shell, and an inbox item when a phase or a blocking question waits on you.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */
