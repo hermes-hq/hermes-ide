@@ -10,6 +10,13 @@ let workspaceRestoreInProgress = false;
 // Dirty flag — set when layout/sessions change in ways worth persisting.
 // Cleared after each successful save. Prevents redundant saves every 10s.
 let workspaceDirty = false;
+// Set once the launch's restore has settled. Before that the session list is
+// not loaded yet, so a save would write an empty or partial workspace over
+// the one about to be restored.
+let workspaceLoaded = false;
+// Saves run one after another, so an older snapshot of the state can never
+// land after a newer one.
+let saveChain: Promise<void> = Promise.resolve();
 import {
   createSession as apiCreateSession, closeSession as apiCloseSession,
   getSessions, getRecentSessions, getSessionSnapshot,
@@ -30,7 +37,8 @@ import {
   createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose,
   type BranchConflictChoice, type BranchInUse,
 } from "./isolation";
-import { useSaveWorkspaceOnClose } from "./useSaveWorkspaceOnClose";
+import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
+import { useWorkspaceFlushOnQuit } from "./useWorkspaceFlushOnQuit";
 import { BranchConflictDialog } from "../components/BranchConflictDialog";
 import type { SessionWorktree } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
@@ -1123,6 +1131,8 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
+  // Mirrors `workspaceLoaded` for the hooks that save on a change.
+  const [workspaceReady, setWorkspaceReady] = useState(workspaceLoaded);
   const busyTimestamps = useRef<Map<string, number>>(new Map());
   const lastAutoAttachCwd = useRef<Map<string, string>>(new Map());
   const closingSessionIds = useRef<Set<string>>(new Set());
@@ -1480,6 +1490,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     setup().catch((err) => console.error("[SessionContext] Failed to setup event listeners:", err));
 
+    const markWorkspaceLoaded = () => {
+      workspaceLoaded = true;
+      setWorkspaceReady(true);
+    };
+
     // Load settings first, THEN sessions (so terminals use correct settings)
     getSettings()
       .then((s) => {
@@ -1502,17 +1517,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // If there are live sessions (hot reload / dev), use them as-is
         if (live.length > 0) {
           dispatch({ type: "SET_ACTIVE", id: live[0].id });
+          markWorkspaceLoaded();
           return;
         }
+
+        // Guard against React StrictMode double-mount: the first mount's
+        // load marks the workspace loaded when it is done.
+        if (workspaceRestoreStarted) return;
+        workspaceRestoreStarted = true;
 
         // No live sessions — attempt workspace restore
         const restorePref = s.restore_sessions || "always";
         const savedJson = s.saved_workspace;
-        if (restorePref === "never" || !savedJson) return;
-
-        // Guard against React StrictMode double-mount
-        if (workspaceRestoreStarted) return;
-        workspaceRestoreStarted = true;
+        if (restorePref === "never" || !savedJson) {
+          markWorkspaceLoaded();
+          return;
+        }
         workspaceRestoreInProgress = true;
 
         try {
@@ -1694,16 +1714,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             if (firstNewId) dispatch({ type: "SET_ACTIVE", id: firstNewId });
           }
 
-          // Restore completed successfully — NOW clear the saved workspace to prevent
-          // double-restore on next launch. This is the key safety improvement: if the
-          // app crashed before reaching this point, the data would still be intact.
-          await setSetting("saved_workspace", "").catch(console.error);
+          // The saved workspace is NOT cleared here: sessions keep their
+          // saved ids, so restoring it again is harmless, and a quit before
+          // the next write must still find it. Marking the workspace loaded
+          // writes the restored state right away (useSaveWorkspaceOnChange).
         } finally {
           workspaceRestoreInProgress = false;
+          markWorkspaceLoaded();
         }
       })
       .catch((err) => {
         workspaceRestoreInProgress = false;
+        markWorkspaceLoaded();
         console.error("[SessionContext] Workspace restore failed:", err);
       });
 
@@ -2103,9 +2125,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // stateRef is declared above closeSession
   stateRef.current = state;
 
-  const saveWorkspace = useCallback(async () => {
-    // Never save during an active restore — we'd overwrite partial state
-    if (workspaceRestoreInProgress) return;
+  const writeWorkspace = useCallback(async () => {
+    // Never save before the launch's restore has settled or during it —
+    // we'd overwrite the saved workspace with an empty or partial one.
+    if (!workspaceLoaded || workspaceRestoreInProgress) return;
 
     const current = stateRef.current;
     const liveSessions = Object.values(current.sessions).filter((s) => s.phase !== "destroyed");
@@ -2186,6 +2209,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       console.error("[SessionContext] Failed to save workspace:", err);
     }
   }, []);
+
+  const saveWorkspace = useCallback((): Promise<void> => {
+    const run = saveChain.then(() => writeWorkspace());
+    saveChain = run.catch(() => {});
+    return run;
+  }, [writeWorkspace]);
 
   // ─── Mode conversion (right-click "Convert to ...") ─────────────────
   // Tears down the existing subprocess for the current mode, flips the
@@ -2664,9 +2693,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // A closed session leaves the saved workspace right away, not on the next
-  // 10 s tick, so it cannot come back after a quit or crash.
-  useSaveWorkspaceOnClose(Object.keys(state.sessions), saveWorkspace);
+  // Once loaded, and whenever a session opens or closes, the saved workspace
+  // is rewritten right away, not on the next 10 s tick, so a quit or crash
+  // right after neither loses a session nor brings a closed one back.
+  useSaveWorkspaceOnChange(Object.keys(state.sessions), workspaceReady, saveWorkspace);
+  // Every quit the backend can hold waits for this write first.
+  useWorkspaceFlushOnQuit(saveWorkspace);
 
   return (
     <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}) }}>

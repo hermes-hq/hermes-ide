@@ -29,7 +29,11 @@
 //!                        permission) and returns { ok, file, width, height }.
 //!                        A capture that is one flat colour (nothing painted,
 //!                        screen locked) is deleted and answered with an error.
-//!   POST /quit        -> asks the app to exit cleanly.
+//!   POST /quit        -> asks the app to exit cleanly (AppHandle::exit).
+//!   POST /menu        -> body { id }; chooses the app menu item `id` the way
+//!                        clicking it does (the menu's own event handler runs
+//!                        on the main thread). 404 when the menu has no such
+//!                        item.
 
 #[cfg(not(debug_assertions))]
 compile_error!(
@@ -205,6 +209,30 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::error(500, e),
             }
+        }
+        ("POST", "/menu") => {
+            let body = match json_body(req) {
+                Ok(v) => v,
+                Err(r) => return r,
+            };
+            let Some(id) = body.get("id").and_then(Value::as_str).map(str::to_string) else {
+                return Response::error(400, "`id` is required");
+            };
+            let in_menu = app
+                .menu()
+                .is_some_and(|m| crate::menu::find_menu_item_recursive(&m, &id).is_some());
+            if !in_menu {
+                return Response::error(404, format!("the app menu has no item '{id}'"));
+            }
+            // Answer first: the item may quit the app.
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                let handle = app.clone();
+                let _ =
+                    app.run_on_main_thread(move || crate::menu::dispatch_menu_action(&handle, id));
+            });
+            Response::ok(json!({ "ok": true }))
         }
         ("POST", "/quit") => {
             // Answer first: the socket may be gone once the app starts exiting.

@@ -109,6 +109,34 @@ fn app_accel(action: &str) -> Result<String, Box<dyn std::error::Error>> {
         .ok_or_else(|| format!("no keyboard chord for menu action {action}").into())
 }
 
+// ─── Quit ───────────────────────────────────────────────────────────
+
+/// The app menu's Quit item.
+pub const QUIT_ID: &str = "hermes.quit";
+
+/// Label and accelerator the predefined Quit item has on each platform:
+/// Cmd+Q on macOS only; on Windows and Linux no chord (Ctrl+Q belongs to the
+/// terminal).
+fn quit_label_and_accelerator(mac: bool, windows: bool) -> (&'static str, Option<&'static str>) {
+    if mac {
+        ("Quit HERMES-IDE", Some("CmdOrCtrl+Q"))
+    } else if windows {
+        ("Exit", None)
+    } else {
+        ("Quit", None)
+    }
+}
+
+fn quit_item(app: &AppHandle) -> tauri::Result<tauri::menu::MenuItem<Wry>> {
+    let (label, accel) =
+        quit_label_and_accelerator(cfg!(target_os = "macos"), cfg!(target_os = "windows"));
+    let builder = MenuItemBuilder::with_id(QUIT_ID, label);
+    match accel {
+        Some(a) => builder.accelerator(a).build(app),
+        None => builder.build(app),
+    }
+}
+
 // ─── Build Application Menu Bar ─────────────────────────────────────
 
 pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
@@ -117,7 +145,9 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let settings = MenuItemBuilder::with_id("hermes.settings", "Settings...")
         .accelerator(app_accel("hermes.settings")?)
         .build(app)?;
-    let quit = PredefinedMenuItem::quit(app, None)?;
+    // Not the predefined Quit: that one exits without asking the frontend
+    // to save its workspace first (see quit_flush).
+    let quit = quit_item(app)?;
 
     #[cfg(target_os = "macos")]
     let hermes_menu = {
@@ -347,10 +377,18 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
 // ─── Handle Menu Bar Events ─────────────────────────────────────────
 
 pub fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
-    let id = event.id().0.clone();
+    dispatch_menu_action(app, event.id().0.clone());
+}
 
+/// What choosing the menu item `id` does.
+pub fn dispatch_menu_action(app: &AppHandle, id: String) {
     // Skip predefined items (handled by the OS)
     if id.starts_with("__") {
+        return;
+    }
+
+    if id == QUIT_ID {
+        crate::quit_flush::quit(app);
         return;
     }
 
@@ -511,7 +549,7 @@ pub async fn update_menu_state(app: AppHandle, updates: Vec<MenuItemUpdate>) -> 
     Ok(())
 }
 
-fn find_menu_item_recursive(
+pub(crate) fn find_menu_item_recursive(
     menu: &Menu<Wry>,
     target_id: &str,
 ) -> Option<tauri::menu::MenuItemKind<Wry>> {
@@ -660,6 +698,16 @@ mod tests {
             accelerator_for("file.close-pane", false).unwrap(),
             "Ctrl+Shift+W"
         );
+    }
+
+    #[test]
+    fn quit_keeps_cmd_q_on_mac_and_leaves_ctrl_q_to_the_terminal() {
+        assert_eq!(
+            quit_label_and_accelerator(true, false),
+            ("Quit HERMES-IDE", Some("CmdOrCtrl+Q"))
+        );
+        assert_eq!(quit_label_and_accelerator(false, true), ("Exit", None));
+        assert_eq!(quit_label_and_accelerator(false, false), ("Quit", None));
     }
 
     #[test]
