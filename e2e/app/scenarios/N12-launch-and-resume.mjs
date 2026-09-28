@@ -338,6 +338,21 @@ async function waitForTerminalText(bridge, sessionId, test, what, { timeoutMs = 
   }
   throw new Error(`terminal never showed ${what} within ${timeoutMs} ms. Last content:\n${text}`);
 }
+/**
+ * Whether the terminal text shows `line`: whole, or split at one point into
+ * two fragments the shell drew apart. A shell with a long prompt (a CI
+ * runner's bash) wraps the typed line and then, on the first resize, redraws
+ * the prompt over the continuation row, leaving `…$ hi ru` and `n <id>` in
+ * the other order. Blanks are ignored; the first fragment must be at least
+ * four characters so a stray "hi" elsewhere never counts.
+ */
+function showsLine(text, line) {
+  const t = text.replace(/\s+/g, "");
+  const l = line.replace(/\s+/g, "");
+  if (t.includes(l)) return true;
+  for (let k = 4; k <= l.length - 4; k++) if (t.includes(l.slice(0, k)) && t.includes(l.slice(k))) return true;
+  return false;
+}
 async function waitForSavedVendorId(bridge, sessionId, vendorId) {
   // The frontend saves the workspace every 10 s once something changed.
   await bridge.waitFor("the conversation id to be saved with the workspace", `
@@ -418,8 +433,8 @@ try {
   const launchedAt = Date.now();
   // A long prompt (a CI runner's bash) wraps or redraws the typed line over
   // two rows, so the launch line is looked for in the rows' text as a whole.
-  const typed = await waitForTerminalText(app.bridge, s1, (text) => text.includes(`hi run ${s1}`), `the launch line "hi run ${s1}"`);
-  assert(typed.includes(`hi run ${s1}`), `the terminal shows the shell-neutral line "hi run ${s1}"`);
+  const typed = await waitForTerminalText(app.bridge, s1, (text) => showsLine(text, `hi run ${s1}`), `the launch line "hi run ${s1}"`);
+  assert(showsLine(typed, `hi run ${s1}`), `the terminal shows the shell-neutral line "hi run ${s1}"`);
   assert(!/--session-id|--settings|--resume/.test(typed), "the terminal never shows the vendor's own flags: everything else is in the launch file");
   await app.bridge.waitForTerminal(s1, /fake-cli: ready/, { timeoutMs: 30_000 });
   const startedIn = await waitForStartup(app.bridge, s1, "started");
@@ -429,6 +444,9 @@ try {
   const d1 = await sessionData(app.bridge, s1);
   log(`  fake saw argv ${JSON.stringify(rec1.argv)}`);
   log(`  fake saw env ${JSON.stringify(rec1.env)}`);
+  // What `hi run <id>` resolves to, independent of how the shell drew the line.
+  const launchFile = JSON.parse(readFileSync(join(app.dataDir, "launch", s1, "launch.json"), "utf8"));
+  assert(launchFile.program === "claude" && JSON.stringify(launchFile.args) === JSON.stringify(rec1.argv), `the launch file behind "hi run ${s1}" names ${launchFile.program} with exactly the arguments the agent received`);
   const sidAt = rec1.argv.indexOf("--session-id");
   const vendorId1 = sidAt >= 0 ? rec1.argv[sidAt + 1] : null;
   assert(vendorId1 && UUID.test(vendorId1), `the agent got a pre-assigned session id (${vendorId1})`);
@@ -522,7 +540,7 @@ try {
   log("run 3, second session: the vendor sits at a folder-trust prompt");
   setFakeMode("trust-prompt");
   const s4 = await createClaudeSession(app.bridge);
-  await waitForTerminalText(app.bridge, s4, (text) => text.includes(`hi run ${s4}`), `the launch line "hi run ${s4}"`);
+  await waitForTerminalText(app.bridge, s4, (text) => showsLine(text, `hi run ${s4}`), `the launch line "hi run ${s4}"`);
   const t4 = Date.now();
   await app.bridge.waitForTerminal(s4, /Do you trust the files in this folder\?/, { timeoutMs: 30_000 });
   const guessIn = await waitForStartup(app.bridge, s4, "waiting_at_startup_prompt", { timeoutMs: 15_000 });
