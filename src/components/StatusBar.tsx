@@ -8,9 +8,26 @@ import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
 import { AgentStatusTag } from "./AgentStatusTag";
 import { isAgentStatusEnabled } from "../agent/status/flag";
+import { useSessionStatus } from "../agent/status/attentionStore";
+import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
+
+/**
+ * The active session's status in the strip. A status that needs a person
+ * (approval, question, gate, failed check, error, limit) is announced
+ * assertively, like the old needs-input capsule; everything else politely.
+ */
+function AgentStatusStrip({ sessionId }: { sessionId: string }) {
+  const { kind } = useSessionStatus(sessionId);
+  const live = BLOCKING_STATUS_KINDS.includes(kind) ? "assertive" : "polite";
+  return (
+    <span className="status-bar-item status-bar-agent-status" role="status" aria-live={live}>
+      <AgentStatusTag sessionId={sessionId} variant="strip" />
+    </span>
+  );
+}
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -122,9 +139,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         {agentStatus && active && active.phase !== "disconnected" && (
           <>
             <span className="status-bar-divider" />
-            <span className="status-bar-item status-bar-agent-status" role="status" aria-live="polite">
-              <AgentStatusTag sessionId={active.id} variant="strip" />
-            </span>
+            <AgentStatusStrip sessionId={active.id} />
           </>
         )}
       </div>

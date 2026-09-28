@@ -363,9 +363,11 @@ try {
   assert(approval.phase === null, "the old phase tag is gone");
   const strip = await bridge.eval(`
     const tag = e2e.first(".status-bar .agent-status-tag");
-    return tag ? { status: tag.getAttribute("data-status"), word: e2e.norm(tag.querySelector(".agent-status-word").innerText) } : null;
+    const live = tag && tag.closest(".status-bar-agent-status");
+    return tag ? { status: tag.getAttribute("data-status"), word: e2e.norm(tag.querySelector(".agent-status-word").innerText), live: live && live.getAttribute("aria-live") } : null;
   `);
   assert(strip?.status === "needs_approval" && strip.word === "needs approval", `the status strip agrees (${JSON.stringify(strip)})`);
+  assert(strip.live === "assertive", `a screen reader hears it at once: the strip is aria-live="${strip.live}" (expected assertive)`);
   const derived = await bridge.eval(`return window.__HERMES_E2E__.sessionStatus(${JSON.stringify(agentId)});`);
   assert(derived.source === "agent-view" && derived.confidence === "exact", `it came from the Agent view provider through the event store (${JSON.stringify(derived)})`);
   await bridge.screenshot(join(evidenceDir, "01-needs-approval.png"));
@@ -383,6 +385,11 @@ try {
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(".perm-modal .perm-link-primary"), "Approve once"));`);
   const finished = await waitForRowStatus(bridge, agentId, ["done_unread", "idle"], "the turn to finish", { timeoutMs: 20_000 });
   log(`  after approval the row says: ${finished} (done until seen; idle when the window has focus on it)`);
+  const calmLive = await bridge.eval(`
+    const el = e2e.first(".status-bar .status-bar-agent-status");
+    return el ? el.getAttribute("aria-live") : null;
+  `);
+  assert(calmLive === "polite", `nothing blocks now, so the strip is aria-live="${calmLive}" (expected polite)`);
 
   // B — a terminal session: the TerminalProvider, guessed
   log("B: a plain terminal session reports through the TerminalProvider, as a guess");
