@@ -102,7 +102,7 @@ describe("<SessionStatusStrip>", () => {
     expect(el.className).toContain("session-status-strip-guessed");
     expect(el.textContent).toContain("working");
     expect(el.textContent).toContain("guessed");
-    expect(el.textContent).toContain("⌘I");
+    expect(el.textContent).toContain(INBOX_SHORTCUT);
   });
 
   it("shows needs approval with 'hook, exact' the moment the event lands, and the detail", () => {
