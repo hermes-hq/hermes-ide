@@ -834,14 +834,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb dbus-x11
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
-          # An AppImage leaves the GPU driver libraries (libEGL, libGL) to the
-          # system, as every desktop has them; the bare ARM runner does not.
-          sudo apt-get install -y libegl1 libgl1
+          # An AppImage leaves the graphics and font stack (libEGL, libGL,
+          # libgbm, libdrm, fontconfig, freetype, harfbuzz) to the system, as
+          # every desktop has it (linuxdeploy's excludelist); a runner does not.
+          sudo apt-get install -y libegl1 libgl1 libgbm1 libdrm2 libfontconfig1 libfreetype6 libharfbuzz0b
           # What a person does: put it somewhere and make it executable.
           mkdir -p "$HOME/Applications"
           cp "$APPIMAGE" "$HOME/Applications/"
           INSTALLED="$HOME/Applications/$(basename "$APPIMAGE")"
           chmod +x "$INSTALLED"
+          # Name any library the system still lacks, so a failure below says
+          # which one instead of stopping at the first.
+          (cd "$RUNNER_TEMP" && "$INSTALLED" --appimage-extract >/dev/null)
+          ROOT="$RUNNER_TEMP/squashfs-root"
+          LIBS=$(find "$ROOT" -name '*.so*' -type f -printf '%h\n' | sort -u | paste -sd:)
+          MISSING=$(find "$ROOT/usr/bin" "$ROOT/usr/lib" -type f \( -perm -u+x -o -name '*.so*' \) | while read -r f; do
+            file -b "$f" | grep -q ELF || continue
+            LD_LIBRARY_PATH="$LIBS" ldd "$f" 2>/dev/null | grep "not found" || true
+          done | sort -u || true)
+          if [ -n "$MISSING" ]; then echo "::warning::libraries the system lacks:"; echo "$MISSING"; fi
+          rm -rf "$ROOT"
           xvfb-run -a dbus-run-session -- "$INSTALLED" --self-test="$RUNNER_TEMP/self-test.json"
 
       - name: Install and self-test (Windows)
