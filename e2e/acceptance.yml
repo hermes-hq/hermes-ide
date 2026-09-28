@@ -722,6 +722,9 @@ features:
     # with injected turn_end events and the guessed path with the fake agent.
     # The 2 s budget fallback and the 14-day ref collection are covered by
     # the Rust tests (src-tauri/src/turn_ledger), not on the real app.
+    # F20-3 restores to T1 where the plan says T3: T1 is the earlier turn, so
+    # the restore has to undo T2 and T3 as well (a file added later goes
+    # away, a file deleted later comes back), which is the stronger check.
     status: partial
     criteria:
       F20-1:

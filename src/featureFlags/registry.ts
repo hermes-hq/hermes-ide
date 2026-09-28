@@ -68,7 +68,7 @@ export const FEATURE_FLAGS = [
     id: "turnLedger",
     label: "Turn history",
     description:
-      "Save a snapshot of the working tree after every agent turn (including changes made through shell commands) into a hidden git reference, and show a bar under terminal sessions with each turn's Diff and Restore.",
+      "Save a snapshot of the working tree after every agent turn (including changes made through shell commands) into a hidden git reference, and show a bar under terminal sessions with each turn's Diff and Restore. Snapshots include untracked files and live inside the repository's .git folder (refs/hermes/...), so a mirror push copies them; they are removed 14 days after the session is closed.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

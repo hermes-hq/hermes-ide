@@ -382,7 +382,8 @@ pub(crate) mod testing {
     /// A throwaway repository with one commit, a synthetic identity and a
     /// pre-existing stash entry (so "the stash is unchanged" is a real check).
     pub struct TestRepo {
-        pub dir: tempfile::TempDir,
+        /// Kept only so the folder lives as long as the repo.
+        _dir: tempfile::TempDir,
         pub repo: Repo,
     }
 
@@ -424,7 +425,7 @@ pub(crate) mod testing {
             write(&root, "README.md", "# demo (stashed)\n");
             git(&root, &["stash", "push", "-q", "-m", "pre-existing"]);
             let repo = Repo::discover(&root).expect("a repo");
-            TestRepo { dir, repo }
+            TestRepo { _dir: dir, repo }
         }
 
         pub fn root(&self) -> &Path {

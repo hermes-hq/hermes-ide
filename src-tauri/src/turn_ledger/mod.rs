@@ -16,10 +16,20 @@
 //!   which the guess is ignored for it.
 //!
 //! A snapshot that runs past the budget (2 s) is stopped; that worktree then
-//! keeps only a diffstat summary per turn (`degraded`) until Hermes restarts.
+//! keeps only a diffstat summary per turn (`degraded`). Every
+//! [`RETRY_AFTER_TURNS`] summaries a full snapshot is tried again, so one
+//! slow moment (a cold index on a large repository) does not switch a
+//! worktree off for the rest of the run.
 //! Kill switches: the `turnLedger` feature flag (the frontend tells the
 //! backend once at start) and the `turn_ledger` setting (`off`).
-//! References of a session closed 14 days ago are collected at startup.
+//!
+//! Nothing is written to a repository until a turn actually changed
+//! something: the baseline a session starts from is only kept in memory (the
+//! tree object, plus a warm private index) and is committed to
+//! `refs/hermes/<session>/base` together with the first recorded turn. A
+//! terminal session that never ran an agent, or an agent that never edited,
+//! leaves no reference behind. References of a session closed 14 days ago
+//! are collected at startup.
 
 pub mod snapshot;
 pub mod store;
@@ -50,6 +60,10 @@ const BASELINE_BUDGET: Duration = Duration::from_secs(30);
 /// Refs of sessions closed this long ago are collected.
 pub const GC_AFTER_DAYS: i64 = 14;
 
+/// A degraded worktree tries a full snapshot again after this many summary
+/// turns.
+pub const RETRY_AFTER_TURNS: u32 = 5;
+
 fn base_ref(session_id: &str) -> String {
     format!("refs/hermes/{session_id}/base")
 }
@@ -69,7 +83,9 @@ pub fn now_ms() -> i64 {
 #[derive(Debug, Default, Clone)]
 struct SessionState {
     root: Option<PathBuf>,
-    /// The tree of the last snapshot (base, turn or restore target).
+    /// The tree of the last snapshot (base, turn or restore target). With
+    /// `last_commit` None it is a baseline that lives only here, committed
+    /// when the first turn that changed something is recorded.
     last_tree: Option<String>,
     /// The commit the next snapshot is parented on.
     last_commit: Option<String>,
@@ -128,8 +144,10 @@ pub struct TurnLedger {
     budget: Mutex<Duration>,
     /// One lock per git dir: a worktree is snapshotted by one worker at a time.
     lanes: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-    /// Git dirs whose snapshots ran past the budget: summary rows only.
-    degraded: Mutex<HashSet<String>>,
+    /// Git dirs whose snapshots ran past the budget: summary rows only,
+    /// with how many summaries were recorded since (a full snapshot is
+    /// tried again at [`RETRY_AFTER_TURNS`]).
+    degraded: Mutex<HashMap<String, u32>>,
     sessions: Mutex<HashMap<String, SessionState>>,
 }
 
@@ -145,7 +163,7 @@ impl TurnLedger {
             enabled: AtomicBool::new(false),
             budget: Mutex::new(budget),
             lanes: Mutex::new(HashMap::new()),
-            degraded: Mutex::new(HashSet::new()),
+            degraded: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
         }
     }
@@ -176,14 +194,37 @@ impl TurnLedger {
         self.degraded
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .contains(&repo.lane_key())
+            .contains_key(&repo.lane_key())
     }
 
     fn mark_degraded(&self, repo: &Repo) {
         self.degraded
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert(repo.lane_key());
+            .insert(repo.lane_key(), 0);
+    }
+
+    fn clear_degraded(&self, repo: &Repo) {
+        self.degraded
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&repo.lane_key());
+    }
+
+    /// Count one more summary turn for a degraded worktree; true when it is
+    /// time to try a full snapshot again.
+    fn degraded_retry_due(&self, repo: &Repo) -> bool {
+        let mut degraded = self.degraded.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(count) = degraded.get_mut(&repo.lane_key()) else {
+            return true;
+        };
+        *count += 1;
+        if *count >= RETRY_AFTER_TURNS {
+            *count = 0;
+            true
+        } else {
+            false
+        }
     }
 
     /// Whether snapshots run at all: the flag (told by the frontend) and the
@@ -243,6 +284,17 @@ impl TurnLedger {
         });
     }
 
+    /// A baseline was (re)taken: the turn in progress, if any, keeps its
+    /// start time.
+    fn remember_baseline(&self, session_id: &str, tree: &str, commit: Option<&str>) {
+        self.with_session(session_id, |s| {
+            s.last_tree = Some(tree.to_string());
+            if let Some(c) = commit {
+                s.last_commit = Some(c.to_string());
+            }
+        });
+    }
+
     /// Note that a turn began (exact or guessed) so its row gets a start time.
     pub fn note_turn_started(&self, session_id: &str, at: i64, exact: bool) -> bool {
         self.with_session(session_id, |s| {
@@ -273,7 +325,9 @@ impl TurnLedger {
     /// starts and refreshed at each turn start, so edits made between turns
     /// (by a person, or between two runs of Hermes) are never charged to a
     /// turn. Nothing happens when the worktree still matches the last
-    /// snapshot.
+    /// snapshot. Until the session has recorded a turn the baseline is only
+    /// remembered (no commit, no ref); once it has a chain of snapshots a
+    /// refreshed baseline is committed onto it, so that chain stays exact.
     pub fn ensure_baseline(
         &self,
         db: &Mutex<Database>,
@@ -306,14 +360,18 @@ impl TurnLedger {
         if state.last_tree.as_deref() == Some(tree.as_str()) {
             return Ok(SnapshotOutcome::NoChange);
         }
-        let parent = state.last_commit.clone().or_else(|| repo.rev_parse("HEAD"));
+        let Some(parent) = state.last_commit.clone() else {
+            // No turn recorded yet: the repository stays untouched.
+            self.remember_baseline(session_id, &tree, None);
+            return Ok(SnapshotOutcome::NoChange);
+        };
         let commit = repo.commit_tree(
             &tree,
-            parent.as_deref(),
+            Some(&parent),
             &format!("Hermes baseline for session {session_id}"),
         )?;
         repo.update_ref(&base_ref(session_id), &commit)?;
-        self.remember(session_id, &tree, &commit);
+        self.remember_baseline(session_id, &tree, Some(&commit));
         Ok(SnapshotOutcome::NoChange)
     }
 
@@ -340,20 +398,28 @@ impl TurnLedger {
         let state = self.session_state(db, session_id, &repo);
         let started_at = started_at.or(state.turn_started_at).unwrap_or(ended_at);
 
-        if self.is_degraded(&repo) {
+        let was_degraded = self.is_degraded(&repo);
+        if was_degraded && !self.degraded_retry_due(&repo) {
             return self.record_summary(db, &repo, session_id, started_at, ended_at);
         }
         let tree = match repo.write_tree(self.budget())? {
             WriteTree::Tree(t) => t,
             WriteTree::TooSlow { elapsed } => {
                 log::warn!(
-                    "[turn-ledger] snapshot of {} took over {elapsed:?}; summaries only from now on",
+                    "[turn-ledger] snapshot of {} took over {elapsed:?}; summaries only for the next {RETRY_AFTER_TURNS} turns",
                     repo.root.display()
                 );
                 self.mark_degraded(&repo);
                 return self.record_summary(db, &repo, session_id, started_at, ended_at);
             }
         };
+        if was_degraded {
+            log::info!(
+                "[turn-ledger] snapshots of {} are back inside the budget",
+                repo.root.display()
+            );
+            self.clear_degraded(&repo);
+        }
         let before_tree = match state.last_tree.clone() {
             Some(t) => t,
             None => match repo.tree_of("HEAD") {
@@ -370,7 +436,23 @@ impl TurnLedger {
             store::max_n(&d, session_id)? + 1
         };
         let git_ref = turn_ref(session_id, n).ok_or("turn ref")?;
-        let parent = state.last_commit.clone().or_else(|| repo.rev_parse("HEAD"));
+        // The first change this session records: its baseline (kept in
+        // memory until now) becomes the root of the chain, so the diff of
+        // turn 1 is against the worktree as the session found it.
+        let parent = match (state.last_commit.clone(), state.last_tree.as_deref()) {
+            (Some(c), _) => Some(c),
+            (None, Some(base_tree)) => {
+                let head = repo.rev_parse("HEAD");
+                let base = repo.commit_tree(
+                    base_tree,
+                    head.as_deref(),
+                    &format!("Hermes baseline for session {session_id}"),
+                )?;
+                repo.update_ref(&base_ref(session_id), &base)?;
+                Some(base)
+            }
+            (None, None) => repo.rev_parse("HEAD"),
+        };
         let commit = repo.commit_tree(
             &tree,
             parent.as_deref(),
@@ -939,8 +1021,8 @@ mod tests {
         let l = ledger();
         l.ensure_baseline(&db, "s1", t.root()).unwrap();
         assert!(
-            t.repo.rev_parse("refs/hermes/s1/base").is_some(),
-            "a baseline ref exists"
+            t.repo.refs_under("refs/hermes/").is_empty(),
+            "a baseline alone writes nothing to the repository"
         );
 
         // What a shell `sed -i` does: rewrite a tracked file; plus a new file.
@@ -979,8 +1061,12 @@ mod tests {
             diff.patch
         );
         assert!(diff.patch.contains("+draft"), "{}", diff.patch);
-        // The snapshot is chained onto the baseline, which sits on HEAD.
-        let base = t.repo.rev_parse("refs/hermes/s1/base").unwrap();
+        // The snapshot is chained onto the baseline (committed with this
+        // first turn), which sits on HEAD.
+        let base = t
+            .repo
+            .rev_parse("refs/hermes/s1/base")
+            .expect("the baseline ref exists once a turn is recorded");
         assert_eq!(
             t.repo.parent_of(&t.repo.rev_parse(&turn.git_ref).unwrap()),
             Some(base.clone())
@@ -1022,6 +1108,41 @@ mod tests {
             diff.patch
         );
         assert!(!diff.patch.contains("-hello"), "{}", diff.patch);
+    }
+
+    #[test]
+    fn a_session_that_never_records_a_turn_leaves_no_ref_behind() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        // A plain terminal session: opened, edited by a person, a turn
+        // start guessed, a turn end that changed nothing, then closed.
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        write(t.root(), "README.md", "# edited by a person\n");
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        assert_eq!(
+            l.record_turn(&db, "s1", t.root(), None, 1).unwrap(),
+            SnapshotOutcome::NoChange
+        );
+        assert!(
+            t.repo.refs_under("refs/hermes/").is_empty(),
+            "no ref for a session without a recorded turn: {:?}",
+            t.repo.refs_under("refs/hermes/")
+        );
+        assert!(store::list_turns(&db.lock().unwrap(), "s1")
+            .unwrap()
+            .is_empty());
+        // The baseline still counts: the first real turn is diffed against
+        // the worktree as it was at the last turn start, not against HEAD.
+        write(t.root(), "src/app.txt", "by the agent\n");
+        let turn = recorded(l.record_turn(&db, "s1", t.root(), None, 2).unwrap());
+        assert_eq!(turn.diffstat.files, 1, "{:?}", turn.diffstat);
+        let diff = l.turn_diff(&db, "s1", 1, Some(t.root())).unwrap().unwrap();
+        assert!(!diff.patch.contains("README.md"), "{}", diff.patch);
+        let mut refs = t.repo.refs_under("refs/hermes/s1/");
+        refs.sort();
+        assert_eq!(refs, vec!["refs/hermes/s1/base", "refs/hermes/s1/turn/1"]);
     }
 
     #[test]
@@ -1112,12 +1233,16 @@ mod tests {
             "no snapshot ref"
         );
         assert!(l.is_degraded(&t.repo));
-        // The worktree stays degraded even with a generous budget now.
+        // The worktree stays degraded for the next turns even with a
+        // generous budget now: no `git add` is even tried.
         l.set_budget(Duration::from_secs(30));
-        write(t.root(), "src/app.txt", "more\n");
-        assert!(
-            matches!(l.record_turn(&db, "s1", t.root(), None, 2).unwrap(), SnapshotOutcome::Degraded(t) if t.n == 2)
-        );
+        for n in 2..=RETRY_AFTER_TURNS {
+            write(t.root(), "src/app.txt", &format!("more {n}\n"));
+            assert!(
+                matches!(l.record_turn(&db, "s1", t.root(), None, n as i64).unwrap(), SnapshotOutcome::Degraded(t) if t.n == n),
+                "turn {n} is a summary"
+            );
+        }
         let diff = l.turn_diff(&db, "s1", 2, Some(t.root())).unwrap().unwrap();
         assert_eq!(diff.patch, "", "a summary turn has no patch");
         assert!(
@@ -1129,6 +1254,46 @@ mod tests {
         write(u.root(), "src/app.txt", "elsewhere\n");
         assert!(matches!(
             l.record_turn(&db, "s2", u.root(), None, 1).unwrap(),
+            SnapshotOutcome::Recorded(_)
+        ));
+        // After RETRY_AFTER_TURNS summaries a full snapshot is tried again;
+        // it fits the budget now, so the worktree is back to snapshots and
+        // that turn's diff covers everything since the last real one.
+        write(t.root(), "src/app.txt", "recovered\n");
+        let back = recorded(l.record_turn(&db, "s1", t.root(), None, 99).unwrap());
+        assert_eq!(back.n, RETRY_AFTER_TURNS + 1);
+        assert!(!l.is_degraded(&t.repo));
+        assert_eq!(back.diffstat.files, 301, "{:?}", back.diffstat);
+        let diff = l
+            .turn_diff(&db, "s1", back.n, Some(t.root()))
+            .unwrap()
+            .unwrap();
+        assert!(diff.patch.contains("+recovered"), "{}", diff.patch);
+        write(t.root(), "src/app.txt", "and on\n");
+        assert!(matches!(
+            l.record_turn(&db, "s1", t.root(), None, 100).unwrap(),
+            SnapshotOutcome::Recorded(t) if t.diffstat.files == 1
+        ));
+        // A retry that is still too slow keeps the worktree degraded for
+        // another RETRY_AFTER_TURNS turns.
+        l.set_budget(Duration::from_nanos(1));
+        write(t.root(), "src/app.txt", "slow again\n");
+        assert!(matches!(
+            l.record_turn(&db, "s1", t.root(), None, 101).unwrap(),
+            SnapshotOutcome::Degraded(_)
+        ));
+        l.set_budget(Duration::from_secs(30));
+        for i in 0..(RETRY_AFTER_TURNS - 1) {
+            write(t.root(), "src/app.txt", &format!("still {i}\n"));
+            assert!(matches!(
+                l.record_turn(&db, "s1", t.root(), None, 102 + i as i64)
+                    .unwrap(),
+                SnapshotOutcome::Degraded(_)
+            ));
+        }
+        write(t.root(), "src/app.txt", "back again\n");
+        assert!(matches!(
+            l.record_turn(&db, "s1", t.root(), None, 200).unwrap(),
             SnapshotOutcome::Recorded(_)
         ));
     }
