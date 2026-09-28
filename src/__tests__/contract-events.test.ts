@@ -66,6 +66,25 @@ describe("SessionEvent", () => {
     for (const raw of fixture.rejected) expect(parseSessionEvent(raw), JSON.stringify(raw)).toBeNull();
   });
 
+  it("bounds `at` to a safe integer and `n` to 1..=4294967295, like the Rust parser", () => {
+    const max = Number.MAX_SAFE_INTEGER;
+    expect(parseSessionEvent({ type: "turn_end", at: max, n: 1 })).toEqual({ type: "turn_end", at: max, n: 1 });
+    expect(parseSessionEvent({ type: "turn_end", at: -max, n: 1 })).toEqual({ type: "turn_end", at: -max, n: 1 });
+    expect(parseSessionEvent({ type: "turn_end", at: max + 1, n: 1 })).toBeNull();
+    expect(parseSessionEvent({ type: "turn_end", at: -(max + 1), n: 1 })).toBeNull();
+    expect(parseSessionEvent({ type: "attention", at: 2 ** 60, detail: "x" })).toBeNull();
+    expect(parseSessionEvent({ type: "turn_end", at: Infinity, n: 1 })).toBeNull();
+    expect(parseSessionEvent({ type: "turn_end", at: NaN, n: 1 })).toBeNull();
+    expect(parseSessionEvent({ type: "turn_start", at: 1, n: 4294967295 })).toEqual({ type: "turn_start", at: 1, n: 4294967295 });
+    for (const type of ["turn_start", "turn_end", "turn_interrupted"]) {
+      expect(parseSessionEvent({ type, at: 1, n: 4294967296 }), type).toBeNull();
+      expect(parseSessionEvent({ type, at: 1, n: 0 }), type).toBeNull();
+      expect(parseSessionEvent({ type, at: 1, n: 1.5 }), type).toBeNull();
+    }
+    expect(parseSessionEvent({ type: "turn_failed", at: 1, n: 4294967296, detail: "x" })).toBeNull();
+    expect(parseSessionEvent({ type: "turn_failed", at: 1, n: 4294967295, detail: "x" })).toEqual({ type: "turn_failed", at: 1, n: 4294967295, detail: "x" });
+  });
+
   it("drops fields it does not know, so a newer producer stays readable", () => {
     expect(parseSessionEvent({ type: "turn_end", at: 1, n: 4, futureField: true })).toEqual({ type: "turn_end", at: 1, n: 4 });
     expect(parseSessionEvent({ type: "exit", at: 1 })).toEqual({ type: "exit", at: 1, code: null, signal: null });

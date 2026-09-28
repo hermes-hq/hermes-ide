@@ -33,6 +33,7 @@
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
     { "type": "status", "at": 1790000000000, "status": { "kind": "working", "confidence": "sure", "detail": "" } },
     { "type": "turn_start", "at": 1790000001000, "n": 0 },
+    { "type": "turn_end", "at": 1790000001000, "n": 4294967296 },
     { "type": "turn_failed", "at": 1790000003000, "n": 2 },
     { "type": "attention", "at": 1790000005000 },
     { "type": "identity", "at": 1790000006000, "vendorSessionId": 7, "model": null, "permissionMode": null },

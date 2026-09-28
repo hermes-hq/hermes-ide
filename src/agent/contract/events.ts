@@ -104,8 +104,11 @@ function optionalString(v: unknown): string | null | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** The largest turn number: the Rust side reads `n` as a NonZeroU32. */
+const MAX_TURN_NUMBER = 4294967295;
+
 function turnNumber(v: unknown): number | null {
-  return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_TURN_NUMBER ? v : null;
 }
 
 /**
@@ -113,12 +116,13 @@ function turnNumber(v: unknown): number | null {
  * injector). Returns null for anything malformed: an unknown type, a
  * missing field, a wrong type. Extra fields are dropped, so a newer
  * producer never breaks an older reader. Numbers are bounded like the
- * Rust side (`at` an integer, `code` an i32) so both parsers agree.
+ * Rust side (`at` an integer JavaScript holds exactly, `n` 1..=u32::MAX,
+ * `code` an i32) so both parsers agree.
  */
 export function parseSessionEvent(value: unknown): SessionEvent | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
-  if (typeof v.at !== "number" || !Number.isInteger(v.at)) return null;
+  if (typeof v.at !== "number" || !Number.isSafeInteger(v.at)) return null;
   const source = v.source === undefined ? undefined : v.source;
   if (source !== undefined && typeof source !== "string") return null;
   const tags = v.tags === undefined || v.tags === null ? undefined : v.tags;
