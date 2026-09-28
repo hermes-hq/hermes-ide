@@ -113,6 +113,13 @@ points at the other kind of bundle. Windows ships the NSIS installer only: the u
 with NSIS, so an MSI install would end up with two copies after its first
 update.
 
+The plain `linux-x86_64` / `linux-aarch64` keys used to be absent (1.1.3 to
+1.4.x shipped no AppImage). Every current client looks up its `-deb` or
+`-appimage` key first, and 1.4.x `.deb` installs already read `-deb`. A `.deb`
+install old enough not to report its bundle type would now be offered the
+AppImage under the plain key, which it cannot install, instead of no update;
+such a user updates by installing the new `.deb` by hand.
+
 ## Bridge runtime
 
 The Claude bridge and its `node_modules` (the Agent SDK and its native

@@ -58,6 +58,7 @@ jobs:
       rust: ${{ github.event_name != 'pull_request' || steps.filter.outputs.rust == 'true' }}
       ci: ${{ github.event_name != 'pull_request' || steps.filter.outputs.ci == 'true' }}
       workflows: ${{ github.event_name != 'pull_request' || steps.filter.outputs.workflows == 'true' }}
+      packaging: ${{ github.event_name != 'pull_request' || steps.filter.outputs.packaging == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -103,6 +104,23 @@ jobs:
               - 'e2e/**'
             workflows:
               - '.github/workflows/**'
+            # What the installer jobs build or install from: the app, its
+            # bundled runtime, the installer scripts and their scenarios.
+            packaging:
+              - 'src-tauri/**'
+              - 'rust-toolchain.toml'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'scripts/stage-bridge-deps.mjs'
+              - 'scripts/pack-bridge-runtime.mjs'
+              - 'scripts/ci/**'
+              - 'e2e/app/build-appimage.mjs'
+              - 'e2e/app/harness.mjs'
+              - 'e2e/app/run.mjs'
+              - 'e2e/app/scenarios/F25-appimage-update.mjs'
+              - 'e2e/app/scenarios/F25-winget-install.mjs'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
 
   # ── Dev and test builds never run as the installed app ───────────────
   instance-identifiers:
@@ -385,7 +403,7 @@ jobs:
             node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
             node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
             node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
-            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs F25-bridge-runtime.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs F25-bridge-runtime.mjs F25-agent-session-runtime.mjs || fail=1
             node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
             exit "$fail"
           '
@@ -404,7 +422,7 @@ jobs:
           node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
           node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
           node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
-          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs F25-bridge-runtime.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs C0-session-event-bridge.mjs F25-bridge-runtime.mjs F25-agent-session-runtime.mjs || fail=1
           node e2e/app/run.mjs --keep-going FIX-close-before-quit.mjs || fail=1
           exit "$fail"
 
@@ -452,10 +470,12 @@ jobs:
   # update itself through the UI; a sabotaged run (wrong signature) must
   # fail. Windows installs the newest release through the winget manifests
   # the release workflow generates. Evidence joins the acceptance gate.
+  # Two full AppImage builds are slow, so on pull requests this runs only
+  # when something that goes into an installer changed (`packaging`).
   e2e-installers:
     name: Installers on ${{ matrix.name }}
     needs: changes
-    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.packaging == 'true'
     strategy:
       fail-fast: false
       matrix:

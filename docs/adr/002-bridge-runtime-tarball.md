@@ -183,9 +183,24 @@ Option A, with these differences from the sketch above:
   installed macOS app 310 -> 118 MB. The Windows NSIS installer grows
   94 -> 103 MB: its LZMA compressed the raw runtime better than zstd does.
   Downloads shrink far less than the 210 MB this ADR hoped for: installers
-  were already compressed, and the runtime is still shipped. The unpacked
-  runtime (256 MB) lands in the data folder once the Agent view is first
-  used.
+  were already compressed, and the runtime is still shipped.
+- **Windows compression, measured.** NSIS compresses the whole installer
+  with solid LZMA (8 MB dictionary), which cannot shrink an archive that is
+  already compressed. Measured on the runtime tar (260 MB) with the same
+  LZMA settings: the raw tar packs to 71.1 MB, the zstd-19 archive to
+  79.7 MB, a zstd-1 archive to 109.4 MB; zstd 22 alone reaches 75.6 MB
+  (7x slower to pack, and a window over the 100 MB the unpacker allows).
+  Shipping an uncompressed tar on Windows would bring the installer back to
+  about 95 MB, but leave a 260 MB file in the install folder instead of
+  79 MB, on top of the unpacked copy. We keep zstd 19 everywhere: 8 MB more
+  download on Windows against 180 MB less disk, one archive format.
+- **Disk footprint.** An Agent-view user now keeps both the 79 MB archive
+  (in the app bundle) and the unpacked runtime (256 MB, in the data folder):
+  about 335 MB, more than the old raw tree (256 MB) on every platform. The
+  unpacked copy is per instance (each instance has its own data folder), so
+  running several instances that use the Agent view means one 256 MB copy
+  each. Users who never open the Agent view (the default, terminal first)
+  never unpack it and keep only the 79 MB archive.
 - **AppImage and updates.** AppImages are built again, and each Linux
   installer is its own updater bundle: `linux-*-deb` for `.deb` installs,
   `linux-*-appimage` and the plain `linux-*` keys for AppImages.

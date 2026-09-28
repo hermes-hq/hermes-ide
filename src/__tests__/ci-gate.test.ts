@@ -11,10 +11,10 @@ type Needs = Record<string, { result: string; outputs?: Record<string, string> }
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/ci-gate.mjs", import.meta.url));
 
-function changes(outputs: Partial<Record<"frontend" | "rust" | "ci" | "workflows", "true" | "false">>) {
+function changes(outputs: Partial<Record<"frontend" | "rust" | "ci" | "workflows" | "packaging", "true" | "false">>) {
 	return {
 		result: "success",
-		outputs: { frontend: "false", rust: "false", ci: "false", workflows: "false", ...outputs },
+		outputs: { frontend: "false", rust: "false", ci: "false", workflows: "false", packaging: "false", ...outputs },
 	};
 }
 
@@ -70,6 +70,19 @@ describe("CI gate", () => {
 			expect(ok, result).toBe(false);
 			expect(lines.join("\n")).toMatch(/acceptance: /);
 		}
+	});
+
+	it("the installer jobs are expected only when something that goes into an installer changed", () => {
+		const frontendOnly = { changes: changes({ frontend: "true" }), ...allJobs("success") } as Needs;
+		frontendOnly["e2e-installers"] = { result: "skipped" };
+		for (const job of ["rust-fmt", "rust-clippy", "rust-test", "actionlint"]) frontendOnly[job] = { result: "skipped" };
+		expect(evaluateGate(frontendOnly).ok).toBe(true);
+
+		const packaging = { changes: changes({ rust: "true", packaging: "true" }), ...allJobs("success") } as Needs;
+		packaging["e2e-installers"] = { result: "skipped" };
+		const { ok, lines } = evaluateGate(packaging);
+		expect(ok).toBe(false);
+		expect(lines.join("\n")).toMatch(/e2e-installers: skipped, but its inputs changed/);
 	});
 
 	it("fails when a job failed", () => {
@@ -147,6 +160,7 @@ function workflow(overrides: { gateNeeds?: string; jobs?: Record<string, string>
       rust: \${{ steps.filter.outputs.rust }}
       ci: \${{ steps.filter.outputs.ci }}
       workflows: \${{ steps.filter.outputs.workflows }}
+      packaging: \${{ steps.filter.outputs.packaging }}
     steps:
       - uses: actions/checkout@v6
         if: github.event_name == 'pull_request'`,
@@ -170,7 +184,7 @@ function workflow(overrides: { gateNeeds?: string; jobs?: Record<string, string>
     if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
 		"e2e-installers": `
     needs: changes
-    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'`,
+    if: needs.changes.outputs.packaging == 'true'`,
 		acceptance: `
     needs: [changes, e2e-app, e2e-installers]
     if: >-
