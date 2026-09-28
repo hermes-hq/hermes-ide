@@ -44,8 +44,8 @@ pub enum LimitSignal {
     Limited,
     /// The agent is working again; the status it is in now.
     Cleared(AgentStatusKind),
-    /// The agent process is gone.
-    Ended,
+    /// The agent process is gone, with its exit status when reported.
+    Ended(Option<i32>),
     /// Fresh numbers for the limit windows (the status line).
     Windows(Vec<LimitWindow>),
     /// Nothing about limits.
@@ -161,7 +161,13 @@ pub fn classify(record: &SignalRecord) -> LimitSignal {
             LimitSignal::Cleared(AgentStatusKind::Working)
         }
         "Stop" => LimitSignal::Cleared(AgentStatusKind::DoneUnread),
-        "SessionEnd" | "hermes.exited" => LimitSignal::Ended,
+        "SessionEnd" => LimitSignal::Ended(None),
+        "hermes.exited" => LimitSignal::Ended(
+            payload
+                .get("exit_code")
+                .and_then(Value::as_i64)
+                .and_then(|c| i32::try_from(c).ok()),
+        ),
         _ => LimitSignal::Nothing,
     }
 }
@@ -255,11 +261,20 @@ impl LimitTracker {
                     });
                 }
             }
-            LimitSignal::Ended => {
+            LimitSignal::Ended(code) => {
+                // A limited session whose agent is gone is exited, not
+                // limited: clear the limit and say the process ended, so
+                // no "limited" tag or inbox item outlives the agent.
                 if self.limited {
                     self.limited = false;
                     self.reported = None;
                     out.push(cleared(at, &source));
+                    out.push(SessionEvent::Exit {
+                        at,
+                        source,
+                        code,
+                        signal: None,
+                    });
                 }
             }
             LimitSignal::Nothing => {}
@@ -500,21 +515,49 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_ending_clears_the_limit_without_a_status() {
+    fn the_agent_ending_clears_the_limit_and_reports_the_exit() {
+        for (event, payload, code) in [
+            ("hermes.exited", json!({ "exit_code": 3 }), Some(3)),
+            ("SessionEnd", json!({ "reason": "prompt_input_exit" }), None),
+        ] {
+            let mut t = LimitTracker::new();
+            t.observe(&rate_limit_stop(T0), NONCE);
+            let out = t.observe(&line(T0 + 5, event, payload), NONCE);
+            assert_eq!(
+                out,
+                vec![
+                    SessionEvent::Limit {
+                        at: (T0 + 5) * 1000,
+                        source: Some("hook:claude".into()),
+                        state: LimitState::Cleared,
+                        resets_at: None,
+                        window: None,
+                    },
+                    SessionEvent::Exit {
+                        at: (T0 + 5) * 1000,
+                        source: Some("hook:claude".into()),
+                        code,
+                        signal: None,
+                    },
+                ],
+                "{event}"
+            );
+            assert!(!t.is_limited());
+            // The exit report after SessionEnd adds nothing.
+            assert!(t
+                .observe(
+                    &line(T0 + 6, "hermes.exited", json!({ "exit_code": 0 })),
+                    NONCE
+                )
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn an_agent_ending_while_not_limited_says_nothing_here() {
         let mut t = LimitTracker::new();
-        t.observe(&rate_limit_stop(T0), NONCE);
-        let out = t.observe(
-            &line(T0 + 5, "hermes.exited", json!({ "exit_code": 0 })),
-            NONCE,
-        );
-        assert_eq!(out.len(), 1);
-        assert!(matches!(
-            &out[0],
-            SessionEvent::Limit {
-                state: LimitState::Cleared,
-                ..
-            }
-        ));
+        let out = t.observe(&line(T0, "hermes.exited", json!({ "exit_code": 0 })), NONCE);
+        assert!(out.is_empty(), "exit without a limit is F11's status");
     }
 
     #[test]

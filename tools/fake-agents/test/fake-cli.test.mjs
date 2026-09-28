@@ -1,7 +1,7 @@
 // The fake vendor CLI must behave like the real one at startup, or the
 // launch-and-resume scenario proves nothing. These tests run it over pipes.
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -224,6 +224,24 @@ describe("fake vendor CLI", () => {
 		expect(fired.notification_type).toBe("quota_auto_resume_fired");
 		// A matcher that does not match keeps its hook from running.
 		expect(logLines(marks, "PermissionPrompt")).toEqual([]);
+	});
+
+	it("l ends another turn on the limit (status line and StopFailure again); q then runs SessionEnd", async () => {
+		const dir = tmp();
+		const work = tmp();
+		const { file, marks } = limitSettings(dir);
+		const res = await run(["--session-id", "rl-2", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "normal" },
+			keys: "lq",
+			afterMs: 2500,
+			cwd: work,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: usage limit reached");
+		expect(existsSync(join(work, "src"))).toBe(false); // no edits, only the limit
+		expect(logLines(marks, "StatusLine")).toHaveLength(1);
+		expect(logLines(marks, "StopFailure")[0]).toMatchObject({ error: "rate_limit", session_id: "rl-2" });
+		expect(records(dir)[0].exit.why).toBe("q");
 	});
 
 	it("server-error mode ends the turn on another error, which the rate_limit matcher does not run for", async () => {

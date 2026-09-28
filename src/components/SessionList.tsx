@@ -21,7 +21,7 @@ import { agentDisplayName } from "../catalog/agentCatalog";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { SessionLimitTag } from "./SessionLimitTag";
 import { HandoffDialog } from "./HandoffDialog";
-import { nestUnderParents, type HandoffKind } from "../limits/handoff";
+import { canHandOff, nestUnderParents, type HandoffKind } from "../limits/handoff";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -743,7 +743,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     const items = buildSessionMenuItems(
       { id: session.id, group: session.group || null, phase: session.phase },
       allGroups,
-      handoffEnabled && session.phase !== "destroyed" && !session.ssh_info
+      handoffEnabled && canHandOff(session)
         ? { continueLabel: t("handoff.continueMenu"), duplicateLabel: t("handoff.duplicateMenu") }
         : undefined,
     );

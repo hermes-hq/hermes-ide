@@ -1590,6 +1590,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 // conversation id back so the agent continues it.
                 launchHelper: isFeatureFlagEnabled("launchHelper"),
                 vendorSessionId: saved.vendor_session_id ?? null,
+                parentSessionId: saved.parent_session_id ? (oldToNew.get(saved.parent_session_id) ?? saved.parent_session_id) : null,
               });
 
               // Agent-mode restore: spawn the Claude subprocess that the
@@ -2161,6 +2162,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // terminal-mode sessions.
             ...(claudeUuid ? { claude_session_uuid: claudeUuid } : {}),
             ...(s.vendor_session_id ? { vendor_session_id: s.vendor_session_id } : {}),
+            ...(s.parent_session_id ? { parent_session_id: s.parent_session_id } : {}),
             ...(agentModel ? { agent_model: agentModel } : {}),
             ...(agentPerm ? { agent_permission_mode: agentPerm } : {}),
             ...(agentEffort ? { agent_effort: agentEffort } : {}),

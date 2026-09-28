@@ -37,7 +37,9 @@
 //                 not a limit (the negative control for the limit checks)
 //
 // In any mode, the key `r` stands for "the limit reset and the agent goes
-// on": the `Notification` hooks with `quota_auto_resume_fired`.
+// on": the `Notification` hooks with `quota_auto_resume_fired`; the key `l`
+// for "another turn ended on the usage limit" (the status line and the
+// `StopFailure` hooks again, no file edits).
 //
 // Hook groups with a `matcher` only run when it matches, like the real CLI
 // (the error of a StopFailure, the notification type of a Notification, the
@@ -318,6 +320,11 @@ async function workThenFail(error) {
 	if (fs.existsSync(readme)) fs.appendFileSync(readme, "\nLogin: redirect after sign-in (in progress).\n");
 	note("work", { files: ["src/login.ts", "README.md"] });
 	out("fake-cli: editing src/login.ts, README.md\r\n");
+	await failTurn(error);
+}
+
+/** The end of a turn on an API error: the status line's windows, then the StopFailure hooks. */
+async function failTurn(error) {
 	const resetsAt = readResetsAt();
 	await runStatusLine({
 		rate_limits: {
@@ -418,6 +425,10 @@ async function main() {
 				message: "Usage limit reset, continuing automatically",
 			});
 			out("\r\nfake-cli: limit reset, continuing\r\n");
+			continue;
+		}
+		if (key === "l") {
+			await failTurn("rate_limit");
 			continue;
 		}
 		if (key === "\r") out("\r\n");

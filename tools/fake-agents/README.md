@@ -64,6 +64,8 @@ Behaviour per launch, from `HERMES_FAKE_MODE` or the file
 
 In any mode the key `r` stands for "the limit reset and the agent goes on":
 the `Notification` hooks run with `notification_type: "quota_auto_resume_fired"`.
+The key `l` ends another turn on the usage limit (the status line and the
+`StopFailure` hooks again, without editing files).
 Hook groups with a `matcher` run only when it matches (the error of a
 `StopFailure`, the notification type of a `Notification`, the tool of a tool
 event), like the real CLI.

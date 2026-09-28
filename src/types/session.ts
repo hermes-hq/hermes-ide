@@ -252,6 +252,9 @@ export interface SavedSessionInfo {
    *  with it; agents without resume start fresh. Optional: older saves and
    *  sessions started without the helper have none. */
   vendor_session_id?: string;
+  /** N19: the session this one was handed off from, so it is shown under
+   *  that session again after a restart. */
+  parent_session_id?: string;
 }
 
 export interface SavedWorkspace {
@@ -326,6 +329,9 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     // A conversation id is a non-empty string or nothing at all.
     if (si.vendor_session_id !== undefined && (typeof si.vendor_session_id !== "string" || !si.vendor_session_id)) {
       delete si.vendor_session_id;
+    }
+    if (si.parent_session_id !== undefined && (typeof si.parent_session_id !== "string" || !si.parent_session_id)) {
+      delete si.parent_session_id;
     }
   }
 

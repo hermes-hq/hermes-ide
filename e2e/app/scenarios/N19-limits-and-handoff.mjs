@@ -29,6 +29,9 @@
 //             files are not there); it also sits under the Claude session
 //          4. the limit resets (the fake reports `quota_auto_resume_fired`):
 //             "limited" goes away and the inbox item is resolved
+//          5. the next turn hits the limit again (the fake's `l`), then the
+//             person quits the agent (`q`): the session is exited, not
+//             limited — no "limited" tag and no limit item outlive the agent
 //
 // Negative controls (each must end in RESULT: FAIL):
 //   HERMES_E2E_N19_FAKE_ERROR=server_error  the fake Claude's turn ends on a
@@ -385,6 +388,14 @@ try {
       button: e2e.norm(t.querySelector(".session-limit-handoff")?.innerText),
       resetsAt: t.dataset.resetsAt,
       confidence: t.dataset.confidence,
+      // Whether the reset time is drawn whole inside the row (not cut off).
+      detailWhole: (() => {
+        const d = t.querySelector(".session-limit-detail");
+        if (!d) return false;
+        const dr = d.getBoundingClientRect();
+        const rr = row.getBoundingClientRect();
+        return d.scrollWidth <= Math.ceil(d.clientWidth) && dr.right <= rr.right + 0.5 && dr.width > 0;
+      })(),
     };
   `, { timeoutMs: 20_000 });
   // The reported reset time as the app's own engine writes a clock time in
@@ -398,6 +409,7 @@ try {
   assert(tag.word === "limited" && tag.detail === `resets ${expectedTime}`, `the row says "${tag.word} · ${tag.detail}"`);
   assert(FLAG_ON ? tag.button === "Hand off…" : !tag.button, `the handoff is offered with the launch helper (${tag.button || "no button"})`);
   assert(tag.confidence === "exact", "the limit comes from the agent's own hook (exact)");
+  assert(tag.detailWhole === true, "the reset time is shown whole in the row, not cut off");
   const snap = await snapshot(bridge, claudeId);
   assert(snap.status.kind === "limited" && snap.status.confidence === "exact", "the session's status is limited, exact");
   assert(snap.limit?.window === "five_hour" && snap.limit?.resetsAt === RESETS_AT * 1000, `the limit is the five_hour window (${JSON.stringify(snap.limit)})`);
@@ -509,6 +521,27 @@ try {
   const inbox2 = (await inboxItems(bridge)).filter((i) => i.kind === "limit");
   assert(inbox2.length === 0, "the inbox item is resolved");
   await bridge.screenshot(join(evidenceDir, "05-limit-reset.png"));
+
+  log("step 5: limited again, then the person quits the agent");
+  await bridge.typeInTerminal(claudeId, "l");
+  await bridge.waitFor("the limited tag to come back", `return !!e2e.first(${JSON.stringify(`${rowOf(claudeId)} .session-limit-tag`)});`, { timeoutMs: 20_000 });
+  const again = await snapshot(bridge, claudeId);
+  assert(again.status.kind === "limited" && again.limit?.resetsAt === RESETS_AT * 1000, `limited again, same reset (${JSON.stringify(again.limit)})`);
+  const inbox3 = (await inboxItems(bridge)).filter((i) => i.kind === "limit");
+  assert(inbox3.length === 1 && inbox3[0].sessionId === claudeId, "one limit item again");
+  await bridge.typeInTerminal(claudeId, "q");
+  // The fake records how it ended; then give Hermes time to see the process
+  // go and any late event (a stale limit, a re-raised inbox item) to land.
+  await waitForRecord("the fake Claude to quit", (r) => r.env?.HERMES_SESSION_ID === claudeId && r.exit?.why === "q", 20_000);
+  await sleep(3_000);
+  const gone = await snapshot(bridge, claudeId);
+  log(`  after quitting: status ${JSON.stringify(gone.status)}, limit ${JSON.stringify(gone.limit)}, exit ${JSON.stringify(gone.exit)}`);
+  assert(gone.status.kind === "exited" && gone.limit === null, "the session is exited, with no limit left");
+  const tagAfterQuit = await bridge.eval(`return e2e.norm(e2e.first(${JSON.stringify(`${rowOf(claudeId)} .session-limit-tag`)})?.innerText ?? "");`);
+  assert(tagAfterQuit === "", `no "limited" tag after the agent quit ("${tagAfterQuit}")`);
+  const inbox4 = (await inboxItems(bridge)).filter((i) => i.kind === "limit");
+  assert(inbox4.length === 0, `no limit item left or raised again for the exited agent (${JSON.stringify(inbox4)})`);
+  await bridge.screenshot(join(evidenceDir, "06-quit-while-limited.png"));
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

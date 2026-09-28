@@ -105,6 +105,8 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       // localised agentError.exitCode / agentError.exitSignal strings.
       next.status = { kind: "exited", confidence: "exact", detail: "" };
       next.turn = { current: null, completed: prev.turn.completed + (prev.turn.current === null ? 0 : 1) };
+      // N19: an agent that is gone is under no limit.
+      next.limit = null;
       break;
     case "limit":
       next.limit = event.state === "limited" ? Object.freeze({ resetsAt: event.resetsAt, window: event.window }) : null;

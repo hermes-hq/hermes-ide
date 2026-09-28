@@ -150,6 +150,15 @@ export function handoffTargets(
   return out.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map(({ t }) => t);
 }
 
+/**
+ * Whether a session can be continued or duplicated in another agent: a
+ * live local session that runs an agent (a plain shell has no task to hand
+ * over; a remote one cannot start a local agent in its folder).
+ */
+export function canHandOff(session: Pick<SessionData, "phase" | "ssh_info" | "ai_provider">): boolean {
+  return session.phase !== "destroyed" && !session.ssh_info && !!session.ai_provider;
+}
+
 /** The task a handoff dialog starts with: the session's description, else its name. */
 export function defaultTask(session: Pick<SessionData, "label" | "description">): string {
   return session.description?.trim() || session.label.trim();

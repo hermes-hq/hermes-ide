@@ -1206,6 +1206,7 @@
   order: 10;
   flex: 1 0 100%;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   font-size: var(--text-2xs);
@@ -1216,10 +1217,10 @@
 .session-limit-word {
   font-weight: 600;
 }
+/* The reset time is the point of the tag: it never gets cut; the button
+ * moves to the next line instead when the row is too narrow. */
 .session-limit-detail {
   color: var(--text-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .session-limit-handoff {

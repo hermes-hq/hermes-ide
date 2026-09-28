@@ -18,6 +18,7 @@ import { _resetInboxForTest, listInboxItems } from "../agent/contract/inbox";
 import { formatResetTime, limitDescription, startLimitInbox } from "../limits/limitStatus";
 import {
   buildHandoffSeed,
+  canHandOff,
   changedFilesOf,
   childBranchName,
   defaultTask,
@@ -29,7 +30,7 @@ import {
 import { HandoffError, runHandoff, type HandoffDeps } from "../limits/runHandoff";
 import { AGENT_CATALOG, listAgents } from "../catalog/agentCatalog";
 import type { GitProjectStatus, SessionWorktree } from "../types/git";
-import type { CreateSessionOpts, SessionData } from "../types/session";
+import { validateSavedWorkspace, type CreateSessionOpts, type SessionData } from "../types/session";
 
 const T0 = Date.UTC(2026, 8, 28, 12, 0, 0); // 2026-09-28 12:00 UTC
 
@@ -43,6 +44,7 @@ const limit = (at: number, resetsAt: number | null, window: string | null = "fiv
   window,
 });
 const cleared = (at: number): SessionEvent => ({ type: "limit", at, state: "cleared", resetsAt: null, window: null });
+const exited = (at: number, code: number | null = 0): SessionEvent => ({ type: "exit", at, code, signal: null });
 
 beforeEach(() => {
   _resetSessionEventStoreForTest();
@@ -90,6 +92,32 @@ describe("the limit event (contract addition)", () => {
     stop();
     dispatchSessionEvent("a", working(3));
     expect(seen).toEqual(["a", "b", "a"]);
+  });
+});
+
+describe("a limited agent that quits", () => {
+  it("is exited, not limited: no tag words, no inbox item left behind or raised again", () => {
+    const stop = startLimitInbox(() => T0);
+    dispatchSessionEvent("s", limit(1, T0 + 3_600_000));
+    dispatchSessionEvent("s", limited(1));
+    expect(listInboxItems()).toHaveLength(1);
+    // What the backend sends when the agent process ends while limited.
+    dispatchSessionEvent("s", cleared(2));
+    dispatchSessionEvent("s", exited(2, 0));
+    const snap = getSessionEventSnapshot("s");
+    expect(snap.status.kind).toBe("exited");
+    expect(snap.limit).toBeNull();
+    expect(limitDescription(snap, T0)).toBeNull();
+    expect(listInboxItems()).toEqual([]);
+    stop();
+  });
+
+  it("an exit alone also drops the limit", () => {
+    dispatchSessionEvent("s", limit(1, T0 + 3_600_000));
+    dispatchSessionEvent("s", limited(1));
+    dispatchSessionEvent("s", exited(2, null));
+    expect(getSessionEventSnapshot("s").limit).toBeNull();
+    expect(limitDescription(getSessionEventSnapshot("s"), T0)).toBeNull();
   });
 });
 
@@ -269,6 +297,39 @@ describe("the agents a task can go to", () => {
     expect(handoffLabel("Login fix", "codex")).toBe("Login fix · Codex");
     expect(defaultTask({ label: "Login fix", description: "  Make the redirect work " })).toBe("Make the redirect work");
     expect(defaultTask({ label: "Login fix", description: "" })).toBe("Login fix");
+  });
+});
+
+describe("which sessions offer the handoff", () => {
+  it("live local agent sessions only: not a plain shell, a closed session or a remote one", () => {
+    const base = { phase: "idle", ssh_info: null, ai_provider: "claude" } as const;
+    expect(canHandOff(base)).toBe(true);
+    expect(canHandOff({ ...base, ai_provider: null })).toBe(false);
+    expect(canHandOff({ ...base, phase: "destroyed" })).toBe(false);
+    expect(canHandOff({ ...base, ssh_info: { host: "example.test", port: 22, user: "test", tmux_session: null } as never })).toBe(false);
+  });
+});
+
+describe("the handoff link after a restart", () => {
+  const saved = (extra: Record<string, unknown>) => ({
+    version: 2,
+    sessions: [
+      { id: "p", label: "Claude", ai_provider: "claude", project_ids: [] },
+      { id: "c", label: "Codex", ai_provider: "codex", project_ids: [], ...extra },
+    ],
+    layout: null,
+    focused_pane_id: null,
+    active_session_id: "p",
+  });
+
+  it("keeps the parent id of a saved session, and drops one that is not a non-empty string", () => {
+    expect(validateSavedWorkspace(saved({ parent_session_id: "p" }))?.sessions[1].parent_session_id).toBe("p");
+    for (const bad of ["", 7, null, ["p"]]) {
+      const ws = validateSavedWorkspace(saved({ parent_session_id: bad }));
+      expect(ws, JSON.stringify(bad)).not.toBeNull();
+      expect("parent_session_id" in ws!.sessions[1]).toBe(false);
+    }
+    expect(validateSavedWorkspace(saved({}))?.sessions[1].parent_session_id).toBeUndefined();
   });
 });
 
