@@ -68,6 +68,8 @@ pub fn prune(saved: &str, closed: &HashSet<String>) -> Option<String> {
         return None;
     }
     if sessions.is_empty() {
+        // Dropping the layout and notes with the last session is not new
+        // data loss: the frontend already writes "" when no session is live.
         return Some(String::new());
     }
     if let Some(notes) = obj.get_mut("notes").and_then(Value::as_object_mut) {

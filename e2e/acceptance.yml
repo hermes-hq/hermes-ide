@@ -354,7 +354,7 @@ features:
     status: shipped
     criteria:
       FIX-close-before-quit-1:
-        text: "Create two sessions, close one, quit within 1 s, relaunch: only the remaining session comes back"
+        text: "Create two sessions, close one (through its close button, confirming the close dialog if it asks), quit within 1 s, relaunch: only the remaining session comes back"
         scenarios: [FIX-close-before-quit.mjs]
       FIX-close-before-quit-2:
         text: "Closing a session drops it from the saved workspace within 2 s, even when the app is killed right after the close"

@@ -130,9 +130,7 @@ const NAME_INPUT = 'input.command-palette-input[placeholder="Session name (optio
 async function createPlainSession(bridge, label) {
   const before = await bridge.terminalIds();
   await bridge.eval(`return e2e.click(e2e.must(e2e.first("button.es-tile-primary") || e2e.first(".activity-bar-action"), "new session button"));`);
-  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator .session-creator-mode-step");`, { timeoutMs: 20_000 });
-  await bridge.click('.session-creator-mode-card[data-category="universal"]');
-  await bridge.click(PRIMARY);
+  await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.clickWhenReady(`
     const cards = e2e.all(".session-creator-provider-card");
@@ -174,7 +172,9 @@ async function closeSession(bridge, label) {
   await bridge.waitFor(`"${label}" to close (or its confirm dialog)`, `
     return !!e2e.first(".close-dialog") || !e2e.all(".session-item").some((el) => el.innerText.includes(${JSON.stringify(label)}));
   `, { timeoutMs: 10_000 });
-  if (await bridge.exists(".close-dialog")) await bridge.click(".close-dialog .close-dialog-btn-confirm");
+  const confirmShown = await bridge.exists(".close-dialog");
+  log(`  close confirm dialog shown: ${confirmShown ? "yes, confirmed" : "no"}`);
+  if (confirmShown) await bridge.click(".close-dialog .close-dialog-btn-confirm");
   await bridge.waitFor(`"${label}" to leave the session list`, `
     return !e2e.all(".session-item").some((el) => el.innerText.includes(${JSON.stringify(label)}));
   `, { timeoutMs: 20_000, intervalMs: 50 });
@@ -256,7 +256,11 @@ try {
     const s = await window.__TAURI_INTERNALS__.invoke("get_settings");
     return !!s.saved_workspace && !s.saved_workspace.includes(${JSON.stringify(tooId)}) && s.saved_workspace.includes(${JSON.stringify(keepId)});
   `, { timeoutMs: 2_000, intervalMs: 50 });
-  log(`  dropped ${Date.now() - droppedAt} ms after the close; saved workspace: ${JSON.stringify(await savedIds(app.bridge))}`);
+  // This is not the frontend's delayed save: get_settings waits on the
+  // database while close_session finishes its cleanup, so the figure is
+  // mostly that wait. The kill in step 7 is what proves the backend drops
+  // the session before close_session returns.
+  log(`  saved workspace read back without the session ${Date.now() - droppedAt} ms after the session left the list: ${JSON.stringify(await savedIds(app.bridge))}`);
   await quit(app);
 
   // ── run 3: still only the kept session; then close and crash ─────
