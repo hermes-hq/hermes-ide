@@ -5,7 +5,7 @@ import type {
   GitStashEntry, GitLogResult, GitCommitDetail, MergeStatus, ConflictContent, ConflictStrategy,
   SearchResponse,
   SessionWorktree, WorktreeInfo, BranchAvailability, WorktreeCreateResult,
-  WorktreeChanges, CommitOutcome,
+  WorktreeChanges, CommitOutcome, WorktreeSetup,
   WorktreeOverviewEntry, OrphanWorktree, CleanupResult,
   DiskStatus, WorktreeUsage, ReclaimResult, OrphanFolder, SweepResult,
 } from "../types/git";
@@ -246,7 +246,7 @@ export async function createWorktree(
   fromRemote?: string,
   baseBranch?: string,
 ): Promise<WorktreeCreateResult> {
-  return invoke<WorktreeCreateResult>("git_create_worktree", {
+  const result = await invoke<WorktreeCreateResult>("git_create_worktree", {
     sessionId,
     projectId,
     branchName,
@@ -257,6 +257,8 @@ export async function createWorktree(
     // Omitted unless set: the backend then cuts a new branch from HEAD.
     ...(baseBranch ? { baseBranch } : {}),
   });
+  await prepareWorktreeIfEnabled(sessionId, projectId);
+  return result;
 }
 
 /** Link a session to the checkout that already has `branchName` (the user chose "reuse"). */
@@ -265,7 +267,28 @@ export async function attachWorktree(
   projectId: string,
   branchName: string,
 ): Promise<WorktreeCreateResult> {
-  return invoke<WorktreeCreateResult>("git_attach_worktree", { sessionId, projectId, branchName });
+  const result = await invoke<WorktreeCreateResult>("git_attach_worktree", { sessionId, projectId, branchName });
+  await prepareWorktreeIfEnabled(sessionId, projectId);
+  return result;
+}
+
+/**
+ * Fast worktrees (behind the "diskGuard" flag): before the session's terminal
+ * starts, clone the worktree's dependencies copy-on-write from a checkout
+ * with the same lockfile and give it its own block of ports. A failure here
+ * never stops the session: it starts without them.
+ */
+async function prepareWorktreeIfEnabled(
+  sessionId: string,
+  projectId: string,
+): Promise<WorktreeSetup | null> {
+  if (!isFeatureFlagEnabled("diskGuard")) return null;
+  try {
+    return await invoke<WorktreeSetup>("git_prepare_worktree", { sessionId, projectId });
+  } catch (err) {
+    console.warn(`[git] could not prepare the worktree for project ${projectId}:`, err);
+    return null;
+  }
 }
 
 /** Drop a session's link to a worktree without touching the disk. */

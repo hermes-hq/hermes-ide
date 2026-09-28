@@ -1687,6 +1687,83 @@ impl Database {
         Ok(())
     }
 
+    // ─── Fast worktrees (N17): ports and setup report ────────────
+
+    /// Port blocks recorded for any session's worktree. A block is free
+    /// again once its worktree link is deleted.
+    pub fn taken_port_bases(&self) -> Result<std::collections::HashSet<u16>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT port_base FROM session_worktrees WHERE port_base IS NOT NULL")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?;
+        let mut out = std::collections::HashSet::new();
+        for row in rows {
+            if let Ok(base) = u16::try_from(row.map_err(|e| e.to_string())?) {
+                out.insert(base);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Record the port block and setup report of a session's worktree.
+    /// Fails when the link does not exist or the block is already recorded
+    /// for another worktree.
+    pub fn set_worktree_setup(
+        &self,
+        session_id: &str,
+        project_id: &str,
+        port_base: Option<u16>,
+        setup_report: &str,
+    ) -> Result<(), String> {
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE session_worktrees SET port_base = ?1, setup_report = ?2
+                 WHERE session_id = ?3 AND realm_id = ?4",
+                params![
+                    port_base.map(i64::from),
+                    setup_report,
+                    session_id,
+                    project_id
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err(format!(
+                "No worktree recorded for session '{}' in project '{}'",
+                session_id, project_id
+            ));
+        }
+        Ok(())
+    }
+
+    /// The port block and setup report of a session's worktree, if recorded.
+    pub fn get_worktree_setup(
+        &self,
+        session_id: &str,
+        project_id: &str,
+    ) -> Result<(Option<u16>, Option<String>), String> {
+        let found = self.conn.query_row(
+            "SELECT port_base, setup_report FROM session_worktrees
+             WHERE session_id = ?1 AND realm_id = ?2",
+            params![session_id, project_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        );
+        match found {
+            Ok((base, report)) => Ok((base.and_then(|b| u16::try_from(b).ok()), report)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     /// Count how many session_worktrees records point at the same checkout as
     /// `path`. Used to protect shared worktrees from premature disk deletion.
     ///

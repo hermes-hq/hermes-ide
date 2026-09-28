@@ -975,6 +975,8 @@ pub fn run() {
             git::git_reclaim_build_output,
             git::git_list_orphan_folders,
             git::git_sweep_orphan_folders,
+            // Fast worktrees
+            git::git_prepare_worktree,
             // Menu
             menu::show_context_menu,
             menu::update_menu_state,

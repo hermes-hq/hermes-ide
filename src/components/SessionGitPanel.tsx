@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { Fragment, useState, useCallback, useEffect } from "react";
 import { useGitStatus } from "../hooks/useGitStatus";
 import { getSessionWorktreeInfo } from "../api/git";
 import { getSettings } from "../api/settings";
@@ -6,6 +6,7 @@ import { GitProjectSection } from "./GitProjectSection";
 import { GitDiffView } from "./GitDiffView";
 import { WorktreeIndicator } from "./WorktreeIndicator";
 import { WorktreeOverviewPanel } from "./WorktreeOverviewPanel";
+import { SessionWorktreeSetup } from "./WorktreeSetupSummary";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { openLandSheet } from "../land/LandSheetHost";
 import type { GitFile, SessionWorktree } from "../types/git";
@@ -150,15 +151,18 @@ export function SessionGitPanel({ sessionId, projectId }: SessionGitPanelProps) 
         )}
 
         {status && status.projects.map((project) => (
-          <GitProjectSection
-            key={project.project_id}
-            sessionId={sessionId}
-            projectId={project.project_id}
-            project={project}
-            onRefresh={refresh}
-            onDiffFile={handleDiffFile}
-            onToast={showToast}
-          />
+          <Fragment key={project.project_id}>
+            {/* Fast worktrees (behind the same flag): ports and cloned dependencies. */}
+            {diskGuard && <SessionWorktreeSetup sessionId={sessionId} projectId={project.project_id} />}
+            <GitProjectSection
+              sessionId={sessionId}
+              projectId={project.project_id}
+              project={project}
+              onRefresh={refresh}
+              onDiffFile={handleDiffFile}
+              onToast={showToast}
+            />
+          </Fragment>
         ))}
       </div>
 

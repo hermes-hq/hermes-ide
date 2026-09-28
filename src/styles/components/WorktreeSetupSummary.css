@@ -1,0 +1,24 @@
+/* ─── Worktree setup summary (fast worktrees) ─────────────────────── */
+
+.worktree-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.worktree-setup-ports {
+  color: var(--text-1);
+}
+
+.worktree-setup-dep {
+  word-break: break-word;
+}
+
+.worktree-setup-warn {
+  color: var(--yellow);
+}

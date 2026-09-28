@@ -25,9 +25,9 @@ export interface FeatureFlagDefinition {
 export const FEATURE_FLAGS = [
   {
     id: "diskGuard",
-    label: "Disk guard and worktree hygiene",
+    label: "Disk guard and fast worktrees",
     description:
-      "Refuses to create a worktree below 10 GB free, shows disk used per worktree, removes build output on request and sweeps orphaned worktree folders in one action (Git panel > Worktrees).",
+      "Refuses to create a worktree below 10 GB free, shows disk used per worktree, removes build output on request and sweeps orphaned worktree folders in one action (Git panel > Worktrees). New worktrees get their dependencies cloned copy-on-write when the lockfile matches another checkout (on Windows, small files are copied, so disk use is lower but not near zero), and their own block of ports: terminals in them get PORT, HERMES_PORT_BASE and HERMES_PORT_COUNT, so dev servers that read PORT bind 21000 and up instead of their default. Agent view sessions do not get these ports.",
   },
   {
     id: "agentViewErrors",

@@ -43,6 +43,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "create agent_turns (turn ledger)",
         apply: create_agent_turns,
     },
+    Migration {
+        version: 4,
+        name: "worktree ports and setup report",
+        apply: worktree_setup_columns,
+    },
 ];
 
 /// The schema version this build writes.
@@ -752,6 +757,21 @@ fn create_agent_turns(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+// ─── Step 4: worktree ports and setup report ─────────────────────────
+
+/// Fast worktrees (N17): each session's worktree records its block of ports
+/// (`port_base`, unique across worktrees so two can never share a block) and
+/// what preparing it did (`setup_report`, JSON). Both stay NULL for
+/// worktrees made without the feature.
+fn worktree_setup_columns(conn: &Connection) -> rusqlite::Result<()> {
+    add_column_if_missing(conn, "session_worktrees", "port_base", "INTEGER")?;
+    add_column_if_missing(conn, "session_worktrees", "setup_report", "TEXT")?;
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sw_port_base
+             ON session_worktrees(port_base) WHERE port_base IS NOT NULL;",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1359,7 +1379,7 @@ mod tests {
         let rows_before = row_counts(&path);
         assert!(!before.0.contains_key("agent_turns"));
 
-        let report = migrate(&conn, Some(&path), MIGRATIONS).unwrap();
+        let report = migrate(&conn, Some(&path), &MIGRATIONS[..3]).unwrap();
         assert_eq!((report.from, report.to), (2, 3));
         let after = schema_of(&path);
         let mut expected_tables = before.0.clone();
@@ -1372,6 +1392,56 @@ mod tests {
         let mut rows_after = row_counts(&path);
         assert_eq!(rows_after.remove("agent_turns"), Some(0));
         assert_eq!(rows_after, rows_before, "every existing row is kept");
+    }
+
+    #[test]
+    fn a_v3_database_gains_worktree_ports_keeping_its_worktrees() {
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let conn = Connection::open(&path).unwrap();
+        migrate(&conn, None, &MIGRATIONS[..3]).unwrap();
+        conn.execute(
+            "INSERT INTO session_worktrees (id, session_id, realm_id, worktree_path, is_main_worktree)
+             VALUES ('w1', 's1', 'p1', '/srv/n17/wt1', 0), ('w2', 's2', 'p1', '/srv/n17/wt2', 0)",
+            [],
+        )
+        .unwrap();
+        let before = row_counts(&path);
+
+        let report = migrate(&conn, Some(&path), MIGRATIONS).unwrap();
+        assert_eq!((report.from, report.to), (3, 4));
+        assert_eq!(row_counts(&path), before, "no row lost");
+        assert!(has_column(&conn, "session_worktrees", "port_base").unwrap());
+        assert!(has_column(&conn, "session_worktrees", "setup_report").unwrap());
+        let unset: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_worktrees WHERE port_base IS NULL AND setup_report IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            unset, before["session_worktrees"],
+            "existing worktrees have no ports until prepared"
+        );
+
+        // Two worktrees can never record the same block.
+        conn.execute(
+            "UPDATE session_worktrees SET port_base = 21000 WHERE id = 'w1'",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE session_worktrees SET port_base = 21000 WHERE id = 'w2'",
+                []
+            )
+            .is_err());
+        conn.execute(
+            "UPDATE session_worktrees SET port_base = 21010 WHERE id = 'w2'",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

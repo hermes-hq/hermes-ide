@@ -156,6 +156,22 @@ features:
       N14-3:
         text: "Orphaned worktree folders are listed and removable in one action"
         scenarios: [N14-disk-guard.mjs]
+  N17:
+    name: "Fast worktrees: shared dependencies and ports"
+    # Behind the diskGuard flag, with N14. Copy-on-write needs the repo and
+    # the app's data on one volume that supports it: APFS on macOS; CI mounts
+    # an XFS image on Linux and a ReFS VHD on Windows (HERMES_E2E_COW_DIR).
+    status: shipped
+    criteria:
+      N17-1:
+        # N17-fast-worktrees.mjs uses a synthetic install (3,000 packages and
+        # a 256 MB blob, to prove the blocks are shared); N17-real-deps.mjs
+        # uses this repo's own node_modules (about 35,000 files).
+        text: "A new worktree of this repo has working dependencies in under 10 seconds"
+        scenarios: [N17-fast-worktrees.mjs, N17-real-deps.mjs]
+      N17-2:
+        text: "Two worktrees running dev servers get different ports"
+        scenarios: [N17-fast-worktrees.mjs]
   F07:
     name: "Agent view: respawn lock and clear errors"
     status: shipped

@@ -181,6 +181,39 @@ export interface SessionWorktree {
    * outside Hermes and a checkout another session also uses.
    */
   ownedBySession?: boolean;
+  /** Ports and cloned dependencies, once the worktree was prepared (fast worktrees). */
+  setup?: WorktreeSetup;
+}
+
+// ─── Fast worktrees (N17) ───────────────────────────────────────────
+
+export type DependencyStatus =
+  | "cloned"
+  | "already_there"
+  | "lockfile_changed"
+  | "not_installed_elsewhere"
+  | "copy_on_write_unavailable"
+  | "failed";
+
+export interface DependencySetup {
+  /** "node_modules", "packages/web/node_modules", "src-tauri/target". */
+  folder: string;
+  /** "dependencies" or "build cache". */
+  kind: string;
+  lockfiles: string[];
+  status: DependencyStatus;
+  method?: "clonefile" | "reflink" | "block_clone";
+  /** The checkout it was cloned from. */
+  source?: string;
+  millis: number;
+  detail?: string;
+}
+
+export interface WorktreeSetup {
+  /** This worktree's ports: PORT = base, HERMES_PORT_COUNT = count. */
+  ports?: { base: number; count: number };
+  dependencies: DependencySetup[];
+  millis: number;
 }
 
 export interface WorktreeInfo {

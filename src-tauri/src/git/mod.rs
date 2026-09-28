@@ -1,4 +1,6 @@
+pub mod cow_clone;
 pub mod disk_guard;
+pub mod fast_setup;
 pub mod journal;
 pub mod recipe;
 pub mod watcher;
@@ -3075,6 +3077,9 @@ pub struct SessionWorktreeInfo {
     pub row: crate::db::SessionWorktreeRow,
     pub shared_with_other_sessions: bool,
     pub owned_by_session: bool,
+    /// Ports and cloned dependencies (fast worktrees), once prepared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup: Option<fast_setup::WorktreeSetup>,
 }
 
 impl SessionWorktreeInfo {
@@ -3084,6 +3089,12 @@ impl SessionWorktreeInfo {
         SessionWorktreeInfo {
             shared_with_other_sessions: shared,
             owned_by_session: owned && !shared,
+            setup: db
+                .get_worktree_setup(&row.session_id, &row.project_id)
+                .ok()
+                .and_then(|(base, report)| {
+                    fast_setup::WorktreeSetup::from_record(base, report.as_deref())
+                }),
             row,
         }
     }
@@ -4130,6 +4141,144 @@ pub async fn git_sweep_orphan_folders(
     Ok(results)
 }
 
+// ─── Fast worktrees (N17) ───────────────────────────────────────────
+
+/// What preparing this session's worktree recorded, if it was prepared.
+fn recorded_setup(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    project_id: &str,
+) -> Result<Option<fast_setup::WorktreeSetup>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let (base, report) = db.get_worktree_setup(session_id, project_id)?;
+    Ok(fast_setup::WorktreeSetup::from_record(
+        base,
+        report.as_deref(),
+    ))
+}
+
+/// Get a session's new worktree ready to run, before its terminal starts:
+/// clone its dependencies and build caches copy-on-write from a checkout
+/// with the same lockfile, and give it its own block of ports (its terminal
+/// gets them as PORT / HERMES_PORT_BASE / HERMES_PORT_COUNT). Called by the
+/// frontend right after the worktree is made, while the "diskGuard" feature
+/// flag is on. Preparing twice returns what the first call recorded.
+#[tauri::command]
+pub async fn git_prepare_worktree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    project_id: String,
+) -> Result<fast_setup::WorktreeSetup, String> {
+    if let Some(done) = recorded_setup(&state, &session_id, &project_id)? {
+        return Ok(done);
+    }
+    let (row, root_path) = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?;
+        let row = db
+            .get_worktree_by_session_and_project(&session_id, &project_id)?
+            .ok_or_else(|| format!("No worktree for session '{}'", session_id))?;
+        let project = db
+            .get_project(&project_id)
+            .map_err(|e| format!("Failed to look up project: {}", e))?
+            .ok_or_else(|| format!("Project '{}' not found", project_id))?;
+        (row, project.path)
+    };
+
+    // Ports: the first free block no other worktree recorded, looked for
+    // while the dependencies are cloned. The unique index settles a race
+    // with another prepare; the loser looks again.
+    let pick_ports = |skip: HashSet<u16>| {
+        let taken = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))
+            .and_then(|db| db.taken_port_bases());
+        async move {
+            let mut taken = taken?;
+            taken.extend(skip);
+            tokio::task::spawn_blocking(move || {
+                fast_setup::pick_port_block(&taken, &fast_setup::port_is_free)
+            })
+            .await
+            .map_err(|e| e.to_string())
+        }
+    };
+
+    // Dependencies: only into a worktree folder Hermes made. The project
+    // folder is the source, never a target.
+    let started = std::time::Instant::now();
+    let clone_dependencies = async {
+        if row.is_main_worktree {
+            return Ok(Vec::new());
+        }
+        match checked_worktree_folder(&app, &row.worktree_path) {
+            Ok(wt) => tokio::task::spawn_blocking(move || {
+                fast_setup::prepare_dependencies(Path::new(&root_path), &wt)
+            })
+            .await
+            .map_err(|e| e.to_string()),
+            Err(e) => {
+                log::info!("[fast-worktrees] dependencies left alone: {}", e);
+                Ok(Vec::new())
+            }
+        }
+    };
+    let (dependencies, first_ports) = tokio::join!(clone_dependencies, pick_ports(HashSet::new()));
+    let dependencies = dependencies?;
+    let millis = started.elapsed().as_millis() as u64;
+
+    let mut skip: HashSet<u16> = HashSet::new();
+    let mut next_ports = Some(first_ports);
+    for _attempt in 0..5 {
+        let ports = match next_ports.take() {
+            Some(first) => first?,
+            None => pick_ports(skip.clone()).await?,
+        };
+        let setup = fast_setup::WorktreeSetup {
+            ports,
+            dependencies: dependencies.clone(),
+            millis,
+        };
+        let report = serde_json::to_string(&setup).map_err(|e| e.to_string())?;
+        let saved = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {}", e))?
+            .set_worktree_setup(&session_id, &project_id, ports.map(|p| p.base), &report);
+        match saved {
+            Ok(()) => {
+                log::info!(
+                    "[fast-worktrees] session {} prepared in {} ms: ports {:?}, {}",
+                    session_id,
+                    millis,
+                    ports.map(|p| p.base),
+                    setup
+                        .dependencies
+                        .iter()
+                        .map(|d| format!("{} {:?}", d.folder, d.status))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                return Ok(setup);
+            }
+            Err(e) if e.contains("UNIQUE") => {
+                if let Some(p) = ports {
+                    skip.insert(p.base);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err("Could not record a port block for this worktree".into())
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4674,5 +4823,50 @@ mod tests {
             .unwrap();
         let shared = info("s1");
         assert!(shared.shared_with_other_sessions && !shared.owned_by_session);
+    }
+
+    #[test]
+    fn worktree_setup_is_recorded_per_link_and_frees_its_ports_with_it() {
+        let db = test_db();
+        db.insert_session_worktree("r1", "s1", "p", "/tmp/hermes-test/wt1", Some("a"), false)
+            .unwrap();
+        db.insert_session_worktree("r2", "s2", "p", "/tmp/hermes-test/wt2", Some("b"), false)
+            .unwrap();
+        assert_eq!(db.get_worktree_setup("s1", "p").unwrap(), (None, None));
+
+        let setup = fast_setup::WorktreeSetup {
+            ports: Some(fast_setup::PortBlock {
+                base: 21_000,
+                count: 10,
+            }),
+            dependencies: Vec::new(),
+            millis: 3,
+        };
+        let json = serde_json::to_string(&setup).unwrap();
+        db.set_worktree_setup("s1", "p", Some(21_000), &json)
+            .unwrap();
+        let (base, report) = db.get_worktree_setup("s1", "p").unwrap();
+        assert_eq!(
+            fast_setup::WorktreeSetup::from_record(base, report.as_deref()),
+            Some(setup)
+        );
+        assert!(
+            db.set_worktree_setup("s2", "p", Some(21_000), &json)
+                .is_err(),
+            "a block is never recorded twice"
+        );
+        assert!(db
+            .set_worktree_setup("nobody", "p", Some(21_010), &json)
+            .is_err());
+        assert_eq!(
+            db.taken_port_bases().unwrap(),
+            [21_000].into_iter().collect()
+        );
+
+        // Closing the session drops its link, and with it the block.
+        db.delete_worktrees_for_session("s1").unwrap();
+        assert!(db.taken_port_bases().unwrap().is_empty());
+        db.set_worktree_setup("s2", "p", Some(21_000), &json)
+            .unwrap();
     }
 }

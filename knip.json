@@ -18,6 +18,7 @@
   ],
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": [
+    "fsutil",
     "lsappinfo",
     "pmset",
     "powercfg",

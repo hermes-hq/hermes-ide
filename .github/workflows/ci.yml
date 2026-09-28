@@ -572,6 +572,60 @@ jobs:
         run: |
           node e2e/app/run.mjs --ci-set keys --shard "$SHARD"
 
+      # N17: fast worktrees. Copy-on-write clones need one volume that can
+      # share blocks for both the repo and the app's data: the temp folder on
+      # macOS (APFS), an XFS image on Linux, a ReFS disk on Windows. Both are
+      # sparse and 20 GB, above the 10 GB the disk guard (same flag) needs.
+      - name: Copy-on-write volume for fast worktrees (Linux, XFS)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          command -v mkfs.xfs >/dev/null || { sudo apt-get update && sudo apt-get install -y xfsprogs; }
+          truncate -s 20G "$RUNNER_TEMP/cow.img"
+          mkfs.xfs -q -m reflink=1 "$RUNNER_TEMP/cow.img"
+          sudo mkdir -p /mnt/hermes-cow
+          sudo mount -o loop "$RUNNER_TEMP/cow.img" /mnt/hermes-cow
+          sudo chown "$(id -u):$(id -g)" /mnt/hermes-cow
+          echo "HERMES_E2E_COW_DIR=/mnt/hermes-cow" >> "$GITHUB_ENV"
+
+      - name: Copy-on-write volume for fast worktrees (Windows, ReFS)
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $vhd = Join-Path $env:RUNNER_TEMP "cow.vhdx"
+          $script = Join-Path $env:RUNNER_TEMP "cow-diskpart.txt"
+          @(
+            "create vdisk file=`"$vhd`" maximum=20480 type=expandable",
+            "select vdisk file=`"$vhd`"",
+            "attach vdisk",
+            "create partition primary",
+            "format fs=refs quick label=HermesCow",
+            "assign letter=R"
+          ) | Set-Content -Path $script -Encoding ascii
+          diskpart /s $script
+          if ($LASTEXITCODE -ne 0) { throw "diskpart failed with $LASTEXITCODE" }
+          New-Item -ItemType Directory -Path R:\cow -Force | Out-Null
+          fsutil fsinfo volumeinfo R:
+          "HERMES_E2E_COW_DIR=R:\cow" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Fast worktrees (Linux, virtual display)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        shell: bash
+        env:
+          CI: "true"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          NO_AT_BRIDGE: "1"
+          GTK_A11Y: "none"
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --keep-going N17-fast-worktrees.mjs N17-real-deps.mjs
+
+      - name: Fast worktrees
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
+        shell: bash
+        env:
+          CI: "true"
+        run: node e2e/app/run.mjs --keep-going N17-fast-worktrees.mjs N17-real-deps.mjs
+
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

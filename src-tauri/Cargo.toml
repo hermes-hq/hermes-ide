@@ -69,6 +69,10 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Console",
   "Win32_System_Power",
   "Win32_System_Threading",
+  # Block cloning on ReFS / Dev Drive (git/cow_clone.rs)
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_SystemServices",
 ] }
 
 [build-dependencies]

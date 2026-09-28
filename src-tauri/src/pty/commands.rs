@@ -855,6 +855,24 @@ pub fn create_session(
     );
     let original_cwd = working_directory.unwrap_or_else(get_working_directory);
 
+    // Fast worktrees: the block of ports recorded for the session's primary
+    // worktree (only set when the worktree was prepared).
+    let port_block: Option<crate::git::fast_setup::PortBlock> =
+        state.db.lock().ok().and_then(|db| {
+            let primary = db
+                .get_session_worktrees(&session_id)
+                .ok()?
+                .into_iter()
+                .next()?;
+            db.get_worktree_setup(&session_id, &primary.project_id)
+                .ok()
+                .and_then(|(base, _)| base)
+                .map(|base| crate::git::fast_setup::PortBlock {
+                    base,
+                    count: crate::git::fast_setup::PORT_BLOCK_SIZE,
+                })
+        });
+
     // If this session has a linked worktree, use its path as the working
     // directory. The worktree row may have been inserted before
     // create_session is called (the frontend pre-generates the session id
@@ -1201,6 +1219,13 @@ pub fn create_session(
             }
             if let Ok(launch_dir) = crate::pty::launch::launch_dir(&app) {
                 cmd.env("HERMES_LAUNCH_DIR", launch_dir.as_os_str());
+            }
+        }
+
+        // This worktree's own ports, so parallel dev servers never collide.
+        if let Some(block) = port_block {
+            for (name, value) in block.env() {
+                cmd.env(name, value);
             }
         }
     }
