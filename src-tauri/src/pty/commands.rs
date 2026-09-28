@@ -4104,6 +4104,11 @@ mod ssh_command_tests {
     }
 }
 
+// These tests drive foreground_lock_released_for_scan with injected probe and
+// scan closures (plus the real probe and process scan where noted). The wiring
+// in is_shell_foreground itself (probe_foreground, then
+// shell_at_prompt_by_process_table on spawn_blocking) is covered by the
+// real-app scenario e2e/app/scenarios/F03-foreground-check-lock.mjs.
 #[cfg(test)]
 mod foreground_tests {
     use super::{
@@ -4280,7 +4285,7 @@ mod foreground_tests {
                     scan_started.store(true, Ordering::SeqCst);
                     // A slow enumerator: long enough for the keystroke to be
                     // written first unless the lock is still held.
-                    std::thread::sleep(Duration::from_secs(2));
+                    std::thread::sleep(Duration::from_millis(500));
                     scan_done.store(true, Ordering::SeqCst);
                     true
                 },
