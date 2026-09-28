@@ -498,6 +498,7 @@ export const jaPack: LanguagePack = {
     "settings.autoStageCommit": "コミット時にすべての変更を自動ステージ",
     "settings.showUntracked": "未追跡ファイルを表示",
     "settings.turnLedger": "エージェントのターンごとにスナップショットを保存する（ターン履歴）",
+    "settings.turnLedgerHint": "スナップショットには未追跡ファイル（例: 置き忘れた .env）も含まれ、リポジトリの .git フォルダ内の refs/hermes に保存されます。mirror push はそれらもコピーします。セッションを閉じてから 14 日後に削除されます。",
     "turnBar.title": "ターン",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "ターン {n}: {files} ファイル変更, +{insertions} −{deletions}",

@@ -835,6 +835,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                       {t("settings.turnLedger")}
                     </label>
+                    <span className="settings-hint-inline" data-setting-hint="turn_ledger">{t("settings.turnLedgerHint")}</span>
                   </div>
                 )}
               </div>

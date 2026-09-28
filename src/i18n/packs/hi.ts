@@ -75,6 +75,7 @@ export const hiPack: LanguagePack = {
     "settings.autoStageCommit": "कमिट पर सभी बदलाव अपने-आप स्टेज करें",
     "settings.showUntracked": "बिना ट्रैक वाली फाइलें दिखाएं",
     "settings.turnLedger": "हर एजेंट टर्न के बाद एक स्नैपशॉट सहेजें (टर्न इतिहास)",
+    "settings.turnLedgerHint": "स्नैपशॉट में बिना ट्रैक वाली फाइलें (जैसे कोई छूटी हुई .env) भी शामिल होती हैं और वे रिपॉज़िटरी के .git फ़ोल्डर में refs/hermes के तहत रहती हैं; mirror push उन्हें भी कॉपी करता है। सत्र बंद होने के 14 दिन बाद वे हटा दी जाती हैं।",
     "turnBar.title": "टर्न",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "टर्न {n}: {files} फाइलें बदलीं, +{insertions} −{deletions}",

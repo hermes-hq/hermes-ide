@@ -498,6 +498,7 @@ export const ptBRPack: LanguagePack = {
     "settings.autoStageCommit": "Adicionar todas as alterações ao stage automaticamente ao fazer commit",
     "settings.showUntracked": "Mostrar arquivos não rastreados",
     "settings.turnLedger": "Salvar um instantâneo após cada turno do agente (histórico de turnos)",
+    "settings.turnLedgerHint": "Os instantâneos incluem arquivos não rastreados (por exemplo, um .env esquecido) e ficam na pasta .git do repositório em refs/hermes; um push mirror os copia. Eles são removidos 14 dias após o fechamento da sessão.",
     "turnBar.title": "Turnos",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "Turno {n}: {files} arquivos alterados, +{insertions} −{deletions}",

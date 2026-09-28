@@ -498,6 +498,7 @@ export const zhCNPack: LanguagePack = {
     "settings.autoStageCommit": "提交时自动暂存所有更改",
     "settings.showUntracked": "显示未跟踪的文件",
     "settings.turnLedger": "每个代理回合后保存一次快照（回合历史）",
+    "settings.turnLedgerHint": "快照包含未跟踪的文件（例如遗落的 .env），保存在仓库 .git 文件夹的 refs/hermes 下；mirror push 会一并复制它们。会话关闭 14 天后会被删除。",
     "turnBar.title": "回合",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "回合 {n}：更改了 {files} 个文件，+{insertions} −{deletions}",

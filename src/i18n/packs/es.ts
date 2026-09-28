@@ -498,6 +498,7 @@ export const esPack: LanguagePack = {
     "settings.autoStageCommit": "Preparar automáticamente todos los cambios al hacer commit",
     "settings.showUntracked": "Mostrar archivos sin seguimiento",
     "settings.turnLedger": "Guardar una instantánea después de cada turno del agente (historial de turnos)",
+    "settings.turnLedgerHint": "Las instantáneas incluyen archivos sin seguimiento (por ejemplo, un .env olvidado) y se guardan en la carpeta .git del repositorio bajo refs/hermes; un push mirror las copia. Se eliminan 14 días después de cerrar la sesión.",
     "turnBar.title": "Turnos",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "Turno {n}: {files} archivos cambiados, +{insertions} −{deletions}",

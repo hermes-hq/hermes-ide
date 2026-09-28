@@ -528,6 +528,7 @@ const ENGLISH_PACK: LanguagePack = {
     "settings.autoStageCommit": "Auto-stage all changes on commit",
     "settings.showUntracked": "Show untracked files",
     "settings.turnLedger": "Save a snapshot after every agent turn (turn history)",
+    "settings.turnLedgerHint": "Snapshots include untracked files (for example a stray .env) and are stored inside the repository's .git folder under refs/hermes, so a mirror push copies them. They are removed 14 days after the session is closed.",
     "turnBar.title": "Turns",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "Turn {n}: {files} files changed, +{insertions} −{deletions}",

@@ -498,6 +498,7 @@ export const dePack: LanguagePack = {
     "settings.autoStageCommit": "Alle Änderungen beim Commit automatisch stagen",
     "settings.showUntracked": "Nicht verfolgte Dateien anzeigen",
     "settings.turnLedger": "Nach jedem Agenten-Zug einen Schnappschuss speichern (Zugverlauf)",
+    "settings.turnLedgerHint": "Schnappschüsse enthalten auch nicht verfolgte Dateien (z. B. eine vergessene .env) und liegen im .git-Ordner des Repositorys unter refs/hermes; ein Mirror-Push kopiert sie mit. Sie werden 14 Tage nach dem Schließen der Sitzung entfernt.",
     "turnBar.title": "Züge",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "Zug {n}: {files} Dateien geändert, +{insertions} −{deletions}",

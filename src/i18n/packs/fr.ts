@@ -498,6 +498,7 @@ export const frPack: LanguagePack = {
     "settings.autoStageCommit": "Indexer automatiquement tous les changements lors du commit",
     "settings.showUntracked": "Afficher les fichiers non suivis",
     "settings.turnLedger": "Enregistrer un instantané après chaque tour de l'agent (historique des tours)",
+    "settings.turnLedgerHint": "Les instantanés incluent les fichiers non suivis (par exemple un .env oublié) et sont stockés dans le dossier .git du dépôt sous refs/hermes ; un push mirror les copie. Ils sont supprimés 14 jours après la fermeture de la session.",
     "turnBar.title": "Tours",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "Tour {n} : {files} fichiers modifiés, +{insertions} −{deletions}",

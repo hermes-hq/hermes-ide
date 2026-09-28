@@ -498,6 +498,7 @@ export const ruPack: LanguagePack = {
     "settings.autoStageCommit": "Автоматически добавлять все изменения при коммите",
     "settings.showUntracked": "Показывать неотслеживаемые файлы",
     "settings.turnLedger": "Сохранять снимок после каждого хода агента (история ходов)",
+    "settings.turnLedgerHint": "Снимки включают неотслеживаемые файлы (например, забытый .env) и хранятся в папке .git репозитория в refs/hermes; mirror push копирует их. Они удаляются через 14 дней после закрытия сессии.",
     "turnBar.title": "Ходы",
     "turnBar.turn": "T{n}",
     "turnBar.turnTitle": "Ход {n}: изменено файлов: {files}, +{insertions} −{deletions}",
