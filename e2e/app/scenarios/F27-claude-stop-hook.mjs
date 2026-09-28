@@ -347,7 +347,7 @@ try {
   assert(JSON.stringify(stops1.map((s) => s.active)) === "[false,true,true,true]", "continuations carry stop_hook_active");
   const stopRuns = t1.hooksRan.filter((h) => h.event === "Stop").slice(0, 3);
   for (const [i, h] of stopRuns.entries()) {
-    const err = h.results[0]?.stderr ?? "";
+    const err = h.results.at(-1)?.stderr ?? ""; // the Done-When hook runs after F11's signal hook
     assert(err.includes(`attempt ${i + 1} of 3`) && err.includes("expected at least 99 work steps"), `continuation ${i + 1} was told what failed ("${err.split("\n")[0].slice(0, 90)}…")`);
   }
   await app.bridge.waitForTerminal(sid, /Stop hook feedback: Hermes Done-When checks failed/, { timeoutMs: 5_000 });
