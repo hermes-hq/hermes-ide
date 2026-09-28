@@ -959,6 +959,7 @@ pub fn run() {
             quit_flush::workspace_flush_ready,
             quit_flush::workspace_flush_done,
             fleet::fleet_memory,
+            fleet::fleet_set_output_batching,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

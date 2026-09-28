@@ -44,6 +44,9 @@ pub struct Proc {
     pub pid: u32,
     pub ppid: Option<u32>,
     pub bytes: u64,
+    /// A thread of another process (Linux lists them as processes, with
+    /// the whole process's memory): never counted.
+    pub thread: bool,
 }
 
 fn subtree(root: u32, children: &HashMap<u32, Vec<u32>>, seen: &mut HashSet<u32>) -> Vec<u32> {
@@ -64,6 +67,7 @@ fn subtree(root: u32, children: &HashMap<u32, Vec<u32>>, seen: &mut HashSet<u32>
 /// Pure: split the process table into sessions and the app. A session whose
 /// root process is gone reports 0 bytes and 0 processes.
 pub fn fleet_from(procs: &[Proc], app_pid: u32, roots: &[(String, u32)]) -> FleetMemory {
+    let procs: Vec<&Proc> = procs.iter().filter(|p| !p.thread).collect();
     let bytes: HashMap<u32, u64> = procs.iter().map(|p| (p.pid, p.bytes)).collect();
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     for p in procs {
@@ -109,6 +113,13 @@ fn table() -> &'static Mutex<System> {
     TABLE.get_or_init(|| Mutex::new(System::new()))
 }
 
+/// Batch terminal output into fewer web view events (fleetPerf flag, read
+/// by the frontend at startup). See pty/output_batch.rs.
+#[tauri::command]
+pub fn fleet_set_output_batching(enabled: bool) {
+    crate::pty::output_batch::set_batching(enabled);
+}
+
 /// Memory of every session's process tree and of Hermes itself.
 #[tauri::command]
 pub fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {
@@ -123,7 +134,7 @@ pub fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::nothing().with_memory(),
+        ProcessRefreshKind::nothing().with_memory().without_tasks(),
     );
     let procs: Vec<Proc> = sys
         .processes()
@@ -132,6 +143,7 @@ pub fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {
             pid: pid.as_u32(),
             ppid: p.parent().map(|pp| pp.as_u32()),
             bytes: p.memory(),
+            thread: p.thread_kind().is_some(),
         })
         .collect();
     Ok(fleet_from(&procs, std::process::id(), &roots))
@@ -146,7 +158,32 @@ mod tests {
             pid,
             ppid: Some(ppid),
             bytes: mb * 1024 * 1024,
+            thread: false,
         }
+    }
+
+    #[test]
+    fn threads_listed_as_processes_are_not_counted_again() {
+        // Linux lists each thread with its process's whole memory and the
+        // process as its parent; counting them multiplied Hermes's figure.
+        let thread = |pid, ppid, mb| Proc {
+            thread: true,
+            ..p(pid, ppid, mb)
+        };
+        let procs = vec![
+            p(100, 1, 200),
+            thread(110, 100, 200),
+            thread(111, 100, 200),
+            p(200, 100, 5),
+            thread(210, 200, 5),
+        ];
+        let fleet = fleet_from(&procs, 100, &[("s1".into(), 200)]);
+        assert_eq!(fleet.app_bytes, 200 * 1024 * 1024);
+        assert_eq!(fleet.app_processes, 1);
+        assert_eq!(
+            (fleet.sessions[0].bytes, fleet.sessions[0].processes),
+            (5 * 1024 * 1024, 1)
+        );
     }
 
     #[test]

@@ -1222,14 +1222,27 @@ pub fn create_session(
         let session_for_cleanup = Arc::clone(&session_clone);
         let app_for_cleanup = app_clone.clone();
         let exit_id = event_session_id.clone();
+        // Output goes to the web view from its own thread, batched when the
+        // fleetPerf flag is on (F24). Flushed before the session's end is
+        // announced, so the exit never overtakes the last output.
+        let output_event = format!("pty-output-{}", event_session_id);
+        let app_for_output = app_clone.clone();
+        let output = super::output_batch::OutputBatcher::spawn(move |bytes: &[u8]| {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            let _ = app_for_output.emit(&output_event, encoded);
+        });
+        let output_ref = &output;
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let output = output_ref;
             let mut buf = [0u8; 4096];
             let mut last_metrics_emit = std::time::Instant::now();
 
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
+                        output.flush();
                         if let Ok(mut s) = session_clone.lock() {
                             s.phase = if s.ssh_info.is_some() {
                                 SessionPhase::Disconnected
@@ -1401,12 +1414,10 @@ pub fn create_session(
                             }
                         }
 
-                        use base64::Engine;
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(data);
-                        let _ =
-                            app_clone.emit(&format!("pty-output-{}", event_session_id), encoded);
+                        output.push(data);
                     }
                     Err(_) => {
+                        output.flush();
                         if let Ok(mut s) = session_clone.lock() {
                             s.phase = if s.ssh_info.is_some() {
                                 SessionPhase::Disconnected
@@ -1444,6 +1455,7 @@ pub fn create_session(
                     SessionPhase::Destroyed
                 };
             }
+            output.flush();
             let _ = app_for_cleanup.emit(&format!("pty-exit-{}", exit_id), ());
         }
     });

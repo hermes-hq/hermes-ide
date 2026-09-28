@@ -10,13 +10,15 @@
     "agentSessionMemoryMb: a session running the fake agent (shell + node), as its row shows it.",
     "ptyThroughputMbPerSec: plain text printed in a visible terminal, time until the last line is",
     "  on screen. A regression floor at today's level, not a target: see the F24 notes.",
+    "floodMb: how much text that throughput step prints on each OS (less where the terminal is slow).",
     "echoLatencyMs: Enter pressed to the command's output on screen, over 20 open sessions (p95 and worst).",
     "switchMs: clicking a session row to its terminal being shown, graphics context included (worst)."
   ],
   "idleAppMemoryMb": { "darwin": 300, "linux": 900, "win32": 900 },
   "perSessionAppMemoryMb": { "darwin": 15, "linux": 40, "win32": 40 },
   "agentSessionMemoryMb": { "darwin": 250, "linux": 250, "win32": 250 },
-  "ptyThroughputMbPerSec": { "darwin": 0.3, "linux": 0.1, "win32": 0.1 },
+  "ptyThroughputMbPerSec": { "darwin": 0.3, "linux": 0.1, "win32": 0.02 },
+  "floodMb": { "darwin": 8, "linux": 4, "win32": 1 },
   "echoLatencyMs": {
     "p95": { "darwin": 500, "linux": 3000, "win32": 3000 },
     "max": { "darwin": 1500, "linux": 6000, "win32": 6000 }

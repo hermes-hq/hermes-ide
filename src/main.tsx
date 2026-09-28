@@ -4,7 +4,8 @@ import { exit } from "@tauri-apps/plugin-process";
 import App from "./App";
 import { getStartupProblem } from "./api/startupProblem";
 import { StartupProblemScreen } from "./components/StartupProblemScreen";
-import { initFeatureFlags } from "./featureFlags";
+import { initFeatureFlags, isFeatureFlagEnabled } from "./featureFlags";
+import { setOutputBatching } from "./api/processes";
 import { startSessionEventChannel } from "./agent/contract/channel";
 import "./styles/tokens.css";
 import "./styles/base.css";
@@ -57,6 +58,10 @@ void getStartupProblem().then((problem) => {
     .then(({ listen }) => startSessionEventChannel(listen))
     .catch((e) => console.warn("[session-event] channel not attached:", e));
   void initFeatureFlags().finally(() => {
+    // F24: batch terminal output into fewer web view events.
+    if (isFeatureFlagEnabled("fleetPerf")) {
+      void setOutputBatching(true).catch((e) => console.warn("[fleet] output batching not set:", e));
+    }
     root.render(
       <React.StrictMode>
         <App />

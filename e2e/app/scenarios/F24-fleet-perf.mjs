@@ -14,9 +14,11 @@
 //      its session's memory, matching what the backend measured.
 //   5. A session running the fake agent shows the agent's memory on its row
 //      (more than the bare shell, within budget).
-//   6. Terminal throughput: 8 MB printed in a visible terminal reaches the
-//      screen at no less than the budget; while another session floods, the
-//      visible one still answers `echo` within budget.
+//   6. Terminal throughput: text printed in a visible terminal reaches the
+//      screen at no less than the budget, in batched events (the same flood
+//      with batching switched off takes at least twice as many; its speed is
+//      recorded for comparison); while another session floods, the visible
+//      one still answers `echo` within budget.
 //   7. "Tile working agents" (command palette) with nobody working says so
 //      and changes nothing; with five sessions reported working it lays
 //      exactly those five out in a grid, and those five hold the contexts.
@@ -48,7 +50,6 @@ const MAC = OS === "darwin";
 const FLAG = process.env.HERMES_E2E_F24_FLAG === "off" ? "off" : "on";
 const SCALE = Number(process.env.HERMES_E2E_F24_BUDGET_SCALE || "1");
 const SESSIONS = Number(process.env.HERMES_E2E_F24_SESSIONS || "20");
-const FLOOD_MB = 8;
 const MB = 1024 * 1024;
 
 const raw = JSON.parse(readFileSync(join(REPO_ROOT, "e2e", "app", "fleet-budgets.json"), "utf8"));
@@ -63,6 +64,8 @@ const BUDGET = {
   echoMaxMs: budget(raw.echoLatencyMs.max),
   switchMs: budget(raw.switchMs),
 };
+/** How much text the throughput step prints (less where the terminal is slow). */
+const FLOOD_MB = raw.floodMb[OS];
 
 const percentile = (values, p) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -245,16 +248,69 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const flood = join(REPO_ROOT, "e2e", "app", "fixtures", "flood.mjs");
   const floodSid = ids[1];
   await selectSession(floodSid);
-  await bridge.typeInTerminal(floodSid, `node "${flood}" ${FLOOD_MB} f24-flood-done\n`);
-  const t0 = Date.now();
-  await bridge.waitFor("the end of the flood on screen", `
-    const rows = window.__HERMES_E2E__.terminalTail(${JSON.stringify(floodSid)}, 6) || [];
-    return rows.some((r) => /^f24-flood-done \\d+ bytes/.test(r.trim()));
-  `, { timeoutMs: Math.max(60_000, (FLOOD_MB / BUDGET.ptyThroughputMbPerSec) * 1000 * 2), intervalMs: 50 });
-  const floodSeconds = (Date.now() - t0) / 1000;
+  // Long enough for the budget's floor, twice over; on a timeout the log
+  // shows how far the output had got.
+  const floodTimeoutMs = Math.max(60_000, (FLOOD_MB / BUDGET.ptyThroughputMbPerSec) * 1000 * 2);
+  const waitForFlood = async (sid, marker, what) => {
+    try {
+      await bridge.waitFor(what, `
+        const rows = window.__HERMES_E2E__.terminalTail(${JSON.stringify(sid)}, 6) || [];
+        return rows.some((r) => r.trim().startsWith(${JSON.stringify(marker + " ")}));
+      `, { timeoutMs: floodTimeoutMs, intervalMs: 50 });
+    } catch (e) {
+      const tail = await bridge.eval(`return window.__HERMES_E2E__.terminalTail(${JSON.stringify(sid)}, 4);`).catch(() => null);
+      log(`  the terminal was still at: ${JSON.stringify(tail)}`);
+      throw e;
+    }
+  };
+  /** How the output arrived: chunks, their size, and the backend's delivery rate. */
+  const delivery = async () => {
+    const s = await bridge.eval(`return window.__HERMES_E2E__.outputStats(${JSON.stringify(floodSid)});`);
+    if (!s || s.chunks === 0) return null;
+    return {
+      chunks: s.chunks,
+      avgChunkBytes: Math.round(s.bytes / s.chunks),
+      deliveredMb: mb(s.bytes),
+      deliveryMbPerSec: s.spanMs > 0 ? Math.round((s.bytes / MB / (s.spanMs / 1000)) * 100) / 100 : null,
+    };
+  };
+  /** Print FLOOD_MB in the flood session; seconds until its last line is on screen. */
+  const timeFlood = async (marker, what) => {
+    await bridge.eval(`await window.__HERMES_E2E__.watchOutput(${JSON.stringify(floodSid)}); return true;`);
+    await bridge.typeInTerminal(floodSid, `node "${flood}" ${FLOOD_MB} ${marker}\n`);
+    const t0 = Date.now();
+    let how = null;
+    try {
+      await waitForFlood(floodSid, marker, what);
+    } finally {
+      how = await delivery().catch(() => null);
+      log(`    delivered by the backend: ${JSON.stringify(how)}`);
+    }
+    return { seconds: (Date.now() - t0) / 1000, delivery: how };
+  };
+  const setBatching = (enabled) =>
+    bridge.eval(`await window.__TAURI_INTERNALS__.invoke("fleet_set_output_batching", { enabled: ${enabled} }); return true;`);
+  const { seconds: floodSeconds, delivery: floodDelivery } = await timeFlood("f24-flood-done", "the end of the flood on screen");
+  metrics.floodDelivery = floodDelivery;
+  metrics.floodMb = FLOOD_MB;
   metrics.ptyThroughputMbPerSec = Math.round((FLOOD_MB / floodSeconds) * 100) / 100;
   log(`  ${FLOOD_MB} MB on screen in ${floodSeconds.toFixed(2)} s: ${metrics.ptyThroughputMbPerSec} MB/s`);
   assert(metrics.ptyThroughputMbPerSec >= BUDGET.ptyThroughputMbPerSec, `throughput ${metrics.ptyThroughputMbPerSec} MB/s >= ${BUDGET.ptyThroughputMbPerSec} MB/s`);
+  if (FLAG === "on") {
+    // The same flood with output batching off, as with the flag off: the
+    // flag (set at startup) must have cut the number of events the web view
+    // had to take. The speed-up is recorded, not budgeted.
+    await setBatching(false);
+    const unbatched = await timeFlood("f24-flood-raw", "the unbatched flood on screen");
+    await setBatching(true);
+    metrics.unbatchedMbPerSec = Math.round((FLOOD_MB / unbatched.seconds) * 100) / 100;
+    metrics.unbatchedDelivery = unbatched.delivery;
+    log(`  unbatched, for comparison: ${FLOOD_MB} MB on screen in ${unbatched.seconds.toFixed(2)} s: ${metrics.unbatchedMbPerSec} MB/s`);
+    assert(
+      floodDelivery && unbatched.delivery && floodDelivery.chunks * 2 <= unbatched.delivery.chunks,
+      `batched output took at most half the events (${floodDelivery?.chunks} vs ${unbatched.delivery?.chunks} unbatched)`,
+    );
+  }
 
   log("  while a hidden session floods, the visible one still answers");
   await bridge.typeInTerminal(floodSid, `node "${flood}" ${FLOOD_MB} f24-flood2-done\n`);
@@ -265,10 +321,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   metrics.echoUnderLoadMs = underLoad;
   log(`  echo under load: ${underLoad} ms`);
   assert(underLoad <= BUDGET.echoMaxMs, `echo under load ${underLoad} ms <= ${BUDGET.echoMaxMs} ms`);
-  await bridge.waitFor("the hidden flood to finish", `
-    const rows = window.__HERMES_E2E__.terminalTail(${JSON.stringify(floodSid)}, 6) || [];
-    return rows.some((r) => /^f24-flood2-done \\d+ bytes/.test(r.trim()));
-  `, { timeoutMs: 120_000, intervalMs: 100 });
+  await waitForFlood(floodSid, "f24-flood2-done", "the hidden flood to finish");
   metrics.hiddenFloodMbPerSec = Math.round((FLOOD_MB / ((Date.now() - hiddenT0) / 1000)) * 100) / 100;
   log(`  the hidden session took its ${FLOOD_MB} MB at ${metrics.hiddenFloodMbPerSec} MB/s`);
   await checkContexts("after the flood");

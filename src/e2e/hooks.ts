@@ -20,6 +20,13 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { listen } from "@tauri-apps/api/event";
+
+/** Output each watched session received (F24 throughput). */
+const outputWatches = new Map<
+  string,
+  { chunks: number; bytes: number; first: number; last: number; unlisten: () => void }
+>();
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -93,6 +100,27 @@ const hooks = {
   /** F24: sessions whose terminal holds a WebGL context, and whether this
    *  web view can create one at all. */
   graphicsContexts: () => ({ available: isWebglAvailable(), sessions: webglSessionIds() }),
+  /**
+   * F24 throughput: count the output chunks the backend delivers to one
+   * session (a second listener next to the terminal's own), so a slow flood
+   * can be told apart: slow delivery, or a slow screen.
+   */
+  watchOutput: async (sessionId: string): Promise<void> => {
+    outputWatches.get(sessionId)?.unlisten();
+    const watch = { chunks: 0, bytes: 0, first: 0, last: 0, unlisten: () => {} };
+    outputWatches.set(sessionId, watch);
+    watch.unlisten = await listen<string>(`pty-output-${sessionId}`, (event) => {
+      const now = performance.now();
+      if (watch.chunks === 0) watch.first = now;
+      watch.last = now;
+      watch.chunks++;
+      watch.bytes += Math.floor((event.payload.length * 3) / 4);
+    });
+  },
+  outputStats: (sessionId: string) => {
+    const w = outputWatches.get(sessionId);
+    return w ? { chunks: w.chunks, bytes: w.bytes, spanMs: Math.round(w.last - w.first) } : null;
+  },
   /**
    * N10 (updates wait for idle): force `useAutoUpdater` to see an update as
    * ready, without reaching a real update server. `useAutoUpdater` reads

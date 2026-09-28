@@ -21,6 +21,11 @@ export function revealProcessInFinder(path: string): Promise<void> {
   return invoke("reveal_process_in_finder", { path });
 }
 
+/** F24: send terminal output to the UI in batches (fleetPerf flag). */
+export function setOutputBatching(enabled: boolean): Promise<void> {
+  return invoke("fleet_set_output_batching", { enabled });
+}
+
 /** F24: memory of every session's process tree and of Hermes itself. */
 export function getFleetMemory(): Promise<FleetMemory> {
   return invoke<FleetMemory>("fleet_memory");
