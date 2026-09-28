@@ -22,7 +22,9 @@
 //     B  a plain terminal session (TerminalProvider, every agent): idle,
 //        guessed, dimmed; the fake terminal agent (tools/fake-agents/
 //        fake-agent.mjs) works after its approval box is answered: the row
-//        says "working · guessed"; back to idle afterwards.
+//        says "working · guessed"; back to idle afterwards. Before that, the
+//        launch helper reporting its agent ended makes the row say exited
+//        while the shell idles; the fake agent's work then replaces it.
 //     C  every status in the vocabulary, pushed through the Rust side of the
 //        session-event channel (what the hook signals of F11 use), shows on
 //        the background session's row with its own glyph and its own word;
@@ -402,6 +404,13 @@ try {
   const { line } = await bridge.waitForTerminal(termId, PROBE_OUTPUT, { timeoutMs: 20_000 });
   const shell = classifyProbe(line);
   log(`  the session's shell is ${shell}`);
+  log("B: an agent reported as ended while the shell stays open says exited until the terminal runs something again");
+  const ended = await emitFromRust(bridge, termId, { type: "status", at: "now", source: "hi", status: { kind: "exited", confidence: "exact", detail: "F10 the agent ended" } });
+  assert(ended.ok, "Rust emitted the launch helper's ended report");
+  await waitForRowStatus(bridge, termId, "exited", "the terminal row to say exited");
+  await sleep(800);
+  const endedRow = await readRow(bridge, termId);
+  assert(endedRow.tag.status === "exited" && endedRow.tag.confidence === "exact" && endedRow.tag.title.startsWith("F10 the agent ended"), `the idle shell keeps "${endedRow.tag.glyph} ${endedRow.tag.word}" with the helper's detail`);
   const agentLog = join(evidenceDir, "fake-agent.jsonl");
   rmSync(agentLog, { force: true });
   await bridge.typeInTerminal(termId, commandLine(shell, process.execPath, [FAKE_AGENT, "--scenario", "approval", "--log", agentLog]) + "\n");
@@ -414,7 +423,7 @@ try {
   await bridge.typeInTerminal(termId, "y");
   await waitForRowStatus(bridge, termId, "working", "the row to say working while the fake agent works", { timeoutMs: 5_000 });
   const working = await readRow(bridge, termId);
-  assert(working.tag.word === "working" && working.tag.guessed === "guessed" && working.tag.glyph.trim() !== "", `the row says "${working.tag.glyph} working · guessed"`);
+  assert(working.tag.word === "working" && working.tag.guessed === "guessed" && working.tag.glyph.trim() !== "", `the row says "${working.tag.glyph} working · guessed" (the terminal's activity replaced the ended agent's exited)`);
   await bridge.screenshot(join(evidenceDir, "03-terminal-working-guessed.png"));
   await bridge.waitForTerminal(termId, /fake-agent: task done/, { timeoutMs: 20_000 });
   await waitForRowStatus(bridge, termId, ["idle", "needs_answer"], "the row to settle after the agent exits", { timeoutMs: 15_000 });
