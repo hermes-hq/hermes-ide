@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn(() => Promise.resolve("2.0.0")) }));
 
 import { I18nProvider } from "../i18n/I18nProvider";
-import { AgentSetupChips } from "../components/AgentSetupChips";
+import { AgentSetupChips, ARGV_POLL_MS } from "../components/AgentSetupChips";
 import { initFeatureFlags, __resetFeatureFlagsForTest, FEATURE_FLAG_OVERRIDES_KEY } from "../featureFlags";
 import type { AgentSetupOverview } from "../api/agentSetup";
 
@@ -97,7 +97,8 @@ describe("AgentSetupChips", () => {
 		it("a Codex session lists AGENTS.md", async () => {
 			renderChips("codex");
 			await waitFor(() => expect(screen.getByRole("button", { name: "AGENTS.md" })).toBeInTheDocument());
-			expect(h.invoke).toHaveBeenCalledWith("agent_setup_overview", { agentId: "codex", cwd: FOLDER, attached: [] });
+			// The chip alone does not read the MCP config files.
+			expect(h.invoke).toHaveBeenCalledWith("agent_setup_overview", { agentId: "codex", cwd: FOLDER, attached: [], includeMcp: false });
 		});
 
 		it("links CLAUDE.md to AGENTS.md, then lists both", async () => {
@@ -105,8 +106,9 @@ describe("AgentSetupChips", () => {
 			const chip = await screen.findByRole("button", { name: "No instruction file" });
 			fireEvent.click(chip);
 			const link = await screen.findByRole("button", { name: "Link CLAUDE.md to AGENTS.md" });
-			// The MCP view names the servers each agent sees.
-			expect(screen.getByText("docs")).toBeInTheDocument();
+			// The open view reads and names the servers each agent sees.
+			expect(await screen.findByText("docs")).toBeInTheDocument();
+			expect(h.invoke).toHaveBeenCalledWith("agent_setup_overview", { agentId: "claude", cwd: FOLDER, attached: [], includeMcp: true });
 			fireEvent.click(link);
 			await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("link_instructions_to_agents_md", { agentId: "claude", folder: FOLDER }));
 			await waitFor(() => expect(screen.getByRole("button", { name: "CLAUDE.md + AGENTS.md" })).toBeInTheDocument());
@@ -115,18 +117,52 @@ describe("AgentSetupChips", () => {
 		});
 
 		it("shows no safety chip for the mapped default", async () => {
-			h.argv = [["-zsh"], ["claude", "--permission-mode", "acceptEdits"]];
+			h.argv = [["claude", "--permission-mode", "acceptEdits"]];
 			renderChips("claude");
 			await waitFor(() => expect(chips()).toHaveAttribute("data-safety", "default"));
 			expect(screen.queryByText("Looser than default")).toBeNull();
 		});
 
 		it("shows 'Looser than default' for a looser flag, naming it", async () => {
-			h.argv = [["node", "/tmp/shim.mjs", "claude", "--permission-mode", "acceptEdits", "--dangerously-skip-permissions"]];
+			h.argv = [["/opt/tools/bin/claude", "--permission-mode", "acceptEdits", "--dangerously-skip-permissions"]];
 			renderChips("claude");
 			const chip = await screen.findByText("Looser than default");
 			expect(chip.getAttribute("title")).toContain("--dangerously-skip-permissions");
 			expect(chips()).toHaveAttribute("data-safety", "looser");
+		});
+
+		it("shows nothing for an SSH session and reads nothing", async () => {
+			render(
+				<I18nProvider>
+					<AgentSetupChips session={{ id: "s1", mode: "terminal", ai_provider: "claude", working_directory: FOLDER, workspace_paths: [], ssh_info: { host: "example.test" } }} />
+				</I18nProvider>,
+			);
+			await act(async () => { await Promise.resolve(); });
+			expect(chips()).toBeNull();
+			const asked = h.invoke.mock.calls.map((c) => c[0]);
+			expect(asked).not.toContain("session_process_argv");
+			expect(asked).not.toContain("agent_setup_overview");
+		});
+
+		it("pauses reading the processes while the window is hidden", async () => {
+			vi.useFakeTimers();
+			const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+			try {
+				renderChips("claude");
+				await act(async () => { await Promise.resolve(); });
+				const reads = () => h.invoke.mock.calls.filter((c) => c[0] === "session_process_argv").length;
+				const first = reads();
+				expect(first).toBe(1);
+				visibility.mockReturnValue("hidden");
+				await act(async () => { vi.advanceTimersByTime(ARGV_POLL_MS * 3); });
+				expect(reads()).toBe(first);
+				visibility.mockReturnValue("visible");
+				await act(async () => { vi.advanceTimersByTime(ARGV_POLL_MS); });
+				expect(reads()).toBe(first + 1);
+			} finally {
+				visibility.mockRestore();
+				vi.useRealTimers();
+			}
 		});
 
 		it("follows an agent started by hand in a plain shell", async () => {

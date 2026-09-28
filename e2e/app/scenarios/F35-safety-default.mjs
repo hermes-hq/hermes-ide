@@ -14,6 +14,9 @@
 //      (--dangerously-skip-permissions, typed as a custom flag) shows the
 //      "Looser than default" chip, naming the flag. The chip is read from the
 //      running agent's command line, not from the wizard.
+//   4. A program that only mentions the agent on its command line
+//      (`node notes.mjs claude --dangerously-skip-permissions`) is not taken
+//      for the agent: no chip.
 //
 // Negative control: HERMES_E2E_NEGATIVE=1 launches the third session without
 // the looser flag; the run must end in RESULT: FAIL (no chip appears).
@@ -62,7 +65,7 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   }
 
   log("step 2: a new Claude session starts in the mapped default");
-  const claude = await startAgentSession(bridge, log, { agent: "claude", prefix: fake.prefix, folders: [project], label: "F35 claude" });
+  const claude = await startAgentSession(bridge, log, { agent: "claude", prefix: fake.prefixFor("claude"), folders: [project], label: "F35 claude" });
   assert(claude.wizard.pillIsHermesDefault && claude.wizard.flags === "--permission-mode acceptEdits", "the wizard preselected Accept edits, marked Hermes default");
   assert(/^FAKE-AGENT claude --permission-mode acceptEdits\b/.test(claude.bannerLine), "Claude runs with --permission-mode acceptEdits");
   await settledChips("claude");
@@ -71,7 +74,7 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   await quitFakeAgent(bridge, claude.sessionId);
 
   log("step 3: a new Codex session starts in the mapped default");
-  const codex = await startAgentSession(bridge, log, { agent: "codex", prefix: fake.prefix, folders: [project], label: "F35 codex" });
+  const codex = await startAgentSession(bridge, log, { agent: "codex", prefix: fake.prefixFor("codex"), folders: [project], label: "F35 codex" });
   assert(codex.wizard.pillIsHermesDefault && codex.wizard.flags === "--sandbox workspace-write --ask-for-approval on-request", "the wizard preselected Codex's sandboxed mode, marked Hermes default");
   assert(/^FAKE-AGENT codex --sandbox workspace-write --ask-for-approval on-request$/.test(codex.bannerLine), "Codex runs with --sandbox workspace-write --ask-for-approval on-request");
   await settledChips("codex");
@@ -82,7 +85,7 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   log("step 4: a Claude session launched with a looser flag");
   const looser = await startAgentSession(bridge, log, {
     agent: "claude",
-    prefix: fake.prefix,
+    prefix: fake.prefixFor("claude"),
     suffix: NEGATIVE ? "" : LOOSER_FLAG,
     folders: [project],
     label: "F35 looser",
@@ -102,4 +105,14 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   await quitFakeAgent(bridge, looser.sessionId);
   await bridge.waitFor("the chip to go away", `return !e2e.first(".agent-setup-chips .agent-safety-chip");`, { timeoutMs: 15_000 });
   log("  ok — no chip once no agent runs looser");
+
+  log("step 6: a program that only mentions claude on its command line is not an agent");
+  await bridge.typeInTerminal(looser.sessionId, `${fake.prefixFor("notes")} claude ${LOOSER_FLAG}\n`);
+  await bridge.waitForTerminal(looser.sessionId, new RegExp(`^FAKE-AGENT claude ${LOOSER_FLAG}\\s*$`), { timeoutMs: 30_000 });
+  for (let i = 0; i < 4; i++) {
+    const c = await readChips(bridge);
+    assert(c && !c.looser && c.safety === "unknown", `no agent is read from "notes.mjs claude ${LOOSER_FLAG}" (poll ${i + 1}: ${JSON.stringify(c)})`);
+    await sleep(1_000);
+  }
+  await quitFakeAgent(bridge, looser.sessionId);
 });

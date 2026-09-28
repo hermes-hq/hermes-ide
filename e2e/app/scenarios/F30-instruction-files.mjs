@@ -70,7 +70,7 @@ await runScenario("F30-instruction-files", async ({ evidenceDir, log, assert, ap
   const { bridge } = app;
 
   log("step 3: a Codex session in the project (shared folder attached) lists AGENTS.md");
-  const codex = await startAgentSession(bridge, log, { agent: "codex", prefix: fake.prefix, folders: [project, shared], label: "F30 codex" });
+  const codex = await startAgentSession(bridge, log, { agent: "codex", prefix: fake.prefixFor("codex"), folders: [project, shared], label: "F30 codex" });
   assert(/^FAKE-AGENT codex\b/.test(codex.bannerLine), "the fake agent was started as Codex");
   const codexChips = await bridge.waitFor("the Codex instructions chip", `
     const c = e2e.first(".agent-setup-chips");
@@ -82,7 +82,7 @@ await runScenario("F30-instruction-files", async ({ evidenceDir, log, assert, ap
   await quitFakeAgent(bridge, codex.sessionId);
 
   log("step 4: a Claude session in the same folders: no instruction file yet");
-  const claude = await startAgentSession(bridge, log, { agent: "claude", prefix: fake.prefix, folders: [project, shared], label: "F30 claude" });
+  const claude = await startAgentSession(bridge, log, { agent: "claude", prefix: fake.prefixFor("claude"), folders: [project, shared], label: "F30 claude" });
   assert(/^FAKE-AGENT claude\b/.test(claude.bannerLine), "the fake agent was started as Claude");
   await bridge.waitFor("the Claude chip", `
     const c = e2e.first(".agent-setup-chips");
@@ -94,7 +94,7 @@ await runScenario("F30-instruction-files", async ({ evidenceDir, log, assert, ap
 
   log("step 5: the view lists what each agent sees, read-only");
   await bridge.click(".agent-setup-chips .agent-rules-chip");
-  await bridge.waitFor("the setup view", `return !!e2e.first(".agent-setup-popover");`);
+  await bridge.waitFor("the setup view with its MCP servers", `return !!e2e.first('.agent-setup-popover .agent-setup-mcp[data-loaded="true"]');`);
   const view = await bridge.eval(`
     const p = e2e.first(".agent-setup-popover");
     const claudeMcp = p.querySelector('.agent-setup-mcp-agent[data-agent-id="claude"]');

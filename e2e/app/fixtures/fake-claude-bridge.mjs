@@ -11,6 +11,8 @@
 //   HERMES_FAKE_BRIDGE_PLAN  path to a JSON file: { "mode": "<mode>" }
 //   HERMES_FAKE_BRIDGE_LOG   path of an NDJSON log this process appends to:
 //                            {"event":"start"|"input"|"exit", "pid", ...}
+//   HERMES_FAKE_MCP_SERVERS  comma-separated MCP server names the init
+//                            message reports as connected
 //
 // Modes, applied to each user message:
 //   ok          replies "fake reply: <text>" and stays up for more messages
@@ -65,7 +67,10 @@ const init = () =>
     cwd,
     session_id: sessionId,
     tools: [],
-    mcp_servers: [],
+    mcp_servers: (process.env.HERMES_FAKE_MCP_SERVERS || "")
+      .split(",")
+      .filter(Boolean)
+      .map((name) => ({ name, status: "connected" })),
     model: "fake-model",
     permissionMode: "default",
     slash_commands: [],

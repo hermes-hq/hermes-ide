@@ -4,19 +4,27 @@
  * - every catalog agent maps the default to one of its own permission modes
  * - the launch line Hermes builds for that mode is never judged looser, and
  *   the "skip all permissions" modes always are (so the chip can fail)
- * - agents are recognised in real command lines: wrappers, Windows shims,
- *   multi-word commands, flags written as --flag=value
+ * - agents are recognised in agent command lines: Windows shims, multi-word
+ *   commands, flags written as --flag=value; an agent's name as a later word
+ *   is not an agent
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn(() => Promise.resolve("2.0.0")) }));
 
 import { AGENT_CATALOG, buildLaunchPreview, getAvailableModes, permissionFlagText } from "../catalog/agentCatalog";
 import { findAgentInvocation, judgeSafety, safetyDefaultMode, safetyOf } from "../catalog/agentSafety";
+import { initFeatureFlags, __resetFeatureFlagsForTest, FEATURE_FLAG_OVERRIDES_KEY } from "../featureFlags";
 import type { PermissionMode } from "../types/session";
 
 const agents = AGENT_CATALOG.agents.filter((a) => !a.custom);
+
+// The safety default is a 2.0 feature: it is on only with the agentCatalog flag.
+beforeAll(async () => {
+	await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: true }) });
+});
+afterAll(() => __resetFeatureFlagsForTest());
 
 /** The argv Hermes's launch line produces for an agent in a mode (the line is typed unquoted). */
 function launchArgs(agentId: string, mode: PermissionMode): string[] {
@@ -78,8 +86,10 @@ describe("safety default: catalog mapping", () => {
 });
 
 describe("safety default: reading a running agent's command line", () => {
-	it("finds the agent behind a wrapper and reads its flags", () => {
-		const inv = findAgentInvocation([["/usr/bin/node", "/tmp/shim.mjs", "claude", "--dangerously-skip-permissions"]]);
+	// The backend returns agent command lines starting at the agent's command
+	// (wrappers are seen through there: src-tauri/src/agent_setup.rs).
+	it("reads the agent and its flags from an agent command line", () => {
+		const inv = findAgentInvocation([["/opt/tools/bin/claude", "--dangerously-skip-permissions"]]);
 		expect(inv).toEqual({ agentId: "claude", args: ["--dangerously-skip-permissions"] });
 		expect(judgeSafety(inv!.agentId, inv!.args)).toEqual({
 			level: "looser",
@@ -89,9 +99,13 @@ describe("safety default: reading a running agent's command line", () => {
 	});
 
 	it("recognises Windows shims and paths", () => {
-		expect(findAgentInvocation([["C:\\Windows\\system32\\cmd.exe", "/c", "D:\\tools\\npm\\codex.cmd", "-s", "danger-full-access"]]))
+		expect(findAgentInvocation([["D:\\tools\\npm\\codex.cmd", "-s", "danger-full-access"]]))
 			.toEqual({ agentId: "codex", args: ["-s", "danger-full-access"] });
 		expect(judgeSafety("codex", ["-s", "danger-full-access"]).level).toBe("looser");
+	});
+
+	it("an agent's name as a later word is not an agent", () => {
+		expect(findAgentInvocation([["cat", "claude"], ["git", "log", "--grep", "goose"], ["tail", "-f", "codex"]])).toBeNull();
 	});
 
 	it("skips a multi-word command's subcommand", () => {
@@ -111,7 +125,7 @@ describe("safety default: reading a running agent's command line", () => {
 	});
 
 	it("prefers the session's own agent when several run", () => {
-		const argvs = [["codex"], ["node", "claude", "--permission-mode", "plan"]];
+		const argvs = [["codex"], ["claude", "--permission-mode", "plan"]];
 		expect(findAgentInvocation(argvs)?.agentId).toBe("codex");
 		expect(findAgentInvocation(argvs, "claude")?.agentId).toBe("claude");
 	});

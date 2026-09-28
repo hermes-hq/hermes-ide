@@ -357,3 +357,14 @@
   align-items: center;
   gap: 8px;
 }
+
+/* F30: a server Hermes will not edit (outside the project's .mcp.json). */
+.mcp-kept-note {
+  font: 11px/1.45 var(--font-display, var(--font-ui));
+  color: var(--ink-secondary, var(--text-2));
+  flex: 1 1 200px;
+}
+
+.mcp-kept-note code {
+  font: 10.5px/1 var(--font-mono);
+}

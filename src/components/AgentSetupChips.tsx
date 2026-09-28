@@ -15,7 +15,9 @@
  *    the processes under the session's shell, so it also covers an agent the
  *    user started by hand.
  *
- * Hermes only observes here: nothing is typed into the terminal.
+ * Hermes only observes here: nothing is typed into the terminal. Nothing
+ * is shown for an SSH session (the agent runs on the other machine), and
+ * polling pauses while the window is hidden.
  */
 import "../styles/components/AgentSetupChips.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -43,8 +45,12 @@ interface Props {
     ai_provider?: string | null;
     working_directory: string;
     workspace_paths: string[];
+    ssh_info?: unknown;
   };
 }
+
+/** Whether the window is hidden (minimised, another space): polling pauses then. */
+const windowHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 
 /** Distinct names of the files the agent loads, in load order. */
 export function loadedInstructionNames(items: readonly SetupItem[]): string[] {
@@ -55,9 +61,12 @@ export function loadedInstructionNames(items: readonly SetupItem[]): string[] {
 
 export function AgentSetupChips({ session }: Props) {
   const { t } = useI18n();
-  const enabled = isSafetyDefaultEnabled() && session.mode !== "agent";
+  // An SSH session's agent runs remotely: the local processes and files say nothing about it.
+  const enabled = isSafetyDefaultEnabled() && session.mode !== "agent" && !session.ssh_info;
   const [argvs, setArgvs] = useState<string[][] | null>(null);
   const [overview, setOverview] = useState<AgentSetupOverview | null>(null);
+  // Whether `overview` holds the MCP servers (read only while the view is open).
+  const [mcpLoaded, setMcpLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const [reload, setReload] = useState(0);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -68,6 +77,7 @@ export function AgentSetupChips({ session }: Props) {
     if (!enabled) return;
     let stopped = false;
     const tick = () => {
+      if (windowHidden()) return;
       getSessionProcessArgv(session.id)
         .then((a) => { if (!stopped) setArgvs(a); })
         .catch(() => { if (!stopped) setArgvs([]); });
@@ -91,7 +101,8 @@ export function AgentSetupChips({ session }: Props) {
   useEffect(() => {
     if (!enabled || !agentId || !cwd) { setOverview(null); return; }
     let stopped = false;
-    const load = async () => {
+    const load = async (initial = false) => {
+      if (!initial && windowHidden()) return;
       // Attached folders: the session's extra workspace folders plus the
       // projects attached to it (the backend drops the session's own folder).
       const projects = await getSessionProjects(session.id).catch(() => []);
@@ -100,16 +111,17 @@ export function AgentSetupChips({ session }: Props) {
         ...projects.map((p) => p.path).filter(Boolean),
       ])];
       try {
-        const o = await getAgentSetupOverview(agentId, cwd, attached);
-        if (!stopped) setOverview(o);
+        // The MCP servers are only shown in the open view.
+        const o = await getAgentSetupOverview(agentId, cwd, attached, open);
+        if (!stopped) { setOverview(o); setMcpLoaded(open); }
       } catch {
-        if (!stopped) setOverview(null);
+        if (!stopped) { setOverview(null); setMcpLoaded(false); }
       }
     };
-    void load();
-    const h = setInterval(load, FILES_POLL_MS);
+    void load(true);
+    const h = setInterval(() => void load(), FILES_POLL_MS);
     return () => { stopped = true; clearInterval(h); };
-  }, [enabled, agentId, cwd, attachedKey, reload, session.id]);
+  }, [enabled, agentId, cwd, attachedKey, reload, session.id, open]);
 
   // Close on a click outside or Escape.
   useEffect(() => {
@@ -167,7 +179,7 @@ export function AgentSetupChips({ session }: Props) {
         className="agent-rules-chip"
         aria-expanded={open}
         title={t("agentSetup.chipTitle")}
-        onClick={() => { setOpen((o) => !o); if (!open) setReload((n) => n + 1); }}
+        onClick={() => setOpen((o) => !o)}
       >
         {label}
       </button>
@@ -195,9 +207,10 @@ export function AgentSetupChips({ session }: Props) {
           <Section title={t("agentSetup.settings")} items={overview.settings} emptyText={t("agentSetup.none")} />
           <Section title={t("agentSetup.skills")} items={overview.skills} emptyText={t("agentSetup.none")} />
 
-          <div className="agent-setup-section agent-setup-mcp">
+          <div className="agent-setup-section agent-setup-mcp" data-loaded={mcpLoaded ? "true" : "false"}>
             <div className="agent-setup-section-title">{t("agentSetup.mcp")}</div>
-            {overview.mcp.map((m) => (
+            {!mcpLoaded && <div className="agent-setup-empty">…</div>}
+            {mcpLoaded && overview.mcp.map((m) => (
               <div key={m.agentId} className="agent-setup-mcp-agent" data-agent-id={m.agentId}>
                 <div className="agent-setup-mcp-agent-name">{m.agentName}</div>
                 {m.servers.length === 0 ? (

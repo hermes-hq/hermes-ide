@@ -10,21 +10,27 @@
 //! * `link_instructions_to_agents_md` is the one write: on request it adds
 //!   `@AGENTS.md` to the agent's own instruction file (for Claude,
 //!   `CLAUDE.md`) in a project folder, so one file holds the project rules.
-//! * `session_process_argv` returns the command lines running under a
-//!   session's shell, so the frontend can tell which agent runs there and
-//!   whether it was started looser than Hermes's safety default.
+//! * `session_process_argv` returns the command lines of the catalog agents
+//!   running under a session's shell (and nothing else), so the frontend can
+//!   tell which agent runs there and whether it was started looser than
+//!   Hermes's safety default.
 //!
 //! The per-agent paths live in the catalog (`setup` in
 //! `src/catalog/agents.json`).
 
 use crate::agent_catalog::{self, Agent};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Largest instruction file read when looking for `@path` imports.
 const MAX_READ_BYTES: u64 = 512 * 1024;
+/// Largest MCP config file read (`~/.claude.json` keeps history and grows
+/// well past the instruction-file cap).
+const MAX_MCP_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 /// Claude Code follows imports at most this many hops deep.
 const MAX_IMPORT_DEPTH: usize = 5;
 /// Folders walked up from the working folder looking for the repository root.
@@ -294,8 +300,12 @@ pub(crate) fn find_imports(text: &str) -> Vec<String> {
 }
 
 fn read_text(path: &Path) -> Option<String> {
+    read_capped(path, MAX_READ_BYTES)
+}
+
+fn read_capped(path: &Path, max: u64) -> Option<String> {
     let meta = fs::metadata(path).ok()?;
-    if !meta.is_file() || meta.len() > MAX_READ_BYTES {
+    if !meta.is_file() || meta.len() > max {
         return None;
     }
     fs::read_to_string(path).ok()
@@ -328,6 +338,33 @@ struct Ctx<'a> {
     cwd: &'a Path,
     home: Option<&'a Path>,
     attached: Vec<PathBuf>,
+    /// MCP config files read so far for this overview, parsed (JSON) or as
+    /// text (TOML): each file is read once however many sources name it.
+    mcp_files: RefCell<HashMap<PathBuf, Rc<McpFile>>>,
+}
+
+enum McpFile {
+    Missing,
+    Json(serde_json::Value),
+    Text(String),
+}
+
+impl Ctx<'_> {
+    fn mcp_file(&self, path: &Path, format: &str) -> Rc<McpFile> {
+        if let Some(f) = self.mcp_files.borrow().get(path) {
+            return f.clone();
+        }
+        let file = match read_capped(path, MAX_MCP_CONFIG_BYTES) {
+            None => McpFile::Missing,
+            Some(text) if format == "toml" => McpFile::Text(text),
+            Some(text) => serde_json::from_str(&text).map_or(McpFile::Missing, McpFile::Json),
+        };
+        let file = Rc::new(file);
+        self.mcp_files
+            .borrow_mut()
+            .insert(path.to_path_buf(), file.clone());
+        file
+    }
 }
 
 impl Ctx<'_> {
@@ -481,18 +518,9 @@ fn path_items(paths: &crate::agent_catalog::SetupPaths, ctx: &Ctx, skills: bool)
 }
 
 /// Server names declared in one MCP source file. Values are never read out.
-fn mcp_names(file: &Path, format: &str, key: &str, cwd: &Path) -> Vec<(String, bool)> {
-    let Some(text) = read_text(file).or_else(|| {
-        // ~/.claude.json can be larger than the import cap.
-        fs::read_to_string(file).ok()
-    }) else {
-        return Vec::new();
-    };
-    match format {
-        "json" | "claude_local" => {
-            let Ok(root) = serde_json::from_str::<serde_json::Value>(&text) else {
-                return Vec::new();
-            };
+fn mcp_names(file: &McpFile, format: &str, key: &str, cwd: &Path) -> Vec<(String, bool)> {
+    match (format, file) {
+        ("json" | "claude_local", McpFile::Json(root)) => {
             let obj = if format == "json" {
                 root.get(key)
             } else {
@@ -527,7 +555,7 @@ fn mcp_names(file: &Path, format: &str, key: &str, cwd: &Path) -> Vec<(String, b
             names.sort();
             names
         }
-        "toml" => {
+        ("toml", McpFile::Text(text)) => {
             let mut names: Vec<(String, bool)> = Vec::new();
             let prefix = format!("[{key}.");
             for line in text.lines() {
@@ -604,7 +632,8 @@ fn mcp_for(agent: &Agent, ctx: &Ctx) -> Option<AgentMcp> {
                     source = format!("{}/{source}", name.to_string_lossy());
                 }
             }
-            for (name, enabled) in mcp_names(&file, &src.format, &src.key, ctx.cwd) {
+            let parsed = ctx.mcp_file(&file, &src.format);
+            for (name, enabled) in mcp_names(&parsed, &src.format, &src.key, ctx.cwd) {
                 servers.push(McpServerItem {
                     name,
                     source: source.clone(),
@@ -652,11 +681,25 @@ fn own_instruction_file(agent: &Agent) -> Option<String> {
     valid.then(|| first.clone())
 }
 
+/// The full overview, MCP servers included.
+#[cfg(test)]
 pub(crate) fn overview(
     agent_id: &str,
     cwd: &Path,
     attached: &[String],
     home: Option<&Path>,
+) -> Result<AgentSetupOverview, String> {
+    overview_with(agent_id, cwd, attached, home, true)
+}
+
+/// `include_mcp: false` leaves the MCP servers out (they are only shown in
+/// the open view; the chip's background refresh does not need them).
+pub(crate) fn overview_with(
+    agent_id: &str,
+    cwd: &Path,
+    attached: &[String],
+    home: Option<&Path>,
+    include_mcp: bool,
 ) -> Result<AgentSetupOverview, String> {
     let agent =
         agent_catalog::agent(agent_id).ok_or_else(|| format!("unknown agent: {agent_id}"))?;
@@ -680,6 +723,7 @@ pub(crate) fn overview(
         cwd,
         home,
         attached,
+        mcp_files: RefCell::new(HashMap::new()),
     };
     let instructions = instruction_items(agent, &ctx);
     let (settings, skills) = match &agent.setup {
@@ -690,11 +734,11 @@ pub(crate) fn overview(
         None => (Vec::new(), Vec::new()),
     };
     let mut mcp: Vec<AgentMcp> = Vec::new();
-    if let Some(m) = mcp_for(agent, &ctx) {
+    if let Some(m) = mcp_for(agent, &ctx).filter(|_| include_mcp) {
         mcp.push(m);
     }
     for other in &agent_catalog::catalog().agents {
-        if other.id != agent.id {
+        if include_mcp && other.id != agent.id {
             if let Some(m) = mcp_for(other, &ctx) {
                 mcp.push(m);
             }
@@ -729,7 +773,14 @@ pub(crate) fn link(agent_id: &str, folder: &Path) -> Result<&'static str, String
     if !folder.join("AGENTS.md").is_file() {
         return Err("there is no AGENTS.md in this folder".into());
     }
-    let path = folder.join(&file);
+    let link_path = folder.join(&file);
+    // A symlinked instruction file is written through to its target, so the
+    // link stays a link.
+    let path = match fs::symlink_metadata(&link_path) {
+        Ok(m) if m.file_type().is_symlink() => fs::canonicalize(&link_path)
+            .map_err(|e| format!("{file} links to a file that cannot be read: {e}"))?,
+        _ => link_path,
+    };
     let existing = if path.exists() {
         Some(fs::read_to_string(&path).map_err(|e| format!("read {file}: {e}"))?)
     } else {
@@ -747,8 +798,16 @@ pub(crate) fn link(agent_id: &str, folder: &Path) -> Result<&'static str, String
         Some(text) => format!("@AGENTS.md\n\n{text}"),
         None => "@AGENTS.md\n".to_string(),
     };
-    let tmp = folder.join(format!(".{file}.hermes-tmp"));
+    let dir = path.parent().unwrap_or(folder);
+    let tmp = dir.join(format!(".{file}.hermes-tmp"));
     fs::write(&tmp, content).map_err(|e| format!("write {file}: {e}"))?;
+    // Keep the file's permissions (the temporary file got the defaults).
+    if let Ok(meta) = fs::metadata(&path) {
+        if let Err(e) = fs::set_permissions(&tmp, meta.permissions()) {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("write {file}: {e}"));
+        }
+    }
     fs::rename(&tmp, &path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("write {file}: {e}")
@@ -767,9 +826,16 @@ pub async fn agent_setup_overview(
     agent_id: String,
     cwd: String,
     attached: Vec<String>,
+    include_mcp: Option<bool>,
 ) -> Result<AgentSetupOverview, String> {
     tokio::task::spawn_blocking(move || {
-        overview(&agent_id, Path::new(&cwd), &attached, home().as_deref())
+        overview_with(
+            &agent_id,
+            Path::new(&cwd),
+            &attached,
+            home().as_deref(),
+            include_mcp.unwrap_or(true),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -780,8 +846,9 @@ pub fn link_instructions_to_agents_md(agent_id: String, folder: String) -> Resul
     link(&agent_id, Path::new(&folder)).map(str::to_string)
 }
 
-/// The command lines of every process running under a session's shell
-/// (children first found, deepest last). Empty when the shell is idle.
+/// The command lines of the catalog agents running under a session's shell,
+/// each starting at the agent's command (`claude --permission-mode plan`).
+/// Other processes are never returned: command lines can carry secrets.
 #[tauri::command]
 pub async fn session_process_argv(
     state: tauri::State<'_, crate::AppState>,
@@ -799,36 +866,177 @@ pub async fn session_process_argv(
             .ok_or_else(|| "Shell process ID not available".to_string())?
     };
     let mut sys = state.sys.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(descendant_argv(&mut sys, shell_pid))
+    let commands = agent_commands();
+    Ok(descendant_argv(&mut sys, shell_pid)
+        .iter()
+        .filter_map(|argv| agent_command_line(argv, commands))
+        .collect())
 }
+
+/// The command names of the catalog's agents (`claude`, `codex`, `kiro-cli`).
+fn agent_commands() -> &'static HashSet<String> {
+    static COMMANDS: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+    COMMANDS.get_or_init(|| {
+        agent_catalog::catalog()
+            .agents
+            .iter()
+            .filter(|a| !a.custom)
+            .filter_map(|a| a.terminal.argv.first())
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    })
+}
+
+/// `/usr/local/bin/Claude.EXE` -> `claude`.
+fn command_name(token: &str) -> String {
+    let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
+    let lower = base.to_ascii_lowercase();
+    for ext in [".exe", ".cmd", ".bat", ".ps1", ".js", ".mjs", ".cjs"] {
+        if let Some(stem) = lower.strip_suffix(ext) {
+            return stem.to_string();
+        }
+    }
+    lower
+}
+
+/// Programs that run the program named by their first non-option argument:
+/// script runners (an npm-installed agent runs as `node .../bin/claude`) and
+/// launch wrappers (`caffeinate -i claude`, `env A=1 codex`, `cmd /c
+/// codex.cmd`).
+const WRAPPERS: &[&str] = &[
+    "node",
+    "nodejs",
+    "bun",
+    "deno",
+    "python",
+    "python3",
+    "env",
+    "caffeinate",
+    "nohup",
+    "time",
+    "cmd",
+];
+
+/// The part of a command line that runs a catalog agent, from the agent's
+/// command on. An agent counts only as the program itself or as the program
+/// a known wrapper runs, never as a later argument: `cat claude`, `git log
+/// --grep goose` and `tail -f codex` are not agents.
+pub(crate) fn agent_command_line(
+    argv: &[String],
+    commands: &HashSet<String>,
+) -> Option<Vec<String>> {
+    agent_command_line_at(argv, commands, 0)
+}
+
+fn agent_command_line_at(
+    argv: &[String],
+    commands: &HashSet<String>,
+    depth: usize,
+) -> Option<Vec<String>> {
+    if depth > 4 {
+        return None;
+    }
+    let name = command_name(argv.first()?);
+    if commands.contains(&name) {
+        return Some(argv.to_vec());
+    }
+    if !WRAPPERS.contains(&name.as_str()) {
+        return None;
+    }
+    let mut j = 1;
+    while let Some(t) = argv.get(j) {
+        let skip = t.starts_with('-')
+            || (name == "cmd" && t.starts_with('/'))
+            || (name == "env" && t.contains('='))
+            || (name == "deno" && t == "run");
+        if !skip {
+            break;
+        }
+        j += 1;
+    }
+    let program = argv.get(j)?;
+    // `cmd /c "codex.cmd --yolo"` can arrive as one argument.
+    if name == "cmd" && program.contains(char::is_whitespace) {
+        let mut split: Vec<String> = program
+            .split_whitespace()
+            .map(|w| w.trim_matches('"').to_string())
+            .filter(|w| !w.is_empty())
+            .collect();
+        split.extend(argv[j + 1..].iter().cloned());
+        return agent_command_line_at(&split, commands, depth + 1);
+    }
+    agent_command_line_at(&argv[j..], commands, depth + 1)
+}
+
+/// One process as far as the parent walk needs it.
+struct ProcInfo {
+    pid: u32,
+    parent: Option<u32>,
+    start_time: u64,
+    name: String,
+}
+
+/// The children of `parent` (started `parent_started`), sorted by pid.
+/// Windows reuses process ids and keeps an orphan's old parent id: a process
+/// that started before its "parent" is not its child. The console host
+/// Windows starts for a console program is not one either.
+fn children_of(procs: &[ProcInfo], parent: u32, parent_started: u64) -> Vec<u32> {
+    let mut out: Vec<u32> = procs
+        .iter()
+        .filter(|p| p.parent == Some(parent) && p.start_time >= parent_started)
+        .filter(|p| {
+            let name = p.name.to_ascii_lowercase();
+            name != "conhost.exe" && name != "openconsole.exe"
+        })
+        .map(|p| p.pid)
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+/// A full process-table refresh is skipped when one ran this recently: every
+/// terminal pane polls, and they share one table.
+const FULL_REFRESH_EVERY: std::time::Duration = std::time::Duration::from_millis(1_000);
 
 fn descendant_argv(sys: &mut sysinfo::System, root: u32) -> Vec<Vec<String>> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
-    // Every process's parent first (cheap), then command lines only for the
-    // shell's descendants.
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
-    let mut pids: Vec<Pid> = Vec::new();
-    let mut frontier = vec![Pid::from_u32(root)];
-    let mut seen: HashSet<Pid> = HashSet::from([Pid::from_u32(root)]);
-    while let Some(parent) = frontier.pop() {
-        // Windows reuses process ids and keeps an orphan's old parent id: a
-        // process that started before its "parent" is not its child. The
-        // console host Windows starts for a console program is not one either.
-        let parent_started = sys.process(parent).map_or(0, |p| p.start_time());
-        let mut children: Vec<Pid> = sys
-            .processes()
+    static LAST_FULL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    // Every process's parent first (cheap, and shared by all panes), then
+    // command lines only for the shell's descendants.
+    {
+        let mut last = LAST_FULL.lock().unwrap_or_else(|e| e.into_inner());
+        if sys.processes().is_empty() || last.is_none_or(|t| t.elapsed() >= FULL_REFRESH_EVERY) {
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+            *last = Some(std::time::Instant::now());
+        }
+    }
+    let procs: Vec<ProcInfo> = sys
+        .processes()
+        .iter()
+        .map(|(pid, p)| ProcInfo {
+            pid: pid.as_u32(),
+            parent: p.parent().map(|pp| pp.as_u32()),
+            start_time: p.start_time(),
+            name: p.name().to_string_lossy().to_string(),
+        })
+        .collect();
+    let started = |pid: u32| {
+        procs
             .iter()
-            .filter(|(_, p)| p.parent() == Some(parent) && p.start_time() >= parent_started)
-            .filter(|(_, p)| {
-                let name = p.name().to_string_lossy().to_ascii_lowercase();
-                name != "conhost.exe" && name != "openconsole.exe"
-            })
-            .map(|(pid, _)| *pid)
-            .collect();
-        children.sort();
-        for pid in children {
+            .find(|p| p.pid == pid)
+            .map_or(0, |p| p.start_time)
+    };
+    let mut pids: Vec<Pid> = Vec::new();
+    let mut frontier = vec![root];
+    let mut seen: HashSet<u32> = HashSet::from([root]);
+    while let Some(parent) = frontier.pop() {
+        for pid in children_of(&procs, parent, started(parent)) {
             if seen.insert(pid) {
-                pids.push(pid);
+                pids.push(Pid::from_u32(pid));
                 frontier.push(pid);
             }
         }
@@ -987,6 +1195,43 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn linking_keeps_a_symlinked_claude_md_a_link_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tree();
+        write(&t.project.join("AGENTS.md"), "# Rules\n");
+        let shared = t.home.join("shared-claude.md");
+        write(&shared, "# Shared\n");
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o640)).unwrap();
+        std::os::unix::fs::symlink(&shared, t.project.join("CLAUDE.md")).unwrap();
+
+        assert_eq!(link("claude", &t.project).unwrap(), "updated");
+        let meta = fs::symlink_metadata(t.project.join("CLAUDE.md")).unwrap();
+        assert!(meta.file_type().is_symlink(), "CLAUDE.md is still a link");
+        assert_eq!(
+            fs::read_to_string(&shared).unwrap(),
+            "@AGENTS.md\n\n# Shared\n"
+        );
+        assert_eq!(
+            fs::metadata(&shared).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linking_refuses_a_dangling_claude_md_link() {
+        let t = tree();
+        write(&t.project.join("AGENTS.md"), "# Rules\n");
+        std::os::unix::fs::symlink(t.home.join("gone.md"), t.project.join("CLAUDE.md")).unwrap();
+        assert!(link("claude", &t.project).is_err());
+        assert!(fs::symlink_metadata(t.project.join("CLAUDE.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
     #[test]
     fn linking_refuses_without_agents_md_or_for_agents_without_imports() {
         let t = tree();
@@ -1107,6 +1352,37 @@ mod tests {
                 ("local-only", "local", true),
             ]
         );
+        // The chip's background refresh leaves the MCP servers out.
+        let quick = overview_with("codex", &t.project, &[], Some(&t.home), false).unwrap();
+        assert!(quick.mcp.is_empty());
+        assert_eq!(quick.instructions, o.instructions);
+    }
+
+    #[test]
+    fn a_large_user_config_is_read_up_to_its_cap_only() {
+        let t = tree();
+        let claude_servers = |o: &AgentSetupOverview| -> Vec<String> {
+            o.mcp
+                .iter()
+                .find(|m| m.agent_id == "claude")
+                .unwrap()
+                .servers
+                .iter()
+                .map(|s| s.name.clone())
+                .collect()
+        };
+        // Past the instruction-file cap (history makes it big): still read.
+        let pad = "x".repeat(MAX_READ_BYTES as usize + 1);
+        let big = serde_json::json!({"mcpServers": {"user-wide": {}}, "pad": pad}).to_string();
+        write(&t.home.join(".claude.json"), &big);
+        let o = overview("claude", &t.project, &[], Some(&t.home)).unwrap();
+        assert_eq!(claude_servers(&o), vec!["user-wide"]);
+        // Past the MCP config cap: not read at all.
+        let pad = "x".repeat(MAX_MCP_CONFIG_BYTES as usize + 1);
+        let huge = serde_json::json!({"mcpServers": {"user-wide": {}}, "pad": pad}).to_string();
+        write(&t.home.join(".claude.json"), &huge);
+        let o = overview("claude", &t.project, &[], Some(&t.home)).unwrap();
+        assert!(claude_servers(&o).is_empty());
     }
 
     #[test]
@@ -1143,6 +1419,110 @@ mod tests {
         let t = tree();
         assert!(overview("nope", &t.project, &[], Some(&t.home)).is_err());
         assert!(overview("claude", Path::new("relative"), &[], Some(&t.home)).is_err());
+    }
+
+    fn line(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    fn agent_line(words: &[&str]) -> Option<Vec<String>> {
+        agent_command_line(&line(words), agent_commands())
+    }
+
+    #[test]
+    fn an_agent_is_found_as_the_program_or_behind_a_wrapper() {
+        let want = Some(line(&["claude", "--dangerously-skip-permissions"]));
+        assert_eq!(
+            agent_line(&["claude", "--dangerously-skip-permissions"]),
+            want
+        );
+        assert_eq!(
+            agent_line(&["/opt/tools/bin/claude", "-p"]),
+            Some(line(&["/opt/tools/bin/claude", "-p"]))
+        );
+        // npm-installed agents run as `node <script named after the agent>`.
+        assert_eq!(
+            agent_line(&[
+                "/usr/bin/node",
+                "--no-warnings",
+                "/usr/lib/bin/codex.js",
+                "--yolo"
+            ]),
+            Some(line(&["/usr/lib/bin/codex.js", "--yolo"]))
+        );
+        assert_eq!(
+            agent_line(&[
+                "caffeinate",
+                "-i",
+                "claude",
+                "--dangerously-skip-permissions"
+            ]),
+            want
+        );
+        assert_eq!(
+            agent_line(&["env", "FOO=1", "claude", "--dangerously-skip-permissions"]),
+            want
+        );
+        assert_eq!(
+            agent_line(&[
+                "C:\\Windows\\system32\\cmd.exe",
+                "/d",
+                "/c",
+                "D:\\npm\\codex.cmd",
+                "-s",
+                "danger-full-access"
+            ]),
+            Some(line(&["D:\\npm\\codex.cmd", "-s", "danger-full-access"]))
+        );
+        // cmd can get the whole command as one argument.
+        assert_eq!(
+            agent_line(&["cmd.exe", "/s", "/c", "\"codex.cmd --yolo\""]),
+            Some(line(&["codex.cmd", "--yolo"]))
+        );
+        assert_eq!(
+            agent_line(&["kiro-cli", "chat", "--trust-all-tools"]),
+            Some(line(&["kiro-cli", "chat", "--trust-all-tools"]))
+        );
+    }
+
+    #[test]
+    fn an_agent_name_as_a_later_argument_is_not_an_agent() {
+        for words in [
+            &["cat", "claude"][..],
+            &["git", "log", "--grep", "goose"],
+            &["tail", "-f", "codex"],
+            &["vim", "opencode"],
+            &["node", "/tmp/tool.mjs", "claude"],
+            &["-zsh"],
+            &[],
+        ] {
+            assert_eq!(agent_line(words), None, "{words:?}");
+        }
+    }
+
+    fn proc(pid: u32, parent: u32, start_time: u64, name: &str) -> ProcInfo {
+        ProcInfo {
+            pid,
+            parent: Some(parent),
+            start_time,
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_reused_parent_id_and_the_console_host_are_not_children() {
+        let procs = vec![
+            proc(10, 1, 100, "pwsh.exe"),
+            proc(11, 10, 105, "node.exe"),
+            // Windows: the console host started for the shell.
+            proc(12, 10, 101, "conhost.exe"),
+            proc(13, 10, 102, "OpenConsole.exe"),
+            // An orphan whose dead parent had id 10 before the shell did.
+            proc(14, 10, 50, "stale.exe"),
+            proc(9, 10, 100, "same-second.exe"),
+        ];
+        assert_eq!(children_of(&procs, 10, 100), vec![9, 11]);
+        assert_eq!(children_of(&procs, 11, 105), Vec::<u32>::new());
     }
 
     #[test]

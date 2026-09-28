@@ -143,6 +143,13 @@ function McpRowDetails({
     return () => { cancelled = true; };
   }, [name, projectDir]);
 
+  // F30: with a project folder, Hermes edits only that project's .mcp.json.
+  // A server set up anywhere else (user-wide, a plugin) is not offered for
+  // removal: removing it there would silently do nothing.
+  const projectOnly = !!projectDir;
+  const removable = !projectOnly || (typeof spec === "object" && spec !== null && spec.source === "project");
+  const showKeptNote = projectOnly && spec !== "loading" && !removable;
+
   return (
     <div className="mcp-row-body">
       {/* Status explanation — always shown, color-coded via [data-status]
@@ -187,7 +194,12 @@ function McpRowDetails({
             restart
           </button>
         )}
-        {onRequestRemove && !confirmRemove && (
+        {onRequestRemove && showKeptNote && (
+          <span className="mcp-kept-note">
+            Set up outside this project's <code>.mcp.json</code> (user-wide or by a plugin). Hermes will not edit it.
+          </span>
+        )}
+        {onRequestRemove && removable && !confirmRemove && (
           <button
             type="button"
             className="mcp-action mcp-action-deny"
@@ -200,10 +212,10 @@ function McpRowDetails({
             remove
           </button>
         )}
-        {onRequestRemove && confirmRemove && (
+        {onRequestRemove && removable && confirmRemove && (
           <div className="mcp-confirm">
             <span className="mcp-confirm-text">
-              Delete <strong>{name}</strong> from <code>~/.claude.json</code>?
+              Delete <strong>{name}</strong> from <code>{projectOnly ? ".mcp.json" : "~/.claude.json"}</code>?
             </span>
             <button
               type="button"

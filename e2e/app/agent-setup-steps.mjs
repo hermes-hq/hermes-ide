@@ -4,10 +4,12 @@
 // wrapper so the real CLI is never run.
 //
 // The fake agent is started as the "prefix command" of a catalog agent:
-// Hermes types `<node> <fake-agent.mjs> claude --permission-mode ...`, so
-// the launch line (and the command line Hermes reads back from the process)
-// is exactly the one it builds for Claude or Codex, but the program that runs
-// is ours. It prints its arguments, answers typed lines and exits on "quit".
+// Hermes types `<node> <dir>/claude.mjs claude --permission-mode ...`, so the
+// launch line is exactly the one it builds for Claude or Codex, but the
+// program that runs is ours. The script is named after the agent, the way an
+// npm-installed agent runs (`node .../bin/claude`), which is how Hermes
+// recognises the agent in the process's command line. It prints its
+// arguments, answers typed lines and exits on "quit".
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
@@ -17,13 +19,7 @@ import { completeOnboarding, dismissWhatsNew, openWizard } from "./n11-steps.mjs
 
 export const onWindows = platform() === "win32";
 
-/** Writes the fake agent; returns { dir, prefix } (prefix = what to type before the agent's command). */
-export function writeFakeAgent(tag) {
-  const dir = mkdtempSync(join(tmpdir(), `hermes-e2e-${tag}-`));
-  const script = join(dir, "fake-agent.mjs");
-  writeFileSync(
-    script,
-    `const args = process.argv.slice(2);
+const FAKE_AGENT_SOURCE = `const args = process.argv.slice(2);
 process.stdout.write("FAKE-AGENT " + args.join(" ") + "\\r\\n");
 process.stdin.setEncoding("utf8");
 let buf = "";
@@ -38,14 +34,27 @@ process.stdin.on("data", (d) => {
     process.stdout.write("fake-agent got: " + line + "\\r\\n");
   }
 });
-`,
-  );
-  const prefix = `${process.execPath} ${script}`;
-  // Typed into the session's shell (zsh, bash, PowerShell, cmd) as written.
-  if (/\s/.test(process.execPath) || /\s/.test(script)) {
-    throw new Error(`the fake agent command would need quoting: ${prefix}`);
-  }
-  return { dir, prefix, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+`;
+
+/**
+ * Writes the fake agent. Returns { dir, prefixFor(name) }: prefixFor gives
+ * what to type before an agent's command so that the fake runs as
+ * `<node> <dir>/<name>.mjs`. A name that is not an agent's (`notes`) gives a
+ * program that merely mentions the agent on its command line.
+ */
+export function writeFakeAgent(tag) {
+  const dir = mkdtempSync(join(tmpdir(), `hermes-e2e-${tag}-`));
+  const prefixFor = (name) => {
+    const script = join(dir, `${name}.mjs`);
+    writeFileSync(script, FAKE_AGENT_SOURCE);
+    const prefix = `${process.execPath} ${script}`;
+    // Typed into the session's shell (zsh, bash, PowerShell, cmd) as written.
+    if (/\s/.test(process.execPath) || /\s/.test(script)) {
+      throw new Error(`the fake agent command would need quoting: ${prefix}`);
+    }
+    return prefix;
+  };
+  return { dir, prefixFor, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /**
@@ -53,12 +62,12 @@ process.stdin.on("data", (d) => {
  * private home (`homeDir`); on Windows the test app's own data folder, since
  * app data lives under %APPDATA% there.
  */
-export function launcher({ evidenceDir, log, homeDir }) {
+export function launcher({ evidenceDir, log, homeDir, env }) {
   return (run, { first = false } = {}) => {
     const runDir = join(evidenceDir, `run-${run}`);
     return onWindows
-      ? launchApp({ runDir, log, home: "real", resetData: first })
-      : launchApp({ runDir, log, home: "private", homeDir });
+      ? launchApp({ runDir, log, home: "real", resetData: first, env })
+      : launchApp({ runDir, log, home: "private", homeDir, env });
   };
 }
 
@@ -202,4 +211,68 @@ export function readChips(bridge) {
 export async function quitFakeAgent(bridge, sessionId) {
   await bridge.typeInTerminal(sessionId, "quit\n");
   await bridge.waitForTerminal(sessionId, /^fake-agent bye$/, { timeoutMs: 15_000 });
+}
+
+/**
+ * Walks the New Session wizard for Claude in Agent view, in `folder`.
+ * Returns the new session's id. The agent is whatever HERMES_BRIDGE_PATH
+ * points at (a fake bridge in these scenarios).
+ */
+export async function startAgentViewSession(bridge, log, { folder }) {
+  const before = await bridge.eval(`return e2e.all(".agent-session-view").map((e) => e.dataset.sessionId);`);
+  await openWizard(bridge);
+  await bridge.clickWhenReady(`
+    const claude = e2e.all(".session-creator-provider-card").find((c) => c.getAttribute("data-agent-id") === "claude" || c.innerText.trim().startsWith("Claude"));
+    return e2e.click(e2e.must(claude, "the Claude card"));
+  `);
+  const agentViewBox = `e2e.first(".session-creator-agent-view input[type=checkbox]")`;
+  await bridge.waitFor("the Agent view option", `return !!${agentViewBox};`);
+  if (!(await bridge.eval(`return ${agentViewBox}.checked;`))) {
+    await bridge.clickWhenReady(`return e2e.click(e2e.must(${agentViewBox}, "the Agent view checkbox"));`);
+  }
+  await bridge.waitFor("the Agent view to be chosen", `return ${agentViewBox}?.checked === true;`);
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(${JSON.stringify(PRIMARY)}), "Next"));`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  const name = folder.split(/[\\/]/).pop();
+  await bridge.eval(setInputJs(`e2e.first(".workspace-scan-input")`, folder));
+  await bridge.clickByName("Scan", { within: ".project-picker-footer" });
+  await bridge.waitFor(`${name} to be selected`, `
+    return e2e.all(".project-picker-item.project-picker-item-attached").some((el) => el.innerText.includes(${JSON.stringify(name)}));
+  `);
+  for (let i = 0; i < 6; i++) {
+    if (!(await bridge.exists(".session-creator"))) break;
+    const clicked = await bridge.clickWhenReady(`
+      if (!e2e.first(".session-creator")) return null;
+      const b = e2e.must(e2e.first(${JSON.stringify(PRIMARY)}), "the wizard's primary button");
+      return { step: e2e.first(".session-creator-step")?.innerText ?? "", ...e2e.click(b) };
+    `);
+    if (clicked) log(`  wizard ${clicked.step}: clicked "${clicked.clicked}"`);
+    await sleep(400);
+  }
+  await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 20_000 });
+  const sid = await bridge.waitFor("the Agent view to open", `
+    const ids = e2e.all(".agent-session-view").map((e) => e.dataset.sessionId).filter(Boolean);
+    const fresh = ids.filter((id) => !${JSON.stringify(before)}.includes(id));
+    return fresh.length === 1 ? fresh[0] : null;
+  `, { timeoutMs: 20_000 });
+  log(`  Agent view session: ${sid}`);
+  return sid;
+}
+
+/** Types a message into the Agent view composer and sends it. */
+export async function sendAgentMessage(bridge, log, text) {
+  if (!(await bridge.exists(".session-composer-input"))) await bridge.click(".session-composer-fab");
+  await bridge.clickWhenReady(`
+    const ta = e2e.must(e2e.first(".session-composer-input"), "the composer");
+    ta.focus();
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+    setter.call(ta, ${JSON.stringify(text)});
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  `);
+  await bridge.waitFor("the composer to hold the message", `
+    return e2e.first(".session-composer-input")?.value === ${JSON.stringify(text)};
+  `);
+  await bridge.click(".session-composer-send-btn");
+  log(`  sent: "${text}"`);
 }

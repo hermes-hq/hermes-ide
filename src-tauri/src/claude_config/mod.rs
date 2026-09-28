@@ -155,20 +155,33 @@ pub fn write_mcp_server(
     })
 }
 
-/// Remove an MCP server entry (from `<project_dir>/.mcp.json` when a
-/// project folder is given).  No-op if absent (idempotent).
+/// Remove an MCP server entry.  Without a project folder: from
+/// `~/.claude.json`, a no-op if absent (idempotent, 1.x).  With one: only
+/// a server declared in `<project_dir>/.mcp.json` can be removed; any other
+/// name (a user-wide server, a plugin's) is refused and nothing is written,
+/// so the caller never believes a server is gone when it is not.
 #[tauri::command]
 pub fn remove_mcp_server(name: String, project_dir: Option<String>) -> Result<(), String> {
     let path = mcp_config_path(project_dir.as_deref())?;
     let validated_name = validate_server_name(&name)?;
+    let project_only = project_dir.is_some();
+    if project_only && !path.is_file() {
+        return Err(not_in_project(validated_name));
+    }
     atomic_json_write(&path, |root| {
-        if let Some(entry) = root.get_mut("mcpServers") {
-            if let Some(map) = entry.as_object_mut() {
-                map.remove(validated_name);
-            }
+        let removed = root
+            .get_mut("mcpServers")
+            .and_then(|entry| entry.as_object_mut())
+            .and_then(|map| map.remove(validated_name));
+        if project_only && removed.is_none() {
+            return Err(not_in_project(validated_name));
         }
         Ok(())
     })
+}
+
+fn not_in_project(name: &str) -> String {
+    format!("{name} is not declared in this project's .mcp.json; Hermes only edits that file")
 }
 
 /// Inspectable view of an MCP server entry — what the user can see in
@@ -196,6 +209,11 @@ pub struct McpServerSpecView {
     /// Names of HTTP headers (sse/http only).  Same redaction rule
     /// as `env_keys`.
     pub header_keys: Vec<String>,
+    /// Where the entry was found: `project` (the project's `.mcp.json`) or
+    /// `user` (`~/.claude.json`).  Hermes offers Remove for a `user` entry
+    /// only when no project folder is given (1.x behaviour, F30).
+    #[serde(default)]
+    pub source: String,
 }
 
 #[tauri::command]
@@ -207,16 +225,17 @@ pub fn read_mcp_server_spec(
     // A project's .mcp.json first (when given), then ~/.claude.json.
     if project_dir.is_some() {
         let project = mcp_config_path(project_dir.as_deref())?;
-        if let Some(view) = read_mcp_server_spec_at(&project, validated_name)? {
+        if let Some(view) = read_mcp_server_spec_at(&project, validated_name, "project")? {
             return Ok(Some(view));
         }
     }
-    read_mcp_server_spec_at(&home_config_path()?, validated_name)
+    read_mcp_server_spec_at(&home_config_path()?, validated_name, "user")
 }
 
 fn read_mcp_server_spec_at(
     path: &Path,
     validated_name: &str,
+    source: &str,
 ) -> Result<Option<McpServerSpecView>, String> {
     if !path.exists() {
         return Ok(None);
@@ -278,6 +297,7 @@ fn read_mcp_server_spec_at(
         url,
         env_keys,
         header_keys,
+        source: source.to_string(),
     }))
 }
 
@@ -959,17 +979,43 @@ mod prewarm_tests {
             .unwrap()
             .unwrap();
         assert_eq!(view.env_keys, vec!["TOKEN".to_string()]);
+        assert_eq!(view.source, "project");
         // A user-wide server is still readable, never rewritten.
-        assert!(read_mcp_server_spec("mine".into(), dir.clone())
+        let mine = read_mcp_server_spec("mine".into(), dir.clone())
             .unwrap()
-            .is_some());
+            .unwrap();
+        assert_eq!(mine.source, "user");
+
+        // Removing a user-wide server with a project folder is refused:
+        // nothing is written anywhere, and the caller hears about it.
+        let err = remove_mcp_server("mine".into(), dir.clone()).unwrap_err();
+        assert!(
+            err.contains("not declared in this project's .mcp.json"),
+            "{err}"
+        );
+        assert_eq!(fs::read(&user).unwrap(), user_bytes);
 
         remove_mcp_server("proj".into(), dir.clone()).unwrap();
-        remove_mcp_server("mine".into(), dir).unwrap();
         let after: Value =
             serde_json::from_slice(&fs::read(project.path().join(".mcp.json")).unwrap()).unwrap();
         assert!(after["mcpServers"].as_object().unwrap().is_empty());
         assert_eq!(fs::read(&user).unwrap(), user_bytes);
+        // Removing it twice is refused too (it is no longer declared there).
+        assert!(remove_mcp_server("proj".into(), dir).is_err());
+    }
+
+    /// F30: a project with no .mcp.json gets none created by a refused remove.
+    #[test]
+    fn project_remove_without_an_mcp_file_writes_nothing() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let dir = Some(project.path().to_string_lossy().to_string());
+        assert!(remove_mcp_server("anything".into(), dir).is_err());
+        assert!(!project.path().join(".mcp.json").exists());
+        // Without a project folder the 1.x no-op stays.
+        remove_mcp_server("anything".into(), None).unwrap();
     }
 
     #[test]

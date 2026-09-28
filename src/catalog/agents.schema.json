@@ -299,6 +299,17 @@
             "type": "array"
           }
         },
+        "beta_permission_modes": {
+          "description": "Permission modes shown only with the agentCatalog flag on (2.0). Each must be a key of permission_flags; with the flag off the mode is not offered and a session asking for it starts in default.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/permissionMode",
+            "not": {
+              "const": "default"
+            }
+          }
+        },
         "min_version": {
           "anyOf": [
             {

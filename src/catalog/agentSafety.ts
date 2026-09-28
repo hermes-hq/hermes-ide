@@ -43,10 +43,12 @@ export interface AgentInvocation {
 }
 
 /**
- * Finds a catalog agent among command lines (one per process under the
- * session's shell). An agent is recognised by its command anywhere in the
- * line, so wrappers (`caffeinate -i claude`, `node cli.js`, `cmd /c
- * claude.cmd`) still count. `preferId` wins when several agents run.
+ * Finds a catalog agent among the agent command lines running under the
+ * session's shell. The backend (`session_process_argv`) returns only those,
+ * each starting at the agent's command: it sees through wrappers (`node
+ * .../bin/claude`, `caffeinate -i claude`, `cmd /c codex.cmd`) and never
+ * counts an agent's name as a later argument (`cat claude`). So the agent is
+ * read from the first word only. `preferId` wins when several agents run.
  */
 export function findAgentInvocation(argvs: readonly (readonly string[])[], preferId?: string | null): AgentInvocation | null {
 	const binaries = new Map<string, string>();
@@ -56,16 +58,13 @@ export function findAgentInvocation(argvs: readonly (readonly string[])[], prefe
 	}
 	let first: AgentInvocation | null = null;
 	for (const argv of argvs) {
-		for (let i = 0; i < argv.length; i++) {
-			const id = binaries.get(commandName(argv[i]));
-			if (!id) continue;
-			// A multi-word command (`goose session`, `kiro-cli chat`): skip its subcommand words.
-			const words = getAgent(id)?.terminal.argv.length ?? 1;
-			const hit = { agentId: id, args: argv.slice(i + words) };
-			if (id === preferId) return hit;
-			first ??= hit;
-			break;
-		}
+		const id = argv.length ? binaries.get(commandName(argv[0])) : undefined;
+		if (!id) continue;
+		// A multi-word command (`goose session`, `kiro-cli chat`): skip its subcommand words.
+		const words = getAgent(id)?.terminal.argv.length ?? 1;
+		const hit = { agentId: id, args: argv.slice(words) };
+		if (id === preferId) return hit;
+		first ??= hit;
 	}
 	return first;
 }

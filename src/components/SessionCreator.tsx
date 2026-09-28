@@ -21,6 +21,7 @@ import {
   getAvailableModes,
   installCommand,
   listAgents,
+  launchPermissionMode,
   permissionFlagText,
   sanitizeCommandFragment,
 } from "../catalog/agentCatalog";
@@ -636,7 +637,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         aiProvider: providerForCreate,
         // The Agent view skips permission/prefix/suffix entirely.
         autoApprove: isLocal && !isAgent ? (autoApprove || undefined) : undefined,
-        permissionMode: isLocal && !isAgent && aiProvider ? permissionMode : undefined,
+        permissionMode: isLocal && !isAgent && aiProvider ? launchPermissionMode(aiProvider, permissionMode) : undefined,
         customPrefix: isLocal && !isAgent && aiProvider && customPrefix.trim() ? customPrefix.trim() : undefined,
         customSuffix: isLocal && !isAgent && aiProvider && customSuffix.trim() ? customSuffix.trim() : undefined,
         agentName: isCustomAgent ? sanitizeCommandFragment(customAgentName) || undefined : undefined,

@@ -38,9 +38,13 @@ export interface AgentSetupOverview {
   link: { folder: string; file: string; target: string } | null;
 }
 
-/** What `agentId` loads when started in `cwd`, plus the session's attached folders (read-only). */
-export function getAgentSetupOverview(agentId: string, cwd: string, attached: string[]): Promise<AgentSetupOverview> {
-  return invoke<AgentSetupOverview>("agent_setup_overview", { agentId, cwd, attached });
+/**
+ * What `agentId` loads when started in `cwd`, plus the session's attached
+ * folders (read-only). `includeMcp: false` leaves out the MCP servers (and
+ * the config files they are read from).
+ */
+export function getAgentSetupOverview(agentId: string, cwd: string, attached: string[], includeMcp = true): Promise<AgentSetupOverview> {
+  return invoke<AgentSetupOverview>("agent_setup_overview", { agentId, cwd, attached, includeMcp });
 }
 
 /** Adds `@AGENTS.md` to the agent's own instruction file in `folder`. */
@@ -48,7 +52,7 @@ export function linkInstructionsToAgentsMd(agentId: string, folder: string): Pro
   return invoke<"created" | "updated" | "already">("link_instructions_to_agents_md", { agentId, folder });
 }
 
-/** Command lines of the processes running under a session's shell. */
+/** Command lines of the catalog agents running under a session's shell, each from the agent's command on. */
 export function getSessionProcessArgv(sessionId: string): Promise<string[][]> {
   return invoke<string[][]>("session_process_argv", { sessionId });
 }

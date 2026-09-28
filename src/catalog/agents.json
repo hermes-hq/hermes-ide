@@ -260,6 +260,7 @@
           "auto": ["--allow-all-tools"],
           "bypassPermissions": ["--allow-all"]
         },
+        "beta_permission_modes": ["acceptEdits"],
         "min_version": "1.0.0",
         "safety": {
           "default_mode": "acceptEdits",

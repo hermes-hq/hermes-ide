@@ -447,3 +447,66 @@ describe("AddMcpDialog — submit (mcp-10, mcp-14)", () => {
     expect(screen.getByText(/name already exists/i)).toBeInTheDocument();
   });
 });
+
+// ─── F30: with a project folder, only that project's servers can go ───
+
+describe("McpSection — remove with a project folder (F30)", () => {
+  const spec = (name: string, source: "project" | "user"): McpServerSpecView => ({
+    name, transport: "stdio", command: "x", args: [], url: "", env_keys: [], header_keys: [], source,
+  });
+  const servers = [{ name: "proj-docs", status: "connected" }, { name: "user-wide", status: "connected" }, { name: "plugin-thing", status: "connected" }];
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args: { name: string }) => {
+      if (cmd !== "read_mcp_server_spec") return undefined;
+      if (args.name === "proj-docs") return spec("proj-docs", "project");
+      if (args.name === "user-wide") return spec("user-wide", "user");
+      return null;
+    });
+  });
+  afterEach(() => cleanup());
+
+  function renderSection(onRequestRemove: (name: string) => void) {
+    render(
+      <McpSection servers={servers} tools={[]} onRequestAdd={() => {}} onRequestRemove={onRequestRemove} projectDir="/work/project" />,
+    );
+  }
+
+  it("a user-wide server has no remove, only a note that Hermes will not edit it", async () => {
+    const onRequestRemove = vi.fn();
+    renderSection(onRequestRemove);
+    fireEvent.click(screen.getByText("user-wide"));
+    expect(await screen.findByText(/Hermes will not edit it/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^remove$/i })).toBeNull();
+    const call = invokeMock.mock.calls.find(([c]) => c === "read_mcp_server_spec");
+    expect(call?.[1]).toEqual({ name: "user-wide", projectDir: "/work/project" });
+    expect(onRequestRemove).not.toHaveBeenCalled();
+  });
+
+  it("a server found in no file (plugin, cloud) has no remove either", async () => {
+    renderSection(vi.fn());
+    fireEvent.click(screen.getByText("plugin-thing"));
+    expect(await screen.findByText(/Hermes will not edit it/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^remove$/i })).toBeNull();
+  });
+
+  it("a server from the project's .mcp.json can be removed from that file", async () => {
+    const onRequestRemove = vi.fn();
+    renderSection(onRequestRemove);
+    fireEvent.click(screen.getByText("proj-docs"));
+    fireEvent.click(await screen.findByRole("button", { name: /^remove$/i }));
+    expect(screen.getByText(".mcp.json")).toBeInTheDocument();
+    expect(screen.queryByText(/Hermes will not edit it/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /yes, remove/i }));
+    await Promise.resolve();
+    expect(onRequestRemove).toHaveBeenCalledWith("proj-docs");
+  });
+
+  it("without a project folder (flag off) remove stays offered for a user-wide server", async () => {
+    render(<McpSection servers={servers} tools={[]} onRequestAdd={() => {}} onRequestRemove={vi.fn()} />);
+    fireEvent.click(screen.getByText("user-wide"));
+    expect(await screen.findByRole("button", { name: /^remove$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Hermes will not edit it/i)).toBeNull();
+  });
+});
