@@ -231,7 +231,7 @@ describe("sessions are never lost on quit", () => {
     expect(settings.saved_workspace).toBe(SAVED);
   });
 
-  it("after a failed restore, a session opened and closed again does replace the saved workspace", async () => {
+  it("after a failed restore, a session opened and closed again saves again, keeping the entry that failed to restore", async () => {
     failCreateSession = true;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await mountProvider();
@@ -243,11 +243,12 @@ describe("sessions are never lost on quit", () => {
     await act(async () => { await fire("session-updated", session(NEW_ID, "Opened now")); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     await flushAll();
-    expect(JSON.parse(settings.saved_workspace).sessions.map((s: { id: string }) => s.id)).toEqual([NEW_ID]);
+    // The session that failed to restore keeps its entry for the next launch.
+    expect(JSON.parse(settings.saved_workspace).sessions.map((s: { id: string }) => s.id)).toEqual([NEW_ID, KEEP_ID]);
 
     await act(async () => { await fire("session-removed", NEW_ID); });
     await settleAndQuit(6);
-    expect(settings.saved_workspace).toBe("");
+    expect(JSON.parse(settings.saved_workspace).sessions.map((s: { id: string }) => s.id)).toEqual([KEEP_ID]);
     warn.mockRestore();
   });
 });

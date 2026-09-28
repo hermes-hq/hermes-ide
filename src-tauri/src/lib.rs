@@ -86,14 +86,19 @@ static WORKSPACE_SAVED: AtomicBool = AtomicBool::new(false);
 
 /// Whether a `session_worktrees` link whose folder is missing (and whose
 /// session still exists) is kept for `create_session` to put the worktree
-/// back: only a worktree Hermes made, on a branch that still exists.
+/// back: only a worktree Hermes made, on a branch that still exists, for a
+/// session the next launch restores (`restored`: it is in the saved
+/// workspace). A link kept for a session nobody restores would linger, and
+/// be reported at every startup, for ever.
 fn keep_missing_worktree_link(
+    restored: bool,
     is_main_worktree: bool,
     worktree_path: &str,
     project_path: Option<&str>,
     branch: Option<&str>,
 ) -> bool {
-    if !git::worktree::isolation_fixes_enabled()
+    if !restored
+        || !git::worktree::isolation_fixes_enabled()
         || !git::worktree::is_owned_checkout(is_main_worktree, worktree_path)
     {
         return false;
@@ -102,6 +107,20 @@ fn keep_missing_worktree_link(
         (Some(repo), Some(branch)) => git::worktree::local_branch_exists(repo, branch),
         _ => false,
     }
+}
+
+/// The ids of the sessions the saved workspace (the `saved_workspace`
+/// setting the frontend writes) restores at the next launch. Empty when
+/// there is no saved workspace or it cannot be read: then nothing is
+/// restored.
+fn saved_workspace_session_ids(saved_workspace: Option<&str>) -> HashSet<String> {
+    saved_workspace
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .and_then(|v| v.get("sessions")?.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.get("id")?.as_str().map(str::to_string))
+        .collect()
 }
 
 /// Clean up worktrees whose sessions no longer exist, remove orphaned
@@ -190,6 +209,13 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
     // Re-fetch from DB since some records may have been deleted above.
     let remaining_worktrees = database.get_all_session_worktrees().unwrap_or_default();
     let mut missing_paths: Vec<serde_json::Value> = Vec::new();
+    let restored_sessions = saved_workspace_session_ids(
+        database
+            .get_setting("saved_workspace")
+            .ok()
+            .flatten()
+            .as_deref(),
+    );
 
     for wt in &remaining_worktrees {
         if wt.is_main_worktree {
@@ -214,6 +240,7 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                 .flatten()
                 .map(|p| p.path);
             if keep_missing_worktree_link(
+                restored_sessions.contains(&wt.session_id),
                 wt.is_main_worktree,
                 &wt.worktree_path,
                 project_path.as_deref(),
@@ -1224,6 +1251,16 @@ mod tests {
 
         let own = "/data/hermes-worktrees/abc/s1_hermes-task";
         assert!(keep_missing_worktree_link(
+            true,
+            false,
+            own,
+            Some(repo_path),
+            Some("hermes/task")
+        ));
+        // A session the saved workspace does not restore: nobody would put
+        // the worktree back, so the link would linger for ever. Drop it.
+        assert!(!keep_missing_worktree_link(
+            false,
             false,
             own,
             Some(repo_path),
@@ -1231,18 +1268,21 @@ mod tests {
         ));
         // Branch gone, unknown, or no project to look in: drop the link.
         assert!(!keep_missing_worktree_link(
+            true,
             false,
             own,
             Some(repo_path),
             Some("hermes/gone")
         ));
         assert!(!keep_missing_worktree_link(
+            true,
             false,
             own,
             Some(repo_path),
             None
         ));
         assert!(!keep_missing_worktree_link(
+            true,
             false,
             own,
             None,
@@ -1251,16 +1291,30 @@ mod tests {
         // Not ours: the project folder, or a worktree made outside Hermes.
         assert!(!keep_missing_worktree_link(
             true,
+            true,
             repo_path,
             Some(repo_path),
             Some("main")
         ));
         assert!(!keep_missing_worktree_link(
+            true,
             false,
             "/work/external-wt",
             Some(repo_path),
             Some("hermes/task")
         ));
+    }
+
+    #[test]
+    fn saved_workspace_session_ids_reads_the_frontend_format_and_tolerates_junk() {
+        let ws = r#"{"version":3,"sessions":[{"id":"s1","label":"a"},{"id":"s2"},{"label":"no id"}],"layout":null}"#;
+        let ids = saved_workspace_session_ids(Some(ws));
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("s1") && ids.contains("s2"));
+        assert!(saved_workspace_session_ids(None).is_empty());
+        assert!(saved_workspace_session_ids(Some("")).is_empty());
+        assert!(saved_workspace_session_ids(Some("not json")).is_empty());
+        assert!(saved_workspace_session_ids(Some(r#"{"sessions":"x"}"#)).is_empty());
     }
 
     /// Journal should NOT be cleared if orphans still exist after replay.

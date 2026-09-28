@@ -41,7 +41,7 @@ import { isFeatureFlagEnabled } from "../featureFlags";
 import {
   createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose, describeBranchHolder,
   withUnrestoredSessions,
-  type BranchConflictChoice, type BranchInUse,
+  type BranchConflictChoice, type BranchInUse, type ReusedCheckout,
 } from "./isolation";
 import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
 import { useWorkspaceFlushOnQuit } from "./useWorkspaceFlushOnQuit";
@@ -1784,7 +1784,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
 
       // Create worktrees for each git project with a branch selection
-      let sharedBranches: string[] = [];
+      let reusedCheckouts: ReusedCheckout[] = [];
       let worktreeErrors: string[] = [];
       // Bug 3 (1.2.x): count successes so we can abort if EVERY worktree
       // failed.  Previously the loop swallowed every error and let
@@ -1818,7 +1818,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
         worktreesSucceeded = outcome.succeeded;
         worktreeErrors = outcome.errors;
-        sharedBranches = outcome.sharedBranches;
+        reusedCheckouts = outcome.reused;
         for (const e of worktreeErrors) console.warn(`[SessionContext] Failed to create worktree: ${e}`);
 
         // Hard-abort when every selected worktree failed.  Returning
@@ -1963,10 +1963,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         has_ai_provider: !!opts?.aiProvider,
       });
 
-      // Warn about shared worktrees via custom event (App.tsx listens for this)
-      if (sharedBranches.length > 0) {
+      // Say what reusing a checkout means via custom event (App.tsx listens for this)
+      if (reusedCheckouts.length > 0) {
         window.dispatchEvent(new CustomEvent("hermes:shared-worktree", {
-          detail: { branches: sharedBranches, sessionLabel: session.label },
+          detail: { reused: reusedCheckouts, sessionLabel: session.label },
         }));
       }
 
