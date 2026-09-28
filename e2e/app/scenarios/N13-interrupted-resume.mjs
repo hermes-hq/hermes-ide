@@ -16,7 +16,12 @@
 //          such conversation", but without saying so. Nothing replaces the
 //          conversation: no "could not resume" line, no second launch, the
 //          session ends and still holds the same id.
-//   run 3  relaunch: the same conversation is resumed again.
+//   run 3  relaunch: this time the vendor no longer knows the conversation
+//          (it says so and exits 1), so hi starts a fresh one — and the
+//          fresh agent is interrupted at its own trust prompt before it ever
+//          starts. Hermes keeps the old conversation: a conversation that
+//          never started does not replace it.
+//   run 4  relaunch: the same conversation is resumed again.
 //          Then a new session whose vendor, once its trust prompt is
 //          answered, starts without a start signal (hooks off): "waiting at a
 //          startup prompt" shows, the answer clears it, and it does not come
@@ -25,7 +30,9 @@
 // Negative control: run this scenario against a build of the code before
 // the fix (hi falls back on any early non-zero exit, Hermes adopts the new
 // id at once, and the report stays until a start signal): it must end in
-// RESULT: FAIL at run 2 ("the session still holds conversation ...").
+// RESULT: FAIL at run 2 ("no second agent started ..."). A build in which
+// Hermes adopts the fresh conversation as soon as hi falls back must end in
+// RESULT: FAIL at run 3 ("the session still holds conversation ...").
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N13-interrupted-resume.mjs
@@ -43,7 +50,14 @@ const SCENARIO = "N13-interrupted-resume";
 const startedAt = Date.now();
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
-rmSync(logFile, { force: true });
+// Start from a clean evidence folder: a screenshot or record left by an
+// earlier run must not sit next to this run's result.
+mkdirSync(evidenceDir, { recursive: true });
+for (const name of readdirSync(evidenceDir)) {
+  if (name === "scenario.log" || name === "result.json" || name === "fake-launch-records" || name.endsWith(".png") || /^run-\w+$/.test(name)) {
+    rmSync(join(evidenceDir, name), { recursive: true, force: true });
+  }
+}
 const log = createLogger(logFile);
 const onWindows = platform() === "win32";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -110,12 +124,26 @@ const setFakeMode = (mode) => {
   writeFileSync(join(recordDir, "mode"), `${mode}\n`);
   log(`  fake vendor mode: ${mode}`);
 };
+/**
+ * One launch record. The fake replaces it whole on every update; a failed
+ * parse (a fake from before that, or a slow file system) is read again.
+ */
+function readRecord(file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(readFileSync(join(recordDir, file), "utf8"));
+    } catch (e) {
+      if (attempt >= 20 || !(e instanceof SyntaxError)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
 /** The fake's launch records, oldest first. */
 const records = () =>
   readdirSync(recordDir)
-    .filter((f) => f.startsWith("launch-"))
+    .filter((f) => f.startsWith("launch-") && f.endsWith(".json"))
     .sort()
-    .map((f) => ({ file: f, ...JSON.parse(readFileSync(join(recordDir, f), "utf8")) }));
+    .map((f) => ({ file: f, ...readRecord(f) }));
 async function waitForRecords(count, { timeoutMs = 30_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -128,7 +156,7 @@ async function waitForRecords(count, { timeoutMs = 30_000 } = {}) {
 async function waitForExit(file, { timeoutMs = 15_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const rec = JSON.parse(readFileSync(join(recordDir, file), "utf8"));
+    const rec = readRecord(file);
     if (rec.exit) return rec;
     if (Date.now() > deadline) throw new Error(`the fake launch ${file} never exited`);
     await sleep(100);
@@ -354,24 +382,68 @@ try {
   // once something changed): it must still be the same conversation.
   await waitForSavedVendorId(app.bridge, s2, vendorId);
   assert((await savedVendorId(app.bridge, s2)) === vendorId, `the saved workspace holds conversation ${vendorId}`);
-  setFakeMode("normal");
+  setFakeMode("resume-fails trust-prompt");
   await quit(app);
 
-  // ── run 3: the same conversation again ────────────────────────────
-  log("run 3: relaunch — the same conversation is resumed");
+  // ── run 3: a real fallback whose fresh agent never starts ─────────
+  log("run 3: relaunch — the vendor rejects the conversation; the fresh agent hi falls back to is interrupted at its trust prompt");
   app = await launch(3);
   await waitForReturningLaunch(app.bridge);
   const s3 = await firstRestoredTerminal(app.bridge);
-  // Only this run's agent says it resumed (run 1 said "(new)", run 2 nothing).
-  await app.bridge.waitForTerminal(s3, /\(resumed from /, { timeoutMs: 45_000 });
-  const rec3 = (await waitForRecords(3)).at(-1);
-  log(`  fake saw argv ${JSON.stringify(rec3.argv)}`);
-  const at3 = rec3.argv.indexOf("--resume");
-  assert(at3 >= 0 && rec3.argv[at3 + 1] === vendorId, `the next launch resumes conversation ${vendorId} again`);
-  await waitForStartup(app.bridge, s3, "started");
-  await app.bridge.screenshot(join(evidenceDir, "03-resumed-again.png"));
+  assert(s3 === s1, "the restored session keeps its id");
+  const all3 = await waitForRecords(4, { timeoutMs: 45_000 });
+  const rejected = await waitForExit(all3[2].file);
+  log(`  fake saw argv ${JSON.stringify(rejected.argv)}; it ended ${JSON.stringify(rejected.exit)}`);
+  const rejectedAt = rejected.argv.indexOf("--resume");
+  assert(rejectedAt >= 0 && rejected.argv[rejectedAt + 1] === vendorId && rejected.exit.why === "resume-rejected", `the vendor rejected conversation ${vendorId}`);
+  // Only this run falls back (run 2 asserted no such line).
+  await app.bridge.waitForTerminal(s3, /hermes: could not resume/, { timeoutMs: 20_000 });
+  const freshFile = all3[3].file;
+  {
+    const deadline = Date.now() + 20_000;
+    while (!readRecord(freshFile).events.some((e) => e.ev === "trust-prompt-shown")) {
+      if (Date.now() > deadline) throw new Error("the fresh agent never showed its trust prompt");
+      await sleep(100);
+    }
+  }
+  await pressCtrlC(app.bridge, s3);
+  const fresh = await waitForExit(freshFile);
+  log(`  fake saw argv ${JSON.stringify(fresh.argv)}; it ended ${JSON.stringify(fresh.exit)}`);
+  const freshAt = fresh.argv.indexOf("--session-id");
+  const freshId = freshAt >= 0 ? fresh.argv[freshAt + 1] : null;
+  assert(freshId && UUID.test(freshId) && freshId !== vendorId, `hi fell back to a fresh conversation ${freshId}`);
+  assert(/at-trust-prompt$/.test(fresh.exit.why) && !fresh.hooksRan.some((h) => h.event === "SessionStart"), `the fresh agent was interrupted at its trust prompt before it started (${fresh.exit.why})`);
+  await waitForStartup(app.bridge, s3, "ended", { timeoutMs: 15_000 });
+  await sleep(RESUME_WINDOW_MS);
+  const after3 = records();
+  for (const r of after3.slice(4)) log(`  UNEXPECTED launch: ${JSON.stringify(r.argv)}`);
+  assert(after3.length === 4, "no further agent started");
+  const d3 = await sessionData(app.bridge, s3);
+  assert(d3.vendor_session_id === vendorId, `the session still holds conversation ${vendorId}, not ${freshId} which never started (holds ${d3.vendor_session_id})`);
+  for (const l of (await app.bridge.readTerminal(s3)).slice(-6)) log(`    | ${l}`);
+  await app.bridge.screenshot(join(evidenceDir, "03-fallback-interrupted.png"));
+  // Past the workspace's 10 s save, the saved id must still be the old one.
+  await sleep(11_000);
+  assert((await savedVendorId(app.bridge, s3)) === vendorId, `the saved workspace holds conversation ${vendorId}`);
+  setFakeMode("normal");
+  await quit(app);
 
-  log("run 3, second session: past its trust prompt the vendor sends no start signal");
+  // ── run 4: the same conversation again ────────────────────────────
+  log("run 4: relaunch — the same conversation is resumed");
+  app = await launch(4);
+  await waitForReturningLaunch(app.bridge);
+  const s6 = await firstRestoredTerminal(app.bridge);
+  // Only this run's agent says it resumed (run 1 said "(new)", runs 2 and 3
+  // never got that far).
+  await app.bridge.waitForTerminal(s6, /\(resumed from /, { timeoutMs: 45_000 });
+  const rec6 = (await waitForRecords(5)).at(-1);
+  log(`  fake saw argv ${JSON.stringify(rec6.argv)}`);
+  const at6 = rec6.argv.indexOf("--resume");
+  assert(at6 >= 0 && rec6.argv[at6 + 1] === vendorId, `the next launch resumes conversation ${vendorId} again`);
+  await waitForStartup(app.bridge, s6, "started");
+  await app.bridge.screenshot(join(evidenceDir, "04-resumed-again.png"));
+
+  log("run 4, second session: past its trust prompt the vendor sends no start signal");
   setFakeMode("trust-prompt no-start-hook");
   const s4 = await createClaudeSession(app.bridge);
   await app.bridge.waitForTerminal(s4, /Do you trust the files in this folder\?/, { timeoutMs: 30_000 });
@@ -381,7 +453,7 @@ try {
     return t ? e2e.norm(t.innerText) : null;
   `);
   assert(tag === "waiting at a startup prompt", `the session list says "${tag}"`);
-  await app.bridge.screenshot(join(evidenceDir, "04-waiting.png"));
+  await app.bridge.screenshot(join(evidenceDir, "05-waiting.png"));
   log("  answering the prompt with y");
   await app.bridge.typeInTerminal(s4, "y");
   await app.bridge.waitForTerminal(s4, /fake-cli: ready/, { timeoutMs: 20_000 });
@@ -396,9 +468,9 @@ try {
   await sleep(7_000);
   assert((await startupTags(app.bridge)).length === 0, "7 s later the agent is still not reported as waiting");
   assert((await sessionData(app.bridge, s4)).agent_startup.state !== "waiting_at_startup_prompt", "nor in the session data");
-  await app.bridge.screenshot(join(evidenceDir, "05-answered-no-start-signal.png"));
+  await app.bridge.screenshot(join(evidenceDir, "06-answered-no-start-signal.png"));
 
-  log("run 3, third session: Ctrl-C at the trust prompt ends the report");
+  log("run 4, third session: Ctrl-C at the trust prompt ends the report");
   setFakeMode("trust-prompt");
   const s5 = await createClaudeSession(app.bridge);
   await app.bridge.waitForTerminal(s5, /Do you trust the files in this folder\?/, { timeoutMs: 30_000 });
@@ -409,7 +481,7 @@ try {
   const rec5 = await waitForExit(records().at(-1).file);
   assert(rec5.exit.code === 130 && /at-trust-prompt$/.test(rec5.exit.why), `the vendor exited at the prompt (${rec5.exit.code}, ${rec5.exit.why})`);
   assert((await startupTags(app.bridge)).length === 0, "after the exit no session is reported as waiting");
-  await app.bridge.screenshot(join(evidenceDir, "06-interrupted-ended.png"));
+  await app.bridge.screenshot(join(evidenceDir, "07-interrupted-ended.png"));
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
