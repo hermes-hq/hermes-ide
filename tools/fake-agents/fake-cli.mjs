@@ -122,8 +122,27 @@ if (RECORD_DIR) {
 	fs.mkdirSync(RECORD_DIR, { recursive: true });
 	recordFile = path.join(RECORD_DIR, `launch-${String(startedAt).padStart(15, "0")}-${process.pid}.json`);
 }
+// Written whole and renamed into place, so a test reading the record while
+// the fake saves it never sees half a file.
 const save = () => {
-	if (recordFile) fs.writeFileSync(recordFile, JSON.stringify(record, null, 2) + "\n");
+	if (!recordFile) return;
+	const tmp = path.join(path.dirname(recordFile), `.tmp-${process.pid}.json`);
+	const text = JSON.stringify(record, null, 2) + "\n";
+	fs.writeFileSync(tmp, text);
+	// Windows refuses to replace a file a reader has open at that moment.
+	for (let i = 0; i < 20; i++) {
+		try {
+			fs.renameSync(tmp, recordFile);
+			return;
+		} catch {
+			const until = Date.now() + 10;
+			while (Date.now() < until) {
+				/* a short wait, synchronously (save is called from exit paths) */
+			}
+		}
+	}
+	fs.rmSync(tmp, { force: true });
+	fs.writeFileSync(recordFile, text);
 };
 const note = (ev, extra = {}) => {
 	record.events.push({ t: Date.now() - startedAt, ev, ...extra });
