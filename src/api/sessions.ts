@@ -35,6 +35,11 @@ export function createSession(opts: {
   /** "terminal" (default) spawns a PTY; "agent" spawns the Claude subprocess
    *  via `agent::spawn_agent_session` instead. */
   mode?: SessionMode | null;
+  /** Feature flag `launchHelper`: start the agent through the bundled `hi`
+   *  helper (shell-neutral launch, resume on restore, startup-prompt guess). */
+  launchHelper?: boolean;
+  /** A restored session's saved conversation id to resume (helper only). */
+  vendorSessionId?: string | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

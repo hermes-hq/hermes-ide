@@ -64,7 +64,6 @@ import { ToastContainer } from "./components/ToastContainer";
 import { useToastStore } from "./hooks/useToastStore";
 import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
-import { FeatureFlagDummyBanner } from "./components/FeatureFlagDummyBanner";
 import { launchFailedMessage } from "./catalog/agentCatalog";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { WhatsNewGate } from "./components/WhatsNewGate";
@@ -848,7 +847,6 @@ function AppContent() {
           ) : (
             <span className="topbar-title">HERMES-IDE</span>
           )}
-          <FeatureFlagDummyBanner />
         </div>
 
       </div>

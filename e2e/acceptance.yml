@@ -345,3 +345,34 @@ features:
       F05-3:
         text: "The keymap scenario runs nightly on all three OSes"
         scenarios: [F05-terminal-keys.mjs]
+  N12:
+    name: "Agents start reliably, with no typing into your shell"
+    # partial: fish is not covered by a scenario yet (zsh and bash on macOS
+    # and Linux, PowerShell and cmd on Windows are).
+    status: partial
+    criteria:
+      N12-1:
+        text: "The same launch works in zsh, bash, fish, PowerShell and cmd"
+        scenarios: [N12-launch-and-resume.mjs]
+      N12-2:
+        text: "A new worktree that triggers a trust prompt raises an inbox item within 5 seconds"
+        scenarios: [N12-launch-and-resume.mjs]
+      N12-3:
+        text: "Hermes never writes to the vendor's global config"
+        scenarios: [N12-launch-and-resume.mjs]
+  N13:
+    name: "Resume every agent after a restart or crash"
+    # partial: the worktree link of a restored session is not covered yet.
+    status: partial
+    criteria:
+      N13-1:
+        text: "Quit and reopen: the Claude session continues the same conversation"
+        scenarios: [N12-launch-and-resume.mjs]
+      N13-2:
+        # Restored sessions keep their id (the worktree link is keyed by it);
+        # the honest-isolation scenario relaunches and checks the branch.
+        text: "A restored session still points at its worktree and branch"
+        scenarios: [F09-honest-isolation.mjs]
+      N13-3:
+        text: "A failed resume prints one line and starts a new conversation"
+        scenarios: [N12-launch-and-resume.mjs]

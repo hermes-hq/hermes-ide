@@ -405,6 +405,10 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         // it MUST be part of the dedup check or the update is silently
         // dropped and the auto-allow effect never re-fires.
         && existing.permission_mode === action.session.permission_mode
+        // The conversation id is what a restore resumes, and the startup
+        // state is what the session list shows while an agent starts.
+        && (existing.vendor_session_id ?? null) === (action.session.vendor_session_id ?? null)
+        && (existing.agent_startup?.state ?? null) === (action.session.agent_startup?.state ?? null)
         && existing.detected_agent?.name === action.session.detected_agent?.name
         && existing.detected_agent?.model === action.session.detected_agent?.model
         && existing.metrics.output_lines === action.session.metrics.output_lines
@@ -1577,6 +1581,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 initialRows: restoreDims.rows,
                 initialCols: restoreDims.cols,
                 mode: restoredMode,
+                // Terminal-agent resume (launchHelper flag): hand the saved
+                // conversation id back so the agent continues it.
+                launchHelper: isFeatureFlagEnabled("launchHelper"),
+                vendorSessionId: saved.vendor_session_id ?? null,
               });
 
               // Agent-mode restore: spawn the Claude subprocess that the
@@ -1839,6 +1847,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         initialRows: initialDims.rows,
         initialCols: initialDims.cols,
         mode,
+        launchHelper: isFeatureFlagEnabled("launchHelper"),
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.
@@ -2144,6 +2153,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // saved JSON small and avoids stamping stale defaults on
             // terminal-mode sessions.
             ...(claudeUuid ? { claude_session_uuid: claudeUuid } : {}),
+            ...(s.vendor_session_id ? { vendor_session_id: s.vendor_session_id } : {}),
             ...(agentModel ? { agent_model: agentModel } : {}),
             ...(agentPerm ? { agent_permission_mode: agentPerm } : {}),
             ...(agentEffort ? { agent_effort: agentEffort } : {}),
@@ -2276,6 +2286,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           sshIdentityFile: session.ssh_info?.identity_file || null,
           sshJumpHost: session.ssh_info?.jump_host || null,
           mode: "terminal",
+          launchHelper: isFeatureFlagEnabled("launchHelper"),
+          vendorSessionId: session.vendor_session_id ?? null,
         });
       }
       return true;

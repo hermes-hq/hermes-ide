@@ -22,12 +22,6 @@ export interface FeatureFlagDefinition {
 
 export const FEATURE_FLAGS = [
   {
-    id: "dummyProofSurface",
-    label: "Dummy proof surface",
-    description:
-      "A harmless badge in the top bar used to prove the feature-flag mechanism end to end. Delete this flag once a real flagged feature exists.",
-  },
-  {
     id: "diskGuard",
     label: "Disk guard and worktree hygiene",
     description:
@@ -50,6 +44,12 @@ export const FEATURE_FLAGS = [
     label: "Honest isolation",
     description:
       "New tasks get their own hermes/<name> branch, a branch already in use asks before it is shared, and closing a session with changes commits them to its branch or archives them instead of stashing.",
+  },
+  {
+    id: "launchHelper",
+    label: "Launch helper (hi run)",
+    description:
+      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

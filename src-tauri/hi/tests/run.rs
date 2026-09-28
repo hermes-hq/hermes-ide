@@ -1,0 +1,318 @@
+//! Runs the built `hi` binary the way a Hermes terminal would.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+
+const HI: &str = env!("CARGO_BIN_EXE_hi");
+
+/// A shell command line for the platform's shell, as a launch-file program
+/// and args. `script` is POSIX sh on Unix and a cmd.exe line on Windows.
+fn shell(posix: &str, windows: &str) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "cmd.exe".to_string(),
+            vec!["/d".into(), "/c".into(), windows.to_string()],
+        )
+    } else {
+        ("sh".to_string(), vec!["-c".into(), posix.to_string()])
+    }
+}
+
+fn spec_json(
+    session: &str,
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &[(&str, &str)],
+    fallback: Option<(&str, &[String], &str)>,
+) -> String {
+    let env_obj: serde_json::Map<String, serde_json::Value> = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string())))
+        .collect();
+    let mut v = serde_json::json!({
+        "v": 1,
+        "session_id": session,
+        "agent": "fake",
+        "cwd": cwd.to_string_lossy(),
+        "env": env_obj,
+        "program": program,
+        "args": args,
+    });
+    if let Some((program, args, vendor)) = fallback {
+        v["fallback"] = serde_json::json!({
+            "program": program,
+            "args": args,
+            "after_ms": 3000,
+            "vendor_session_id": vendor,
+        });
+    }
+    serde_json::to_string(&v).unwrap()
+}
+
+fn write_launch(dir: &Path, session: &str, json: &str) -> PathBuf {
+    let sess = dir.join(session);
+    fs::create_dir_all(&sess).unwrap();
+    let file = sess.join("launch.json");
+    fs::write(&file, json).unwrap();
+    file
+}
+
+fn hi_run(launch_dir: &Path, arg: &str) -> Output {
+    Command::new(HI)
+        .args(["run", arg])
+        .env("HERMES_LAUNCH_DIR", launch_dir)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).to_string()
+}
+
+#[test]
+fn runs_the_program_with_its_args_env_and_cwd_and_reports_its_exit_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().join("work dir");
+    fs::create_dir_all(&work).unwrap();
+    let (program, args) = shell(
+        "echo \"args=$1 $2 env=$HERMES_AGENT_TEST\"; pwd; exit 7",
+        "echo args=%1 %2 env=%HERMES_AGENT_TEST%& cd & exit 7",
+    );
+    let mut args = args;
+    if cfg!(windows) {
+        args.push("one".into());
+        args.push("two words".into());
+    } else {
+        args.push("sh".into()); // $0
+        args.push("one".into());
+        args.push("two words".into());
+    }
+    let json = spec_json(
+        "s1",
+        &program,
+        &args,
+        &work,
+        &[("HERMES_AGENT_TEST", "yes")],
+        None,
+    );
+    write_launch(dir.path(), "s1", &json);
+
+    let out = hi_run(dir.path(), "s1");
+    let stdout = text(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "stdout: {stdout}\nstderr: {}",
+        text(&out.stderr)
+    );
+    assert!(stdout.contains("args=one two words env=yes"), "{stdout}");
+    let cwd_line = stdout
+        .lines()
+        .find(|l| l.contains("work dir"))
+        .unwrap_or("");
+    assert!(cwd_line.ends_with("work dir"), "cwd line: {cwd_line:?}");
+}
+
+#[test]
+fn a_launch_file_path_works_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let (program, args) = shell("echo direct", "echo direct");
+    let json = spec_json("s2", &program, &args, dir.path(), &[], None);
+    let file = write_launch(dir.path(), "s2", &json);
+    let out = Command::new(HI)
+        .args(["run", file.to_str().unwrap()])
+        .env_remove("HERMES_LAUNCH_DIR")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(text(&out.stdout).contains("direct"));
+}
+
+#[test]
+fn a_resume_that_fails_at_once_prints_one_line_records_it_and_starts_fresh() {
+    let dir = tempfile::tempdir().unwrap();
+    let signals = dir.path().join("spool").join("signals.ndjson");
+    let (program, resume_args) = shell(
+        "echo 'No conversation found with session ID: old' >&2; exit 1",
+        "echo No conversation found with session ID: old 1>&2 & exit 1",
+    );
+    let (_, fresh_args) = shell("echo fresh-started; exit 0", "echo fresh-started& exit 0");
+    let sig = signals.to_string_lossy().to_string();
+    let json = spec_json(
+        "s3",
+        &program,
+        &resume_args,
+        dir.path(),
+        &[("HERMES_SIGNAL_FILE", sig.as_str())],
+        Some((&program, &fresh_args, "new-vendor-id")),
+    );
+    write_launch(dir.path(), "s3", &json);
+
+    let out = hi_run(dir.path(), "s3");
+    let stdout = text(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {}",
+        text(&out.stderr)
+    );
+    let notice = stdout
+        .lines()
+        .filter(|l| l.starts_with("hermes: "))
+        .collect::<Vec<_>>();
+    assert_eq!(notice.len(), 1, "exactly one visible line: {stdout:?}");
+    assert!(notice[0]
+        .contains("could not resume the previous conversation (exit 1); starting a new one"));
+    assert!(stdout.contains("fresh-started"), "{stdout}");
+
+    let spool = fs::read_to_string(&signals).unwrap();
+    let lines: Vec<serde_json::Value> = spool
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["event"], "hermes.resume_fallback");
+    assert_eq!(lines[0]["session"], "s3");
+    assert_eq!(lines[0]["payload"]["vendor_session_id"], "new-vendor-id");
+    assert_eq!(lines[0]["payload"]["exit_code"], 1);
+}
+
+#[test]
+fn a_failure_after_the_window_is_not_a_failed_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let (program, args) = shell("sleep 1; exit 3", "ping -n 3 127.0.0.1 >nul & exit 3");
+    let (_, fresh) = shell("echo must-not-run", "echo must-not-run");
+    let mut json: serde_json::Value = serde_json::from_str(&spec_json(
+        "s4",
+        &program,
+        &args,
+        dir.path(),
+        &[],
+        Some((&program, &fresh, "x")),
+    ))
+    .unwrap();
+    json["fallback"]["after_ms"] = serde_json::json!(300);
+    write_launch(dir.path(), "s4", &json.to_string());
+
+    let out = hi_run(dir.path(), "s4");
+    assert_eq!(out.status.code(), Some(3));
+    assert!(!text(&out.stdout).contains("must-not-run"));
+    assert!(!text(&out.stdout).contains("hermes:"));
+}
+
+#[test]
+fn a_missing_program_is_reported_like_a_shell_would() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = spec_json("s5", "no-such-agent-binary-xyz", &[], dir.path(), &[], None);
+    write_launch(dir.path(), "s5", &json);
+    let out = hi_run(dir.path(), "s5");
+    assert_eq!(out.status.code(), Some(127));
+    let err = text(&out.stderr);
+    assert!(
+        err.contains("no-such-agent-binary-xyz: command not found"),
+        "{err}"
+    );
+}
+
+#[test]
+fn an_unknown_session_and_bad_usage_exit_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = hi_run(dir.path(), "does-not-exist");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("no launch file"));
+    let out = Command::new(HI).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(text(&out.stderr).contains("usage"));
+    let out = Command::new(HI).arg("--version").output().unwrap();
+    assert!(out.status.success());
+    assert!(text(&out.stdout).starts_with("hi "));
+}
+
+#[test]
+fn signal_appends_one_spool_line_from_the_hook_json_on_stdin() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("nested").join("signals.ndjson");
+    let mut child = Command::new(HI)
+        .args(["signal", "--agent", "claude", "--event", "Fallback"])
+        .env("HERMES_SIGNAL_FILE", &file)
+        .env("HERMES_SESSION_ID", "hermes-42")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"hook_event_name":"SessionStart","session_id":"vendor-1","cwd":"/repo","tool_input":{"x":1}}"#)
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty(), "hi signal must print nothing");
+
+    let spool = fs::read_to_string(&file).unwrap();
+    let line: serde_json::Value = serde_json::from_str(spool.trim()).unwrap();
+    assert_eq!(line["event"], "SessionStart");
+    assert_eq!(line["session"], "hermes-42");
+    assert_eq!(line["agent"], "claude");
+    assert_eq!(line["payload"]["session_id"], "vendor-1");
+    assert!(line["payload"].get("tool_input").is_none());
+}
+
+#[test]
+fn signal_without_a_spool_file_or_with_bad_input_still_exits_0() {
+    let out = Command::new(HI)
+        .args(["signal"])
+        .env_remove("HERMES_SIGNAL_FILE")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("signals.ndjson");
+    let mut child = Command::new(HI)
+        .args(["signal", "--event", "Stop"])
+        .env("HERMES_SIGNAL_FILE", &file)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"not json at all")
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    let line: serde_json::Value =
+        serde_json::from_str(fs::read_to_string(&file).unwrap().trim()).unwrap();
+    assert_eq!(line["event"], "Stop");
+}
+
+#[test]
+fn signal_takes_the_payload_from_the_last_argument_with_argv_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("signals.ndjson");
+    let payload = r#"{"type":"agent-turn-complete","thread-id":"t-77","last-assistant-message":"done","input-messages":["x"]}"#;
+    let out = Command::new(HI)
+        .args(["signal", "--agent", "codex", "--argv-json", payload])
+        .env("HERMES_SIGNAL_FILE", &file)
+        .env("HERMES_SESSION_ID", "hermes-7")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+    let line: serde_json::Value =
+        serde_json::from_str(fs::read_to_string(&file).unwrap().trim()).unwrap();
+    assert_eq!(line["agent"], "codex");
+    assert_eq!(line["session"], "hermes-7");
+    assert_eq!(line["payload"]["thread-id"], "t-77");
+    assert_eq!(line["payload"]["type"], "agent-turn-complete");
+    assert!(line["payload"].get("last-assistant-message").is_none());
+}

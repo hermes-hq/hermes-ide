@@ -599,6 +599,7 @@ export const esPack: LanguagePack = {
     "sessions.ready": "lista",
     "sessions.starting": "iniciando",
     "sessions.disconnected": "desconectada",
+    "sessions.startupPrompt": "esperando en un aviso de inicio",
     "language.panel.title": "Idioma de la interfaz",
     "language.panel.selectLabel": "Idioma",
     "language.panel.subtitle": "Los paquetes de idioma los proporcionan los plugins. El inglés sigue siendo el idioma de reserva principal.",
