@@ -5,6 +5,7 @@ import App from "./App";
 import { getStartupProblem } from "./api/startupProblem";
 import { StartupProblemScreen } from "./components/StartupProblemScreen";
 import { initFeatureFlags } from "./featureFlags";
+import { startSessionEventChannel } from "./agent/contract/channel";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -49,6 +50,12 @@ void getStartupProblem().then((problem) => {
   // before any other backend call. It never rejects, and gives up after a
   // short timeout (flags then stay at their stable default for this launch),
   // so a slow backend can never leave a blank window.
+  // The one channel every agent's session events arrive on (2.0 contracts,
+  // docs/adr/004-2.0-contracts.md). Attached before the workspace renders so
+  // no event is missed; a failure to attach only logs.
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => startSessionEventChannel(listen))
+    .catch((e) => console.warn("[session-event] channel not attached:", e));
   void initFeatureFlags().finally(() => {
     root.render(
       <React.StrictMode>

@@ -11,6 +11,18 @@ import { pool, getFocusedSessionId } from "../terminal/pool";
 import { armCrash } from "../components/CrashProbe";
 import { loadedViews } from "../utils/lazyView";
 import { getI18nSnapshot } from "../i18n/registry";
+import { parseSessionEvent } from "../agent/contract/events";
+import {
+  dispatchSessionEvent,
+  getSessionEventSnapshot,
+  sessionIdsWithEvents,
+  subscribeSessionEvents,
+} from "../agent/contract/sessionEventStore";
+import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
+import type { InboxRaise } from "../agent/contract/inbox";
+
+/** Notifications each watched session's subscriber received (C0 proof). */
+const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
 
 function readLines(sessionId: string): string[] | null {
   const entry = pool.get(sessionId);
@@ -79,6 +91,39 @@ const hooks = {
   },
   /** Read back how many times the (faked) install/relaunch pipeline ran. */
   updateTestState: () => window.__HERMES_TEST_UPDATE__ ?? null,
+
+  // ── C0 contracts: session events and the inbox (docs/adr/004) ──────
+  /**
+   * Feed one SessionEvent to a session, exactly as the Rust channel would.
+   * The event goes through the same validating parser; a malformed one is
+   * refused (false) and changes nothing.
+   */
+  injectSessionEvent: (sessionId: string, event: unknown): boolean => {
+    const parsed = parseSessionEvent(event);
+    if (!parsed || typeof sessionId !== "string" || sessionId === "") return false;
+    dispatchSessionEvent(sessionId, parsed);
+    return true;
+  },
+  /** The snapshot the app reads for a session (useSessionEvents). */
+  sessionEventSnapshot: (sessionId: string) => getSessionEventSnapshot(sessionId),
+  sessionEventSessionIds: (): string[] => sessionIdsWithEvents(),
+  /** Subscribe to a session like a component would; count the wake-ups. */
+  watchSessionEvents: (sessionId: string): void => {
+    if (sessionEventWatches.has(sessionId)) return;
+    const watch = { count: 0, unsubscribe: () => {} };
+    watch.unsubscribe = subscribeSessionEvents(sessionId, () => {
+      watch.count++;
+    });
+    sessionEventWatches.set(sessionId, watch);
+  },
+  sessionEventNotifications: (sessionId: string): number => sessionEventWatches.get(sessionId)?.count ?? -1,
+  unwatchSessionEvents: (sessionId: string): void => {
+    sessionEventWatches.get(sessionId)?.unsubscribe();
+    sessionEventWatches.delete(sessionId);
+  },
+  raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
+  resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
+  inboxItems: () => listInboxItems(),
 };
 
 export type HermesE2EHooks = typeof hooks;
