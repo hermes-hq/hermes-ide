@@ -9,6 +9,9 @@ import { AWAY_NOTIFY_URL_KEY } from "../api/attention";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
 import { useI18n } from "../i18n/I18nProvider";
 
+// An example address, not a sentence: the same in every language.
+const EXAMPLE_ADDRESS = "https://ntfy.sh/my-topic";
+
 interface AwayNotifySettingProps {
   value: string;
   onSave: (key: string, value: string) => void;
@@ -45,7 +48,7 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
         inputMode="url"
         spellCheck={false}
         autoComplete="off"
-        placeholder="https://ntfy.sh/my-topic"
+        placeholder={EXAMPLE_ADDRESS}
         aria-label={t("settings.awayNotifyUrl")}
         aria-invalid={invalid}
         aria-describedby="away-notify-hint"
