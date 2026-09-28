@@ -1,4 +1,5 @@
 {
   "_note": "Startup JS = the entry script in dist/index.html plus everything it imports statically. Checked by scripts/bundle-budget.mjs in CI. Raise only with a reason in the PR.",
-  "startupJsMaxBytes": 1200000
+  "_raised": "1200000 -> 1300000 bytes in the 2.0 early batch: thirteen features that each fit alone (agent status, zero-setup signals, attention inbox, model chips, plugin API v2, turn history, Review Desk, Land sheet, worktree recipes, Done-When, Feature Tracks, session host) land together and add about 80 KB of startup code and English strings.",
+  "startupJsMaxBytes": 1300000
 }
