@@ -673,6 +673,8 @@ export const ruPack: LanguagePack = {
     "launcher.signIn": "Войти",
     "launcher.copyInstall": "Скопировать команду установки",
     "launcher.copied": "Скопировано",
+    "launcher.taskNotDeliveredCopied": "{agent} запущен без вашей задачи. Задача в буфере обмена: вставьте её в терминал.",
+    "launcher.taskNotDelivered": "{agent} запущен без вашей задачи. Вставьте её в терминал: {task}",
     "launcher.useBranch": "Использовать {branch}",
     "launcher.noFirstPrompt": "{agent} не может получить задачу при запуске. Задача скопирована: вставьте её, когда агент будет готов.",
     "launcher.failed": "Не удалось запустить задачу.",

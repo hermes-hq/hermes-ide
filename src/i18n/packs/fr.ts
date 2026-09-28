@@ -673,6 +673,8 @@ export const frPack: LanguagePack = {
     "launcher.signIn": "Se connecter",
     "launcher.copyInstall": "Copier la commande d'installation",
     "launcher.copied": "Copié",
+    "launcher.taskNotDeliveredCopied": "{agent} a démarré sans ta tâche. La tâche est dans le presse-papiers : colle-la dans le terminal.",
+    "launcher.taskNotDelivered": "{agent} a démarré sans ta tâche. Colle-la dans le terminal : {task}",
     "launcher.useBranch": "Utiliser {branch}",
     "launcher.noFirstPrompt": "{agent} ne peut pas recevoir la tâche au démarrage. La tâche est copiée : collez-la quand l'agent est prêt.",
     "launcher.failed": "La tâche n'a pas pu démarrer.",

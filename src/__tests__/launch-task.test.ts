@@ -6,7 +6,7 @@
  * and the launch record.
  */
 import { describe, expect, it, vi } from "vitest";
-import { launchTask, normalizeRepoPath, type LaunchTaskDeps } from "../launcher/launchTask";
+import { handleUndeliveredTask, launchTask, normalizeRepoPath, type LaunchTaskDeps } from "../launcher/launchTask";
 import { parseTaskLaunches } from "../launcher/taskLauncher";
 import type { CreateSessionOpts, SessionData } from "../types/session";
 import type { TaskLaunchRequest } from "../components/TaskLauncher";
@@ -165,5 +165,37 @@ describe("normalizeRepoPath", () => {
     expect(normalizeRepoPath("/fixture-home/repo/")).toBe("/fixture-home/repo");
     expect(normalizeRepoPath("C:/Fixture/Repo\\", true)).toBe("c:\\fixture\\repo");
     expect(normalizeRepoPath("/")).toBe("/");
+  });
+});
+
+describe("a task the agent's launch could not carry", () => {
+  it("goes on the clipboard and the person is told which agent started without it", async () => {
+    const copied: string[] = [];
+    const notes: string[] = [];
+    await handleUndeliveredTask(
+      { sessionId: "s1", agentId: "claude", task: "  fix the login bug \n" },
+      { copyText: async (t) => { copied.push(t); }, notify: (m) => notes.push(m) },
+    );
+    expect(copied).toEqual(["fix the login bug"]);
+    expect(notes).toEqual(["Claude Code started without your task. The task is on the clipboard: paste it into the terminal."]);
+  });
+
+  it("shows the task itself when the clipboard refuses it", async () => {
+    const notes: string[] = [];
+    await handleUndeliveredTask(
+      { sessionId: "s1", agentId: "codex", task: "fix the login bug" },
+      { copyText: async () => { throw new Error("denied"); }, notify: (m) => notes.push(m) },
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("fix the login bug");
+    expect(notes[0]).not.toContain("clipboard");
+  });
+
+  it("does nothing for an empty task", async () => {
+    const copyText = vi.fn(async () => {});
+    const notify = vi.fn();
+    await handleUndeliveredTask({ sessionId: "s1", agentId: "claude", task: "   " }, { copyText, notify });
+    expect(copyText).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 });

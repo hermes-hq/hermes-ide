@@ -71,7 +71,7 @@ import { getAgent } from "./catalog/agentCatalog";
 import { getProjectsOrdered, getSessionProjects } from "./api/projects";
 import { getSessionWorktreeInfo } from "./api/git";
 import { writeTaskFeatureFile } from "./api/launcher";
-import { launchTask, normalizeRepoPath } from "./launcher/launchTask";
+import { handleUndeliveredTask, launchTask, normalizeRepoPath, type UndeliveredTask } from "./launcher/launchTask";
 import { TASK_LAUNCHES_KEY } from "./launcher/taskLauncher";
 import type { TaskLaunchRequest } from "./components/TaskLauncher";
 import { WhatsNewGate } from "./components/WhatsNewGate";
@@ -315,6 +315,22 @@ function AppContent() {
         message: launchFailedMessage(event.payload),
         type: "warning",
         duration: 15000,
+      });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
+  // ── A launcher task the agent's launch could not carry (F15) ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<UndeliveredTask>("task-prompt-undelivered", (event) => {
+      if (cancelled) return;
+      void handleUndeliveredTask(event.payload, {
+        copyText: (text) => navigator.clipboard.writeText(text),
+        notify: (message) => toastStoreRef.current.addToast({ message, type: "warning", duration: 15000 }),
       });
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }

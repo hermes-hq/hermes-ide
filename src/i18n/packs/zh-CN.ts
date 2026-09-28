@@ -673,6 +673,8 @@ export const zhCNPack: LanguagePack = {
     "launcher.signIn": "登录",
     "launcher.copyInstall": "复制安装命令",
     "launcher.copied": "已复制",
+    "launcher.taskNotDeliveredCopied": "{agent} 启动时没有带上你的任务。任务已复制到剪贴板：请粘贴到终端中。",
+    "launcher.taskNotDelivered": "{agent} 启动时没有带上你的任务。请粘贴到终端中：{task}",
     "launcher.useBranch": "使用 {branch}",
     "launcher.noFirstPrompt": "{agent} 无法在启动时接收任务。任务已复制：智能体就绪后请粘贴。",
     "launcher.failed": "任务无法启动。",

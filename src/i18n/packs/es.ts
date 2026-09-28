@@ -673,6 +673,8 @@ export const esPack: LanguagePack = {
     "launcher.signIn": "Iniciar sesión",
     "launcher.copyInstall": "Copiar comando de instalación",
     "launcher.copied": "Copiado",
+    "launcher.taskNotDeliveredCopied": "{agent} se inició sin tu tarea. La tarea está en el portapapeles: pégala en la terminal.",
+    "launcher.taskNotDelivered": "{agent} se inició sin tu tarea. Pégala en la terminal: {task}",
     "launcher.useBranch": "Usar {branch}",
     "launcher.noFirstPrompt": "{agent} no puede recibir la tarea al iniciarse. La tarea está copiada: pégala cuando el agente esté listo.",
     "launcher.failed": "No se pudo iniciar la tarea.",

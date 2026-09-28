@@ -604,6 +604,22 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
     })
 }
 
+/// A launcher task (F15) the typed vendor command cannot carry: the helper
+/// launch fell through (no `hi` next to the app, no recipe, the launch file
+/// not written), so without this the task would be lost silently. Only for
+/// agents the catalog says take a first prompt; for the others the task
+/// launcher already put the task on the clipboard. Taken, so it is reported
+/// once.
+pub(crate) fn take_undelivered_task(s: &mut Session) -> Option<String> {
+    let task = s.task_prompt.take()?;
+    let provider = s.ai_provider.as_deref()?;
+    crate::agent_catalog::agent(provider)?
+        .terminal
+        .initial_prompt
+        .as_ref()?;
+    Some(task)
+}
+
 fn write_plan(session_dir: &Path, plan: &LaunchPlan) -> std::io::Result<()> {
     std::fs::create_dir_all(session_dir)?;
     for (path, contents) in &plan.files {
@@ -1364,6 +1380,33 @@ mod tests {
             vec!["{\"b\":2}".to_string(), "{\"c\":3}".to_string()]
         );
         assert!(reader.poll().is_empty());
+    }
+
+    #[test]
+    fn a_task_the_fallback_launch_cannot_carry_is_handed_back_once() {
+        let mut s = test_session();
+        s.task_prompt = Some("fix the login bug".into());
+        assert_eq!(
+            take_undelivered_task(&mut s).as_deref(),
+            Some("fix the login bug")
+        );
+        assert_eq!(s.task_prompt, None);
+        assert_eq!(take_undelivered_task(&mut s), None);
+    }
+
+    #[test]
+    fn no_task_means_nothing_to_hand_back() {
+        let mut s = test_session();
+        assert_eq!(take_undelivered_task(&mut s), None);
+    }
+
+    #[test]
+    fn an_agent_without_a_first_prompt_already_had_its_task_copied() {
+        let mut s = test_session();
+        s.ai_provider = Some("custom".into());
+        s.task_prompt = Some("fix the login bug".into());
+        assert_eq!(take_undelivered_task(&mut s), None);
+        assert_eq!(s.task_prompt, None);
     }
 
     fn test_session() -> Session {

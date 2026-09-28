@@ -14,6 +14,8 @@
 
 import type { CreateSessionOpts, SessionData } from "../types/session";
 import type { TaskLaunchRequest } from "../components/TaskLauncher";
+import { getAgent } from "../catalog/agentCatalog";
+import { translate } from "../i18n/registry";
 import {
   agentTakesFirstPrompt,
   appendTaskLaunches,
@@ -125,4 +127,40 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
     console.warn("[launchTask] could not record the launch:", err);
   }
   return result;
+}
+
+// ─── A task the agent's launch could not carry ─────────────────────────
+//
+// The backend starts the agent without its task when the helper launch
+// falls through (no helper next to the app, for example) and says so with
+// `task-prompt-undelivered`. The task goes on the clipboard and the person
+// is told, instead of the task vanishing.
+
+export interface UndeliveredTask {
+  sessionId: string;
+  agentId: string;
+  task: string;
+}
+
+export interface UndeliveredTaskDeps {
+  copyText(text: string): Promise<void>;
+  notify(message: string): void;
+}
+
+export async function handleUndeliveredTask(payload: UndeliveredTask, deps: UndeliveredTaskDeps): Promise<void> {
+  const task = payload.task?.trim();
+  if (!task) return;
+  const agent = getAgent(payload.agentId)?.name ?? payload.agentId;
+  let copied = true;
+  try {
+    await deps.copyText(task);
+  } catch (err) {
+    copied = false;
+    console.warn("[launchTask] could not copy the undelivered task:", err);
+  }
+  deps.notify(
+    copied
+      ? translate("launcher.taskNotDeliveredCopied", { agent })
+      : translate("launcher.taskNotDelivered", { agent, task }),
+  );
 }

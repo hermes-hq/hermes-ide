@@ -673,6 +673,8 @@ export const dePack: LanguagePack = {
     "launcher.signIn": "Anmelden",
     "launcher.copyInstall": "Installationsbefehl kopieren",
     "launcher.copied": "Kopiert",
+    "launcher.taskNotDeliveredCopied": "{agent} wurde ohne deine Aufgabe gestartet. Die Aufgabe ist in der Zwischenablage: füge sie im Terminal ein.",
+    "launcher.taskNotDelivered": "{agent} wurde ohne deine Aufgabe gestartet. Füge sie im Terminal ein: {task}",
     "launcher.useBranch": "{branch} verwenden",
     "launcher.noFirstPrompt": "{agent} kann die Aufgabe beim Start nicht übernehmen. Die Aufgabe ist kopiert: füge sie ein, sobald der Agent bereit ist.",
     "launcher.failed": "Die Aufgabe konnte nicht gestartet werden.",

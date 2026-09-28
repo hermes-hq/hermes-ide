@@ -673,6 +673,8 @@ export const jaPack: LanguagePack = {
     "launcher.signIn": "サインイン",
     "launcher.copyInstall": "インストールコマンドをコピー",
     "launcher.copied": "コピーしました",
+    "launcher.taskNotDeliveredCopied": "{agent} はタスクなしで起動しました。タスクはクリップボードにあります。ターミナルに貼り付けてください。",
+    "launcher.taskNotDelivered": "{agent} はタスクなしで起動しました。ターミナルに貼り付けてください: {task}",
     "launcher.useBranch": "{branch} を使う",
     "launcher.noFirstPrompt": "{agent} は起動時にタスクを受け取れません。タスクはコピー済みです。エージェントの準備ができたら貼り付けてください。",
     "launcher.failed": "タスクを開始できませんでした。",

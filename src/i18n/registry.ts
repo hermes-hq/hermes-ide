@@ -703,6 +703,8 @@ const ENGLISH_PACK: LanguagePack = {
     "launcher.signIn": "Sign in",
     "launcher.copyInstall": "Copy install command",
     "launcher.copied": "Copied",
+    "launcher.taskNotDeliveredCopied": "{agent} started without your task. The task is on the clipboard: paste it into the terminal.",
+    "launcher.taskNotDelivered": "{agent} started without your task. Paste it into the terminal: {task}",
     "launcher.useBranch": "Use {branch}",
     "launcher.noFirstPrompt": "{agent} can't take the task when it starts. The task is copied: paste it once the agent is ready.",
     "launcher.failed": "The task could not start.",

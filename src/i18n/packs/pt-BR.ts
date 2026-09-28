@@ -673,6 +673,8 @@ export const ptBRPack: LanguagePack = {
     "launcher.signIn": "Entrar",
     "launcher.copyInstall": "Copiar comando de instalação",
     "launcher.copied": "Copiado",
+    "launcher.taskNotDeliveredCopied": "{agent} iniciou sem a sua tarefa. A tarefa está na área de transferência: cole-a no terminal.",
+    "launcher.taskNotDelivered": "{agent} iniciou sem a sua tarefa. Cole-a no terminal: {task}",
     "launcher.useBranch": "Usar {branch}",
     "launcher.noFirstPrompt": "{agent} não consegue receber a tarefa ao iniciar. A tarefa foi copiada: cole-a quando o agente estiver pronto.",
     "launcher.failed": "Não foi possível iniciar a tarefa.",

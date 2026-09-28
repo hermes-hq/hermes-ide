@@ -25,6 +25,9 @@
 //          - a folder that is not a git repository blocks Launch.
 //          - ⌘⇧N (Ctrl+Shift+H) opens the advanced creator, which still
 //            offers SSH; so does the launcher's Advanced link.
+//          - with the launch helper moved away from the app, a task still
+//            starts the agent, which cannot get the task: a notice names the
+//            agent and puts the task on the clipboard (or shows it).
 //   run 3  the disk reports 2 GB free: a "low disk" row blocks Launch.
 //
 // On macOS the File menu's key equivalents belong to the native menu, which
@@ -39,7 +42,7 @@
 //   node e2e/app/scenarios/F15-task-launcher.mjs
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
@@ -437,8 +440,13 @@ try {
     const file = join(w.worktreePath, ".hermes", "features", "existing-task", "feature.md");
     assert(existsSync(file) && /track: Full/.test(readFileSync(file, "utf8")), `the Full track wrote ${file.replace(work, "<work>")}`);
   }
-  const panes = await bridge.eval(`return document.querySelectorAll(".split-pane[data-pane-id], [data-pane-id]").length;`);
-  log(`  panes on screen: ${panes}`);
+  // The second agent opens beside the first: two panes, both on the task.
+  await bridge.waitFor("the two agents side by side", `
+    const labels = e2e.all(".split-pane .split-pane-label > span:first-child").map((el) => el.textContent.trim());
+    return labels.filter((l) => l === "Existing task").length === 2;
+  `, { timeoutMs: 20_000 });
+  const panes = await bridge.eval(`return e2e.all(".split-pane .split-pane-label > span:first-child").map((el) => el.textContent.trim());`);
+  log(`  panes on screen: ${JSON.stringify(panes)}`);
   await bridge.screenshot(join(evidenceDir, "05-two-agents.png"));
 
   log("step 6: a folder that is not a git repository blocks Launch");
@@ -460,6 +468,37 @@ try {
   await bridge.waitFor("the advanced creator from its own shortcut", `return !!e2e.first(".session-creator") && !e2e.first(".task-launcher-sheet");`, { timeoutMs: 20_000 });
   assert(await bridge.exists(".session-creator-ssh-link"), "⌘⇧N opens the creator with SSH");
   await bridge.screenshot(join(evidenceDir, "07-advanced.png"));
+  await bridge.click(".session-creator .settings-close");
+  await bridge.waitFor("the creator to close", `return !e2e.first(".session-creator");`, { timeoutMs: 10_000 });
+
+  log("step 8: with no launch helper next to the app, the agent starts without the task and the person is told");
+  const hiPath = join(outDir(), "bin", onWindows ? "hi.exe" : "hi");
+  const hiAside = `${hiPath}.aside`;
+  renameSync(hiPath, hiAside);
+  try {
+    await openLauncher(bridge);
+    await typeInto(bridge, ".task-launcher-repo", repo);
+    await typeInto(bridge, ".task-launcher-task", "Helper missing task");
+    await chooseOption(bridge, ".task-launcher-agent", "claude");
+    await bridge.waitFor("Launch to be enabled", `return !e2e.first(".task-launcher-launch")?.disabled;`, { timeoutMs: 30_000 });
+    before = await bridge.terminalIds();
+    const recsBeforeFallback = records().length;
+    await pressEnterInTask(bridge);
+    await newTerminals(bridge, before, 1, "the fallback terminal");
+    const toast = await bridge.waitFor("the task-not-delivered notice", `
+      const t = e2e.all(".toast-message").map((el) => e2e.norm(el.innerText)).find((m) => m.includes("started without your task"));
+      return t || null;
+    `, { timeoutMs: 30_000 });
+    log(`  toast: "${toast}"`);
+    assert(toast.startsWith("Claude Code started without your task"), "the notice names the agent");
+    assert(toast.includes("clipboard") || toast.includes("Helper missing task"), "the task is on the clipboard, or shown in the notice");
+    const fallbackRec = (await waitForRecords(recsBeforeFallback + 1)).at(-1);
+    log(`  fake claude record: ${JSON.stringify({ argv: fallbackRec.argv, prompt: fallbackRec.prompt })}`);
+    assert(!fallbackRec.argv.some((a) => String(a).includes("Helper missing task")), "the typed command did not carry the task (the notice is not a false alarm)");
+    await bridge.screenshot(join(evidenceDir, "08-task-not-delivered.png"));
+  } finally {
+    renameSync(hiAside, hiPath);
+  }
   await app.stop();
 
   // ── run 3: low disk ──────────────────────────────────────────────
@@ -473,7 +512,7 @@ try {
   st = await launcherState(app.bridge);
   log(`  launcher: ${JSON.stringify(st)}`);
   assert(st.launchDisabled && /2\.0 GB/.test(st.blocks.find((b) => b.kind === "low-disk").text), "Launch is disabled and the row says how much is free");
-  await app.bridge.screenshot(join(evidenceDir, "08-low-disk.png"));
+  await app.bridge.screenshot(join(evidenceDir, "09-low-disk.png"));
   await app.stop();
   app = null;
 } catch (err) {

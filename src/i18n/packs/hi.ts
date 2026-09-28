@@ -673,6 +673,8 @@ export const hiPack: LanguagePack = {
     "launcher.signIn": "साइन इन करें",
     "launcher.copyInstall": "इंस्टॉल कमांड कॉपी करें",
     "launcher.copied": "कॉपी किया गया",
+    "launcher.taskNotDeliveredCopied": "{agent} आपके कार्य के बिना शुरू हुआ। कार्य क्लिपबोर्ड पर है: इसे टर्मिनल में पेस्ट करें।",
+    "launcher.taskNotDelivered": "{agent} आपके कार्य के बिना शुरू हुआ। इसे टर्मिनल में पेस्ट करें: {task}",
     "launcher.useBranch": "{branch} इस्तेमाल करें",
     "launcher.noFirstPrompt": "{agent} शुरू होते समय कार्य नहीं ले सकता। कार्य कॉपी कर दिया गया है: एजेंट तैयार होने पर उसे पेस्ट करें।",
     "launcher.failed": "कार्य शुरू नहीं हो सका।",

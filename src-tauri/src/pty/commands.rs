@@ -713,6 +713,19 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
             )),
         });
     }
+    // The typed command cannot carry a launcher task: hand it to the UI,
+    // which puts it on the clipboard and says so, instead of dropping it.
+    if let Some(task) = crate::pty::launch::take_undelivered_task(&mut s) {
+        log::warn!(
+            "[LAUNCH] {} starts {} without its task (no helper launch); handing the task to the UI",
+            s.id,
+            provider
+        );
+        let _ = app.emit(
+            "task-prompt-undelivered",
+            serde_json::json!({ "sessionId": s.id, "agentId": provider, "task": task }),
+        );
+    }
     // Only launch known/allowed AI providers (reject unknown values)
     let Some(launch_cmd) = ai_launch_command(
         &provider,

@@ -56,7 +56,7 @@ export const FEATURE_FLAGS = [
     id: "taskLauncher",
     label: "Task launcher and agent doctor",
     description:
-      "New Session (⌘N) opens the task launcher: describe the task and it starts on its own hermes/<name> branch as the agent's first prompt; the full creator moves to ⌘⇧N. First launch shows the three-step welcome with the agent doctor, which also lives in Settings > Agents.",
+      "New Session (⌘N) opens the task launcher: describe the task and it starts on its own hermes/<name> branch as the agent's first prompt; the full creator moves to ⌘⇧N. Agents it starts always go through the bundled helper (it carries the task), even with that flag off. First launch shows the three-step welcome with the agent doctor, which also lives in Settings > Agents.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
