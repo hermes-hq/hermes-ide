@@ -834,6 +834,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb dbus-x11
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
+          # An AppImage leaves the GPU driver libraries (libEGL, libGL) to the
+          # system, as every desktop has them; the bare ARM runner does not.
+          sudo apt-get install -y libegl1 libgl1
           # What a person does: put it somewhere and make it executable.
           mkdir -p "$HOME/Applications"
           cp "$APPIMAGE" "$HOME/Applications/"

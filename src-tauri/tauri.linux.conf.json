@@ -11,11 +11,7 @@
   "bundle": {
     "targets": ["deb", "appimage"],
     "resources": [
-      "bridge/hermes-claude-bridge.mjs",
-      "bridge/canUseToolHelpers.mjs",
-      "bridge/bridgeRuntimeHelpers.mjs",
-      "bridge/package.json",
-      "bridge/node_modules",
+      "bridge/runtime",
       "helpers/hi"
     ]
   }

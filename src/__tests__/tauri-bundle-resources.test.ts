@@ -35,6 +35,18 @@ describe("tauri.conf.json bundle resources", () => {
     }
   });
 
+  // A platform config replaces the whole resources array (JSON merge patch),
+  // so each one that lists resources must carry the packed runtime too.
+  for (const platform of ["linux", "windows"]) {
+    it(`tauri.${platform}.conf.json ships the packed runtime, not node_modules`, () => {
+      const file = `src-tauri/tauri.${platform}.conf.json`;
+      const own: string[] = JSON.parse(readFileSync(file, "utf-8"))?.bundle?.resources ?? [];
+      if (own.length === 0) return;
+      expect(own).toContain("bridge/runtime");
+      expect(own.some((r) => r.includes("node_modules"))).toBe(false);
+    });
+  }
+
   it("packs the runtime as part of beforeBuildCommand", () => {
     const cmd: string = conf?.build?.beforeBuildCommand ?? "";
     expect(cmd).toMatch(/prepare:bridge/);
