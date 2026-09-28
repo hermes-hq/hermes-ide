@@ -9,7 +9,8 @@
 //          app's settings while it is closed, as Settings > Flags stores it —
 //          N07 proves that control; the flag also gates N14)
 //   run 2  - session A on a new branch: its worktree has node_modules within
-//            10 s of pressing Create, cloned copy-on-write from the project
+//            10 s of pressing Create (real deps on Windows: 20 s and 3x faster
+//            than a fresh install, see DEADLINE_MS), cloned copy-on-write from the project
 //            folder (clonefile on macOS, reflink on Linux, block cloning on
 //            Windows). The disk barely notices (the blob is shared, not
 //            copied: free space on macOS/Linux, the blob's clusters on
@@ -84,13 +85,23 @@ function assert(condition, message) {
 }
 
 const DB_FILE = "hermes_idea_v3.db";
-const DEADLINE_MS = 10_000;
+const onWindows = platform() === "win32";
+// N17-1, per OS. macOS and Linux: under 10 s. Windows, with this repo's own
+// dependencies: under 20 s AND at least 3x faster than a fresh install of the
+// same lockfile, measured in the same run. ReFS block-clones only files over
+// 64 KB and copies the rest, and those ~35,000 small files alone take about
+// 9.6 s on a hosted runner. The synthetic install keeps 10 s everywhere.
+const DEADLINE_MS = onWindows && REAL_DEPS ? 20_000 : 10_000;
+const MIN_SPEEDUP = 3;
+// The fresh-install baseline: on Windows, or anywhere with
+// HERMES_E2E_N17_INSTALL_BASELINE=1 (the 3x check then applies there too).
+const MEASURE_INSTALL =
+  REAL_DEPS && !NEGATIVE && (onWindows || process.env.HERMES_E2E_N17_INSTALL_BASELINE === "1");
 const BLOB_BYTES = 256 * 1024 * 1024;
 const FILLER_PACKAGES = 3_000;
 const MARKER = join("node_modules", "n17-mine.txt");
 const EXPECTED_METHOD = { darwin: "clonefile", linux: "reflink", win32: "block_clone" }[platform()];
 
-const onWindows = platform() === "win32";
 const cowRoot = process.env.HERMES_E2E_COW_DIR || tmpdir();
 mkdirSync(cowRoot, { recursive: true });
 const workDir = mkdtempSync(join(cowRoot, "hermes-e2e-n17-work-"));
@@ -205,6 +216,30 @@ function installInProjectFolder() {
   const blob = join(nm, "n17-blob", "blob.bin");
   const chunk = 16 * 1024 * 1024;
   for (let written = 0; written < BLOB_BYTES; written += chunk) appendFileSync(blob, randomBytes(chunk));
+}
+
+/**
+ * How long a fresh install of this repo's lockfile takes: `npm ci` in a new
+ * folder on the same volume. Scripts are skipped and npm's cache is warm (CI
+ * installed the repo earlier), so this is the fast case for npm.
+ */
+function timeFreshInstall() {
+  const dir = join(workDir, "fresh-install");
+  mkdirSync(dir);
+  cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+  cpSync(join(REPO_ROOT, "package-lock.json"), join(dir, "package-lock.json"));
+  const started = Date.now();
+  const res = spawnSync("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], {
+    cwd: dir,
+    encoding: "utf8",
+    shell: onWindows, // npm is npm.cmd there
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const ms = Date.now() - started;
+  if (res.status !== 0) throw new Error(`npm ci failed (${res.status}): ${res.stderr || res.stdout}`);
+  if (!existsSync(join(dir, "node_modules", "react", "package.json"))) throw new Error("npm ci left no react");
+  rmSync(dir, { recursive: true, force: true });
+  return ms;
 }
 
 /** The first 64 KB of a file. */
@@ -481,6 +516,12 @@ try {
   makeRepo();
   installInProjectFolder();
   log(`  throwaway repo with node_modules installed: ${repo}${REAL_DEPS ? " (this repo's own dependencies)" : ""}`);
+  let installMs = null;
+  if (MEASURE_INSTALL) {
+    log("step 0: baseline — a fresh install of the same lockfile on the same volume");
+    installMs = timeFreshInstall();
+    log(`  npm ci --ignore-scripts --prefer-offline: ${installMs} ms`);
+  }
 
   // ── run 1: fresh install, flag on ────────────────────────────────
   log("step 1: fresh launch, complete onboarding, quit");
@@ -514,6 +555,12 @@ try {
   assert(sameDir(depA.source, repo), "from the project folder");
   assert(depA.millis < DEADLINE_MS, `the clone took ${depA.millis} ms (< ${DEADLINE_MS} ms)`);
   assert(a.tookMs < DEADLINE_MS, `the session was up with its dependencies ${a.tookMs} ms after Create (< ${DEADLINE_MS} ms)`);
+  if (installMs !== null) {
+    assert(
+      a.tookMs * MIN_SPEEDUP <= installMs,
+      `${(installMs / a.tookMs).toFixed(1)}x faster than a fresh install (${installMs} ms; at least ${MIN_SPEEDUP}x)`,
+    );
+  }
   const used = freeBefore - freeAfter;
   log(`  free space before/after: ${freeBefore} / ${freeAfter} (used ${used} bytes)`);
   if (!REAL_DEPS) {

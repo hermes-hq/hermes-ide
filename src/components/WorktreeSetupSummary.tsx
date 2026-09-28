@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getSessionWorktreeInfo } from "../api/git";
+import { useI18n } from "../i18n/I18nProvider";
 import type { DependencySetup, WorktreeSetup } from "../types/git";
 import "../styles/components/WorktreeSetupSummary.css";
 
@@ -36,18 +37,16 @@ export function describeDependency(d: DependencySetup): string {
  * folder cloned copy-on-write or why it was not (fast worktrees, N17).
  */
 function WorktreeSetupSummary({ setup }: { setup: WorktreeSetup }) {
+  const { t } = useI18n();
   const ports = setup.ports;
   return (
     <div className="worktree-setup" data-port-base={ports?.base}>
       {ports ? (
-        <div
-          className="worktree-setup-ports"
-          title="Given to this session's terminal as PORT, HERMES_PORT_BASE and HERMES_PORT_COUNT"
-        >
-          Ports {ports.base}–{ports.base + ports.count - 1} (PORT={ports.base})
+        <div className="worktree-setup-ports" title={t("worktreeSetup.portsTitle")}>
+          {t("worktreeSetup.ports", { first: ports.base, last: ports.base + ports.count - 1, port: ports.base })}
         </div>
       ) : (
-        <div className="worktree-setup-ports worktree-setup-warn">No free block of ports was found</div>
+        <div className="worktree-setup-ports worktree-setup-warn">{t("worktreeSetup.noPorts")}</div>
       )}
       {setup.dependencies.map((d) => (
         <div

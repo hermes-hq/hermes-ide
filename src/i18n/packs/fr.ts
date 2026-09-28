@@ -1091,5 +1091,8 @@ export const frPack: LanguagePack = {
     "onboarding.moreInSettings": "Le thème et la confidentialité sont dans les Paramètres.",
     "onboarding.resume": "Retour à la configuration",
     "onboarding.signInNote": "Connectez-vous à {agent} dans le terminal, puis revenez à la configuration.",
+    "worktreeSetup.portsTitle": "Transmis au terminal de cette session comme PORT, HERMES_PORT_BASE et HERMES_PORT_COUNT",
+    "worktreeSetup.ports": "Ports {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "Aucun bloc de ports libre trouvé",
   },
 };

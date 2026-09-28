@@ -1091,5 +1091,8 @@ export const hiPack: LanguagePack = {
     "onboarding.moreInSettings": "थीम और गोपनीयता सेटिंग्स में हैं।",
     "onboarding.resume": "सेटअप पर वापस जाएँ",
     "onboarding.signInNote": "टर्मिनल में {agent} में साइन इन करें, फिर सेटअप पर लौटें।",
+    "worktreeSetup.portsTitle": "इस सत्र के टर्मिनल को PORT, HERMES_PORT_BASE और HERMES_PORT_COUNT के रूप में दिए जाते हैं",
+    "worktreeSetup.ports": "पोर्ट {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "पोर्ट का कोई खाली ब्लॉक नहीं मिला",
   },
 };

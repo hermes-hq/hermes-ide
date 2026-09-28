@@ -29,6 +29,7 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: h.getVersion }));
 import { createWorktree, attachWorktree } from "../api/git";
 import { initFeatureFlags, __resetFeatureFlagsForTest, FEATURE_FLAG_OVERRIDES_KEY } from "../featureFlags";
 import { SessionGitPanel } from "../components/SessionGitPanel";
+import { I18nProvider } from "../i18n/I18nProvider";
 import { describeDependency } from "../components/WorktreeSetupSummary";
 import type { DependencySetup, WorktreeSetup } from "../types/git";
 
@@ -165,7 +166,11 @@ describe("N17 the session's Git panel shows what was prepared", () => {
   it("lists the ports and each folder's outcome", async () => {
     await setFlag(true);
     backend(SETUP);
-    const { container } = render(<SessionGitPanel sessionId="s1" projectId="" />);
+    const { container } = render(
+      <I18nProvider>
+        <SessionGitPanel sessionId="s1" projectId="" />
+      </I18nProvider>,
+    );
     await screen.findByText("Ports 21010–21019 (PORT=21010)");
     await screen.findByText(
       "node_modules: cloned from demo-repo in 0.4 s, sharing disk space until changed",
@@ -180,7 +185,11 @@ describe("N17 the session's Git panel shows what was prepared", () => {
   it("shows nothing for a worktree that was never prepared, or with the flag off", async () => {
     await setFlag(true);
     backend(undefined);
-    const first = render(<SessionGitPanel sessionId="s1" projectId="" />);
+    const first = render(
+      <I18nProvider>
+        <SessionGitPanel sessionId="s1" projectId="" />
+      </I18nProvider>,
+    );
     await screen.findByText("GIT");
     await Promise.resolve();
     expect(first.container.querySelector(".worktree-setup")).toBeNull();
@@ -188,7 +197,11 @@ describe("N17 the session's Git panel shows what was prepared", () => {
 
     await setFlag(false);
     backend(SETUP);
-    const second = render(<SessionGitPanel sessionId="s1" projectId="" />);
+    const second = render(
+      <I18nProvider>
+        <SessionGitPanel sessionId="s1" projectId="" />
+      </I18nProvider>,
+    );
     await screen.findByText("GIT");
     await new Promise((r) => setTimeout(r, 20));
     expect(second.container.querySelector(".worktree-setup")).toBeNull();

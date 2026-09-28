@@ -1091,5 +1091,8 @@ export const ptBRPack: LanguagePack = {
     "onboarding.moreInSettings": "Tema e privacidade ficam nas Configurações.",
     "onboarding.resume": "Voltar à configuração",
     "onboarding.signInNote": "Entre no {agent} pelo terminal e depois volte à configuração.",
+    "worktreeSetup.portsTitle": "Passadas ao terminal desta sessão como PORT, HERMES_PORT_BASE e HERMES_PORT_COUNT",
+    "worktreeSetup.ports": "Portas {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "Nenhum bloco de portas livre foi encontrado",
   },
 };

@@ -1091,5 +1091,8 @@ export const jaPack: LanguagePack = {
     "onboarding.moreInSettings": "テーマとプライバシーは設定にあります。",
     "onboarding.resume": "セットアップに戻る",
     "onboarding.signInNote": "ターミナルで {agent} にサインインしてから、セットアップに戻ってください。",
+    "worktreeSetup.portsTitle": "このセッションのターミナルに PORT、HERMES_PORT_BASE、HERMES_PORT_COUNT として渡されます",
+    "worktreeSetup.ports": "ポート {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "空いているポートのブロックが見つかりませんでした",
   },
 };

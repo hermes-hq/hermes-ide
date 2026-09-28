@@ -1091,5 +1091,8 @@ export const dePack: LanguagePack = {
     "onboarding.moreInSettings": "Design und Datenschutz findest du in den Einstellungen.",
     "onboarding.resume": "Zurück zur Einrichtung",
     "onboarding.signInNote": "Melde dich im Terminal bei {agent} an und kehre dann zur Einrichtung zurück.",
+    "worktreeSetup.portsTitle": "Wird dem Terminal dieser Sitzung als PORT, HERMES_PORT_BASE und HERMES_PORT_COUNT übergeben",
+    "worktreeSetup.ports": "Ports {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "Kein freier Portblock gefunden",
   },
 };

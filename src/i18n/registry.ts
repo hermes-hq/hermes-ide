@@ -1121,6 +1121,9 @@ const ENGLISH_PACK: LanguagePack = {
     "onboarding.moreInSettings": "Theme and privacy are in Settings.",
     "onboarding.resume": "Back to setup",
     "onboarding.signInNote": "Sign in to {agent} in the terminal, then come back to setup.",
+    "worktreeSetup.portsTitle": "Given to this session's terminal as PORT, HERMES_PORT_BASE and HERMES_PORT_COUNT",
+    "worktreeSetup.ports": "Ports {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "No free block of ports was found",
   },
 };
 

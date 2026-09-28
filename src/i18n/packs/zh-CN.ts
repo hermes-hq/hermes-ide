@@ -1091,5 +1091,8 @@ export const zhCNPack: LanguagePack = {
     "onboarding.moreInSettings": "主题和隐私在设置中。",
     "onboarding.resume": "返回设置向导",
     "onboarding.signInNote": "在终端中登录 {agent}，然后返回设置向导。",
+    "worktreeSetup.portsTitle": "以 PORT、HERMES_PORT_BASE 和 HERMES_PORT_COUNT 传给此会话的终端",
+    "worktreeSetup.ports": "端口 {first}–{last}（PORT={port}）",
+    "worktreeSetup.noPorts": "没有找到空闲的端口块",
   },
 };

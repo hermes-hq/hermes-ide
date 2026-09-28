@@ -1091,5 +1091,8 @@ export const ruPack: LanguagePack = {
     "onboarding.moreInSettings": "Тема и приватность — в Настройках.",
     "onboarding.resume": "Вернуться к настройке",
     "onboarding.signInNote": "Войдите в {agent} в терминале, затем вернитесь к настройке.",
+    "worktreeSetup.portsTitle": "Передаются терминалу этой сессии как PORT, HERMES_PORT_BASE и HERMES_PORT_COUNT",
+    "worktreeSetup.ports": "Порты {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "Свободный блок портов не найден",
   },
 };

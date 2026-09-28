@@ -1091,5 +1091,8 @@ export const esPack: LanguagePack = {
     "onboarding.moreInSettings": "El tema y la privacidad están en Configuración.",
     "onboarding.resume": "Volver a la configuración",
     "onboarding.signInNote": "Inicia sesión en {agent} en el terminal y luego vuelve a la configuración.",
+    "worktreeSetup.portsTitle": "Se pasan al terminal de esta sesión como PORT, HERMES_PORT_BASE y HERMES_PORT_COUNT",
+    "worktreeSetup.ports": "Puertos {first}–{last} (PORT={port})",
+    "worktreeSetup.noPorts": "No se encontró ningún bloque de puertos libre",
   },
 };
