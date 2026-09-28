@@ -1707,7 +1707,7 @@ pub fn write_to_session(
         w.flush().map_err(|e| format!("Flush failed: {}", e))?;
     }
 
-    // ── Direct SIGINT delivery (macOS/Unix) ──
+    // ── Direct SIGINT delivery (macOS only) ──
     //
     // Writing \x03 to the PTY master should cause the line discipline to
     // generate SIGINT for the foreground process group.  However, on macOS
@@ -1716,7 +1716,12 @@ pub fn write_to_session(
     //   1. Try tcgetpgrp() on the slave device to find the foreground pgrp.
     //   2. If that fails (it does from a non-session-leader process), send
     //      SIGINT to every child of the shell using sysctl/proc enumeration.
-    #[cfg(unix)]
+    //
+    // This must stay macOS-only (issue #394): the PTY line discipline
+    // already delivers SIGINT reliably on Linux (see the definitive test in
+    // spawn.rs), so also firing this fallback there sent SIGINT twice per
+    // Ctrl-C — bash then misreports $? or drops the next typed line.
+    #[cfg(target_os = "macos")]
     if bytes.contains(&0x03) {
         // Diagnostic: check termios on the slave to see if ISIG is enabled
         // Send SIGINT to the shell's child processes directly.
