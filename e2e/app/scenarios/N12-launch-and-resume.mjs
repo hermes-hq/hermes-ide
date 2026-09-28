@@ -657,7 +657,11 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  // The web view's helper processes (system services on macOS) can still be
+  // writing under the private home's Library just after the app exited;
+  // retry the removal instead of crashing the scenario after every check
+  // passed (seen as ENOTEMPTY on the macOS runner).
+  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
