@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
+import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, pngPixel, pngPixels, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
 
 const TOKEN = "t".repeat(64);
 let server;
@@ -212,6 +212,38 @@ describe("pngFlatColour", () => {
     const file = join(dir, "junk.png");
     writeFileSync(file, "not a png");
     expect(() => pngFlatColour(file)).toThrow(/not a PNG/);
+  });
+});
+
+describe("pngPixel", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hermes-png-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("reads the colour at a point, whatever the row filter and format", () => {
+    for (const filter of [0, 1, 2, 3]) {
+      const file = join(dir, `px-${filter}.png`);
+      writeFileSync(file, encodePng(20, 10, (x, y) => (x < 10 ? [255, 0, 255, 255] : [0, y * 20, 200, 255]), { filter }));
+      expect(pngPixel(file, 3, 7)).toBe("#ff00ff");
+      expect(pngPixel(file, 15, 4)).toBe("#0050c8");
+    }
+    const grey = join(dir, "grey.png");
+    writeFileSync(grey, encodePng(4, 4, (x) => [x * 60]));
+    expect(pngPixel(grey, 2, 0)).toBe("#787878");
+  });
+
+  it("refuses a point outside the picture", () => {
+    const file = join(dir, "small.png");
+    writeFileSync(file, encodePng(4, 4, () => [1, 2, 3]));
+    expect(() => pngPixel(file, 4, 0)).toThrow(/outside the 4x4 picture/);
+    expect(() => pngPixel(file, 0, -1)).toThrow(/outside/);
+  });
+
+  it("reads several points of one picture in the order asked", () => {
+    const file = join(dir, "many.png");
+    writeFileSync(file, encodePng(8, 8, (x, y) => [x * 30, y * 30, 7, 255], { filter: 2 }));
+    expect(pngPixels(file, [[0, 0], [7, 0], [3, 5], [7, 7]])).toEqual(["#000007", "#d20007", "#5a9607", "#d2d207"]);
+    expect(pngPixels(file, [])).toEqual([]);
+    expect(() => pngPixels(file, [[1, 1], [8, 1]])).toThrow(/pixel \(8, 1\) is outside the 8x8 picture/);
   });
 });
 

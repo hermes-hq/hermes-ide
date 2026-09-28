@@ -39,6 +39,14 @@ features:
         # did not pass.
         text: "A feature marked shipped with no green scenario on all three OSes fails the release gate"
         scenarios: [N01-acceptance-gate.mjs]
+      N01-5:
+        # On the Linux runner the app started last covers the first; the app
+        # raises the window and has it repaint before each capture. The same
+        # scenario shows on macOS that a window painted one flat colour is
+        # still refused; on Windows and Linux the capture includes the native
+        # title and menu bar, so there the unit tests cover that refusal.
+        text: "A screenshot shows the window it was asked for even while another test app covers it"
+        scenarios: [N01-screenshot-covered-window.mjs]
   N02:
     name: "Hermes instances never clobber each other"
     status: partial

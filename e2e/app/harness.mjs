@@ -273,7 +273,8 @@ export class Bridge {
       rmSync(target, { force: true });
       throw new Error(`the screenshot ${target} is one flat colour (${flat}): the window had not painted, or the screen is locked`);
     }
-    return { file: target, bytes: statSync(target).size, width: shot.width, height: shot.height };
+    // attempts: how many pictures the app took before one was not flat.
+    return { file: target, bytes: statSync(target).size, width: shot.width, height: shot.height, attempts: shot.attempts ?? 1 };
   }
 }
 
@@ -287,6 +288,40 @@ const SCREENSHOT_SETTLE_MS = 250;
  * the runners have Node and nothing else.
  */
 export function pngFlatColour(file) {
+  const { width, height, channels, rows } = readPng(file);
+  const first = rows[0].subarray(0, channels);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width * channels; x += channels) {
+      if (!rows[y].subarray(x, x + channels).equals(first)) return null;
+    }
+  }
+  return hexColour(first, channels);
+}
+
+/**
+ * The colour ("#rrggbb") of the pixel at (x, y) of a PNG the app wrote.
+ * Same formats as pngFlatColour; a pixel outside the picture is an error.
+ */
+export function pngPixel(file, x, y) {
+  return pngPixels(file, [[x, y]])[0];
+}
+
+/**
+ * The colours ("#rrggbb") of several pixels ([x, y] pairs) of one PNG, read
+ * once. A pixel outside the picture is an error.
+ */
+export function pngPixels(file, points) {
+  const { width, height, channels, rows } = readPng(file);
+  return points.map(([x, y]) => {
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= width || y >= height) {
+      throw new Error(`${file}: pixel (${x}, ${y}) is outside the ${width}x${height} picture`);
+    }
+    return hexColour(rows[y].subarray(x * channels, (x + 1) * channels), channels);
+  });
+}
+
+/** Width, height and the unfiltered pixel rows of a PNG. */
+function readPng(file) {
   const buf = readFileSync(file);
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (buf.length < 8 || !buf.subarray(0, 8).equals(signature)) throw new Error(`${file} is not a PNG`);
@@ -320,8 +355,8 @@ export function pngFlatColour(file) {
   const raw = inflateSync(Buffer.concat(idat));
   const stride = width * channels;
   if (raw.length < height * (stride + 1)) throw new Error(`${file}: PNG data is truncated`);
+  const rows = [];
   let previous = Buffer.alloc(stride);
-  let first = null;
   for (let y = 0; y < height; y++) {
     const at = y * (stride + 1);
     const filter = raw[at];
@@ -344,14 +379,14 @@ export function pngFlatColour(file) {
       } else throw new Error(`${file}: bad PNG filter ${filter} on row ${y}`);
       row[i] = (row[i] + predicted) & 0xff;
     }
-    for (let x = 0; x < stride; x += channels) {
-      const pixel = row.subarray(x, x + channels);
-      if (first === null) first = Buffer.from(pixel);
-      else if (!pixel.equals(first)) return null;
-    }
+    rows.push(row);
     previous = row;
   }
-  const rgb = channels < 3 ? [first[0], first[0], first[0]] : [first[0], first[1], first[2]];
+  return { width, height, channels, rows };
+}
+
+function hexColour(pixel, channels) {
+  const rgb = channels < 3 ? [pixel[0], pixel[0], pixel[0]] : [pixel[0], pixel[1], pixel[2]];
   return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
 }
 
