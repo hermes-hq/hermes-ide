@@ -81,7 +81,9 @@ function phaseEvent(phase: string, at: number): SessionEvent | null {
 export const terminalProvider: SessionProvider<TerminalObservation> = {
   id: "terminal",
   source: TERMINAL_SOURCE,
-  capabilities: { status: "exact", approvals: false, questions: true, turnBoundaries: false, identity: true },
+  // `questions: false`: a terminal only guesses a question from the PTY
+  // (needs_answer, guessed); it cannot tell one.
+  capabilities: { status: "exact", approvals: false, questions: false, turnBoundaries: false, identity: true },
   observe(prev, next, at) {
     const events: SessionEvent[] = [];
     const startupChanged = next.startup !== null && !sameStartup(prev?.startup ?? null, next.startup);

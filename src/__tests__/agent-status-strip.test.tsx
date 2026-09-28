@@ -113,4 +113,19 @@ describe("status strip", () => {
     expect(html).toContain("Bash: npm test");
     expect(html).not.toContain("status-capsule");
   });
+
+  it("flag on: a status that needs a person is announced assertively, others politely", async () => {
+    await setFlag(true);
+    currentSession = session("busy");
+    dispatchSessionEvent("s1", { type: "status", at: 1, source: "hook:x", status: { kind: "working", confidence: "exact", detail: "" } });
+    expect(render()).toMatch(/status-bar-agent-status" role="status" aria-live="polite"/);
+    for (const kind of ["needs_approval", "needs_answer", "gate", "check_failed", "error", "limited"] as const) {
+      dispatchSessionEvent("s1", { type: "status", at: 2, source: "hook:x", status: { kind, confidence: "exact", detail: "" } });
+      const html = render();
+      expect(html).toContain(`data-status="${kind}"`);
+      expect(html).toMatch(/status-bar-agent-status" role="status" aria-live="assertive"/);
+    }
+    dispatchSessionEvent("s1", { type: "status", at: 3, source: "hook:x", status: { kind: "plan_ready", confidence: "exact", detail: "" } });
+    expect(render()).toMatch(/status-bar-agent-status" role="status" aria-live="polite"/);
+  });
 });
