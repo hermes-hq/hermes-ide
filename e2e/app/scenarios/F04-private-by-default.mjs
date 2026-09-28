@@ -438,7 +438,16 @@ try {
     }
   }
   sink.close();
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+  // A helper process of the app can still be writing into the throwaway
+  // home for a moment after the app exits (seen on Linux: ENOTEMPTY).
+  // Cleanup retries and never decides the result.
+  if (homeDir) {
+    try {
+      rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (err) {
+      log(`  (could not remove the throwaway home ${homeDir}: ${err.message})`);
+    }
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log, details: { analyticsEvents: eventNames() } });
