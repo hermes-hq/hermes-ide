@@ -810,7 +810,9 @@ features:
     # .hermes/worktree.toml: setup commands, copy of git-ignored files,
     # default done_when, [ports]. Behind the honestIsolation flag (recipes
     # prepare the worktrees that feature creates); the scenario turns it on.
-    # Negative control: HERMES_E2E_F26_FLAG=off must end in RESULT: FAIL.
+    # Negative control: a build whose copy step ignores the tracked-file
+    # check ends in RESULT: FAIL at step 6 (HERMES_E2E_F26_FLAG=off also
+    # fails, but before any recipe step, so it proves nothing about F26).
     # The file's commands never run without the user's "Run setup" once per
     # version of the file; secrets from copied files are masked in the log
     # and never stored (the scenario scans the app's data folder and log).

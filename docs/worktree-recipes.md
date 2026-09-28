@@ -51,6 +51,7 @@ files that belong in a commit.
 
 Hermes copies files from disk to disk; their contents never pass through the
 app. Values found in copied files (`KEY=value` lines) are masked in the setup
-log. The log is kept in memory only: it is never written to disk, the
+log, except for keys that are never secret (`HOST`, `HOSTNAME`, `PORT`,
+`NODE_ENV`, `APP_ENV`, `RAILS_ENV`, `LOG_LEVEL`, `TZ`). The log is kept in memory only: it is never written to disk, the
 database, the app's own log or a settings export. The only thing Hermes
 stores is a hash of the recipe file you allowed to run.
