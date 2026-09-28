@@ -98,12 +98,13 @@ function turnNumber(v: unknown): number | null {
  * Validating parser for an event off the wire (Rust, a plugin, the e2e
  * injector). Returns null for anything malformed: an unknown type, a
  * missing field, a wrong type. Extra fields are dropped, so a newer
- * producer never breaks an older reader.
+ * producer never breaks an older reader. Numbers are bounded like the
+ * Rust side (`at` an integer, `code` an i32) so both parsers agree.
  */
 export function parseSessionEvent(value: unknown): SessionEvent | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
-  if (typeof v.at !== "number" || !Number.isFinite(v.at)) return null;
+  if (typeof v.at !== "number" || !Number.isInteger(v.at)) return null;
   const source = v.source === undefined ? undefined : v.source;
   if (source !== undefined && typeof source !== "string") return null;
   const base: EventBase = source === undefined ? { at: v.at } : { at: v.at, source };
@@ -136,7 +137,7 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
     case "exit": {
       const code = v.code === undefined || v.code === null ? null : v.code;
       const signal = v.signal === undefined || v.signal === null ? null : v.signal;
-      if (code !== null && !(typeof code === "number" && Number.isInteger(code))) return null;
+      if (code !== null && !(typeof code === "number" && Number.isInteger(code) && code >= -2147483648 && code <= 2147483647)) return null;
       if (signal !== null && typeof signal !== "string") return null;
       return { ...base, type: "exit", code, signal };
     }

@@ -46,7 +46,9 @@ import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } fro
 const SCENARIO = "F03-retire-autopilot";
 const startedAt = Date.now();
 const DB_FILE = "hermes_idea_v3.db";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+/** Tables created by schema steps after F03's step 2. */
+const ADDED_BY_LATER_STEPS = ["agent_turns"];
 const FIXTURE = join(REPO_ROOT, "src-tauri", "tests", "fixtures", "db", "v1.4.0.sql");
 const NEGATIVE = process.env.HERMES_E2E_F03_NEGATIVE === "1";
 
@@ -426,7 +428,12 @@ if (!failed && dbPath) {
       if (table === "execution_nodes") continue;
       assert(after[table] >= n, `${table}: ${n} rows before, ${after[table]} after`);
     }
-    assert(Object.keys(after).length === Object.keys(before).length - 1, "no other table was added or removed");
+    // Later schema steps only add tables (step 3: agent_turns, 2.0 contracts).
+    const expected = [...Object.keys(before).filter((t) => t !== "execution_nodes"), ...ADDED_BY_LATER_STEPS].sort();
+    assert(
+      JSON.stringify(Object.keys(after).sort()) === JSON.stringify(expected),
+      `no other table was added or removed: ${Object.keys(after).sort().join(", ")}`,
+    );
     const backupDir = join(dirname(dbPath), "backups");
     const backups = existsSync(backupDir) ? readdirSync(backupDir) : [];
     assert(backups.length === 1 && /-from-v0\.db$/.test(backups[0]), `one backup of the 1.4.0 data: ${backups.join(", ")}`);

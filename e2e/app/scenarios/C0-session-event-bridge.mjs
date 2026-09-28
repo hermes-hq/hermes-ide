@@ -130,7 +130,7 @@ try {
     const s = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(SESSION)});
     return s.exit ? s : null;
   `);
-  assert(s3.status.kind === "exited" && s3.status.confidence === "exact" && s3.status.detail === "exit code 0", "an exit sets the status to exited, exactly");
+  assert(s3.status.kind === "exited" && s3.status.confidence === "exact" && s3.status.detail === "", "an exit sets the status to exited, exactly, with no text of its own");
   const wokenAfterRust = await bridge.eval(`return window.__HERMES_E2E__.sessionEventNotifications(${JSON.stringify(SESSION)});`);
   assert(wokenAfterRust === 3, `the subscriber was woken once per event (got ${wokenAfterRust})`);
 

@@ -35,6 +35,8 @@
     { "type": "attention", "at": 1790000005000 },
     { "type": "identity", "at": 1790000006000, "vendorSessionId": 7, "model": null, "permissionMode": null },
     { "type": "exit", "at": 1790000007000, "code": "zero", "signal": null },
+    { "type": "exit", "at": 1790000007000, "code": 2147483648, "signal": null },
+    { "type": "turn_start", "at": 1790000001000.5, "n": 1 },
     { "type": "status", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
     { "type": "nope", "at": 1790000000000 },
     "not an object"
