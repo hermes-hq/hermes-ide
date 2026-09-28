@@ -33,6 +33,8 @@ import { startStatusBridge } from "../attention/statusBridge";
 import { createNotifier, type AwayPayload, type NotifierDeps } from "../attention/notifier";
 import { awayPayload, itemState, notificationText } from "../attention/describe";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
+import { _resetUserLabelsForTest, rememberUserLabel } from "../attention/userLabels";
+import { deriveSessionLabelFromMessage } from "../utils/autoSessionLabel";
 import { _resetMutesForTest, getMutes, muteSession, unmuteSession } from "../attention/mutes";
 import { claimPcAppChords, isAppChordInTerminal } from "../utils/keymap";
 import { matchAppShortcut } from "../utils/shortcuts";
@@ -326,6 +328,11 @@ describe("what an away message and a notification say", () => {
   const session = { label: "fix-login", ai_provider: "claude", agent_name: "", detected_agent: null };
   const blocked = item({ id: "1", sessionId: "A", detail: "Bash: ./deploy.sh --cluster zebra-canary-42", source: "status" });
 
+  beforeEach(() => {
+    _resetUserLabelsForTest();
+    rememberUserLabel("A", "fix-login");
+  });
+
   it("the away message has exactly agent, task and state, never the detail", () => {
     const p = awayPayload(blocked, session, "needs_approval");
     expect(Object.keys(p).sort()).toEqual(["agent", "state", "task"]);
@@ -341,8 +348,33 @@ describe("what an away message and a notification say", () => {
   });
 
   it("long task names are cut", () => {
+    rememberUserLabel("A", "x".repeat(300));
     const p = awayPayload(blocked, { ...session, label: "x".repeat(300) }, "needs_answer");
     expect(p.task.length).toBe(80);
+  });
+
+  it("never names the task after a prompt: an auto-named Agent view session sends no task", () => {
+    _resetUserLabelsForTest();
+    const prompt = "Rotate the walrus-prod database password and email it to ops\nthen restart";
+    const autoLabel = deriveSessionLabelFromMessage(prompt)!;
+    expect(autoLabel).toContain("walrus");
+    const p = awayPayload(blocked, { ...session, label: autoLabel }, "needs_approval");
+    expect(p.task).toBe("");
+    expect(JSON.stringify(p)).not.toMatch(/walrus|Rotate|password/);
+  });
+
+  it("sends the placeholder name and names the user typed, and drops a name that changed since", () => {
+    _resetUserLabelsForTest();
+    expect(awayPayload(blocked, { ...session, label: "Session 4" }, "needs_approval").task).toBe("Session 4");
+    expect(awayPayload(blocked, session, "needs_approval").task).toBe("");
+    rememberUserLabel("A", "fix-login");
+    expect(awayPayload(blocked, session, "needs_approval").task).toBe("fix-login");
+    // Another session with the same words was not named by the user.
+    const other = item({ id: "2", sessionId: "B", source: "status" });
+    expect(awayPayload(other, session, "needs_approval").task).toBe("");
+    // The user named it "Session 9", then the first message renamed it.
+    rememberUserLabel("A", "Session 9");
+    expect(awayPayload(blocked, { ...session, label: "ship the otter migration" }, "needs_approval").task).toBe("");
   });
 
   it("the OS notification names the agent and the state, and shows the detail locally", () => {

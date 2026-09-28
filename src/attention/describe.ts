@@ -3,13 +3,15 @@
 // F12 + N16. What the inbox row, the OS notification and the away message
 // say about an item. The away message is deliberately poorer than the rest:
 // the agent, the task name and the state, never the detail line (which can
-// hold a command, a question or a file path).
+// hold a command, a question or a file path), and the task name only when it
+// cannot come from a prompt (see userLabels.ts).
 
 import type { InboxItem } from "../agent/contract/inbox";
 import type { AgentStatusKind } from "../agent/contract/status";
 import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
 import type { SessionData } from "../types/session";
 import type { AwayPayload, NotificationText } from "./notifier";
+import { shareableLabel } from "./userLabels";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -49,7 +51,7 @@ function clip(text: string, max: number): string {
 export function awayPayload(item: InboxItem, session: SessionLike | undefined, status: AgentStatusKind | null): AwayPayload {
   return {
     agent: clip(agentLabel(session), AWAY_AGENT_MAX),
-    task: clip(session?.label ?? "", AWAY_TASK_MAX),
+    task: clip(shareableLabel(item.sessionId, session?.label), AWAY_TASK_MAX),
     state: itemState(item, status),
   };
 }

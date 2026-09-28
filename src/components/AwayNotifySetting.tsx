@@ -1,7 +1,7 @@
 // ─── Settings > General: away notifications (N16) ─────────────────────
 //
 // One optional address. Saved when the field loses focus (or Enter), and
-// only when it is empty or an http(s) URL. The backend reads it when an
+// only when it is empty or an http(s) URL. Masked unless being edited. The backend reads it when an
 // agent is blocked; empty means no network call at all.
 
 import { useEffect, useState } from "react";
@@ -18,6 +18,9 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(value);
   const [invalid, setInvalid] = useState(false);
+  // The address can hold a secret (a Telegram bot token, a private topic):
+  // shown only while the field is being edited.
+  const [editing, setEditing] = useState(false);
   useEffect(() => setDraft(value), [value]);
 
   const commit = () => {
@@ -38,7 +41,7 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
       <input
         id="away-notify-url"
         className="settings-input"
-        type="url"
+        type={editing ? "url" : "password"}
         inputMode="url"
         spellCheck={false}
         autoComplete="off"
@@ -51,7 +54,11 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
           setDraft(e.target.value);
           if (invalid) setInvalid(false);
         }}
-        onBlur={commit}
+        onFocus={() => setEditing(true)}
+        onBlur={() => {
+          setEditing(false);
+          commit();
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") commit();
         }}
