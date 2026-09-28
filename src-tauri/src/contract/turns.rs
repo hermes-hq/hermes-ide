@@ -1,11 +1,13 @@
 //! Turn ledger seam (contract C0; mirror of src/agent/contract/turns.ts).
 //!
-//! F20 fills it: at the end of every agent turn Hermes snapshots the
-//! worktree into `refs/hermes/<session>/turn/<n>` and records the turn in
-//! the `agent_turns` table (schema step 3, db/migrations.rs). Until then the
-//! commands answer with nothing: `list_turns` -> `[]`, `get_turn_diff` -> `null`.
+//! F20 fills it (src/turn_ledger): at the end of every agent turn Hermes
+//! snapshots the worktree into `refs/hermes/<session>/turn/<n>` and records
+//! the turn in the `agent_turns` table (schema step 3, db/migrations.rs).
+//! `list_turns` and `get_turn_diff` read that ledger; a session without
+//! turns still answers `[]` / `null`.
 
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diffstat {
@@ -28,6 +30,11 @@ pub struct Turn {
     /// Epoch milliseconds; None while the turn is running.
     pub ended_at: Option<i64>,
     pub diffstat: Diffstat,
+    /// F20 (additive): the snapshot ran past its budget, so this turn has a
+    /// diffstat summary but no snapshot (`ref` is empty) and cannot be
+    /// diffed or restored.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub degraded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,22 +75,26 @@ pub fn parse_turn_ref(git_ref: &str) -> Option<(String, u32)> {
     (n > 0).then(|| (session.to_string(), n))
 }
 
-/// Turns of a session, oldest first. Empty until F20 lands.
+/// Turns of a session, oldest first; `[]` for a session without any.
 #[tauri::command]
-pub fn list_turns(session_id: String) -> Result<Vec<Turn>, String> {
+pub fn list_turns(app: AppHandle, session_id: String) -> Result<Vec<Turn>, String> {
     if !is_turn_ref_session_id(&session_id) {
         return Err(format!("not a session id: {session_id:?}"));
     }
-    Ok(Vec::new())
+    crate::turn_ledger::list_turns_for(&app, &session_id)
 }
 
-/// The diff of one turn, or None when there is no such turn (always, until F20).
+/// The diff of one turn, or None when there is no such turn.
 #[tauri::command]
-pub fn get_turn_diff(session_id: String, n: u32) -> Result<Option<TurnDiff>, String> {
+pub fn get_turn_diff(
+    app: AppHandle,
+    session_id: String,
+    n: u32,
+) -> Result<Option<TurnDiff>, String> {
     if turn_ref(&session_id, n).is_none() {
         return Err(format!("not a turn: {session_id:?} #{n}"));
     }
-    Ok(None)
+    crate::turn_ledger::turn_diff_for(&app, &session_id, n)
 }
 
 #[cfg(test)]
@@ -115,14 +126,6 @@ mod tests {
     }
 
     #[test]
-    fn the_commands_answer_with_nothing_but_still_validate_their_input() {
-        assert_eq!(list_turns("sess-1".into()).unwrap(), Vec::<Turn>::new());
-        assert!(list_turns("no/slash".into()).is_err());
-        assert_eq!(get_turn_diff("sess-1".into(), 1).unwrap(), None);
-        assert!(get_turn_diff("sess-1".into(), 0).is_err());
-    }
-
-    #[test]
     fn a_turn_serialises_with_the_frontend_field_names() {
         let turn = Turn {
             session_id: "s1".into(),
@@ -131,6 +134,7 @@ mod tests {
             started_at: 10,
             ended_at: None,
             diffstat: Diffstat::default(),
+            degraded: false,
         };
         assert_eq!(
             serde_json::to_value(&turn).unwrap(),
@@ -139,6 +143,22 @@ mod tests {
                 "startedAt": 10, "endedAt": null,
                 "diffstat": { "files": 0, "insertions": 0, "deletions": 0 }
             })
+        );
+        let degraded = Turn {
+            degraded: true,
+            git_ref: String::new(),
+            ..turn
+        };
+        assert_eq!(serde_json::to_value(&degraded).unwrap()["degraded"], true);
+        let back: Turn = serde_json::from_value(serde_json::json!({
+            "sessionId": "s1", "n": 2, "ref": "refs/hermes/s1/turn/2",
+            "startedAt": 10, "endedAt": null,
+            "diffstat": { "files": 0, "insertions": 0, "deletions": 0 }
+        }))
+        .unwrap();
+        assert!(
+            !back.degraded,
+            "an older row without the field reads as a full snapshot"
         );
     }
 }

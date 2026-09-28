@@ -35,9 +35,15 @@ Ctrl-C, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
 | `bracketed-paste` | Reports one bracketed paste |
 | `resize` | Reports a resize |
 
-Steps: `print, sleep, title, osc9, progress, osc99, osc777, bigOsc, bell, raw,
+Steps: `print, sleep, title, osc9, progress, osc99, osc777, bigOsc, bell, raw, shell,
 split, altScreen, modes, box, size, waitKey, waitPaste, waitResize, hang, kill,
 exit`.
+
+`shell` runs a command through the platform shell in the agent's working
+directory, the way an agent's Bash tool does: `{ "do": "shell", "posix":
+"sed -i ...", "win32": "echo ...", "label": "sed -i", "failExit": 1 }`. It
+prints `fake-agent: ran <label> (exit <code>)`, logs the exit code, and ends
+the scenario with `failExit` (when given) if the command fails.
 
 ## Fake vendor CLI
 

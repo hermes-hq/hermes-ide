@@ -301,3 +301,47 @@ describe("fake-agent: log and usage", () => {
 		}
 	});
 });
+
+describe("fake-agent: shell step (an agent's Bash tool)", () => {
+	it("runs the platform command in the agent's working directory and reports the exit code", async () => {
+		const dir = tmpDir();
+		const f = scenarioFile(dir, [
+			{ do: "print", text: "editing\n" },
+			{
+				do: "shell",
+				label: "sed -i",
+				posix: "printf 'hello world\\n' > app.txt && mkdir -p notes && printf 'draft\\n' > notes/new.txt",
+				win32: "echo hello world>app.txt & mkdir notes & echo draft>notes\\new.txt",
+			},
+			{ do: "shell", label: "a failing one", posix: "exit 7", win32: "exit /b 7" },
+			{ do: "exit", code: 0 },
+		]);
+		const logFile = path.join(dir, "log.jsonl");
+		const p = start(AGENT, ["--scenario", f, "--speed", "0", "--log", logFile], { cwd: dir });
+		const r = await p.done;
+		const text = r.stdout.toString("latin1");
+		expect(r.code).toBe(0);
+		expect(text).toContain("fake-agent: ran sed -i (exit 0)\r\n");
+		expect(text).toContain("fake-agent: ran a failing one (exit 7)\r\n");
+		expect(fs.readFileSync(path.join(dir, "app.txt"), "utf8").trim()).toBe("hello world");
+		expect(fs.readFileSync(path.join(dir, "notes", "new.txt"), "utf8").trim()).toBe("draft");
+		const events = fs.readFileSync(logFile, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		expect(events.filter((e) => e.ev === "shell").map((e) => e.code)).toEqual([0, 7]);
+	});
+
+	it("failExit ends the scenario with that code when the command fails, and a missing platform command is reported", async () => {
+		const dir = tmpDir();
+		const f = scenarioFile(dir, [
+			{ do: "shell", label: "boom", posix: "exit 3", win32: "exit /b 3", failExit: 9 },
+			{ do: "print", text: "never printed\n" },
+			{ do: "exit", code: 0 },
+		]);
+		const r = await run(f);
+		expect(r.code).toBe(9);
+		expect(r.text).not.toContain("never printed");
+		const g = scenarioFile(dir, [{ do: "shell", label: "elsewhere" }, { do: "exit", code: 5 }]);
+		const r2 = await run(g);
+		expect(r2.code).toBe(5);
+		expect(r2.text).toContain(`fake-agent: no shell command for ${process.platform}`);
+	});
+});

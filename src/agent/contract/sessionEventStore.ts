@@ -100,9 +100,11 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
 }
 
 type Listener = () => void;
+type AnyListener = (sessionId: string, event: SessionEvent) => void;
 
 const snapshots = new Map<string, SessionEventSnapshot>();
 const listeners = new Map<string, Set<Listener>>();
+const anyListeners = new Set<AnyListener>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
 
 /** The current snapshot of a session; stable until an event lands. */
@@ -130,6 +132,18 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
   };
 }
 
+/**
+ * Hear every accepted event of every session, after it was folded in
+ * (F20, additive): for consumers that act on events rather than render
+ * snapshots, such as the turn ledger bridge.
+ */
+export function subscribeAllSessionEvents(listener: AnyListener): () => void {
+  anyListeners.add(listener);
+  return () => {
+    anyListeners.delete(listener);
+  };
+}
+
 /** Fold one event into its session and wake that session's subscribers. */
 export function dispatchSessionEvent(sessionId: string, event: SessionEvent): SessionEventSnapshot {
   const next = reduceSessionEvent(getSessionEventSnapshot(sessionId), event);
@@ -137,6 +151,7 @@ export function dispatchSessionEvent(sessionId: string, event: SessionEvent): Se
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const l of [...anyListeners]) l(sessionId, event);
   return next;
 }
 
@@ -165,5 +180,6 @@ export function useSessionEvents(sessionId: string): SessionEventSnapshot {
 export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
+  anyListeners.clear();
   emptyCache.clear();
 }

@@ -1910,6 +1910,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "git_author_email",
     "git_auto_stage",
     "git_show_untracked",
+    // Turn ledger kill switch (F20): "off" stops every snapshot.
+    "turn_ledger",
     // AI agent defaults
     "default_permission_mode",
     "custom_command_suffix",

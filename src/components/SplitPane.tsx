@@ -5,6 +5,8 @@ import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
 import { ProviderActionsBar } from "./ProviderActionsBar";
 import { TerminalPane } from "./TerminalPane";
+import { TurnBar } from "./TurnBar";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { translate } from "../i18n/registry";
 import { CrashProbe } from "./CrashProbe";
@@ -363,6 +365,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           </ContainedErrorBoundary>
         </div>
       </div>
+      {/* F20: the turn bar (Diff / Restore per agent turn) under a terminal
+          session, behind the turnLedger flag. */}
+      {session.mode !== "agent" && isFeatureFlagEnabled("turnLedger") && <TurnBar sessionId={sessionId} />}
 
       {/* Drag capture overlay — sits above xterm canvas during drags */}
       <div className="split-pane-drag-capture" />

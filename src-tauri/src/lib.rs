@@ -28,6 +28,7 @@ pub mod pty;
 mod saved_workspace;
 mod self_test;
 mod transcript;
+mod turn_ledger;
 mod updater;
 mod workspace;
 
@@ -603,6 +604,8 @@ pub fn run() {
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
             app.manage(inline_pty::InlinePtyManager::new());
+            // Turn ledger (F20): off until the frontend says the flag is on.
+            app.manage(turn_ledger::TurnLedger::default());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
             // for it (warm_agent_bridge) once an Agent-view session exists,
@@ -869,6 +872,12 @@ pub fn run() {
             contract::turns::list_turns,
             contract::turns::get_turn_diff,
             contract::emit_session_event_for_test,
+            // Turn ledger (F20)
+            turn_ledger::set_turn_ledger_enabled,
+            turn_ledger::turn_ledger_turn_started,
+            turn_ledger::turn_ledger_turn_ended,
+            turn_ledger::preview_restore_turn,
+            turn_ledger::restore_turn,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

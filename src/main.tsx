@@ -4,8 +4,9 @@ import { exit } from "@tauri-apps/plugin-process";
 import App from "./App";
 import { getStartupProblem } from "./api/startupProblem";
 import { StartupProblemScreen } from "./components/StartupProblemScreen";
-import { initFeatureFlags } from "./featureFlags";
+import { initFeatureFlags, isFeatureFlagEnabled } from "./featureFlags";
 import { startSessionEventChannel } from "./agent/contract/channel";
+import { startTurnLedgerBridge } from "./agent/turns/turnLedgerBridge";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -57,6 +58,9 @@ void getStartupProblem().then((problem) => {
     .then(({ listen }) => startSessionEventChannel(listen))
     .catch((e) => console.warn("[session-event] channel not attached:", e));
   void initFeatureFlags().finally(() => {
+    // Turn ledger (F20): forward turn boundaries to the backend snapshots
+    // while the flag is on; tell the backend to stay off otherwise.
+    startTurnLedgerBridge(isFeatureFlagEnabled("turnLedger"));
     root.render(
       <React.StrictMode>
         <App />

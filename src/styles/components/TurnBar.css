@@ -1,0 +1,210 @@
+/* ─── Turn bar (F20) — under a terminal session ─────────────────── */
+
+.turn-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 2px var(--space-2);
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  overflow: hidden;
+}
+
+.turn-bar-title {
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.turn-bar-turns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.turn-bar-turns::-webkit-scrollbar { display: none; }
+
+.turn-bar-turn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font: inherit;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  line-height: 1.6;
+}
+.turn-bar-turn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-0);
+}
+.turn-bar-turn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.turn-bar-turn-degraded .turn-bar-turn-label::after {
+  content: " ~";
+  color: var(--text-3);
+}
+
+.turn-bar-turn-stat,
+.turn-sheet-stat {
+  display: inline-flex;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.turn-bar-add { color: var(--green); }
+.turn-bar-del { color: var(--red); }
+
+.turn-bar-notice {
+  flex-shrink: 0;
+  color: var(--green);
+  font-weight: 600;
+  animation: turn-bar-notice-fade 4s ease-out forwards;
+}
+@keyframes turn-bar-notice-fade {
+  0%, 75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ─── The diff / restore sheet ───────────────────────────────────── */
+
+.turn-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.turn-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(900px, 92vw);
+  height: min(680px, 86vh);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.turn-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.turn-sheet-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-0);
+  font-size: var(--text-sm);
+}
+.turn-sheet-close {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  line-height: 1;
+  padding: 0 4px;
+}
+.turn-sheet-close:hover { color: var(--text-0); }
+
+.turn-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.turn-sheet-hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+
+.turn-sheet-loading,
+.turn-sheet-error,
+.turn-diff-empty {
+  padding: var(--space-4);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.turn-sheet-error { color: var(--red); }
+
+.turn-diff-text {
+  margin: 0;
+  padding: var(--space-2) 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 4;
+}
+.turn-diff-line {
+  padding: 0 var(--space-3);
+  min-height: 18px;
+}
+.turn-diff-line-add { background: var(--green-dim); color: var(--green); }
+.turn-diff-line-del { background: var(--red-dim); color: var(--red); }
+.turn-diff-line-hunk { color: var(--accent); }
+.turn-diff-line-header,
+.turn-diff-line-file { color: var(--text-3); }
+.turn-diff-line-file { margin-top: var(--space-2); font-weight: 600; }
+
+.turn-sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.turn-sheet-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.turn-sheet-btn:hover:not(:disabled) { color: var(--text-0); border-color: var(--text-3); }
+.turn-sheet-btn:disabled { opacity: 0.5; cursor: default; }
+.turn-sheet-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-0);
+}
+.turn-sheet-btn-danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--bg-0);
+}
