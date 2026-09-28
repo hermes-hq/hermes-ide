@@ -1,5 +1,6 @@
 pub mod disk_guard;
 pub mod journal;
+pub mod recipe;
 pub mod watcher;
 pub mod worktree;
 

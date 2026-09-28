@@ -1,0 +1,182 @@
+/* ─── Worktree recipe panel (F26) ─────────────────────────────────── */
+
+.worktree-recipe-panel {
+  position: fixed;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  /* Finished cards stay under dialogs (the wizard is at 100)... */
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(560px, calc(100vw - 2 * var(--space-3)));
+  max-height: calc(100vh - 2 * var(--space-3));
+  overflow-y: auto;
+}
+
+/* ...while a card asks or runs, it is above them: the wizard waits on it. */
+.worktree-recipe-panel-active {
+  z-index: 1100;
+}
+
+.worktree-recipe-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.worktree-recipe-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-shadow);
+}
+
+.worktree-recipe-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+.worktree-recipe-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.worktree-recipe-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-recipe-branch {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.worktree-recipe-state {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+.worktree-recipe-running .worktree-recipe-state,
+.worktree-recipe-awaiting .worktree-recipe-state {
+  color: var(--warning);
+}
+.worktree-recipe-succeeded .worktree-recipe-state {
+  color: var(--success);
+}
+.worktree-recipe-failed .worktree-recipe-state,
+.worktree-recipe-invalid .worktree-recipe-state {
+  color: var(--danger);
+}
+
+.worktree-recipe-ask p {
+  margin: 0 0 var(--space-1) 0;
+  line-height: 1.5;
+}
+
+.worktree-recipe-commands {
+  margin: 0 0 var(--space-1) 0;
+  padding-left: var(--space-4);
+  font-family: var(--font-mono);
+}
+
+.worktree-recipe-commands code {
+  color: var(--text-0);
+  word-break: break-all;
+}
+
+.worktree-recipe-note {
+  color: var(--text-2);
+}
+
+.worktree-recipe-failure {
+  margin: 0;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.worktree-recipe-meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}
+
+.worktree-recipe-log {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.worktree-recipe-line-command {
+  color: var(--accent);
+}
+.worktree-recipe-line-stderr {
+  color: var(--warning);
+}
+.worktree-recipe-line-hermes {
+  color: var(--text-2);
+}
+
+.worktree-recipe-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.worktree-recipe-actions:empty {
+  display: none;
+}
+
+.worktree-recipe-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.worktree-recipe-btn:hover {
+  background: var(--bg-hover);
+}
+.worktree-recipe-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-shadow);
+}
+.worktree-recipe-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-0);
+}
+.worktree-recipe-btn-primary:hover {
+  background: var(--accent-bright);
+}

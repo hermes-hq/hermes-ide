@@ -20,6 +20,7 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { defaultDoneWhen, listRecipeRuns } from "../state/worktreeRecipes";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +125,12 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F26 worktree recipes ───────────────────────────────────────────
+  /** Recipe runs the panel shows (state, log lines, ports, failure). */
+  worktreeRecipeRuns: () => listRecipeRuns(),
+  /** The done_when checks a session's worktree.toml declared. */
+  defaultDoneWhen: (sessionId: string) => defaultDoneWhen(sessionId),
 };
 
 export type HermesE2EHooks = typeof hooks;

@@ -2895,6 +2895,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "ssh_connection_history",
     // Feature flag overrides — per-install debug state, not a real preference
     "feature_flag_overrides",
+    // Worktree recipes the user allowed to run (project id -> file hash)
+    "worktree_recipe_trust",
 ];
 
 /// Validate a settings file path for export or import.
