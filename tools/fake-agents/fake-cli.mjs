@@ -13,8 +13,11 @@
 //     the hook's stdin, the same shape Claude Code sends) — but only after a
 //     startup prompt was answered, when it shows one;
 //   - then behaves as a small TUI: echoes keys, `q` or Ctrl-C quits (running
-//     the `SessionEnd` hooks first). Hooks run in exec form (`args`) or
-//     through the shell, with matchers, as Claude Code runs them.
+//     the `SessionEnd` hooks first); a bracketed paste followed by Enter is
+//     a prompt, which runs the `UserPromptSubmit` hooks with `{prompt}` — the
+//     Review Desk's delivery receipt rides on that — and then the `Stop`
+//     hooks, as the turn ends. Hooks run in exec form (`args`) or through
+//     the shell, with matchers, as Claude Code runs them.
 //
 // One key per thing a real agent does, so a test can drive every signal
 // path (F11): `p` PermissionRequest then y/n (PostToolUse / PermissionDenied),
@@ -23,6 +26,12 @@
 // `u`/`d` SubagentStart/SubagentStop, `n` Notification idle_prompt,
 // `o` an OSC 9 notification (no hook), `m` the OSC 777 Hermes marker with this
 // launch's nonce, `x` the same marker with a forged nonce.
+//
+// In the `prompts` mode (F21) those keys are plain text instead: a line of
+// typed text followed by Enter is a prompt too. A prompt of the form
+// `work <ms>` keeps the agent on its turn for that long first; keys typed
+// meanwhile are queued and read only after the turn, as the real CLI does
+// (the Review Desk must not type into a working agent).
 //
 // Behaviour is chosen per launch with HERMES_FAKE_MODE, or the file
 // `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches).
@@ -38,6 +47,12 @@
 //   ignore-resume accept `--resume` but start a new conversation under a new
 //                 id anyway — a broken vendor, used as the negative control
 //                 that proves the resume checks can fail
+//   prompts       typed lines are prompts (see above), not signal keys
+//   no-prompt-hooks
+//                 take prompts (as `prompts`) but never run the
+//                 `UserPromptSubmit` hooks — a vendor without that hook, the
+//                 negative control that proves the Review Desk's "not
+//                 delivered" is real
 // and, with trust-prompt:
 //   interrupt-exit-1  Ctrl-C at the prompt exits 1 instead — the same code
 //                 as a rejected resume, but without its message
@@ -126,6 +141,8 @@ const record = {
 	settings,
 	settingsError,
 	prompt: args.positional.join(" ") || null,
+	/** Prompts submitted while running (typed or pasted, then Enter). */
+	prompts: [],
 	hooksRan: [],
 	events: [],
 	exit: null,
@@ -389,23 +406,45 @@ async function main() {
 	else await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
 
+	// A prompt: typed text, or a bracketed paste, submitted with Enter —
+	// as the Review Desk's one visible line arrives. Like the real CLI it
+	// runs the UserPromptSubmit hooks with the prompt, unless the mode says
+	// this vendor has no such hook (the negative control of the receipt).
+	const promptsMode = has("prompts") || has("no-prompt-hooks");
+	let line = "";
+	let escape = "";
+	let pasting = false;
 	for (;;) {
 		const key = await nextKey();
 		if (key === null || key === "\x04") {
 			await quit("eof");
 			return;
 		}
-		if (key === "\x03") {
+		if (escape || key === ESC) {
+			escape += key;
+			if (escape === `${ESC}[200~`) {
+				pasting = true;
+				escape = "";
+			} else if (escape === `${ESC}[201~`) {
+				pasting = false;
+				escape = "";
+			} else if (!`${ESC}[200~`.startsWith(escape) && !`${ESC}[201~`.startsWith(escape)) {
+				escape = ""; // some other key sequence: dropped
+			}
+			continue;
+		}
+		if (!pasting && key === "\x03") {
 			await quit("ctrl-c");
 			return;
 		}
-		if (key === "q") {
+		if (!pasting && line === "" && key === "q") {
 			await quit("q");
 			return;
 		}
 		// One key per thing a real agent does, so a test can drive every
-		// signal path (see the header comment).
-		switch (key) {
+		// signal path (see the header comment). Not inside a paste, not
+		// in the middle of a line, and not in the `prompts` mode.
+		if (!promptsMode && !pasting && line === "") switch (key) {
 			case "p": {
 				out("\r\nfake-cli: asking permission for Bash: rm -rf node_modules  [y/n]\r\n");
 				await runHooks("PermissionRequest", { tool_name: "Bash", tool_input: { command: "rm -rf node_modules" } });
@@ -482,9 +521,47 @@ async function main() {
 			default:
 				break;
 		}
-		if (key === "\r") out("\r\n");
-		else if (key >= " ") out(key);
+		if (key === "\r" || key === "\n") {
+			if (pasting) {
+				line += "\n";
+				continue;
+			}
+			out("\r\n");
+			if (line.trim() !== "") await submitPrompt(line);
+			line = "";
+			continue;
+		}
+		if (key === "\x7f" || key === "\b") {
+			line = line.slice(0, -1);
+			continue;
+		}
+		if (key >= " ") {
+			// Outside the `prompts` mode only a paste builds a prompt; typed
+			// text is echoed, as before.
+			if (promptsMode || pasting) line += key;
+			out(key);
+		}
 	}
+}
+
+async function submitPrompt(text) {
+	record.prompts.push(text);
+	note("prompt", { chars: text.length });
+	out(`fake-cli: prompt received (${text.length} chars)\r\n`);
+	if (has("no-prompt-hooks")) return;
+	await runHooks("UserPromptSubmit", { prompt: text });
+	// The turn: `work <ms>` keeps the agent busy (nothing is read from the
+	// terminal meanwhile); every turn ends with the Stop hooks.
+	const work = /^work (\d+)$/.exec(text.trim());
+	if (work) {
+		const ms = Number(work[1]);
+		out(`fake-cli: working for ${ms} ms\r\n`);
+		note("working", { ms });
+		await new Promise((resolve) => setTimeout(resolve, ms));
+	}
+	await runHooks("Stop", { stop_hook_active: false });
+	note("turn-end");
+	out("fake-cli: turn ended\r\n");
 }
 
 main().catch((e) => {

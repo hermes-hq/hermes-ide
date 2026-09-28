@@ -726,6 +726,43 @@ const KEPT_FIELDS: &[&str] = &[
     "agent_type",
 ];
 
+/// Machine markers Hermes put into text the agent now reports back, in the
+/// form `[hermes-<name> #<n>]` (for example the `[hermes-review #3]` line a
+/// person pastes from the Review Desk, F21), as `hermes-<name>#<n>`,
+/// deduplicated, in order of appearance. Only the markers leave the process:
+/// the surrounding text (the prompt) never reaches the spool. Mirror of
+/// `contract::signal::tags_in_text` in the app.
+pub fn tags_in_text(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("[hermes-") {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find(']') else {
+            break;
+        };
+        let inner = &after_open[..close];
+        if let Some((name, n)) = inner.split_once(" #") {
+            let name_ok = name.len() > "hermes-".len()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            let n_ok = !n.is_empty() && n.len() <= 9 && n.bytes().all(|b| b.is_ascii_digit());
+            if name_ok && n_ok {
+                let tag = format!("{name}#{n}");
+                if !out.contains(&tag) {
+                    out.push(tag);
+                }
+            }
+        }
+        rest = &after_open[close + 1..];
+    }
+    out
+}
+
+/// The field a spool line carries the markers in.
+const TAGS_FIELD: &str = "hermes_tags";
+const MAX_TAGS: usize = 16;
+
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -751,6 +788,24 @@ pub fn signal_line(
 ) -> serde_json::Value {
     let mut kept = serde_json::Map::new();
     if let Some(serde_json::Value::Object(map)) = payload {
+        // Hermes markers in any text field (the submitted prompt, above all)
+        // are lifted out here; the text itself is dropped with the field.
+        let mut tags: Vec<String> = Vec::new();
+        for value in map.values() {
+            if let serde_json::Value::String(s) = value {
+                for tag in tags_in_text(s) {
+                    if !tags.contains(&tag) && tags.len() < MAX_TAGS {
+                        tags.push(tag);
+                    }
+                }
+            }
+        }
+        if !tags.is_empty() {
+            kept.insert(
+                TAGS_FIELD.to_string(),
+                serde_json::Value::Array(tags.into_iter().map(serde_json::Value::String).collect()),
+            );
+        }
         for key in KEPT_FIELDS {
             match map.get(*key) {
                 Some(serde_json::Value::String(s)) => {
@@ -1151,6 +1206,7 @@ mod tests {
             "last_assistant_message": big,
             "transcript_path": big,
             "stop_hook_active": false,
+            "prompt": "[hermes-review #3] Please read the review",
         });
         let line = signal_line(
             Some("Other"),
@@ -1169,11 +1225,49 @@ mod tests {
         assert_eq!(kept["stop_hook_active"], false);
         assert!(kept.get("tool_input").is_none());
         assert!(kept.get("last_assistant_message").is_none());
+        // The prompt never reaches the spool; only Hermes's own markers in
+        // it do (F21), as `hermes_tags`.
+        assert!(kept.get("prompt").is_none());
+        assert_eq!(kept["hermes_tags"], serde_json::json!(["hermes-review#3"]));
+        assert!(!serde_json::to_string(&line)
+            .unwrap()
+            .contains("Please read the review"));
         assert_eq!(
             kept["transcript_path"].as_str().unwrap().len(),
             MAX_FIELD_CHARS
         );
         assert!(serde_json::to_string(&line).unwrap().len() < 8 * 1024);
+    }
+
+    #[test]
+    fn markers_are_lifted_from_text_and_a_plain_prompt_leaves_no_field() {
+        assert_eq!(
+            tags_in_text("[hermes-review #3] Please read /tmp/review-3.md"),
+            vec!["hermes-review#3"]
+        );
+        assert_eq!(
+            tags_in_text("[hermes-review #3] again [hermes-review #3] and [hermes-gate #12]"),
+            vec!["hermes-review#3", "hermes-gate#12"]
+        );
+        for bad in [
+            "[hermes-review #]",
+            "[hermes-review 3]",
+            "[hermes- #3]",
+            "[hermes-review #x]",
+            "[hermes-review #3",
+            "no markers here",
+        ] {
+            assert!(tags_in_text(bad).is_empty(), "{bad}");
+        }
+        let plain = signal_line(
+            Some("UserPromptSubmit"),
+            "claude",
+            "s",
+            Some("n"),
+            Some(&serde_json::json!({ "prompt": "fix the tests" })),
+        );
+        assert!(plain["payload"].get("hermes_tags").is_none());
+        assert!(plain["payload"].get("prompt").is_none());
     }
 
     #[test]

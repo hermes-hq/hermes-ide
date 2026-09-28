@@ -60,6 +60,9 @@ pub struct AgentStatus {
 
 /// What a session reports. `at` is epoch milliseconds; `source` names where
 /// the event came from ("hook:claude", "osc", "pty", "plugin:<id>", "e2e").
+/// `tags` (F21, additive) are machine markers found in what the agent
+/// reported, such as `hermes-review#3` for a `[hermes-review #3]` line in a
+/// submitted prompt; never text for people.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
@@ -67,24 +70,32 @@ pub enum SessionEvent {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         status: AgentStatus,
     },
     TurnStart {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         n: NonZeroU32,
     },
     TurnEnd {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         n: NonZeroU32,
     },
     TurnFailed {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         n: NonZeroU32,
         detail: String,
     },
@@ -92,12 +103,16 @@ pub enum SessionEvent {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         n: NonZeroU32,
     },
     Attention {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         detail: String,
     },
     #[serde(rename_all = "camelCase")]
@@ -105,6 +120,8 @@ pub enum SessionEvent {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         vendor_session_id: Option<String>,
         model: Option<String>,
         permission_mode: Option<String>,
@@ -113,6 +130,8 @@ pub enum SessionEvent {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         code: Option<i32>,
         signal: Option<String>,
     },
@@ -122,6 +141,8 @@ pub enum SessionEvent {
         at: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
         running: u32,
     },
 }
@@ -205,7 +226,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 11);
+        assert_eq!(events.len(), 12);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -240,6 +261,7 @@ mod tests {
             event: SessionEvent::Attention {
                 at: 5,
                 source: Some("e2e".into()),
+                tags: None,
                 detail: "hello".into(),
             },
         };

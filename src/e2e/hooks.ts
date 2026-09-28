@@ -24,6 +24,8 @@ import { getAttentionSummary, getSessionStatus } from "../agent/status/attention
 import { attentionDebug } from "../attention/debug";
 import { setWindowFocusOverride } from "../attention/windowFocus";
 import { listReviewChecks, reviewInputFromPatch, runReviewChecks } from "../agent/contract/reviewChecks";
+import { clearFakeTurns, injectFakeTurns, type InjectedTurn } from "../review/turnSource";
+import { getReviewState } from "../review/reviewStore";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -158,6 +160,12 @@ const hooks = {
    */
   runReviewChecks: (sessionId: string, turn: number | null, patch: string, timeoutMs?: number) =>
     runReviewChecks(reviewInputFromPatch(sessionId, turn, patch), { timeoutMs }),
+  // ── F21 Review Desk: fake turns while the ledger (F20) is not filled ──
+  /** Give a session a turn ledger (turn + patch), as F20 will record it. */
+  injectTurns: (sessionId: string, turns: InjectedTurn[]): void => injectFakeTurns(sessionId, turns),
+  clearTurns: (sessionId?: string): void => clearFakeTurns(sessionId),
+  /** What the desk keeps for a repository: viewed files, comments, deliveries. */
+  reviewState: (repoPath: string) => getReviewState(repoPath),
 };
 
 export type HermesE2EHooks = typeof hooks;

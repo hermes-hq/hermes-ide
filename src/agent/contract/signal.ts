@@ -181,11 +181,51 @@ function notificationStatus(payload: Record<string, unknown>): AgentStatusKind |
 }
 
 /**
+ * Machine markers Hermes put into text the agent now reports back, in the
+ * form `[hermes-<name> #<n>]` (for example the `[hermes-review #3]` line a
+ * person pastes from the Review Desk, F21). Returned as `hermes-<name>#<n>`,
+ * deduplicated, in order of appearance. Never the surrounding text. The
+ * Rust mirror is `contract::signal::tags_in_text`.
+ */
+export function tagsInText(text: string): string[] {
+  const out: string[] = [];
+  const re = /\[(hermes-[A-Za-z0-9_-]+) #(\d{1,9})\]/g;
+  for (const m of text.matchAll(re)) {
+    const tag = `${m[1]}#${m[2]}`;
+    if (!out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
+/** The field `hi signal` lifts the markers into (the prompt itself never reaches the spool). */
+const TAGS_FIELD = "hermes_tags";
+const TAG_SHAPE = /^hermes-[A-Za-z0-9_-]+#\d{1,9}$/;
+
+/**
+ * The markers of a payload: the `hermes_tags` list `hi` wrote, plus
+ * `tagsInText` over any string value still present. Deduplicated.
+ */
+export function tagsInPayload(payload: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (tag: string) => {
+    if (!out.includes(tag)) out.push(tag);
+  };
+  const listed = payload[TAGS_FIELD];
+  if (Array.isArray(listed)) for (const item of listed) if (typeof item === "string" && TAG_SHAPE.test(item)) push(item);
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === TAGS_FIELD || typeof value !== "string") continue;
+    for (const tag of tagsInText(value)) push(tag);
+  }
+  return out;
+}
+
+/**
  * Every event a nonce-verified record means: an `identity` when the record
  * names the vendor's conversation, then the status, attention or exit it
  * stands for. Empty when the nonce does not match or the event carries no
  * meaning for Hermes. `confidence` is the agent's (catalog
- * `signals.confidence`); `source` names where the record came from.
+ * `signals.confidence`); `source` names where the record came from. The
+ * status, attention or exit carries the payload's `tags` (F21) when it has any.
  * Mirrors `map_signal_record` in src-tauri/src/contract/signal.rs.
  */
 export function mapSignalRecord(record: SignalRecord, expectedNonce: string, confidence: Confidence, source: string): SessionEvent[] {
@@ -234,7 +274,10 @@ export function mapSignalRecord(record: SignalRecord, expectedNonce: string, con
       else primary = status(kind, "");
     }
   }
-  out.push(primary);
+  // F21: machine markers in what the agent reported ride on the event
+  // they came with (never on the identity).
+  const tags = tagsInPayload(payload);
+  out.push(tags.length > 0 ? { ...primary, tags } : primary);
   return out;
 }
 

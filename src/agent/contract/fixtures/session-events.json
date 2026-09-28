@@ -26,7 +26,8 @@
     { "type": "identity", "at": 1790000006500, "vendorSessionId": null, "model": null, "permissionMode": null },
     { "type": "exit", "at": 1790000007000, "source": "pty", "code": 0, "signal": null },
     { "type": "exit", "at": 1790000008000, "code": null, "signal": "SIGTERM" },
-    { "type": "subagents", "at": 1790000009000, "source": "hook:claude", "running": 2 }
+    { "type": "subagents", "at": 1790000009000, "source": "hook:claude", "running": 2 },
+    { "type": "status", "at": 1790000010000, "source": "hook:claude", "tags": ["hermes-review#3"], "status": { "kind": "working", "confidence": "exact", "detail": "" } }
   ],
   "rejected": [
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
@@ -42,6 +43,8 @@
     { "type": "subagents", "at": 1790000009000, "running": -1 },
     { "type": "subagents", "at": 1790000009000 },
     { "type": "nope", "at": 1790000000000 },
+    { "type": "status", "at": 1790000009000, "tags": "hermes-review#3", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
+    { "type": "status", "at": 1790000009000, "tags": [3], "status": { "kind": "working", "confidence": "exact", "detail": "" } },
     "not an object"
   ]
 }

@@ -13,6 +13,12 @@ interface EventBase {
   readonly at: number;
   /** Where it came from; free text, for people and logs. */
   readonly source?: string;
+  /**
+   * Machine markers found in what the agent reported (F21, additive): a
+   * `[hermes-review #3]` line pasted into the agent's prompt comes back as
+   * `hermes-review#3`. Never text for people. Absent when there are none.
+   */
+  readonly tags?: readonly string[];
 }
 
 export interface StatusEvent extends EventBase {
@@ -115,7 +121,13 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
   if (typeof v.at !== "number" || !Number.isInteger(v.at)) return null;
   const source = v.source === undefined ? undefined : v.source;
   if (source !== undefined && typeof source !== "string") return null;
-  const base: EventBase = source === undefined ? { at: v.at } : { at: v.at, source };
+  const tags = v.tags === undefined || v.tags === null ? undefined : v.tags;
+  if (tags !== undefined && !(Array.isArray(tags) && tags.every((t) => typeof t === "string"))) return null;
+  const base: EventBase = {
+    at: v.at,
+    ...(source === undefined ? {} : { source }),
+    ...(tags === undefined ? {} : { tags: [...(tags as string[])] }),
+  };
 
   switch (v.type) {
     case "status": {

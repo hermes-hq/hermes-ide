@@ -29,6 +29,7 @@ mod project;
 #[doc(hidden)]
 pub mod pty;
 mod quit_flush;
+mod review;
 mod saved_workspace;
 mod self_test;
 mod transcript;
@@ -973,6 +974,11 @@ pub fn run() {
             turn_ledger::turn_ledger_turn_ended,
             turn_ledger::preview_restore_turn,
             turn_ledger::restore_turn,
+            // Review Desk (F21): merge-base diff, revert a turn, review file.
+            review::review_diff,
+            review::review_revert_preview,
+            review::review_revert_patch,
+            review::review_write_file,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

@@ -1543,6 +1543,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                             crate::contract::SessionEvent::Subagents {
                                 at: record.ts.saturating_mul(1000),
                                 source: Some(source.clone()),
+                                tags: None,
                                 running: subagents as u32,
                             },
                         );
@@ -1718,6 +1719,19 @@ mod tests {
         );
         assert_eq!(start["timeout"], 5);
         assert!(hooks["SessionStart"][0].get("matcher").is_none());
+        // The prompt-submitted hook carries the Review Desk's delivery
+        // receipt (F21): the pasted `[hermes-review #n]` line comes back
+        // through it. The turn's end (and a failed turn) say when a send
+        // back held for a working agent may go through.
+        for event in ["UserPromptSubmit", "Stop", "StopFailure"] {
+            let hook = &hooks[event][0]["hooks"][0];
+            assert_eq!(hook["command"], "/app/hi", "{event}");
+            assert_eq!(
+                hook["args"],
+                serde_json::json!(["signal", "--agent", "claude"]),
+                "{event}"
+            );
+        }
         // Tool hooks only for the tools Hermes reads; every notification.
         assert_eq!(
             hooks["PreToolUse"][0]["matcher"],

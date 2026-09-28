@@ -70,6 +70,12 @@ export const FEATURE_FLAGS = [
     description:
       "Save a snapshot of the working tree after every agent turn (including changes made through shell commands) into a hidden git reference, and show a bar under terminal sessions with each turn's Diff and Restore. Snapshots include untracked files and live inside the repository's .git folder (refs/hermes/...), so a mirror push copies them; they are removed 14 days after the session is closed.",
   },
+  {
+    id: "reviewDesk",
+    label: "Review Desk (⌘G)",
+    description:
+      "Replaces the git panels with one review surface: the diff from the merge-base grouped by turn or by file, viewed checkboxes, line comments sent back to the agent that made the turn with a delivery receipt, revert of one turn, and risk flags on lockfiles, workflows, secrets and binaries.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

@@ -744,3 +744,33 @@ features:
       F20-5:
         text: "Works for a Claude agent session and a Codex terminal session (exact turn ends where the agent reports them, guessed from idle time for the rest)"
         scenarios: [F20-turn-ledger.mjs]
+  F21:
+    name: "Review Desk with risk flags (⌘G)"
+    # Behind the reviewDesk flag (off on stable until proven); the scenario
+    # turns it on and shows the old palette entry with it off. The turns
+    # come from the test bridge's injector (the ledger, F20, is not filled
+    # yet) with the exact patches git produced; the diff, the risk flags,
+    # the send-back with its receipt and the revert are all real. Negative
+    # control: HERMES_E2E_F21_RISK_FILE=src/app.js must end in RESULT: FAIL.
+    # On Windows the fake `claude` needs the user's registry Path, so the
+    # scenario runs there on CI runners only (it reports SKIP elsewhere).
+    status: partial
+    criteria:
+      F21-1:
+        text: "One shortcut opens the Review Desk; no other git panel remains"
+        scenarios: [F21-review-desk.mjs]
+      F21-2:
+        text: "A comment on a line changed by an agent in its turn reaches that agent's session, and Hermes shows \"delivered\""
+        scenarios: [F21-review-desk.mjs]
+      F21-3:
+        text: "An undelivered comment shows \"not delivered\" with retry"
+        scenarios: [F21-review-desk.mjs]
+      F21-4:
+        text: "Reverting one turn previews the result and leaves the other turns intact"
+        scenarios: [F21-review-desk.mjs]
+      F21-5:
+        text: "A lockfile or workflow change shows a risk flag"
+        scenarios: [F21-review-desk.mjs]
+      F21-6:
+        text: "Send to a working agent types nothing into it; the line goes out when its turn ends"
+        scenarios: [F21-review-desk.mjs]

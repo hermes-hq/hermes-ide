@@ -6,6 +6,8 @@ import {
   signalRecordToSessionEvent,
   signalStatusKind,
   subagentDelta,
+  tagsInPayload,
+  tagsInText,
   vendorSessionIdOf,
   SIGNAL_PAYLOAD_CAP_BYTES,
 } from "../agent/contract/signal";
@@ -89,6 +91,30 @@ describe("signalRecordToSessionEvent", () => {
   it("caps the detail it lifts from the payload", () => {
     const ev = signalRecordToSessionEvent(record({ payload: { message: "x".repeat(500) } }), "n-abc");
     expect(ev?.type === "status" && ev.status.detail.length).toBe(200);
+  });
+
+  it("reads the markers hi lifted into hermes_tags (and any left in a text field) as tags (F21)", () => {
+    expect(tagsInText("[hermes-review #3] Please read /fixture/review-3.md")).toEqual(["hermes-review#3"]);
+    expect(tagsInText("[hermes-review #3] x [hermes-review #3] y [hermes-gate #12]")).toEqual(["hermes-review#3", "hermes-gate#12"]);
+    for (const bad of ["[hermes-review #]", "[hermes-review 3]", "[hermes- #3]", "[hermes-review #x]", "[hermes-review #3", "nothing"]) {
+      expect(tagsInText(bad), bad).toEqual([]);
+    }
+    // What `hi` writes: the list, no prompt text. Malformed entries and doubles are dropped.
+    expect(tagsInPayload({ hermes_tags: ["hermes-review#7", "bogus", 3, "hermes-review#7"], cwd: "/x" })).toEqual(["hermes-review#7"]);
+    // A text field with a marker still counts, merged without doubles.
+    expect(tagsInPayload({ hermes_tags: ["hermes-review#7"], title: "[hermes-review #7] and [hermes-gate #1]" })).toEqual(["hermes-review#7", "hermes-gate#1"]);
+    expect(tagsInPayload({ hermes_tags: "hermes-review#7" })).toEqual([]);
+    const ev = signalRecordToSessionEvent(record({ event: "UserPromptSubmit", payload: { hermes_tags: ["hermes-review#7"] } }), "n-abc");
+    expect(ev).toEqual({
+      type: "status",
+      at: 1790000000000,
+      source: "hook:claude",
+      tags: ["hermes-review#7"],
+      status: { kind: "working", confidence: "exact", detail: "" },
+    });
+    // Without markers no tags field appears at all; a turn's end comes the same way.
+    expect(signalRecordToSessionEvent(record({ event: "UserPromptSubmit", payload: {} }), "n-abc")).not.toHaveProperty("tags");
+    expect(signalRecordToSessionEvent(record({ event: "Stop", payload: {} }), "n-abc")).toMatchObject({ type: "status", status: { kind: "done_unread" } });
   });
 });
 

@@ -182,6 +182,7 @@ pub fn notification_events(
         return vec![SessionEvent::Attention {
             at,
             source: Some("osc".to_string()),
+            tags: None,
             detail: format!("{} (unverified)", n.body),
         }];
     }
@@ -196,12 +197,14 @@ pub fn notification_events(
     let mut events = vec![SessionEvent::Attention {
         at,
         source: Some("osc".to_string()),
+        tags: None,
         detail: text.clone(),
     }];
     if let Some(kind) = classify(&text) {
         events.push(SessionEvent::Status {
             at,
             source: Some("osc".to_string()),
+            tags: None,
             status: AgentStatus {
                 kind,
                 confidence: Confidence::Signal,
@@ -271,7 +274,9 @@ mod tests {
                 matches!(&events[0], SessionEvent::Attention { detail, source, .. } if detail == text && source.as_deref() == Some("osc"))
             );
             match &events[1] {
-                SessionEvent::Status { status, source, at } => {
+                SessionEvent::Status {
+                    status, source, at, ..
+                } => {
                     assert_eq!(status.kind, kind, "{text}");
                     assert_eq!(status.confidence, Confidence::Signal);
                     assert_eq!(status.detail, text);
@@ -310,7 +315,7 @@ mod tests {
         let events = notification_events(&good, "claude", Some("n0nce"), 7_000);
         assert_eq!(events.len(), 1);
         assert!(
-            matches!(&events[0], SessionEvent::Status { at: 7_000, source, status }
+            matches!(&events[0], SessionEvent::Status { at: 7_000, source, status, .. }
             if source.as_deref() == Some("hook:claude:osc")
             && status.kind == AgentStatusKind::NeedsApproval
             && status.confidence == Confidence::Exact)

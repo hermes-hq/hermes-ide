@@ -93,6 +93,7 @@ pub fn event_to_session_event(
     Some(SessionEvent::Status {
         at,
         source,
+        tags: None,
         status: AgentStatus {
             kind: status_kind,
             confidence,
@@ -349,7 +350,7 @@ mod tests {
         assert_eq!(ev(r#"{"type":"server.connected","properties":{}}"#), None);
         assert!(
             matches!(ev(r#"{"type":"permission.asked","properties":{"title":"Run npm test"}}"#),
-            Some(SessionEvent::Status { status, source, at: 9 }) if status.kind == AgentStatusKind::NeedsApproval && status.detail == "Run npm test" && status.confidence == Confidence::Exact && source.as_deref() == Some("stream:opencode"))
+            Some(SessionEvent::Status { status, source, at: 9, .. }) if status.kind == AgentStatusKind::NeedsApproval && status.detail == "Run npm test" && status.confidence == Confidence::Exact && source.as_deref() == Some("stream:opencode"))
         );
         assert!(
             matches!(ev(r#"{"type":"session.idle","properties":{"sessionID":"s"}}"#),

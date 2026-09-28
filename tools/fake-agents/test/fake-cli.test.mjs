@@ -43,7 +43,7 @@ function run(args, { env = {}, keys = "", afterMs = 300, cwd } = {}) {
 }
 
 /** A settings file whose hooks append the event name and stdin to a file. */
-function hookSettings(dir) {
+function hookSettings(dir, extraEvents = []) {
 	const marks = join(dir, "hooks.log");
 	const script = join(dir, "hook.mjs");
 	writeFileSync(
@@ -62,6 +62,7 @@ function hookSettings(dir) {
 			hooks: {
 				SessionStart: [{ hooks: [{ type: "command", command: cmd("SessionStart"), timeout: 5 }] }],
 				SessionEnd: [{ hooks: [{ type: "command", command: cmd("SessionEnd"), timeout: 5 }] }],
+				...Object.fromEntries(extraEvents.map((ev) => [ev, [{ hooks: [{ type: "command", command: cmd(ev), timeout: 5 }] }]])),
 			},
 		}),
 	);
@@ -259,6 +260,65 @@ describe("fake vendor CLI", () => {
 		child.stdin.write("q");
 		expect(await new Promise((r) => child.on("close", r))).toBe(0);
 		expect(records(dir)[0].events.map((e) => e.ev)).toContain("start-hook-skipped");
+	});
+
+	it("a pasted line followed by Enter is a prompt that runs the UserPromptSubmit hook with it", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["UserPromptSubmit"]);
+		const pasted = "\x1b[200~[hermes-review #3] Please read /fixture/review-3.md\x1b[201~\r";
+		const res = await run(["--session-id", "p-1", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir },
+			keys: `${pasted}q`,
+			afterMs: 800,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: prompt received (51 chars)");
+		const log = readFileSync(marks, "utf8");
+		const submit = JSON.parse(log.split("\n").find((l) => l.startsWith("UserPromptSubmit ")).slice("UserPromptSubmit ".length));
+		expect(submit).toMatchObject({ hook_event_name: "UserPromptSubmit", session_id: "p-1", prompt: "[hermes-review #3] Please read /fixture/review-3.md" });
+		const [rec] = records(dir);
+		expect(rec.prompts).toEqual(["[hermes-review #3] Please read /fixture/review-3.md"]);
+		// The turn ends at once: Stop follows the prompt.
+		expect(rec.hooksRan.map((h) => h.event)).toEqual(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]);
+	});
+
+	it("in the prompts mode `work <ms>` keeps the agent on its turn; input typed meanwhile is read only after Stop", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["UserPromptSubmit", "Stop"]);
+		// The second line arrives while the agent works; it becomes a prompt only after the turn.
+		const res = await run(["--session-id", "p-3", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "prompts" },
+			keys: "work 600\rlater\rq",
+			afterMs: 1500,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: working for 600 ms");
+		const events = readFileSync(marks, "utf8").split("\n").filter(Boolean).map((l) => l.split(" ")[0]);
+		expect(events).toEqual(["SessionStart", "UserPromptSubmit", "Stop", "UserPromptSubmit", "Stop", "SessionEnd"]);
+		const [rec] = records(dir);
+		expect(rec.prompts).toEqual(["work 600", "later"]);
+		const evs = rec.events.map((e) => e.ev);
+		const working = evs.indexOf("working");
+		const turnEnd = evs.indexOf("turn-end", working);
+		const secondPrompt = evs.indexOf("prompt", working);
+		expect(working).toBeGreaterThan(-1);
+		expect(turnEnd).toBeGreaterThan(working);
+		expect(secondPrompt).toBeGreaterThan(turnEnd);
+		expect(rec.events[turnEnd].t - rec.events[working].t).toBeGreaterThanOrEqual(550);
+	});
+
+	it("in no-prompt-hooks mode the prompt is taken but no hook runs (the receipt's negative control)", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["UserPromptSubmit"]);
+		const res = await run(["--session-id", "p-2", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "no-prompt-hooks" },
+			keys: "typed prompt\rq",
+			afterMs: 800,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: prompt received (12 chars)");
+		expect(readFileSync(marks, "utf8")).not.toContain("UserPromptSubmit ");
+		expect(records(dir)[0].prompts).toEqual(["typed prompt"]);
 	});
 
 	it("declining the trust prompt exits without starting", async () => {
