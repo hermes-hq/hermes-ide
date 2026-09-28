@@ -210,17 +210,21 @@ impl PtyTransport for HostedPty {
 mod tests {
     use super::*;
 
-    /// A real PTY in this process: the bytes go both ways, the size is what
-    /// was asked for, and kill ends the stream.
+    /// A real PTY in this process: the bytes go both ways, the program sees
+    /// the size it is given, and the stream ends with the program.
     #[cfg(unix)]
     #[test]
     fn in_process_pty_round_trips_bytes_and_reports_its_size() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
         let mut cmd = CommandBuilder::new("/bin/sh");
-        cmd.args(["-c", "stty size; cat"]);
+        // Size before and after `cat`, which echoes what it is typed.
+        cmd.args(["-c", "stty size; cat; stty size"]);
         cmd.env("PATH", "/usr/bin:/bin");
         let size = PtySize {
-            rows: 31,
-            cols: 97,
+            rows: 24,
+            cols: 80,
             pixel_width: 0,
             pixel_height: 0,
         };
@@ -237,17 +241,66 @@ mod tests {
         assert!(pty.pid().is_some());
         let mut reader = pty.take_reader().unwrap();
         let mut writer = pty.take_writer().unwrap();
-        writer.write_all(b"ping\n").unwrap();
+
+        // Reads happen on their own thread, so a lost byte fails the test
+        // instead of hanging it.
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if tx.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
         let mut text = String::new();
-        let mut buf = [0u8; 1024];
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !(text.contains("31 97") && text.matches("ping").count() >= 2) {
-            assert!(std::time::Instant::now() < deadline, "got: {text}");
-            let n = reader.read(&mut buf).unwrap();
-            assert!(n > 0, "stream ended early: {text}");
-            text.push_str(&String::from_utf8_lossy(&buf[..n]));
+        let wait_until = |text: &mut String, done: &dyn Fn(&str) -> bool, what: &str| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !done(text) {
+                let left = deadline.saturating_duration_since(Instant::now());
+                assert!(!left.is_zero(), "never saw {what}; got: {text:?}");
+                match rx.recv_timeout(left) {
+                    Ok(bytes) => text.push_str(&String::from_utf8_lossy(&bytes)),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        assert!(done(text), "stream ended before {what}; got: {text:?}");
+                    }
+                }
+            }
+        };
+
+        // The program is up once it printed its first size line. Only then
+        // resize and type: a size set or a line typed before the child's
+        // first open of the terminal can be lost (macOS opens the slave by
+        // path in the child, after the parent closed its own copy).
+        wait_until(&mut text, &|t| t.contains('\n'), "the first size line");
+        pty.resize(31, 97).unwrap();
+        writer.write_all(b"ping\n").unwrap();
+        // The typed line echoed, then cat's copy of it.
+        wait_until(&mut text, &|t| t.matches("ping").count() >= 2, "ping twice");
+        // End of input: cat exits, the shell prints the size cat ran with.
+        writer.write_all(b"\x04").unwrap();
+        wait_until(&mut text, &|t| t.contains("31 97"), "the new size 31 97");
+        // The shell exits: the stream ends.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(bytes) => text.push_str(&String::from_utf8_lossy(&bytes)),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the stream never ended; got: {text:?}"
+                    );
+                }
+            }
         }
-        pty.kill().unwrap();
+        let _ = pty.kill();
         pty.wait();
     }
 }
