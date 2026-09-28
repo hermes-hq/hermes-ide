@@ -114,6 +114,45 @@ function detailOf(payload: Record<string, unknown>): string {
 }
 
 /**
+ * Machine markers Hermes put into text the agent now reports back, in the
+ * form `[hermes-<name> #<n>]` (for example the `[hermes-review #3]` line a
+ * person pastes from the Review Desk, F21). Returned as `hermes-<name>#<n>`,
+ * deduplicated, in order of appearance. Never the surrounding text. The
+ * Rust mirror is `contract::signal::tags_in_text`.
+ */
+export function tagsInText(text: string): string[] {
+  const out: string[] = [];
+  const re = /\[(hermes-[A-Za-z0-9_-]+) #(\d{1,9})\]/g;
+  for (const m of text.matchAll(re)) {
+    const tag = `${m[1]}#${m[2]}`;
+    if (!out.includes(tag)) out.push(tag);
+  }
+  return out;
+}
+
+/** The field `hi signal` lifts the markers into (the prompt itself never reaches the spool). */
+const TAGS_FIELD = "hermes_tags";
+const TAG_SHAPE = /^hermes-[A-Za-z0-9_-]+#\d{1,9}$/;
+
+/**
+ * The markers of a payload: the `hermes_tags` list `hi` wrote, plus
+ * `tagsInText` over any string value still present. Deduplicated.
+ */
+export function tagsInPayload(payload: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (tag: string) => {
+    if (!out.includes(tag)) out.push(tag);
+  };
+  const listed = payload[TAGS_FIELD];
+  if (Array.isArray(listed)) for (const item of listed) if (typeof item === "string" && TAG_SHAPE.test(item)) push(item);
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === TAGS_FIELD || typeof value !== "string") continue;
+    for (const tag of tagsInText(value)) push(tag);
+  }
+  return out;
+}
+
+/**
  * Map a spool record to the SessionEvent it means, or null when the nonce
  * does not match (the line is untrusted text) or the event carries no
  * meaning for Hermes yet. Stub: F11 extends the table per agent.
@@ -122,11 +161,13 @@ export function signalRecordToSessionEvent(record: SignalRecord, expectedNonce: 
   if (record.nonce !== expectedNonce) return null;
   const at = Math.round(record.ts * 1000);
   const source = `hook:${record.agent}`;
+  const found = tagsInPayload(record.payload);
+  const tagged = found.length > 0 ? { tags: found } : {};
   const kind = signalStatusKind(record.event);
-  if (kind === "exited") return { type: "exit", at, source, code: null, signal: null };
+  if (kind === "exited") return { type: "exit", at, source, ...tagged, code: null, signal: null };
   if (kind) {
-    return { type: "status", at, source, status: { kind, confidence: "exact", detail: detailOf(record.payload) } };
+    return { type: "status", at, source, ...tagged, status: { kind, confidence: "exact", detail: detailOf(record.payload) } };
   }
-  if (record.event === "Notification") return { type: "attention", at, source, detail: detailOf(record.payload) };
+  if (record.event === "Notification") return { type: "attention", at, source, ...tagged, detail: detailOf(record.payload) };
   return null;
 }

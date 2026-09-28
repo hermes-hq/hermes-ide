@@ -183,7 +183,10 @@ fn plain_events<'a>(agent: &'a Agent, status: &str) -> impl Iterator<Item = &'a 
 /// settings without replacing anything.
 pub fn settings_file_json(agent: &Agent, hi: &Path) -> String {
     let mut hooks = serde_json::Map::new();
-    for status in ["session_start", "exited"] {
+    // `working` covers the prompt-submitted event: the Review Desk (F21)
+    // reads its delivery receipt from it, and holds a send back while the
+    // agent works; `turn_end` and `error` say when it stopped.
+    for status in ["session_start", "working", "turn_end", "error", "exited"] {
         for event in plain_events(agent, status) {
             hooks.insert(
                 event.to_string(),
@@ -751,12 +754,19 @@ pub(crate) fn watch_signals(
     std::thread::spawn(move || {
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
         let mut launched_at = Instant::now();
+        let session_id = session.lock().map(|s| s.id.clone()).unwrap_or_default();
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
             let mut changed = false;
             let mut stop = false;
             let mut guess_waiting = false;
+            // Every nonce-verified line with a meaning in the C0 status
+            // table also goes out as a contract SessionEvent (exact): the
+            // prompt event with the `[hermes-review #n]` markers the Review
+            // Desk waits for as its delivery receipt, the turn's end that
+            // lets a held send back through, and so on. One event per line.
+            let mut events: Vec<crate::contract::SessionEvent> = Vec::new();
             if let Ok(mut s) = session.lock() {
                 if matches!(
                     s.phase,
@@ -765,6 +775,11 @@ pub(crate) fn watch_signals(
                     stop = true;
                 }
                 for line in &lines {
+                    if let Some(event) =
+                        crate::contract::signal::session_event_in_line(line, &nonce)
+                    {
+                        events.push(event);
+                    }
                     if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             launched_at = Instant::now();
@@ -812,6 +827,9 @@ pub(crate) fn watch_signals(
                 }
             } else {
                 stop = true;
+            }
+            for event in events {
+                crate::contract::emit_session_event(&app, &session_id, event);
             }
             if guess_waiting {
                 log::info!(
@@ -902,6 +920,21 @@ mod tests {
             "\"/app/hi\" signal --agent claude --event SessionStart"
         );
         assert!(json["hooks"]["SessionEnd"].is_array());
+        // The prompt-submitted hook carries the Review Desk's delivery
+        // receipt (F21): the pasted `[hermes-review #n]` line comes back
+        // through it. The turn's end (and a failed turn) say when a send
+        // back held for a working agent may go through.
+        for event in ["UserPromptSubmit", "Stop", "StopFailure"] {
+            let hook = &json["hooks"][event][0]["hooks"][0];
+            assert_eq!(
+                hook["command"],
+                format!("\"/app/hi\" signal --agent claude --event {event}"),
+                "{event}"
+            );
+        }
+        // Entries with a matcher stay F11's (nothing is written for them).
+        assert!(json["hooks"].get("PreToolUse").is_none());
+        assert!(json["hooks"].get("PermissionRequest").is_none());
     }
 
     #[test]

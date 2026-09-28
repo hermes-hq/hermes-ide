@@ -5,8 +5,10 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 5 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 6th, retire one first.
+// At most 12 flags may exist at once while the 2.0 build wave lands its
+// features behind flags side by side — enforced by
+// src/__tests__/feature-flags.test.ts. The cap goes back to 5 once those
+// features are proven and their flags retired; retire one before adding.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -50,6 +52,12 @@ export const FEATURE_FLAGS = [
     label: "Launch helper (hi run)",
     description:
       "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt.",
+  },
+  {
+    id: "reviewDesk",
+    label: "Review Desk (⌘G)",
+    description:
+      "Replaces the git panels with one review surface: the diff from the merge-base grouped by turn or by file, viewed checkboxes, line comments sent back to the agent that made the turn with a delivery receipt, revert of one turn, and risk flags on lockfiles, workflows, secrets and binaries.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

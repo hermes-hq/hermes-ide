@@ -75,4 +75,14 @@ describe("SessionEvent", () => {
     expect(parseSessionEvent({ type: "attention", at: 1, detail: "x", source: "osc" })).toEqual({ type: "attention", at: 1, detail: "x", source: "osc" });
     expect(parseSessionEvent({ type: "attention", at: 1, detail: "x", source: 5 })).toBeNull();
   });
+
+  it("keeps tags on any event (F21), copies the array, and refuses malformed ones", () => {
+    const tags = ["hermes-review#3"];
+    const parsed = parseSessionEvent({ type: "turn_start", at: 1, n: 2, tags });
+    expect(parsed).toEqual({ type: "turn_start", at: 1, n: 2, tags: ["hermes-review#3"] });
+    expect(parsed?.tags).not.toBe(tags);
+    expect(parseSessionEvent({ type: "turn_start", at: 1, n: 2, tags: null })).toEqual({ type: "turn_start", at: 1, n: 2 });
+    expect(parseSessionEvent({ type: "turn_start", at: 1, n: 2, tags: "hermes-review#3" })).toBeNull();
+    expect(parseSessionEvent({ type: "turn_start", at: 1, n: 2, tags: [3] })).toBeNull();
+  });
 });

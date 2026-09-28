@@ -84,6 +84,94 @@ fn detail_of(payload: &Map<String, Value>) -> String {
     String::new()
 }
 
+/// Machine markers Hermes put into text the agent now reports back, in the
+/// form `[hermes-<name> #<n>]` (for example the `[hermes-review #3]` line a
+/// person pastes from the Review Desk, F21). Returned as `hermes-<name>#<n>`,
+/// deduplicated, in order of appearance. Never the surrounding text.
+pub fn tags_in_text(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("[hermes-") {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find(']') else {
+            break;
+        };
+        let inner = &after_open[..close];
+        if let Some((name, n)) = inner.split_once(" #") {
+            let name_ok = name.len() > "hermes-".len()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            let n_ok = !n.is_empty() && n.len() <= 9 && n.bytes().all(|b| b.is_ascii_digit());
+            if name_ok && n_ok {
+                let tag = format!("{name}#{n}");
+                if !out.contains(&tag) {
+                    out.push(tag);
+                }
+            }
+        }
+        rest = &after_open[close + 1..];
+    }
+    out
+}
+
+/// The field `hi signal` lifts the markers into (the prompt itself never
+/// reaches the spool).
+const TAGS_FIELD: &str = "hermes_tags";
+
+/// True for a well-formed `hermes-<name>#<n>` tag, as `hi` writes them.
+fn is_tag(s: &str) -> bool {
+    let Some((name, n)) = s.split_once('#') else {
+        return false;
+    };
+    name.starts_with("hermes-")
+        && name.len() > "hermes-".len()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && !n.is_empty()
+        && n.len() <= 9
+        && n.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The markers of a payload: the `hermes_tags` list `hi` wrote, plus
+/// [`tags_in_text`] over any string value still present. Deduplicated.
+pub fn tags_in_payload(payload: &Map<String, Value>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |tag: String| {
+        if !out.contains(&tag) {
+            out.push(tag);
+        }
+    };
+    if let Some(Value::Array(list)) = payload.get(TAGS_FIELD) {
+        for item in list {
+            if let Value::String(s) = item {
+                if is_tag(s) {
+                    push(s.clone());
+                }
+            }
+        }
+    }
+    for (key, value) in payload {
+        if key == TAGS_FIELD {
+            continue;
+        }
+        if let Value::String(s) = value {
+            for tag in tags_in_text(s) {
+                push(tag);
+            }
+        }
+    }
+    out
+}
+
+/// The SessionEvent one spool line means, when the line carries this
+/// launch's nonce. None for a foreign, malformed or meaningless line.
+pub fn session_event_in_line(line: &str, expected_nonce: &str) -> Option<SessionEvent> {
+    let record = parse_signal_line(line).ok()?;
+    to_session_event(&record, expected_nonce)
+}
+
 /// The SessionEvent a record means, or None when the nonce does not match
 /// or the event carries no meaning for Hermes yet.
 pub fn to_session_event(record: &SignalRecord, expected_nonce: &str) -> Option<SessionEvent> {
@@ -92,16 +180,22 @@ pub fn to_session_event(record: &SignalRecord, expected_nonce: &str) -> Option<S
     }
     let at = record.ts.saturating_mul(1000);
     let source = Some(format!("hook:{}", record.agent));
+    let tags = {
+        let found = tags_in_payload(&record.payload);
+        (!found.is_empty()).then_some(found)
+    };
     match status_kind_of(&record.event) {
         Some(AgentStatusKind::Exited) => Some(SessionEvent::Exit {
             at,
             source,
+            tags,
             code: None,
             signal: None,
         }),
         Some(kind) => Some(SessionEvent::Status {
             at,
             source,
+            tags,
             status: AgentStatus {
                 kind,
                 confidence: Confidence::Exact,
@@ -111,6 +205,7 @@ pub fn to_session_event(record: &SignalRecord, expected_nonce: &str) -> Option<S
         None if record.event == "Notification" => Some(SessionEvent::Attention {
             at,
             source,
+            tags,
             detail: detail_of(&record.payload),
         }),
         None => None,
@@ -133,6 +228,7 @@ mod tests {
             SessionEvent::Status {
                 at: 1_790_000_000_000,
                 source: Some("hook:claude".into()),
+                tags: None,
                 status: AgentStatus {
                     kind: AgentStatusKind::NeedsApproval,
                     confidence: Confidence::Exact,
@@ -140,6 +236,64 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn review_tags_in_a_prompt_travel_on_the_event_and_nothing_else_does() {
+        assert_eq!(
+            tags_in_text("[hermes-review #3] Please read /tmp/review-3.md"),
+            vec!["hermes-review#3"]
+        );
+        assert_eq!(
+            tags_in_text("[hermes-review #3] again [hermes-review #3] and [hermes-gate #12]"),
+            vec!["hermes-review#3", "hermes-gate#12"]
+        );
+        assert!(tags_in_text("[hermes-review #]").is_empty());
+        assert!(tags_in_text("[hermes-review 3]").is_empty());
+        assert!(tags_in_text("[hermes- #3]").is_empty());
+        assert!(tags_in_text("[hermes-review #x]").is_empty());
+        assert!(tags_in_text("[hermes-review #3").is_empty());
+        assert!(tags_in_text("no markers here").is_empty());
+        // What `hi` writes: the markers as a list, no prompt text at all.
+        let line = r#"{"v":1,"ts":1790000000,"session":"s1","agent":"claude","nonce":"n-abc","event":"UserPromptSubmit","payload":{"hermes_tags":["hermes-review#7","bogus","hermes-review#7"],"cwd":"/repo"}}"#;
+        assert!(session_event_in_line(line, "other").is_none());
+        assert!(session_event_in_line("garbage", "n-abc").is_none());
+        match session_event_in_line(line, "n-abc").unwrap() {
+            SessionEvent::Status {
+                tags,
+                status,
+                source,
+                ..
+            } => {
+                assert_eq!(tags, Some(vec!["hermes-review#7".to_string()]));
+                assert_eq!(source.as_deref(), Some("hook:claude"));
+                assert_eq!(status.kind, AgentStatusKind::Working);
+                assert_eq!(status.confidence, Confidence::Exact);
+                assert_eq!(status.detail, "");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // A string field with a marker in it still counts (another helper
+        // may keep text), and the two sources are merged without doubles.
+        let mut payload = Map::new();
+        payload.insert("hermes_tags".into(), serde_json::json!(["hermes-review#7"]));
+        payload.insert(
+            "title".into(),
+            Value::String("[hermes-review #7] and [hermes-gate #1]".into()),
+        );
+        assert_eq!(
+            tags_in_payload(&payload),
+            vec!["hermes-review#7", "hermes-gate#1"]
+        );
+        // A turn's end comes through the same door, without tags.
+        let stop = r#"{"v":1,"ts":1790000001,"session":"s1","agent":"claude","nonce":"n-abc","event":"Stop","payload":{}}"#;
+        match session_event_in_line(stop, "n-abc").unwrap() {
+            SessionEvent::Status { tags, status, .. } => {
+                assert_eq!(tags, None);
+                assert_eq!(status.kind, AgentStatusKind::DoneUnread);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

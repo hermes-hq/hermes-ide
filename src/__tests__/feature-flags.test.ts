@@ -39,8 +39,8 @@ import {
 const FLAG: FeatureFlagId = FEATURE_FLAGS[0].id;
 
 describe("N07 feature-flag registry", () => {
-  it("holds at most 5 flags — retire one before adding a 6th", () => {
-    expect(FEATURE_FLAGS.length).toBeLessThanOrEqual(5);
+  it("holds at most 12 flags during the 2.0 build wave (5 afterwards) — retire flags as features are proven", () => {
+    expect(FEATURE_FLAGS.length).toBeLessThanOrEqual(12);
   });
 
   it("has at least one flag (the proof surface) and every id is unique", () => {

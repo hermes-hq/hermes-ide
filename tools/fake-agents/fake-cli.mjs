@@ -13,7 +13,13 @@
 //     the hook's stdin, the same shape Claude Code sends) — but only after a
 //     startup prompt was answered, when it shows one;
 //   - then behaves as a small TUI: echoes keys, `q` or Ctrl-C quits (running
-//     the `SessionEnd` hooks first).
+//     the `SessionEnd` hooks first); a line of text or a bracketed paste
+//     followed by Enter is a prompt, which runs the `UserPromptSubmit` hooks
+//     with `{prompt}` — the Review Desk's delivery receipt rides on that —
+//     and then the `Stop` hooks, as the turn ends. A prompt of the form
+//     `work <ms>` keeps the agent on its turn for that long first; keys
+//     typed meanwhile are queued and read only after the turn, as the real
+//     CLI does (the Review Desk must not type into a working agent).
 //
 // Behaviour is chosen per launch with HERMES_FAKE_MODE, or the file
 // `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches):
@@ -26,6 +32,10 @@
 //   ignore-resume accept `--resume` but start a new conversation under a new
 //                 id anyway — a broken vendor, used as the negative control
 //                 that proves the resume checks can fail
+//   no-prompt-hooks
+//                 take prompts but never run the `UserPromptSubmit` hooks —
+//                 a vendor without that hook, the negative control that
+//                 proves the Review Desk's "not delivered" is real
 //
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
@@ -104,6 +114,8 @@ const record = {
 	settings,
 	settingsError,
 	prompt: args.positional.join(" ") || null,
+	/** Prompts submitted while running (typed or pasted, then Enter). */
+	prompts: [],
 	hooksRan: [],
 	events: [],
 	exit: null,
@@ -301,23 +313,79 @@ async function main() {
 	await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
 
+	// A prompt: typed text, or a bracketed paste, submitted with Enter —
+	// as the Review Desk's one visible line arrives. Like the real CLI it
+	// runs the UserPromptSubmit hooks with the prompt, unless the mode says
+	// this vendor has no such hook (the negative control of the receipt).
+	let line = "";
+	let escape = "";
+	let pasting = false;
 	for (;;) {
 		const key = await nextKey();
 		if (key === null || key === "\x04") {
 			await quit("eof");
 			return;
 		}
-		if (key === "\x03") {
+		if (escape || key === ESC) {
+			escape += key;
+			if (escape === `${ESC}[200~`) {
+				pasting = true;
+				escape = "";
+			} else if (escape === `${ESC}[201~`) {
+				pasting = false;
+				escape = "";
+			} else if (!`${ESC}[200~`.startsWith(escape) && !`${ESC}[201~`.startsWith(escape)) {
+				escape = ""; // some other key sequence: dropped
+			}
+			continue;
+		}
+		if (!pasting && key === "\x03") {
 			await quit("ctrl-c");
 			return;
 		}
-		if (key === "q") {
+		if (!pasting && line === "" && key === "q") {
 			await quit("q");
 			return;
 		}
-		if (key === "\r") out("\r\n");
-		else if (key >= " ") out(key);
+		if (key === "\r" || key === "\n") {
+			if (pasting) {
+				line += "\n";
+				continue;
+			}
+			out("\r\n");
+			if (line.trim() !== "") await submitPrompt(line);
+			line = "";
+			continue;
+		}
+		if (key === "\x7f" || key === "\b") {
+			line = line.slice(0, -1);
+			continue;
+		}
+		if (key >= " ") {
+			line += key;
+			out(key);
+		}
 	}
+}
+
+async function submitPrompt(text) {
+	record.prompts.push(text);
+	note("prompt", { chars: text.length });
+	out(`fake-cli: prompt received (${text.length} chars)\r\n`);
+	if (mode === "no-prompt-hooks") return;
+	await runHooks("UserPromptSubmit", { prompt: text });
+	// The turn: `work <ms>` keeps the agent busy (nothing is read from the
+	// terminal meanwhile); every turn ends with the Stop hooks.
+	const work = /^work (\d+)$/.exec(text.trim());
+	if (work) {
+		const ms = Number(work[1]);
+		out(`fake-cli: working for ${ms} ms\r\n`);
+		note("working", { ms });
+		await new Promise((resolve) => setTimeout(resolve, ms));
+	}
+	await runHooks("Stop", { stop_hook_active: false });
+	note("turn-end");
+	out("fake-cli: turn ended\r\n");
 }
 
 main().catch((e) => {

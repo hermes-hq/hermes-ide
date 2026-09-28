@@ -36,6 +36,8 @@ interface MenuEventHandlers {
   pendingSplit: React.MutableRefObject<{ paneId: string; direction: string } | null>;
   onCheckForUpdates: () => void;
   commandPaletteShortcut: string;
+  /** F21: with the reviewDesk flag on, ⌘G opens the Review Desk instead of the git panel. */
+  toggleReviewDesk?: () => void;
 }
 
 export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
@@ -54,6 +56,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
     requestCloseSession,
     onCheckForUpdates,
     commandPaletteShortcut,
+    toggleReviewDesk,
   } = handlers;
 
   const onMenuAction = useCallback(
@@ -105,7 +108,8 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           dispatch({ type: "TOGGLE_PROCESS_PANEL" });
           break;
         case "view.git-panel":
-          dispatch({ type: "TOGGLE_GIT_PANEL" });
+          if (toggleReviewDesk) toggleReviewDesk();
+          else dispatch({ type: "TOGGLE_GIT_PANEL" });
           break;
         case "view.context-panel":
           dispatch({ type: "TOGGLE_CONTEXT" });
@@ -192,6 +196,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
       requestCloseSession,
       onCheckForUpdates,
       commandPaletteShortcut,
+      toggleReviewDesk,
     ],
   );
 

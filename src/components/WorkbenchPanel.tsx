@@ -20,6 +20,7 @@ import { FileExplorerPanel } from "./FileExplorerPanel";
 import { AgentContextPanel } from "./AgentContextPanel";
 import { GitPanel } from "./GitPanel";
 import { WorkbenchNotes } from "./WorkbenchNotes";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import {
   clampFilesNotesSplit,
   MIN_FILES_NOTES_SPLIT,
@@ -190,6 +191,10 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
   if (!wb.open) return null;
 
   const sessionLabel = session.label || session.id.slice(0, 8);
+  // F21: with the Review Desk on, the Git tab is retired from the workbench
+  // (⌘G opens the desk); a saved "git" tab shows Files instead.
+  const gitTab = !isFeatureFlagEnabled("reviewDesk");
+  const activeTab = !gitTab && wb.tab === "git" ? "files" : wb.tab;
 
   return (
     <aside
@@ -230,7 +235,7 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
             type="button"
             className="workbench-tab"
             role="tab"
-            aria-selected={wb.tab === "files"}
+            aria-selected={activeTab === "files"}
             onClick={() => setTab("files")}
           >
             Files
@@ -239,20 +244,22 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
             type="button"
             className="workbench-tab"
             role="tab"
-            aria-selected={wb.tab === "context"}
+            aria-selected={activeTab === "context"}
             onClick={() => setTab("context")}
           >
             Context
           </button>
-          <button
-            type="button"
-            className="workbench-tab"
-            role="tab"
-            aria-selected={wb.tab === "git"}
-            onClick={() => setTab("git")}
-          >
-            Git
-          </button>
+          {gitTab && (
+            <button
+              type="button"
+              className="workbench-tab"
+              role="tab"
+              aria-selected={activeTab === "git"}
+              onClick={() => setTab("git")}
+            >
+              Git
+            </button>
+          )}
         </div>
       </header>
 
@@ -264,26 +271,28 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
         className="workbench-body"
         role="tabpanel"
         aria-label="Files"
-        hidden={wb.tab !== "files"}
+        hidden={activeTab !== "files"}
       >
-        <FileExplorerPanel visible={wb.tab === "files"} />
+        <FileExplorerPanel visible={activeTab === "files"} />
       </div>
       <div
         className="workbench-body"
         role="tabpanel"
         aria-label="Context"
-        hidden={wb.tab !== "context"}
+        hidden={activeTab !== "context"}
       >
         <AgentContextPanel session={session} />
       </div>
-      <div
-        className="workbench-body"
-        role="tabpanel"
-        aria-label="Git"
-        hidden={wb.tab !== "git"}
-      >
-        <GitPanel visible={wb.tab === "git"} />
-      </div>
+      {gitTab && (
+        <div
+          className="workbench-body"
+          role="tabpanel"
+          aria-label="Git"
+          hidden={activeTab !== "git"}
+        >
+          <GitPanel visible={activeTab === "git"} />
+        </div>
+      )}
 
       <div
         className="workbench-split"

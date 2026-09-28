@@ -20,6 +20,8 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { clearFakeTurns, injectFakeTurns, type InjectedTurn } from "../review/turnSource";
+import { getReviewState } from "../review/reviewStore";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +126,13 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F21 Review Desk: fake turns while the ledger (F20) is not filled ──
+  /** Give a session a turn ledger (turn + patch), as F20 will record it. */
+  injectTurns: (sessionId: string, turns: InjectedTurn[]): void => injectFakeTurns(sessionId, turns),
+  clearTurns: (sessionId?: string): void => clearFakeTurns(sessionId),
+  /** What the desk keeps for a repository: viewed files, comments, deliveries. */
+  reviewState: (repoPath: string) => getReviewState(repoPath),
 };
 
 export type HermesE2EHooks = typeof hooks;

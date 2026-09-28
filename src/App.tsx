@@ -45,6 +45,7 @@ import { getComposerTextarea } from "./components/composerTextarea";
 import { SplitLayout } from "./components/SplitLayout";
 import { focusedPaneSnapshot, splitAfterCreateActions } from "./state/splitAfterCreate";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
+import { isFeatureFlagEnabled } from "./featureFlags";
 import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { getDraggedSession } from "./components/SplitPane";
@@ -85,6 +86,9 @@ const FileExplorerPanel = lazyView("FileExplorerPanel", () => import("./componen
 const SearchPanel = lazyView("SearchPanel", () => import("./components/SearchPanel").then((m) => m.SearchPanel));
 const CommandPalette = lazyView("CommandPalette", () => import("./components/CommandPalette").then((m) => m.CommandPalette));
 const SessionGitPanel = lazyView("SessionGitPanel", () => import("./components/SessionGitPanel").then((m) => m.SessionGitPanel));
+// F21: behind the reviewDesk flag, ⌘G opens the Review Desk and the git
+// panels above are no longer reachable.
+const ReviewDesk = lazyView("ReviewDesk", () => import("./components/ReviewDesk").then((m) => m.ReviewDesk));
 // Dialogs that only exist once the user opens them.
 const SessionCreator = lazyView("SessionCreator", () => import("./components/SessionCreator").then((m) => m.SessionCreator));
 const PromptComposer = lazyView("PromptComposer", () => import("./components/PromptComposer").then((m) => m.PromptComposer));
@@ -103,6 +107,10 @@ function AppContent() {
   const [settingsOpen, setSettingsOpen] = useState<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [costDashboardOpen, setCostDashboardOpen] = useState(false);
+  // F21 Review Desk: replaces the git panels when its flag is on.
+  const reviewDeskEnabled = isFeatureFlagEnabled("reviewDesk");
+  const [reviewDeskOpen, setReviewDeskOpen] = useState(false);
+  const toggleReviewDesk = useCallback(() => setReviewDeskOpen((open) => !open), []);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [sessionCreatorOpen, setSessionCreatorOpenInner] = useState<false | { group?: string }>(false);
 
@@ -815,6 +823,7 @@ function AppContent() {
     pendingSplit,
     onCheckForUpdates: () => updater.manualCheck(),
     commandPaletteShortcut: cmdPaletteShortcut,
+    toggleReviewDesk: reviewDeskEnabled ? toggleReviewDesk : undefined,
   });
 
   // ── Windows/Linux: app chords typed in the webview (terminal keeps Ctrl+letter) ──
@@ -824,7 +833,8 @@ function AppContent() {
   useMenuStateSync({
     sidebarVisible: !ui.sessionListCollapsed,
     processPanelOpen: ui.processPanelOpen,
-    gitPanelOpen: ui.gitPanelOpen,
+    // F21: with the desk on, the ⌘G item's checkmark follows the desk.
+    gitPanelOpen: reviewDeskEnabled ? reviewDeskOpen : ui.gitPanelOpen,
     contextPanelOpen: ui.contextPanelOpen,
     searchPanelOpen: ui.searchPanelOpen,
     flowMode: ui.flowMode,
@@ -936,9 +946,14 @@ function AppContent() {
                 null
               }
               onViewChange={(view: SessionView) => {
+                if (view === "git" && reviewDeskEnabled) {
+                  setReviewDeskOpen(true);
+                  return;
+                }
                 if (view) setActivePluginPanel(null);
                 dispatch({ type: "SET_SUBVIEW_PANEL", panel: view });
               }}
+              gitViewTitle={reviewDeskEnabled ? t("palette.reviewDesk") : undefined}
               gitBadge={activeGitSummary.changeCount || undefined}
               pluginSessionActions={pluginSessionActions}
               activePluginPanel={activePluginPanel}
@@ -956,7 +971,7 @@ function AppContent() {
         {sessionListVisible && secondPanelOpen && (
           <PanelResizeHandle direction="horizontal" onResize={handleLeftResize} onResizeEnd={refitActive} />
         )}
-        {ui.gitPanelOpen && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
+        {ui.gitPanelOpen && !reviewDeskEnabled && !ui.flowMode && !activePluginPanel && state.activeSessionId && (
           <PanelErrorBoundary panelName="Git Panel">
             <Suspense fallback={null}>
               <SessionGitPanel sessionId={state.activeSessionId} projectId="" />
@@ -1222,7 +1237,8 @@ function AppContent() {
           onAttachProject={() => setProjectPickerOpen(true)}
           onOpenComposer={() => dispatch({ type: "OPEN_COMPOSER" })}
           onOpenShortcuts={() => { setShortcutsOpen(true); }}
-          onToggleGit={() => dispatch({ type: "TOGGLE_GIT_PANEL" })}
+          onToggleGit={reviewDeskEnabled ? toggleReviewDesk : () => dispatch({ type: "TOGGLE_GIT_PANEL" })}
+          reviewDesk={reviewDeskEnabled}
           onToggleSearch={() => dispatch({ type: "TOGGLE_SEARCH_PANEL" })}
           onScanCwd={() => {
             if (activeSession?.working_directory) {
@@ -1246,6 +1262,14 @@ function AppContent() {
         <Suspense fallback={null}>
           <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />
         </Suspense>
+      )}
+
+      {reviewDeskEnabled && reviewDeskOpen && state.activeSessionId && (
+        <PanelErrorBoundary panelName="Review Desk">
+          <Suspense fallback={null}>
+            <ReviewDesk sessionId={state.activeSessionId} sessions={sessions} onClose={() => setReviewDeskOpen(false)} />
+          </Suspense>
+        </PanelErrorBoundary>
       )}
 
       {costDashboardOpen && (
