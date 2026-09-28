@@ -44,3 +44,18 @@
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* Land sheet entry (feature flag "landSheet") */
+.session-git-land-btn {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--bg-0);
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.session-git-land-btn + .git-panel-refresh {
+  margin-left: 4px;
+}

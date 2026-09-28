@@ -38,6 +38,7 @@ import type { SessionView } from "./components/SessionList";
 import { StatusBar } from "./components/StatusBar";
 import { EmptyState } from "./components/EmptyState";
 import { CloseSessionDialog } from "./components/CloseSessionDialog";
+import { LandSheetHost } from "./land/LandSheetHost";
 import { FlowToast } from "./components/FlowToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -1392,6 +1393,7 @@ function AppContent() {
       />
 
       <OnboardingGate />
+      <LandSheetHost />
       <WhatsNewGate version={__APP_VERSION__} />
 
       {state.pendingCloseSessionId && (

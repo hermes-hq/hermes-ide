@@ -20,6 +20,8 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { setFakeLandTurnsForTest } from "../land/turnSource";
+import type { Turn } from "../agent/contract/turns";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +126,11 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F22 Land sheet: stand in for the turn ledger (F20) ─────────────
+  /** The turns (and each turn's diff) the Land sheet reads for a session. */
+  setFakeLandTurns: (sessionId: string, turns: Array<{ turn: Turn; patch: string }>): void =>
+    setFakeLandTurnsForTest(sessionId, turns),
 };
 
 export type HermesE2EHooks = typeof hooks;

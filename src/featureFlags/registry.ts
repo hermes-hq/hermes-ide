@@ -5,8 +5,8 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 5 flags may exist at once — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 6th, retire one first.
+// At most 6 flags may exist at once — enforced by
+// src/__tests__/feature-flags.test.ts. If you need a 7th, retire one first.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -50,6 +50,12 @@ export const FEATURE_FLAGS = [
     label: "Launch helper (hi run)",
     description:
       "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, and report an agent stuck at a startup prompt.",
+  },
+  {
+    id: "landSheet",
+    label: "Land sheet with undo",
+    description:
+      "A Land button in the session's Git panel: commit, open a pull request or squash-merge locally in one step, archive the worktree, and undo any of it.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

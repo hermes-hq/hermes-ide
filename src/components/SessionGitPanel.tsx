@@ -7,6 +7,7 @@ import { GitDiffView } from "./GitDiffView";
 import { WorktreeIndicator } from "./WorktreeIndicator";
 import { WorktreeOverviewPanel } from "./WorktreeOverviewPanel";
 import { isFeatureFlagEnabled } from "../featureFlags";
+import { openLandSheet } from "../land/LandSheetHost";
 import type { GitFile, SessionWorktree } from "../types/git";
 import type { GitToast } from "./GitPanel";
 import "../styles/components/SessionGitPanel.css";
@@ -33,6 +34,13 @@ export function SessionGitPanel({ sessionId, projectId }: SessionGitPanelProps) 
   // Disk guard (feature flag): a Worktrees view with disk use and cleanup.
   const diskGuard = isFeatureFlagEnabled("diskGuard");
   const [view, setView] = useState<"changes" | "worktrees">("changes");
+  // Land sheet (feature flag): ship this task's worktree, with undo.
+  const landSheet = isFeatureFlagEnabled("landSheet");
+  // Projects this session works on in a worktree of its own (the backend
+  // re-checks: never the project folder, never a shared checkout).
+  const landable = landSheet
+    ? (status?.projects ?? []).filter((p) => p.is_git_repo && /hermes-worktrees[\\/]/.test(p.project_path))
+    : [];
 
   // Load poll interval setting on mount
   useEffect(() => {
@@ -85,6 +93,17 @@ export function SessionGitPanel({ sessionId, projectId }: SessionGitPanelProps) 
             isActive
           />
         )}
+        {landable.map((project) => (
+          <button
+            key={project.project_id}
+            className="session-git-land-btn"
+            data-project-id={project.project_id}
+            onClick={() => openLandSheet(sessionId, project.project_id)}
+            title="Commit, open a pull request or merge this task, with undo"
+          >
+            {landable.length === 1 ? "Land…" : `Land ${project.project_name}…`}
+          </button>
+        ))}
         <button
           className="git-panel-refresh"
           onClick={refresh}
