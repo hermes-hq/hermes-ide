@@ -27,6 +27,10 @@ export interface Turn {
   /** Epoch milliseconds, null while the turn is running. */
   readonly endedAt: number | null;
   readonly diffstat: Diffstat;
+  /** Repository-relative paths the turn changed, when the ledger records
+   *  them (optional, added for F37 Collision Radar; without it the radar
+   *  reads the paths from the turn's diff). */
+  readonly paths?: readonly string[];
 }
 
 export interface TurnDiff {

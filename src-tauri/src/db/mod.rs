@@ -1938,6 +1938,11 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "ui_language",
     // Feature flags (per-install debug overrides — see src/featureFlags/)
     "feature_flag_overrides",
+    // Fleet controls (2.0: spend caps and the task queue — see src/fleet/)
+    "fleet_spend_cap_session_usd",
+    "fleet_spend_cap_feature_usd",
+    "fleet_max_running_agents",
+    "fleet_max_agent_memory_mb",
 ];
 
 #[tauri::command]

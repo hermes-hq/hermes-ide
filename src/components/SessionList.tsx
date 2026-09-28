@@ -18,6 +18,9 @@ import type { PluginSessionActionContribution } from "../plugins/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionModel } from "../agent/useSessionModel";
 import { agentDisplayName } from "../catalog/agentCatalog";
+import { isFeatureFlagEnabled } from "../featureFlags";
+import { SessionOverlapBadge, SessionSpendChip } from "../fleet/FleetRowBadges";
+import { TaskQueueSection } from "../fleet/TaskQueueSection";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -886,6 +889,12 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     onViewChange(activeView === view ? null : view);
   }, [activeView, onViewChange]);
 
+  // 2.0 fleet controls (flag, read once at startup): the spend an agent
+  // reports, "n/a" otherwise, overlap badges and the task queue. With it on,
+  // the project headers no longer add up estimated costs.
+  const fleetOn = isFeatureFlagEnabled("fleetControls");
+  const labelOf = (id: string) => sessions.find((s) => s.id === id)?.label ?? id;
+
   const renderSession = (session: SessionData) => {
     const isActive = session.id === activeSessionId;
     const shouldTriggerRename = renameSessionId === session.id;
@@ -932,6 +941,8 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
               <SessionAgentTag session={session} />
+              {fleetOn && session.phase !== "destroyed" && <SessionSpendChip session={session} />}
+              {fleetOn && session.phase !== "destroyed" && <SessionOverlapBadge sessionId={session.id} labelOf={labelOf} />}
               {session.agent_startup?.state === "waiting_at_startup_prompt" && (
                 <span
                   className="session-startup-tag"
@@ -1129,6 +1140,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
         <span className="session-list-title">{t("sessions.title")}</span>
       </div>
       <div className="session-list-body" onContextMenu={handleEmptyAreaContextMenu}>
+        {fleetOn && <TaskQueueSection />}
         {sessions.length === 0 && (
           <div className="session-list-empty">{t("sessions.noActive")}<br/><span className="text-muted">{t("sessions.createHint", { shortcut: shortcutLabel("file.new-session") })}</span></div>
         )}
@@ -1137,7 +1149,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
         {allGroups.map((group) => {
           const groupSessions = grouped.get(group) || [];
           const isCollapsed = collapsedGroups.has(group);
-          const groupCost = groupSessions.reduce((sum, s) => sum + sessionCost(s), 0);
+          const groupCost = fleetOn ? 0 : groupSessions.reduce((sum, s) => sum + sessionCost(s), 0);
           const groupColor = groupSessions.find((s) => s.phase !== "destroyed" && s.color)?.color || groupSessions.find((s) => s.color)?.color || emptyProjectColors[group] || "";
 
           return (

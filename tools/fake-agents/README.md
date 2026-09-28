@@ -20,7 +20,7 @@ node tools/fake-agents/fake-agent.mjs --scenario approval [--log run.jsonl] [--s
 
 `--scenario` takes a file or a name from `scenarios/`. `--speed 0` skips
 sleeps. Exit codes: the scenario's own, 124 when a wait times out, 130 on
-Ctrl-C, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
+Ctrl-C or SIGINT, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
 
 | Scenario | Behaviour |
 |---|---|

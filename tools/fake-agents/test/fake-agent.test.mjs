@@ -98,10 +98,11 @@ describe("fake-agent: approval scenario", () => {
 		expect(r.text.endsWith(`${ESC}[?1049l${ESC}[?25h${ESC}[?2004l${ESC}[?1004l`)).toBe(true);
 	});
 
-	posixIt("SIGTERM ends it with 143, SIGHUP with 129", async () => {
+	posixIt("SIGTERM ends it with 143, SIGHUP with 129, SIGINT with 130", async () => {
 		for (const [sig, code] of [
 			["SIGTERM", 143],
 			["SIGHUP", 129],
+			["SIGINT", 130],
 		]) {
 			const p = start(AGENT, ["--scenario", "approval", "--speed", "0"]);
 			await printed(p, "[a] always");

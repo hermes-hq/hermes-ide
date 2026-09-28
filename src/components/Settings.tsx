@@ -35,8 +35,10 @@ import {
   FEATURE_FLAG_OVERRIDES_KEY,
   parseFeatureFlagOverrides,
   getReleaseChannel,
+  isFeatureFlagEnabled,
   type FeatureFlagId,
 } from "../featureFlags";
+import { FleetSettingsTab } from "../fleet/FleetSettingsTab";
 
 // The plugin manager loads when its tab is first opened.
 const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
@@ -241,6 +243,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     { id: "ssh", label: t("settings.ssh") },
     { id: "git", label: t("settings.git") },
     { id: "ai-agent", label: t("settings.aiAgent") },
+    // 2.0 fleet controls: spend caps and the running-agents cap.
+    ...(isFeatureFlagEnabled("fleetControls") ? [{ id: "limits", label: t("settings.limits") }] : []),
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
     { id: "privacy", label: t("settings.privacy") },
@@ -802,6 +806,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               </div>
             )}
 
+
+            {activeTab === "limits" && isFeatureFlagEnabled("fleetControls") && <FleetSettingsTab />}
 
             {activeTab === "ai-agent" && (
               <AiAgentSettingsTab
