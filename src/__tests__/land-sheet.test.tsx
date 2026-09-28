@@ -162,10 +162,15 @@ beforeEach(() => {
   h.shellOpen.mockClear();
   h.sessions = { [SID]: { label: "Search" } };
   _resetSessionEventStoreForTest();
+  // The stand-in turns are read only in test builds.
+  vi.stubEnv("VITE_HERMES_E2E", "1");
   setFakeLandTurnsForTest(SID, []);
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 describe("what the sheet shows", () => {
   it("shows Done-When, the turn count, the diffstat and the disk used", async () => {
@@ -187,6 +192,21 @@ describe("what the sheet shows", () => {
     await waitFor(() => expect(document.querySelector(".land-sheet-disk")?.textContent).toContain("5.0 MB (build output 4.0 MB)"));
     const message = (document.querySelector(".land-sheet-message") as HTMLTextAreaElement).value;
     expect(message).toBe("Add search\n\n2 turns:\n- Turn 1: 2 files, +9 -1 (src/a.ts)\n- Turn 2: 1 file, +3 -3 (README.md)");
+  });
+
+  it("says nothing about the branch when landing goes to main", async () => {
+    backend();
+    await openSheet();
+    expect(document.querySelector(".land-sheet-base-note")).toBeNull();
+  });
+
+  it("warns when the project folder is on another branch than main", async () => {
+    backend({ preview: preview({ base: { name: "release-1", head: "2222222222", checkedOutAt: "/repo" } }) });
+    render(<LandSheet sessionId={SID} projectId={PID} onClose={vi.fn()} />);
+    await screen.findByText("Squash-merge into release-1 locally");
+    expect(document.querySelector(".land-sheet-base-note")?.textContent).toBe(
+      "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
+    );
   });
 
   it("counts turns the session reported even before the ledger has them", async () => {

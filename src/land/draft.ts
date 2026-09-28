@@ -201,6 +201,18 @@ export function mergeNote(merge: MergeCheck, base: string | null): string {
   }
 }
 
+/** Branch names Hermes treats as a project's main line. */
+const MAIN_LINE = new Set(["main", "master", "trunk"]);
+
+/**
+ * Landing goes to the branch the project folder has checked out. When that is
+ * not a main line, say so: the person may expect main.
+ */
+export function baseBranchNote(base: string | null): string | null {
+  if (!base || MAIN_LINE.has(base)) return null;
+  return `The project folder has ${base} checked out, so this lands on ${base}. To land on your main branch, check it out in the project folder first.`;
+}
+
 /** The one line offered to the agent after a conflict (pasted, never sent). */
 export function rebaseRequest(base: string, files: readonly string[]): string {
   return `Please rebase this branch onto ${base} and resolve the conflicts in ${files.join(", ")}.`;
