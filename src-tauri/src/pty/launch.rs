@@ -136,6 +136,9 @@ pub struct LaunchPlan {
     pub context_in_args: bool,
     /// The nonce every spool line of this launch must carry.
     pub nonce: String,
+    /// True when the agent's stop runs the Done-When checks itself (F27),
+    /// so Hermes does not run them again at its turn end.
+    pub check_hook: bool,
 }
 
 fn split_words(fragment: &str) -> Vec<String> {
@@ -178,22 +181,60 @@ fn plain_events<'a>(agent: &'a Agent, status: &str) -> impl Iterator<Item = &'a 
         .filter(|e| !e.contains(':'))
 }
 
+/// How long the agent waits for the Done-When Stop hook: the checks' own
+/// time budget (`hi`'s default, 600 s) plus room to start and report.
+pub const CHECK_HOOK_TIMEOUT_SECS: u64 = 660;
+
+/// The Done-When hook command (F27): runs the repository's checks and
+/// refuses the stop while they fail (see `hi check --stop-hook`).
+fn check_command(hi: &Path) -> String {
+    format!("\"{}\" check --stop-hook", hook_path(hi))
+}
+
+/// Add one hook group under `event`, after any group already there.
+fn push_hook(
+    hooks: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    hook: serde_json::Value,
+) {
+    let group = serde_json::json!({ "hooks": [hook] });
+    match hooks.get_mut(event) {
+        Some(serde_json::Value::Array(groups)) => groups.push(group),
+        _ => {
+            hooks.insert(event.to_string(), serde_json::json!([group]));
+        }
+    }
+}
+
 /// The per-launch hook file for the `settings_file` method (Claude's
 /// settings shape): hooks only, so it merges on top of the user's own
-/// settings without replacing anything.
+/// settings without replacing anything. When the catalog names a
+/// `check_hook` event, that event also runs the Done-When checks (F27).
 pub fn settings_file_json(agent: &Agent, hi: &Path) -> String {
     let mut hooks = serde_json::Map::new();
     for status in ["session_start", "exited"] {
         for event in plain_events(agent, status) {
-            hooks.insert(
-                event.to_string(),
-                serde_json::json!([{ "hooks": [{
+            push_hook(
+                &mut hooks,
+                event,
+                serde_json::json!({
                     "type": "command",
                     "command": signal_command(hi, &agent.id, event),
                     "timeout": 5
-                }]}]),
+                }),
             );
         }
+    }
+    if let Some(event) = agent.terminal.signals.check_hook.as_deref() {
+        push_hook(
+            &mut hooks,
+            event,
+            serde_json::json!({
+                "type": "command",
+                "command": check_command(hi),
+                "timeout": CHECK_HOOK_TIMEOUT_SECS
+            }),
+        );
     }
     serde_json::to_string_pretty(&serde_json::json!({ "hooks": hooks })).unwrap_or_default()
 }
@@ -230,6 +271,7 @@ struct SignalSetup {
     env: BTreeMap<String, String>,
     files: Vec<(PathBuf, String)>,
     expects_start_signal: bool,
+    check_hook: bool,
 }
 
 fn signal_setup(
@@ -245,6 +287,7 @@ fn signal_setup(
         env: BTreeMap::new(),
         files: Vec::new(),
         expects_start_signal: false,
+        check_hook: false,
     };
     let file = match signals.method.as_str() {
         "settings_file" => Some((
@@ -282,6 +325,8 @@ fn signal_setup(
         setup.files.push(f);
         // Only a hook file we wrote can carry the start hook.
         setup.expects_start_signal = has_start;
+        // ...and the Done-When Stop hook (only the settings file has one).
+        setup.check_hook = signals.method == "settings_file" && signals.check_hook.is_some();
     }
     setup
 }
@@ -415,6 +460,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         // only on the fresh command (which the fallback also carries).
         context_in_args: context_in_args && !resumes,
         nonce: input.nonce.to_string(),
+        check_hook: signals.check_hook,
     })
 }
 
@@ -564,6 +610,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
             .resumes
             .then(|| "resuming the previous conversation".to_string()),
     });
+    crate::done_when::set_hook(app, &s.id, plan.check_hook);
     Some(PreparedLaunch {
         line: format!("hi run {}", s.id),
         context_in_args: plan.context_in_args,
@@ -600,6 +647,9 @@ pub enum SpoolEvent {
         exit_code: i64,
         error: Option<String>,
     },
+    /// A Done-When check ran inside the agent (its Stop hook, or `hi check`
+    /// typed by the agent): the report, for `crate::done_when`.
+    Check(serde_json::Value),
     Other,
 }
 
@@ -637,6 +687,10 @@ pub fn parse_spool_line(line: &str, nonce: &str) -> Option<SpoolEvent> {
                 .and_then(|x| x.as_i64())
                 .unwrap_or(-1),
             error: payload_str("error"),
+        },
+        "hermes.check" => match payload {
+            Some(p @ serde_json::Value::Object(_)) => SpoolEvent::Check(p.clone()),
+            _ => SpoolEvent::Other,
         },
         _ => SpoolEvent::Other,
     })
@@ -693,7 +747,9 @@ pub fn apply_spool_event(s: &mut Session, event: &SpoolEvent) -> bool {
             });
             true
         }
-        SpoolEvent::Other => false,
+        // A check report changes no startup state; the watcher hands it to
+        // `crate::done_when`.
+        SpoolEvent::Check(_) | SpoolEvent::Other => false,
     }
 }
 
@@ -757,7 +813,10 @@ pub(crate) fn watch_signals(
             let mut changed = false;
             let mut stop = false;
             let mut guess_waiting = false;
+            let mut checks: Vec<serde_json::Value> = Vec::new();
+            let mut session_id = String::new();
             if let Ok(mut s) = session.lock() {
+                session_id = s.id.clone();
                 if matches!(
                     s.phase,
                     SessionPhase::Destroyed | SessionPhase::Disconnected
@@ -768,6 +827,9 @@ pub(crate) fn watch_signals(
                     if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             launched_at = Instant::now();
+                        }
+                        if let SpoolEvent::Check(report) = &event {
+                            checks.push(report.clone());
                         }
                         if let SpoolEvent::Exited { exit_code, error } = &event {
                             log::info!(
@@ -812,6 +874,15 @@ pub(crate) fn watch_signals(
                 }
             } else {
                 stop = true;
+            }
+            // Outside the session lock: results go to the frontend, and a
+            // hook that gave up turns the session `check_failed`.
+            for report in &checks {
+                crate::done_when::on_hook_report(&app, &session_id, report);
+            }
+            if stop && !session_id.is_empty() {
+                // The agent is gone; nothing refuses its stops any more.
+                crate::done_when::set_hook(&app, &session_id, false);
             }
             if guess_waiting {
                 log::info!(
@@ -902,6 +973,61 @@ mod tests {
             "\"/app/hi\" signal --agent claude --event SessionStart"
         );
         assert!(json["hooks"]["SessionEnd"].is_array());
+        // Done-When (F27): Claude's stop runs the checks and can be refused.
+        let stop = &json["hooks"]["Stop"][0]["hooks"][0];
+        assert_eq!(stop["type"], "command");
+        assert_eq!(stop["command"], "\"/app/hi\" check --stop-hook");
+        assert_eq!(stop["timeout"], CHECK_HOOK_TIMEOUT_SECS);
+        assert!(plan.check_hook);
+    }
+
+    #[test]
+    fn only_a_settings_file_agent_with_a_check_hook_gets_the_done_when_hook() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        for provider in ["codex", "gemini"] {
+            let plan = plan_launch(&input(provider, None, hi, dir)).unwrap();
+            assert!(!plan.check_hook, "{provider}");
+            for (_, contents) in &plan.files {
+                assert!(!contents.contains("--stop-hook"), "{provider}");
+            }
+            assert!(!plan.spec.args.iter().any(|a| a.contains("--stop-hook")));
+        }
+    }
+
+    #[test]
+    fn a_second_hook_on_the_same_event_is_added_not_replaced() {
+        let mut hooks = serde_json::Map::new();
+        push_hook(&mut hooks, "Stop", serde_json::json!({ "command": "a" }));
+        push_hook(&mut hooks, "Stop", serde_json::json!({ "command": "b" }));
+        let groups = hooks["Stop"].as_array().unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0]["hooks"][0]["command"], "a");
+        assert_eq!(groups[1]["hooks"][0]["command"], "b");
+    }
+
+    #[test]
+    fn a_check_report_on_the_spool_is_handed_on_whole() {
+        let line = r#"{"v":1,"ts":1,"session":"s","agent":"claude","nonce":"n0nce","event":"hermes.check","payload":{"state":"failed","trigger":"stop_hook","attempt":2}}"#;
+        match parse_spool_line(line, "n0nce") {
+            Some(SpoolEvent::Check(p)) => {
+                assert_eq!(p["state"], "failed");
+                assert_eq!(p["attempt"], 2);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Another launch's nonce: ignored like any other line.
+        assert_eq!(parse_spool_line(line, "other"), None);
+        let no_payload = r#"{"v":1,"ts":1,"session":"s","agent":"claude","nonce":"n0nce","event":"hermes.check"}"#;
+        assert_eq!(
+            parse_spool_line(no_payload, "n0nce"),
+            Some(SpoolEvent::Other)
+        );
+        let mut s = test_session();
+        assert!(!apply_spool_event(
+            &mut s,
+            &SpoolEvent::Check(serde_json::json!({}))
+        ));
     }
 
     #[test]

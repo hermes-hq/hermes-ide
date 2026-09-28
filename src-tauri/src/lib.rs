@@ -5,6 +5,7 @@ mod claude_config;
 mod clipboard;
 pub mod contract;
 mod db;
+pub mod done_when;
 #[cfg(feature = "e2e")]
 mod e2e_bridge;
 #[cfg(any(test, feature = "e2e"))]
@@ -602,6 +603,7 @@ pub fn run() {
             app.manage(state);
             app.manage(Mutex::new(transcript::TranscriptWatcherState::default()));
             app.manage(agent::AgentState::default());
+            app.manage(done_when::DoneWhenState::default());
             app.manage(inline_pty::InlinePtyManager::new());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
@@ -869,6 +871,9 @@ pub fn run() {
             contract::turns::list_turns,
             contract::turns::get_turn_diff,
             contract::emit_session_event_for_test,
+            // Done-When checks (F27).
+            done_when::done_when_run,
+            done_when::done_when_history,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

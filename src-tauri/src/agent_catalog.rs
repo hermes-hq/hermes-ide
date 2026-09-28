@@ -73,6 +73,11 @@ pub struct Signals {
     /// Hermes status -> the vendor events that mean it.
     #[serde(default)]
     pub events: HashMap<String, Vec<String>>,
+    /// Done-When (F27): the hook event whose command can refuse the agent's
+    /// stop and hand the failures back (Claude's `Stop`, exit code 2). Only
+    /// meaningful for the `settings_file` method.
+    #[serde(default)]
+    pub check_hook: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

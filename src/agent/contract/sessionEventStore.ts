@@ -130,6 +130,21 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
   };
 }
 
+/** Called with every accepted event of every session (after the snapshot
+ *  moved). For features that act on events wherever they happen, like the
+ *  Done-When checks at a turn end (F27). Additive to the C0 contract. */
+export type SessionEventTap = (sessionId: string, event: SessionEvent, snapshot: SessionEventSnapshot) => void;
+
+const taps = new Set<SessionEventTap>();
+
+/** Watch every session's events; returns the unsubscribe. */
+export function tapSessionEvents(tap: SessionEventTap): () => void {
+  taps.add(tap);
+  return () => {
+    taps.delete(tap);
+  };
+}
+
 /** Fold one event into its session and wake that session's subscribers. */
 export function dispatchSessionEvent(sessionId: string, event: SessionEvent): SessionEventSnapshot {
   const next = reduceSessionEvent(getSessionEventSnapshot(sessionId), event);
@@ -137,6 +152,13 @@ export function dispatchSessionEvent(sessionId: string, event: SessionEvent): Se
   emptyCache.delete(sessionId);
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
+  for (const tap of [...taps]) {
+    try {
+      tap(sessionId, event, next);
+    } catch (e) {
+      console.warn("[session-event] a tap threw:", e);
+    }
+  }
   return next;
 }
 
@@ -166,4 +188,5 @@ export function _resetSessionEventStoreForTest(): void {
   snapshots.clear();
   listeners.clear();
   emptyCache.clear();
+  taps.clear();
 }

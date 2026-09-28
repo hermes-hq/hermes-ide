@@ -12,8 +12,13 @@
 //   - reads the `--settings` file and runs its `SessionStart` hooks (JSON on
 //     the hook's stdin, the same shape Claude Code sends) — but only after a
 //     startup prompt was answered, when it shows one;
-//   - then behaves as a small TUI: echoes keys, `q` or Ctrl-C quits (running
-//     the `SessionEnd` hooks first).
+//   - then behaves as a small TUI: echoes keys, `q` on an empty line or
+//     Ctrl-C quits (running the `SessionEnd` hooks first);
+//   - a line (typed, or a bracketed paste) and Enter is a prompt: one turn
+//     of "work" (a line appended to `.fake-work.log` in its folder), then a
+//     stop that the settings file's `Stop` hooks may refuse with exit code 2,
+//     like Claude Code — the fake then shows the feedback, works once more
+//     and stops again with `stop_hook_active: true`.
 //
 // Behaviour is chosen per launch with HERMES_FAKE_MODE, or the file
 // `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches):
@@ -26,6 +31,9 @@
 //   ignore-resume accept `--resume` but start a new conversation under a new
 //                 id anyway — a broken vendor, used as the negative control
 //                 that proves the resume checks can fail
+//   ignore-stop-hooks runs the Stop hooks but stops even when one refuses
+//                 (exit 2) — a vendor without blocking stops, the negative
+//                 control of the Done-When scenario
 //
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
@@ -105,6 +113,7 @@ const record = {
 	settingsError,
 	prompt: args.positional.join(" ") || null,
 	hooksRan: [],
+	turns: [],
 	events: [],
 	exit: null,
 };
@@ -212,7 +221,7 @@ function runHook(hook, payload) {
 		const timer = setTimeout(() => child.kill(), timeoutMs);
 		child.on("close", (code) => {
 			clearTimeout(timer);
-			resolve({ command: hook.command, code, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 500) });
+			resolve({ command: hook.command, code, stdout: stdout.slice(0, 500), stderr: stderr.slice(0, 2000) });
 		});
 		child.on("error", (e) => {
 			clearTimeout(timer);
@@ -301,6 +310,7 @@ async function main() {
 	await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
 
+	let line = "";
 	for (;;) {
 		const key = await nextKey();
 		if (key === null || key === "\x04") {
@@ -311,13 +321,102 @@ async function main() {
 			await quit("ctrl-c");
 			return;
 		}
-		if (key === "q") {
+		if (key === "q" && line === "") {
 			await quit("q");
 			return;
 		}
-		if (key === "\r") out("\r\n");
-		else if (key >= " ") out(key);
+		if (key === "\x1b") {
+			// A bracketed paste (ESC [200~ ... ESC [201~) is one prompt text.
+			const pasted = await readPaste();
+			if (pasted !== null) {
+				line += pasted;
+				out(`[pasted ${pasted.length} chars]`);
+			}
+			continue;
+		}
+		if (key === "\r" || key === "\n") {
+			out("\r\n");
+			const prompt = line;
+			line = "";
+			if (prompt.trim()) await turn(prompt);
+			continue;
+		}
+		if (key === "\x7f" || key === "\b") {
+			if (line) {
+				line = line.slice(0, -1);
+				out("\b \b");
+			}
+			continue;
+		}
+		if (key >= " ") {
+			line += key;
+			out(key);
+		}
 	}
+}
+
+/** After an ESC: the text of a bracketed paste, or null for any other
+ *  escape sequence (its bytes are dropped). */
+async function readPaste() {
+	let head = "";
+	while (head.length < 5) {
+		const k = await nextKey();
+		if (k === null) return null;
+		head += k;
+		if (!"[200~".startsWith(head)) return null;
+	}
+	let text = "";
+	for (;;) {
+		const k = await nextKey();
+		if (k === null) return text;
+		text += k;
+		if (text.endsWith("\x1b[201~")) return text.slice(0, -6);
+	}
+}
+
+// ─── Turns (a prompt, some work, a stop the Stop hooks may refuse) ───
+//
+// Like Claude Code: each prompt runs the `UserPromptSubmit` hooks, does its
+// "work" (appends one line to `.fake-work.log` in the current folder, so a
+// check can tell how far the agent got), then tries to stop. The `Stop`
+// hooks run with `stop_hook_active` false the first time; a hook that exits
+// 2 refuses the stop and its stderr is the feedback: the fake shows it,
+// works once more and tries to stop again with `stop_hook_active` true.
+
+/** Most stops a turn may have refused before the fake gives up by itself
+ *  (only a broken hook would get here; Claude has no such cap). */
+const MAX_REFUSED_STOPS = 10;
+
+function workStep(label) {
+	const file = path.join(process.cwd(), ".fake-work.log");
+	fs.appendFileSync(file, `${label}\n`);
+	return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length;
+}
+
+async function turn(prompt) {
+	const entry = { prompt: prompt.slice(0, 2000), stops: [] };
+	record.turns = record.turns ?? [];
+	record.turns.push(entry);
+	await runHooks("UserPromptSubmit", { prompt });
+	let steps = workStep(`turn ${record.turns.length}: ${prompt.split("\n")[0].slice(0, 80)}`);
+	out(`fake-cli: worked (step ${steps})\r\n`);
+	let active = false;
+	for (let i = 0; i <= MAX_REFUSED_STOPS; i++) {
+		const results = await runHooks("Stop", { stop_hook_active: active, last_assistant_message: `step ${steps}` });
+		// A vendor without blocking stops (the negative control) stops anyway.
+		const refused = mode === "ignore-stop-hooks" ? undefined : results.find((r) => r.code === 2);
+		entry.stops.push({ active, codes: results.map((r) => r.code) });
+		save();
+		if (!refused) break;
+		const first = (refused.stderr || "").split("\n").find((l) => l.trim()) ?? "";
+		out(`fake-cli: Stop hook feedback: ${first.slice(0, 160)}\r\n`);
+		note("stop-refused", { attempt: i + 1 });
+		active = true;
+		steps = workStep(`continue ${i + 1}`);
+		out(`fake-cli: worked (step ${steps})\r\n`);
+	}
+	out("fake-cli: turn done\r\n");
+	note("turn-done", { stops: entry.stops.length });
 }
 
 main().catch((e) => {

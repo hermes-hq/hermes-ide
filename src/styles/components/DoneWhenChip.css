@@ -1,0 +1,115 @@
+/* ─── Done-When chip (F27) ──────────────────────────────────────── */
+
+.done-when {
+  position: relative;
+  display: inline-flex;
+}
+
+.done-when-chip {
+  background: none;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-pill);
+  padding: 0 7px;
+  font-size: var(--text-2xs);
+  line-height: 16px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.done-when-chip:hover { color: var(--text-0); }
+.done-when-chip[data-state="passed"] { color: var(--success); border-color: var(--success-dim); }
+.done-when-chip[data-state="failed"],
+.done-when-chip[data-state="retrying"] { color: var(--warning); border-color: var(--warning-dim); }
+.done-when-chip[data-state="check_failed"],
+.done-when-chip[data-state="error"] { color: var(--danger); border-color: var(--danger-dim); }
+.done-when-chip[data-state="running"] { color: var(--text-3); }
+
+.done-when-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  width: min(460px, 70vw);
+  max-height: 360px;
+  overflow: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-3);
+  padding: 8px 10px;
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+.done-when-popover-title {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  margin-bottom: 6px;
+}
+
+.done-when-error { color: var(--danger); margin-bottom: 6px; }
+
+.done-when-commands {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.done-when-command-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.done-when-command-line code {
+  font-family: var(--font-code);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.done-when-command-result { margin-left: auto; font-size: var(--text-xs); white-space: nowrap; }
+.done-when-command[data-ok="true"] .done-when-command-result { color: var(--success); }
+.done-when-command[data-ok="false"] .done-when-command-result { color: var(--danger); }
+
+.done-when-output {
+  margin: 4px 0 0;
+  padding: 6px;
+  max-height: 140px;
+  overflow: auto;
+  background: var(--bg-0);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-code);
+  font-size: var(--text-2xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-1);
+}
+
+.done-when-note { margin-top: 8px; color: var(--text-2); font-size: var(--text-xs); }
+
+.done-when-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+.done-when-actions button {
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  border: 1px solid var(--border-light);
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.done-when-actions .done-when-send { background: var(--accent); border-color: var(--accent); color: var(--bg-0); }
+.done-when-actions button:disabled { opacity: 0.6; cursor: default; }
+
+/* Land sheet block (for F22) */
+.done-when-land { display: flex; flex-direction: column; gap: 8px; font-size: var(--text-sm); }
+.done-when-land-status[data-state="passed"] { color: var(--success); }
+.done-when-land-status[data-state="failed"],
+.done-when-land-status[data-state="error"] { color: var(--danger); }
+.done-when-land-actions { display: flex; gap: 8px; justify-content: flex-end; }

@@ -20,6 +20,7 @@ import {
 } from "../agent/contract/sessionEventStore";
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
+import { checksForTurn, getDoneWhenSnapshot } from "../doneWhen/store";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -124,6 +125,10 @@ const hooks = {
   raiseInboxItem: (input: InboxRaise) => raiseInboxItem(input),
   resolveInboxItem: (id: string): boolean => resolveInboxItem(id),
   inboxItems: () => listInboxItems(),
+
+  // ── F27 Done-When: what the chip reads, and the result kept per turn ──
+  doneWhenSnapshot: (sessionId: string) => getDoneWhenSnapshot(sessionId),
+  doneWhenForTurn: (sessionId: string, n: number) => checksForTurn(sessionId, n),
 };
 
 export type HermesE2EHooks = typeof hooks;

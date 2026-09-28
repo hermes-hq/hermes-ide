@@ -1,0 +1,371 @@
+{
+ "_comment": "Done-When (F27): cases the frontend readers (src/agent/contract) and the hi helper's readers (src-tauri/hi/src/done_when.rs) must agree on, messages and line numbers included. For a readable file only done_when (and the slug) is compared.",
+ "worktree": [
+  {
+   "name": "full recipe",
+   "text": "\n# Worktree recipe for this repository\nsetup = [\"npm ci\", \"cargo fetch\"]   # in order\ncopy = [\".env*\", 'config/local.json']\ndone_when = [\n  \"npm test\",\n  \"npm run lint\", # trailing comma is fine\n]\n\n[ports]\nweb = 3000\napi = 8_080\n",
+   "doneWhen": [
+    "npm test",
+    "npm run lint"
+   ]
+  },
+  {
+   "name": "empty file",
+   "text": "",
+   "doneWhen": []
+  },
+  {
+   "name": "only a comment",
+   "text": "# only a comment\n",
+   "doneWhen": []
+  },
+  {
+   "name": "unknown keys are ignored",
+   "text": "setup = [\"a\"]\nshared_deps = true\n[cache]\ndir = \"x\"\ndone_when = [\"make check\"]\n",
+   "doneWhen": []
+  },
+  {
+   "name": "root done_when before a table",
+   "text": "done_when = [\"make check\"]\n[cache]\ndir = \"x\"\n",
+   "doneWhen": [
+    "make check"
+   ]
+  },
+  {
+   "name": "escapes in basic strings, none in literal",
+   "text": "done_when = [\"echo \\\"hi\\\"\", 'C:\\\\path']",
+   "doneWhen": [
+    "echo \"hi\"",
+    "C:\\\\path"
+   ]
+  },
+  {
+   "name": "a hash inside a string is not a comment",
+   "text": "done_when = [\"#not a comment\"] # a comment",
+   "doneWhen": [
+    "#not a comment"
+   ]
+  },
+  {
+   "name": "CRLF line endings",
+   "text": "done_when = [\r\n  \"npm test\",\r\n]\r\n",
+   "doneWhen": [
+    "npm test"
+   ]
+  },
+  {
+   "name": "setup as a string",
+   "text": "setup = \"npm ci\"",
+   "error": {
+    "message": "setup must be an array of strings",
+    "line": 0
+   }
+  },
+  {
+   "name": "done_when with numbers",
+   "text": "done_when = [1, 2]",
+   "error": {
+    "message": "done_when must be an array of strings",
+    "line": 0
+   }
+  },
+  {
+   "name": "done_when as a string",
+   "text": "done_when = \"npm test\"",
+   "error": {
+    "message": "done_when must be an array of strings",
+    "line": 0
+   }
+  },
+  {
+   "name": "done_when as a table",
+   "text": "[done_when]\nx = \"npm test\"",
+   "error": {
+    "message": "done_when must be an array of strings",
+    "line": 0
+   }
+  },
+  {
+   "name": "unterminated array",
+   "text": "copy = [\"a\"",
+   "error": {
+    "message": "unterminated array",
+    "line": 1
+   }
+  },
+  {
+   "name": "bad value in a multi-line array",
+   "text": "\n\nsetup = [\n  \"a\",\n  oops\n]",
+   "error": {
+    "message": "cannot read value oops",
+    "line": 3
+   }
+  },
+  {
+   "name": "ports not a table",
+   "text": "ports = 3000",
+   "error": {
+    "message": "ports must be a [ports] table",
+    "line": 0
+   }
+  },
+  {
+   "name": "port out of range",
+   "text": "[ports]\nweb = 70000",
+   "error": {
+    "message": "ports.web must be a port number (1-65535)",
+    "line": 0
+   }
+  },
+  {
+   "name": "port as a string",
+   "text": "[ports]\nweb = \"3000\"",
+   "error": {
+    "message": "ports.web must be a port number (1-65535)",
+    "line": 0
+   }
+  },
+  {
+   "name": "not key = value",
+   "text": "just words",
+   "error": {
+    "message": "expected key = value",
+    "line": 1
+   }
+  },
+  {
+   "name": "key twice",
+   "text": "setup = [\"a\"]\nsetup = [\"b\"]",
+   "error": {
+    "message": "key setup defined twice",
+    "line": 2
+   }
+  },
+  {
+   "name": "table twice",
+   "text": "[ports]\n[ports]",
+   "error": {
+    "message": "table [ports] defined twice",
+    "line": 2
+   }
+  },
+  {
+   "name": "dotted table",
+   "text": "[a.b]\nx = 1",
+   "error": {
+    "message": "only [name] tables are supported",
+    "line": 1
+   }
+  },
+  {
+   "name": "unterminated string",
+   "text": "name = \"unterminated",
+   "error": {
+    "message": "unterminated string",
+    "line": 1
+   }
+  },
+  {
+   "name": "unknown escape",
+   "text": "done_when = [\"a\\qb\"]",
+   "error": {
+    "message": "unknown escape \\q",
+    "line": 1
+   }
+  },
+  {
+   "name": "empty array element",
+   "text": "done_when = [\"a\", , \"b\"]",
+   "error": {
+    "message": "empty array element",
+    "line": 1
+   }
+  },
+  {
+   "name": "missing value",
+   "text": "done_when =",
+   "error": {
+    "message": "missing value",
+    "line": 1
+   }
+  }
+ ],
+ "feature": [
+  {
+   "name": "full front matter",
+   "text": "---\nslug: search-index\ntrack: Full\nphase: plan          # where we are\ngate: waiting\ndone_when:\n  - npm test\n  - \"npm run lint\"\n---\n# Search index\n\nBuild the index.\n",
+   "slug": "search-index",
+   "doneWhen": [
+    "npm test",
+    "npm run lint"
+   ]
+  },
+  {
+   "name": "inline list",
+   "text": "---\nslug: a\ntrack: Quick\ndone_when: [npm test, 'x y']\n---\n",
+   "slug": "a",
+   "doneWhen": [
+    "npm test",
+    "x y"
+   ]
+  },
+  {
+   "name": "no done_when",
+   "text": "---\nslug: a\ntrack: Light\nowner: someone\n---\nbody",
+   "slug": "a",
+   "doneWhen": []
+  },
+  {
+   "name": "CRLF",
+   "text": "---\r\nslug: a\r\ntrack: Full\r\ndone_when:\r\n- make test\r\n---\r\n",
+   "slug": "a",
+   "doneWhen": [
+    "make test"
+   ]
+  },
+  {
+   "name": "hash without a space is kept",
+   "text": "---\nslug: a\ntrack: Full\ndone_when:\n  - echo a#b # a comment\n---\n",
+   "slug": "a",
+   "doneWhen": [
+    "echo a#b"
+   ]
+  },
+  {
+   "name": "no front matter",
+   "text": "# no front matter\n",
+   "error": {
+    "message": "feature.md must start with ---",
+    "line": 1
+   }
+  },
+  {
+   "name": "never closes",
+   "text": "---\nslug: a\ntrack: Full\n",
+   "error": {
+    "message": "front matter never closes (missing ---)",
+    "line": 3
+   }
+  },
+  {
+   "name": "slug required",
+   "text": "---\ntrack: Full\n---\n",
+   "error": {
+    "message": "slug is required",
+    "line": 1
+   }
+  },
+  {
+   "name": "track required",
+   "text": "---\nslug: a\n---\n",
+   "error": {
+    "message": "track is required (Quick, Light or Full)",
+    "line": 1
+   }
+  },
+  {
+   "name": "bad slug",
+   "text": "---\nslug: Bad Slug\ntrack: Full\n---\n",
+   "error": {
+    "message": "slug must be lowercase letters, digits and dashes",
+    "line": 2
+   }
+  },
+  {
+   "name": "bad track",
+   "text": "---\nslug: a\ntrack: Huge\n---\n",
+   "error": {
+    "message": "track must be one of Quick, Light, Full",
+    "line": 3
+   }
+  },
+  {
+   "name": "bad phase",
+   "text": "---\nslug: a\ntrack: Full\nphase: later\n---\n",
+   "error": {
+    "message": "phase must be one of questions, research, design, structure, plan, implement, done",
+    "line": 4
+   }
+  },
+  {
+   "name": "bad gate",
+   "text": "---\nslug: a\ntrack: Full\ngate: yes\n---\n",
+   "error": {
+    "message": "gate must be one of none, waiting, approved",
+    "line": 4
+   }
+  },
+  {
+   "name": "gate as a list",
+   "text": "---\nslug: a\ntrack: Full\ngate:\n---\n",
+   "error": {
+    "message": "gate must be one word",
+    "line": 4
+   }
+  },
+  {
+   "name": "done_when as a scalar",
+   "text": "---\nslug: a\ntrack: Full\ndone_when: npm test\n---\n",
+   "error": {
+    "message": "done_when must be a list",
+    "line": 4
+   }
+  },
+  {
+   "name": "stray list item",
+   "text": "---\nslug: a\ntrack: Full\n  - stray\n---\n",
+   "error": {
+    "message": "list item outside a list",
+    "line": 4
+   }
+  },
+  {
+   "name": "not a field",
+   "text": "---\nslug: a\n\nthis is not a field\ntrack: Full\n---\n",
+   "error": {
+    "message": "expected key: value",
+    "line": 4
+   }
+  },
+  {
+   "name": "slug twice",
+   "text": "---\nslug: a\nslug: b\ntrack: Full\n---\n",
+   "error": {
+    "message": "slug given twice",
+    "line": 3
+   }
+  },
+  {
+   "name": "unterminated list",
+   "text": "---\nslug: a\ntrack: Full\ndone_when: [a, b\n---\n",
+   "error": {
+    "message": "unterminated list",
+    "line": 4
+   }
+  },
+  {
+   "name": "slug as a list",
+   "text": "---\nslug: [a]\ntrack: Full\n---\n",
+   "error": {
+    "message": "slug must be lowercase letters, digits and dashes",
+    "line": 2
+   }
+  },
+  {
+   "name": "empty list item",
+   "text": "---\nslug: a\ntrack: Full\ndone_when:\n  -\n---\n",
+   "error": {
+    "message": "empty list item",
+    "line": 5
+   }
+  },
+  {
+   "name": "unexpected indentation",
+   "text": "---\nslug: a\n  track: Full\n---\n",
+   "error": {
+    "message": "unexpected indentation",
+    "line": 3
+   }
+  }
+ ]
+}

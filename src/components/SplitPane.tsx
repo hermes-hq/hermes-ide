@@ -8,6 +8,8 @@ import { TerminalPane } from "./TerminalPane";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { translate } from "../i18n/registry";
 import { CrashProbe } from "./CrashProbe";
+import { DoneWhenChip } from "./DoneWhenChip";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
@@ -315,6 +317,8 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
         <div className="split-pane-label">
           <span>{session.label}</span>
           <span className="split-pane-phase">{session.phase}</span>
+          {/* Done-When checks (F27), with the launch helper that runs them. */}
+          {session.mode !== "agent" && isFeatureFlagEnabled("launchHelper") && <DoneWhenChip sessionId={sessionId} />}
           <button
             className="split-pane-close"
             onClick={(e) => { e.stopPropagation(); dispatch({ type: "CLOSE_PANE", paneId }); }}

@@ -4,8 +4,9 @@ import { exit } from "@tauri-apps/plugin-process";
 import App from "./App";
 import { getStartupProblem } from "./api/startupProblem";
 import { StartupProblemScreen } from "./components/StartupProblemScreen";
-import { initFeatureFlags } from "./featureFlags";
+import { initFeatureFlags, isFeatureFlagEnabled } from "./featureFlags";
 import { startSessionEventChannel } from "./agent/contract/channel";
+import { startDoneWhen } from "./doneWhen/controller";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -57,6 +58,14 @@ void getStartupProblem().then((problem) => {
     .then(({ listen }) => startSessionEventChannel(listen))
     .catch((e) => console.warn("[session-event] channel not attached:", e));
   void initFeatureFlags().finally(() => {
+    // Done-When checks (F27) run through the launch helper, so they share
+    // its flag. Attached before the workspace renders so no turn end is
+    // missed.
+    if (isFeatureFlagEnabled("launchHelper")) {
+      void import("@tauri-apps/api/event")
+        .then(({ listen }) => startDoneWhen({ listen }))
+        .catch((e) => console.warn("[done-when] not started:", e));
+    }
     root.render(
       <React.StrictMode>
         <App />

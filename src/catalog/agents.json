@@ -28,6 +28,7 @@
             "error": ["StopFailure"],
             "exited": ["SessionEnd"]
           },
+          "check_hook": "Stop",
           "confidence": "exact",
           "note": "Hook entries merge with the user's own hooks; nothing is written to the user's settings."
         },

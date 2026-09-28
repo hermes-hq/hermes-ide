@@ -14,6 +14,7 @@ import {
   SESSION_EVENT_CAP,
   sessionIdsWithEvents,
   subscribeSessionEvents,
+  tapSessionEvents,
   useSessionEvents,
 } from "../agent/contract/sessionEventStore";
 import {
@@ -165,5 +166,28 @@ describe("the Rust -> frontend channel", () => {
     expect(listen).toHaveBeenCalledTimes(1);
     handlers[0]({ payload: { sessionId: "s9", event: { type: "identity", at: 1, vendorSessionId: null, model: "m9", permissionMode: null } } });
     expect(getSessionEventSnapshot("s9").identity.model).toBe("m9");
+  });
+});
+
+describe("tapSessionEvents (additive, F27)", () => {
+  beforeEach(() => _resetSessionEventStoreForTest());
+
+  it("sees every session's accepted events after the snapshot moved, until unsubscribed", () => {
+    const seen: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = tapSessionEvents(() => {
+      throw new Error("a broken tap");
+    });
+    const off = tapSessionEvents((sessionId, event, snap) => {
+      seen.push(`${sessionId}:${event.type}:${snap.version}`);
+    });
+    dispatchSessionEvent("a", { type: "turn_start", at: 1, n: 1 });
+    dispatchSessionEvent("b", { type: "turn_end", at: 2, n: 4 });
+    off();
+    bad();
+    dispatchSessionEvent("a", { type: "turn_end", at: 3, n: 1 });
+    expect(seen).toEqual(["a:turn_start:1", "b:turn_end:1"]);
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });
