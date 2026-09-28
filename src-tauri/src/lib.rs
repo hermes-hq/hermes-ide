@@ -571,6 +571,7 @@ pub fn run_console_interrupt_helper() -> Option<i32> {
 pub fn run() {
     env_logger::init();
     install_crash_handler();
+    fleet::let_terminals_receive_ctrl_c();
 
     // Decide which instance this is before anything touches app data: a dev,
     // beta or test build must never open the installed app's data folder.

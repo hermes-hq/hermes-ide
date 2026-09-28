@@ -239,7 +239,7 @@ fn interrupt_blocking(app: &AppHandle, session_id: &str) -> Result<bool, String>
         .arg(INTERRUPT_HELPER_ARG)
         .arg(shell_pid.to_string())
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .creation_flags(DETACHED_PROCESS)
         .spawn()
@@ -256,11 +256,30 @@ fn interrupt_blocking(app: &AppHandle, session_id: &str) -> Result<bool, String>
             Err(e) => return Err(format!("could not wait for the interrupt helper: {e}")),
         }
     };
+    let mut said = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        use std::io::Read;
+        let _ = out.read_to_string(&mut said);
+    }
     let sent = status.success();
     log::info!(
-        "[fleet] cap interrupt: console Ctrl+C event to {session_id} (shell {shell_pid}): {sent} ({status})"
+        "[fleet] cap interrupt: console Ctrl+C event to {session_id} (shell {shell_pid}): {sent} ({status}); {}",
+        said.trim()
     );
     Ok(sent)
+}
+
+/// Windows: let programs in Hermes's terminals receive Ctrl+C even when
+/// Hermes itself was started with Ctrl+C turned off (a process started in
+/// a new process group has it off, and every process it starts inherits
+/// that, the shells in its terminals included). Hermes has no console
+/// window of its own to press Ctrl+C in, so this changes nothing for it.
+pub fn let_terminals_receive_ctrl_c() {
+    #[cfg(windows)]
+    // SAFETY: a plain Win32 call on this process's own console state.
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 0);
+    }
 }
 
 /// The argument that starts Hermes as the Windows interrupt helper.
@@ -284,22 +303,29 @@ pub fn console_interrupt_helper(args: &[String]) -> Option<i32> {
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Console::{
-            AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
-            CTRL_C_EVENT,
+            AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, GetConsoleProcessList,
+            SetConsoleCtrlHandler, CTRL_C_EVENT,
         };
+        let mut attached = [0u32; 64];
         // SAFETY: plain Win32 calls on this short-lived process's own
-        // console state; no pointers are passed.
-        unsafe {
+        // console state; the one buffer passed is ours, with its length.
+        let (sent, count) = unsafe {
             FreeConsole();
             if AttachConsole(pid) == 0 {
                 return Some(3);
             }
             // The helper is attached too: it must not stop itself.
             SetConsoleCtrlHandler(None, 1);
+            let count = GetConsoleProcessList(attached.as_mut_ptr(), attached.len() as u32);
             let sent = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) != 0;
             FreeConsole();
-            Some(if sent { 0 } else { 4 })
-        }
+            (sent, count)
+        };
+        // For Hermes's log: which programs share the console (the helper
+        // itself among them).
+        let listed = &attached[..(count as usize).min(attached.len())];
+        println!("attached to the console of {pid}: {listed:?} ({count} in all)");
+        Some(if sent { 0 } else { 4 })
     }
     #[cfg(not(windows))]
     {
