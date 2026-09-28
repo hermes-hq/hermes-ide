@@ -89,11 +89,10 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       break;
     case "exit":
       next.exit = { code: event.code, signal: event.signal };
-      next.status = {
-        kind: "exited",
-        confidence: "exact",
-        detail: event.signal ? `signal ${event.signal}` : event.code === null ? "" : `exit code ${event.code}`,
-      };
+      // The detail stays empty on purpose: the store holds no user-facing
+      // text. A renderer (F10) builds the line from `snapshot.exit` with the
+      // localised agentError.exitCode / agentError.exitSignal strings.
+      next.status = { kind: "exited", confidence: "exact", detail: "" };
       next.turn = { current: null, completed: prev.turn.completed + (prev.turn.current === null ? 0 : 1) };
       break;
   }

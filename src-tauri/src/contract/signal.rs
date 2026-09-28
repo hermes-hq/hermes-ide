@@ -57,6 +57,8 @@ pub fn parse_signal_line(line: &str) -> Result<SignalRecord, String> {
 }
 
 /// Vendor event name -> status. None: not a status by itself.
+/// Owned by F11, which moves this table into the providers module when it
+/// fills it; nothing outside that module should grow more vendor names.
 pub fn status_kind_of(event: &str) -> Option<AgentStatusKind> {
     Some(match event {
         "UserPromptSubmit" | "PostToolUse" | "PreToolUse" => AgentStatusKind::Working,

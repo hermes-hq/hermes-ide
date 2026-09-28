@@ -69,7 +69,11 @@ export function parseSignalRecord(line: string): SignalParse {
   };
 }
 
-/** Vendor event name -> status, from the signals report. Null: not a status. */
+/**
+ * Vendor event name -> status, from the signals report. Null: not a status.
+ * Owned by F11, which moves this table into the providers folder when it
+ * fills it; nothing outside that folder should grow more vendor names.
+ */
 export function signalStatusKind(event: string): AgentStatusKind | null {
   switch (event) {
     case "UserPromptSubmit":

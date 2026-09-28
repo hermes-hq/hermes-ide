@@ -53,7 +53,7 @@ describe("reduceSessionEvent", () => {
       { type: "exit", at: 1, code: 2, signal: null },
       (s) => {
         expect(s.exit).toEqual({ code: 2, signal: null });
-        expect(s.status).toEqual({ kind: "exited", confidence: "exact", detail: "exit code 2" });
+        expect(s.status).toEqual({ kind: "exited", confidence: "exact", detail: "" });
       },
     ],
   ])("%s", (_name, event, check) => {
@@ -74,7 +74,7 @@ describe("reduceSessionEvent", () => {
     // Exit while a turn runs counts that turn as over.
     const started = reduceSessionEvent(empty, { type: "turn_start", at: 1, n: 1 });
     expect(reduceSessionEvent(started, { type: "exit", at: 2, code: null, signal: "SIGKILL" }).turn).toEqual({ current: null, completed: 1 });
-    expect(reduceSessionEvent(started, { type: "exit", at: 2, code: null, signal: "SIGKILL" }).status.detail).toBe("signal SIGKILL");
+    expect(reduceSessionEvent(started, { type: "exit", at: 2, code: null, signal: "SIGKILL" }).exit).toEqual({ code: null, signal: "SIGKILL" });
   });
 
   it("keeps at most SESSION_EVENT_CAP events, dropping the oldest", () => {
