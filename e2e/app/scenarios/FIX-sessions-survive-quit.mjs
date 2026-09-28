@@ -15,10 +15,19 @@
 //          100 ms after it shows
 //   run 6  all four are back. Close "Gamma" and choose Quit less than 1 s
 //          later
-//   run 7  "Alpha", "Beta" and "Delta" are back; "Gamma" stays closed
+//   run 7  "Alpha", "Beta" and "Delta" are back; "Gamma" stays closed.
+//          Turn "Restore sessions" off (Settings) and quit
+//   run 8  nothing is restored; 2 s later the saved workspace still holds
+//          the three sessions. Close the window, relaunch (run 9): still
+//          there. Turn restoring back on and choose Quit
+//   run 10 "Alpha", "Beta" and "Delta" are back: a launch that restored
+//          nothing never wrote an empty workspace over the saved one
 //
-// Each quit must end cleanly and its app log must show that the frontend
-// wrote the workspace before the exit (not that the wait timed out).
+// Each quit must end cleanly, and what the next launch shows is the proof a
+// person sees. The app log line "[quit] workspace saved" is checked too: it
+// is the only direct sign that the quit was held until the frontend wrote
+// (rather than the write winning a race), and closing the window now has a
+// single owner (the backend hold), so the line is deterministic.
 //
 // Negative controls (run by hand): a build of main before this fix ends in
 // RESULT: FAIL at run 3 ("Alpha" is gone: the restore had emptied the saved
@@ -28,6 +37,12 @@
 // the save that follows a new session). Neither build logs the quit-time
 // save, so run the controls with HERMES_E2E_NEGATIVE_CONTROL=1, which skips
 // only that log check and lets them fail on what a person would see.
+// A third control puts back the frontend's own close-requested handler
+// (save, then destroy the window): closing the window races the backend's
+// hold again, and repeated runs end in RESULT: FAIL at run 4 ("app exited
+// ~60 ms after the quit", no quit line). The controls carry the same build
+// stamp as the fixed build (the stamp hashes the built frontend only), so
+// the differing outcome is what shows which code ran.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/FIX-sessions-survive-quit.mjs
@@ -215,6 +230,30 @@ async function closeSession(bridge, label) {
   `, { timeoutMs: 20_000, intervalMs: 50 });
 }
 
+/** Change a setting the way the Settings panel does. */
+async function setSettingValue(bridge, key, value) {
+  await bridge.eval(`
+    await window.__TAURI_INTERNALS__.invoke("set_setting", { key: ${JSON.stringify(key)}, value: ${JSON.stringify(value)} });
+    return true;
+  `);
+  log(`  setting ${key} = ${JSON.stringify(value)}`);
+}
+
+/** A launch with restoring turned off: no session shows, and 2 s later the saved workspace is untouched. */
+async function expectNothingRestoredAndKept(bridge, labels) {
+  await bridge.waitFor("the app UI (returning launch)", `return !!e2e.first(".topbar") && !e2e.first(".onboarding-backdrop");`);
+  await dismissWhatsNew(bridge);
+  // Longer than the save that follows a load (300 ms) and a late restore.
+  await sleep(2_000);
+  const shown = await bridge.eval(`return e2e.all(".session-item").map((el) => e2e.norm(el.innerText));`);
+  log(`  session list: ${JSON.stringify(shown)}`);
+  assert(shown.length === 0, "no session was restored (restoring is off)");
+  const saved = await savedLabels(bridge);
+  log(`  saved workspace 2 s after the launch: ${JSON.stringify(saved)}`);
+  assert(Array.isArray(saved) && labels.every((l) => saved.includes(l)) && saved.length === labels.length,
+    `the saved workspace still holds ${JSON.stringify(labels)}`);
+}
+
 /** The session labels in the saved workspace ("" when it is empty). */
 async function savedLabels(bridge) {
   return bridge.eval(`
@@ -365,6 +404,26 @@ try {
   app = await launch(7);
   const finalLabels = await expectRestored(app.bridge, ["Alpha", "Beta", "Delta"], "07-closed-stays-closed.png");
   assert(!has(finalLabels, "Gamma"), '"Gamma" did not come back');
+  await setSettingValue(app.bridge, "restore_sessions", "never");
+  await expectCleanExit(app, "AppHandle::exit", await quitVia(app, "exit"));
+
+  // ── runs 8-10: a launch that restores nothing keeps the saved workspace ──
+  const kept = ["Alpha", "Beta", "Delta"];
+  log("step 8: relaunch with restoring off — nothing shows, the saved workspace is kept; close the window");
+  app = await launch(8);
+  await expectNothingRestoredAndKept(app.bridge, kept);
+  await app.bridge.screenshot(join(evidenceDir, "08-restore-off.png"));
+  await expectCleanExit(app, "window close", await quitVia(app, "window close"));
+
+  log("step 9: relaunch with restoring off — still kept; turn restoring on and choose Quit");
+  app = await launch(9);
+  await expectNothingRestoredAndKept(app.bridge, kept);
+  await setSettingValue(app.bridge, "restore_sessions", "always");
+  await expectCleanExit(app, "menu Quit", await quitVia(app, "menu Quit"));
+
+  log('step 10: relaunch with restoring on — "Alpha", "Beta" and "Delta" are back');
+  app = await launch(10);
+  await expectRestored(app.bridge, kept, "10-restored-again.png");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

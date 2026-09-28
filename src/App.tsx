@@ -722,26 +722,15 @@ function AppContent() {
   }, []);
 
   // ── Save workspace before app close ──
-  // Intercept the window close event to persist session state for restore on next launch.
-  // Uses both Tauri's onCloseRequested (primary) and browser beforeunload (fallback).
+  // Closing the window is held by the backend until the workspace is written
+  // (src-tauri/src/quit_flush.rs, answered by useWorkspaceFlushOnQuit). There
+  // is deliberately no close-requested listener here: one would make Tauri
+  // hold the close for this webview too and race the backend's hold.
+  // beforeunload stays as a fire-and-forget fallback for a webview reload.
   const saveWorkspaceRef = useRef(saveWorkspace);
   saveWorkspaceRef.current = saveWorkspace;
   const workspaceSavedRef = useRef(false);
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    getCurrentWindow().onCloseRequested(async (event) => {
-      if (workspaceSavedRef.current) return; // Already saved, let it close
-      event.preventDefault();
-      workspaceSavedRef.current = true;
-      try {
-        await saveWorkspaceRef.current();
-      } catch (err) {
-        console.error("[App] Failed to save workspace on close:", err);
-      }
-      getCurrentWindow().destroy();
-    }).then((u) => { unlisten = u; });
-
-    // Fallback: browser beforeunload — fire-and-forget save
     const onBeforeUnload = () => {
       if (workspaceSavedRef.current) return;
       workspaceSavedRef.current = true;
@@ -750,7 +739,6 @@ function AppContent() {
     window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
-      unlisten?.();
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, []);
