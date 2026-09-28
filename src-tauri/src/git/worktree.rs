@@ -957,6 +957,105 @@ pub fn is_hermes_worktree_path(path: &str) -> bool {
     normalized.contains("hermes-worktrees/")
 }
 
+/// Whether the session that a `session_worktrees` row belongs to owns that
+/// checkout: a linked worktree Hermes created under `hermes-worktrees/`.
+///
+/// Everything else is somebody else's checkout and closing the session must
+/// leave it alone: the project folder (`is_main_worktree`) and a worktree
+/// made outside Hermes (`git worktree add` by hand, or another tool) that
+/// the user chose to reuse through the Branch In Use choice. Only an owned
+/// checkout is removed on close, asked about when it has uncommitted
+/// changes, or recreated when its folder went missing.
+pub fn is_owned_checkout(is_main_worktree: bool, worktree_path: &str) -> bool {
+    if !isolation_fixes_enabled() {
+        // Test builds only (negative control): the behaviour before the
+        // F09 edge-case fixes, which treated every linked worktree as owned.
+        return !is_main_worktree;
+    }
+    !is_main_worktree && is_hermes_worktree_path(worktree_path)
+}
+
+/// Test builds only: `HERMES_E2E_ISOLATION_FIXES=off` switches the F09
+/// edge-case fixes off (external checkouts treated as owned, no recovery of
+/// a missing worktree folder), so the real-app scenario has a negative
+/// control that must end in FAIL. Needs the `e2e` cargo feature (never in a
+/// release build) AND `HERMES_E2E=1` at run time.
+pub fn isolation_fixes_enabled() -> bool {
+    #[cfg(feature = "e2e")]
+    {
+        !isolation_fixes_switched_off(
+            std::env::var("HERMES_E2E").ok().as_deref(),
+            std::env::var("HERMES_E2E_ISOLATION_FIXES").ok().as_deref(),
+        )
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        true
+    }
+}
+
+#[cfg(any(test, feature = "e2e"))]
+fn isolation_fixes_switched_off(e2e: Option<&str>, value: Option<&str>) -> bool {
+    crate::e2e_protocol::is_enabled(e2e) && value.map(str::trim) == Some("off")
+}
+
+/// Whether `branch` exists as a local branch of the repository at `repo_path`.
+pub fn local_branch_exists(repo_path: &str, branch: &str) -> bool {
+    Repository::open(repo_path)
+        .and_then(|repo| repo.find_branch(branch, BranchType::Local).map(|_| ()))
+        .is_ok()
+}
+
+/// Put back a linked worktree whose folder was deleted from disk (by hand,
+/// by a cleaner, or by another tool) at the same `worktree_path` and on the
+/// same `branch`, so a restored session finds its files where it left them.
+///
+/// Git still remembers the old folder, so its stale entry is pruned first.
+/// Fails when the branch no longer exists (the caller then falls back to
+/// the project folder) or is checked out somewhere else (`BRANCH_IN_USE`).
+pub fn recreate_worktree(repo_path: &str, worktree_path: &str, branch: &str) -> Result<(), String> {
+    if !is_hermes_worktree_path(worktree_path) {
+        return Err(format!(
+            "refusing to recreate a checkout outside hermes-worktrees/: '{}'",
+            worktree_path
+        ));
+    }
+    if Path::new(worktree_path).is_dir() {
+        return Ok(());
+    }
+    if !local_branch_exists(repo_path, branch) {
+        return Err(format!("branch '{}' no longer exists", branch));
+    }
+    // The old entry in .git/worktrees still points at the deleted folder;
+    // `git worktree add` refuses the path until it is pruned.
+    let _ = Command::new("git")
+        .current_dir(repo_path)
+        .args(["worktree", "prune"])
+        .output();
+    if let Some(parent) = Path::new(worktree_path).parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "could not create the worktree folder's parent '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["worktree", "add", worktree_path, branch])
+        .output()
+        .map_err(|e| format!("Failed to run 'git worktree add': {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(err) = branch_in_use_from_stderr(repo_path, branch, &stderr) {
+            return Err(err);
+        }
+        return Err(format!("git worktree add failed: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2174,5 +2273,106 @@ mod tests {
             "Should be rejected by safety guard, got: {}",
             err
         );
+    }
+
+    // ── F09 edge cases: owned vs. someone else's checkout ──────────────
+
+    #[test]
+    fn only_a_hermes_made_linked_worktree_is_owned() {
+        assert!(is_owned_checkout(
+            false,
+            "/data/hermes-worktrees/abc/s1_main"
+        ));
+        assert!(is_owned_checkout(
+            false,
+            "C:\\data\\hermes-worktrees\\abc\\s1_main"
+        ));
+        // The project folder, and a worktree made outside Hermes.
+        assert!(!is_owned_checkout(true, "/work/repo"));
+        assert!(!is_owned_checkout(false, "/work/repo-external-wt"));
+    }
+
+    #[test]
+    fn isolation_fixes_switch_off_only_in_an_e2e_run_that_asks_for_it() {
+        assert!(!isolation_fixes_switched_off(None, Some("off")));
+        assert!(!isolation_fixes_switched_off(Some("1"), None));
+        assert!(!isolation_fixes_switched_off(Some("1"), Some("on")));
+        assert!(isolation_fixes_switched_off(Some("1"), Some("off")));
+        assert!(isolation_fixes_switched_off(Some("1"), Some(" off ")));
+    }
+
+    #[test]
+    fn recreate_worktree_puts_a_deleted_folder_back_on_its_branch() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let app_data = create_test_app_data_dir();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "s1",
+            "hermes/task-a",
+            true,
+            None,
+        )
+        .unwrap();
+        std::fs::write(Path::new(&wt.worktree_path).join("note.txt"), "x").unwrap();
+        Command::new("git")
+            .current_dir(&wt.worktree_path)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(&wt.worktree_path)
+            .args(["commit", "-q", "-m", "note"])
+            .output()
+            .unwrap();
+
+        // The folder goes away behind Hermes' back.
+        std::fs::remove_dir_all(&wt.worktree_path).unwrap();
+        assert!(!Path::new(&wt.worktree_path).exists());
+
+        recreate_worktree(repo_path, &wt.worktree_path, "hermes/task-a").unwrap();
+        assert!(Path::new(&wt.worktree_path).join("note.txt").is_file());
+        assert_eq!(
+            get_worktree_branch(&wt.worktree_path).unwrap().as_deref(),
+            Some("hermes/task-a")
+        );
+        // Idempotent once the folder is there.
+        recreate_worktree(repo_path, &wt.worktree_path, "hermes/task-a").unwrap();
+    }
+
+    #[test]
+    fn recreate_worktree_fails_when_the_branch_is_gone_or_the_path_is_not_ours() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let app_data = create_test_app_data_dir();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "s1",
+            "hermes/task-b",
+            true,
+            None,
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&wt.worktree_path).unwrap();
+        Command::new("git")
+            .current_dir(repo_path)
+            .args(["worktree", "prune"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(repo_path)
+            .args(["branch", "-D", "hermes/task-b"])
+            .output()
+            .unwrap();
+
+        let err = recreate_worktree(repo_path, &wt.worktree_path, "hermes/task-b").unwrap_err();
+        assert!(err.contains("no longer exists"), "got: {}", err);
+        assert!(!Path::new(&wt.worktree_path).exists());
+
+        let outside = repo_dir.path().join("..").join("not-ours");
+        let err = recreate_worktree(repo_path, outside.to_str().unwrap(), "main").unwrap_err();
+        assert!(err.contains("refusing"), "got: {}", err);
     }
 }

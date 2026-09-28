@@ -82,6 +82,17 @@
   color: var(--green);
 }
 
+.branch-conflict-path {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  margin: 0 0 var(--space-2) 0;
+  overflow-wrap: anywhere;
+}
+
+.branch-conflict-path code {
+  font-family: var(--font-mono);
+}
+
 .branch-conflict-hint {
   font-size: var(--text-xs);
   color: var(--text-3);

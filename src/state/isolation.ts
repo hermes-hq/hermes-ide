@@ -227,12 +227,51 @@ export function closeCommitMessage(sessionLabel: string, kind: "session" | "arch
  *
  *   - a checkout shared with another session is never asked about (its
  *     changes may be that session's work, and it stays on disk);
+ *   - neither is a checkout Hermes did not make (`git worktree add` by
+ *     hand) that the session reused on purpose: it is not deleted on close
+ *     and its changes are whoever made it's;
  *   - with honest isolation, neither is the project folder or a project
  *     with no worktree link;
  *   - without it, everything else is checked as before.
  */
 export function shouldAskAboutChangesOnClose(wt: SessionWorktree | null, honest: boolean): boolean {
   if (wt?.sharedWithOtherSessions) return false;
+  if (wt && !wt.isMainWorktree && wt.ownedBySession === false) return false;
   if (!honest) return true;
-  return !!wt && !wt.isMainWorktree;
+  if (!wt || wt.isMainWorktree) return false;
+  return wt.ownedBySession ?? true;
+}
+
+/**
+ * Who holds the branch, for the Branch In Use dialog: the session whose
+ * worktree has it, the project folder, or a checkout made outside Hermes
+ * (`git worktree add` by hand). The dialog shows the checkout's folder
+ * next to it, so the user can tell which one it is.
+ */
+export function describeBranchHolder(conflict: BranchInUse, holderLabel: string | null): string {
+  if (conflict.projectFolder) return "the project folder";
+  if (holderLabel) return `session "${holderLabel}"`;
+  return "a checkout outside Hermes";
+}
+
+/** Payload of the backend's `session-working-directory-recovered` event. */
+export interface WorkingDirectoryRecovery {
+  sessionId: string;
+  branchName: string | null;
+  missingPath: string;
+  path: string;
+  outcome: "recreated" | "project-folder" | "home";
+}
+
+/** One line telling the user where a session opened and why. */
+export function workingDirectoryRecoveryMessage(r: WorkingDirectoryRecovery): string {
+  const what = r.branchName ? `The working folder of branch '${r.branchName}'` : `The working folder '${r.missingPath}'`;
+  switch (r.outcome) {
+    case "recreated":
+      return `${what} was missing and has been recreated.`;
+    case "project-folder":
+      return `${what} is gone; the session opened in the project folder instead.`;
+    default:
+      return `${what} is gone; the session opened in your home folder instead.`;
+  }
 }

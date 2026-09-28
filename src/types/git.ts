@@ -175,6 +175,12 @@ export interface SessionWorktree {
   createdAt: string;
   /** Another session works in the same checkout (it is not this session's alone). */
   sharedWithOtherSessions?: boolean;
+  /**
+   * This session owns the checkout alone: a worktree Hermes made for it,
+   * shared with no one. False for the project folder, a checkout made
+   * outside Hermes and a checkout another session also uses.
+   */
+  ownedBySession?: boolean;
 }
 
 export interface WorktreeInfo {

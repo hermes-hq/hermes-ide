@@ -3062,14 +3062,30 @@ fn checkout_is_shared(db: &Database, wt: &crate::db::SessionWorktreeRow) -> bool
 }
 
 /// A session's worktree link, plus whether another session shares that
-/// checkout (`sharedWithOtherSessions`). The close dialog only asks about
-/// changes in a checkout the session owns alone.
+/// checkout (`sharedWithOtherSessions`) and whether the session owns it
+/// alone (`ownedBySession`: a worktree Hermes made for it, shared with no
+/// one). The close dialog only asks about changes in a checkout the session
+/// owns alone; the project folder and a checkout made outside Hermes are
+/// never asked about, never cleaned up.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorktreeInfo {
     #[serde(flatten)]
     pub row: crate::db::SessionWorktreeRow,
     pub shared_with_other_sessions: bool,
+    pub owned_by_session: bool,
+}
+
+impl SessionWorktreeInfo {
+    fn describe(db: &Database, row: crate::db::SessionWorktreeRow) -> Self {
+        let shared = !row.is_main_worktree && checkout_is_shared(db, &row);
+        let owned = worktree::is_owned_checkout(row.is_main_worktree, &row.worktree_path);
+        SessionWorktreeInfo {
+            shared_with_other_sessions: shared,
+            owned_by_session: owned && !shared,
+            row,
+        }
+    }
 }
 
 /// Drop a session's link to a worktree without touching the disk. Undoes a
@@ -3117,8 +3133,14 @@ pub fn git_commit_worktree(
         .ok_or_else(|| "This session has no worktree of its own".to_string())?;
     let shared = checkout_is_shared(&db, &wt);
     drop(db);
-    if wt.is_main_worktree || !worktree::is_hermes_worktree_path(&wt.worktree_path) {
+    if wt.is_main_worktree {
         return Err("This session works in the project folder; nothing to commit on close".into());
+    }
+    if !worktree::is_owned_checkout(false, &wt.worktree_path) {
+        return Err(format!(
+            "This session works in a checkout Hermes did not create ({}); its changes stay there",
+            wt.worktree_path
+        ));
     }
     if shared {
         return Err(
@@ -3176,6 +3198,19 @@ pub fn git_remove_worktree(
         return Ok(GitOperationResult {
             success: true,
             message: "Unlinked from a checkout another session still uses".to_string(),
+            error: None,
+        });
+    }
+    // SAFETY: a worktree made outside Hermes (reused on purpose) is not ours
+    // to delete either; `remove_worktree` would refuse it anyway.
+    if !worktree::is_owned_checkout(false, &wt_path) {
+        db.delete_session_worktree(&wt_id)?;
+        return Ok(GitOperationResult {
+            success: true,
+            message: format!(
+                "Unlinked from the checkout at {} (not made by Hermes)",
+                wt_path
+            ),
             error: None,
         });
     }
@@ -3321,10 +3356,7 @@ pub fn git_session_worktree_info(
     let row = db
         .get_worktree_by_session_and_project(&session_id, &project_id)
         .map_err(|e| format!("Failed to look up worktree: {}", e))?;
-    Ok(row.map(|row| SessionWorktreeInfo {
-        shared_with_other_sessions: !row.is_main_worktree && checkout_is_shared(&db, &row),
-        row,
-    }))
+    Ok(row.map(|row| SessionWorktreeInfo::describe(&db, row)))
 }
 
 #[tauri::command]
@@ -4589,18 +4621,57 @@ mod tests {
             .get_worktree_by_session_and_project("s1", "p")
             .unwrap()
             .unwrap();
-        let alone = SessionWorktreeInfo {
-            shared_with_other_sessions: checkout_is_shared(&db, &row),
-            row: row.clone(),
-        };
+        let alone = SessionWorktreeInfo::describe(&db, row.clone());
         let json = serde_json::to_value(&alone).unwrap();
         assert_eq!(json["sharedWithOtherSessions"], false);
         assert_eq!(json["worktreePath"], "/tmp/hermes-test/wt");
         assert_eq!(json["isMainWorktree"], false);
+        // Not under hermes-worktrees/: a checkout Hermes did not make.
+        assert_eq!(json["ownedBySession"], false);
 
         // Same folder, spelled with a trailing separator.
         db.insert_session_worktree("r2", "s2", "p", "/tmp/hermes-test/wt/", Some("b"), false)
             .unwrap();
         assert!(checkout_is_shared(&db, &row));
+    }
+
+    #[test]
+    fn session_owns_only_its_own_unshared_hermes_worktree() {
+        let db = test_db();
+        let own = "/data/hermes-worktrees/abc/s1_hermes-task";
+        db.insert_session_worktree("r1", "s1", "p", own, Some("hermes/task"), false)
+            .unwrap();
+        db.insert_session_worktree("r2", "s2", "p", "/work/repo", Some("main"), true)
+            .unwrap();
+        db.insert_session_worktree(
+            "r3",
+            "s3",
+            "p",
+            "/work/repo-external",
+            Some("external"),
+            false,
+        )
+        .unwrap();
+        let info = |s: &str| {
+            SessionWorktreeInfo::describe(
+                &db,
+                db.get_worktree_by_session_and_project(s, "p")
+                    .unwrap()
+                    .unwrap(),
+            )
+        };
+        assert!(info("s1").owned_by_session, "its own hermes worktree");
+        assert!(!info("s2").owned_by_session, "the project folder");
+        let external = info("s3");
+        assert!(
+            !external.owned_by_session && !external.shared_with_other_sessions,
+            "a worktree made outside Hermes: not shared, not ours"
+        );
+
+        // Once another session reuses s1's worktree it is shared, so not owned alone.
+        db.insert_session_worktree("r4", "s4", "p", own, Some("hermes/task"), false)
+            .unwrap();
+        let shared = info("s1");
+        assert!(shared.shared_with_other_sessions && !shared.owned_by_session);
     }
 }
