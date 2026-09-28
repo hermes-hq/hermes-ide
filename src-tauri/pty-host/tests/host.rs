@@ -70,9 +70,9 @@ impl Host {
     ) -> Child {
         Command::new(HOST)
             .arg("--dir")
-            .arg(&dir)
+            .arg(dir)
             .arg("--socket")
-            .arg(&socket)
+            .arg(socket)
             .arg("--empty-exit-ms")
             .arg(empty_exit_ms.to_string())
             .arg("--startup-grace-ms")
