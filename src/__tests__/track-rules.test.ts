@@ -69,6 +69,20 @@ describe("attached sessions and the writer", () => {
     expect(writerSessionId(sessions, "/nowhere")).toBeNull();
   });
 
+  it("a session with a turn history writes before an older plain shell", () => {
+    const sessions = [
+      s("shell", "/repo/wt", "2026-01-01T00:00:00Z"),
+      s("agent", "/repo/wt", "2026-01-02T00:00:00Z"),
+      s("later-agent", "/repo/wt", "2026-01-03T00:00:00Z"),
+    ];
+    const history = new Set(["agent", "later-agent"]);
+    const has = (id: string) => history.has(id);
+    expect(attachedSessions(sessions, "/repo/wt", has).map((x) => x.id)).toEqual(["agent", "later-agent", "shell"]);
+    expect(writerSessionId(sessions, "/repo/wt", has)).toBe("agent");
+    // Nobody has a turn yet (an agent typed into a plain shell): seniority decides.
+    expect(writerSessionId(sessions, "/repo/wt", () => false)).toBe("shell");
+  });
+
   it("normalises Windows paths by slash and case, POSIX paths by slash only", () => {
     expect(normalizePath("C:\\Work\\Repo\\")).toBe("c:/work/repo");
     expect(normalizePath("/Repo/wt/")).toBe("/Repo/wt");
@@ -108,8 +122,10 @@ describe("editorCommandFor", () => {
     expect(editorCommandFor("/bin/bash", "/a$b/plan.md")).toBe("eval \"${EDITOR:-vi} '/a\\$b/plan.md'\"");
     expect(editorCommandFor("/usr/bin/fish", "/r/plan.md")).toBe("set -q EDITOR; and eval $EDITOR '/r/plan.md'; or vi '/r/plan.md'");
     expect(editorCommandFor("C:\\Program Files\\PowerShell\\7\\pwsh.exe", "C:\\r\\plan.md")).toBe(
-      "if ($env:EDITOR) { Invoke-Expression \"$env:EDITOR 'C:\\r\\plan.md'\" } else { notepad 'C:\\r\\plan.md' }",
+      "$e = $env:EDITOR; if (-not $e) { notepad 'C:\\r\\plan.md' } elseif (Test-Path -LiteralPath $e) { & $e 'C:\\r\\plan.md' } else { Invoke-Expression \"& $e 'C:\\r\\plan.md'\" }",
     );
+    // A path with a dollar sign survives PowerShell's expansion of the re-parsed line.
+    expect(editorCommandFor("pwsh", "C:\\r$x\\plan.md")).toContain("Invoke-Expression \"& $e 'C:\\r`$x\\plan.md'\"");
     expect(editorCommandFor("cmd.exe", "C:\\r\\plan.md")).toBe('if defined EDITOR (%EDITOR% "C:\\r\\plan.md") else (notepad "C:\\r\\plan.md")');
   });
 });

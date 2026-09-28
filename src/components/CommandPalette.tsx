@@ -81,9 +81,9 @@ export function CommandPalette({
     ...(onOpenShortcuts ? [{ id: "shortcuts", label: t("palette.keyboardShortcuts"), category: t("app.help"), shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
     ...(onToggleGit ? [{ id: "git", label: reviewDesk ? t("palette.reviewDesk") : t("palette.toggleGitPanel"), category: t("app.view"), shortcut: shortcutLabel("view.git-panel"), action: () => { onToggleGit(); onClose(); } }] : []),
     ...(onToggleSearch ? [{ id: "search", label: t("palette.searchInFolder"), category: t("app.view"), shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
-    ...(onToggleTrack ? [{ id: "track", label: "Toggle Track panel", category: t("app.view"), action: () => { onToggleTrack(); onClose(); } }] : []),
-    ...(onApproveGate ? [{ id: "track-approve", label: "Approve gate", category: "Track", shortcut: fmt("{mod}⏎"), action: () => { onApproveGate(); onClose(); } }] : []),
-    ...(onMakeFeature ? [{ id: "track-make-feature", label: "Make it a feature", category: "Track", action: () => { onMakeFeature(); onClose(); } }] : []),
+    ...(onToggleTrack ? [{ id: "track", label: t("palette.toggleTrackPanel"), category: t("app.view"), action: () => { onToggleTrack(); onClose(); } }] : []),
+    ...(onApproveGate ? [{ id: "track-approve", label: t("palette.approveGate"), category: t("app.track"), shortcut: fmt("{mod}⏎"), action: () => { onApproveGate(); onClose(); } }] : []),
+    ...(onMakeFeature ? [{ id: "track-make-feature", label: t("palette.makeFeature"), category: t("app.track"), action: () => { onMakeFeature(); onClose(); } }] : []),
     ...sessions.map((s, i) => ({
       id: `session-${s.id}`,
       label: s.label,

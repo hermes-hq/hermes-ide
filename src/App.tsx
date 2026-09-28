@@ -885,29 +885,30 @@ function AppContent() {
     const track = getTrackState(activeSession.working_directory);
     const feature = track.features.find((f) => f.slug === track.slug) ?? (track.features.length === 1 ? track.features[0] : undefined);
     if (!feature?.meta || feature.meta.gate !== "waiting") {
-      toastStore.addToast({ message: "No gate is waiting in this worktree", type: "info", duration: 3000 });
+      toastStore.addToast({ message: t("track.noGateWaiting"), type: "info", duration: 3000 });
       return;
     }
     try {
       noteOwnApproval(activeSession.working_directory, feature.slug);
       const move = await trackApprove(activeSession.working_directory, feature.slug);
-      toastStore.addToast({ message: `${feature.slug}: approved ${move.from}; next phase ${move.to}`, type: "success", duration: 4000 });
+      toastStore.addToast({ message: t("track.approvedToast", { slug: feature.slug, from: move.from, to: move.to }), type: "success", duration: 4000 });
     } catch (e) {
       toastStore.addToast({ message: String(e), type: "error", duration: 5000 });
     }
-  }, [activeSession, toastStore]);
+  }, [activeSession, toastStore, t]);
   /** Palette: "Make it a feature" for the active worktree (Light track). */
   const makeActiveFeature = useCallback(async () => {
     if (!activeSession) return;
     const track = getTrackState(activeSession.working_directory);
     try {
       const out = await trackPromote(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", null);
-      toastStore.addToast({ message: `Feature ${out.slug} created (Light track)`, type: "success", duration: 4000 });
+      const made = t("track.featureCreated", { slug: out.slug, track: "Light" });
+      toastStore.addToast({ message: out.branch ? `${made} — ${out.branch}` : made, type: "success", duration: 4000 });
       if (!ui.trackPanelOpen) dispatch({ type: "TOGGLE_TRACK" });
     } catch (e) {
       toastStore.addToast({ message: String(e), type: "error", duration: 5000 });
     }
-  }, [activeSession, toastStore, ui.trackPanelOpen, dispatch]);
+  }, [activeSession, toastStore, ui.trackPanelOpen, dispatch, t]);
 
   // ── Native menu bar event bridge ──
   useNativeMenuEvents({
@@ -1272,7 +1273,7 @@ function AppContent() {
           <ActivityBar
             side="right"
             tabs={[
-              ...(featureTracksOn && activeSession ? [{ id: "track", label: "Track", icon: TrackIcon }] : []),
+              ...(featureTracksOn && activeSession ? [{ id: "track", label: t("app.track"), icon: TrackIcon }] : []),
               ...(activeSession?.mode === "agent"
                 ? [
                     {

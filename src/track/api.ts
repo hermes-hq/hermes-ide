@@ -48,6 +48,8 @@ export interface PromoteOutcome {
   readonly created: boolean;
   readonly slug: string;
   readonly featureFile: string | null;
+  /** What happened to the `hermes/<slug>` branch, or null outside a repository. */
+  readonly branch: string | null;
 }
 
 export function trackWatch(sessionId: string, worktreePath: string): Promise<TrackWorktreeSnapshot> {

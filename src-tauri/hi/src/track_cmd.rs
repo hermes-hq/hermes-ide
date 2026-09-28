@@ -14,7 +14,6 @@
 //! terminal and in a log.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use hermes_track::{
     current_branch, feature, land, phases::Phase, phases::Track, status, TrackError, AGENT_ENV,
@@ -171,7 +170,7 @@ pub fn cmd_feature(cwd: &Path, args: &[String]) -> i32 {
     let branch_line = if args.no_branch {
         None
     } else {
-        ensure_branch(&root, slug)
+        hermes_track::ensure_branch(&root, slug)
     };
     if !outcome.created {
         println!("Quick track: no feature folder, no phases; just do the work.");
@@ -197,33 +196,6 @@ pub fn cmd_feature(cwd: &Path, args: &[String]) -> i32 {
     }
     println!("Next: hi phase");
     0
-}
-
-/// Put the worktree on `hermes/<slug>` when it is a repository and not there
-/// yet. Never fatal: the folder is what matters.
-fn ensure_branch(root: &Path, slug: &str) -> Option<String> {
-    if !root.join(".git").exists() {
-        return None;
-    }
-    let want = format!("hermes/{slug}");
-    if current_branch(root).as_deref() == Some(want.as_str()) {
-        return Some(format!("On branch {want}"));
-    }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["switch", "-c", &want])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => Some(format!("Switched to a new branch {want}")),
-        Ok(o) => Some(format!(
-            "Stayed on the current branch (git switch -c {want} said: {})",
-            String::from_utf8_lossy(&o.stderr).trim()
-        )),
-        Err(e) => Some(format!(
-            "Stayed on the current branch (git not available: {e})"
-        )),
-    }
 }
 
 pub fn cmd_phase(cwd: &Path, args: &[String]) -> i32 {

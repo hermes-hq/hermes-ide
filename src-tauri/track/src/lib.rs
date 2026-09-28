@@ -20,8 +20,9 @@ pub mod questions;
 pub mod status;
 
 pub use feature::{
-    approve, check, create, current_branch, find_slug, finish_phase, list_features, revert_gate,
-    skip_phase, start_phase, CreateOutcome, FeatureDir, Loaded, Problem, StartOutcome, TrackError,
+    approve, check, create, current_branch, ensure_branch, find_slug, finish_phase, list_features,
+    revert_gate, skip_phase, start_phase, CreateOutcome, FeatureDir, Loaded, Problem, StartOutcome,
+    TrackError,
 };
 pub use front_matter::{parse, set_keys, FrontMatterError, Parsed};
 pub use phases::{next_phase, track_phases, Gate, Phase, Track};

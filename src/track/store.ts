@@ -23,6 +23,12 @@ import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contr
 import type { TrackFeatureSnapshot, TrackFileInfo, TrackWorktreeSnapshot } from "./api";
 import { attachedSessions, changeMadeDuringTurn, parseQuestions, PHASE_FILE, previousPhase, type AttachedSession, type Question } from "./rules";
 
+/** The turn history says whether a session is an agent (contract C0). */
+export function hasTurnHistory(sessionId: string): boolean {
+  const turn = getSessionEventSnapshot(sessionId).turn;
+  return turn.current !== null || turn.completed > 0;
+}
+
 export const TRACK_SOURCE = "track";
 /** How long an approval Hermes wrote itself is expected to show up. */
 export const OWN_WRITE_WINDOW_MS = 15_000;
@@ -309,7 +315,7 @@ export function applyTrackSnapshot(snap: TrackWorktreeSnapshot): TrackWorktreeSt
     version: (prev?.version ?? 0) + 1,
   });
   publish(next);
-  const attached = attachedSessions(deps.sessions(), snap.worktreePath).map((s) => s.id);
+  const attached = attachedSessions(deps.sessions(), snap.worktreePath, hasTurnHistory).map((s) => s.id);
   guardGates(prev, next, attached);
   syncInbox(next, attached[0] ?? null);
   captureBaselines(prev, next);

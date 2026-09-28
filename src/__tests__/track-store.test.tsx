@@ -128,6 +128,13 @@ describe("the ◆ inbox items", () => {
     expect(listInboxItems().map((i) => i.detail)).toEqual(["demo: plan is ready for review"]);
   });
 
+  it("addresses items to the session with a turn history over an older plain shell", () => {
+    dispatchSessionEvent("reader", { type: "turn_start", at: 60_000, n: 1 });
+    dispatchSessionEvent("reader", { type: "turn_end", at: 70_000, n: 1 });
+    applyTrackSnapshot(snap({ text: featureMd("questions", "waiting") }));
+    expect(listInboxItems().map((i) => i.sessionId)).toEqual(["reader"]);
+  });
+
   it("raises one item per blocking open question and none for answered or plain ones", () => {
     applyTrackSnapshot(snap({ questions: "- [ ] ! Which engine?\n- [ ] Colour?\n- [x] ! Old blocker\n" }));
     expect(listInboxItems().map((i) => i.detail)).toEqual(["demo: question — Which engine?"]);

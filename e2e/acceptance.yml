@@ -884,3 +884,9 @@ features:
       F28-7:
         text: "hi phase prints the phase prompt and creates the phase file from its template; hi status --all lists blocked items as plain text; hi land archives the track files to refs/hermes/archive/<slug>, keeps them out of the merge and writes the PR body from feature.md + plan.md"
         scenarios: [F28-feature-tracks.mjs]
+      F28-8:
+        text: "The writer is the attached session with a turn history (the agent), not the oldest one; a plain shell opened earlier reads"
+        scenarios: [F28-feature-tracks.mjs]
+      F28-9:
+        text: "Make it a feature creates .hermes/features/<slug>/ and puts the worktree on hermes/<slug>, like hi feature new"
+        scenarios: [F28-feature-tracks.mjs]
