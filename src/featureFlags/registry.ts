@@ -76,6 +76,12 @@ export const FEATURE_FLAGS = [
     description:
       "Replaces the git panels with one review surface: the diff from the merge-base grouped by turn or by file, viewed checkboxes, line comments sent back to the agent that made the turn with a delivery receipt, revert of one turn, and risk flags on lockfiles, workflows, secrets and binaries.",
   },
+  {
+    id: "landSheet",
+    label: "Land sheet with undo",
+    description:
+      "A Land button in the session's Git panel: commit, open a pull request or squash-merge locally in one step, archive the worktree, and undo any of it.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

@@ -1,0 +1,304 @@
+/* ─── Land sheet (F22) ─────────────────────────────────────────────── */
+
+.land-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.land-sheet {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  width: min(92vw, 620px);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.land-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.land-sheet-title {
+  flex: 1;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.land-sheet-branch {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.land-sheet-x {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.land-sheet-x:hover {
+  color: var(--text-0);
+}
+
+.land-sheet-body {
+  padding: var(--space-3);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+.land-sheet-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.land-sheet-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  background: var(--bg-2);
+  min-width: 0;
+}
+
+.land-sheet-stat-label {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.land-sheet-stat-value {
+  color: var(--text-0);
+  overflow-wrap: anywhere;
+}
+
+.land-sheet-donewhen-failing {
+  border-color: var(--red);
+}
+.land-sheet-donewhen-failing .land-sheet-stat-value {
+  color: var(--red);
+}
+
+.land-sheet-ins {
+  color: var(--green);
+}
+.land-sheet-del {
+  color: var(--red);
+}
+
+.land-sheet-commands,
+.land-sheet-files ul,
+.land-sheet-undo-steps,
+.land-sheet-check-list {
+  margin: 0;
+  padding-left: var(--space-3);
+}
+
+.land-sheet-files summary,
+.land-sheet-prbody summary {
+  cursor: pointer;
+  color: var(--text-1);
+}
+
+.land-sheet-options {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  margin: 0;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.land-sheet-options legend {
+  color: var(--text-2);
+  padding: 0 4px;
+}
+
+.land-sheet-option label {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  cursor: pointer;
+  color: var(--text-0);
+}
+.land-sheet-option-disabled label {
+  cursor: not-allowed;
+  color: var(--text-2);
+}
+
+.land-sheet-option-reason,
+.land-sheet-option-hint {
+  margin-left: 22px;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+.land-sheet-option-reason {
+  color: var(--yellow);
+}
+
+.land-sheet-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 22px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+}
+.land-sheet-checks-head .land-sheet-link-btn,
+.land-sheet-previous .land-sheet-link-btn {
+  margin-left: var(--space-1);
+}
+
+.land-sheet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.land-sheet-message {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--bg-0);
+  color: var(--text-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-2);
+  resize: vertical;
+}
+
+.land-sheet-prbody-text {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-2);
+  max-height: 180px;
+  overflow: auto;
+  margin: 4px 0 0;
+}
+
+.land-sheet-check {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.land-sheet-conflict,
+.land-sheet-warning {
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-2);
+  color: var(--text-0);
+}
+.land-sheet-conflict-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.land-sheet-result {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--space-2);
+  color: var(--text-0);
+}
+
+.land-sheet-error {
+  color: var(--red);
+}
+
+.land-sheet-note,
+.land-sheet-muted,
+.land-sheet-loading,
+.land-sheet-previous {
+  color: var(--text-2);
+}
+
+.land-sheet-checks-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.land-sheet-ci {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 0;
+}
+.land-sheet-ci-name {
+  flex: 1;
+  color: var(--text-0);
+}
+.land-sheet-ci-fail .land-sheet-ci-state {
+  color: var(--red);
+}
+.land-sheet-ci-pass .land-sheet-ci-state {
+  color: var(--green);
+}
+
+.land-sheet-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.land-sheet-spacer {
+  flex: 1;
+}
+
+.land-sheet-btn {
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm, 4px);
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.land-sheet-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.land-sheet-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-0);
+}
+.land-sheet-btn-secondary {
+  background: transparent;
+  color: var(--text-1);
+}
+
+@media (max-width: 560px) {
+  .land-sheet-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

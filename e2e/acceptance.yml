@@ -148,11 +148,11 @@ features:
         text: "Below 10 GB free, creating a task shows the reason and creates nothing"
         scenarios: [N14-disk-guard.mjs]
       N14-2:
-        # Proven today: "Remove build output" frees the space shown. Doing it
-        # automatically when a task is archived or landed waits for Archive
-        # (F09) and Land (F22), which call the same command.
+        # "Remove build output" frees the space shown (N14-disk-guard). The
+        # Land sheet's Archive (F22) removes the whole worktree folder, build
+        # output included, and says how much went.
         text: "Archiving a task removes its build output and frees the space shown"
-        scenarios: []
+        scenarios: [F22-land-sheet.mjs]
       N14-3:
         text: "Orphaned worktree folders are listed and removable in one action"
         scenarios: [N14-disk-guard.mjs]
@@ -780,3 +780,28 @@ features:
       F21-7:
         text: "An agent whose launch installed no prompt hook shows \"pasted — cannot confirm\" instead of \"not delivered\""
         scenarios: [F21-review-desk.mjs]
+  F22:
+    name: "Land sheet with undo"
+    # Behind the landSheet flag (off on stable until proven); the scenario
+    # turns it on. With the flag off it must fail (negative control:
+    # HERMES_E2E_F22_NEGATIVE=1). It runs against a local bare remote and a
+    # stand-in gh (e2e/app/fixtures/fake-gh.mjs): no GitHub account. Turns
+    # come from the test hook that stands in for the turn ledger (F20), and a
+    # failing Done-When from an injected check_failed status (F27).
+    status: partial
+    criteria:
+      F22-1:
+        text: "Land with PR creates a PR whose body lists the turns (and the plan when a feature exists)"
+        scenarios: [F22-land-sheet.mjs]
+      F22-2:
+        text: "A conflicting merge is routed to PR or 'Ask agent to rebase', never force-merged"
+        scenarios: [F22-land-sheet.mjs]
+      F22-3:
+        text: "Archive removes the worktree directory and the branch still exists"
+        scenarios: [F22-land-sheet.mjs]
+      F22-4:
+        text: "With gh missing or signed out, the PR option is disabled with a sign-in link"
+        scenarios: [F22-land-sheet.mjs]
+      F22-5:
+        text: "Undo after a local merge restores main to the commit it had before"
+        scenarios: [F22-land-sheet.mjs]

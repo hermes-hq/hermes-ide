@@ -3668,7 +3668,7 @@ pub fn git_worktree_has_changes(
 /// intent — typically dropped into the worktree by some AI CLI tool
 /// (Aider, etc.).  These get filtered from the dirty-close dialog so
 /// the user isn't asked about files they never created.
-fn is_dirty_close_noise_file(path: &str) -> bool {
+pub(crate) fn is_dirty_close_noise_file(path: &str) -> bool {
     let basename = path.rsplit('/').next().unwrap_or(path);
     matches!(
         basename,

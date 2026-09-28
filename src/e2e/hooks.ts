@@ -26,6 +26,8 @@ import { setWindowFocusOverride } from "../attention/windowFocus";
 import { listReviewChecks, reviewInputFromPatch, runReviewChecks } from "../agent/contract/reviewChecks";
 import { clearFakeTurns, injectFakeTurns, type InjectedTurn } from "../review/turnSource";
 import { getReviewState } from "../review/reviewStore";
+import { setFakeLandTurnsForTest } from "../land/turnSource";
+import type { Turn } from "../agent/contract/turns";
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -166,6 +168,10 @@ const hooks = {
   clearTurns: (sessionId?: string): void => clearFakeTurns(sessionId),
   /** What the desk keeps for a repository: viewed files, comments, deliveries. */
   reviewState: (repoPath: string) => getReviewState(repoPath),
+  // ── F22 Land sheet: stand in for the turn ledger (F20) ─────────────
+  /** The turns (and each turn's diff) the Land sheet reads for a session. */
+  setFakeLandTurns: (sessionId: string, turns: Array<{ turn: Turn; patch: string }>): void =>
+    setFakeLandTurnsForTest(sessionId, turns),
 };
 
 export type HermesE2EHooks = typeof hooks;

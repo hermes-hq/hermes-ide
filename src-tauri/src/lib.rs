@@ -18,6 +18,7 @@ mod e2e_protocol;
 mod git;
 mod inline_pty;
 mod instance;
+mod land;
 mod menu;
 mod platform;
 mod plugin_features;
@@ -979,6 +980,13 @@ pub fn run() {
             review::review_revert_preview,
             review::review_revert_patch,
             review::review_write_file,
+            land::land_preview,
+            land::land_gh_status,
+            land::land_execute,
+            land::land_archive,
+            land::land_undo,
+            land::land_pr_checks,
+            land::land_ci_log,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,
