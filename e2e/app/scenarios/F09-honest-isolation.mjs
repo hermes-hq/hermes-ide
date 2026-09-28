@@ -519,8 +519,17 @@ try {
   try {
     log(`final git worktree list: ${JSON.stringify(worktrees())}`);
   } catch { /* repo may be gone */ }
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
-  rmSync(workDir, { recursive: true, force: true });
+  // A helper process of the app can still be writing into the throwaway
+  // directories for a moment after the app exits (seen on Linux:
+  // ENOTEMPTY). Cleanup retries and never decides the result.
+  for (const dir of [homeDir, workDir]) {
+    if (!dir) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (err) {
+      log(`  (could not remove the throwaway directory ${dir}: ${err.message})`);
+    }
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
