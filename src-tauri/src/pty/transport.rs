@@ -222,6 +222,9 @@ mod tests {
         // Size before and after `cat`, which echoes what it is typed.
         cmd.args(["-c", "stty size; cat; stty size"]);
         cmd.env("PATH", "/usr/bin:/bin");
+        // A fixed folder: without one the program starts in $HOME, which
+        // other tests point at temporary folders they then delete.
+        cmd.cwd("/");
         let size = PtySize {
             rows: 24,
             cols: 80,
