@@ -659,7 +659,13 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  // The app's last writes (and its terminals' shells) can land a moment
+  // after it quit; a cleanup race is not a test result.
+  try {
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (e) {
+    log(`  (could not remove the scratch folder: ${e.message})`);
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
