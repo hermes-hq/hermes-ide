@@ -51,8 +51,8 @@ function check(over: Partial<LaunchCheckInput> = {}): LaunchCheckInput {
   return {
     agents: [{ id: "claude", branch: "hermes/fix-login" }],
     doctor: { claude: row("claude") },
-    repoPath: "/Users/test/repo",
-    gitRoot: "/Users/test/repo",
+    repoPath: "/fixture-home/repo",
+    gitRoot: "/fixture-home/repo",
     branchExists: () => false,
     disk: { freeBytes: 50 * GB, requiredBytes: 10 * GB, belowThreshold: false },
     ...over,
@@ -115,13 +115,13 @@ describe("done when, from .hermes/worktree.toml", () => {
 describe("blocking rows", () => {
   it("none when everything is ready", () => {
     expect(blockingRows(check())).toEqual([]);
-    expect(canLaunch("do it", "/Users/test/repo", [])).toBe(true);
+    expect(canLaunch("do it", "/fixture-home/repo", [])).toBe(true);
   });
 
   it("a signed-out agent blocks Launch", () => {
     const rows = blockingRows(check({ doctor: { claude: row("claude", { signed_in: "no" }) } }));
     expect(rows).toEqual([{ kind: "signed-out", agentId: "claude" }]);
-    expect(canLaunch("do it", "/Users/test/repo", rows)).toBe(false);
+    expect(canLaunch("do it", "/fixture-home/repo", rows)).toBe(false);
   });
 
   it("an unknown sign-in state does not block (the CLI asks itself)", () => {
@@ -143,7 +143,7 @@ describe("blocking rows", () => {
   });
 
   it("a folder that is not a repository blocks, and no branch is judged there", () => {
-    expect(blockingRows(check({ gitRoot: null, branchExists: () => true }))).toEqual([{ kind: "not-git", path: "/Users/test/repo" }]);
+    expect(blockingRows(check({ gitRoot: null, branchExists: () => true }))).toEqual([{ kind: "not-git", path: "/fixture-home/repo" }]);
     expect(blockingRows(check({ repoPath: "  ", gitRoot: undefined }))).toEqual([{ kind: "no-repo" }]);
     // Still checking: nothing to say yet, and Launch waits.
     expect(blockingRows(check({ gitRoot: undefined }))).toEqual([]);
@@ -170,7 +170,7 @@ describe("blocking rows", () => {
   });
 
   it("an empty task never launches", () => {
-    expect(canLaunch("   ", "/Users/test/repo", [])).toBe(false);
+    expect(canLaunch("   ", "/fixture-home/repo", [])).toBe(false);
   });
 
   it("formats sizes for people", () => {
@@ -203,7 +203,7 @@ describe("launch records", () => {
     task: "t",
     agentId: "claude",
     mode: "terminal",
-    repo: "/Users/test/repo",
+    repo: "/fixture-home/repo",
     branch: "hermes/t",
     track: "Quick",
     doneWhen: [],

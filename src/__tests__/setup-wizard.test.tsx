@@ -164,7 +164,7 @@ const stepTitle = () => document.querySelector(".setup-title")?.textContent;
 describe("SetupWizard", () => {
   it("reaches a launched first task in three screens", async () => {
     h.doctor = [row("claude", "Claude Code")];
-    h.projects = [{ id: "p1", name: "repo", path: "/Users/test/repo", path_exists: true }];
+    h.projects = [{ id: "p1", name: "repo", path: "/fixture-home/repo", path_exists: true }];
     const { onLaunch, onDone } = await openWizard();
     expect(stepTitle()).toBe("Your agents");
     expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
@@ -186,7 +186,7 @@ describe("SetupWizard", () => {
     await settle();
     fireEvent.keyDown(screen.getByPlaceholderText(/Describe the task/), { key: "Enter" });
     await waitFor(() => expect(onLaunch).toHaveBeenCalled());
-    expect(onLaunch.mock.calls[0][0]).toMatchObject({ task: "Add a README", repoRoot: "/Users/test/repo" });
+    expect(onLaunch.mock.calls[0][0]).toMatchObject({ task: "Add a README", repoRoot: "/fixture-home/repo" });
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(h.settings.get("onboarding_completed")).toBe("true");
     expect(h.settings.get("telemetry_enabled")).toBe("false");
@@ -213,7 +213,7 @@ describe("SetupWizard", () => {
     await openWizard();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await settle();
-    fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/Users/test/plain" } });
+    fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/fixture-home/plain" } });
     await settle();
     expect(screen.getByText("Not a git repository")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();

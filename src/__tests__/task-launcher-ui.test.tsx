@@ -50,7 +50,7 @@ function doctorRow(id: string, name: string, over: Partial<DoctorRow> = {}): Doc
   return { id, name, installed: true, version: "1.2.3", min_version: null, version_ok: null, signed_in: "yes", signals: "exact", resume: true, retired: false, retired_note: null, beta: false, ...over };
 }
 
-const REPO = "/Users/test/repo";
+const REPO = "/fixture-home/repo";
 
 beforeEach(() => {
   h.doctor = [doctorRow("claude", "Claude Code"), doctorRow("codex", "Codex CLI")];
@@ -125,7 +125,7 @@ describe("TaskLauncher", () => {
   });
 
   it("a folder that is not a git repository blocks Launch", async () => {
-    await open({ defaultRepo: "/Users/test/plain" });
+    await open({ defaultRepo: "/fixture-home/plain" });
     fireEvent.change(task(), { target: { value: "Fix it" } });
     expect(blocks()).toEqual(["not-git"]);
     expect(launchButton()).toBeDisabled();

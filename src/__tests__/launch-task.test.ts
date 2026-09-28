@@ -26,7 +26,7 @@ function fakeDeps(over: Partial<LaunchTaskDeps> = {}) {
       return { id: `s${n}` } as SessionData;
     }),
     place: (id, i, first) => placed.push([id, i, first]),
-    worktreePath: vi.fn(async (id: string) => `/Users/test/wt/${id}`),
+    worktreePath: vi.fn(async (id: string) => `/fixture-home/wt/${id}`),
     writeFeatureFile: vi.fn(async (checkout: string, slug: string, contents: string) => {
       files.push([checkout, slug, contents]);
       return `${checkout}/.hermes/features/${slug}/feature.md`;
@@ -46,7 +46,7 @@ function fakeDeps(over: Partial<LaunchTaskDeps> = {}) {
 
 const req = (over: Partial<TaskLaunchRequest> = {}): TaskLaunchRequest => ({
   task: "  Fix the login bug  ",
-  repoRoot: "/Users/test/repo",
+  repoRoot: "/fixture-home/repo",
   agents: [{ id: "claude", mode: "terminal", branch: "hermes/fix-the-login-bug" }],
   track: "Quick",
   doneWhen: ["npm test"],
@@ -64,7 +64,7 @@ describe("launchTask", () => {
         aiProvider: "claude",
         mode: "terminal",
         projectIds: ["proj-1"],
-        workingDirectory: "/Users/test/repo",
+        workingDirectory: "/fixture-home/repo",
         branchSelections: { "proj-1": { branch: "hermes/fix-the-login-bug", createNew: true } },
         initialPrompt: "Fix the login bug",
       },
@@ -78,7 +78,7 @@ describe("launchTask", () => {
         task: "Fix the login bug",
         agentId: "claude",
         mode: "terminal",
-        repo: "/Users/test/repo",
+        repo: "/fixture-home/repo",
         branch: "hermes/fix-the-login-bug",
         track: "Quick",
         doneWhen: ["npm test"],
@@ -134,10 +134,10 @@ describe("launchTask", () => {
   it("a Full track writes the first feature.md into each worktree", async () => {
     const f = fakeDeps();
     const r = await launchTask(req({ track: "Full" }), f.deps);
-    expect(f.files.map(([checkout, slug]) => [checkout, slug])).toEqual([["/Users/test/wt/s1", "fix-the-login-bug"]]);
+    expect(f.files.map(([checkout, slug]) => [checkout, slug])).toEqual([["/fixture-home/wt/s1", "fix-the-login-bug"]]);
     expect(f.files[0][2]).toContain("track: Full");
     expect(f.files[0][2]).toContain('  - "npm test"');
-    expect(r.featureFiles).toEqual(["/Users/test/wt/s1/.hermes/features/fix-the-login-bug/feature.md"]);
+    expect(r.featureFiles).toEqual(["/fixture-home/wt/s1/.hermes/features/fix-the-login-bug/feature.md"]);
   });
 
   it("an agent that cannot take a first prompt gets the task on the clipboard", async () => {
@@ -162,8 +162,8 @@ describe("launchTask", () => {
 
 describe("normalizeRepoPath", () => {
   it("ignores trailing separators, and case and slashes on Windows", () => {
-    expect(normalizeRepoPath("/Users/test/repo/")).toBe("/Users/test/repo");
-    expect(normalizeRepoPath("C:/Users/Test/Repo\\", true)).toBe("c:\\users\\test\\repo");
+    expect(normalizeRepoPath("/fixture-home/repo/")).toBe("/fixture-home/repo");
+    expect(normalizeRepoPath("C:/Fixture/Repo\\", true)).toBe("c:\\fixture\\repo");
     expect(normalizeRepoPath("/")).toBe("/");
   });
 });
