@@ -328,9 +328,10 @@ try {
   const rec = await waitForRecord((r) => r.argv.includes("--settings"), "a launch through hi with a settings file");
   assert(records().length > before, "the agent was started again in this run");
   await app.bridge.waitForTerminal(sid, /fake-cli: ready/, { timeoutMs: 30_000 });
-  const stopHook = rec.settings?.hooks?.Stop?.flatMap((g) => g.hooks ?? []).find((h) => /check --stop-hook$/.test(h.command ?? ""));
-  assert(stopHook && stopHook.type === "command", `the per-launch settings carry the Done-When Stop hook ("${stopHook?.command}")`);
-  assert(/\bhi(\.exe)?" check --stop-hook$/.test(stopHook.command), "the hook is the bundled hi helper");
+  // Exec form, like F11's signal hooks: the helper and its arguments, no shell.
+  const stopHook = rec.settings?.hooks?.Stop?.flatMap((g) => g.hooks ?? []).find((h) => Array.isArray(h.args) && h.args.join(" ") === "check --stop-hook");
+  assert(stopHook && stopHook.type === "command", `the per-launch settings carry the Done-When Stop hook (${JSON.stringify(stopHook ?? null)})`);
+  assert(/\bhi(\.exe)?$/.test(stopHook.command), "the hook is the bundled hi helper");
   const data = await sessionData(app.bridge, sid);
   log(`  session folder: ${data.working_directory}`);
 

@@ -434,7 +434,10 @@ try {
     `the per-launch settings file hooks every event Hermes reads (${Object.keys(hooks1).sort().join(", ")})`,
   );
   assert(hooks1.PreToolUse[0].matcher === "AskUserQuestion|ExitPlanMode", `PreToolUse is narrowed to the tools Hermes reads ("${hooks1.PreToolUse[0].matcher}")`);
-  assert(Object.values(hooks1).every((groups) => groups.every((g) => g.hooks.every((h) => Array.isArray(h.args) && h.args[0] === "signal"))), "every hook is `hi signal` in exec form (no shell)");
+  // F27 adds one more group on Stop: the Done-When check (`hi check
+  // --stop-hook`), in the same exec form.
+  const isDoneWhen = (h) => Array.isArray(h.args) && h.args[0] === "check" && h.args[1] === "--stop-hook";
+  assert(Object.values(hooks1).every((groups) => groups.every((g) => g.hooks.every((h) => Array.isArray(h.args) && (h.args[0] === "signal" || isDoneWhen(h))))), "every hook is `hi signal` (or F27's Done-When check) in exec form (no shell)");
 
   const { strip: started, ms: startedMs } = await waitForStrip(app.bridge, s1, { kind: "idle", confidence: "exact" }, { timeoutMs: 15_000 });
   assert(started.source === "hook" && started.sourceText === "hook, exact" && !started.guessed, `once started the strip says "${started.word} · ${started.sourceText}" (${startedMs} ms after ready)`);
