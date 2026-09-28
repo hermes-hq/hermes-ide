@@ -7,6 +7,62 @@ Each release uses the categories: **New**, **Fixed**, **Improved**, **Removed**.
 
 ---
 
+# 1.4.1 (2026-09-28)
+
+## New
+- New sessions open every agent, Claude included, in the agent's own terminal interface; Claude's Agent view is an option ("Agent view for Claude") on the agent step of New Session
+- New Session starts straight on "What do you want to run?"; the mode step is gone and "Connect over SSH" is a link on that step
+- Hermes remembers the agent you picked and how you ran it, and preselects both next time
+- Updates wait until every session is idle before relaunching; the dialog says how many sessions it is waiting for and offers "Relaunch now"
+- Beta update channel: new builds go to beta first and reach stable after a soak period; pick the channel in Settings → General → Update channel
+- Hermes saves a copy of your data before updating it (the three newest copies are kept), and an older version never opens data saved by a newer one
+- A failure inside one pane shows an error card with Reload pane and Close pane while every other pane, the session list and the running shells keep working
+- Usage analytics is off on a fresh install and nothing is sent unless you opt in; turning it on or off in Settings → Privacy takes effect at once
+- "Delete Session Data…" in a session's right-click menu clears the saved output, command history, token usage, pinned context and agent state Hermes keeps about that session
+- Windows and Linux: Ctrl+letter keys reach the terminal; app shortcuts are now Ctrl+Shift+letter, and the old Ctrl+letter shortcuts still work when no terminal has focus
+- Agent view: an approval prompt no longer takes keyboard focus, so Enter while typing never approves a command by accident
+- Agent view: "Always allow" saves the rule to the current project's own Claude settings instead of your global ones, and the rules are listed under Permissions in the Context tab
+- "Hermes inline suggestions" toggle in Settings → General turns Hermes suggestions off and leaves your shell's own autosuggestions in charge
+- Plugin side panels and the Git and Files views have their own resizable width (240–600 px) and a clear edge against the main area
+- Editor font size shortcuts: Cmd/Ctrl+= grows, Cmd/Ctrl+- shrinks, Cmd/Ctrl+0 resets; the size is remembered
+- GitHub Copilot means the current Copilot CLI, with the CLI's own slash commands as quick actions
+- SSH sessions honour the configured jump host, and a blank SSH user lets your ~/.ssh/config decide
+- Agent-view sessions load CLAUDE.md from every folder attached to the session
+- Suggestions for starting a VS Code tunnel from the terminal
+- `hermes-ide --self-test=report.json` checks an install and writes a report you can send in, with no user or host name in it
+- Linux in-app updates install the .deb package
+- The About dialog says Hermes IDE is not affiliated with Nous Research or its Hermes Agent
+
+## Fixed
+- Each Claude session follows its own project's transcript instead of whichever project was used last
+- The Workbench layout and session notes are restored after a restart
+- Closing a session that shares a checkout with another session no longer deletes that checkout and its uncommitted work
+- The branch picker greys out branches other sessions have checked out, and Next on the folder step waits until Hermes knows whether the folder is a git repository
+- `:` intent commands run again instead of typing their raw text into the shell
+- Shell history and shell-type detection reach the suggestions again, and ghost text is no longer drawn over the shell's own autosuggestions
+- Agent view: clicking Retry twice restarts the agent once instead of starting two processes for one session
+- Splitting a pane that is not the focused one no longer shows the new session in two panes
+- Unsent image attachments in the agent composer survive switching to a terminal session and back
+- The working folder in the header updates even when the shell reports it in two pieces, and an unfinished escape sequence no longer makes Hermes hold long output in memory
+- The context-file variable in the launch line uses the session shell's own syntax, so it works in PowerShell and cmd
+- Session labels, saved hosts and the file explorer no longer show a fake `ssh@host` or a stray `@` when no SSH user is set
+- Having only the retired `gh copilot` extension no longer counts as Copilot being installed; the card shows how to install the CLI
+- Opted-in analytics events (app started, session created, feature used) are actually sent; before, none left the app
+- A plugin can no longer read another plugin's stored data, use its permissions, grant itself permissions or list what else is installed
+- Leftover shell-setup files from older versions are cleaned out of the system temp folder after an upgrade
+
+## Improved
+- Faster start: Settings, the plugin manager, the code editor, the Agent view, the New Session wizard, side panels and the welcome screens load when first needed, and only the language in use is loaded
+- Terminal-only use starts no extra agent process at launch
+- Hermes no longer slows down after days of use; the per-session activity history is capped
+- The Keyboard Shortcuts panel and Settings → Shortcuts list every real shortcut in your interface language, and a shortcuts reference page is included in the docs
+- Shortcuts follow the letters printed on your keyboard (AZERTY, Dvorak, …) and the menus show the right keys for your platform
+- In narrow windows the main area always keeps room to work when side panels are open
+
+## Removed
+- The Manual / Assisted / Auto switch, the Autonomous settings tab and the countdown that ran a predicted command; Hermes never types into your terminal on its own
+- Inline suggestions and ghost text over an agent CLI; they still work at a plain shell prompt
+
 # 1.4.0 (2026-09-27)
 
 ## New
