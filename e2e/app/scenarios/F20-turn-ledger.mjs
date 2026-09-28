@@ -474,6 +474,7 @@ try {
   assert(preview.files === 3, `the preview says 3 files would change (app.txt, README.md, notes/new.txt): ${preview.files}`);
   assert(preview.lines.some((l) => l === "-second") && preview.lines.some((l) => l.startsWith("+draft")), "the preview shows the changes restoring would make");
   assert(read(dirA, "src/app.txt").includes("second") && read(dirA, "notes/new.txt") === null, "a preview changes nothing on disk");
+  const treeBeforeRestore = worktreeTree(dirA);
   await bridge.screenshot(join(evidenceDir, "03-restore-preview.png"));
   await bridge.clickByName("Restore", { within: ".turn-sheet-actions" });
   await bridge.waitFor("the restore notice", `
@@ -489,7 +490,18 @@ try {
   const stateAfterRestore = userState(dirA);
   assert(stateAfterRestore.head === stateAtStart.head && stateAfterRestore.index === stateAtStart.index && stateAfterRestore.stash === stateAtStart.stash, "HEAD, index and stash are still untouched after the restore");
   assert(turnRefs(dirA, sessionA).length === 3, "T1..T3 are still there after the restore");
-  assert(gitIn(dirA, "rev-parse", "--verify", "-q", `refs/hermes/${sessionA}/before-restore`).length > 0, "what was there before the restore is kept in a hidden ref");
+  // What was there before the restore is kept: in before-restore when the
+  // worktree had moved on since the last snapshot, otherwise in that
+  // snapshot itself (here T3: nothing changed after it).
+  let keptTree;
+  try {
+    keptTree = gitIn(dirA, "rev-parse", "--verify", "-q", `refs/hermes/${sessionA}/before-restore^{tree}`);
+    log("  the pre-restore state is in before-restore");
+  } catch {
+    keptTree = gitIn(dirA, "rev-parse", `refs/hermes/${sessionA}/turn/3^{tree}`);
+    log("  nothing changed after T3, so T3 itself holds the pre-restore state");
+  }
+  assert(keptTree === treeBeforeRestore, "what was there before the restore is kept in a hidden ref");
 
   // ── E. the kill switch ──────────────────────────────────────────
   log("step E: the kill switch stops recording; turning it back on records again");
