@@ -55,6 +55,9 @@ import { GitMergeBanner } from "./GitMergeBanner";
 import { GitConflictViewer } from "./GitConflictViewer";
 import "../styles/components/ReviewDesk.css";
 
+// A key name, shown as printed on the keyboard in every language.
+const ESC_KEY = "Esc";
+
 interface ReviewDeskProps {
   /** The focused session: its folder is what is reviewed. */
   sessionId: string;
@@ -621,7 +624,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               {t("review.tabRepository")}
             </button>
           </div>
-          <button type="button" className="review-close" onClick={onClose} aria-label={t("common.close")} title="Esc">
+          <button type="button" className="review-close" onClick={onClose} aria-label={t("common.close")} title={ESC_KEY}>
             ✕
           </button>
         </header>
@@ -752,7 +755,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
             {renderSendPanel()}
             <footer className="review-keys" aria-hidden="true">
               <kbd>j</kbd>/<kbd>k</kbd> {t("review.keyMove")} · <kbd>[</kbd>/<kbd>]</kbd> {t("review.keyTurn")} · <kbd>c</kbd> {t("review.keyComment")} · <kbd>s</kbd>{" "}
-              {t("review.keySend")} · <kbd>x</kbd> {t("review.keyRevert")} · <kbd>Esc</kbd> {t("common.close")}
+              {t("review.keySend")} · <kbd>x</kbd> {t("review.keyRevert")} · <kbd>{ESC_KEY}</kbd> {t("common.close")}
             </footer>
           </>
         )}
