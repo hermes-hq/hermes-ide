@@ -73,8 +73,11 @@ export function SessionIdentityChips({ session }: { session: SessionData }) {
   const { identity } = useSessionEvents(session.id);
   if (session.mode !== "terminal") return null;
   if (!identity.model && !identity.permissionMode) return null;
+  // Its own row, not squeezed into the meta row next to the phase tag and
+  // age: a real model id ("vendor-model-4-5-20250929") needs the row's
+  // full width to stay readable at the default sidebar width.
   return (
-    <>
+    <div className="session-item-identity-row" data-testid="session-identity-row">
       {identity.model && (
         <span
           className="session-model-chip"
@@ -93,7 +96,7 @@ export function SessionIdentityChips({ session }: { session: SessionData }) {
           {identity.permissionMode}
         </span>
       )}
-    </>
+    </div>
   );
 }
 
@@ -974,7 +977,6 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
               )}
               <SessionAgentTag session={session} />
-              <SessionIdentityChips session={session} />
               {agentStatus && session.phase !== "disconnected" ? (
                 <AgentStatusTag sessionId={session.id} />
               ) : (
@@ -995,6 +997,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               )}
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
+            <SessionIdentityChips session={session} />
             {session.phase === "disconnected" && session.ssh_info && onReconnect && (
               <button
                 className="session-item-reconnect-btn"

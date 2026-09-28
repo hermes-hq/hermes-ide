@@ -433,7 +433,18 @@
 
 /* F08: read-only chips fed by the agent's own identity signal (C0).
  * Deliberately plain — no color-coding, no interaction — this is a fact
- * the agent reported, not a status to react to. */
+ * the agent reported, not a status to react to. They get their own row
+ * (the meta row above is already full with the phase tag and age), and
+ * wrap rather than truncate — first onto a second line, then inside the
+ * chip at a hyphen: a model id is only useful if all of it can be read. */
+.session-item-identity-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  min-width: 0;
+}
+
 .session-model-chip,
 .session-permission-chip {
   font-size: var(--text-2xs);
@@ -443,10 +454,9 @@
   border-radius: var(--radius-sm);
   letter-spacing: var(--tracking-snug);
   font-family: var(--font-numeric);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 12em;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .session-ssh-tag {

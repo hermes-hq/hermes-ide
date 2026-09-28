@@ -676,3 +676,22 @@ features:
       F08-2:
         text: "A malformed identity event is refused and the chip does not move; another session's identity never appears on this one's chip"
         scenarios: [F08-model-chips.mjs]
+      F08-3:
+        text: "A full-length model id and the permission mode show in full, not truncated, at the default window and sidebar size"
+        scenarios: [F08-model-chips.mjs]
+  F18:
+    name: "New surfaces translated and accessible"
+    # The inbox, status strip and Review Desk are other 2.0 tracks and not
+    # on main yet; each of those scenarios calls e2e/app/a11y.mjs on its
+    # own surface when it lands. Colour contrast and reduced motion are not
+    # checked automatically (see the header of e2e/app/a11y.mjs).
+    status: partial
+    criteria:
+      F18-1:
+        # Proven by src/__tests__/lint-no-untranslated-strings.test.ts,
+        # which runs the repository's real ESLint config.
+        text: "A raw string in a new surface fails the build"
+        scenarios: []
+      F18-2:
+        text: "The rig's accessibility audit runs on a real 2.0 surface, passes it, and fails on an unnamed control planted in it"
+        scenarios: [F08-model-chips.mjs]
