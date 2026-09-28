@@ -3,8 +3,9 @@
 // Contract C0 (docs/adr/004-2.0-contracts.md). F20 fills it: at the end of
 // every agent turn Hermes snapshots the worktree into a hidden git ref,
 // `refs/hermes/<session>/turn/<n>`, and records the turn in the
-// `agent_turns` table (schema step 3). Until then the backend commands
-// answer with nothing (`listTurns` -> [], `getTurnDiff` -> null).
+// `agent_turns` table (schema step 3). A session without turns still
+// answers with nothing (`listTurns` -> [], `getTurnDiff` -> null). The
+// ledger's own commands (restore, preview) live in src/agent/turns/.
 //
 // The Rust mirror is src-tauri/src/contract/turns.rs.
 
@@ -27,6 +28,12 @@ export interface Turn {
   /** Epoch milliseconds, null while the turn is running. */
   readonly endedAt: number | null;
   readonly diffstat: Diffstat;
+  /**
+   * F20 (additive): the snapshot ran past its budget, so this turn has a
+   * diffstat summary but no snapshot (`ref` is empty) and cannot be diffed
+   * or restored. Absent on a full snapshot.
+   */
+  readonly degraded?: boolean;
 }
 
 export interface TurnDiff {

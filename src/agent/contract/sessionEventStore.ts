@@ -116,7 +116,8 @@ const anyListeners = new Set<AnySessionEventListener>();
 const emptyCache = new Map<string, SessionEventSnapshot>();
 
 /**
- * Told about every session (F10 and F12 recount, F36 fans out to plugins).
+ * Told about every session (F10 and F12 recount, F36 fans out to plugins,
+ * F20's turn ledger bridge acts on turn boundaries).
  * On an accepted event: the event, the snapshot after and the one before.
  * When a session is cleared: `event` is null and `snapshot` is the empty
  * snapshot; listeners that only follow events skip that call.

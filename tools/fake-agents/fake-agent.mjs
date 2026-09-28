@@ -15,6 +15,7 @@
 // Exit codes: the scenario's own, 124 on a waitKey/waitPaste/waitResize
 // timeout, 130 on Ctrl-C, 143 on SIGTERM, 129 on SIGHUP, 2 on bad usage.
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,6 +253,22 @@ const steps = {
 		if (size === null) return s.onTimeout ?? { exit: 124 };
 		out(`resized to ${size.cols}x${size.rows}\r\n`);
 		return null;
+	},
+	// Run a command through the platform shell in the agent's own working
+	// directory, the way an agent's Bash tool does (`posix` under sh,
+	// `win32` under cmd.exe). Prints the exit code; `failExit` (optional)
+	// ends the scenario with that code when the command fails.
+	shell: (s) => {
+		const command = process.platform === "win32" ? s.win32 : s.posix;
+		if (!command) {
+			out(`fake-agent: no shell command for ${process.platform}\r\n`);
+			return s.failExit === undefined ? null : { exit: s.failExit };
+		}
+		const r = spawnSync(command, { shell: true, cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+		const code = r.status ?? 1;
+		log({ ev: "shell", command, code, stderr: (r.stderr ?? Buffer.alloc(0)).toString("utf8").slice(0, 2000) });
+		out(`fake-agent: ran ${s.label ?? command} (exit ${code})\r\n`);
+		return code !== 0 && s.failExit !== undefined ? { exit: s.failExit } : null;
 	},
 	// Never returns: only a signal or Ctrl-C ends it.
 	hang: () => new Promise(() => {}),

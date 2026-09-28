@@ -822,6 +822,21 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     {t("settings.showUntracked")}
                   </label>
                 </div>
+
+                {/* F20 turn ledger kill switch: only shown while the flag is on. */}
+                {isFeatureFlagEnabled("turnLedger") && (
+                  <div className="settings-group">
+                    <label className="settings-label settings-label-row">
+                      <input
+                        type="checkbox"
+                        data-setting="turn_ledger"
+                        checked={settings.turn_ledger !== "off"}
+                        onChange={(e) => updateSetting("turn_ledger", e.target.checked ? "on" : "off")}
+                      />
+                      {t("settings.turnLedger")}
+                    </label>
+                  </div>
+                )}
               </div>
             )}
 

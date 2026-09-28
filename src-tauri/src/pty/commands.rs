@@ -1205,6 +1205,9 @@ pub fn create_session(
         let update = SessionUpdate::from(&*s);
         let _ = app.emit("session-updated", &update);
     }
+    // Turn ledger (F20): the baseline every turn of this session is diffed
+    // against, taken in the background.
+    crate::turn_ledger::on_session_started(&app, &session_id, &cwd);
 
     let analyzer = Arc::new(StdMutex::new(OutputAnalyzer::new()));
     let analyzer_clone = Arc::clone(&analyzer);
@@ -1310,6 +1313,7 @@ pub fn create_session(
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_clone.lock() {
                                     if s.phase.can_transition_to(&new_phase) {
+                                        let old_phase = s.phase.clone();
                                         s.phase = new_phase.clone();
                                         s.last_activity_at = now();
                                         s.detected_agent = a.detected_agent.clone();
@@ -1318,6 +1322,16 @@ pub fn create_session(
                                         // need phase + agent + activity timestamp.
                                         let update = SessionUpdate::from(&*s);
                                         let _ = app_clone.emit("session-updated", &update);
+                                        // Turn ledger (F20): a guessed turn boundary. Only
+                                        // spawns work; never blocks this thread.
+                                        crate::turn_ledger::on_phase_change(
+                                            &app_clone,
+                                            &event_session_id,
+                                            &s.working_directory,
+                                            &old_phase,
+                                            &new_phase,
+                                            s.ai_provider.is_some() || s.detected_agent.is_some(),
+                                        );
 
                                         // Deliver any deferred context nudge now that the agent is idle
                                         if new_phase == SessionPhase::NeedsInput {
@@ -1552,12 +1566,23 @@ pub fn create_session(
                     if let Some(new_phase) = new_phase {
                         if let (Some(metrics), Ok(mut s)) = (metrics, session_silence.lock()) {
                             if s.phase.can_transition_to(&new_phase) {
+                                let old_phase = s.phase.clone();
                                 s.phase = new_phase.clone();
                                 s.detected_agent = detected_agent;
                                 s.metrics = metrics;
                                 s.last_activity_at = now();
                                 let update = SessionUpdate::from(&*s);
                                 let _ = app_silence.emit("session-updated", &update);
+                                // Turn ledger (F20): silence after work is the
+                                // guessed end of a turn.
+                                crate::turn_ledger::on_phase_change(
+                                    &app_silence,
+                                    &s.id,
+                                    &s.working_directory,
+                                    &old_phase,
+                                    &new_phase,
+                                    s.ai_provider.is_some() || s.detected_agent.is_some(),
+                                );
                             }
                         }
                     }

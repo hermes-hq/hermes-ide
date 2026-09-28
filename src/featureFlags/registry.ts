@@ -64,6 +64,12 @@ export const FEATURE_FLAGS = [
     description:
       "Plugins can declare \"apiVersion\": 2 to react to every agent's status, add inbox items, read feature tracks and add review checks; plugins built for v1 keep working and are marked as using the old API.",
   },
+  {
+    id: "turnLedger",
+    label: "Turn history",
+    description:
+      "Save a snapshot of the working tree after every agent turn (including changes made through shell commands) into a hidden git reference, and show a bar under terminal sessions with each turn's Diff and Restore.",
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 /** Derived from FEATURE_FLAGS, so adding or deleting an entry is the only step. */

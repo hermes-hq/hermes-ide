@@ -711,3 +711,31 @@ features:
       F36-2:
         text: "v1 plugins keep working for one minor with a deprecation warning"
         scenarios: [F36-plugin-api-v2.mjs]
+  F20:
+    name: "Turn history (Turn Ledger)"
+    # Behind the turnLedger flag. The scenario drives a plain terminal session
+    # with a fake agent whose edits go through shell commands, turn ends
+    # through the C0 session-event injector (an exact signal) and, for the
+    # PTY heuristic, a Custom-agent session with no injected event at all.
+    # partial: F20-5 (a real Claude agent session and a real Codex session)
+    # needs real accounts, which the rig never uses; the exact path is proven
+    # with injected turn_end events and the guessed path with the fake agent.
+    # The 2 s budget fallback and the 14-day ref collection are covered by
+    # the Rust tests (src-tauri/src/turn_ledger), not on the real app.
+    status: partial
+    criteria:
+      F20-1:
+        text: "After a turn in which the agent ran 'sed -i' via Bash, the turn diff shows that change"
+        scenarios: [F20-turn-ledger.mjs]
+      F20-2:
+        text: "git status, HEAD, the index and the stash list are unchanged by snapshots"
+        scenarios: [F20-turn-ledger.mjs]
+      F20-3:
+        text: "Restore to T1 previews the diff and then restores exactly the T1 tree"
+        scenarios: [F20-turn-ledger.mjs]
+      F20-4:
+        text: "A no-change turn creates no commit; the kill switch stops recording"
+        scenarios: [F20-turn-ledger.mjs]
+      F20-5:
+        text: "Works for a Claude agent session and a Codex terminal session (exact turn ends where the agent reports them, guessed from idle time for the rest)"
+        scenarios: [F20-turn-ledger.mjs]
