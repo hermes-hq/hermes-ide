@@ -45,6 +45,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { removeWorkDir } from "../n11-steps.mjs";
 
 const SCENARIO = "N12-launch-and-resume";
 const startedAt = Date.now();
@@ -657,11 +658,7 @@ try {
   } catch {
     /* best effort */
   }
-  // The web view's helper processes (system services on macOS) can still be
-  // writing under the private home's Library just after the app exited;
-  // retry the removal instead of crashing the scenario after every check
-  // passed (seen as ENOTEMPTY on the macOS runner).
-  rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  removeWorkDir(work, log);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

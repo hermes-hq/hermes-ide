@@ -2,7 +2,7 @@
 // creating sessions through the New Session wizard, and a scenario runner
 // that captures failure evidence and always quits the app.
 
-import { rmSync } from "node:fs";
+import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger, finishScenario, outDir, sleep } from "./harness.mjs";
 
@@ -192,4 +192,42 @@ export async function closeWindow(app, log) {
   const until = Date.now() + 15_000;
   while (app.isRunning() && Date.now() < until) await sleep(100);
   return !app.isRunning();
+}
+
+/**
+ * Remove a scenario's private work folder after the app has exited. On the
+ * macOS runner something still writes under the private home for a moment
+ * after the app is gone (seen as ENOTEMPTY under Library), so the removal
+ * retries, and when it still fails the scenario logs what was left, with
+ * when it was written, instead of failing after every check has passed.
+ */
+export function removeWorkDir(work, log) {
+  try {
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  } catch (e) {
+    const left = [];
+    const walk = (dir) => {
+      let entries = [];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else {
+          let when = "?";
+          try {
+            when = statSync(path).mtime.toISOString();
+          } catch {
+            /* gone already */
+          }
+          left.push(`${path.slice(work.length + 1)} (${when})`);
+        }
+      }
+    };
+    walk(work);
+    log(`  (could not remove the work folder: ${e.code || e.message}; left behind: ${left.length ? left.join(", ") : "nothing"})`);
+  }
 }
