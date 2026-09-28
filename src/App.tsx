@@ -6,7 +6,6 @@ import { PluginRuntime } from "./plugins/PluginRuntime";
 import { PluginLoader } from "./plugins/PluginLoader";
 import { builtinPlugins } from "./plugins/builtin";
 import { usePluginRuntime } from "./plugins/usePluginRuntime";
-import { isFeatureFlagEnabled } from "./featureFlags";
 import { PluginPanelHost } from "./plugins/PluginPanelHost";
 import { I18nProvider, useI18n } from "./i18n/I18nProvider";
 
