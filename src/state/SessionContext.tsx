@@ -14,6 +14,11 @@ let workspaceDirty = false;
 // not loaded yet, so a save would write an empty or partial workspace over
 // the one about to be restored.
 let workspaceLoaded = false;
+// Set when this launch restored no session from a saved workspace (restore
+// turned off, every session failed to start, unreadable data). Until a
+// session exists, a save leaves that saved workspace alone instead of
+// writing an empty one over it.
+let keepSavedWorkspace = false;
 // Saves run one after another, so an older snapshot of the state can never
 // land after a newer one.
 let saveChain: Promise<void> = Promise.resolve();
@@ -1530,10 +1535,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const restorePref = s.restore_sessions || "always";
         const savedJson = s.saved_workspace;
         if (restorePref === "never" || !savedJson) {
+          if (savedJson) keepSavedWorkspace = true;
           markWorkspaceLoaded();
           return;
         }
         workspaceRestoreInProgress = true;
+        // Cleared below once a session is restored.
+        keepSavedWorkspace = true;
 
         try {
           let parsed: unknown;
@@ -1676,6 +1684,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           }
 
           if (oldToNew.size === 0) return;
+          keepSavedWorkspace = false;
 
           // Restore the right-rail Workbench layout + per-session notes
           // (1.1.14).  Notes are remapped through the same old→new id
@@ -1725,6 +1734,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       })
       .catch((err) => {
         workspaceRestoreInProgress = false;
+        // The launch could not even read what was saved: never write an
+        // empty workspace over it (a session opened later clears this).
+        keepSavedWorkspace = true;
         markWorkspaceLoaded();
         console.error("[SessionContext] Workspace restore failed:", err);
       });
@@ -2133,6 +2145,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const current = stateRef.current;
     const liveSessions = Object.values(current.sessions).filter((s) => s.phase !== "destroyed");
     if (liveSessions.length === 0) {
+      // Nothing was restored and no session was opened since: the saved
+      // workspace is still the user's, not a stale one.
+      if (keepSavedWorkspace) return;
       // Clear stale workspace so closed sessions don't reappear on next launch
       await setSetting("saved_workspace", "").catch(console.error);
       return;
@@ -2697,6 +2712,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // is rewritten right away, not on the next 10 s tick, so a quit or crash
   // right after neither loses a session nor brings a closed one back.
   useSaveWorkspaceOnChange(Object.keys(state.sessions), workspaceReady, saveWorkspace);
+  // Once a session exists in this run, the workspace saved before the launch
+  // is replaced by what the user has now, even when that is nothing.
+  const hasLiveSession = Object.values(state.sessions).some((s) => s.phase !== "destroyed");
+  useEffect(() => {
+    if (workspaceReady && hasLiveSession) keepSavedWorkspace = false;
+  });
   // Every quit the backend can hold waits for this write first.
   useWorkspaceFlushOnQuit(saveWorkspace);
 

@@ -377,7 +377,8 @@ features:
     # A bug fix, not new 2.0 work, so it is not behind a feature flag.
     # Negative controls (run by hand, see the scenario header): a build of
     # main before the fix ends in RESULT: FAIL at run 3, and one where
-    # quitting does not wait for the frontend at run 4.
+    # quitting does not wait for the frontend at run 4, and one with the
+    # frontend's own window-close handler put back fails run 4 on repeats.
     # Not driven: a real Cmd+Q key press (the rig never sends OS input on
     # macOS; the menu item is chosen through its own handler) and quits the
     # OS forces (logging out, the Dock's Quit), which no app can hold.

@@ -122,6 +122,13 @@ impl QuitFlush {
     }
 
     /// Let every quit from now on go through.
+    ///
+    /// This is permanent on purpose: the quit carried out after a flush
+    /// (closing the window, then the exit that follows the last window) must
+    /// not be held again. It relies on nothing cancelling that close, which is
+    /// why the frontend has no close-requested listener of its own. Anything
+    /// that starts cancelling it must put the phase back to `Running`, or
+    /// later quits would skip the flush.
     pub fn release(&self) {
         self.lock().phase = Phase::Released;
     }
