@@ -56,7 +56,7 @@ export function setInput(bridge, selector, value) {
 
 /**
  * Settings > Limits: type `value` into one cap field ("" turns it off) and
- * leave the field, as a person would. Waits until the setting is stored.
+ * press Enter, as a person would. Waits until the setting is stored.
  * `field` is sessionUsd | featureUsd | maxRunning | maxMemoryMb.
  */
 export async function setCapInSettings(bridge, log, field, value) {
@@ -77,7 +77,17 @@ export async function setCapInSettings(bridge, log, field, value) {
   await bridge.waitFor(`the ${field} field`, `return !!e2e.first(${JSON.stringify(selector)});`);
   const label = await bridge.eval(`return e2e.norm(e2e.first('label[for="fleet-cap-${field}"]')?.textContent ?? "");`);
   await setInput(bridge, selector, String(value));
-  await bridge.eval(`e2e.first(${JSON.stringify(selector)}).blur(); return true;`);
+  // Confirm with Enter. Leaving the field (blur) only fires when the input
+  // really has focus, which a window in the background (Windows runners)
+  // never gives it; a key-down on the input reaches the app either way.
+  const focus = await bridge.eval(`
+    const input = e2e.first(${JSON.stringify(selector)});
+    const focus = { active: document.activeElement === input, pageHasFocus: document.hasFocus() };
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true, composed: true, view: window }));
+    input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true, composed: true, view: window }));
+    return focus;
+  `);
+  log(`  pressed Enter in the ${field} field (input focused: ${focus.active}, window focused: ${focus.pageHasFocus})`);
   const stored = await bridge.waitFor(`the ${field} cap to be saved`, `
     const raw = await window.__TAURI_INTERNALS__.invoke("get_settings");
     const stored = raw[${JSON.stringify(keys[field])}] ?? "";
