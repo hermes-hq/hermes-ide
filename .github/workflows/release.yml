@@ -997,13 +997,16 @@ jobs:
       - name: Make sure winget is available
         shell: pwsh
         run: ./scripts/ci/ensure-winget.ps1
-      # Unsigned installers: SmartScreen stalls winget on a fresh runner
-      # (see ci.yml, e2e-installers).
-      - name: Switch SmartScreen off on the runner
+      # Unsigned installers: Windows checks them before they start and
+      # nobody can answer on a runner (see ci.yml, e2e-installers).
+      - name: Let unsigned installers start on the runner
         shell: pwsh
         run: |
           reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f
           reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v SmartScreenEnabled /t REG_SZ /d Off /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Associations" /v LowRiskFileTypes /t REG_SZ /d ".exe;.msi" /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1806 /t REG_DWORD /d 0 /f
+          echo "SEE_MASK_NOZONECHECKS=1" >> $env:GITHUB_ENV
       - name: winget install --manifest, then uninstall
         shell: bash
         env:

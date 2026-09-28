@@ -543,17 +543,21 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/ensure-winget.ps1
 
-      # The installers are unsigned (no Windows signing identity yet). On a
-      # fresh runner winget stalls after the download, while SmartScreen
-      # checks the unknown, unsigned file; it is switched off on the runner.
-      # A person installing an unsigned build gets Windows' "unknown
-      # publisher" prompt instead; code signing (F25-1) removes it.
-      - name: Switch SmartScreen off on the runner (Windows)
+      # The installers are unsigned (no Windows signing identity yet). winget
+      # marks its download as coming from the internet, and Windows then
+      # checks an unsigned program before starting it (SmartScreen, and the
+      # "publisher could not be verified" prompt). On a runner nobody can
+      # answer, so the checks are switched off there. A person installing an
+      # unsigned build sees those prompts; code signing (F25-1) removes them.
+      - name: Let unsigned installers start on the runner (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f
           reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v SmartScreenEnabled /t REG_SZ /d Off /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Associations" /v LowRiskFileTypes /t REG_SZ /d ".exe;.msi" /f
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" /v 1806 /t REG_DWORD /d 0 /f
+          echo "SEE_MASK_NOZONECHECKS=1" >> $env:GITHUB_ENV
 
       - name: winget installs Hermes from the generated manifests (Windows)
         if: runner.os == 'Windows'
