@@ -28,7 +28,7 @@ import { triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { getSetting } from "./api/settings";
-import { workingDirectoryRecoveryMessage, type WorkingDirectoryRecovery } from "./state/isolation";
+import { workingDirectoryRecoveryMessage, reusedCheckoutMessage, type WorkingDirectoryRecovery, type ReusedCheckout } from "./state/isolation";
 import { SessionList } from "./components/SessionList";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon } from "./components/ActivityBar";
@@ -345,16 +345,17 @@ function AppContent() {
     return () => { cancelled = true; unlisten?.(); };
   }, []);
 
-  // ── Shared worktree warning ──
+  // ── Reused checkout notice (shared with a session, project folder, or outside Hermes) ──
   useEffect(() => {
     const handler = (e: Event) => {
-      const { branches } = (e as CustomEvent).detail as { branches: string[]; sessionLabel: string };
-      const branchList = branches.join(", ");
-      toastStoreRef.current.addToast({
-        message: `Sharing worktree for ${branchList} with another session. Changes to files will affect both sessions — avoid editing the same files.`,
-        type: "warning",
-        duration: 10000,
-      });
+      const { reused } = (e as CustomEvent).detail as { reused: ReusedCheckout[]; sessionLabel: string };
+      for (const r of reused) {
+        toastStoreRef.current.addToast({
+          message: reusedCheckoutMessage(r),
+          type: r.holder === "outside" ? "info" : "warning",
+          duration: 10000,
+        });
+      }
     };
     window.addEventListener("hermes:shared-worktree", handler);
     return () => window.removeEventListener("hermes:shared-worktree", handler);

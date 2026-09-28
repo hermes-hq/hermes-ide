@@ -125,13 +125,48 @@ export interface WorktreeDeps {
   resolveConflict(conflict: BranchInUse & { projectId: string }): Promise<BranchConflictChoice>;
 }
 
+/** A checkout the user chose to reuse instead of getting one of their own. */
+export interface ReusedCheckout {
+  branch: string;
+  path: string;
+  /**
+   * Who holds it: another Hermes session's worktree (`session`), the
+   * project folder, or a checkout Hermes did not make (`outside`: made by
+   * hand, or by another Hermes instance).
+   */
+  holder: "session" | "project-folder" | "outside";
+}
+
 export interface WorktreesOutcome {
   succeeded: number;
   errors: string[];
-  /** Branches the user chose to share with another checkout. */
-  sharedBranches: string[];
+  /** Checkouts the user chose to reuse, and who holds each. */
+  reused: ReusedCheckout[];
   /** The user cancelled: everything this call made was undone. */
   cancelled: boolean;
+}
+
+/** Who holds a checkout that is in use, from a BRANCH_IN_USE conflict. */
+export function branchHolderKind(conflict: BranchInUse): ReusedCheckout["holder"] {
+  if (conflict.projectFolder) return "project-folder";
+  return conflict.sessionId ? "session" : "outside";
+}
+
+/**
+ * One line telling the user what reusing a checkout means, by who holds it.
+ * Only a checkout of another Hermes session is "shared with another
+ * session"; the project folder and a checkout outside Hermes are not, and
+ * saying so used to be misleading.
+ */
+export function reusedCheckoutMessage(r: ReusedCheckout): string {
+  switch (r.holder) {
+    case "session":
+      return `Sharing worktree for ${r.branch} with another session. Changes to files will affect both sessions — avoid editing the same files.`;
+    case "project-folder":
+      return `Working on ${r.branch} in the project folder. Changes there are not isolated from the project.`;
+    default:
+      return `Working on ${r.branch} in a checkout outside Hermes (${r.path}). Hermes leaves it alone when the session closes: it is not cleaned up and its changes stay there.`;
+  }
 }
 
 /** How often one project may bounce between "in use" and a new name. */
@@ -149,7 +184,7 @@ export async function createSessionWorktrees(
   selections: Readonly<Record<string, BranchSelection | undefined>>,
   deps: WorktreeDeps,
 ): Promise<WorktreesOutcome> {
-  const outcome: WorktreesOutcome = { succeeded: 0, errors: [], sharedBranches: [], cancelled: false };
+  const outcome: WorktreesOutcome = { succeeded: 0, errors: [], reused: [], cancelled: false };
   const made: Array<{ projectId: string; attached: boolean }> = [];
 
   const undo = async () => {
@@ -194,7 +229,7 @@ export async function createSessionWorktrees(
             await deps.attachWorktree(sessionId, projectId, conflict.branch);
             made.push({ projectId, attached: true });
             outcome.succeeded++;
-            outcome.sharedBranches.push(conflict.branch);
+            outcome.reused.push({ branch: conflict.branch, path: conflict.path, holder: branchHolderKind(conflict) });
           } catch (attachErr) {
             outcome.errors.push(
               `${projectId}: ${attachErr instanceof Error ? attachErr.message : String(attachErr)}`,

@@ -14,6 +14,8 @@ import {
   closeCommitMessage,
   shouldAskAboutChangesOnClose,
   describeBranchHolder,
+  branchHolderKind,
+  reusedCheckoutMessage,
   workingDirectoryRecoveryMessage,
   withUnrestoredSessions,
   type WorktreeDeps,
@@ -110,7 +112,7 @@ describe("createSessionWorktrees", () => {
       p1: { branch: "hermes/task-a", createNew: true },
       p3: { branch: "feature", createNew: false, fromRemote: "origin/feature" },
     }, d);
-    expect(out).toEqual({ succeeded: 2, errors: [], sharedBranches: [], cancelled: false });
+    expect(out).toEqual({ succeeded: 2, errors: [], reused: [], cancelled: false });
     expect(d.createWorktree.mock.calls).toEqual([
       ["s1", "p1", "hermes/task-a", true, undefined, undefined],
       ["s1", "p3", "feature", false, "origin/feature", undefined],
@@ -128,7 +130,7 @@ describe("createSessionWorktrees", () => {
       branch: "main", path: "/tmp/hermes-test/repo", sessionId: null, projectFolder: true, projectId: "p1",
     });
     expect(d.attachWorktree).toHaveBeenCalledWith("s1", "p1", "main");
-    expect(out).toEqual({ succeeded: 1, errors: [], sharedBranches: ["main"], cancelled: false });
+    expect(out).toEqual({ succeeded: 1, errors: [], reused: [{ branch: "main", path: "/tmp/hermes-test/repo", holder: "project-folder" }], cancelled: false });
   });
 
   it("'use <branch>-2' creates a new branch cut from the branch in use", async () => {
@@ -140,7 +142,7 @@ describe("createSessionWorktrees", () => {
     const out = await createSessionWorktrees("s1", ["p1"], { p1: { branch: "hermes/a", createNew: false } }, d);
     expect(create.mock.calls[1]).toEqual(["s1", "p1", "hermes/a-2", true, undefined, "hermes/a"]);
     expect(d.attachWorktree).not.toHaveBeenCalled();
-    expect(out).toEqual({ succeeded: 1, errors: [], sharedBranches: [], cancelled: false });
+    expect(out).toEqual({ succeeded: 1, errors: [], reused: [], cancelled: false });
   });
 
   it("cancel undoes what was made: removes own worktrees, only unlinks shared ones", async () => {
@@ -163,7 +165,7 @@ describe("createSessionWorktrees", () => {
   it("other errors are reported, not turned into a shared checkout", async () => {
     const d = deps({ createWorktree: vi.fn(async () => { throw new Error("disk full"); }) });
     const out = await createSessionWorktrees("s1", ["p1"], { p1: { branch: "a", createNew: true } }, d);
-    expect(out).toEqual({ succeeded: 0, errors: ["p1: disk full"], sharedBranches: [], cancelled: false });
+    expect(out).toEqual({ succeeded: 0, errors: ["p1: disk full"], reused: [], cancelled: false });
     expect(d.resolveConflict).not.toHaveBeenCalled();
     expect(d.attachWorktree).not.toHaveBeenCalled();
   });
@@ -237,6 +239,24 @@ describe("describeBranchHolder", () => {
     expect(describeBranchHolder({ ...conflict, projectFolder: true }, null)).toBe("the project folder");
     expect(describeBranchHolder({ ...conflict, sessionId: "s1" }, "Fix login")).toBe('session "Fix login"');
     expect(describeBranchHolder(conflict, null)).toBe("a checkout outside Hermes");
+  });
+});
+
+describe("reusedCheckoutMessage", () => {
+  const conflict = { branch: "feature", path: "/work/repo-external-wt", sessionId: null, projectFolder: false };
+
+  it("says 'another session' only for another Hermes session's worktree", () => {
+    expect(branchHolderKind({ ...conflict, sessionId: "s1" })).toBe("session");
+    expect(branchHolderKind({ ...conflict, projectFolder: true })).toBe("project-folder");
+    expect(branchHolderKind(conflict)).toBe("outside");
+
+    const session = reusedCheckoutMessage({ branch: "feature", path: "/data/hermes-worktrees/x/s1_feature", holder: "session" });
+    expect(session).toMatch(/^Sharing worktree for feature with another session\./);
+    expect(reusedCheckoutMessage({ branch: "main", path: "/work/repo", holder: "project-folder" }))
+      .toBe("Working on main in the project folder. Changes there are not isolated from the project.");
+    const outside = reusedCheckoutMessage({ branch: "feature", path: "/work/repo-external-wt", holder: "outside" });
+    expect(outside).toContain("a checkout outside Hermes (/work/repo-external-wt)");
+    expect(outside).not.toMatch(/another session/);
   });
 });
 

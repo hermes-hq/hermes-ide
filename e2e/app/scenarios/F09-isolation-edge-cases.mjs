@@ -13,8 +13,10 @@
 //             dialog — so "no dialog" above is a real check.
 //          B. a checkout made OUTSIDE Hermes (`git worktree add` by hand)
 //             has branch `external-branch`. Task X asks for that branch: the
-//             Branch In Use choice names that checkout's folder. Reuse it,
-//             put an uncommitted file there, close X: no dialog, no
+//             Branch In Use choice names that checkout's folder. Reuse it:
+//             the notice says it is a checkout outside Hermes (not "shared
+//             with another session"); put an uncommitted file there, close
+//             X: no dialog, no
 //             "failed to clean up / retried on next startup" warning, the
 //             folder, its file and git's record of it are untouched.
 //             Then the same with a checkout of ANOTHER Hermes instance (a
@@ -327,8 +329,12 @@ const statusOf = (bridge, label) => bridge.eval(`
   return item ? item.innerText : null;
 `);
 
-/** Ask for `branch` through the Branch In Use choice and reuse the checkout that has it. */
-async function reuseCheckoutOf(bridge, { label, branch, viaNewName = false }) {
+/**
+ * Ask for `branch` through the Branch In Use choice and reuse the checkout
+ * that has it; `holder` is who is expected to hold it ("session" or
+ * "outside"), which the notice shown afterwards must get right.
+ */
+async function reuseCheckoutOf(bridge, { label, branch, holder, viaNewName = false }) {
   const before = await bridge.terminalIds();
   if (viaNewName) {
     // The picker greys out branches other sessions hold, so reach the branch
@@ -351,7 +357,21 @@ async function reuseCheckoutOf(bridge, { label, branch, viaNewName = false }) {
   log(`  dialog: ${text}`);
   await bridge.clickByName("Reuse its checkout", { within: ".branch-conflict-actions" });
   const id = await waitForNewSession(bridge, before, label);
-  return { id, text, shownPath: (shownPath ?? "").trim() };
+  // The notice must say who really holds the checkout: "another session"
+  // only when a Hermes session does; a checkout outside Hermes is not one.
+  const notice = await bridge.waitFor("the reused-checkout notice", `
+    const branch = ${JSON.stringify(branch)};
+    return e2e.all(".toast .toast-message").map((el) => el.innerText)
+      .find((t) => t.includes(branch) && /Sharing worktree|outside Hermes|project folder/.test(t)) || null;
+  `, { timeoutMs: 10_000 });
+  log(`  notice: ${notice}`);
+  if (holder === "session") {
+    assert(/^Sharing worktree for .* with another session/.test(notice), "the notice says the checkout is shared with another session");
+  } else {
+    assert(!/another session/.test(notice), `the notice does not claim another session holds a checkout outside Hermes (${JSON.stringify(notice)})`);
+    assert(/outside Hermes/.test(notice) && notice.includes(branch), "the notice says the checkout is outside Hermes and names the branch");
+  }
+  return { id, text, shownPath: (shownPath ?? "").trim(), notice };
 }
 
 let app;
@@ -389,7 +409,7 @@ try {
   assert(wtA && /^hermes\/task-/.test(wtA.branchName) && wtA.ownedBySession === true, `task A owns its worktree on ${wtA?.branchName}`);
 
   log("step 3 (A): task E reuses task A's worktree on purpose; A has uncommitted work; close E");
-  const reuseA = await reuseCheckoutOf(bridge, { label: "F09 task E", branch: wtA.branchName, viaNewName: true });
+  const reuseA = await reuseCheckoutOf(bridge, { label: "F09 task E", branch: wtA.branchName, holder: "session", viaNewName: true });
   assert(/F09 task A/.test(reuseA.text), "the choice named task A as the holder");
   const idE = reuseA.id;
   const wtE = await worktreeOf(bridge, idE, pid);
@@ -427,7 +447,7 @@ try {
 
   // B ─────────────────────────────────────────────────────────────
   log("step 5 (B): task X asks for external-branch, checked out in a folder Hermes did not make");
-  const reuseX = await reuseCheckoutOf(bridge, { label: "F09 task X", branch: "external-branch" });
+  const reuseX = await reuseCheckoutOf(bridge, { label: "F09 task X", branch: "external-branch", holder: "outside" });
   assert(/external-branch/.test(reuseX.text) && /a checkout outside Hermes/.test(reuseX.text), "the choice says the branch is held by a checkout outside Hermes");
   assert(samePath(reuseX.shownPath, externalWt), `the choice names that checkout's folder (${reuseX.shownPath})`);
   const idX = reuseX.id;
@@ -458,7 +478,7 @@ try {
   await bridge.screenshot(join(evidenceDir, "04-after-close-x.png"));
 
   log("step 6b (B): task Y reuses a checkout of ANOTHER Hermes instance; uncommitted work; close Y");
-  const reuseY = await reuseCheckoutOf(bridge, { label: "F09 task Y", branch: "foreign-branch" });
+  const reuseY = await reuseCheckoutOf(bridge, { label: "F09 task Y", branch: "foreign-branch", holder: "outside" });
   assert(samePath(reuseY.shownPath, foreignWt), `the choice names the other instance's folder (${reuseY.shownPath})`);
   const idY = reuseY.id;
   const wtY = await worktreeOf(bridge, idY, pid);
@@ -537,8 +557,10 @@ try {
   await app.bridge.screenshot(join(evidenceDir, "06-restored-project-folder.png"));
   assert(!existsSync(wtR.worktreePath), "nothing was recreated for a branch that no longer exists");
   assert((await worktreeOf(app.bridge, idR, pid)) === null, "R is no longer shown as isolated (its stale link is gone)");
+  // `git rev-parse --show-toplevel` answers in every shell Hermes may pick
+  // (bash, zsh, pwsh, cmd.exe); `pwd` would not in cmd.exe.
   const repoName = basename(repo);
-  const shownDir = await runInTerminal(app.bridge, idR, "pwd", new RegExp(`${repoName}$`));
+  const shownDir = await runInTerminal(app.bridge, idR, "git rev-parse --show-toplevel", new RegExp(`${repoName}$`));
   assert(samePath(shownDir, repo), `R's terminal answers, in the project folder (${shownDir})`);
   assert(!/starting/.test((await statusOf(app.bridge, "F09 task R")) ?? ""), "the session list does not show R as starting");
 } catch (e) {

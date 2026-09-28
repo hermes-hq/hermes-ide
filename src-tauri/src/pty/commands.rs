@@ -821,10 +821,8 @@ pub fn create_session(
     // back or replaced by a folder that exists: the shell is never spawned
     // into a missing directory (a restored session used to hang at
     // "starting" that way).
-    let (cwd, recovery) = match state.db.lock() {
-        Ok(db) => resolve_session_cwd(&db, &session_id, original_cwd, project_ids.as_deref()),
-        Err(_) => (original_cwd, None),
-    };
+    let (cwd, recovery) =
+        resolve_session_cwd(&state.db, &session_id, original_cwd, project_ids.as_deref());
     if let Some(recovery) = recovery {
         log::warn!(
             "Session {} did not open in '{}' ({}); it opens in '{}' instead",
@@ -2128,8 +2126,12 @@ pub struct WorkingDirectoryRecovery {
 /// attached one); else the home folder. A worktree link that could not be
 /// honoured is dropped so the session is not shown as isolated when it is
 /// not. The second value says what happened when it was not the plain case.
+///
+/// The database lock is taken only to read the rows and to drop a stale
+/// link, never while git recreates a worktree (which can take a while on a
+/// large repository and would block every other command that uses it).
 pub fn resolve_session_cwd(
-    db: &Database,
+    db: &std::sync::Mutex<Database>,
     session_id: &str,
     requested_cwd: String,
     project_ids: Option<&[String]>,
@@ -2147,24 +2149,40 @@ pub fn resolve_session_cwd(
         })
     };
 
-    let rows = db.get_session_worktrees(session_id).unwrap_or_default();
+    // Read everything needed under the lock, then let it go.
+    let (primary, project_path, attached_projects) = match db.lock() {
+        Ok(db) => {
+            let primary = db
+                .get_session_worktrees(session_id)
+                .unwrap_or_default()
+                .into_iter()
+                .next();
+            let project_path = primary
+                .as_ref()
+                .and_then(|p| db.get_project(&p.project_id).ok().flatten())
+                .map(|p| p.path);
+            let attached: Vec<String> = project_ids
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|id| db.get_project(id).ok().flatten().map(|p| p.path))
+                .collect();
+            (primary, project_path, attached)
+        }
+        Err(_) => return (requested_cwd, None),
+    };
+
     let mut missing: Option<(String, Option<String>)> = None;
     let mut fallback_project: Option<String> = None;
 
-    if let Some(primary) = rows.first() {
+    if let Some(primary) = primary {
         if Path::new(&primary.worktree_path).is_dir() {
-            return (primary.worktree_path.clone(), None);
+            return (primary.worktree_path, None);
         }
         if !isolation_fixes_enabled() {
             // Test builds only (negative control): the old behaviour, which
             // handed back the requested folder even when it was missing.
             return (requested_cwd, None);
         }
-        let project_path = db
-            .get_project(&primary.project_id)
-            .ok()
-            .flatten()
-            .map(|p| p.path);
         if is_owned_checkout(primary.is_main_worktree, &primary.worktree_path) {
             if let (Some(repo), Some(branch)) = (&project_path, &primary.branch_name) {
                 match recreate_worktree(repo, &primary.worktree_path, branch) {
@@ -2190,14 +2208,23 @@ pub fn resolve_session_cwd(
         }
         // The link cannot be honoured: drop it, so the session is not shown
         // as isolated, and open somewhere that exists.
-        if let Err(e) = db.delete_session_worktree(&primary.id) {
-            log::warn!(
+        match db.lock() {
+            Ok(db) => {
+                if let Err(e) = db.delete_session_worktree(&primary.id) {
+                    log::warn!(
+                        "Failed to drop the stale worktree link '{}': {}",
+                        primary.id,
+                        e
+                    );
+                }
+            }
+            Err(e) => log::warn!(
                 "Failed to drop the stale worktree link '{}': {}",
                 primary.id,
                 e
-            );
+            ),
         }
-        missing = Some((primary.worktree_path.clone(), primary.branch_name.clone()));
+        missing = Some((primary.worktree_path, primary.branch_name));
         fallback_project = project_path;
     }
 
@@ -2226,12 +2253,7 @@ pub fn resolve_session_cwd(
     let (gone, branch) = missing.unwrap_or((requested_cwd, None));
     let project_folder = fallback_project
         .into_iter()
-        .chain(
-            project_ids
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|id| db.get_project(id).ok().flatten().map(|p| p.path)),
-        )
+        .chain(attached_projects)
         .find(|p| Path::new(p).is_dir());
     if let Some(folder) = project_folder {
         return (
@@ -2239,13 +2261,27 @@ pub fn resolve_session_cwd(
             recovered(&gone, branch.as_deref(), folder, "project-folder"),
         );
     }
+    // The home folder; failing that (HOME pointing at a folder that is
+    // gone), the process' working directory, then the temp folder, which
+    // always exists. Never a folder that does not.
     let home = crate::platform::home_dir()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(get_working_directory);
-    (
-        home.clone(),
-        recovered(&gone, branch.as_deref(), home, "home"),
-    )
+        .filter(|p| Path::new(p).is_dir());
+    match home {
+        Some(home) => (
+            home.clone(),
+            recovered(&gone, branch.as_deref(), home, "home"),
+        ),
+        None => {
+            let folder = Some(get_working_directory())
+                .filter(|p| Path::new(p).is_dir())
+                .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+            (
+                folder.clone(),
+                recovered(&gone, branch.as_deref(), folder, "folder"),
+            )
+        }
+    }
 }
 
 /// Drain the DB-side state for `session_id`: mark the session as
@@ -3564,6 +3600,7 @@ pub fn ssh_get_remote_git_info(
 mod tests {
     use super::{drain_session_db_state, resolve_session_cwd};
     use crate::db::Database;
+    use std::sync::Mutex;
     use tempfile::NamedTempFile;
 
     fn test_db() -> Database {
@@ -3762,6 +3799,7 @@ mod tests {
     fn resolve_session_cwd_uses_the_worktree_when_it_exists() {
         let db = test_db();
         let (_repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);
+        let db = Mutex::new(db);
         let (cwd, recovery) = resolve_session_cwd(&db, "s1", "/nowhere".into(), None);
         assert_eq!(cwd, wt_path);
         assert_eq!(recovery, None);
@@ -3772,8 +3810,10 @@ mod tests {
         let db = test_db();
         let (repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);
         std::fs::remove_dir_all(&wt_path).unwrap();
+        let db = Mutex::new(db);
 
         let (cwd, recovery) = resolve_session_cwd(&db, "s1", wt_path.clone(), None);
+        let db = db.into_inner().unwrap();
 
         assert_eq!(cwd, wt_path);
         assert!(
@@ -3818,7 +3858,9 @@ mod tests {
                 .success());
         }
 
+        let db = Mutex::new(db);
         let (cwd, recovery) = resolve_session_cwd(&db, "s1", wt_path.clone(), None);
+        let db = db.into_inner().unwrap();
 
         assert_eq!(cwd, repo_path);
         assert!(
@@ -3857,12 +3899,15 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let elsewhere_path = elsewhere.path().to_str().unwrap().to_string();
 
+        let db = Mutex::new(db);
         let (cwd, recovery) = resolve_session_cwd(&db, "s1", elsewhere_path.clone(), None);
         assert_eq!(cwd, elsewhere_path);
         assert_eq!(recovery.unwrap().outcome, "folder");
 
         // The same, asked for the project folder itself.
-        db.insert_session_worktree("wt2", "s2", "proj-1", &wt_path, Some("hermes/task"), false)
+        db.lock()
+            .unwrap()
+            .insert_session_worktree("wt2", "s2", "proj-1", &wt_path, Some("hermes/task"), false)
             .unwrap();
         let (cwd, recovery) = resolve_session_cwd(&db, "s2", repo_path.clone(), None);
         assert_eq!(cwd, repo_path);
@@ -3879,6 +3924,7 @@ mod tests {
         let repo_path = repo.path().to_str().unwrap().to_string();
         db.insert_project("proj-1", &repo_path, "repo", "[]", "[]")
             .unwrap();
+        let db = Mutex::new(db);
         let ids = vec!["proj-1".to_string()];
 
         let gone = repo.path().join("hermes-worktrees").join("x").join("gone");
@@ -3894,10 +3940,17 @@ mod tests {
         let (cwd, recovery) = resolve_session_cwd(&db, "s9", gone.clone(), None);
         assert!(
             std::path::Path::new(&cwd).is_dir(),
-            "home folder exists: {}",
+            "the fallback folder exists: {}",
             cwd
         );
-        assert_eq!(recovery.unwrap().outcome, "home");
+        // Other tests point HOME at temp folders they then delete, so the
+        // home folder may not exist while this test runs: then another
+        // folder that exists is used, and named as such.
+        let home_exists = crate::platform::home_dir().is_some_and(|h| h.is_dir());
+        assert_eq!(
+            recovery.unwrap().outcome,
+            if home_exists { "home" } else { "folder" }
+        );
 
         // A folder that exists is used as asked, quietly.
         let (cwd, recovery) = resolve_session_cwd(&db, "s9", repo_path.clone(), None);
