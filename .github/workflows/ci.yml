@@ -543,6 +543,18 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/ensure-winget.ps1
 
+      # The installers are unsigned (no Windows signing identity yet). On a
+      # fresh runner winget stalls after the download, while SmartScreen
+      # checks the unknown, unsigned file; it is switched off on the runner.
+      # A person installing an unsigned build gets Windows' "unknown
+      # publisher" prompt instead; code signing (F25-1) removes it.
+      - name: Switch SmartScreen off on the runner (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" /v SmartScreenEnabled /t REG_SZ /d Off /f
+
       - name: winget installs Hermes from the generated manifests (Windows)
         if: runner.os == 'Windows'
         shell: bash

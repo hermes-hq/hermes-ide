@@ -122,7 +122,13 @@ try {
   if (install.code !== 0) {
     // What was still running (the installer, a WebView2 setup, the app?).
     sh("tasklist", ["/FO", "CSV", "/NH"], { allowFail: true });
-    if (existsSync(wingetLog)) log(readFileSync(wingetLog, "utf8").split(/\r?\n/).slice(-60).map((l) => `      | ${l}`).join("\n"));
+    // winget's own diagnostic logs (written even when it is stopped midway).
+    const diag = join(process.env.LOCALAPPDATA ?? "", "Packages", "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe", "LocalState", "DiagOutputDir");
+    const logs = [wingetLog, ...(existsSync(diag) ? readdirSync(diag).sort().slice(-2).map((f) => join(diag, f)) : [])];
+    for (const file of logs.filter((f) => existsSync(f))) {
+      log(`  --- ${file} (last lines)`);
+      log(readFileSync(file, "utf8").split(/\r?\n/).slice(-60).map((l) => `      | ${l}`).join("\n"));
+    }
   }
   assert(install.code === 0, `winget install succeeds (exit ${install.code})`);
   installedDir = join(process.env.LOCALAPPDATA ?? "", PACKAGE.productCode);
