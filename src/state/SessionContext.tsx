@@ -30,6 +30,7 @@ import {
   createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose,
   type BranchConflictChoice, type BranchInUse,
 } from "./isolation";
+import { useSaveWorkspaceOnClose } from "./useSaveWorkspaceOnClose";
 import { BranchConflictDialog } from "../components/BranchConflictDialog";
 import type { SessionWorktree } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
@@ -2650,6 +2651,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, 10_000); // every 10 seconds
     return () => clearInterval(interval);
   }, []);
+
+  // A closed session leaves the saved workspace right away, not on the next
+  // 10 s tick, so it cannot come back after a quit or crash.
+  useSaveWorkspaceOnClose(Object.keys(state.sessions), saveWorkspace);
 
   return (
     <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}) }}>
