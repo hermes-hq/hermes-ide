@@ -17,7 +17,10 @@ scenario on every OS.
   virtual display). Screenshots are taken after the page has painted, and a
   capture that is one flat colour (nothing painted, screen locked) is refused
   by both the app and the harness, so a picture in the evidence always shows
-  the state the scenario asserted.
+  the state the scenario asserted. Before each capture on Linux the app raises
+  the window and has it repaint (xvfb has no window manager, so a second test
+  app covers the first); a flat capture is taken again up to five times and
+  the request fails if every attempt is flat.
 - `src/e2e/hooks.ts` — read-only hooks for the terminal's text, compiled in
   only when the frontend is built with `VITE_HERMES_E2E=1`.
 - `harness.mjs` — the client: launch the test app with a throwaway home

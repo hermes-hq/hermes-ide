@@ -50,6 +50,8 @@ const DEFAULT_EVAL_TIMEOUT_MS: u64 = 10_000;
 const MAX_EVAL_TIMEOUT_MS: u64 = 120_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(15);
 const MAIN_THREAD_TIMEOUT: Duration = Duration::from_secs(15);
+/// Grows with each retry of a flat screenshot: 250 ms, 500 ms, 750 ms, ...
+const SCREENSHOT_RETRY_PAUSE: Duration = Duration::from_millis(250);
 /// Set by e2e/app/build.mjs for the build it stages; None for any other build.
 const BUILD_STAMP: Option<&str> = option_env!("HERMES_E2E_BUILD_STAMP");
 
@@ -360,7 +362,9 @@ fn window_info(app: &AppHandle, label: &str) -> Result<Value, String> {
 /// ours, so this works while the window is covered, unfocused, on a virtual
 /// display (Linux xvfb) or on a CI runner that has never granted a
 /// screen-recording permission. A capture that is one flat colour is not
-/// evidence of anything: it is deleted and reported as an error.
+/// evidence of anything: it is deleted and taken again after the window was
+/// asked to repaint (see `capture::prepare`), and when every attempt is flat
+/// the request fails. The answer says how many attempts it took.
 fn screenshot(app: &AppHandle, label: &str, file: &std::path::Path) -> Result<Value, String> {
     let window = app
         .get_webview_window(label)
@@ -372,25 +376,29 @@ fn screenshot(app: &AppHandle, label: &str, file: &std::path::Path) -> Result<Va
         std::fs::create_dir_all(parent).map_err(|e| format!("create {:?}: {}", parent, e))?;
     }
 
-    let (width, height) = capture::capture_png(app, window, file)?;
-
-    let bytes = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
-    if bytes == 0 {
-        return Err(format!("screenshot file {:?} is empty", file));
-    }
-    if let Some(colour) = e2e_evidence::flat_colour(file)? {
-        let _ = std::fs::remove_file(file);
-        return Err(format!(
-            "the capture is one flat colour ({}): the window has not painted yet, or the screen is locked",
-            e2e_evidence::hex(colour)
-        ));
+    let painted =
+        e2e_evidence::capture_until_painted(file, e2e_evidence::PAINT_ATTEMPTS, |attempt| {
+            if attempt > 1 {
+                std::thread::sleep(SCREENSHOT_RETRY_PAUSE * (attempt - 1));
+            }
+            capture::prepare(app, &window);
+            capture::capture_png(app, window.clone(), file)
+        })?;
+    if let Some(colour) = painted.flat_before {
+        eprintln!(
+            "[e2e bridge] screenshot of '{}' was one flat colour ({}) until attempt {}",
+            label,
+            e2e_evidence::hex(colour),
+            painted.attempt
+        );
     }
     Ok(json!({
         "ok": true,
         "file": file.to_string_lossy(),
-        "width": width,
-        "height": height,
-        "bytes": bytes,
+        "width": painted.width,
+        "height": painted.height,
+        "bytes": painted.bytes,
+        "attempts": painted.attempt,
     }))
 }
 
@@ -433,6 +441,10 @@ mod capture {
     use tauri::AppHandle;
 
     const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(20);
+
+    /// Nothing to do: WebKit renders the snapshot itself, whatever covers
+    /// the window (and `afterScreenUpdates` waits for pending paint work).
+    pub fn prepare(_app: &AppHandle, _window: &tauri::WebviewWindow) {}
 
     /// Ask WebKit itself for a picture of the page. The web content process
     /// renders it, so it works while the window is covered, in the background
@@ -514,6 +526,10 @@ mod capture {
     /// Not in the public headers, but honoured since Windows 8.1: render the
     /// full composed content, which is what a WebView2 window needs.
     const PW_RENDERFULLCONTENT: u32 = 0x0000_0002;
+
+    /// Nothing to do: PrintWindow makes the window paint into our bitmap,
+    /// whatever covers it.
+    pub fn prepare(_app: &AppHandle, _window: &tauri::WebviewWindow) {}
 
     /// PrintWindow asks the window to paint itself into our bitmap, so it
     /// works while the window is covered or the runner has no real screen.
@@ -598,10 +614,47 @@ mod capture {
 
 #[cfg(target_os = "linux")]
 mod capture {
+    use std::time::Duration;
+
     use super::on_main_thread;
     use gtk::gdk::prelude::*;
     use gtk::prelude::*;
     use tauri::AppHandle;
+
+    /// Waits for the page to draw two frames: one to start a frame after the
+    /// repaint request, one to know it has been handed to the window.
+    const NEXT_FRAMES: &str =
+        "await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });";
+
+    /// Bring the window to the top and have it repaint everything before its
+    /// pixels are read.
+    ///
+    /// GDK reads the pixels from the X server, and xvfb runs without a window
+    /// manager or compositor: every test app opens at the same spot, the one
+    /// started last covers the others, and a covered window has no pixels of
+    /// its own until it is exposed and repaints. Reading it before that gives
+    /// whatever is on the screen there, often plain black. So: raise it, mark
+    /// all of it dirty, let the main loop handle the resulting expose and draw
+    /// (this returns before capture_png's own main-thread hop), and wait for
+    /// the page to draw a frame. The window is never resized: that would
+    /// resize the terminals in it.
+    pub fn prepare(app: &AppHandle, window: &tauri::WebviewWindow) {
+        let target = window.clone();
+        let _ = on_main_thread(app, move || {
+            let Ok(gtk_window) = target.gtk_window() else {
+                return;
+            };
+            if let Some(gdk_window) = gtk_window.window() {
+                gdk_window.raise();
+                gdk_window.invalidate_rect(None, true);
+                gdk_window.display().flush();
+            }
+            gtk_window.queue_draw();
+        });
+        // Best effort: a page that cannot answer still gets captured, and the
+        // flat-colour check judges the result.
+        let _ = super::eval_js(app, window.label(), NEXT_FRAMES, Duration::from_secs(2));
+    }
 
     /// GDK reads the window's pixels straight from the X server, so a virtual
     /// display (xvfb) is enough — no compositor and no window manager needed.
@@ -637,6 +690,7 @@ mod capture {
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod capture {
     use tauri::AppHandle;
+    pub fn prepare(_app: &AppHandle, _window: &tauri::WebviewWindow) {}
     pub fn capture_png(
         _app: &AppHandle,
         _window: tauri::WebviewWindow,

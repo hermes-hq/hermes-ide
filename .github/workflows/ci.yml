@@ -362,14 +362,18 @@ jobs:
           # The toolchain step turns cargo colours on for the job; scenarios
           # that read cargo's messages need them plain.
           export CARGO_TERM_COLOR=never
+          # Every batch runs even when an earlier one failed, so one red
+          # scenario never leaves later ones without a result; the step
+          # still fails at the end if any batch did.
           xvfb-run -a -s "-screen 0 1600x1000x24" bash -c '
-            set -e
-            node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
-            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs
-            node e2e/app/run.mjs F13-approval-safety.mjs
-            node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-release-refuses-e2e.mjs
-            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs
-            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs
+            fail=0
+            node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs || fail=1
+            node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs N01-release-refuses-e2e.mjs || fail=1
+            node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
+            node e2e/app/run.mjs --keep-going N09-terminal-first.mjs || fail=1
+            exit "$fail"
           '
 
       - name: Run scenarios
@@ -379,12 +383,15 @@ jobs:
           CI: "true"
         run: |
           export CARGO_TERM_COLOR=never
-          node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs
-          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs
-          node e2e/app/run.mjs F13-approval-safety.mjs
-          node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs
-          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs
-          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs
+          # Every batch runs even when an earlier one failed (see above).
+          fail=0
+          node e2e/app/run.mjs --repeat "$REPEAT" terminal-echo.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N02-instance-isolation.mjs N06-db-migrations.mjs N07-feature-flags.mjs SEC-plugin-identity-two-plugins.mjs N14-disk-guard.mjs F07-agent-view-respawn.mjs F03-retire-autopilot.mjs F06-custom-agent.mjs N03-fake-agent.mjs N05-self-test.mjs N05-update-channel.mjs F04-private-by-default.mjs F02-crash-containment.mjs N10-update-waits-for-idle.mjs || fail=1
+          node e2e/app/run.mjs F13-approval-safety.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N01-bridge-safety.mjs N01-acceptance-gate.mjs N01-screenshot-covered-window.mjs || fail=1
+          node e2e/app/run.mjs --keep-going F09-honest-isolation.mjs N23-shortcuts-panel.mjs N23-docs-gates.mjs || fail=1
+          node e2e/app/run.mjs --keep-going N09-terminal-first.mjs || fail=1
+          exit "$fail"
 
       # F05: a focused terminal keeps Ctrl+letter. Real OS key presses
       # (xdotool / SendInput) go through the native menu and the webview.
