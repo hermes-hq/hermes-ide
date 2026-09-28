@@ -63,30 +63,138 @@ pub struct OutputAnalyzer {
     /// followed by a long run of plain output would otherwise be held in
     /// memory until the next escape.
     osc_open_len: usize,
+    /// Terminal notifications (OSC 9/99/777) seen since the last take: the
+    /// status fallback for agents without hooks (F11, `osc_signals.rs`).
+    pending_notifications: Vec<TerminalNotification>,
+    /// A kitty (OSC 99) notification arrives in parts (title, body, done),
+    /// possibly across reads; the parts of each id wait here.
+    osc99_parts: std::collections::BTreeMap<String, (String, String)>,
 }
+
+use super::osc_signals::{sanitize, TerminalNotification};
 
 /// Longest open OSC sequence kept across reads. A real OSC 7 report is at
 /// most a PATH_MAX path, percent-encoded (about 12 KiB); anything past this
 /// is a stray `ESC ]` and the parser is reset.
 const MAX_OPEN_OSC_BYTES: usize = 64 * 1024;
 
-/// Collects the working directory from OSC 7 reports
-/// (`ESC ] 7 ; file://host/path BEL` or `... ESC \`) seen by the parser.
-/// The last report in a read wins.
+/// Collects, from the OSC sequences the parser sees in one read: the
+/// working directory from OSC 7 reports (`ESC ] 7 ; file://host/path BEL`
+/// or `... ESC \`; the last report in a read wins) and the terminal
+/// notifications of OSC 9 (iTerm2), OSC 99 (kitty, in parts) and OSC 777
+/// (`notify;title;body`). Notification text is untrusted: see
+/// `osc_signals::sanitize`.
 #[derive(Default)]
-struct CwdReportCollector {
+struct OscCollector {
     last: Option<String>,
+    notifications: Vec<TerminalNotification>,
+    osc99_parts: std::collections::BTreeMap<String, (String, String)>,
 }
 
-impl vte::Perform for CwdReportCollector {
+impl OscCollector {
+    /// One kitty notification part: `i=<id>:d=<0|1>:p=<title|body>` metadata
+    /// then the payload. `d=0` means more parts follow; the notification is
+    /// complete on the first part without it.
+    fn osc99(&mut self, meta: &[u8], payload: &[u8]) {
+        let meta = String::from_utf8_lossy(meta).to_string();
+        let mut id = "0".to_string();
+        let mut more = false;
+        let mut part = "body";
+        for kv in meta.split(':') {
+            match kv.split_once('=') {
+                Some(("i", v)) => id = v.to_string(),
+                Some(("d", "0")) => more = true,
+                Some(("p", "title")) => part = "title",
+                Some(("p", "body")) => part = "body",
+                _ => {}
+            }
+        }
+        let entry = self.osc99_parts.entry(id.clone()).or_default();
+        let text = sanitize(payload);
+        if !text.is_empty() {
+            let slot = if part == "title" {
+                &mut entry.0
+            } else {
+                &mut entry.1
+            };
+            if slot.is_empty() {
+                *slot = text;
+            } else {
+                slot.push(' ');
+                slot.push_str(&text);
+            }
+        }
+        if !more {
+            let (title, body) = self.osc99_parts.remove(&id).unwrap_or_default();
+            if !title.is_empty() || !body.is_empty() {
+                self.notifications.push(TerminalNotification {
+                    osc: 99,
+                    title,
+                    body,
+                });
+            }
+        }
+        if self.osc99_parts.len() > 16 {
+            self.osc99_parts.clear();
+        }
+    }
+}
+
+impl vte::Perform for OscCollector {
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
-        if params.len() < 2 || params[0] != b"7" {
+        if params.len() < 2 {
             return;
         }
-        // The parser splits on ';', which is legal inside a path.
-        let uri = params[1..].join(&b';');
-        if let Some(path) = osc7_path(&String::from_utf8_lossy(&uri)) {
-            self.last = Some(path);
+        match params[0] {
+            b"7" => {
+                // The parser splits on ';', which is legal inside a path.
+                let uri = params[1..].join(&b';');
+                if let Some(path) = osc7_path(&String::from_utf8_lossy(&uri)) {
+                    self.last = Some(path);
+                }
+            }
+            b"9" => {
+                // `9;4;<state>;<pct>` is a progress bar, not a notification.
+                if params[1] == b"4" && params.len() >= 3 {
+                    return;
+                }
+                let body = sanitize(&params[1..].join(&b';'));
+                if !body.is_empty() {
+                    self.notifications.push(TerminalNotification {
+                        osc: 9,
+                        title: String::new(),
+                        body,
+                    });
+                }
+            }
+            b"99" => {
+                let payload = if params.len() > 2 {
+                    params[2..].join(&b';')
+                } else {
+                    Vec::new()
+                };
+                self.osc99(params[1], &payload);
+            }
+            b"777" if params[1] == b"notify" => {
+                let title = params.get(2).map(|t| sanitize(t)).unwrap_or_default();
+                let body = if params.len() > 3 {
+                    sanitize(&params[3..].join(&b';'))
+                } else {
+                    String::new()
+                };
+                if !title.is_empty() || !body.is_empty() {
+                    self.notifications.push(TerminalNotification {
+                        osc: 777,
+                        title,
+                        body,
+                    });
+                }
+            }
+            _ => {}
+        }
+        if self.notifications.len() > 32 {
+            // A program spraying notifications: keep the latest.
+            self.notifications.drain(..self.notifications.len() - 32);
         }
     }
 }
@@ -140,6 +248,8 @@ impl OutputAnalyzer {
             in_alternate_screen: false,
             osc_parser: vte::Parser::new(),
             osc_open_len: 0,
+            pending_notifications: Vec::new(),
+            osc99_parts: std::collections::BTreeMap::new(),
         }
     }
 
@@ -182,8 +292,15 @@ impl OutputAnalyzer {
 
         // OSC 7 (CWD reporting). The parser keeps its state between reads, so
         // a report split across two PTY reads is still seen once complete.
-        let mut cwd_reports = CwdReportCollector::default();
+        let mut cwd_reports = OscCollector {
+            last: None,
+            notifications: Vec::new(),
+            osc99_parts: std::mem::take(&mut self.osc99_parts),
+        };
         self.osc_parser.advance(&mut cwd_reports, raw);
+        self.osc99_parts = std::mem::take(&mut cwd_reports.osc99_parts);
+        self.pending_notifications
+            .append(&mut cwd_reports.notifications);
         // BEL, CAN, SUB and ESC all end an open OSC sequence.
         self.osc_open_len = match raw
             .iter()
@@ -565,6 +682,11 @@ impl OutputAnalyzer {
         }
     }
 
+    /// Terminal notifications seen since the last call, oldest first.
+    pub fn take_pending_notifications(&mut self) -> Vec<TerminalNotification> {
+        std::mem::take(&mut self.pending_notifications)
+    }
+
     pub fn take_pending_cwd(&mut self) -> Option<String> {
         self.pending_cwd.take()
     }
@@ -773,6 +895,88 @@ mod tests {
         let mut s2 = true;
         OutputAnalyzer::update_alt_screen_state(&mut s2, b"\x1b[?25l\x1b[?2004l");
         assert!(s2, "unrelated DEC modes should not leave alt screen");
+    }
+
+    // ── OSC 9 / 99 / 777 (terminal notifications, F11) ──────────────
+
+    #[test]
+    fn notifications_on_osc_9_99_and_777_are_collected_and_progress_is_not() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]9;Approval requested: rm -rf node_modules\x07");
+        a.process(b"\x1b]9;4;3;\x07\x1b]9;4;0;\x07"); // progress: ignored
+        a.process(b"\x1b]99;i=h1:d=0:p=title;fake-agent\x1b\\\x1b]99;i=h1:p=body;Needs your permission\x1b\\\x1b]99;i=h1:d=1:a=focus;\x1b\\");
+        a.process(b"\x1b]777;notify;fake-agent;Needs your permission; now\x1b\\");
+        let got = a.take_pending_notifications();
+        assert_eq!(
+            got,
+            vec![
+                TerminalNotification {
+                    osc: 9,
+                    title: "".into(),
+                    body: "Approval requested: rm -rf node_modules".into()
+                },
+                TerminalNotification {
+                    osc: 99,
+                    title: "fake-agent".into(),
+                    body: "Needs your permission".into()
+                },
+                TerminalNotification {
+                    osc: 777,
+                    title: "fake-agent".into(),
+                    body: "Needs your permission; now".into()
+                },
+            ]
+        );
+        assert!(a.take_pending_notifications().is_empty(), "taken once");
+        // Other OSCs (title, cwd) are not notifications.
+        a.process(b"\x1b]2;my title\x07\x1b]7;file://h/x\x07\x1b]777;other;x\x07");
+        assert!(a.take_pending_notifications().is_empty());
+    }
+
+    #[test]
+    fn a_notification_split_across_reads_and_a_kitty_part_split_across_reads_still_arrive() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]9;Question re");
+        assert!(a.take_pending_notifications().is_empty());
+        a.process(b"quested\x07");
+        assert_eq!(a.take_pending_notifications()[0].body, "Question requested");
+        a.process(b"\x1b]99;i=k:d=0:p=title;codex\x1b\\");
+        assert!(
+            a.take_pending_notifications().is_empty(),
+            "more parts to come"
+        );
+        a.process(b"\x1b]99;i=k:p=body;Agent turn complete\x1b\\");
+        let got = a.take_pending_notifications();
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            (got[0].title.as_str(), got[0].body.as_str()),
+            ("codex", "Agent turn complete")
+        );
+    }
+
+    #[test]
+    fn notification_text_is_untrusted_capped_and_stripped() {
+        let mut a = OutputAnalyzer::new();
+        let mut big = b"\x1b]9;".to_vec();
+        big.extend(std::iter::repeat_n(b'A', 5000));
+        big.extend(b"\x1b[31mred\x1b\\");
+        a.process(&big);
+        let got = a.take_pending_notifications();
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            got[0].body.chars().count(),
+            super::super::osc_signals::MAX_NOTIFICATION_CHARS
+        );
+        assert!(!got[0].body.contains('\x1b'));
+        // A program spraying notifications does not grow memory without bound.
+        let mut spray = Vec::new();
+        for i in 0..500 {
+            spray.extend(format!("\x1b]9;n{i}\x07").into_bytes());
+        }
+        a.process(&spray);
+        let got = a.take_pending_notifications();
+        assert!(got.len() <= 32, "{}", got.len());
+        assert_eq!(got.last().unwrap().body, "n499");
     }
 
     // ── OSC 7 (working directory reports) ──────────────────────────

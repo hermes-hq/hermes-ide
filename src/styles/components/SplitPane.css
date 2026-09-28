@@ -85,6 +85,8 @@
   flex: 1;
   overflow: hidden;
   display: flex;
+  /* The status strip (F11) sits above the terminal or the Agent view. */
+  flex-direction: column;
   min-height: 0;
 }
 

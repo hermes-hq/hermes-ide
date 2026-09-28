@@ -1936,6 +1936,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "activity_bar_order",
     // Localization
     "ui_language",
+    // The status line above terminal agent sessions (F11): "on" | "off"
+    "status_strip",
     // Feature flags (per-install debug overrides — see src/featureFlags/)
     "feature_flag_overrides",
 ];

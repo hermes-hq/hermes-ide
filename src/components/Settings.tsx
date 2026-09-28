@@ -30,6 +30,7 @@ import { normalizeUpdateChannel } from "../api/updater";
 import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import { visibleShortcutGroups } from "../utils/shortcuts";
 import { useI18n } from "../i18n/I18nProvider";
+import { setStatusStripEnabled } from "../statusStrip/preference";
 import {
   FEATURE_FLAGS,
   FEATURE_FLAG_OVERRIDES_KEY,
@@ -318,6 +319,22 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     {" "}{t("settings.shellSuggestions")}
                   </label>
                   <span className="settings-hint-inline">{t("settings.shellSuggestionsHint")}</span>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">
+                    <input
+                      type="checkbox"
+                      data-setting="status_strip"
+                      checked={settings.status_strip !== "off"}
+                      onChange={(e) => {
+                        updateSetting("status_strip", e.target.checked ? "on" : "off");
+                        void setStatusStripEnabled(e.target.checked);
+                      }}
+                    />
+                    {" "}{t("settings.statusStrip")}
+                  </label>
+                  <span className="settings-hint-inline">{t("settings.statusStripHint")}</span>
                 </div>
 
                 <div className="settings-group">

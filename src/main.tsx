@@ -6,6 +6,8 @@ import { getStartupProblem } from "./api/startupProblem";
 import { StartupProblemScreen } from "./components/StartupProblemScreen";
 import { initFeatureFlags } from "./featureFlags";
 import { startSessionEventChannel } from "./agent/contract/channel";
+import { getSettings } from "./api/settings";
+import { initStatusStripPreference } from "./statusStrip/preference";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -56,6 +58,10 @@ void getStartupProblem().then((problem) => {
   void import("@tauri-apps/api/event")
     .then(({ listen }) => startSessionEventChannel(listen))
     .catch((e) => console.warn("[session-event] channel not attached:", e));
+  // The status-strip preference (F11) rides on the same settings read.
+  void getSettings()
+    .then((settings) => initStatusStripPreference(settings))
+    .catch(() => {});
   void initFeatureFlags().finally(() => {
     root.render(
       <React.StrictMode>

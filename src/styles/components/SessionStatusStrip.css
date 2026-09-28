@@ -1,0 +1,81 @@
+/* ─── Session status strip (F11) ───────────────────────────────────── */
+/* One line above a terminal agent session: status, source, sub-agents, ⌘I. */
+
+.session-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 22px;
+  padding: 2px 8px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.session-status-strip-guessed {
+  opacity: 0.6;
+}
+
+.session-status-strip-glyph {
+  width: 1em;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.session-status-strip[data-status-kind="needs_approval"] .session-status-strip-glyph,
+.session-status-strip[data-status-kind="needs_answer"] .session-status-strip-glyph,
+.session-status-strip[data-status-kind="plan_ready"] .session-status-strip-glyph {
+  color: var(--warning);
+}
+
+.session-status-strip[data-status-kind="error"] .session-status-strip-glyph,
+.session-status-strip[data-status-kind="check_failed"] .session-status-strip-glyph {
+  color: var(--danger, var(--warning));
+}
+
+.session-status-strip[data-status-kind="done_unread"] .session-status-strip-glyph {
+  color: var(--accent);
+}
+
+.session-status-strip-word {
+  color: var(--text-1);
+}
+
+.session-status-strip-sep,
+.session-status-strip-source,
+.session-status-strip-subagents {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.session-status-strip-detail {
+  margin-left: 4px;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-status-strip-inbox {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-3);
+  font-size: var(--text-2xs);
+  font-family: var(--font-numeric);
+  padding: 0 4px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.session-status-strip-inbox:hover {
+  color: var(--text-1);
+  border-color: var(--accent);
+}

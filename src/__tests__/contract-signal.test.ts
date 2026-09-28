@@ -1,6 +1,16 @@
 /** C0 contracts: `hi signal` spool records and their mapping to events. */
 import { describe, it, expect } from "vitest";
-import { parseSignalRecord, signalRecordToSessionEvent, signalStatusKind, SIGNAL_PAYLOAD_CAP_BYTES } from "../agent/contract/signal";
+import {
+  mapSignalRecord,
+  parseSignalRecord,
+  signalRecordToSessionEvent,
+  signalStatusKind,
+  subagentDelta,
+  vendorSessionIdOf,
+  SIGNAL_PAYLOAD_CAP_BYTES,
+} from "../agent/contract/signal";
+import type { Confidence } from "../agent/contract/status";
+import fixture from "../agent/contract/fixtures/signal-records.json";
 
 const LINE =
   '{"v":1,"ts":1790000000,"session":"s1","agent":"claude","nonce":"n-abc","event":"PermissionRequest","payload":{"tool_name":"Bash"}}';
@@ -79,5 +89,26 @@ describe("signalRecordToSessionEvent", () => {
   it("caps the detail it lifts from the payload", () => {
     const ev = signalRecordToSessionEvent(record({ payload: { message: "x".repeat(500) } }), "n-abc");
     expect(ev?.type === "status" && ev.status.detail.length).toBe(200);
+  });
+});
+
+describe("mapSignalRecord (F11: every agent, shared with the Rust side)", () => {
+  it("maps every case of the shared fixture to exactly the same events as Rust", () => {
+    expect(fixture.cases.length).toBeGreaterThanOrEqual(20);
+    for (const c of fixture.cases) {
+      const parsed = parseSignalRecord(JSON.stringify(c.record));
+      expect(parsed.ok, c.name).toBe(true);
+      if (!parsed.ok) continue;
+      const got = mapSignalRecord(parsed.record, c.nonce, c.confidence as Confidence, `hook:${parsed.record.agent}`);
+      expect(got, c.name).toEqual(c.events);
+      expect(subagentDelta(parsed.record), `${c.name} subagent delta`).toBe((c as { subagentDelta?: number }).subagentDelta ?? 0);
+    }
+  });
+
+  it("names the vendor conversation whatever the agent calls it", () => {
+    expect(vendorSessionIdOf({ "thread-id": "t1" })).toBe("t1");
+    expect(vendorSessionIdOf({ conversationId: "c1" })).toBe("c1");
+    expect(vendorSessionIdOf({ session_id: "  " })).toBeNull();
+    expect(vendorSessionIdOf({})).toBeNull();
   });
 });
