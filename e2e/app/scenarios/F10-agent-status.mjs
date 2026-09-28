@@ -442,6 +442,11 @@ try {
   log("C: a guess from the same source is dimmed and says 'guessed'");
   await emitFromRust(bridge, agentId, { type: "status", at: "now", source: "hook:fake", status: { kind: "working", confidence: "guessed", detail: "" } });
   await bridge.waitFor("the row to show the guess", `return !!e2e.first(${JSON.stringify(ROW(agentId) + ' .agent-status-tag[data-confidence="guessed"]')});`);
+  // Read the dimming once the style has been applied (a frame later on some webviews).
+  await bridge.waitFor("the guess to be dimmed", `
+    const tag = e2e.first(${JSON.stringify(ROW(agentId) + ' .agent-status-tag[data-confidence="guessed"]')});
+    return !!tag && Number(getComputedStyle(tag).opacity) < 1;
+  `, { timeoutMs: 5_000 });
   const guessed = await readRow(bridge, agentId);
   assert(guessed.tag.guessed === "guessed" && guessed.tag.opacity < 1, `"${guessed.tag.word} · ${guessed.tag.guessed}", opacity ${guessed.tag.opacity}`);
 
@@ -495,7 +500,11 @@ try {
       log("FAILED: the app did not quit cleanly");
     }
   }
-  rmSync(work, { recursive: true, force: true });
+  try {
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (e) {
+    log(`  (could not remove the scratch folder: ${e.message})`);
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
