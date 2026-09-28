@@ -186,6 +186,7 @@ describe("helpers", () => {
   it("statusOfEvent maps each event type", () => {
     expect(statusOfEvent({ type: "turn_start", at: 1, n: 1 })?.kind).toBe("working");
     expect(statusOfEvent({ type: "identity", at: 1, vendorSessionId: null, model: null, permissionMode: null })).toBeNull();
+    expect(statusOfEvent({ type: "subagents", at: 1, running: 2 })).toBeNull();
     expect(statusOfEvent({ type: "exit", at: 1, code: null, signal: "SIGTERM" })).toMatchObject({ kind: "exited", confidence: "exact", detail: "" });
   });
   it("foldStatus is order-sensitive and pure", () => {

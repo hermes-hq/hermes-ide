@@ -102,6 +102,7 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
       // snapshot's { code, signal } in the person's language.
       return { ...make("exited", "", "exact"), processExited: true };
     case "identity":
+    case "subagents":
       return null;
   }
 }
