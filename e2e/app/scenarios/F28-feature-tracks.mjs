@@ -173,6 +173,7 @@ async function startPlainShellInRepo(bridge, label) {
     const cards = e2e.all(".session-creator-provider-card");
     return e2e.click(e2e.must(cards[cards.length - 1], "plain shell card"));
   `);
+  let usedCurrentBranch = false;
   for (let i = 0; i < 10 && (await bridge.exists(".session-creator")); i++) {
     await sleep(300);
     if (await bridge.exists(".workspace-scan-input")) {
@@ -192,7 +193,21 @@ async function startPlainShellInRepo(bridge, label) {
     } else if (await bridge.exists('input.command-palette-input[placeholder="Session name (optional)"]')) {
       await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
     } else if (await bridge.exists(".session-creator-branch-multi")) {
-      await bridge.waitFor("a default branch", `return !!e2e.first(".session-creator-branch-selected-label");`);
+      // The current branch is pre-selected, unless another session in the
+      // same folder already uses it: then the person says so explicitly.
+      const chosen = await bridge.waitFor("a default branch", `
+        if (e2e.first(".session-creator-branch-selected-label")) return "preselected";
+        return e2e.all("button").some((b) => e2e.norm(b.innerText) === "Use current branch") ? "in-use" : null;
+      `, { timeoutMs: 20_000 });
+      if (chosen === "in-use" && !usedCurrentBranch) {
+        usedCurrentBranch = true;
+        await bridge.clickWhenReady(`
+          const btn = e2e.all("button").find((b) => e2e.norm(b.innerText) === "Use current branch");
+          return e2e.click(e2e.must(btn, "Use current branch"));
+        `);
+        await sleep(300);
+        continue;
+      }
     }
     const r = await bridge.clickWhenReady(`
       if (!e2e.first(".session-creator")) return null;
@@ -313,7 +328,11 @@ try {
   const { bridge } = app;
   await waitForReturningLaunch(bridge);
 
-  log("step 1: a plain shell in the test repo; hi is on PATH");
+  log("step 1: a plain shell in the test repo (opened first, on purpose), then the agent's shell; hi is on PATH");
+  // The person opened a plain shell in the worktree before starting the
+  // agent: seniority must never make it the writer once the agent has run
+  // a turn (F28-8).
+  const shellId = await startPlainShellInRepo(bridge, "F28 shell");
   const writerId = await startPlainShellInRepo(bridge, "F28 writer");
   const writerData = await sessionData(bridge, writerId);
   const wt = writerData.working_directory;
@@ -324,6 +343,14 @@ try {
   assert(/no feature here/.test(statusLine), `\`hi status\` runs from PATH in a Hermes shell and says "${statusLine.slice(0, 60)}"`);
   await openTrackPanel(bridge);
   assert(await bridge.exists('[data-testid="track-empty"]'), "the Track panel says there is no feature yet and offers Make it a feature");
+  let attrs = await panelAttrs(bridge);
+  assert(attrs.role === "reader", `before any turn, the older plain shell writes by seniority (this session: ${attrs.role})`);
+  // Hermes observed the agent's first turn (contract C0): that, not seniority, makes it the writer.
+  const earlier = Date.now() - 60_000;
+  assert(await injectEvent(bridge, writerId, { type: "turn_start", at: earlier, n: 1, source: "e2e" }), "the agent's session ran a turn (contract injector)");
+  assert(await injectEvent(bridge, writerId, { type: "turn_end", at: earlier + 1000, n: 1, source: "e2e" }), "and ended it");
+  await bridge.waitFor("the roles to swap", `const p = e2e.first('[data-testid="track-panel"]'); return p && p.dataset.role === "writer";`);
+  assert(true, `a session with a turn history writes before the older plain shell ${shellId.slice(0, 8)} without one`);
   await bridge.screenshot(join(evidenceDir, "01-no-feature.png"));
 
   log("step 2: the fake agent creates the feature and hands over questions.md");
@@ -336,12 +363,12 @@ try {
   const gateDelay = gateHit.at - handedOverAt;
   log(`  gate item raised ${Math.round(gateDelay)} ms after feature.md was written`);
   assert(gateDelay <= GATE_BUDGET_MS, `setting gate: waiting raised a ◆ inbox item within ${GATE_BUDGET_MS} ms (${Math.round(gateDelay)} ms)`);
-  assert(gateHit.item.sessionId === writerId && gateHit.item.source === "track", "the item points at the writer session and comes from the track watcher");
+  assert(gateHit.item.sessionId === writerId && gateHit.item.source === "track", "the item points at the writer session (the agent, not the older shell) and comes from the track watcher");
   const questionHit = await waitForInbox(bridge, (i) => i.kind === "gate" && i.detail === `${SLUG}: question — Which search engine do we index with?`, "for the blocking question");
   assert(questionHit.item.sessionId === writerId, "the blocking question is a ◆ item too");
   assert(!gateHit.items.some((i) => i.detail.includes("cached")), "a plain (non-blocking) question raises nothing");
   await bridge.waitFor("the panel to show the waiting gate", `const p = e2e.first('[data-testid="track-panel"]'); return p && p.dataset.gate === "waiting";`);
-  let attrs = await panelAttrs(bridge);
+  attrs = await panelAttrs(bridge);
   assert(attrs.slug === SLUG && attrs.track === "Light" && attrs.phase === "questions" && attrs.role === "writer", `the panel shows ${attrs.slug} (${attrs.track}) at ${attrs.phase}, role ${attrs.role}`);
   assert(await bridge.exists('.track-question[data-blocking="true"][data-open="true"]'), "the blocking question is listed as open");
   await bridge.screenshot(join(evidenceDir, "02-questions-waiting.png"));
@@ -410,7 +437,7 @@ try {
   await openTrackPanel(bridge);
 
   log("step 6: the agent approves its own gate — refused by hi, then forged by hand during its turn and reverted");
-  assert(await injectEvent(bridge, writerId, { type: "turn_start", at: Date.now(), n: 1, source: "e2e" }), "a turn starts for the writer (contract injector)");
+  assert(await injectEvent(bridge, writerId, { type: "turn_start", at: Date.now(), n: 2, source: "e2e" }), "a turn starts for the writer (contract injector)");
   writeFileSync(join(ctl, "go-forge"), "");
   const approveLine = (await agentLine(bridge, writerId, "hi approve exit")).line;
   assert(/hi approve exit 3/.test(approveLine), `\`hi approve\` exits non-zero inside an agent process (${approveLine.trim()})`);
@@ -422,7 +449,7 @@ try {
   assert(reverted.gate === "waiting" && reverted.phase === "plan", "feature.md is back at plan, waiting");
   const alert = await waitForInbox(bridge, (i) => i.kind === "error" && i.detail.includes("approved its own gate"), "for the alert");
   assert(alert.item.sessionId === writerId, `an inbox alert names the session: "${alert.item.detail}"`);
-  assert(await injectEvent(bridge, writerId, { type: "turn_end", at: Date.now(), n: 1, source: "e2e" }), "the turn ends");
+  assert(await injectEvent(bridge, writerId, { type: "turn_end", at: Date.now(), n: 2, source: "e2e" }), "the turn ends");
   await bridge.screenshot(join(evidenceDir, "06-forged-approval-reverted.png"));
 
   log("step 7: approve the plan and the implementation; the track reaches done");
@@ -451,7 +478,6 @@ try {
   const statusAll = await runInTerminal(bridge, readerId, "hi status --all", new RegExp(`^${SLUG}\\s+Light\\s+done\\s+gate:`));
   assert(!/\x1b/.test(statusAll), `\`hi status --all\` lists the feature as plain text: "${statusAll}"`);
   await bridge.screenshot(join(evidenceDir, "08-reader.png"));
-
   log("step 9: a malformed feature.md is reported with its line; a Quick task creates no folder");
   const goodText = readFileSync(featureMdOf(wt), "utf8");
   writeFileSync(featureMdOf(wt), `---\nslug: ${SLUG}\ntrack: Light\ngate: maybe\n---\n`);
@@ -481,9 +507,15 @@ try {
   const body = readFileSync(bodyFile, "utf8");
   assert(body.startsWith("Demo search\n") && body.includes("## Plan") && body.includes("- [ ] build the index"), "the PR body comes from feature.md and plan.md");
   await bridge.waitFor("the panel to show no feature", `return !!e2e.first('[data-testid="track-empty"]');`);
+  // Off the hermes/ branch: the promotion must create it, like hi feature new.
+  git(wt, "switch", "-q", "-c", SLUG);
+  git(wt, "branch", "-q", "-D", `hermes/${SLUG}`);
+  await bridge.waitFor("the panel to show the plain branch", `return (e2e.first(".track-branch")?.textContent ?? "") === ${JSON.stringify(SLUG)};`);
   await bridge.click("button.track-make-feature");
   await bridge.waitFor("the promoted feature", `const p = e2e.first('[data-testid="track-panel"]'); return p && p.dataset.slug === ${JSON.stringify(SLUG)} && p.dataset.phase === "questions";`);
   assert(existsSync(featureMdOf(wt)), "Make it a feature created .hermes/features/<slug>/feature.md for the branch");
+  assert(git(wt, "branch", "--show-current") === `hermes/${SLUG}`, "and put the worktree on hermes/<slug>, like hi feature new");
+  await bridge.waitFor("the panel to show the new branch", `return (e2e.first(".track-branch")?.textContent ?? "") === ${JSON.stringify(`hermes/${SLUG}`)};`);
   await bridge.screenshot(join(evidenceDir, "10-promoted.png"));
 } catch (e) {
   failed = true;

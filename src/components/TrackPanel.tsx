@@ -13,13 +13,15 @@
  * on its own: `r` sends one tagged line because the person pressed it.
  */
 import "../styles/components/TrackPanel.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SessionData } from "../types/session";
-import { useTrack, noteOwnApproval, phaseFileOf, type TrackFeatureState } from "../track/store";
+import { useTrack, noteOwnApproval, phaseFileOf, hasTurnHistory, type TrackFeatureState } from "../track/store";
 import { trackApprove, trackFilePath, trackPromote, trackReadFile, trackSkip, trackWriteReview } from "../track/api";
 import { attachedSessions, PHASE_LINE_CAP, TRACK_PHASES } from "../track/rules";
+import { subscribeSessionEvents } from "../agent/contract/sessionEventStore";
 import { FEATURE_TRACKS, type FeatureTrack } from "../agent/contract/featureFrontMatter";
 import { useToastStore } from "../hooks/useToastStore";
+import { useI18n } from "../i18n/I18nProvider";
 import { fmt } from "../utils/platform";
 
 interface TrackPanelProps {
@@ -43,12 +45,35 @@ export function slugFromBranch(branch: string | null, workingDirectory: string):
   return slug || "feature";
 }
 
+/**
+ * Which of these sessions have a turn history, as one comparable string, so
+ * the writer is re-chosen the moment a session turns out to be an agent.
+ */
+function useTurnHistoryOf(sessionIds: readonly string[]): string {
+  const key = sessionIds.join("\u0000");
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const offs = key === "" ? [] : key.split("\u0000").map((id) => subscribeSessionEvents(id, listener));
+      return () => offs.forEach((off) => off());
+    },
+    [key],
+  );
+  const snapshot = useCallback(() => (key === "" ? "" : key.split("\u0000").filter(hasTurnHistory).join("\u0000")), [key]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
 export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWriter, onClose }: TrackPanelProps) {
+  const { t } = useI18n();
   const worktree = session.working_directory;
   const state = useTrack(worktree);
   const toast = useToastStore();
   const feature: TrackFeatureState | undefined = state.features.find((f) => f.slug === state.slug) ?? (state.features.length === 1 ? state.features[0] : undefined);
-  const attached = useMemo(() => attachedSessions(sessions, worktree), [sessions, worktree]);
+  const inWorktree = useMemo(() => attachedSessions(sessions, worktree), [sessions, worktree]);
+  const withHistory = useTurnHistoryOf(useMemo(() => inWorktree.map((s) => s.id), [inWorktree]));
+  const attached = useMemo(() => {
+    const has = new Set(withHistory === "" ? [] : withHistory.split("\u0000"));
+    return attachedSessions(inWorktree, worktree, (id) => has.has(id));
+  }, [inWorktree, worktree, withHistory]);
   const writer = attached[0] ?? null;
   const role = writer ? (writer.id === session.id ? "writer" : "reader") : "none";
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
@@ -74,26 +99,26 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
     try {
       noteOwnApproval(worktree, slug);
       const move = await trackApprove(worktree, slug);
-      say(`${slug}: approved ${move.from}; next phase ${move.to}`, "success");
+      say(t("track.approvedToast", { slug, from: move.from, to: move.to }), "success");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [slug, waiting, busy, worktree, say]);
+  }, [slug, waiting, busy, worktree, say, t]);
 
   const skip = useCallback(async () => {
     if (!slug || !meta || meta.phase === "done" || busy) return;
     setBusy(true);
     try {
       const move = await trackSkip(worktree, slug);
-      say(`${slug}: skipped ${move.from}; now at ${move.to}`, "info");
+      say(t("track.skippedToast", { slug, from: move.from, to: move.to }), "info");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [slug, meta, busy, worktree, say]);
+  }, [slug, meta, busy, worktree, say, t]);
 
   const openPreview = useCallback(async () => {
     if (!slug) return;
@@ -123,37 +148,38 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
     if (!slug || !feature || busy) return;
     const name = phaseFile && phaseFileInfo ? phaseFile : null;
     if (!name) {
-      say("This phase has no file to send back", "warning");
+      say(t("track.noFileToSend"), "warning");
       return;
     }
     if (!writer) {
-      say("No session is attached to this worktree", "warning");
+      say(t("track.noWriter"), "warning");
       return;
     }
     setBusy(true);
     try {
       const review = await trackWriteReview(worktree, slug, name, feature.baseline[name] ?? null);
       await onSendToWriter(writer.id, review.line);
-      say(`Sent ${review.path} (${review.changedLines} changed line${review.changedLines === 1 ? "" : "s"}) to ${writer.label || "the writer"}`, "success");
+      say(t("track.sentEdits", { path: review.path, count: review.changedLines, writer: writer.label || t("track.theWriter") }), "success");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [slug, feature, busy, phaseFile, phaseFileInfo, writer, worktree, onSendToWriter, say]);
+  }, [slug, feature, busy, phaseFile, phaseFileInfo, writer, worktree, onSendToWriter, say, t]);
 
   const promote = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     try {
       const out = await trackPromote(worktree, slugFromBranch(state.branch, worktree), promoteTrack, null);
-      say(out.created ? `Feature ${out.slug} created (${promoteTrack} track)` : `Quick track: no feature folder for ${out.slug}`, "success");
+      const made = out.created ? t("track.featureCreated", { slug: out.slug, track: promoteTrack }) : t("track.quickNoFolder", { slug: out.slug });
+      say(out.branch ? `${made} — ${out.branch}` : made, "success");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [busy, worktree, state.branch, promoteTrack, say]);
+  }, [busy, worktree, state.branch, promoteTrack, say, t]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {
@@ -192,16 +218,16 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
       data-track={meta?.track ?? ""}
       data-role={role}
       data-error={feature?.error ? "true" : "false"}
-      aria-label="Feature track"
+      aria-label={t("track.ariaLabel")}
       tabIndex={0}
       onKeyDown={onKeyDown}
     >
       <header className="track-head">
-        <span className="track-title">Track</span>
+        <span className="track-title">{t("track.title")}</span>
         {slug && <span className="track-slug mono">{slug}</span>}
         {meta && <span className="track-kind">{meta.track}</span>}
-        <span className={`track-role track-role-${role}`}>{role === "writer" ? "writer" : role === "reader" ? `reader of ${writer?.label || "writer"}` : "no writer"}</span>
-        <button type="button" className="track-close" onClick={onClose} aria-label="Close track panel" title="Close">
+        <span className={`track-role track-role-${role}`}>{role === "writer" ? t("track.roleWriter") : role === "reader" ? t("track.roleReader", { writer: writer?.label || t("track.theWriter") }) : t("track.roleNone")}</span>
+        <button type="button" className="track-close" onClick={onClose} aria-label={t("track.close")} title={t("track.close")}>
           ✕
         </button>
       </header>
@@ -210,18 +236,18 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
 
       {!feature && (
         <section className="track-empty" data-testid="track-empty">
-          <p>No feature track in this worktree.</p>
-          <p className="text-muted">Guided work keeps its questions, plan and gates as short files under .hermes/features/. Any agent drives it with `hi phase`.</p>
+          <p>{t("track.empty")}</p>
+          <p className="text-muted">{t("track.emptyHint")}</p>
           <div className="track-promote">
-            <select className="track-select" value={promoteTrack} onChange={(e) => setPromoteTrack(e.target.value as FeatureTrack)} aria-label="Track">
-              {FEATURE_TRACKS.map((t) => (
-                <option key={t} value={t}>
-                  {t} {t === "Quick" ? "(no files)" : t === "Light" ? "(questions, plan, implement)" : "(every phase)"}
+            <select className="track-select" value={promoteTrack} onChange={(e) => setPromoteTrack(e.target.value as FeatureTrack)} aria-label={t("app.track")}>
+              {FEATURE_TRACKS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {kind} {kind === "Quick" ? t("track.quickHint") : kind === "Light" ? t("track.lightHint") : t("track.fullHint")}
                 </option>
               ))}
             </select>
             <button type="button" className="track-btn track-btn-primary track-make-feature" onClick={() => void promote()} disabled={busy}>
-              Make it a feature
+              {t("track.makeFeature")}
             </button>
           </div>
           <p className="text-muted mono">hermes/{slugFromBranch(state.branch, worktree)}</p>
@@ -230,19 +256,17 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
 
       {feature?.error && (
         <section className="track-error" data-testid="track-error" role="alert">
-          <p>
-            feature.md can't be read (line {feature.error.line})
-          </p>
+          <p>{t("track.unreadable", { line: feature.error.line })}</p>
           <p className="text-muted">{feature.error.message}</p>
           <button type="button" className="track-btn track-open-error" onClick={() => void openInEditor()}>
-            Open
+            {t("track.open")}
           </button>
         </section>
       )}
 
       {feature && meta && (
         <>
-          <ol className="track-phases" aria-label="Phases">
+          <ol className="track-phases" aria-label={t("track.phases")}>
             {phases.map((p, i) => {
               const cls = i < doneIdx ? "done" : i === doneIdx ? (waiting ? "waiting" : "current") : "upcoming";
               return (
@@ -271,21 +295,19 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
           <div className={`track-gate track-gate-${meta.gate}`} data-testid="track-gate">
             {waiting && (
               <>
-                <span className="track-gate-text">
-                  ◆ {meta.phase} is ready for your review
-                </span>
+                <span className="track-gate-text">{t("track.gateWaiting", { phase: meta.phase })}</span>
                 <button type="button" className="track-btn track-btn-primary track-approve" onClick={() => void approve()} disabled={busy}>
-                  Approve {fmt("{mod}⏎")}
+                  {t("track.approve")} {fmt("{mod}⏎")}
                 </button>
               </>
             )}
-            {meta.gate === "approved" && <span className="track-gate-text">approved — the agent starts {meta.phase} with `hi phase`</span>}
-            {meta.gate === "none" && meta.phase !== "done" && <span className="track-gate-text text-muted">{meta.phase} in progress</span>}
-            {meta.phase === "done" && <span className="track-gate-text">done — land it from the Land sheet or `hi land`</span>}
+            {meta.gate === "approved" && <span className="track-gate-text">{t("track.gateApproved", { phase: meta.phase })}</span>}
+            {meta.gate === "none" && meta.phase !== "done" && <span className="track-gate-text text-muted">{t("track.inProgress", { phase: meta.phase })}</span>}
+            {meta.phase === "done" && <span className="track-gate-text">{t("track.done")}</span>}
           </div>
 
           {feature.questions.length > 0 && (
-            <section className="track-questions" aria-label="Questions">
+            <section className="track-questions" aria-label={t("track.questions")}>
               {feature.questions.map((q) => (
                 <div key={q.line} className={`track-question ${q.open ? "open" : "answered"} ${q.blocking ? "blocking" : ""}`} data-blocking={q.blocking} data-open={q.open}>
                   <span className="track-question-mark mono">{q.open ? (q.blocking ? "◆" : "○") : "✓"}</span>
@@ -297,16 +319,16 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
 
           <div className="track-actions">
             <button type="button" className="track-btn track-open" onClick={() => void openPreview()} disabled={!phaseFileInfo && !feature}>
-              {preview ? "Hide" : "Open"} <kbd>o</kbd>
+              {preview ? t("track.hide") : t("track.open")} <kbd>o</kbd>
             </button>
             <button type="button" className="track-btn track-open-editor" onClick={() => void openInEditor()}>
-              $EDITOR split <kbd>⇧O</kbd>
+              {t("track.editorSplit")} <kbd>⇧O</kbd>
             </button>
             <button type="button" className="track-btn track-send-edits" onClick={() => void sendEdits()} disabled={!phaseFileInfo || busy}>
-              Send my edits <kbd>r</kbd>
+              {t("track.sendEdits")} <kbd>r</kbd>
             </button>
             <button type="button" className="track-btn track-skip" onClick={() => void skip()} disabled={meta.phase === "done" || busy}>
-              Skip <kbd>s</kbd>
+              {t("track.skip")} <kbd>s</kbd>
             </button>
           </div>
 
@@ -320,9 +342,7 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
         </>
       )}
 
-      <footer className="track-foot text-muted">
-        {fmt("{mod}⏎")} approve · o open · ⇧O editor · r send edits · s skip
-      </footer>
+      <footer className="track-foot text-muted">{t("track.footer", { shortcut: fmt("{mod}⏎") })}</footer>
     </aside>
   );
 }

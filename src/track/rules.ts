@@ -87,19 +87,29 @@ export function normalizePath(p: string): string {
   return /^[A-Za-z]:\//.test(out) ? out.toLowerCase() : out;
 }
 
+/** Whether a session has run at least one agent turn (the turn history). */
+export type HasTurnHistory = (sessionId: string) => boolean;
+
+const NO_HISTORY: HasTurnHistory = () => false;
+
 /**
- * The sessions attached to a worktree, oldest first: the first one is the
- * writer (the agent that drives the feature), the rest are readers.
+ * The sessions attached to a worktree: the first one is the writer (the
+ * agent that drives the feature; `r` types into its terminal), the rest are
+ * readers. A session with a turn history is an agent for sure, so it comes
+ * before one without, whatever their ages: a plain shell opened in the
+ * worktree before the agent never becomes the writer by seniority. Among
+ * equals the oldest wins.
  */
-export function attachedSessions<S extends AttachedSession>(sessions: readonly S[], worktreePath: string): S[] {
+export function attachedSessions<S extends AttachedSession>(sessions: readonly S[], worktreePath: string, hasTurnHistory: HasTurnHistory = NO_HISTORY): S[] {
   const target = normalizePath(worktreePath);
+  const rank = (s: S) => (hasTurnHistory(s.id) ? 0 : 1);
   return sessions
     .filter((s) => !s.ssh_info && normalizePath(s.working_directory) === target)
-    .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));
+    .sort((a, b) => rank(a) - rank(b) || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));
 }
 
-export function writerSessionId(sessions: readonly AttachedSession[], worktreePath: string): string | null {
-  return attachedSessions(sessions, worktreePath)[0]?.id ?? null;
+export function writerSessionId(sessions: readonly AttachedSession[], worktreePath: string, hasTurnHistory: HasTurnHistory = NO_HISTORY): string | null {
+  return attachedSessions(sessions, worktreePath, hasTurnHistory)[0]?.id ?? null;
 }
 
 // ─── The turn history ─────────────────────────────────────────────────
@@ -133,7 +143,13 @@ export function editorCommandFor(shell: string, path: string): string {
   const name = shell.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
   if (/^(pwsh|powershell)(\.exe)?$/.test(name)) {
     const quoted = `'${path.replace(/'/g, "''")}'`;
-    return `if ($env:EDITOR) { Invoke-Expression "$env:EDITOR ${quoted}" } else { notepad ${quoted} }`;
+    // $EDITOR is a program path ("C:\Program Files\...\code.cmd", spaces
+    // and all) or a command line ("code --wait", '"C:\...\code.cmd" --wait'):
+    // a path that exists runs through the call operator as one word; anything
+    // else is re-parsed as a command line. Inside the re-parsed string the
+    // path is escaped for PowerShell's own expansion.
+    const inner = quoted.replace(/[`$]/g, (c) => `\`${c}`);
+    return `$e = $env:EDITOR; if (-not $e) { notepad ${quoted} } elseif (Test-Path -LiteralPath $e) { & $e ${quoted} } else { Invoke-Expression "& $e ${inner}" }`;
   }
   if (/^cmd(\.exe)?$/.test(name)) {
     const quoted = `"${path.replace(/"/g, "")}"`;

@@ -49,8 +49,14 @@ Exit codes: 0 ok · 2 usage · 3 people only · 4 refused by the state machine.
 
 Right rail → **Track** (while the flag is on). It shows the worktree's
 feature: phases, the gate, the questions, the current file's size against
-its cap, and whether this session is the **writer** (the oldest session in
-the worktree — the agent) or a **reader**.
+its cap, and whether this session is the **writer** (the agent that drives
+the feature; `r` types into its terminal) or a **reader**. The writer is the
+session in the worktree with a turn history (an agent Hermes started and
+observed), the oldest of them when several have one; when no session has
+run a turn yet — an agent you typed into a plain shell — the oldest session
+in the worktree is the writer. So a shell you opened before starting the
+agent does not receive your edits by seniority; check the role in the
+panel's header before pressing r.
 
 | Key (panel focused) | Action |
 |---|---|
@@ -61,7 +67,11 @@ the worktree — the agent) or a **reader**.
 | s | Skip the phase |
 
 **Make it a feature** (panel or palette) promotes a session's worktree to a
-feature folder on its branch.
+feature folder and, exactly like `hi feature new`, puts the worktree on
+`hermes/<slug>` when it is not there yet (the slug comes from the branch —
+`hermes/<slug>` or the branch name — else from the folder's name). The
+branch step is never fatal: the folder is what matters, and the toast says
+what happened to the branch.
 
 ## Gates are protected by the turn history
 
@@ -71,6 +81,20 @@ not write itself, landing while an attached session is in a turn (the
 session's turn events, contract C0), is reverted to `waiting` and raised as
 an error item in the inbox. An approval outside every turn (you ran
 `hi approve` in your own shell) is accepted.
+
+The guard is soft, and it is only as good as what Hermes can see:
+
+- Both checks depend on the agent having been started through Hermes (the
+  `launchHelper` path): that is where `HERMES_AGENT` is set and where the
+  turn events come from. An agent you start by typing its command into a
+  plain Hermes terminal has neither, so it can run `hi approve` unrefused
+  and its hand edits fall outside every turn — they are accepted as yours.
+- Only an approval is guarded. An agent that skips a gate instead — editing
+  `phase: <next>` together with `gate: none` by hand, or running
+  `hi phase skip` before handing the phase over — is not detected; the
+  panel simply shows the next phase in progress. `hi phase skip` refuses
+  while a gate is waiting, and `hi land` refuses agents, so the last word on
+  merging stays with a person.
 
 ## Proof
 

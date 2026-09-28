@@ -274,6 +274,36 @@ pub fn create(
     })
 }
 
+/// Put the worktree on `hermes/<slug>` when it is a repository and not there
+/// yet: `hi feature new` and the app's "Make it a feature" both go through
+/// here, so one feature is one branch whichever way it was created. Never
+/// fatal: the folder is what matters. Returns one line saying what happened,
+/// or `None` outside a repository.
+pub fn ensure_branch(root: &Path, slug: &str) -> Option<String> {
+    if !root.join(".git").exists() {
+        return None;
+    }
+    let want = format!("hermes/{slug}");
+    if current_branch(root).as_deref() == Some(want.as_str()) {
+        return Some(format!("On branch {want}"));
+    }
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["switch", "-c", &want])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => Some(format!("Switched to a new branch {want}")),
+        Ok(o) => Some(format!(
+            "Stayed on the current branch (git switch -c {want} said: {})",
+            String::from_utf8_lossy(&o.stderr).trim()
+        )),
+        Err(e) => Some(format!(
+            "Stayed on the current branch (git not available: {e})"
+        )),
+    }
+}
+
 /// Copy the built-in prompts into `.hermes/phases/` where none exist, so a
 /// repository can edit them. Returns what was written.
 pub fn seed_phase_prompts(root: &Path) -> Result<Vec<PathBuf>, TrackError> {

@@ -257,14 +257,16 @@ fn phase_move((from, to): (ht::Phase, ht::Phase)) -> PhaseMove {
 #[tauri::command]
 pub fn track_approve(worktree_path: String, slug: String) -> Result<PhaseMove, String> {
     let root = absolute_dir(&worktree_path)?;
-    ht::approve(&root, &slug).map(phase_move).map_err(track_err)
+    let slug = checked_slug(&slug)?;
+    ht::approve(&root, slug).map(phase_move).map_err(track_err)
 }
 
 /// `s` in the Track view: a person skips the phase, waiting or not.
 #[tauri::command]
 pub fn track_skip(worktree_path: String, slug: String) -> Result<PhaseMove, String> {
     let root = absolute_dir(&worktree_path)?;
-    ht::skip_phase(&root, &slug, true)
+    let slug = checked_slug(&slug)?;
+    ht::skip_phase(&root, slug, true)
         .map(phase_move)
         .map_err(track_err)
 }
@@ -273,8 +275,9 @@ pub fn track_skip(worktree_path: String, slug: String) -> Result<PhaseMove, Stri
 #[tauri::command]
 pub fn track_revert_gate(worktree_path: String, slug: String, phase: String) -> Result<(), String> {
     let root = absolute_dir(&worktree_path)?;
+    let slug = checked_slug(&slug)?;
     let phase = ht::Phase::parse(&phase).ok_or_else(|| format!("unknown phase {phase:?}"))?;
-    ht::revert_gate(&root, &slug, phase).map_err(track_err)
+    ht::revert_gate(&root, slug, phase).map_err(track_err)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -283,9 +286,13 @@ pub struct PromoteOutcome {
     pub created: bool,
     pub slug: String,
     pub feature_file: Option<String>,
+    /// What happened to the branch (`hermes/<slug>`, like `hi feature new`),
+    /// or `None` outside a repository.
+    pub branch: Option<String>,
 }
 
-/// "Make it a feature": a session on `hermes/<slug>` gets its folder.
+/// "Make it a feature": the worktree gets its folder and, like `hi feature
+/// new`, its `hermes/<slug>` branch (never fatal: the folder is what matters).
 #[tauri::command]
 pub fn track_promote(
     worktree_path: String,
@@ -297,20 +304,30 @@ pub fn track_promote(
     let track = ht::Track::parse(&track).ok_or_else(|| format!("unknown track {track:?}"))?;
     let out =
         ht::create(&root, &slug, track, title.as_deref().unwrap_or(""), "").map_err(track_err)?;
+    let branch = ht::ensure_branch(&root, &slug);
     Ok(PromoteOutcome {
         created: out.created,
         slug,
         feature_file: out.feature_file.map(|p| p.to_string_lossy().to_string()),
+        branch,
     })
+}
+
+/// Every command takes the slug from the frontend as a string; only a real
+/// slug may name a folder under `.hermes/features/`.
+fn checked_slug(slug: &str) -> Result<&str, String> {
+    if ht::front_matter::is_slug(slug) {
+        Ok(slug)
+    } else {
+        Err(format!("not a feature slug: {slug}"))
+    }
 }
 
 fn readable(root: &Path, slug: &str, name: &str) -> Result<PathBuf, String> {
     if !READABLE.contains(&name) {
         return Err(format!("not a track file: {name}"));
     }
-    if !ht::front_matter::is_slug(slug) {
-        return Err(format!("not a feature slug: {slug}"));
-    }
+    let slug = checked_slug(slug)?;
     Ok(ht::FeatureDir::new(root, slug).dir().join(name))
 }
 
@@ -442,6 +459,93 @@ pub fn track_hi_path(app: AppHandle) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approve_skip_and_revert_refuse_anything_but_a_slug() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        ht::create(dir.path(), "demo", ht::Track::Light, "Demo", "").unwrap();
+        std::fs::create_dir_all(dir.path().join("outside")).unwrap();
+        for bad in ["../outside", "Demo Search", "", "a/b"] {
+            let err = track_approve(root.clone(), bad.to_string()).unwrap_err();
+            assert!(
+                err.starts_with("not a feature slug:"),
+                "approve {bad:?}: {err}"
+            );
+            let err = track_skip(root.clone(), bad.to_string()).unwrap_err();
+            assert!(
+                err.starts_with("not a feature slug:"),
+                "skip {bad:?}: {err}"
+            );
+            let err = track_revert_gate(root.clone(), bad.to_string(), "plan".into()).unwrap_err();
+            assert!(
+                err.starts_with("not a feature slug:"),
+                "revert {bad:?}: {err}"
+            );
+        }
+        assert!(!dir.path().join("outside/feature.md").exists());
+        // A real slug still reaches the state machine (which has its own say).
+        let err = track_approve(root, "demo".into()).unwrap_err();
+        assert!(!err.starts_with("not a feature slug:"), "{err}");
+    }
+
+    #[test]
+    fn promote_creates_the_folder_and_the_branch_like_hi_feature_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@test",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "root",
+        ]);
+        let out = track_promote(
+            root.to_string_lossy().to_string(),
+            "demo-search".into(),
+            "Light".into(),
+            Some("Demo".into()),
+        )
+        .unwrap();
+        assert!(out.created);
+        assert_eq!(
+            out.branch.as_deref(),
+            Some("Switched to a new branch hermes/demo-search")
+        );
+        assert_eq!(git(&["branch", "--show-current"]), "hermes/demo-search");
+        assert!(root
+            .join(".hermes/features/demo-search/feature.md")
+            .is_file());
+        // Outside a repository there is no branch to speak of.
+        let plain = tempfile::tempdir().unwrap();
+        let out = track_promote(
+            plain.path().to_string_lossy().to_string(),
+            "x".into(),
+            "Quick".into(),
+            None,
+        )
+        .unwrap();
+        assert!(!out.created && out.branch.is_none());
+    }
 
     #[test]
     fn a_snapshot_lists_every_feature_with_its_texts_and_files() {

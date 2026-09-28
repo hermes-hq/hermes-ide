@@ -15,6 +15,7 @@
 // harness can refuse a binary that was built elsewhere.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
@@ -66,9 +67,13 @@ const targetDir = cargoTargetDir();
 // Helpers that live next to the app binary: `hi` (agent launch and signals,
 // every OS) and, on macOS, `hermes-pty-setup`. Built explicitly here into
 // their own target folders and staged next to the binary below, so the rig
-// never depends on where the app's build script managed to put them.
+// never depends on where the app's build script managed to put them. The
+// folder is keyed by this checkout's path: helpers carry no build stamp, so
+// two checkouts sharing one cargo target folder must never build the same
+// helper into the same place (one would stage the other's binary).
+const checkoutKey = createHash("sha1").update(REPO_ROOT).digest("hex").slice(0, 8);
 function buildHelper(crateDir, binName) {
-  const helperTarget = join(targetDir, `${crateDir}-build`);
+  const helperTarget = join(targetDir, `${crateDir}-build-${checkoutKey}`);
   run("cargo", [
     "build",
     "--manifest-path",
