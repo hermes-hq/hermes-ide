@@ -41,6 +41,15 @@ export interface RevertResult {
   readonly message: string;
 }
 
+/**
+ * True when the diff failed only because the folder is not a git
+ * repository (git's "fatal: not a git repository ..."): the desk then shows
+ * its plain "no repository" state instead of git's error text.
+ */
+export function isNotAGitRepository(error: unknown): boolean {
+  return /not a git repository/i.test(String(error));
+}
+
 export function reviewDiff(path: string): Promise<ReviewDiff> {
   return invoke<ReviewDiff>("review_diff", { path });
 }

@@ -1082,3 +1082,39 @@ features:
       REAL-3:
         text: "None of a parent Claude Code session's environment markers reach the agent; it saves its transcript; ~/.claude/settings.json is byte-identical afterwards"
         scenarios: ["REAL-claude-launch.mjs@darwin,linux"]
+  UI:
+    name: "One consistent control set (UI kit foundation)"
+    # Foundation only: tokens, the base.css reset, the components in
+    # src/components/ui and a hidden preview (Settings > Flags > Controls
+    # preview); screens move to them in later waves. Not behind a flag: the
+    # registry is at its 15-flag cap and the only change a user sees is the
+    # global reset (UI font on buttons, one solid focus ring, no press
+    # shrink) and the contrast fixes. Keyboard and ARIA of every component
+    # are unit-tested (src/__tests__/ui-*.test.tsx); every theme's contrast
+    # pairs by scripts/contrast-audit.test.mjs. The focus ring is measured
+    # on the preview's copy of the :focus-visible rules, because the test
+    # window has no keyboard focus locally (the log says whether the real
+    # :focus-visible matched as well).
+    status: partial
+    criteria:
+      UI-1:
+        text: "In every theme, buttons are 28/32/36 px, fields, select triggers, icon buttons, segmented controls and tabs 32 (28 small), chips 28, toggles 18, checkboxes 16, badges 18"
+        scenarios: [UI-kit.mjs]
+      UI-2:
+        text: "In every theme the focus ring is a solid 2 px outline 2 px away in --focus-ring at >= 3:1, visible in a screenshot, and a focused field keeps its border"
+        scenarios: [UI-kit.mjs]
+      UI-3:
+        text: "Rendered button, field, badge, segment and navigation colours meet 4.5:1 (text) and 3:1 (field edge) in every theme"
+        scenarios: [UI-kit.mjs]
+      UI-4:
+        text: "A plain button takes the UI font and ink, and no rule shrinks a pressed button"
+        scenarios: [UI-kit.mjs]
+      UI-5:
+        text: "In the real webview the Select opens with the arrow key, type-ahead and Enter pick a value, Esc closes only the list, and the Menu runs the item picked with the keyboard"
+        scenarios: [UI-kit.mjs]
+      UI-6:
+        text: "The empty state shows the running app's version"
+        scenarios: [UI-audit-fixes.mjs]
+      UI-7:
+        text: "The Review Desk of a folder that is not a git repository shows the plain empty state, not git's raw error"
+        scenarios: [UI-audit-fixes.mjs]

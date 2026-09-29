@@ -1,0 +1,56 @@
+/* ─── Badge (status) and Counter ──────────────────────────────────
+ * Nothing below 10 px. Tones use the -dim fill with the tone's ink.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.h-badge {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--badge-h);
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-none);
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.h-badge--neutral { border: var(--control-border-width) solid var(--control-border); background: var(--control-bg); color: var(--control-fg); }
+.h-badge--success { background: var(--success-dim); color: var(--success-ink); }
+.h-badge--warning { background: var(--warning-dim); color: var(--warning-ink); }
+.h-badge--danger { background: var(--danger-dim); color: var(--danger-fg); }
+.h-badge--info { background: var(--info-dim); color: var(--info-ink); }
+
+.h-counter {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: var(--counter-h);
+  height: var(--counter-h);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-full);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-none);
+}
+.h-counter--neutral { border: var(--control-border-width) solid var(--control-border); background: var(--control-bg); color: var(--control-fg); }
+.h-counter--attention { background: var(--primary-bg); color: var(--primary-fg); }
+
+.h-visually-hidden {
+  position: absolute;
+  width: var(--sr-only-size);
+  height: var(--sr-only-size);
+  margin: calc(-1 * var(--sr-only-size));
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,0 +1,59 @@
+/* ─── Tabs: a brass rail marks the selected tab ──────────────────── */
+
+.h-tabs { display: flex; }
+.h-tabs--horizontal {
+  gap: var(--space-1);
+  border-bottom: var(--control-border-width) solid var(--rule-card);
+}
+.h-tabs--vertical { flex-direction: column; gap: var(--space-0-5); }
+
+.h-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: var(--control-h-md);
+  padding: 0 var(--control-px-md);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-md);
+  font-weight: var(--control-weight);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease-out-soft), background-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-tab:hover:not(:disabled, [aria-selected="true"]) { color: var(--text-1); }
+.h-tab[aria-selected="true"] { color: var(--text-0); }
+.h-tab:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+.h-tab::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+  transition: background-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-tab[aria-selected="true"]::after { background: var(--primary-bg); }
+
+/* Horizontal: 2 px rail on the baseline */
+.h-tabs--horizontal .h-tab { margin-bottom: calc(-1 * var(--control-border-width)); }
+.h-tabs--horizontal .h-tab::after { left: 0; right: 0; bottom: 0; height: var(--rail-width); }
+.h-tabs--horizontal .h-tab:focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
+
+/* Vertical (Settings nav): 32 px rows, current row filled, 2 px left rail */
+.h-tabs--vertical .h-tab {
+  justify-content: flex-start;
+  width: 100%;
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+.h-tabs--vertical .h-tab:hover:not(:disabled, [aria-selected="true"]) { background: var(--quiet-hover-bg); }
+.h-tabs--vertical .h-tab[aria-selected="true"] { background: var(--row-active-bg); }
+.h-tabs--vertical .h-tab::after {
+  top: var(--space-1-5);
+  bottom: var(--space-1-5);
+  left: 0;
+  width: var(--rail-width);
+  border-radius: var(--radius-full);
+}

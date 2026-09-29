@@ -1,0 +1,125 @@
+/* ─── Checkbox · Radio · Toggle ─────────────────────────────────────
+ * All drawn with appearance: none. A checked box, a chosen radio and a
+ * toggle that is on use --primary-bg (brass); state is never colour
+ * alone — a check, a dot, the knob's position.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.h-choice {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: var(--control-h-md);
+  padding: calc((var(--control-h-md) - var(--choice-size)) / 2) 0;
+  box-sizing: border-box;
+  color: var(--text-1);
+  font-size: var(--control-font-md);
+  line-height: var(--choice-size);
+  cursor: pointer;
+}
+.h-choice--toggle { padding: calc((var(--control-h-md) - var(--toggle-h)) / 2) 0; line-height: var(--toggle-h); }
+.h-choice--disabled { cursor: not-allowed; }
+.h-choice--disabled .h-choice-text { opacity: var(--disabled-opacity); }
+.h-choice-text { display: inline-flex; flex-direction: column; gap: var(--space-0-5); }
+.h-choice-description { color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-snug); }
+
+/* ─── Checkbox ────────────────────────────────────────────────────── */
+
+.h-checkbox,
+.h-radio {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: var(--choice-size);
+  height: var(--choice-size);
+  margin: 0;
+  border: var(--choice-border-width) solid var(--field-border);
+  background: var(--field-bg);
+  cursor: inherit;
+  transition:
+    background-color var(--dur-quick) var(--ease-out-soft),
+    border-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-checkbox { border-radius: var(--radius-sm); }
+.h-checkbox:hover:not(:disabled),
+.h-radio:hover:not(:disabled) { border-color: var(--field-border-hover); }
+
+.h-checkbox:checked,
+.h-checkbox:indeterminate {
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
+}
+.h-checkbox::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--check-mark);
+  height: var(--check-mark);
+  background: var(--primary-fg);
+  mask: var(--glyph-check) center / contain no-repeat;
+  -webkit-mask: var(--glyph-check) center / contain no-repeat;
+  opacity: 0;
+}
+.h-checkbox:checked::after { opacity: 1; }
+.h-checkbox:indeterminate::after {
+  height: var(--rail-width);
+  border-radius: var(--radius-full);
+  mask: none;
+  -webkit-mask: none;
+  opacity: 1;
+}
+.h-checkbox:disabled,
+.h-radio:disabled { opacity: var(--disabled-opacity); }
+
+/* ─── Radio ───────────────────────────────────────────────────────── */
+
+.h-radio { border-radius: 50%; }
+.h-radio:checked { border-color: var(--primary-bg); }
+.h-radio::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--radio-dot);
+  height: var(--radio-dot);
+  border-radius: 50%;
+  background: var(--primary-bg);
+  transform: scale(0);
+  transition: transform var(--dur-quick) var(--ease-out-soft);
+}
+.h-radio:checked::after { transform: scale(1); }
+
+.h-radio-group { display: flex; flex-direction: column; }
+
+/* ─── Toggle (role=switch) ────────────────────────────────────────── */
+
+.h-toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--toggle-w);
+  height: var(--toggle-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--toggle-off-bg);
+  cursor: inherit;
+  transition: background-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-toggle-knob {
+  position: absolute;
+  top: calc((var(--toggle-h) - var(--toggle-knob)) / 2);
+  left: calc((var(--toggle-h) - var(--toggle-knob)) / 2);
+  width: var(--toggle-knob);
+  height: var(--toggle-knob);
+  border-radius: var(--radius-full);
+  background: var(--toggle-knob-bg);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-quick) var(--ease-out-soft), background-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-toggle[aria-checked="true"] { background: var(--primary-bg); }
+.h-toggle[aria-checked="true"] .h-toggle-knob {
+  background: var(--primary-fg);
+  transform: translateX(calc(var(--toggle-w) - var(--toggle-h)));
+}
+.h-toggle:disabled { opacity: var(--disabled-opacity); }

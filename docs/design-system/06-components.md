@@ -183,3 +183,82 @@ Enter animation: `var(--dur-slow) var(--ease-out-expo)` opacity + scale.
   {open && <pre className="thought-body">...</pre>}
 </div>
 ```
+
+## Controls
+
+Every button, field, list, toggle and badge comes from one set of React
+components in `src/components/ui/` (styles in `src/styles/ui/`). A screen
+never styles its own button or select; it picks a component and a variant.
+Open **Settings → Flags → Controls preview** (click the Settings title seven
+times to show Flags) to see every control in every state, in any theme.
+
+**Signature: brass is the operator's hand.** Anything that commits your
+intent is brass (`--primary-bg`): the primary button, a checked box, a
+toggle that is on, the rail under the selected tab or beside the current
+row, and the focus ring. Blue stays with the agent and with links.
+
+### Rules
+
+1. **One primary per surface.** A dialog, sheet or panel has at most one
+   `primary` button, right-most in its footer. Everything else is
+   `secondary` or `quiet`. The step's own "Next"/"Finish" is the primary,
+   not a helper action beside it.
+2. **Three heights.** `md` (32 px, `--control-h-md`) everywhere by default;
+   `sm` (28 px) only in dense chrome (toolbars, list rows) with ≥ 4 px
+   between targets; `lg` (36 px) only on the welcome and empty states.
+   Heights go through `--density-y`.
+3. **One focus ring.** A solid 2 px `--focus-ring` outline, 2 px away from
+   the control (`base.css`). Fields do not change their border on focus.
+   Never `outline: none` without drawing the same ring another way.
+4. **Selection is never colour alone:** a raised keycap, a rail, a check, a
+   dot or the knob's position always goes with it.
+5. **Disabled** is `opacity: .45`, no hover, `cursor: not-allowed`.
+6. **No hardcoded text.** Every label and accessible name comes from
+   `t("…")`; icon-only controls must be given a `label` (the types require
+   it).
+7. **Contrast.** Text ≥ 4.5:1 on every fill it is drawn on (hover and
+   selected included); field edges, the focus ring and brass marks ≥ 3:1.
+   `scripts/contrast-audit.mjs` checks every pair in all eight themes and
+   runs in the unit tests.
+
+### Components
+
+| Component | Use it for | Notes |
+|---|---|---|
+| `Button` | An action. `primary` (brass, one per surface), `secondary` (default), `quiet` (toolbar and tertiary actions), `danger` (a destructive action among others), `danger-solid` (only as the primary of a confirm dialog), `link` (inline "Sign in", "Check again") | `size` sm/md/lg. `loading` keeps the label, shows a brass sweep, sets `aria-busy` and ignores presses. Presses move the button down half a pixel; nothing scales. |
+| `IconButton` | An action shown as an icon only | `label` is required: it is the accessible name and the tooltip. `pressed` for icon toggles. md 32 or sm 28. |
+| `CloseButton` | Closing any dialog, sheet or panel | Always a small icon button with one drawn ×. Replaces every "x", ×, ✕ and `.close-btn`. |
+| `Input`, `Textarea` | Free text | `code` for paths, branches and commands (code font, 12 px). `error` shows the message under the field and links it with `aria-describedby`; `invalid` alone marks the field. |
+| `Select` | Choosing a value whose options carry a status or version ("2.1.284", "not installed"), or anything longer than a handful of plain words | Combobox with `aria-activedescendant`; focus stays on the trigger. Enter, Space, ↑, ↓ or Alt+↓ open; ↑ ↓ Home End PgUp PgDn move without wrapping; type-ahead (500 ms, repeat a letter to cycle); Enter/Space or Tab commit; Esc reverts. Typing while closed changes the value, like a native select. Options have a check slot, a label and a right-hand detail; disabled options are skipped. |
+| `NativeSelect` | Short lists of plain text in Settings (shell, scrollback, font size, channel) | A real `<select>` with the trigger's look; the OS draws the list, like the right-click menus. |
+| `Menu` | A list of actions (not values) behind a button | `role=menu`, same keys as Select, focus returns to the trigger. Shortcut hints on the right, separators, destructive items in the danger ink (a highlighted destructive item turns its row red). |
+| `Chip` | A compact value: a model, a filter, a scope | Neutral by default; `selected` + `onToggle` makes it a toggle button (`aria-pressed`, brass tint); `onRemove` + `removeLabel` adds a trailing ×. sm 24 / md 28, fully round. |
+| `Segmented` | Picking one of two to five views of the same content ("By file / By turn") | `radiogroup` with one tab stop; arrows move and select, Home/End jump. The selected segment is a raised keycap in a recessed well. |
+| `Tabs` | Switching between separate views of one surface | `tablist` with automatic activation (arrows select). Horizontal: brass rail under the selected tab. `orientation="vertical"` for a navigation column (Settings): 32 px rows, current row filled with `--row-active-bg` plus a left rail. Pair panels with `TabPanel`. |
+| `Checkbox` | Picking items, and consent | 16 px box, brass when checked, `indeterminate` shows a bar (`aria-checked="mixed"`). The label makes the row ≥ 32 px tall. |
+| `Toggle` | An on/off setting that applies at once — every Settings boolean | `role=switch`, 32 × 18 track. |
+| `RadioGroup` / `Radio` | One of a few choices that need a description each | One tab stop; arrows move and select in every engine. |
+| `Badge` | A short status word ("EXACT", "RETIRED") | 18 px, 10 px caps. Tones: neutral, success, warning, danger, info (the `-dim` fill with the tone's ink). |
+| `Counter` | A count on a tab, button or icon | 16 px, tabular digits, `max` shows "99+". Neutral by default; `attention` (brass) only when the count needs you. `label` gives screen readers the meaning. Nothing is smaller than 10 px. |
+
+### Tokens
+
+Heights, paddings and fonts: `--control-h-{sm,md,lg}`, `--control-px-*`,
+`--control-font-*`, `--control-weight`. Radii: `--radius-xs` 3,
+`--radius-sm` 4, `--radius-md` (= `--radius`), `--radius-lg` 10,
+`--radius-full` (`--radius-pill` is its deprecated alias). Focus:
+`--focus-ring`, `--focus-ring-width`, `--focus-ring-offset`. Colour roles,
+set per theme in `themes.css` ("Controls"): `--primary-bg`/`-hover`/
+`-active`/`--primary-fg`, `--control-bg`/`-hover`/`-active`/`--control-border`/
+`--control-fg`, `--field-bg`/`--field-border`/`-hover`, `--quiet-hover-bg`,
+`--quiet-active-bg`, `--selected-bg`, `--row-active-bg`, `--popover-bg`,
+`--danger-fg`, `--danger-solid-bg`, `--success-ink`, `--warning-ink`,
+`--info-ink`, `--link-fg`, `--chip-selected-*`, `--toggle-*`.
+
+### Lint
+
+`node scripts/lint-css.mjs` (CI: Frontend job) applies `.stylelintrc.json`
+to every line of `src/styles/ui/` and of new stylesheets, and to the added
+lines of older ones: no raw px, raw colours, hand-rolled shadows or easing,
+raw font weights or `outline: none`. The older lines are the baseline and
+migrate with their screens.

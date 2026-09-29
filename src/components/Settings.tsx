@@ -1,5 +1,7 @@
 import "../styles/components/Settings.css";
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import { createPortal } from "react-dom";
+import { Button } from "./ui/Button";
 import { lazyView } from "../utils/lazyView";
 import { useResizablePanel } from "../hooks/useResizablePanel";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
@@ -45,6 +47,8 @@ import { FleetSettingsTab } from "../fleet/FleetSettingsTab";
 
 // The plugin manager loads when its tab is first opened.
 const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
+// The hidden controls preview (Flags tab) loads only when opened.
+const UiKitScreen = lazyView("UiKitScreen", () => import("./ui/UiKitScreen").then((m) => m.UiKitScreen));
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  SETTINGS PAGE — EXPORT / IMPORT CONTRACT                              ║
@@ -102,6 +106,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   // 1.5s of each other, like Android's build-number developer-options
   // gesture. Not persisted — resets every time Settings is reopened.
   const [flagsUnlocked, setFlagsUnlocked] = useState(false);
+  const [uiKitOpen, setUiKitOpen] = useState(false);
   const titleClicks = useRef(0);
   const titleClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleTitleClick = useCallback(() => {
@@ -943,6 +948,12 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "flags" && flagsUnlocked && (
               <div className="settings-section">
                 <p className="settings-hint">{t("settings.flags.hint", { channel: getReleaseChannel() })}</p>
+                <div className="settings-group">
+                  <Button data-testid="ui-kit-open" onClick={() => setUiKitOpen(true)}>
+                    {t("settings.flags.uiKit")}
+                  </Button>
+                  <span className="settings-hint-inline">{t("settings.flags.uiKitHint")}</span>
+                </div>
                 {FEATURE_FLAGS.map((flag) => {
                   const overrides = parseFeatureFlagOverrides(settings[FEATURE_FLAG_OVERRIDES_KEY]);
                   const current = overrides[flag.id];
@@ -1020,6 +1031,14 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
           </button>
           {footerStatus && <span className="settings-footer-status">{footerStatus}</span>}
         </div>
+        {/* Inside the panel, whose click handler keeps clicks from closing Settings. */}
+        {uiKitOpen &&
+          createPortal(
+            <Suspense fallback={null}>
+              <UiKitScreen onClose={() => setUiKitOpen(false)} uiScale={settings.ui_scale} />
+            </Suspense>,
+            document.body,
+          )}
       </div>
     </div>
   );

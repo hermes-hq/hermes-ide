@@ -38,8 +38,8 @@
   --bg-elevated: #2c2c2e;
   --text-0: #f5f5f7;
   --text-1: #d6d6d9;
-  --text-2: #8e8e93;
-  --text-3: #5c5c61;
+  --text-2: #a1a1a8;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #939399;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   --voice-user:  #ffb340;
   --voice-agent: #0a84ff;
   --accent: #0a84ff;
@@ -71,8 +71,8 @@
   --scanline-opacity: 0;
   --accent-glow: none;
   --shadow-tint: #000;
-  --focus-ring: var(--voice-user);
-  --focus-ring-shadow: 0 0 0 3px rgba(255,179,64,.35);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -89,8 +89,8 @@ html[data-theme="frosted-dark"] {
   --bg-elevated: #2c2c2e;
   --text-0: #f5f5f7;
   --text-1: #d6d6d9;
-  --text-2: #8e8e93;
-  --text-3: #5c5c61;
+  --text-2: #a1a1a8;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #939399;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   --voice-user:  #ffb340;
   --voice-agent: #0a84ff;
   --accent: #0a84ff;
@@ -122,8 +122,8 @@ html[data-theme="frosted-dark"] {
   --scanline-opacity: 0;
   --accent-glow: none;
   --shadow-tint: #000;
-  --focus-ring: var(--voice-user);
-  --focus-ring-shadow: 0 0 0 3px rgba(255,179,64,.35);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Frosted Dark — cool radial wash on the agent surface so the frost
@@ -209,8 +209,8 @@ html[data-theme="atelier"] {
   --bg-elevated: #2d2823;
   --text-0: #e8e0d4;
   --text-1: #c8bfb0;
-  --text-2: #8a7f72;
-  --text-3: #6b6258;
+  --text-2: #b2aba2;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #a6a19b;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   /* Mono-tone identity: both voices alias to the warm accent. */
   --voice-user:  #e07850;
   --voice-agent: #e07850;
@@ -243,8 +243,8 @@ html[data-theme="atelier"] {
   --scanline-opacity: 0;
   --accent-glow: none;
   --shadow-tint: #14110e;
-  --focus-ring: var(--accent);
-  --focus-ring-shadow: 0 0 0 3px rgba(224,120,80,.35);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Atelier — subtle warm radial wash on the conversation surface so it
@@ -271,8 +271,8 @@ html[data-theme="observatory"] {
   --bg-elevated: #18223a;
   --text-0: #e8d8b8;
   --text-1: #c8b896;
-  --text-2: #8a7a5c;
-  --text-3: #6a5e48;            /* lifted from #5c5240 for contrast */
+  --text-2: #aca18b;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #a0988a;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   /* Brass + cool ink — true duotone. */
   --voice-user:  #d4a86a;
   --voice-agent: #7aa9d6;
@@ -305,8 +305,8 @@ html[data-theme="observatory"] {
   --scanline-opacity: 0;
   --accent-glow: 0 0 12px rgba(212, 168, 106, 0.18);
   --shadow-tint: #050811;
-  --focus-ring: var(--voice-user);
-  --focus-ring-shadow: 0 0 0 3px rgba(212,168,106,.35);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Observatory — brass-rail accent on workbench and panels.
@@ -397,8 +397,8 @@ html[data-theme="phosphor"] {
   --bg-elevated: #0e160e;
   --text-0: #b0f0a8;
   --text-1: #80d878;
-  --text-2: #5a9a52;
-  --text-3: #4a8038;            /* lifted from #366028 (3:1 vs bg-1) */
+  --text-2: #69a362;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #6b975c;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   /* Mono-tone identity: both voices share the phosphor green. */
   --voice-user:  #b0f0a8;
   --voice-agent: #b0f0a8;
@@ -432,8 +432,8 @@ html[data-theme="phosphor"] {
   --accent-glow: 0 0 8px rgba(176, 240, 168, 0.45);
   --shadow-tint: #000;
   /* CRT focus ring — accent glow */
-  --focus-ring: var(--accent);
-  --focus-ring-shadow: 0 0 0 2px var(--accent), 0 0 12px rgba(176,240,168,.5);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring), 0 0 12px rgba(176,240,168,.5);
   /* Phosphor weights — keep the bitmap feel */
   --weight-regular: 400;
   --weight-semibold: 600;
@@ -515,8 +515,8 @@ html[data-theme="frosted-light"] {
   --bg-elevated: #ffffff;
   --text-0: #1c1c1e;
   --text-1: #3a3a3c;
-  --text-2: #6c6c70;
-  --text-3: #7a7a7e;            /* WCAG AA fix: was #9c9ca0 (2.9:1), now 4.6:1 */
+  --text-2: #5f5f64;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #66666b;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   --voice-user:  #c87a1a;
   --voice-agent: #0a84ff;
   --accent: #0a84ff;
@@ -548,8 +548,8 @@ html[data-theme="frosted-light"] {
   --scanline-opacity: 0;
   --accent-glow: none;
   --shadow-tint: #1a1f2a;
-  --focus-ring: var(--voice-agent);
-  --focus-ring-shadow: 0 0 0 3px rgba(10,132,255,.30);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Frosted Light — frosted toolbar & sidebar */
@@ -626,8 +626,8 @@ html[data-theme="linen"] {
   --bg-elevated: #fffaf0;
   --text-0: #2a221a;
   --text-1: #4a3e30;
-  --text-2: #7a6b58;
-  --text-3: #8a7a5a;            /* WCAG AA fix: was #a89a82 (2.4:1), now 4.6:1 */
+  --text-2: #635747;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #6a5e45;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   /* Mono-tone identity: terracotta is the only voice. */
   --voice-user:  #c45a32;
   --voice-agent: #c45a32;
@@ -660,8 +660,8 @@ html[data-theme="linen"] {
   --scanline-opacity: 0;
   --accent-glow: none;
   --shadow-tint: #4a3e30;       /* warm under-paper shade */
-  --focus-ring: var(--accent);
-  --focus-ring-shadow: 0 0 0 3px rgba(196,90,50,.30);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Linen — subtle warm paper grain on the conversation surface so the
@@ -689,8 +689,8 @@ html[data-theme="newsprint"] {
   --bg-elevated: #ffffff;
   --text-0: #0a0a0a;
   --text-1: #2a2a2a;
-  --text-2: #5a5a5a;
-  --text-3: #6a6a6a;            /* lifted from #8a8a8a for AA */
+  --text-2: #5a5a5a;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #636363;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   /* Duotone: brass becomes the live accent; true ink stays for body. */
   --ink-emphasis: #0a0a0a;
   --voice-user:  #b8862a;
@@ -727,8 +727,8 @@ html[data-theme="newsprint"] {
   --weight-regular: 460;        /* Newsprint feels printed */
   --weight-semibold: 700;
   /* Sharp double-rule ring survives any backdrop */
-  --focus-ring: var(--ink-emphasis);
-  --focus-ring-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px var(--ink-emphasis);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 
 /* Newsprint — broadside grid.  Sharp 1px rules around major panels,
@@ -773,8 +773,8 @@ html[data-theme="atrium"] {
   --bg-elevated: #ffffff;
   --text-0: #2a3548;
   --text-1: #4a5566;
-  --text-2: #6a7280;            /* WCAG AA: was #7a8090 (borderline 3.6:1) → 4.7:1 */
-  --text-3: #6a7280;            /* WCAG AA: was #a8b0bc (2.6:1) → 4.7:1 */
+  --text-2: #575d69;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
+  --text-3: #5d6471;            /* ≥ 4.5:1 on every surface and hover fill (contrast-audit) */
   /* Richer slate-teal accent (was muted #4a6a8c). Warm voice as counter. */
   --voice-user:  #c8862a;
   --voice-agent: #2f6f9a;
@@ -807,8 +807,242 @@ html[data-theme="atrium"] {
   --scanline-opacity: 0;
   --accent-glow: none;
   --shadow-tint: #2a3548;       /* cool graphite */
-  --focus-ring: var(--accent);
-  --focus-ring-shadow: 0 0 0 3px rgba(47,111,154,.30);
+  --focus-ring: var(--primary-bg);   /* solid brass ring, ≥ 3:1 (contrast-audit) */
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
+
+
+/* ════════════════════════════════════════════════════════════════════
+ * Controls — colour roles of the control set (src/components/ui)
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * "Brass is the operator's hand": the primary button, a checked box, a
+ * toggle that is on, the rail of the selected tab and the focus ring all
+ * use --primary-bg. Every value below is checked by
+ * scripts/contrast-audit.mjs (run in the unit tests):
+ *   text ≥ 4.5:1 on every fill it is drawn on (hover and selected too),
+ *   field edges, the focus ring, brass marks and the toggle ≥ 3:1.
+ * Frosted Dark / Light carry the approved proposal values; the other six
+ * were computed against the same rules. See docs/design-system/06-components.md.
+ * ──────────────────────────────────────────────────────────────────── */
+
+:root,
+html[data-theme="frosted-dark"] {
+  --primary-bg: #ffb340;
+  --primary-bg-hover: #ffc870;
+  --primary-bg-active: #e8992a;
+  --primary-fg: #1a1208;
+  --control-bg: #2b3039;
+  --control-bg-hover: #343a45;
+  --control-bg-active: #3d4450;
+  --control-border: #4a515e;
+  --control-fg: #d6d6d9;
+  --field-bg: #1a1c20;
+  --field-border: #6e7584;
+  --field-border-hover: #858c9a;
+  --selected-bg: #353a44;
+  --row-active-bg: #30343d;
+  --popover-bg: #262a31;
+  --danger-fg: #ff6f66;
+  --danger-solid-bg: #d13438;
+  --success-ink: #30d158;
+  --warning-ink: #ffb340;
+  --info-ink: #64d2ff;
+  --link-fg: #8fb4ff;
+  --chip-selected-fg: #ffc870;
+  --accent-fg: #01070d;
+  --toggle-knob-bg: #f5f5f7;
+}
+
+html[data-theme="atelier"] {
+  --primary-bg: #e07850;
+  --primary-bg-hover: #e69373;
+  --primary-bg-active: #cc6d49;
+  --primary-fg: #160c08;
+  --control-bg: #2e2924;
+  --control-bg-hover: #332e28;
+  --control-bg-active: #3e3932;
+  --control-border: #4c4740;
+  --control-fg: #c8bfb0;
+  --field-bg: #1a1714;
+  --field-border: #78736c;
+  --field-border-hover: #88847e;
+  --selected-bg: #332e28;
+  --row-active-bg: #2f2a24;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #e58a8a;
+  --danger-solid-bg: #bf4b4b;
+  --success-ink: #92be6e;
+  --warning-ink: #d6ab4c;
+  --info-ink: #76b9c5;
+  --link-fg: #e07850;
+  --chip-selected-fg: #e69373;
+  --accent-fg: #0b0604;
+  --toggle-knob-bg: #e8e0d4;
+}
+
+html[data-theme="observatory"] {
+  --primary-bg: #d4a86a;
+  --primary-bg-hover: #ddb988;
+  --primary-bg-active: #c19960;
+  --primary-fg: #15110b;
+  --control-bg: #18202f;
+  --control-bg-hover: #1c2538;
+  --control-bg-active: #283040;
+  --control-border: #393e4a;
+  --control-fg: #c8b896;
+  --field-bg: #0a1018;
+  --field-border: #6d6e72;
+  --field-border-hover: #7f7f83;
+  --selected-bg: #1c2538;
+  --row-active-bg: #182132;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #d68b7b;
+  --danger-solid-bg: #b25744;
+  --success-ink: #83b483;
+  --warning-ink: #e8b04e;
+  --info-ink: #85b0d9;
+  --link-fg: #7aa9d6;
+  --chip-selected-fg: #ddb988;
+  --accent-fg: #0b0805;
+  --toggle-knob-bg: #e8d8b8;
+}
+
+html[data-theme="phosphor"] {
+  --primary-bg: #b0f0a8;
+  --primary-bg-hover: #c0f3b9;
+  --primary-bg-active: #a0da99;
+  --primary-fg: #121811;
+  --control-bg: #131c13;
+  --control-bg-hover: #182218;
+  --control-bg-active: #212e21;
+  --control-border: #2d3f2c;
+  --control-fg: #80d878;
+  --field-bg: #050805;
+  --field-border: #536b50;
+  --field-border-hover: #687d65;
+  --selected-bg: #182218;
+  --row-active-bg: #141d14;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #ff7a6a;
+  --danger-solid-bg: #b3554a;
+  --success-ink: #b0f0a8;
+  --warning-ink: #f0e088;
+  --info-ink: #80d8d0;
+  --link-fg: #b0f0a8;
+  --chip-selected-fg: #c0f3b9;
+  --accent-fg: #090c08;
+  --toggle-knob-bg: #b0f0a8;
+  --radius-full: 1px;              /* sharp theme: pills stay square */
+}
+
+html[data-theme="frosted-light"] {
+  --primary-bg: #a45f0a;
+  --primary-bg-hover: #8f5200;
+  --primary-bg-active: #7a4600;
+  --primary-fg: #ffffff;
+  --control-bg: #ffffff;
+  --control-bg-hover: #f4f6fa;
+  --control-bg-active: #eaedf2;
+  --control-border: #c3c8d0;
+  --control-fg: #1c1c1e;
+  --field-bg: #ffffff;
+  --field-border: #868c96;
+  --field-border-hover: #6f7682;
+  --selected-bg: #ffffff;
+  --row-active-bg: #e3e8f0;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #b3261e;
+  --danger-solid-bg: #c42b22;
+  --success-ink: #1e7a34;
+  --warning-ink: #8a5a00;
+  --info-ink: #0b67a3;
+  --link-fg: #0066cc;
+  --chip-selected-fg: #8a4f00;
+  --accent-fg: #01070d;
+  --toggle-knob-bg: #ffffff;
+}
+
+html[data-theme="linen"] {
+  --primary-bg: #b6542f;
+  --primary-bg-hover: #9e4929;
+  --primary-bg-active: #893f23;
+  --primary-fg: #ffffff;
+  --control-bg: #ffffff;
+  --control-bg-hover: #f4ede0;
+  --control-bg-active: #ebe2d2;
+  --control-border: #cabeaa;
+  --control-fg: #4a3e30;
+  --field-bg: #ffffff;
+  --field-border: #8d8578;
+  --field-border-hover: #7c756a;
+  --selected-bg: #ffffff;
+  --row-active-bg: #e4dbc9;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #a93026;
+  --danger-solid-bg: #b03228;
+  --success-ink: #4d7134;
+  --warning-ink: #836515;
+  --info-ink: #3e6d86;
+  --link-fg: #ac4f2c;
+  --chip-selected-fg: #964527;
+  --accent-fg: #0a0503;
+  --toggle-knob-bg: #ffffff;
+}
+
+html[data-theme="newsprint"] {
+  --primary-bg: #936b22;
+  --primary-bg-hover: #805d1e;
+  --primary-bg-active: #6e501a;
+  --primary-fg: #ffffff;
+  --control-bg: #ffffff;
+  --control-bg-hover: #f7f4ec;
+  --control-bg-active: #ede9dd;
+  --control-border: #c5c0b2;
+  --control-fg: #2a2a2a;
+  --field-bg: #ffffff;
+  --field-border: #8e8a80;
+  --field-border-hover: #7d7971;
+  --selected-bg: #ffffff;
+  --row-active-bg: #e6e1d4;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #a82828;
+  --danger-solid-bg: #a82828;
+  --success-ink: #2a6a2a;
+  --warning-ink: #866517;
+  --info-ink: #2a4a8a;
+  --link-fg: #2a4a8a;
+  --chip-selected-fg: #7d5b1d;
+  --accent-fg: #090702;
+  --toggle-knob-bg: #ffffff;
+  --radius-full: 1px;              /* sharp theme: pills stay square */
+}
+
+html[data-theme="atrium"] {
+  --primary-bg: #9a6720;
+  --primary-bg-hover: #865a1c;
+  --primary-bg-active: #744d18;
+  --primary-fg: #ffffff;
+  --control-bg: #ffffff;
+  --control-bg-hover: #eef2f6;
+  --control-bg-active: #e4e9ee;
+  --control-border: #c2c9d2;
+  --control-fg: #4a5566;
+  --field-bg: #ffffff;
+  --field-border: #84888d;
+  --field-border-hover: #74787c;
+  --selected-bg: #ffffff;
+  --row-active-bg: #dee3e9;
+  --popover-bg: var(--bg-elevated);
+  --danger-fg: #a04343;
+  --danger-solid-bg: #b04a4a;
+  --success-ink: #3e7459;
+  --warning-ink: #816920;
+  --info-ink: #2e6d97;
+  --link-fg: #2f6f9a;
+  --chip-selected-fg: #82571b;
+  --accent-fg: #ffffff;
+  --toggle-knob-bg: #ffffff;
 }
 
 /* ════════════════════════════════════════════════════════════════════

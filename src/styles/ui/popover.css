@@ -1,0 +1,79 @@
+/* ─── Listbox (Select) and Menu ─────────────────────────────────────
+ * Same shell and rows for both. The list is portalled to <body> and
+ * placed with position: fixed by usePopover.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.h-popover {
+  z-index: var(--z-popover);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  max-height: var(--popover-max-h);
+  margin: 0;
+  padding: var(--space-1);
+  overflow-y: auto;
+  list-style: none;
+  border: var(--control-border-width) solid var(--rule-zone);
+  border-radius: var(--radius-lg);
+  background: var(--popover-bg);
+  color: var(--text-1);
+  box-shadow: var(--shadow-3);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-md);
+  animation: h-popover-in var(--dur-quick) var(--ease-out-soft);
+}
+.h-popover[hidden] { display: none; }
+/* A menu keeps focus on itself and marks the active item
+ * (aria-activedescendant): the highlighted row is the focus indicator. */
+/* stylelint-disable-next-line declaration-property-value-disallowed-list */
+.h-menu:focus-visible { outline: none; }
+
+@keyframes h-popover-in {
+  from { opacity: 0; transform: translateY(calc(-1 * var(--popover-offset))); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.h-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.h-option[data-highlighted] { background: var(--quiet-hover-bg); color: var(--text-0); }
+.h-option[aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
+.h-option-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--icon-size-md);
+  color: var(--primary-bg);
+}
+.h-option-check svg { width: var(--check-mark); height: var(--check-mark); }
+.h-option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.h-option-detail { flex-shrink: 0; color: var(--text-2); font-size: var(--text-sm); }
+/* A highlighted row lifts its detail one step (contrast on the hover fill). */
+.h-option[data-highlighted] .h-option-detail { color: var(--text-1); }
+.h-listbox--code .h-option-label { font-family: var(--font-code); font-size: var(--text-sm); }
+
+/* ─── Menu specifics ──────────────────────────────────────────────── */
+
+.h-menu { min-width: calc(var(--control-h-lg) * 5); }
+.h-menu-item .h-option-check { color: var(--text-2); }
+.h-menu-item .h-option-check svg { width: var(--icon-size-sm); height: var(--icon-size-sm); }
+.h-menu-shortcut { flex-shrink: 0; margin-left: var(--space-3); }
+.h-menu-separator {
+  height: 0;
+  margin: var(--space-1) 0;
+  border-top: var(--control-border-width) solid var(--rule-hair);
+}
+.h-menu-item--danger { color: var(--danger-fg); }
+.h-menu-item--danger .h-option-check { color: var(--danger-fg); }
+/* Highlighted destructive item: red row, --text-0 label. */
+.h-menu-item--danger[data-highlighted] { background: var(--danger-dim); color: var(--text-0); }

@@ -365,4 +365,28 @@ describe("ReviewDesk: what the git panel it replaces offered", () => {
     await open();
     expect(screen.getByRole("tab", { name: "Worktrees" })).toBeInTheDocument();
   });
+
+  it("a folder that is not a repository shows the plain empty state, not the raw error", async () => {
+    backend({
+      review_diff: () => {
+        throw "fatal: not a git repository (or any of the parent directories): .git";
+      },
+    });
+    await open();
+    const empty = document.querySelector('.review-empty[data-empty="no-repository"]');
+    expect(empty).toHaveTextContent("No git repository in this session's folders.");
+    expect(document.querySelector(".review-error")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/fatal:/);
+  });
+
+  it("any other diff failure is still shown as an error", async () => {
+    backend({
+      review_diff: () => {
+        throw "error: could not read index";
+      },
+    });
+    await open();
+    expect(document.querySelector(".review-error")).toHaveTextContent("error: could not read index");
+    expect(document.querySelector('.review-empty[data-empty="no-repository"]')).toBeNull();
+  });
 });
