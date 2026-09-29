@@ -145,6 +145,8 @@ export interface SessionData {
   /** This create reattached to a program the host kept running: its output
    *  was replayed into the terminal, so no saved scrollback is written. */
   reattached?: boolean;
+  /** N19: the session this one continues or duplicates (a handoff). */
+  parent_session_id?: string | null;
 }
 
 export type AgentStartupState = "launching" | "started" | "waiting_at_startup_prompt" | "ended";
@@ -211,6 +213,11 @@ export interface CreateSessionOpts {
    *  (so the helper is used for this session whatever the launchHelper
    *  flag says); the Agent view gets it as the first message. */
   initialPrompt?: string;
+  /** N19 handoff: the new agent's first prompt (the task and the work so
+   *  far). Passed only as a launch argument through the `hi` helper. */
+  seedPrompt?: string;
+  /** N19 handoff: the session this one continues or duplicates. */
+  parentSessionId?: string;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────
@@ -256,6 +263,9 @@ export interface SavedSessionInfo {
    *  with it; agents without resume start fresh. Optional: older saves and
    *  sessions started without the helper have none. */
   vendor_session_id?: string;
+  /** N19: the session this one was handed off from, so it is shown under
+   *  that session again after a restart. */
+  parent_session_id?: string;
 }
 
 export interface SavedWorkspace {
@@ -330,6 +340,9 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     // A conversation id is a non-empty string or nothing at all.
     if (si.vendor_session_id !== undefined && (typeof si.vendor_session_id !== "string" || !si.vendor_session_id)) {
       delete si.vendor_session_id;
+    }
+    if (si.parent_session_id !== undefined && (typeof si.parent_session_id !== "string" || !si.parent_session_id)) {
+      delete si.parent_session_id;
     }
   }
 

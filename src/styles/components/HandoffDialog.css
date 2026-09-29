@@ -1,0 +1,216 @@
+/* ─── Handoff dialog (N19) ─────────────────────────────────────────── */
+
+.handoff-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.handoff-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  width: min(92vw, 520px);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.handoff-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.handoff-title {
+  flex: 1;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.handoff-close {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  line-height: 1;
+  padding: 0 4px;
+}
+.handoff-close:hover:not(:disabled) {
+  color: var(--text-0);
+}
+
+.handoff-body {
+  padding: var(--space-3);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.handoff-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.handoff-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.handoff-kind-selected {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.handoff-kind-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.handoff-kind-name {
+  color: var(--text-0);
+  font-size: var(--text-sm);
+}
+.handoff-kind-hint {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.handoff-section-label {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  margin-top: var(--space-1);
+}
+
+.handoff-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.handoff-agent {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.handoff-agent:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.handoff-agent-selected {
+  border-color: var(--accent);
+  color: var(--text-0);
+}
+.handoff-agent-state {
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+}
+
+.handoff-task {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  background: var(--bg-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-0);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  padding: var(--space-2);
+}
+
+.handoff-file-list {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-1);
+}
+
+.handoff-muted {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.handoff-seed summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+.handoff-seed-text {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  background: var(--bg-0);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.handoff-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.handoff-error {
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.handoff-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.handoff-btn {
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  border: 1px solid var(--border-light);
+}
+.handoff-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.handoff-btn-cancel {
+  background: none;
+  color: var(--text-2);
+}
+.handoff-btn-start {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

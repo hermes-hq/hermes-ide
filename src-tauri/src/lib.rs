@@ -1,7 +1,7 @@
 mod agent;
 mod agent_catalog;
-mod agent_setup;
 mod agent_doctor;
+mod agent_setup;
 mod analytics;
 mod attention;
 mod claude_config;
@@ -22,6 +22,7 @@ mod git;
 mod inline_pty;
 mod instance;
 mod land;
+mod limits;
 mod menu;
 mod platform;
 mod plugin_features;
@@ -37,8 +38,8 @@ mod review;
 mod saved_workspace;
 mod self_test;
 mod session_host;
-mod track;
 mod task_launcher;
+mod track;
 mod transcript;
 mod turn_ledger;
 mod updater;
@@ -1300,6 +1301,7 @@ mod tests {
             agent_startup: None,
             hosted: false,
             reattached: false,
+            parent_session_id: None,
         };
         database.create_session_v2(&update).unwrap();
 

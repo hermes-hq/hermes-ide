@@ -110,7 +110,8 @@
         "error",
         "exited",
         "session_start",
-        "subagents"
+        "subagents",
+        "limited"
       ]
     },
     "signals": {

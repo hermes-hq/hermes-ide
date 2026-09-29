@@ -61,7 +61,7 @@ One key per thing a real agent does, so a scenario can drive every signal
 path (F11): `p` PermissionRequest then `y`/`n` (PostToolUse or
 PermissionDenied), `?` PreToolUse AskUserQuestion, `t` PreToolUse Bash (no
 matcher hit), `l` PreToolUse ExitPlanMode, `w` UserPromptSubmit, `s` Stop,
-`e` StopFailure, `u`/`d` SubagentStart/SubagentStop, `n` Notification
+`e` StopFailure (`server_error`), `u`/`d` SubagentStart/SubagentStop, `n` Notification
 idle_prompt, `o` an OSC 9 notification (no hook), `m` the OSC 777 Hermes
 marker with this launch's nonce, `x` the same marker with a forged nonce.
 Every hook's stdout is recorded, so a test can see that `hi signal` printed
@@ -98,12 +98,25 @@ launch: `--version` prints `HERMES_FAKE_VERSION` (or the file
 `HERMES_FAKE_AGENT` to the agent it stands in for (default `claude`).
 `e2e/app/scenarios/F15-task-launcher.mjs` and `F16-onboarding-doctor.mjs`
 use this.
+| `rate-limit` | starts, writes `src/login.ts` and appends to `README.md` in its folder, runs the settings file's status line with `rate_limits` (five_hour used up, resetting at `<HERMES_FAKE_DIR>/resets_at`, epoch seconds, or in two hours) and ends the turn on its usage limit: the `StopFailure` hooks with `error: "rate_limit"`, as Claude Code 2.1.283 does |
+| `server-error` | the same, but the turn ends on `error: "server_error"` (not a limit; the negative control of the limit checks) |
+
+In any mode but `prompts` the key `r` stands for "the limit reset and the
+agent goes on": the `Notification` hooks run with
+`notification_type: "quota_auto_resume_fired"`. The key `L` ends another turn
+on the usage limit (the status line and the `StopFailure` hooks again, without
+editing files); `e` ends one on an API error that is not a limit.
+Hook groups with a `matcher` run only when it matches (the error of a
+`StopFailure`, the notification type of a `Notification`, the tool of a tool
+event), like the real CLI.
 
 With `HERMES_FAKE_DIR` set, every launch is recorded to
 `<HERMES_FAKE_DIR>/launch-<n>.json`: argv, cwd, the Hermes environment it
 saw, the settings file's contents, which hooks ran and how it ended.
 `e2e/app/scenarios/N12-launch-and-resume.mjs` and `F27-claude-stop-hook.mjs` put a `claude` shim that runs
-this file first on the app's PATH and reads those records. Tests:
+this file first on the app's PATH and reads those records;
+`e2e/app/scenarios/N19-limits-and-handoff.mjs` does the same with a `claude`
+and a `codex` shim. Tests:
 `tools/fake-agents/test/fake-cli.test.mjs`.
 
 ## Replaying a cassette

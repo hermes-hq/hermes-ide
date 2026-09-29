@@ -104,6 +104,8 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
     case "identity":
     case "subagents":
     case "usage":
+    // N19: a limit travels with its own `limited` status event.
+    case "limit":
       return null;
   }
 }

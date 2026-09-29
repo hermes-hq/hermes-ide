@@ -484,7 +484,14 @@ try {
   const settingsAt = rec1.argv.indexOf("--settings");
   const settingsFile = settingsAt >= 0 ? rec1.argv[settingsAt + 1] : null;
   assert(settingsFile && settingsFile.startsWith(join(app.dataDir, "launch", s1)), `the settings file lives under the app's data folder (${settingsFile})`);
-  assert(rec1.settings && Object.keys(rec1.settings).join() === "hooks", "the settings file holds hooks and nothing else");
+  // Hooks, plus (N19) the status line that reports Claude's usage limits to
+  // hi when the user has no status line of their own — nothing else.
+  const settingsKeys = rec1.settings ? Object.keys(rec1.settings).sort().join() : "";
+  assert(settingsKeys === "hooks" || settingsKeys === "hooks,statusLine", `the settings file holds hooks and nothing else but Hermes' status line (${settingsKeys})`);
+  if (settingsKeys.includes("statusLine")) {
+    const sl = rec1.settings.statusLine;
+    assert(sl?.type === "command" && /\bhi(\.exe)?" signal --agent claude --event StatusLine$/.test(sl.command), `the status line only reports to hi ("${sl?.command}")`);
+  }
   const startHook = rec1.settings.hooks.SessionStart?.[0]?.hooks?.[0];
   assert(
     startHook?.type === "command" && /\bhi(\.exe)?$/.test(startHook.command) && JSON.stringify(startHook.args) === JSON.stringify(["signal", "--agent", "claude"]),

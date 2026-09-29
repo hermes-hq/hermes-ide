@@ -29,7 +29,9 @@
     { "type": "subagents", "at": 1790000009000, "source": "hook:claude", "running": 2 },
     { "type": "status", "at": 1790000010000, "source": "hook:claude", "tags": ["hermes-review#3"], "status": { "kind": "working", "confidence": "exact", "detail": "" } },
     { "type": "usage", "at": 1790000011000, "source": "hook:claude", "inputTokens": 12000, "outputTokens": 3400, "costUsd": 0.4125 },
-    { "type": "usage", "at": 1790000011500, "inputTokens": 800, "outputTokens": null, "costUsd": null }
+    { "type": "usage", "at": 1790000011500, "inputTokens": 800, "outputTokens": null, "costUsd": null },
+    { "type": "limit", "at": 1790000012000, "source": "hook:claude", "state": "limited", "resetsAt": 1790007200000, "window": "five_hour" },
+    { "type": "limit", "at": 1790000013000, "state": "cleared", "resetsAt": null, "window": null }
   ],
   "rejected": [
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
@@ -52,6 +54,8 @@
     { "type": "usage", "at": 1790000009000, "inputTokens": 1.5, "outputTokens": null, "costUsd": null },
     { "type": "usage", "at": 1790000009000, "inputTokens": null, "outputTokens": null, "costUsd": -0.01 },
     { "type": "usage", "at": 1790000009000, "inputTokens": null, "outputTokens": null, "costUsd": "0.50" },
+    { "type": "limit", "at": 1790000009000, "state": "waiting", "resetsAt": null, "window": null },
+    { "type": "limit", "at": 1790000009000, "state": "limited", "resetsAt": "soon", "window": null },
     "not an object"
   ]
 }

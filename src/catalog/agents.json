@@ -31,11 +31,19 @@
             "turn_end": ["Stop"],
             "error": ["StopFailure"],
             "exited": ["SessionEnd"],
-            "subagents": ["SubagentStart", "SubagentStop"]
+            "subagents": ["SubagentStart", "SubagentStop"],
+            "limited": [
+              "StopFailure:rate_limit",
+              "Notification:quota_auto_resume_stale",
+              "Notification:quota_auto_resume_disabled",
+              "Notification:quota_auto_resume_fired",
+              "UserPromptSubmit",
+              "statusLine:rate_limits"
+            ]
           },
           "check_hook": "Stop",
           "confidence": "exact",
-          "note": "Hook entries merge with the user's own hooks; nothing is written to the user's settings."
+          "note": "Hook entries merge with the user's own hooks; nothing is written to the user's settings. 'limited' lists the events that start, update or end a usage limit; the status line (which carries rate_limits) is set only when the user has none of their own."
         },
         "permission_flags": {
           "default": [],

@@ -10,6 +10,7 @@ import { getSettings } from "./api/settings";
 import { initStatusStripPreference } from "./statusStrip/preference";
 import { startTurnLedgerBridge } from "./agent/turns/turnLedgerBridge";
 import { startDoneWhen } from "./doneWhen/controller";
+import { startLimitInbox } from "./limits/limitStatus";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
@@ -64,6 +65,8 @@ void getStartupProblem().then((problem) => {
   void getSettings()
     .then((settings) => initStatusStripPreference(settings))
     .catch(() => {});
+  // N19: a session that hits its usage limit waits in the attention inbox.
+  startLimitInbox();
   void initFeatureFlags().finally(() => {
     // Turn ledger (F20): forward turn boundaries to the backend snapshots
     // while the flag is on; tell the backend to stay off otherwise.

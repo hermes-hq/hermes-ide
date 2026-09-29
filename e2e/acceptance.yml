@@ -986,3 +986,21 @@ features:
       F16-4:
         text: "The usage stats line reads 'off'"
         scenarios: [F16-onboarding-doctor.mjs]
+  N19:
+    name: "Rate limits and handoff"
+    # partial: only Claude reports its limit today (StopFailure rate_limit,
+    # the quota notifications and the status line's rate_limits); other
+    # agents are never shown as limited, which is honest but not "limited".
+    # The reset time comes from the status line Hermes sets per launch, so a
+    # user with a status line of their own sees "limited" without a reset
+    # time. Behind the launchHelper flag: the task travels as a launch
+    # argument through hi, so only agents that take a first prompt are
+    # offered.
+    status: partial
+    criteria:
+      N19-1:
+        text: "A rate-limited Claude session shows \"limited\" with the reset time"
+        scenarios: [N19-limits-and-handoff.mjs]
+      N19-2:
+        text: "Continue in Codex opens a session that references the task and the changed files"
+        scenarios: [N19-limits-and-handoff.mjs]

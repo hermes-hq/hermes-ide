@@ -89,6 +89,20 @@ export interface UsageEvent extends EventBase {
   readonly costUsd: number | null;
 }
 
+/**
+ * N19 (an addition to C0): the agent hit, or left, its vendor's usage
+ * limit. A `limited` travels together with a `status` event of kind
+ * `limited`; this one carries what the status cannot: when the vendor says
+ * the limit resets (epoch ms, null when it did not say) and which limit it
+ * was ("five_hour", "seven_day"...), both as the vendor reported them.
+ */
+export interface LimitEvent extends EventBase {
+  readonly type: "limit";
+  readonly state: "limited" | "cleared";
+  readonly resetsAt: number | null;
+  readonly window: string | null;
+}
+
 export type SessionEvent =
   | StatusEvent
   | TurnStartEvent
@@ -99,7 +113,8 @@ export type SessionEvent =
   | IdentityEvent
   | ExitEvent
   | SubagentsEvent
-  | UsageEvent;
+  | UsageEvent
+  | LimitEvent;
 
 export type SessionEventType = SessionEvent["type"];
 
@@ -114,6 +129,7 @@ export const SESSION_EVENT_TYPES: readonly SessionEventType[] = [
   "exit",
   "subagents",
   "usage",
+  "limit",
 ];
 
 function optionalString(v: unknown): string | null | undefined {
@@ -205,6 +221,14 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       const costUsd = optionalUsd(v.costUsd);
       if (inputTokens === undefined || outputTokens === undefined || costUsd === undefined) return null;
       return { ...base, type: "usage", inputTokens, outputTokens, costUsd };
+    }
+    case "limit": {
+      if (v.state !== "limited" && v.state !== "cleared") return null;
+      const resetsAt = v.resetsAt === undefined || v.resetsAt === null ? null : v.resetsAt;
+      if (resetsAt !== null && !(typeof resetsAt === "number" && Number.isInteger(resetsAt))) return null;
+      const window = optionalString(v.window);
+      if (window === undefined) return null;
+      return { ...base, type: "limit", state: v.state, resetsAt, window };
     }
     default:
       return null;

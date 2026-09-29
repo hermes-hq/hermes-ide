@@ -466,7 +466,7 @@ try {
   assert((await stripOf(app.bridge, s1)).kind === "working", "and the strip did not change");
 
   const seen1 = await driveSession(app.bridge, s1, { expectStrip: true });
-  assert(seen1.find((s) => s.key === "e")?.detail === "rate_limit", "a failed turn shows the agent's own error as detail");
+  assert(seen1.find((s) => s.key === "e")?.detail === "server_error", "a failed turn shows the agent's own error as detail");
   assert(seen1.every((s) => s.source === "hook" && s.sourceText === "hook, exact"), "every hook-driven status is hook, exact");
   // The agent's output so far, with the strip on, read while it is all
   // still on screen: the second session (strip off) is read at the same

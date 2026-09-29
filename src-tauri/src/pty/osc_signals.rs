@@ -169,6 +169,7 @@ pub fn notification_events(
                         | SessionEvent::Exit { at: t, .. }
                         | SessionEvent::Subagents { at: t, .. }
                         | SessionEvent::Usage { at: t, .. }
+                        | SessionEvent::Limit { at: t, .. }
                         | SessionEvent::TurnStart { at: t, .. }
                         | SessionEvent::TurnEnd { at: t, .. }
                         | SessionEvent::TurnFailed { at: t, .. }

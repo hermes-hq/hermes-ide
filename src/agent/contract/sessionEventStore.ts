@@ -53,10 +53,20 @@ export interface SessionEventSnapshot {
   readonly subagents: number;
   /** The latest usage totals the agent itself reported; null until it reports any. */
   readonly usage: SessionUsage | null;
+  /** N19: the usage limit the agent is under, as its last `limit` event
+   *  said, or null (never limited, or the limit cleared). */
+  readonly limit: SessionLimit | null;
   /** The most recent events, oldest first, at most SESSION_EVENT_CAP. */
   readonly events: readonly SessionEvent[];
   /** Bumps on every accepted event; 0 for a session nothing reported on. */
   readonly version: number;
+}
+
+export interface SessionLimit {
+  /** Epoch ms when the vendor says the limit resets; null when it did not say. */
+  readonly resetsAt: number | null;
+  /** The vendor's name for the limit ("five_hour", "seven_day"...), or null. */
+  readonly window: string | null;
 }
 
 const NO_IDENTITY: SessionIdentity = Object.freeze({ vendorSessionId: null, model: null, permissionMode: null });
@@ -72,6 +82,7 @@ function emptySnapshot(sessionId: string): SessionEventSnapshot {
     exit: null,
     subagents: 0,
     usage: null,
+    limit: null,
     events: Object.freeze([]) as readonly SessionEvent[],
     version: 0,
   });
@@ -113,6 +124,11 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       // localised agentError.exitCode / agentError.exitSignal strings.
       next.status = { kind: "exited", confidence: "exact", detail: "" };
       next.turn = { current: null, completed: prev.turn.completed + (prev.turn.current === null ? 0 : 1) };
+      // N19: an agent that is gone is under no limit.
+      next.limit = null;
+      break;
+    case "limit":
+      next.limit = event.state === "limited" ? Object.freeze({ resetsAt: event.resetsAt, window: event.window }) : null;
       break;
     case "usage":
       // Totals as the agent reports them. A part it stopped reporting keeps
@@ -192,7 +208,8 @@ export function subscribeSessionEvents(sessionId: string, listener: Listener): (
 /**
  * Subscribe to every session at once (added by F10 for the attention store,
  * which summarises all sessions; F12's inbox uses it to follow sessions it
- * has not seen yet; F36's plugin API fans the events out to plugins). The
+ * has not seen yet; F36's plugin API fans the events out to plugins; N19's
+ * limit inbox raises and resolves items for every session). The
  * listener runs after that session's own subscribers were woken, on every
  * accepted event and on clear (see AnySessionEventListener). A listener
  * that throws is logged and never stops the others or the store.

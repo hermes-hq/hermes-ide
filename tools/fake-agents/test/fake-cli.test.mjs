@@ -1,7 +1,7 @@
 // The fake vendor CLI must behave like the real one at startup, or the
 // launch-and-resume scenario proves nothing. These tests run it over pipes.
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -488,5 +488,103 @@ describe("fake vendor CLI: agent doctor probes", () => {
 		const res = await run(["--session-id", "p-1", "status"], { env: { HERMES_FAKE_DIR: dir }, keys: "q" });
 		expect(res.code).toBe(0);
 		expect(records(dir)[0].prompt).toBe("status");
+	});
+});
+
+describe("fake vendor CLI: usage limits (N19)", () => {
+	/** Settings like the ones Hermes writes for Claude (N19): limit hooks with matchers and a status line. */
+	function limitSettings(dir) {
+		const marks = join(dir, "hooks.log");
+		const script = join(dir, "hook.mjs");
+		writeFileSync(
+			script,
+			[
+				"import fs from 'node:fs';",
+				"let s=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',(d)=>s+=d);",
+				`process.stdin.on('end',()=>{fs.appendFileSync(${JSON.stringify(marks)}, process.argv[2]+' '+s.replace(/\\n/g,' ')+'\\n');});`,
+			].join("\n"),
+		);
+		const hook = (tag) => [{ type: "command", command: `"${process.execPath}" "${script}" ${tag}`, timeout: 5 }];
+		const file = join(dir, "settings.json");
+		writeFileSync(
+			file,
+			JSON.stringify({
+				hooks: {
+					StopFailure: [{ matcher: "rate_limit", hooks: hook("StopFailure") }],
+					Notification: [
+						{ matcher: "quota_auto_resume_fired", hooks: hook("QuotaFired") },
+						{ matcher: "permission_prompt", hooks: hook("PermissionPrompt") },
+					],
+				},
+				statusLine: { type: "command", command: `"${process.execPath}" "${script}" StatusLine` },
+			}),
+		);
+		return { file, marks };
+	}
+	const logLines = (marks, tag) =>
+		readFileSync(marks, "utf8")
+			.split("\n")
+			.filter((l) => l.startsWith(`${tag} `))
+			.map((l) => JSON.parse(l.slice(tag.length + 1)));
+
+	it("rate-limit mode: edits files, reports its windows through the status line, ends the turn on its limit; r resumes", async () => {
+		const dir = tmp();
+		const work = tmp();
+		writeFileSync(join(work, "README.md"), "# repo\n");
+		writeFileSync(join(dir, "resets_at"), "1790007200\n");
+		const { file, marks } = limitSettings(dir);
+		const res = await run(["--session-id", "rl-1", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "rate-limit" },
+			keys: "rq",
+			afterMs: 2500,
+			cwd: work,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: usage limit reached");
+		expect(readFileSync(join(work, "src", "login.ts"), "utf8")).toContain("login");
+		expect(readFileSync(join(work, "README.md"), "utf8")).toContain("in progress");
+		const [status] = logLines(marks, "StatusLine");
+		expect(status.rate_limits.five_hour).toEqual({ used_percentage: 100, resets_at: 1790007200 });
+		const [stop] = logLines(marks, "StopFailure");
+		expect(stop).toMatchObject({ hook_event_name: "StopFailure", error: "rate_limit", session_id: "rl-1" });
+		const [fired] = logLines(marks, "QuotaFired");
+		expect(fired.notification_type).toBe("quota_auto_resume_fired");
+		// A matcher that does not match keeps its hook from running.
+		expect(logLines(marks, "PermissionPrompt")).toEqual([]);
+	});
+
+	it("L ends another turn on the limit (status line and StopFailure again); q then runs SessionEnd", async () => {
+		const dir = tmp();
+		const work = tmp();
+		const { file, marks } = limitSettings(dir);
+		const res = await run(["--session-id", "rl-2", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "normal" },
+			keys: "Lq",
+			afterMs: 2500,
+			cwd: work,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: usage limit reached");
+		expect(existsSync(join(work, "src"))).toBe(false); // no edits, only the limit
+		expect(logLines(marks, "StatusLine")).toHaveLength(1);
+		expect(logLines(marks, "StopFailure")[0]).toMatchObject({ error: "rate_limit", session_id: "rl-2" });
+		expect(records(dir)[0].exit.why).toBe("q");
+	});
+
+	it("server-error mode ends the turn on another error, which the rate_limit matcher does not run for", async () => {
+		const dir = tmp();
+		const work = tmp();
+		const { file, marks } = limitSettings(dir);
+		const res = await run(["--session-id", "se-1", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "server-error" },
+			keys: "q",
+			afterMs: 2500,
+			cwd: work,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("fake-cli: the API failed");
+		expect(logLines(marks, "StatusLine")).toHaveLength(1);
+		expect(logLines(marks, "StopFailure")).toEqual([]);
+		expect(records(dir)[0].hooksRan.find((h) => h.event === "StopFailure").results).toEqual([]);
 	});
 });

@@ -1220,3 +1220,51 @@
   outline: none;
   min-width: 0;
 }
+
+/* N19: an agent on its usage limit, and handed-off sessions under their parent.
+ * The limit gets a line of its own (the row is narrow), and the PTY guess
+ * next to it ("working") is hidden while the agent itself says it is limited. */
+.session-item-meta:has(.session-limit-tag) {
+  flex-wrap: wrap;
+}
+.session-limit-tag ~ .session-phase-tag {
+  display: none;
+}
+.session-limit-tag {
+  order: 10;
+  flex: 1 0 100%;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--warning);
+  letter-spacing: var(--tracking-snug);
+  min-width: 0;
+}
+.session-limit-word {
+  font-weight: 600;
+}
+/* The reset time is the point of the tag: it never gets cut; the button
+ * moves to the next line instead when the row is too narrow. */
+.session-limit-detail {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.session-limit-handoff {
+  background: none;
+  border: 1px solid var(--warning-dim);
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  font-size: var(--text-2xs);
+  padding: 0 var(--space-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.session-limit-handoff:hover {
+  background: var(--warning-dim);
+}
+.session-item-wrapper-nested {
+  margin-left: var(--space-3);
+  border-left: 1px solid var(--border-light);
+}

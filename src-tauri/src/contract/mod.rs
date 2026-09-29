@@ -187,6 +187,31 @@ pub enum SessionEvent {
         output_tokens: Option<u64>,
         cost_usd: Option<Usd>,
     },
+    /// N19 (an addition to C0): the agent hit, or left, its vendor's usage
+    /// limit. `resetsAt` (epoch ms) is when the vendor says the limit
+    /// resets, or null when it did not say; `window` is the vendor's name
+    /// for the limit that was hit ("five_hour", "seven_day"...), or null.
+    /// A `limited` is sent together with a `status` event of kind
+    /// `limited`, so the status stays the one thing every renderer reads.
+    #[serde(rename_all = "camelCase")]
+    Limit {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
+        state: LimitState,
+        resets_at: Option<i64>,
+        window: Option<String>,
+    },
+}
+
+/// Whether a [`SessionEvent::Limit`] starts or ends a limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitState {
+    Limited,
+    Cleared,
 }
 
 /// The one Tauri event every SessionEvent travels on.
@@ -268,7 +293,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 14);
+        assert_eq!(events.len(), 16);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -276,7 +301,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&event).unwrap(), raw);
             seen.insert(raw["type"].as_str().unwrap().to_string());
         }
-        assert_eq!(seen.len(), 10, "every variant appears: {seen:?}");
+        assert_eq!(seen.len(), 11, "every variant appears: {seen:?}");
     }
 
     #[test]

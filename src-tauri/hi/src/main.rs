@@ -467,6 +467,36 @@ unsafe extern "system" fn swallow_ctrl_event(_ctrl_type: u32) -> i32 {
 
 /// Run the agent to its end. With `running_after`, call it once when the
 /// agent is still running after that long.
+/// Whether Windows runs this program through `cmd.exe` (a `.bat` or `.cmd`
+/// file, like the shims npm installs for `codex` or `gemini`).
+pub fn is_batch_file(program: &Path) -> bool {
+    program
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"))
+}
+
+/// The arguments as a batch file can take them. `cmd.exe` has no way to
+/// pass a line break inside an argument (the standard library refuses to
+/// start the program rather than let it split the line), so a multi-line
+/// first prompt — a handoff's task and file list — reaches a batch shim
+/// with each line break as one space. Nothing else changes, and programs
+/// that are not batch files get the arguments untouched.
+pub fn args_for(program: &Path, args: &[String]) -> Vec<String> {
+    if !is_batch_file(program) {
+        return args.to_vec();
+    }
+    args.iter()
+        .map(|a| {
+            if a.contains(['\r', '\n']) {
+                a.replace("\r\n", " ").replace(['\r', '\n'], " ")
+            } else {
+                a.clone()
+            }
+        })
+        .collect()
+}
+
 fn run_child(
     resolved: &Path,
     args: &[String],
@@ -475,7 +505,7 @@ fn run_child(
     running_after: Option<(Duration, &dyn Fn())>,
 ) -> std::io::Result<ExitStatus> {
     let mut cmd = Command::new(resolved);
-    cmd.args(args);
+    cmd.args(args_for(resolved, args));
     cmd.envs(env);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
@@ -783,6 +813,47 @@ pub fn tags_in_text(text: &str) -> Vec<String> {
 /// The field a spool line carries the markers in.
 const TAGS_FIELD: &str = "hermes_tags";
 const MAX_TAGS: usize = 16;
+/// The status line input's `rate_limits` (N19), reduced to what Hermes
+/// reads: per window (`five_hour`, `seven_day`...) its `used_percentage` (or
+/// `utilization`) and `resets_at`. At most eight windows with short names;
+/// anything else is dropped, so a vendor adding fields never bloats the
+/// spool.
+pub fn kept_rate_limits(v: &serde_json::Value) -> Option<serde_json::Value> {
+    let map = v.as_object()?;
+    let mut out = serde_json::Map::new();
+    for (name, window) in map.iter().take(8) {
+        let valid_name = !name.is_empty()
+            && name.len() <= 32
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        let Some(window) = window.as_object().filter(|_| valid_name) else {
+            continue;
+        };
+        let mut kept = serde_json::Map::new();
+        for key in ["used_percentage", "utilization"] {
+            if let Some(n) = window.get(key).filter(|x| x.is_number()) {
+                kept.insert(key.to_string(), n.clone());
+            }
+        }
+        match window.get("resets_at") {
+            Some(n @ serde_json::Value::Number(_)) => {
+                kept.insert("resets_at".to_string(), n.clone());
+            }
+            Some(serde_json::Value::String(t)) if t.len() <= 64 => {
+                kept.insert(
+                    "resets_at".to_string(),
+                    serde_json::Value::String(t.clone()),
+                );
+            }
+            _ => {}
+        }
+        if !kept.is_empty() {
+            out.insert(name.clone(), serde_json::Value::Object(kept));
+        }
+    }
+    (!out.is_empty()).then_some(serde_json::Value::Object(out))
+}
 
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -840,6 +911,9 @@ pub fn signal_line(
                 }
                 _ => {}
             }
+        }
+        if let Some(rl) = map.get("rate_limits").and_then(kept_rate_limits) {
+            kept.insert("rate_limits".to_string(), rl);
         }
     }
     let kept_str = |key: &str| {
@@ -1559,6 +1633,69 @@ mod tests {
         );
         assert!(plain["payload"].get("hermes_tags").is_none());
         assert!(plain["payload"].get("prompt").is_none());
+    }
+
+    #[test]
+    fn a_batch_shim_gets_line_breaks_as_spaces_and_everything_else_untouched() {
+        let args = vec![
+            "-c".to_string(),
+            "Task:\nFix \"login\"\r\n- new: src/a.ts\rend".to_string(),
+            "100%".to_string(),
+        ];
+        for shim in ["codex.cmd", "C:/npm/gemini.CMD", "tool.bat"] {
+            assert!(is_batch_file(Path::new(shim)), "{shim}");
+            assert_eq!(
+                args_for(Path::new(shim), &args),
+                vec!["-c", "Task: Fix \"login\" - new: src/a.ts end", "100%"]
+            );
+        }
+        for program in ["codex", "codex.exe", "/usr/local/bin/codex", "run.cmd.sh"] {
+            assert!(!is_batch_file(Path::new(program)), "{program}");
+            assert_eq!(args_for(Path::new(program), &args), args);
+        }
+    }
+
+    #[test]
+    fn a_status_line_record_keeps_only_the_rate_limit_numbers() {
+        // What Claude Code pipes to a status line command (trimmed).
+        let payload = serde_json::json!({
+            "session_id": "abc",
+            "model": { "id": "fake-model", "display_name": "Fake" },
+            "workspace": { "current_dir": "/repo" },
+            "rate_limits": {
+                "five_hour": { "used_percentage": 100, "resets_at": 1790007200, "extra": "x" },
+                "seven_day": { "used_percentage": 41.5, "resets_at": "2026-09-30T10:00:00Z" },
+                "bad name!": { "used_percentage": 1 },
+                "not_an_object": 7,
+                "empty": { "label": "nothing we read" },
+            },
+        });
+        let line = signal_line(
+            Some("StatusLine"),
+            "claude",
+            "h1",
+            Some("n"),
+            Some(&payload),
+        );
+        assert_eq!(line["event"], "StatusLine");
+        let kept = line["payload"].as_object().unwrap();
+        assert!(kept.get("model").is_none() && kept.get("workspace").is_none());
+        assert_eq!(
+            kept["rate_limits"],
+            serde_json::json!({
+                "five_hour": { "used_percentage": 100, "resets_at": 1790007200 },
+                "seven_day": { "used_percentage": 41.5, "resets_at": "2026-09-30T10:00:00Z" },
+            })
+        );
+        // No rate limits at all: no key.
+        let none = signal_line(
+            Some("StatusLine"),
+            "claude",
+            "h1",
+            Some("n"),
+            Some(&serde_json::json!({ "rate_limits": {} })),
+        );
+        assert!(none["payload"].get("rate_limits").is_none());
     }
 
     #[test]

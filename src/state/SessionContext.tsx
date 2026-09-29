@@ -90,6 +90,7 @@ import { createRespawnQueue, respawnJoinDisabledForTest } from "../utils/respawn
 import { destroyAgentSessionStore } from "../agent/agentSessionStore";
 import { cleanupSessionRefs } from "../utils/sessionRefCleanup";
 import { cacheAgentInit, clearAgentInitCache, peekAgentInitCache } from "../agent/useAgentInit";
+import { clearSessionEvents } from "../agent/contract/sessionEventStore";
 import {
   buildUserEnvelope,
   echoUserEnvelope,
@@ -1519,6 +1520,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // otherwise the Map grows unbounded across long-running app
         // sessions.
         clearAgentInitCache(event.payload);
+        // Forget its 2.0 session events: whatever waited on it (a usage
+        // limit in the inbox, N19) goes with it.
+        clearSessionEvents(event.payload);
         dispatch({ type: "SESSION_REMOVED", id: event.payload });
       });
       unlisteners.push(u2);
@@ -1652,6 +1656,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 // Session host (sessionHost flag): reattach to the program
                 // the host kept running under this id, if it still has it.
                 sessionHost: isFeatureFlagEnabled("sessionHost"),
+                parentSessionId: saved.parent_session_id ? (oldToNew.get(saved.parent_session_id) ?? saved.parent_session_id) : null,
               });
 
               // Agent-mode restore: spawn the Claude subprocess that the
@@ -1955,6 +1960,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         featureTracks: isFeatureFlagEnabled("featureTracks"),
         sessionHost: isFeatureFlagEnabled("sessionHost"),
         initialPrompt: mode === "terminal" ? opts?.initialPrompt?.trim() || null : null,
+        seedPrompt: opts?.seedPrompt || null,
+        parentSessionId: opts?.parentSessionId || null,
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.
@@ -2279,6 +2286,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // terminal-mode sessions.
             ...(claudeUuid ? { claude_session_uuid: claudeUuid } : {}),
             ...(s.vendor_session_id ? { vendor_session_id: s.vendor_session_id } : {}),
+            ...(s.parent_session_id ? { parent_session_id: s.parent_session_id } : {}),
             ...(agentModel ? { agent_model: agentModel } : {}),
             ...(agentPerm ? { agent_permission_mode: agentPerm } : {}),
             ...(agentEffort ? { agent_effort: agentEffort } : {}),
