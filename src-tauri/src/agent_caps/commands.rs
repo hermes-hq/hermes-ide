@@ -644,6 +644,7 @@ pub fn session_launch(
         account_id,
         profile_env,
         login: options.purpose.as_deref() == Some("login"),
+        relaunch: false,
     })
 }
 
@@ -760,6 +761,7 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
     launch.account_id = resolved.account_id;
     launch.profile_env = resolved.profile_env;
     launch.login = false;
+    launch.relaunch = true;
 
     let prepared = {
         let mut s = session.lock().map_err(|e| e.to_string())?;

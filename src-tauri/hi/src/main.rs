@@ -93,6 +93,10 @@ pub struct LaunchSpec {
     /// Hermes may stop this launch: the agent's CLI refused it (a model it
     /// does not know, no sign-in) within its first seconds.
     pub stop: Option<StopSpec>,
+    /// Clear the screen before the agent starts: a relaunch after a refused
+    /// launch, so a terminal that repaints its screen cannot replay the
+    /// old refusal.
+    pub clear_screen: bool,
 }
 
 /// How Hermes asks `hi` to stop a launch the agent's CLI refused. Hermes
@@ -242,6 +246,10 @@ impl LaunchSpec {
             args: field_args(&v, "args")?,
             fallback,
             stop,
+            clear_screen: v
+                .get("clear_screen")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false),
         })
     }
 }
@@ -870,6 +878,11 @@ fn cmd_run(arg: &str) -> i32 {
     // Hermes reads the agent's refusal only from output after this marker:
     // a terminal that repaints its screen (Windows' ConPTY) would otherwise
     // replay an earlier launch's refusal into this one.
+    if spec.clear_screen {
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x1b[H\x1b[2J");
+        let _ = out.flush();
+    }
     if spec.stop.is_some() {
         if let Some(nonce) = reporter.nonce.as_deref() {
             let mut out = std::io::stdout();
@@ -2043,6 +2056,9 @@ mod tests {
         );
         let plain = r#"{"v":1,"program":"claude"}"#;
         assert!(LaunchSpec::parse(plain).unwrap().stop.is_none());
+        assert!(!LaunchSpec::parse(plain).unwrap().clear_screen);
+        let again = r#"{"v":1,"program":"claude","clear_screen":true}"#;
+        assert!(LaunchSpec::parse(again).unwrap().clear_screen);
     }
 
     #[test]

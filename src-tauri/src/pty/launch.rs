@@ -130,6 +130,8 @@ pub struct LaunchInput<'a> {
     pub effort: Option<&'a str>,
     pub profile_env: Option<(&'a str, &'a str)>,
     pub login: bool,
+    /// Clear the screen before the agent starts (a relaunch after a refusal).
+    pub clear_screen: bool,
 }
 
 /// The launch file `hi run` reads. Field names are the wire format.
@@ -148,6 +150,10 @@ pub struct LaunchSpec {
     /// catalog `error_signatures` matched its output), and for how long.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<StopSpec>,
+    /// Clear the screen before the agent starts (a relaunch after a
+    /// refusal; see `SessionLaunch::relaunch`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clear_screen: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -938,6 +944,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             args,
             fallback,
             stop: stop_spec(agent, input.session_dir),
+            clear_screen: input.clear_screen,
         },
         files: signals.files,
         vendor_session_id,
@@ -1003,6 +1010,7 @@ fn plan_login(agent: &Agent, input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             args: args.to_vec(),
             fallback: None,
             stop: None,
+            clear_screen: false,
         },
         files: Vec::new(),
         vendor_session_id: None,
@@ -1360,6 +1368,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
             .as_ref()
             .map(|p| (p.name.as_str(), p.value.as_str())),
         login: s.agent_launch.login,
+        clear_screen: s.agent_launch.relaunch,
     }) else {
         return HelperLaunch::TypeCommand;
     };
@@ -1412,6 +1421,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
     // The seed is for this session's first start only; it now lives in the
     // launch file.
     s.seed_prompt = None;
+    s.agent_launch.relaunch = false;
     s.vendor_session_id = plan.vendor_session_id.clone();
     s.signal_nonce = Some(plan.nonce.clone());
     s.agent_startup = Some(AgentStartup {
@@ -2401,6 +2411,7 @@ mod tests {
             effort: None,
             profile_env: None,
             login: false,
+            clear_screen: false,
         }
     }
 
@@ -2489,6 +2500,18 @@ mod tests {
         let stop = plan.spec.stop.as_ref().unwrap();
         assert_eq!(stop.file, dir.join(STOP_FILE).to_string_lossy());
         assert_eq!(stop.window_ms, 90_000);
+        assert!(
+            !plan.spec.clear_screen
+                && !serde_json::to_string(&plan.spec)
+                    .unwrap()
+                    .contains("clear_screen")
+        );
+        i.clear_screen = true;
+        let again = plan_launch(&i).unwrap();
+        assert!(
+            serde_json::to_value(&again.spec).unwrap()["clear_screen"] == true,
+            "a relaunch clears the screen first"
+        );
 
         // A resume keeps the profile (the conversation lives there) and the model.
         let mut r = input("claude", Some("abc"), hi, dir);

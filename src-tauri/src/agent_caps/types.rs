@@ -233,6 +233,12 @@ pub struct SessionLaunch {
     /// Run the CLI's sign-in instead of the agent.
     #[serde(default)]
     pub login: bool,
+    /// The next launch starts again after a refused one (the banner's
+    /// buttons): `hi` clears the screen first, so a terminal that repaints
+    /// its screen (Windows' ConPTY) cannot replay the old refusal. Never
+    /// saved or sent.
+    #[serde(skip)]
+    pub relaunch: bool,
 }
 
 impl SessionLaunch {
