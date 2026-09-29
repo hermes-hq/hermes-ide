@@ -29,6 +29,7 @@ export const CI_EXCLUDED = {
   "N11-split-cwd-report.mjs": "N11 is planned and macOS-only (see e2e/acceptance.yml)",
   "N11-transcript-per-project.mjs": "N11 is planned and macOS-only (see e2e/acceptance.yml)",
   "N11-workbench-notes-restore.mjs": "N11 is planned and macOS-only (see e2e/acceptance.yml)",
+  "REAL-claude-launch.mjs": "local only: needs a signed-in real claude and costs a turn; it says SKIP in CI",
 };
 
 /** The scenarios the shard jobs split between them: every file not listed above. */

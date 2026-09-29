@@ -1064,3 +1064,21 @@ features:
       F24-2:
         text: "Idle and per-agent memory stay within the CI budgets"
         scenarios: [F24-fleet-perf.mjs]
+  REAL:
+    name: "The real Claude Code, started the way a person starts it"
+    # Local only: e2e/app/scenarios/REAL-claude-launch.mjs needs a signed-in
+    # `claude` on the machine and costs one tiny turn, so it says SKIP in CI
+    # (e2e/app/ci-plan.mjs excludes it from the shards) and this entry asks
+    # for no result. Run it by hand before a release; it passed on the
+    # maintainer's Mac on 2026-09-29.
+    status: planned
+    criteria:
+      REAL-1:
+        text: "New Session with a task starts claude through the launch helper (shell -> hi run -> claude), with the task as its first prompt and the per-launch hooks file passed with --settings"
+        scenarios: ["REAL-claude-launch.mjs@darwin,linux"]
+      REAL-2:
+        text: "The start and the turn's end arrive as exact hook signals; no notice appears while the first session starts"
+        scenarios: ["REAL-claude-launch.mjs@darwin,linux"]
+      REAL-3:
+        text: "None of a parent Claude Code session's environment markers reach the agent; it saves its transcript; ~/.claude/settings.json is byte-identical afterwards"
+        scenarios: ["REAL-claude-launch.mjs@darwin,linux"]
