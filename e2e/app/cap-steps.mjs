@@ -8,7 +8,7 @@
 // refuse the models a scenario lists (see the fake's header).
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { REPO_ROOT, launchApp, sleep } from "./harness.mjs";
@@ -224,4 +224,13 @@ export async function waitForTerminalText(bridge, sessionId, test, what, timeout
     await sleep(100);
   }
   throw new Error(`terminal never showed ${what} within ${timeoutMs} ms. Last content:\n${text}`);
+}
+
+/** Delete the work folder; on Windows a shell that is still closing can hold it a moment, which is not a failure. */
+export function removeWork(f, log) {
+  try {
+    rmSync(f.work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  } catch (e) {
+    log(`  (could not delete the work folder yet: ${e.code ?? e.message})`);
+  }
 }

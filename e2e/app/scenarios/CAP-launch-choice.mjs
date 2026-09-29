@@ -44,6 +44,7 @@ import {
   logins,
   onWindows,
   records,
+  removeWork,
   registryPath,
   setFake,
   setFakeMode,
@@ -290,7 +291,7 @@ try {
     /* nothing recorded */
   }
   restorePath?.();
-  rmSync(f.work, { recursive: true, force: true });
+  removeWork(f, log);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

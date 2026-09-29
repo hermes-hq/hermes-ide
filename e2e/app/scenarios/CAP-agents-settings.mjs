@@ -41,6 +41,7 @@ import {
   logins,
   openAgentsSettings,
   registryPath,
+  removeWork,
   setFake,
   setupFakes,
 } from "../cap-steps.mjs";
@@ -236,7 +237,7 @@ try {
     /* nothing recorded */
   }
   restorePath?.();
-  rmSync(f.work, { recursive: true, force: true });
+  removeWork(f, log);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
