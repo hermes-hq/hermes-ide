@@ -46,9 +46,17 @@ import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } fro
 const SCENARIO = "F03-retire-autopilot";
 const startedAt = Date.now();
 const DB_FILE = "hermes_idea_v3.db";
-const SCHEMA_VERSION = 4;
-/** Tables created by schema steps after F03's step 2. */
-const ADDED_BY_LATER_STEPS = ["agent_turns"];
+const SCHEMA_VERSION = 5;
+/** Tables created by schema steps after F03's step 2 (3: turn ledger; 5: launch choices, CAP). */
+const ADDED_BY_LATER_STEPS = [
+  "agent_turns",
+  "agent_accounts",
+  "agent_model_rejections",
+  "launch_history",
+  "launch_memory",
+  "launch_preset_prompts_dismissed",
+  "launch_presets",
+];
 const FIXTURE = join(REPO_ROOT, "src-tauri", "tests", "fixtures", "db", "v1.4.0.sql");
 const NEGATIVE = process.env.HERMES_E2E_F03_NEGATIVE === "1";
 

@@ -81,6 +81,25 @@ if (!NEGATIVE) {
 setFakeMode(f, "normal");
 
 const recordsOf = (sid) => records(f).filter((r) => r.env?.HERMES_SESSION_ID === sid);
+/** Whether a process is still running. */
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+/** The session's latest launch record once its fake has ended (recorded, or its process gone). */
+async function waitStopped(sid, what, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const rec = recordsOf(sid).at(-1);
+    if (rec && (rec.exit || !pidAlive(rec.pid))) return rec;
+    if (Date.now() > deadline) throw new Error(`${what}: the fake still runs after ${timeoutMs} ms`);
+    await sleep(150);
+  }
+}
 const chip = (bridge, sid) =>
   bridge.eval(`
     const row = e2e.first('.session-item[data-session-item-id="${sid}"]');
@@ -164,9 +183,11 @@ try {
   assert(b2.body.includes("There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it.") && b2.body.includes("Nothing ran."), "Claude's own line and \"Nothing ran.\"");
   assert(b2.actions.map((a) => a.kind).join(",") === "retry-default,pick-model", `offers Retry with default model and Pick another model (${b2.actions.map((a) => a.text).join(" | ")})`);
   assert(bannerMs < 15_000, `within seconds (${bannerMs} ms)`);
-  const rec2 = await waitForRecord(f, "the refused launch to end", (r) => r.env?.HERMES_SESSION_ID === s2 && r.exit, 15_000);
-  log(`  the fake: exit ${JSON.stringify(rec2.exit)}; hooks ${rec2.hooksRan.length}; turns ${rec2.turns.length}`);
-  assert(rec2.exit.why === (onWindows ? rec2.exit.why : "SIGTERM"), `Hermes stopped the agent (${rec2.exit.why})`);
+  const rec2 = await waitStopped(s2, "the refused launch to end", 15_000);
+  log(`  the fake: exit ${JSON.stringify(rec2.exit)}; alive ${pidAlive(rec2.pid)}; hooks ${rec2.hooksRan.length}; turns ${rec2.turns.length}`);
+  // POSIX: SIGTERM, which the fake records; Windows: the process tree is
+  // ended (TerminateProcess), so the fake records nothing and is just gone.
+  assert(onWindows ? !pidAlive(rec2.pid) : rec2.exit?.why === "SIGTERM", `Hermes stopped the agent (${rec2.exit?.why ?? "process gone"})`);
   assert(rec2.hooksRan.length === 0 && rec2.turns.length === 0 && rec2.prompts.length === 0, "nothing ran: no hook, no turn, no prompt");
   await waitForTerminalText(bridge, s2, (t) => t.includes("hermes: claude refused this launch; Hermes stopped it."), "hi's stop line", 15_000);
   const snap2 = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(s2)});`);
@@ -190,11 +211,11 @@ try {
   const rec3start = await waitForRecord(f, "the codex launch", (r) => r.env?.HERMES_SESSION_ID === s3);
   assert(rec3start.argv.join(" ").includes('-m gpt-fake-old') && rec3start.argv.join(" ").includes('-c model_reasoning_effort="medium"'), `codex got -m and -c model_reasoning_effort (${JSON.stringify(rec3start.argv)})`);
   const { banner: b3 } = await waitForBanner(bridge, s3, 30_000);
-  const rec3 = await waitForRecord(f, "codex to be stopped", (r) => r.env?.HERMES_SESSION_ID === s3 && r.exit, 20_000);
+  const rec3 = await waitStopped(s3, "codex to be stopped", 20_000);
   const stoppedAfter = Date.now() - t3;
   log(`  codex stopped after ${stoppedAfter} ms (${JSON.stringify(rec3.exit)}); banner: ${b3.title}`);
   assert(b3.reason === "model" && b3.body.includes("The model `gpt-fake-old` does not exist or you do not have access to it."), "Codex's own 404 line");
-  assert(stoppedAfter < 20_000 && rec3.exit.t < 20_000, `the minute of reconnecting was cut short (${rec3.exit.t} ms)`);
+  assert(stoppedAfter < 20_000 && (rec3.exit?.t ?? 0) < 20_000, `the minute of reconnecting was cut short (${stoppedAfter} ms)`);
   const codexCaps = await invoke(bridge, "get_agent_capabilities", { agentId: "codex", accountId: null, refresh: false });
   const old = codexCaps.models.find((m) => m.id === "gpt-fake-old");
   log(`  codex models: ${codexCaps.models.map((m) => `${m.id}${m.available ? "" : " (off)"}`).join(", ")}`);
