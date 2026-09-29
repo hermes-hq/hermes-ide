@@ -1,0 +1,93 @@
+/* ─── Launch refused (2.0) ─────────────────────────────────────────── */
+/* Above a terminal session whose CLI refused the launch: the CLI's words,
+   "nothing ran", and the next step. */
+
+.launch-rejected {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  margin: 6px 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--danger, #c2413b) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger, #c2413b) 10%, var(--bg-1));
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+.launch-rejected-title {
+  font-weight: 600;
+}
+
+.launch-rejected-body {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.launch-rejected-vendor {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-1);
+  word-break: break-word;
+}
+
+.launch-rejected-actions,
+.launch-rejected-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.launch-rejected-action,
+.launch-rejected-start {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.launch-rejected-action.primary,
+.launch-rejected-start.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.launch-rejected-action:disabled,
+.launch-rejected-start:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.launch-rejected-dismiss {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--text-base, 14px);
+  cursor: pointer;
+}
+
+.launch-rejected-pick label {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+.launch-rejected-pick select {
+  font-size: var(--text-xs);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.launch-rejected-error {
+  color: var(--danger, var(--warning));
+  font-size: var(--text-xs);
+}

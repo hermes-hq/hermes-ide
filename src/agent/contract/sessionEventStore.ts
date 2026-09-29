@@ -13,7 +13,7 @@
 // component re-renders exactly when its session changed.
 
 import { useSyncExternalStore } from "react";
-import type { SessionEvent } from "./events";
+import type { LaunchRejectedEvent, SessionEvent } from "./events";
 import { UNKNOWN_STATUS, type AgentStatus } from "./status";
 
 /** How many events a session keeps in memory (oldest dropped first). */
@@ -70,6 +70,8 @@ export interface SessionEventSnapshot {
   readonly context: SessionContextUsage | null;
   /** How many times the agent compacted its context. */
   readonly compactions: number;
+  /** CAP: the CLI refused the last launch (Hermes stopped it), until a turn starts. */
+  readonly rejection: LaunchRejectedEvent | null;
   /** The most recent events, oldest first, at most SESSION_EVENT_CAP. */
   readonly events: readonly SessionEvent[];
   /** Bumps on every accepted event; 0 for a session nothing reported on. */
@@ -99,6 +101,7 @@ function emptySnapshot(sessionId: string): SessionEventSnapshot {
     limit: null,
     context: null,
     compactions: 0,
+    rejection: null,
     events: Object.freeze([]) as readonly SessionEvent[],
     version: 0,
   });
@@ -114,6 +117,8 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       break;
     case "turn_start":
       next.turn = { current: event.n, completed: prev.turn.completed };
+      // A turn started: the launch was taken.
+      next.rejection = null;
       break;
     case "turn_end":
     case "turn_failed":
@@ -161,6 +166,11 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       break;
     case "compacted":
       next.compactions = prev.compactions + 1;
+      break;
+    case "launch_rejected":
+      next.rejection = event;
+      // Hermes stopped the launch: an exact error with the CLI's words.
+      next.status = { kind: "error", confidence: "exact", detail: event.vendorMessage };
       break;
   }
   return Object.freeze(next);

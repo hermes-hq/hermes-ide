@@ -1004,6 +1004,18 @@ function AppContent() {
     if (session) showSession(session.id);
   }, [createSession, showSession, t]);
 
+  /** 2.0: sign an account Hermes added in: the CLI's sign-in, in that account's profile. */
+  const signInAccount = useCallback(async (agentId: string, accountId: string) => {
+    setTaskLauncherOpen(false);
+    const session = await createSession({
+      aiProvider: agentId,
+      mode: "terminal",
+      label: t("agentError.signInSessionLabel", { agent: getAgent(agentId)?.name ?? agentId }),
+      agentLaunch: { accountId, purpose: "login" },
+    });
+    if (session) showSession(session.id);
+  }, [createSession, showSession, t]);
+
   const runTaskLaunch = useCallback(async (req: TaskLaunchRequest) => {
     const result = await launchTask(req, {
       projectFor: async (root) => {
@@ -1634,6 +1646,7 @@ function AppContent() {
           pluginRuntime={pluginRuntime}
           pluginRefreshTrigger={pluginUpdater.updateResults.length}
           onSignInAgent={(agentId) => void signInAgent(agentId)}
+          onSignInAccount={(agentId, accountId) => void signInAccount(agentId, accountId)}
           onOpenAdvancedCreator={openAdvancedCreator}
           onConfirmPluginUpdate={(plugin) => {
             const info = pluginUpdater.updatesAvailable.find((u) => u.id === plugin.id);

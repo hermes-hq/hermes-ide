@@ -58,7 +58,10 @@ pub fn capabilities(
     let agent = agent(agent_id)?;
     let key = account_id.unwrap_or("");
     let host = host();
-    if !refresh {
+    if refresh {
+        // Every account of the agent is probed again, not only this one.
+        discover::invalidate(agent_id);
+    } else {
         let version = || {
             let (bin, args) = agent.detect.as_ref()?.command.split_first()?;
             let path = host.find(bin)?;

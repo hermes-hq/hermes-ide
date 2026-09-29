@@ -2175,6 +2175,11 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                         }
                         if let SpoolEvent::Exited { .. } = &event {
                             crate::agent_caps::watch::end_soon(&session_id);
+                            // A sign-in (Add account) ended: the account's
+                            // state is asked again next time.
+                            if s.agent_launch.login {
+                                crate::agent_caps::discover::invalidate(&agent);
+                            }
                         }
                         if let SpoolEvent::Exited { exit_code, error } = &event {
                             log::info!(

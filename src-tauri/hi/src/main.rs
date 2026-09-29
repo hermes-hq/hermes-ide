@@ -482,11 +482,11 @@ pub fn stop_requested(file: &Path, nonce: Option<&str>) -> Option<String> {
 }
 
 /// Sequences that give the terminal back after a full-screen agent was
-/// stopped mid-draw: main screen, cursor shown, colours reset, mouse
+/// stopped mid-draw: main screen (without moving the cursor), cursor shown, colours reset, mouse
 /// reporting, bracketed paste and the kitty keyboard protocol off, normal
 /// keypad.
 pub const TERMINAL_RESET: &str =
-    "\x1b[?1049l\x1b[?25h\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b>";
+    "\x1b[?1047l\x1b[?25h\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b>";
 
 /// The lines `hi` prints after stopping a refused launch.
 pub fn stopped_text(agent: &str, vendor_message: &str) -> String {
@@ -568,6 +568,14 @@ fn stop_child(child: &mut std::process::Child) -> std::io::Result<ExitStatus> {
     }
     #[cfg(not(unix))]
     {
+        // A .cmd shim (an npm-installed CLI) runs the agent as its child:
+        // end the whole tree, then the shim itself.
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
         let _ = child.kill();
         child.wait()
     }

@@ -500,7 +500,7 @@ impl Host for RealHost {
 /// How long a result is trusted without asking the CLI for its version again.
 const VERSION_RECHECK: Duration = Duration::from_secs(60);
 /// How long a result is kept at most (sign-in can change outside Hermes).
-const MAX_AGE: Duration = Duration::from_secs(10 * 60);
+const MAX_AGE: Duration = Duration::from_secs(2 * 60);
 
 struct Cached {
     caps: AgentCapabilities,

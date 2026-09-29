@@ -7,6 +7,9 @@ import { ProviderActionsBar } from "./ProviderActionsBar";
 import { AgentSetupChips } from "./AgentSetupChips";
 import { TerminalPane } from "./TerminalPane";
 import { SessionStatusStrip } from "./SessionStatusStrip";
+import { LaunchRejectedBanner } from "./LaunchRejectedBanner";
+import { splitAfterCreateActions } from "../state/splitAfterCreate";
+import { getAgent } from "../catalog/agentCatalog";
 import { useStatusStripEnabled } from "../statusStrip/preference";
 import { TurnBar } from "./TurnBar";
 import { isFeatureFlagEnabled } from "../featureFlags";
@@ -91,7 +94,7 @@ function hasImageFiles(paths: string[]): boolean {
 }
 
 export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
-  const { state, dispatch, convertSessionMode } = useSession();
+  const { state, dispatch, convertSessionMode, createSession } = useSession();
   const session = state.sessions[sessionId];
   const isFocused = state.layout.focusedPaneId === paneId;
   const paneRef = useRef<HTMLDivElement>(null);
@@ -365,6 +368,23 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}
             {session.mode !== "agent" && session.ai_provider && statusStripOn && isFeatureFlagEnabled("launchHelper") && (
               <SessionStatusStrip sessionId={sessionId} phase={session.phase} />
+            )}
+            {/* 2.0: the CLI refused the launch; Hermes stopped it and says why. */}
+            {session.mode !== "agent" && session.ai_provider && (
+              <LaunchRejectedBanner
+                session={session}
+                onSignIn={(agentId, accountId) => {
+                  void createSession({
+                    aiProvider: agentId,
+                    mode: "terminal",
+                    label: translate("agentError.signInSessionLabel", { agent: getAgent(agentId)?.name ?? agentId }),
+                    agentLaunch: { accountId, purpose: "login" },
+                  }).then((created) => {
+                    if (!created) return;
+                    for (const action of splitAfterCreateActions({ paneId, sessionId }, { paneId, direction: "horizontal" }, created.id)) dispatch(action);
+                  });
+                }}
+              />
             )}
             {session.mode === "agent" ? (
               <Suspense fallback={<div className="split-pane-loading" aria-busy="true" />}>

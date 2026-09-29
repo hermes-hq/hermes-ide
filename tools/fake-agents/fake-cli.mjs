@@ -99,6 +99,32 @@
 // (the error of a StopFailure, the notification type of a Notification, the
 // tool of a tool event).
 //
+// Models, effort and accounts (2.0 launch contract). The fake takes the
+// model and effort flags of the agent it stands in for (`--model`, `-m`,
+// `--effort`, `-c model_reasoning_effort="…"`), reports the model it runs in
+// its SessionStart hook (`model`) and status line (`model.id`), and answers
+// the capability probes like the real CLIs (verbatim shapes from the
+// capability matrix):
+//   claude `auth status --json`   {"loggedIn":…,"subscriptionType":…}
+//   codex  `login status`         "Logged in using ChatGPT" / "Not logged in"
+//   codex  `debug models --bundled` a small model catalog (JSON)
+//   agy    `models`               "slug<TAB>Name" lines, or "Authentication required"
+//   `auth login` / `login`        signs the profile in (see below) and exits 0
+// Sign-in per profile: with the agent's profile variable set
+// (CLAUDE_CONFIG_DIR, CODEX_HOME, …) the state is the file `.fake-auth` in
+// that folder ("in"; missing = signed out, like an empty profile); without
+// it, HERMES_FAKE_AUTH / <HERMES_FAKE_DIR>/auth-<agent> as before. A login
+// writes "in" there.
+// (`refuse-signed-out` as a mode word refuses a signed-out default profile too.)
+// A refused launch: a model listed in HERMES_FAKE_REJECT_MODELS or
+// <HERMES_FAKE_DIR>/reject-models-<agent> (comma-separated; "*" = every
+// model but the default), or a signed-out profile, makes the fake print the
+// vendor's own refusal: Claude Code's "There's an issue with the selected
+// model (…)" / "Not logged in · Please run /login" and then sit idle like
+// the real TUI; Codex's 404 inside its minute-long "Reconnecting... n/5"
+// loop; Antigravity's "error: invalid model selection …" and exit 1. It
+// runs no hook and no turn, so a test can tell that nothing ran.
+//
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
 // ran, how it ended) when HERMES_FAKE_DIR is set.
@@ -123,11 +149,18 @@ const KEPT_ENV = [
 ];
 
 function parseArgs(argv) {
-	const out = { sessionId: null, resumeId: null, settings: null, permissionMode: null, channels: [], positional: [], raw: argv };
+	const out = { sessionId: null, resumeId: null, settings: null, permissionMode: null, channels: [], model: null, effort: null, config: [], positional: [], raw: argv };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const next = () => argv[++i];
-		if (a === "--session-id") out.sessionId = next();
+		if (a === "--model" || a === "-m") out.model = next();
+		else if (a === "--effort" || a === "--reasoning-effort") out.effort = next();
+		else if (a === "-c" || a === "--config") {
+			const kv = next() ?? "";
+			out.config.push(kv);
+			const m = kv.match(/^model_reasoning_effort=\"?([^"]*)\"?$/);
+			if (m) out.effort = m[1];
+		} else if (a === "--session-id") out.sessionId = next();
 		else if (a === "--resume") out.resumeId = next();
 		else if (a === "--settings") out.settings = next();
 		else if (a === "--permission-mode") out.permissionMode = next();
@@ -174,13 +207,95 @@ function fakeSetting(envName, file, fallback) {
 	return fallback;
 }
 
+/** The profile variable of the agent this fake stands in for. */
+const PROFILE_ENV = { claude: "CLAUDE_CONFIG_DIR", codex: "CODEX_HOME", gemini: "GEMINI_CLI_HOME", copilot: "COPILOT_HOME", goose: "GOOSE_PATH_ROOT", "hermes-agent": "HERMES_HOME" }[FAKE_AGENT] ?? null;
+const profileDir = () => (PROFILE_ENV && process.env[PROFILE_ENV] ? process.env[PROFILE_ENV] : null);
+
+/** Signed in: per profile folder when one is set, else the fake's setting. */
+function isSignedIn() {
+	const dir = profileDir();
+	if (dir) {
+		try {
+			return fs.readFileSync(path.join(dir, ".fake-auth"), "utf8").trim() === "in";
+		} catch {
+			return false; // an empty profile is signed out, like the real CLI
+		}
+	}
+	return fakeSetting("HERMES_FAKE_AUTH", "auth", "in") !== "out";
+}
+
+/** The models this fake refuses ("*": every one but the default). */
+function refusedModels() {
+	return fakeSetting("HERMES_FAKE_REJECT_MODELS", "reject-models", "")
+		.split(",")
+		.map((m) => m.trim())
+		.filter(Boolean);
+}
+
+/** A small model catalog in Codex's `debug models` shape. */
+const CODEX_CATALOG = {
+	models: [
+		{ slug: "gpt-fake-terra", display_name: "GPT-Fake-Terra", description: "Balanced fake model.", default_reasoning_level: "medium", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max", "ultra"].map((effort) => ({ effort })), visibility: "list" },
+		{ slug: "gpt-fake-luna", display_name: "GPT-Fake-Luna", description: "Fast fake model.", default_reasoning_level: "medium", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max"].map((effort) => ({ effort })), visibility: "list" },
+		{ slug: "gpt-fake-old", display_name: "GPT-Fake-Old", description: "Older fake model.", default_reasoning_level: "medium", supported_reasoning_levels: ["low", "medium", "high", "xhigh"].map((effort) => ({ effort })), visibility: "list" },
+		{ slug: "gpt-fake-hidden", display_name: "Hidden", supported_reasoning_levels: [], visibility: "hide" },
+	],
+};
+
 function answerDoctorProbe(argv) {
+	const is = (...words) => words.length === argv.length && words.every((w, i) => w === argv[i]);
 	if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v")) {
 		process.stdout.write(`${fakeSetting("HERMES_FAKE_VERSION", "version", "0.1.0")} (fake ${FAKE_AGENT})\n`);
 		return 0;
 	}
+	if (is("auth", "status", "--json")) {
+		const plan = fakeSetting("HERMES_FAKE_PLAN", "plan", "max");
+		const signedIn = isSignedIn();
+		process.stdout.write(
+			JSON.stringify(
+				signedIn
+					? { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", configDirectory: profileDir() ?? "~/.claude", email: "fake@example.com", orgName: "Fake Org", subscriptionType: plan }
+					: { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
+			) + "\n",
+		);
+		return signedIn ? 0 : 1;
+	}
+	if (is("login", "status")) {
+		const signedIn = isSignedIn();
+		process.stdout.write(signedIn ? "Logged in using ChatGPT\n" : "Not logged in\n");
+		return signedIn ? 0 : 1;
+	}
+	if (is("debug", "models", "--bundled") || is("debug", "models")) {
+		process.stdout.write(JSON.stringify(CODEX_CATALOG) + "\n");
+		return 0;
+	}
+	if (is("models")) {
+		if (!isSignedIn()) {
+			process.stdout.write("Authentication required. Please visit the URL to log in:\nhttps://accounts.example.com/o/oauth2/auth?fake=1\n");
+			return 1;
+		}
+		process.stdout.write("Fetching available models...\ngemini-fake-flash-low\tGemini Fake Flash (Low)\ngemini-fake-pro-high\tGemini Fake Pro (High)\nclaude-fake-sonnet\tClaude Fake Sonnet (Thinking)\n");
+		return 0;
+	}
+	if (is("auth", "login") || is("login")) {
+		// A sign-in in the profile Hermes created: remember it there.
+		const dir = profileDir();
+		process.stdout.write(`Signing in to fake ${FAKE_AGENT}… done.\n`);
+		if (dir) {
+			fs.mkdirSync(dir, { recursive: true });
+			fs.writeFileSync(path.join(dir, ".fake-auth"), "in\n");
+		}
+		if (RECORD_DIR) {
+			fs.mkdirSync(RECORD_DIR, { recursive: true });
+			fs.writeFileSync(
+				path.join(RECORD_DIR, `login-${Date.now()}-${process.pid}.json`),
+				JSON.stringify({ kind: "fake-cli-login", agent: FAKE_AGENT, argv, profileEnv: PROFILE_ENV, profileDir: dir, hermesSession: process.env.HERMES_SESSION_ID ?? null }, null, 2) + "\n",
+			);
+		}
+		return 0;
+	}
 	if (AUTH_CHECKS.some((c) => c.length === argv.length && c.every((w, i) => w === argv[i]))) {
-		const signedIn = fakeSetting("HERMES_FAKE_AUTH", "auth", "in") !== "out";
+		const signedIn = isSignedIn();
 		process.stdout.write(signedIn ? "Signed in (fake)\n" : "Not signed in (fake)\n");
 		return signedIn ? 0 : 1;
 	}
@@ -225,6 +340,9 @@ const record = {
 	settingsFile: args.settings,
 	settings,
 	settingsError,
+	model: args.model,
+	effort: args.effort,
+	profileDir: profileDir(),
 	prompt: args.positional.join(" ") || null,
 	/** Prompts submitted while running (typed or pasted, then Enter). */
 	prompts: [],
@@ -411,6 +529,7 @@ async function runHooks(event, extra = {}) {
 		transcript_path: transcriptPath(),
 		cwd: process.cwd(),
 		permission_mode: args.permissionMode || "default",
+		...(event === "SessionStart" ? { model: reportedModel() } : {}),
 		...extra,
 	};
 	const results = [];
@@ -438,7 +557,7 @@ async function runStatusLine(extra) {
 		session_id: sessionId,
 		transcript_path: `/fixture-home/.fake/${sessionId}.jsonl`,
 		cwd: process.cwd(),
-		model: { id: "fake-model-1", display_name: "Fake" },
+		model: { id: reportedModel(), display_name: "Fake" },
 		workspace: { current_dir: process.cwd(), project_dir: process.cwd() },
 		...extra,
 	};
@@ -581,8 +700,68 @@ function interruptTrustPrompt(why) {
 	finish(interruptCode, why);
 }
 
+/** The model the fake says it runs: the one it was started with, else its default. */
+function reportedModel() {
+	return args.model || process.env.HERMES_FAKE_DEFAULT_MODEL || "fake-default-model";
+}
+
+/** Refuse the launch the way the real CLI does (see the header). */
+async function refuse(kind) {
+	note("refused", { kind, model: args.model });
+	const model = args.model ?? "default";
+	if (FAKE_AGENT === "codex") {
+		const line =
+			kind === "signed-out"
+				? "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"
+				: `{"type":"error","message":"stream error: unexpected status 404 Not Found: The model \`${model}\` does not exist or you do not have access to it."}`;
+		// Codex retries about five times over a minute before it gives up.
+		for (let n = 1; n <= 30; n++) {
+			out(`${ESC}[2K\rReconnecting... ${Math.min(n, 5)}/5\r\n`);
+			if (n === 2) out(`${line}\r\n`);
+			await new Promise((r) => setTimeout(r, 2000));
+		}
+		finish(1, `refused-${kind}`);
+		return;
+	}
+	if (FAKE_AGENT === "antigravity") {
+		out(
+			kind === "signed-out"
+				? "Authentication required. Please visit the URL to log in:\r\nhttps://accounts.example.com/o/oauth2/auth?fake=1\r\n"
+				: `error: invalid model selection (--model "${model}" --effort ""): model ${model} is not recognized as a known model or custom model in settings\r\nAvailable models:\r\n  Gemini Fake Flash (Low)\r\n`,
+		);
+		finish(1, `refused-${kind}`);
+		return;
+	}
+	// Claude Code: the message, then the idle TUI (nothing is sent).
+	out(
+		kind === "signed-out"
+			? "\r\nNot logged in · Please run /login\r\n"
+			: `\r\n"${model}" isn't described by this version's model catalog; update Claude Code, or map it with behavesAs…\r\nThere's an issue with the selected model (${model}). It may not exist or you may not have access to it. Run --model to pick a different model.\r\n`,
+	);
+	out("> ");
+	for (;;) {
+		const key = await nextKey();
+		if (key === null || key === "\x03" || key === "q") {
+			finish(1, `refused-${kind}`);
+			return;
+		}
+	}
+}
+
 async function main() {
 	note("start", { sessionId, resumed });
+
+	const refused = refusedModels();
+	if (args.model && (refused.includes(args.model) || refused.includes("*"))) {
+		await refuse("model");
+		return;
+	}
+	// Signed out: refused in a profile Hermes added (an empty profile is
+	// signed out), or anywhere with the mode word `refuse-signed-out`.
+	if ((profileDir() || has("refuse-signed-out")) && !isSignedIn()) {
+		await refuse("signed-out");
+		return;
+	}
 
 	if (resumed && has("resume-fails")) {
 		process.stderr.write(`No conversation found with session ID: ${args.resumeId}\n`);
