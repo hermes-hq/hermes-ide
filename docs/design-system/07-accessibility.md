@@ -63,12 +63,16 @@ Global rule in `base.css`:
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
-  box-shadow: none;
 }
 ```
 
-Inside a container that would clip it (a segmented well, a tab bar) the
-ring is drawn inset (`outline-offset: calc(-1 * var(--focus-ring-width))`).
+The rule leaves `box-shadow` alone, so a focused card or popover keeps
+its elevation. It has the lowest specificity, so any `outline: none` in a
+more specific rule (`.item:focus-visible`, `.field input`), or in a
+lazily loaded stylesheet that lands after `base.css`, hides it.
+
+Inside a container that would clip it (a segmented well, a tab bar, a
+scrolling list, a borderless sheet that fills its panel) the ring is drawn inset (`outline-offset: calc(-1 * var(--focus-ring-width))`).
 `--focus-ring-shadow` draws the same ring for the few components that
 still show focus with a box-shadow.
 

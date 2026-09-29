@@ -112,6 +112,13 @@ enforces it on every line of `src/styles/ui/` and of new stylesheets, and on
 the added lines of older ones, so existing lines are a baseline that
 migrates with its screen (see 06-components.md · Controls).
 
+Still to move to the one ring when their screens migrate (they show focus,
+but not with the solid outline): the attention badge and list, the
+composer's floating send button and the worktree recipe toggle and buttons
+(the older `--focus-ring-shadow` box-shadow), and the Feature Track panel
+(a 1 px inset accent line). The session list's current row still uses
+`--bg-active`, not `--row-active-bg`.
+
 ## ThinkingBlock-specific migration
 
 The pre-fix `ThinkingBlock.tsx` rendered a `.agent-thinking-block` div

@@ -27,7 +27,8 @@ function refuseUnlessAllowed() {
 
 /**
  * Press chords on the real keyboard path of the app window owned by `pid`.
- * `chords` are xdotool-style names: "ctrl+d", "ctrl+shift+d".
+ * `chords` are xdotool-style names: "ctrl+d", "ctrl+shift+d", or "tab" /
+ * "shift+tab" (moving keyboard focus).
  * Returns diagnostics (which window, whether it had focus).
  */
 /**
@@ -38,7 +39,7 @@ function refuseUnlessAllowed() {
 export async function pressChords(pid, chords, { delayMs = 150, clickAt = null } = {}) {
   refuseUnlessAllowed();
   for (const c of chords) {
-    if (!/^((ctrl|shift|alt)\+)+[a-z]$/.test(c)) throw new Error(`unsupported chord: ${c}`);
+    if (!/^((ctrl|shift|alt)\+)+[a-z]$/.test(c) && !/^(shift\+)?tab$/.test(c)) throw new Error(`unsupported chord: ${c}`);
   }
   return platform() === "linux" ? pressLinux(pid, chords, delayMs, clickAt) : pressWindows(pid, chords, delayMs, clickAt);
 }
@@ -85,7 +86,8 @@ async function pressLinux(pid, chords, delayMs, clickAt) {
     await sleep(300);
   }
   const focused = xdotool(["getwindowfocus"]).out;
-  const res = xdotool(["key", "--clearmodifiers", "--delay", String(delayMs), ...chords], 60_000);
+  const names = chords.map((c) => c.replace(/(^|\+)tab$/, "$1Tab"));
+  const res = xdotool(["key", "--clearmodifiers", "--delay", String(delayMs), ...names], 60_000);
   if (res.status !== 0) throw new Error(`xdotool key failed: ${res.err}`);
   return { driver: "xdotool", window: win, focusedWindow: focused, clicked, sent: chords.length };
 }
@@ -199,7 +201,8 @@ foreach ($c in $Chords.Split(',')) {
       'alt' { $mods.Add([uint16]0x12) }
     }
   }
-  $key = [uint16][char]($parts[$parts.Length - 1].ToUpper())
+  $last = $parts[$parts.Length - 1]
+  if ($last -eq 'tab') { $key = [uint16]0x09 } else { $key = [uint16][char]($last.ToUpper()) }
   $n = [HermesKeys]::Chord($mods.ToArray(), $key)
   if ($n -eq 0) { throw "SendInput sent nothing for $c" }
   $sent++

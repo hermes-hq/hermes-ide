@@ -36,7 +36,6 @@
   font-size: var(--text-sm);
   color: var(--text-1);
   font-family: var(--font-ui);
-  outline: none;
   box-sizing: border-box;
 }
 

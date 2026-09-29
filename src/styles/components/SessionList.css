@@ -564,6 +564,8 @@
   transition: opacity 0.1s, background 0.1s, color 0.1s;
   flex-shrink: 0;
 }
+/* --text-3 is under 3:1 on the current row's --bg-active in some themes. */
+.session-item-active .session-item-close { color: var(--text-2); }
 .session-item:hover .session-item-close { opacity: 1; }
 .session-item-close:hover { background: var(--red-dim); color: var(--red); }
 
@@ -1136,7 +1138,6 @@
   color: var(--text-0);
   font-size: var(--text-sm);
   padding: 5px 8px;
-  outline: none;
   font-family: var(--font-ui);
 }
 

@@ -17,7 +17,6 @@ button, input, select, textarea {
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
-  box-shadow: none;
 }
 
 html, body, #root {

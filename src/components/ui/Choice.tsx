@@ -9,13 +9,17 @@ interface ChoiceText {
   description?: ReactNode;
 }
 
-function ChoiceLabel({ id, label, description }: ChoiceText & { id: string }) {
+function ChoiceLabel({ id, descriptionId, label, description }: ChoiceText & { id: string; descriptionId?: string }) {
   return (
     <span className="h-choice-text">
       <span id={id} className="h-choice-label">
         {label}
       </span>
-      {description && <span className="h-choice-description">{description}</span>}
+      {description && (
+        <span id={descriptionId} className="h-choice-description">
+          {description}
+        </span>
+      )}
     </span>
   );
 }
@@ -64,6 +68,7 @@ export interface ToggleProps extends ChoiceText {
 /** On/off that takes effect at once (every Settings boolean). role=switch. */
 export function Toggle({ checked, onChange, label, description, disabled, id, className }: ToggleProps) {
   const labelId = useId();
+  const descriptionId = useId();
   return (
     <label className={cx("h-choice", "h-choice--toggle", disabled && "h-choice--disabled", className)}>
       <button
@@ -72,13 +77,14 @@ export function Toggle({ checked, onChange, label, description, disabled, id, cl
         role="switch"
         aria-checked={checked}
         aria-labelledby={labelId}
+        aria-describedby={description ? descriptionId : undefined}
         disabled={disabled}
         className="h-toggle"
         onClick={() => onChange(!checked)}
       >
         <span className="h-toggle-knob" aria-hidden="true" />
       </button>
-      <ChoiceLabel id={labelId} label={label} description={description} />
+      <ChoiceLabel id={labelId} descriptionId={descriptionId} label={label} description={description} />
     </label>
   );
 }

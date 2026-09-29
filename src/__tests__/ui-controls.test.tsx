@@ -270,6 +270,24 @@ describe("Tabs", () => {
     expect(tab.getAttribute("aria-controls")).toBe(panel.id);
   });
 
+  it("only the selected tab points at a panel, and that panel is in the page", () => {
+    render(<H />);
+    const check = () => {
+      for (const tab of screen.getAllByRole("tab")) {
+        const controls = tab.getAttribute("aria-controls");
+        if (tab.getAttribute("aria-selected") === "true") {
+          expect(controls).toBe(screen.getByRole("tabpanel").id);
+          expect(document.getElementById(controls!)).not.toBeNull();
+        } else {
+          expect(controls).toBeNull();
+        }
+      }
+    };
+    check();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Review" }), { key: "ArrowRight" });
+    check();
+  });
+
   it("horizontal: ←/→ select at once (automatic activation), wrapping; Home/End", () => {
     render(<H />);
     fireEvent.keyDown(screen.getByRole("tab", { name: "Review" }), { key: "ArrowRight" });
@@ -333,6 +351,19 @@ describe("Checkbox, Toggle, Radio", () => {
     expect(sw).toHaveAttribute("aria-checked", "true");
     await userEvent.keyboard("{Enter}");
     expect(sw).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("a toggle's description is its accessible description, not part of its name", () => {
+    render(
+      <>
+        <Toggle label="Wrap lines" description="Long lines continue on the next row" checked={false} onChange={() => {}} />
+        <Toggle label="Bell" checked={false} onChange={() => {}} />
+      </>,
+    );
+    const wrap = screen.getByRole("switch", { name: "Wrap lines" });
+    expect(wrap).toHaveAccessibleDescription("Long lines continue on the next row");
+    const bell = screen.getByRole("switch", { name: "Bell" });
+    expect(bell).not.toHaveAttribute("aria-describedby");
   });
 
   it("clicking a toggle's label flips it", async () => {

@@ -207,7 +207,6 @@
   font-size: var(--text-md);
   font-family: inherit;
   color: var(--text-0);
-  outline: none;
 }
 .style-selector-create-field input:focus {
   border-color: var(--accent);

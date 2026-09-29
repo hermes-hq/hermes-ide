@@ -84,7 +84,7 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-.setup-repo-input:focus { outline: none; border-color: var(--accent); }
+.setup-repo-input:focus { border-color: var(--accent); }
 
 .setup-repo-state { font-size: var(--text-xs); }
 .setup-repo-state.ok { color: var(--green); }

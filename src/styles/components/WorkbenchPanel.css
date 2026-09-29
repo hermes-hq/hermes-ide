@@ -309,7 +309,6 @@
   border: 0;
   background: transparent;
   resize: none;
-  outline: none;
   padding: 0 14px 12px;
   font-family: var(--font-serif, Georgia, serif);
   font-size: 13.5px;
@@ -318,8 +317,10 @@
   caret-color: var(--brass, #d4a86a);
 }
 
-.workbench-notes-textarea:focus {
-  outline: none;
+/* The notes sheet is borderless and fills its panel: the focus ring is
+ * drawn inside it. */
+.workbench-notes-textarea:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
 .workbench-notes-textarea::placeholder {
