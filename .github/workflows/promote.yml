@@ -74,7 +74,10 @@ jobs:
         run: |
           set -euo pipefail
           gh release edit "$TAG" --prerelease=false --latest
-          gh release view "$TAG" --json tagName,isPrerelease,isLatest
+          gh release view "$TAG" --json tagName,isPrerelease
+          LATEST=$(gh api "repos/$REPO/releases/latest" --jq .tag_name)
+          echo "latest release: $LATEST"
+          [ "$LATEST" = "$TAG" ] || { echo "::error::$TAG is not the latest release (latest is $LATEST)"; exit 1; }
 
       - name: Canary — stable clients see the new version and can download it
         id: canary
