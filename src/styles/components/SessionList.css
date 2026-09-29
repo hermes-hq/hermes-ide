@@ -462,7 +462,7 @@
 /* 2.0: the model asked for at launch, until the agent reports its own. */
 .session-model-chip-requested {
   background: transparent;
-  border: 1px dashed var(--border);
+  border: var(--control-border-width) dashed var(--border);
   color: var(--text-3);
 }
 

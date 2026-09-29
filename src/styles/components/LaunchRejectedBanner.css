@@ -5,25 +5,25 @@
 .launch-rejected {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1-5);
   flex-shrink: 0;
-  margin: 6px 8px 0;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--danger, #c2413b) 55%, var(--border));
-  background: color-mix(in srgb, var(--danger, #c2413b) 10%, var(--bg-1));
+  margin: var(--space-1-5) var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: var(--control-border-width) solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-1));
   font-size: var(--text-sm);
   color: var(--text-1);
 }
 
 .launch-rejected-title {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .launch-rejected-body {
   color: var(--text-2);
   font-size: var(--text-xs);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
 }
 
 .launch-rejected-vendor {
@@ -37,14 +37,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
 }
 
 .launch-rejected-action,
 .launch-rejected-start {
-  padding: 4px 10px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid var(--border);
   background: var(--bg-2);
   color: var(--text-1);
   font-size: var(--text-xs);
@@ -53,9 +53,9 @@
 
 .launch-rejected-action.primary,
 .launch-rejected-start.primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
 }
 
 .launch-rejected-action:disabled,
@@ -69,7 +69,7 @@
   border: none;
   background: transparent;
   color: var(--text-3);
-  font-size: var(--text-base, 14px);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 
@@ -82,9 +82,9 @@
   font-size: var(--text-xs);
   background: var(--bg-2);
   color: var(--text-1);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 4px;
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-0-5) var(--space-1);
 }
 
 .launch-rejected-error {
