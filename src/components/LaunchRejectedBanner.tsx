@@ -82,6 +82,8 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 		}
 	};
 	const launch = session.agent_launch ?? null;
+	// Everything but the model that was just refused (the default one included).
+	const models = (caps?.models ?? []).filter((m) => m.available && m.id !== (launch?.modelId ?? "default"));
 	const run = (a: RejectionAction) => {
 		switch (a.kind) {
 			case "retry-default": {
@@ -99,7 +101,7 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 				onSignIn(agentId, a.accountId);
 				break;
 			case "pick-model":
-				setPickModel("default");
+				setPickModel(models[0]?.id ?? "default");
 				setPickEffort("");
 				setPicking(true);
 				break;
@@ -119,7 +121,6 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 				return t("launchRejected.pickModel");
 		}
 	};
-	const models = (caps?.models ?? []).filter((m) => m.available && m.id !== launch?.modelId);
 	const picked = models.find((m) => m.id === pickModel);
 	const efforts = picked?.efforts ?? [];
 

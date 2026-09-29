@@ -191,6 +191,22 @@ describe("LaunchRejectedBanner", () => {
 		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("relaunch_agent", { sessionId: "sess-r", options: { modelId: "haiku", effort: null, accountId: undefined, purpose: "agent" } }));
 	});
 
+	it("when the default model was refused, Pick another model does not offer it again", async () => {
+		dispatchSessionEvent("sess-r", { type: "launch_rejected", at: 11, reason: "model", vendorMessage: "no", suggestion: "retry-default" });
+		const r = render(
+			<I18nProvider>
+				<LaunchRejectedBanner session={session({ agent_launch: { modelId: null } })} onSignIn={() => {}} />
+			</I18nProvider>,
+		);
+		expect(r.queryByText("Retry with default model")).toBeNull();
+		fireEvent.click(await r.findByText("Pick another model"));
+		const select = r.container.querySelector("select.launch-rejected-model") as HTMLSelectElement;
+		expect([...select.options].map((o) => o.value)).toEqual(["opus", "haiku"]);
+		expect(select.value).toBe("opus");
+		fireEvent.click(r.getByText("Start"));
+		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("relaunch_agent", { sessionId: "sess-r", options: { modelId: "opus", effort: null, accountId: undefined, purpose: "agent" } }));
+	});
+
 	it("Sign in hands the account to the caller (a terminal running the CLI's sign-in)", async () => {
 		dispatchSessionEvent("sess-r", { type: "launch_rejected", at: 10, reason: "signed_out", vendorMessage: "Not logged in · Please run /login", suggestion: "sign-in" });
 		const onSignIn = vi.fn();
