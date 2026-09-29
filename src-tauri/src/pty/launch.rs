@@ -1218,6 +1218,7 @@ fn clear_dir_except(dir: &Path, keep: &[String]) {
 }
 
 pub fn remove_session_files<R: tauri::Runtime>(app: &AppHandle<R>, session_id: &str) {
+    crate::agent_caps::watch::end(session_id);
     if let Ok(dir) = launch_dir(app) {
         let session_dir = dir.join(session_id);
         if session_dir.is_dir() {

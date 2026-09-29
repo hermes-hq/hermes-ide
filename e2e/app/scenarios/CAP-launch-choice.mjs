@@ -21,6 +21,8 @@
 //   4. An account whose profile is signed out: the launch is refused as
 //      signed out; "Sign in" opens the CLI's own sign-in in that profile
 //      (a second terminal); "Try again" then runs the agent in the profile.
+//   5. After a restart, each agent resumes its conversation in its account's
+//      profile with its model and effort (the saved workspace keeps them).
 //
 // Negative control: HERMES_E2E_CAP_NEGATIVE=1 lets the fakes accept every
 // model, so the refusal never shows and step 2 FAILS.
@@ -233,6 +235,21 @@ try {
 
   const exit = await app.stop();
   assert(exit.code === 0, "the app quit cleanly");
+
+  // ─── 5. a restart resumes each agent with its choice ───────────────
+  log("step 5: after a restart, each agent resumes in its account's profile with its model and effort");
+  const seenBefore = new Set(records(f).map((r) => r.file));
+  app = await launch(f, evidenceDir, log, 2);
+  const s1bBack = await waitForRecord(f, "the opus session resumed", (r) => !seenBefore.has(r.file) && r.env?.HERMES_SESSION_ID === s1b, 60_000);
+  log(`  resumed ${s1b}: ${JSON.stringify(s1bBack.argv.filter((a) => !a.includes("/")))}`);
+  assert(s1bBack.resumeIdArg && s1bBack.model === "opus" && s1bBack.effort === "high", "the opus session resumed its conversation with --model opus --effort high");
+  const s4Back = await waitForRecord(f, "the Work session resumed", (r) => !seenBefore.has(r.file) && r.env?.HERMES_SESSION_ID === s4, 60_000);
+  assert(s4Back.profileDir === added.account.profileEnv.value, "the Work session resumed in the Work profile");
+  const restoredChip = await chip(app.bridge, s1b);
+  log(`  chip after restart: ${JSON.stringify(restoredChip)}`);
+  assert(restoredChip && /opus/.test(restoredChip.text), "its model chip still shows opus");
+  const exit2 = await app.stop();
+  assert(exit2.code === 0, "the app quit cleanly again");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

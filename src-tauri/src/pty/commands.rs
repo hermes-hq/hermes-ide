@@ -861,7 +861,21 @@ pub fn create_session(
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let agent_launch = match (&ai_provider, &agent_launch) {
         (Some(provider), Some(options)) if ssh_host.is_none() => {
-            crate::agent_caps::commands::session_launch(&app, provider, options)?
+            match crate::agent_caps::commands::session_launch(&app, provider, options) {
+                Ok(launch) => launch,
+                // A restored session whose account Hermes no longer knows
+                // resumes in the default profile rather than not at all; a
+                // new launch with an unknown account is refused.
+                Err(e)
+                    if vendor_session_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty()) =>
+                {
+                    log::warn!("[CAPS] restoring {provider} without its launch choice: {e}");
+                    Default::default()
+                }
+                Err(e) => return Err(e),
+            }
         }
         _ => Default::default(),
     };
