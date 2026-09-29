@@ -49,4 +49,52 @@ describe("N16 away address field", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSave).toHaveBeenCalledWith("away_notify_url", TOKEN_URL);
   });
+
+  it("a saved value that arrives late never replaces what the person is typing", () => {
+    const onSave = vi.fn();
+    const view = (value: string) => (
+      <I18nProvider>
+        <AwayNotifySetting value={value} onSave={onSave} />
+      </I18nProvider>
+    );
+    const { rerender } = render(view(""));
+    const input = document.getElementById("away-notify-url") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: TOKEN_URL } });
+    // The settings finish loading while the field has the keyboard.
+    rerender(view("https://late.example/old"));
+    expect(input.value).toBe(TOKEN_URL);
+    fireEvent.blur(input);
+    expect(onSave).toHaveBeenCalledWith("away_notify_url", TOKEN_URL);
+  });
+
+  it("a typed, refused address is kept when the saved value arrives after the blur", () => {
+    const onSave = vi.fn();
+    const view = (value: string) => (
+      <I18nProvider>
+        <AwayNotifySetting value={value} onSave={onSave} />
+      </I18nProvider>
+    );
+    const { rerender } = render(view(""));
+    const input = document.getElementById("away-notify-url") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "ftp://nope.example" } });
+    fireEvent.blur(input);
+    rerender(view("https://late.example/old"));
+    expect(input.value).toBe("ftp://nope.example");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("follows a saved value that arrives late while the field is untouched", () => {
+    const onSave = vi.fn();
+    const view = (value: string) => (
+      <I18nProvider>
+        <AwayNotifySetting value={value} onSave={onSave} />
+      </I18nProvider>
+    );
+    const { rerender } = render(view(""));
+    rerender(view(TOKEN_URL));
+    const input = document.getElementById("away-notify-url") as HTMLInputElement;
+    expect(input.value).toBe(TOKEN_URL);
+  });
 });

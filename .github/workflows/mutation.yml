@@ -2,12 +2,19 @@ name: Mutation testing
 
 # Nightly: mutate the Rust lines that changed on main in the last 24 hours
 # (cargo-mutants --in-diff) and fail when fewer than 80% of the viable
-# mutants are killed by the tests. Not part of the pull request gate: it is
-# too slow for every push. A red run points at tests that do not test the
-# changed code. Waivers: `exclude_re` in src-tauri/.cargo/mutants.toml, added
-# in a reviewed pull request. That file does not exist until the first waiver;
-# the pull request with the first waiver creates it (cargo-mutants reads it
-# from there automatically).
+# mutants are killed by the tests. Not part of the pull request gate (no
+# branch protection names it): it is too slow for every push. A red run
+# points at tests that do not test the changed code. Waivers: `exclude_re` in
+# src-tauri/.cargo/mutants.toml, added in a reviewed pull request. That file
+# does not exist until the first waiver; the pull request with the first
+# waiver creates it (cargo-mutants reads it from there automatically).
+#
+# The mutants are split over SHARDS parallel jobs (cargo-mutants --shard k/n;
+# each mutant runs the whole test suite, in place, one at a time). A shard
+# stops mutating after its time budget and reports what it tested; the
+# score job scores every shard's outcomes together and says when a shard
+# ran out of time, so a busy day finishes with a partial score instead of
+# the job being cancelled.
 
 on:
   schedule:
@@ -32,10 +39,12 @@ env:
   RUSTUP_MAX_RETRIES: 10
 
 jobs:
-  rust-mutants:
-    name: Rust mutants on changed lines
+  plan:
+    name: Changed Rust lines
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -56,37 +65,55 @@ jobs:
             echo "No Rust source changes since $base; nothing to mutate."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Cache apt packages
+      - name: Keep the diff for the shards
         if: steps.diff.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutants-diff
+          path: ${{ runner.temp }}/changes.diff
+          retention-days: 3
+
+  rust-mutants:
+    name: Rust mutants (shard ${{ matrix.shard }} of 12)
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: mutants-diff
+          path: ${{ runner.temp }}
+      - name: Cache apt packages
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: 1.0
       - name: Ensure system libraries are installed
-        if: steps.diff.outputs.run == 'true'
         run: |
           if ! pkg-config --exists glib-2.0 gtk+-3.0 webkit2gtk-4.1 libsoup-3.0 javascriptcoregtk-4.1; then
             sudo apt-get update
             sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           fi
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        if: steps.diff.outputs.run == 'true'
         with:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        if: steps.diff.outputs.run == 'true'
       - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        if: steps.diff.outputs.run == 'true'
         with:
           workspaces: src-tauri
           shared-key: mutation
+          save-if: ${{ matrix.shard == 0 }}
       # Stages bridge runtime deps; the Tauri build script checks them.
       - name: Install npm deps + stage bridge runtime
-        if: steps.diff.outputs.run == 'true'
         run: npm ci
       - name: Install cargo-mutants
-        if: steps.diff.outputs.run == 'true'
         env:
           MUTANTS_VERSION: 27.1.0
           MUTANTS_SHA256: dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e
@@ -97,25 +124,57 @@ jobs:
           tar -xzf "$RUNNER_TEMP/cargo-mutants.tgz" -C "$HOME/.cargo/bin" cargo-mutants
       # --in-place: the Tauri build reads files outside src-tauri (../dist,
       # bridge resources), so the crate cannot be copied elsewhere to mutate.
-      - name: Run cargo-mutants
-        if: steps.diff.outputs.run == 'true'
+      # The time budget (90 min) leaves room for the build inside the job's
+      # timeout; outcomes.json is written as mutants are tested, so a shard
+      # that runs out of time still reports what it tested.
+      - name: Run cargo-mutants (this shard)
         working-directory: src-tauri
         run: |
           set +e
-          cargo mutants --in-place --in-diff "$RUNNER_TEMP/changes.diff" \
-            --cargo-test-arg=--lib --output "$RUNNER_TEMP"
+          timeout --signal=INT --kill-after=2m 90m \
+            cargo mutants --in-place --in-diff "$RUNNER_TEMP/changes.diff" \
+              --shard "${{ matrix.shard }}/12" \
+              --cargo-test-arg=--lib --output "$RUNNER_TEMP"
           code=$?
           # 0 = all caught, 2 = some missed, 3 = some timed out: scored below.
+          # 124/130 = the time budget ran out: partial, scored below.
           # Anything else (baseline tests failing, usage error) is a failure.
-          case "$code" in 0|2|3) exit 0 ;; *) exit "$code" ;; esac
-      - name: Score (minimum 80% killed)
-        if: steps.diff.outputs.run == 'true'
-        run: node scripts/mutation-score.mjs "$RUNNER_TEMP/mutants.out/outcomes.json" --min 80
-      - name: Upload report
-        if: always() && steps.diff.outputs.run == 'true'
+          case "$code" in
+            0|2|3) exit 0 ;;
+            124|130|137) echo "::warning::shard ${{ matrix.shard }} ran out of its time budget; its score is partial"; exit 0 ;;
+            *) exit "$code" ;;
+          esac
+      - name: Upload this shard's outcomes
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: mutants-out
+          name: mutants-out-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants.out
           if-no-files-found: warn
           retention-days: 14
+
+  score:
+    name: Score (minimum 80% killed)
+    needs: [plan, rust-mutants]
+    if: always() && needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: mutants-out-*
+          path: ${{ runner.temp }}/shards
+      - name: Score every shard together
+        run: |
+          files=$(find "$RUNNER_TEMP/shards" -name outcomes.json | sort)
+          if [ -z "$files" ]; then
+            echo "No shard reported any outcome."
+            exit 1
+          fi
+          echo "$files"
+          # shellcheck disable=SC2086
+          node scripts/mutation-score.mjs $files --min 80

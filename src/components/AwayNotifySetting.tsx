@@ -4,7 +4,7 @@
 // only when it is empty or an http(s) URL. Masked unless being edited. The backend reads it when an
 // agent is blocked; empty means no network call at all.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AWAY_NOTIFY_URL_KEY } from "../api/attention";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
 import { useI18n } from "../i18n/I18nProvider";
@@ -24,7 +24,13 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
   // The address can hold a secret (a Telegram bot token, a private topic):
   // shown only while the field is being edited.
   const [editing, setEditing] = useState(false);
-  useEffect(() => setDraft(value), [value]);
+  // Follow the saved value (it can arrive after the dialog opened), but
+  // never over what the person is typing or typed and has not saved yet.
+  const focused = useRef(false);
+  const dirty = useRef(false);
+  useEffect(() => {
+    if (!focused.current && !dirty.current) setDraft(value);
+  }, [value]);
 
   const commit = () => {
     const next = draft.trim();
@@ -33,6 +39,7 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
       return;
     }
     setInvalid(false);
+    dirty.current = false;
     if (next !== value) onSave(AWAY_NOTIFY_URL_KEY, next);
   };
 
@@ -54,11 +61,16 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
         aria-describedby="away-notify-hint"
         value={draft}
         onChange={(e) => {
+          dirty.current = true;
           setDraft(e.target.value);
           if (invalid) setInvalid(false);
         }}
-        onFocus={() => setEditing(true)}
+        onFocus={() => {
+          focused.current = true;
+          setEditing(true);
+        }}
         onBlur={() => {
+          focused.current = false;
           setEditing(false);
           commit();
         }}

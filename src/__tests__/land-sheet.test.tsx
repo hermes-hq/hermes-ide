@@ -6,7 +6,7 @@
  * e2e/app/scenarios/F22-land-sheet.mjs.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -225,6 +225,38 @@ describe("what the sheet shows", () => {
     expect(option("pr").textContent).toContain("GitHub CLI (gh) is not signed in.");
     fireEvent.click(screen.getByText("Sign in: run gh auth login"));
     expect(h.shellOpen).toHaveBeenCalledWith("https://cli.github.com/manual/gh_auth_login");
+  });
+
+  it("keeps the person's pick when the GitHub CLI status arrives after it (it is never replaced by the default)", async () => {
+    const b = backend();
+    let answerGh!: (g: GhStatus) => void;
+    const late = new Promise<GhStatus>((resolve) => {
+      answerGh = resolve;
+    });
+    const base = h.invoke.getMockImplementation()!;
+    h.invoke.mockImplementation(async (cmd: string, args: Record<string, unknown> = {}) => (cmd === "land_gh_status" ? late : base(cmd, args)));
+    await openSheet();
+    const merge = option("merge").querySelector("input") as HTMLInputElement;
+    await waitFor(() => expect(merge.disabled).toBe(false));
+    // Nothing is picked while the pull request option is still being checked.
+    expect(document.querySelector<HTMLInputElement>('input[name="land-mode"]:checked')).toBeNull();
+    fireEvent.click(merge);
+    expect(merge.checked).toBe(true);
+    // The status arrives: a pull request could now be opened, which is the
+    // option the sheet picks by itself; the person already chose.
+    await act(async () => {
+      answerGh(b.gh);
+      await late;
+    });
+    await waitFor(() => expect(option("pr").getAttribute("aria-disabled")).toBe("false"));
+    expect(merge.checked).toBe(true);
+    expect((option("pr").querySelector("input") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("picks a pull request by itself once the status says it can, when nothing was picked", async () => {
+    backend();
+    await openSheet();
+    await waitFor(() => expect((option("pr").querySelector("input") as HTMLInputElement).checked).toBe(true));
   });
 
   it("offers to install gh when it is missing", async () => {

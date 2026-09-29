@@ -27,6 +27,7 @@ import { loadLandTurns, type LandTurn } from "./turnSource";
 import {
   baseBranchNote,
   ciLogRequest,
+  defaultLandMode,
   doneWhenCommands,
   doneWhenLabel,
   doneWhenState,
@@ -137,12 +138,19 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
     if (draftInput && !edited.current) setMessage(draftMessage(draftInput));
   }, [draftInput]);
 
-  // Pick the first option that can be used, once we know.
+  // Pick the first option that can be used, once we know — never over the
+  // person's own pick. The GitHub CLI status arrives late (it runs `gh`), so
+  // this effect can run for a render from before a click that is already
+  // queued: the functional update keeps whatever was picked meanwhile.
+  const picked = useRef(false);
+  const pick = useCallback((m: Mode) => {
+    picked.current = true;
+    setMode(m);
+  }, []);
   useEffect(() => {
-    if (!available || mode) return;
-    if (!available.pr) setMode("pr");
-    else if (gh && !available.merge) setMode("merge");
-    else if (gh && !available.commit) setMode("commit");
+    if (!available || mode || picked.current) return;
+    const first = defaultLandMode(available, gh);
+    if (first) setMode((current) => current ?? first);
   }, [available, mode, gh]);
 
   const busyRef = useRef(false);
@@ -290,8 +298,8 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
 
   const routeToPr = useCallback(() => {
     setOutcome(null);
-    setMode("pr");
-  }, []);
+    pick("pr");
+  }, [pick]);
 
   // ── Render ──────────────────────────────────────────────────────────
   const openLandings = preview?.landings.filter((l) => !l.undone) ?? [];
@@ -404,14 +412,14 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 <LandOption
                   mode="commit"
                   current={mode}
-                  onPick={setMode}
+                  onPick={pick}
                   title={`Commit on ${preview.branch}`}
                   reason={available?.commit ?? null}
                 />
                 <LandOption
                   mode="pr"
                   current={mode}
-                  onPick={setMode}
+                  onPick={pick}
                   title={`Commit, push${preview.remote ? ` to ${preview.remote}` : ""} and open a pull request`}
                   reason={available?.pr ?? null}
                 >
@@ -429,7 +437,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 <LandOption
                   mode="merge"
                   current={mode}
-                  onPick={setMode}
+                  onPick={pick}
                   title={`Squash-merge into ${preview.base?.name ?? "the base branch"} locally`}
                   reason={available?.merge ?? null}
                   hint={available?.merge ? null : mergeNote(preview.merge, preview.base?.name ?? null)}

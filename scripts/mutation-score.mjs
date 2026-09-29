@@ -10,7 +10,8 @@
 // added in a pull request that says why the mutant cannot be killed.
 // The file is created by the first such pull request.
 //
-// Usage: node scripts/mutation-score.mjs <outcomes.json> [--min 80]
+// Usage: node scripts/mutation-score.mjs <outcomes.json>... [--min 80]
+// (one file per shard; the outcomes are scored together)
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -44,16 +45,21 @@ function describe(scenario) {
   return m && m.name ? m.name : JSON.stringify(scenario);
 }
 
+/** One outcomes list from several shards' outcomes.json (cargo-mutants --shard k/n). */
+export function mergeOutcomes(list) {
+  return { outcomes: list.flatMap((o) => o.outcomes ?? []) };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const minIdx = args.indexOf("--min");
-  const file = args.find((a, i) => !a.startsWith("--") && i !== minIdx + 1);
+  const files = args.filter((a, i) => !a.startsWith("--") && i !== minIdx + 1);
   const min = minIdx >= 0 ? Number(args[minIdx + 1]) : 80;
-  if (!file || Number.isNaN(min)) {
-    console.error("usage: mutation-score.mjs <outcomes.json> [--min 80]");
+  if (files.length === 0 || Number.isNaN(min)) {
+    console.error("usage: mutation-score.mjs <outcomes.json>... [--min 80]");
     process.exit(2);
   }
-  const result = scoreOutcomes(JSON.parse(readFileSync(file, "utf8")), min);
+  const result = scoreOutcomes(mergeOutcomes(files.map((f) => JSON.parse(readFileSync(f, "utf8")))), min);
   const { counts, viable, killed, percent, ok, missed } = result;
   console.log(`caught ${counts.caught}, timeout ${counts.timeout}, missed ${counts.missed}, unviable ${counts.unviable}`);
   for (const m of missed) console.log(`MISSED ${m}`);

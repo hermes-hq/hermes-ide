@@ -12,6 +12,7 @@ import {
   baseBranchNote,
   branchStem,
   ciLogRequest,
+  defaultLandMode,
   doneWhenCommands,
   doneWhenLabel,
   doneWhenState,
@@ -266,5 +267,19 @@ describe("which branch landing goes to", () => {
     expect(baseBranchNote("release-1")).toBe(
       "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
     );
+  });
+});
+
+describe("defaultLandMode: the option the sheet picks by itself", () => {
+  const all = { commit: null, pr: null, merge: null, archive: null };
+  const ready = { state: "ready" as const, detail: "" };
+  it.each([
+    ["a pull request when one can be opened", all, ready, "pr"],
+    ["nothing while the GitHub CLI is still being checked (merge could be the wrong guess)", { ...all, pr: "Checking GitHub CLI…" }, null, null],
+    ["a merge once the CLI is known to be unusable", { ...all, pr: "GitHub CLI (gh) is not signed in." }, { state: "signed_out" as const, detail: "" }, "merge"],
+    ["a commit when neither a PR nor a merge can be done", { ...all, pr: "no remote", merge: "nothing to merge" }, ready, "commit"],
+    ["nothing when no option can be used", { commit: "x", pr: "x", merge: "x", archive: null }, ready, null],
+  ])("%s", (_name, available, gh, expected) => {
+    expect(defaultLandMode(available, gh)).toBe(expected);
   });
 });

@@ -174,18 +174,40 @@ fn inhibit(what: &str) -> Result<(Hold, KeepAwakeStatus), (&'static str, String)
         .process_group(0)
         .spawn()
         .map_err(|e| ("none", format!("systemd-inhibit is not available: {e}")))?;
-    // systemd-inhibit exits at once when logind refuses the lock.
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    if let Ok(Some(exit)) = child.try_wait() {
-        let mut err = String::new();
-        if let Some(mut stderr) = child.stderr.take() {
-            use std::io::Read;
-            let _ = stderr.read_to_string(&mut err);
+    // systemd-inhibit exits at once when logind refuses the lock, and takes
+    // a moment to register it when it accepts: the hold is active only once
+    // logind lists it (what `systemd-inhibit --list` shows people).
+    let deadline = std::time::Instant::now() + INHIBIT_CONFIRM_TIMEOUT;
+    loop {
+        if let Ok(Some(exit)) = child.try_wait() {
+            let mut err = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                use std::io::Read;
+                let _ = stderr.read_to_string(&mut err);
+            }
+            return Err((
+                "systemd-inhibit",
+                format!("systemd-inhibit exited ({exit}): {}", err.trim()),
+            ));
         }
-        return Err((
-            "systemd-inhibit",
-            format!("systemd-inhibit exited ({exit}): {}", err.trim()),
-        ));
+        match inhibitor_listing() {
+            // logind lists it: the hold is real.
+            Some(listing) if listing_has_hold(&listing) => break,
+            // The list cannot be read here: the running inhibitor is all
+            // there is to go by.
+            None => break,
+            Some(_) if std::time::Instant::now() >= deadline => {
+                release(Hold::Process(child));
+                return Err((
+                    "systemd-inhibit",
+                    format!(
+                        "logind did not list the lock within {} ms",
+                        INHIBIT_CONFIRM_TIMEOUT.as_millis()
+                    ),
+                ));
+            }
+            Some(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
     }
     let status = KeepAwakeStatus {
         active: true,
@@ -195,6 +217,30 @@ fn inhibit(what: &str) -> Result<(Hold, KeepAwakeStatus), (&'static str, String)
         error: None,
     };
     Ok((Hold::Process(child), status))
+}
+
+/// How long inhibit() waits for logind to list a lock it did not refuse.
+#[cfg(all(unix, not(target_os = "macos")))]
+const INHIBIT_CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// `systemd-inhibit --list`, or None when it cannot be run or read.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn inhibitor_listing() -> Option<String> {
+    let out = std::process::Command::new("systemd-inhibit")
+        .args(["--list", "--no-pager"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Whether a `systemd-inhibit --list` output shows Hermes's hold.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+fn listing_has_hold(listing: &str) -> bool {
+    listing.lines().any(|l| l.contains(REASON))
 }
 
 #[cfg(windows)]
@@ -272,6 +318,17 @@ fn release(hold: Hold) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hold_counts_only_once_logind_lists_it() {
+        let listed = format!(
+            "WHO    UID  USER   PID   COMM            WHAT       WHY                          MODE\nHermes 1000 runner 4242  systemd-inhibit idle:sleep {REASON} block\n\n1 inhibitors listed.\n"
+        );
+        assert!(listing_has_hold(&listed));
+        let other = "WHO  UID USER PID COMM WHAT WHY MODE\nModemManager 0 root 700 ModemManager sleep ModemManager needs to reset devices delay\n\n1 inhibitors listed.\n";
+        assert!(!listing_has_hold(other));
+        assert!(!listing_has_hold(""));
+    }
 
     /// Takes and releases a real hold on this machine (macOS: caffeinate;
     /// Linux: systemd-inhibit when it is allowed; Windows: a power request).

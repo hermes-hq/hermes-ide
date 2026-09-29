@@ -305,25 +305,22 @@ function readSheet(bridge) {
   `);
 }
 
+/**
+ * Click an option once, like a person. The sheet's own default pick (made
+ * when the late GitHub CLI status arrives) must never replace it, so the
+ * choice has to hold for a while after the status is in.
+ */
 async function pickMode(bridge, mode) {
-  // The sheet settles its default pick once the GitHub CLI status arrives;
-  // on a slow runner that can land right after the click, so click again
-  // until the choice holds.
+  await bridge.clickWhenReady(`
+    const input = e2e.first('.land-sheet-option[data-mode="${mode}"] input');
+    if (!input || input.disabled) return null;
+    return e2e.click(input);
+  `);
   const chosen = `return e2e.first('.land-sheet-option[data-mode="${mode}"] input')?.checked === true;`;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await bridge.clickWhenReady(`
-      const input = e2e.first('.land-sheet-option[data-mode="${mode}"] input');
-      if (!input || input.disabled) return null;
-      return e2e.click(input);
-    `);
-    try {
-      await bridge.waitFor(`the ${mode} option to be chosen`, chosen, { timeoutMs: 5_000 });
-      return;
-    } catch {
-      /* clicked too early: try again */
-    }
-  }
-  await bridge.waitFor(`the ${mode} option to be chosen`, chosen);
+  await bridge.waitFor(`the ${mode} option to be chosen`, chosen, { timeoutMs: 5_000 });
+  await bridge.waitFor("the GitHub CLI status to be in", `return !/Checking GitHub CLI/.test(e2e.first('.land-sheet-option[data-mode="pr"]')?.innerText ?? "");`, { timeoutMs: 20_000 });
+  await sleep(500);
+  assert(await bridge.eval(chosen), `the ${mode} option is still chosen after the GitHub CLI status arrived`);
 }
 
 async function closeSheet(bridge) {

@@ -155,6 +155,18 @@ export interface LandAvailability {
   readonly archive: string | null;
 }
 
+/**
+ * The option the sheet picks by itself: a pull request when it can open
+ * one; otherwise, once the GitHub CLI status is known, a local merge, then
+ * a commit. Null while it cannot tell yet (or nothing can be used).
+ */
+export function defaultLandMode(available: LandAvailability, gh: GhStatus | null): "pr" | "merge" | "commit" | null {
+  if (!available.pr) return "pr";
+  if (gh && !available.merge) return "merge";
+  if (gh && !available.commit) return "commit";
+  return null;
+}
+
 export function landAvailability(p: LandPreview, gh: GhStatus | null): LandAvailability {
   const hasWork = p.uncommittedFiles > 0 || p.commitsAhead > 0;
   const base = p.base?.name ?? null;

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 // @ts-expect-error — plain ESM script without type declarations
-import { scoreOutcomes } from "../../scripts/mutation-score.mjs";
+import { mergeOutcomes, scoreOutcomes } from "../../scripts/mutation-score.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/mutation-score.mjs", import.meta.url));
 
@@ -22,6 +22,16 @@ function outcomes(...rows: ReturnType<typeof mutant>[]) {
 }
 
 describe("mutation score", () => {
+	it("scores the shards of one night together (cargo-mutants --shard k/n)", () => {
+		const r = scoreOutcomes(
+			mergeOutcomes([outcomes(mutant("CaughtMutant", "a"), mutant("MissedMutant", "b")), outcomes(mutant("CaughtMutant", "c"), mutant("Timeout", "d")), {}]),
+			80,
+		);
+		expect(r.counts).toEqual({ caught: 2, missed: 1, timeout: 1, unviable: 0 });
+		expect(r.percent).toBe(75);
+		expect(r.ok).toBe(false);
+	});
+
 	it("counts caught and timed-out mutants as killed and leaves unviable ones out", () => {
 		const r = scoreOutcomes(
 			outcomes(

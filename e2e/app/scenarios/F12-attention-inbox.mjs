@@ -455,7 +455,13 @@ try {
     return s.keepAwake.active ? s.keepAwake : null;
   `);
   log(`  hold: ${JSON.stringify(held)}`);
-  const listing = osKeepAwakeListing();
+  // The OS may list the hold a moment after the app reports it: ask again
+  // for a few seconds before judging.
+  let listing = osKeepAwakeListing();
+  for (let i = 0; i < 25 && !heldByHermes(listing, held); i++) {
+    await sleep(200);
+    listing = osKeepAwakeListing();
+  }
   writeFileSync(join(evidenceDir, "keep-awake-held.txt"), listing);
   assert(heldByHermes(listing, held), `the OS lists Hermes's hold (${held.mechanism})`);
 
