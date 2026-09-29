@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "bundle": {
+    "externalBin": [
+      "binaries/hermes-pty-setup",
+      "binaries/hi",
+      "binaries/hermes-pty-host"
+    ]
+  }
+}

@@ -89,15 +89,33 @@ fn build_helper(crate_dir: &str, bin_name: &str, build_dir: &str) {
                 }
                 // The Windows and Linux bundles pick `hi` up as a resource
                 // (tauri.windows.conf.json, tauri.linux.conf.json list
-                // helpers/hi); the macOS release copies it into
-                // Contents/MacOS and signs it (release.yml). Copied before
-                // tauri_build::build() checks that the resource exists.
+                // helpers/hi). Copied before tauri_build::build() checks
+                // that the resource exists.
                 if bin_name == "hi" || bin_name == "hermes-pty-host" {
                     let helpers = manifest_dir.join("helpers");
                     if let Err(e) = std::fs::create_dir_all(&helpers)
                         .and_then(|_| std::fs::copy(&built, helpers.join(&exe)))
                     {
                         println!("cargo:warning=Failed to stage {bin_name} for the bundle: {e}");
+                    }
+                }
+                // The macOS bundle carries every helper as an external
+                // binary (tauri.macos.conf.json), so it lands signed in
+                // Contents/MacOS next to the app whatever built the
+                // bundle: a local `tauri build` too, not only the release
+                // workflow. Tauri wants it as binaries/<name>-<triple>;
+                // staged before tauri_build::build() looks for it, which
+                // fails the build rather than ship an app without it.
+                if cfg!(target_os = "macos") {
+                    if let Ok(triple) = std::env::var("TARGET") {
+                        let binaries = manifest_dir.join("binaries");
+                        if let Err(e) = std::fs::create_dir_all(&binaries).and_then(|_| {
+                            std::fs::copy(&built, binaries.join(format!("{bin_name}-{triple}")))
+                        }) {
+                            println!(
+                                "cargo:warning=Failed to stage {bin_name} as an external binary: {e}"
+                            );
+                        }
                     }
                 }
             } else {
