@@ -143,10 +143,17 @@ fn parse_no_cow_override(e2e: Option<&str>, value: Option<&str>) -> bool {
 
 /// Recreate `src` at `dst`: folders and symlinks as they are, every file
 /// through `clone_file`. The first file decides whether the disk supports
-/// cloning at all; an unsupported disk stops the walk straight away.
+/// cloning at all; an unsupported disk stops the walk straight away. Files
+/// for which `one_at_a_time` holds go through a single thread of their own,
+/// in parallel with the others (Windows block clones, which contend).
 #[cfg(any(target_os = "linux", target_os = "android", windows, test))]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
-fn walk_clone(src: &Path, dst: &Path, clone_file: &FileCloner) -> Result<(), CloneError> {
+fn walk_clone(
+    src: &Path,
+    dst: &Path,
+    clone_file: &FileCloner,
+    one_at_a_time: &OneAtATime,
+) -> Result<(), CloneError> {
     let fail = |what: &str, p: &Path, e: std::io::Error| {
         CloneError::Failed(format!("cannot {what} '{}': {e}", p.display()))
     };
@@ -194,30 +201,41 @@ fn walk_clone(src: &Path, dst: &Path, clone_file: &FileCloner) -> Result<(), Clo
     let rest = files.get(1..).unwrap_or_default();
     if !rest.is_empty() {
         use std::sync::atomic::Ordering::Relaxed;
-        workers = clone_threads().min(rest.len());
+        let (serial, parallel): (Vec<_>, Vec<_>) =
+            rest.iter().partition(|(_, _, meta)| one_at_a_time(meta));
+        workers = clone_threads().min(parallel.len());
         let stop = std::sync::atomic::AtomicBool::new(false);
-        // Each thread takes the next file when it is done with one, so a
-        // thread held up (by a large file, or waiting its turn to block
-        // clone on Windows) does not leave a share of files waiting on it.
-        let next = std::sync::atomic::AtomicUsize::new(0);
         let first_error: std::sync::Mutex<Option<CloneError>> = std::sync::Mutex::new(None);
-        std::thread::scope(|s| {
-            for _ in 0..workers {
-                let (stop, next, first_error, clone_one) = (&stop, &next, &first_error, &clone_one);
-                s.spawn(move || {
-                    while let Some(item) = rest.get(next.fetch_add(1, Relaxed)) {
-                        if stop.load(Relaxed) {
-                            return;
-                        }
-                        if let Err(e) = clone_one(item) {
-                            stop.store(true, Relaxed);
-                            if let Ok(mut slot) = first_error.lock() {
-                                slot.get_or_insert(e);
-                            }
-                            return;
-                        }
+        // A queue of files and the threads that empty it. Each thread takes
+        // the next file when it is done with one, so a thread held up by a
+        // large file does not leave a share of files waiting on it.
+        let drain = |queue: &[&(PathBuf, PathBuf, fs::Metadata)],
+                     next: &std::sync::atomic::AtomicUsize| {
+            while let Some(item) = queue.get(next.fetch_add(1, Relaxed)) {
+                if stop.load(Relaxed) {
+                    return;
+                }
+                if let Err(e) = clone_one(item) {
+                    stop.store(true, Relaxed);
+                    if let Ok(mut slot) = first_error.lock() {
+                        slot.get_or_insert(e);
                     }
-                });
+                    return;
+                }
+            }
+        };
+        let (next_serial, next_parallel) = (
+            std::sync::atomic::AtomicUsize::new(0),
+            std::sync::atomic::AtomicUsize::new(0),
+        );
+        std::thread::scope(|s| {
+            if !serial.is_empty() {
+                let (drain, serial, next) = (&drain, &serial, &next_serial);
+                s.spawn(move || drain(serial, next));
+            }
+            for _ in 0..workers {
+                let (drain, parallel, next) = (&drain, &parallel, &next_parallel);
+                s.spawn(move || drain(parallel, next));
             }
         });
         if let Some(e) = first_error.into_inner().ok().flatten() {
@@ -262,6 +280,10 @@ fn clone_threads() -> usize {
 #[cfg(any(target_os = "linux", target_os = "android", windows, test))]
 type FileCloner<'a> =
     dyn Fn(&Path, &Path, &fs::Metadata) -> Result<fs::File, CloneError> + Sync + 'a;
+
+/// Whether a file must be cloned one at a time (see `walk_clone`).
+#[cfg(any(target_os = "linux", target_os = "android", windows, test))]
+type OneAtATime<'a> = dyn Fn(&fs::Metadata) -> bool + Sync + 'a;
 
 /// Give a cloned file its source's timestamps and permissions, through the
 /// handle the clone left open (no second open per file).
@@ -389,7 +411,7 @@ mod platform {
     use std::path::Path;
 
     pub fn clone_tree(src: &Path, dst: &Path) -> Result<CloneMethod, CloneError> {
-        walk_clone(src, dst, &reflink_file)?;
+        walk_clone(src, dst, &reflink_file, &|_| false)?;
         Ok(CloneMethod::Reflink)
     }
 
@@ -471,12 +493,12 @@ mod platform {
         // small files are copied instead (see `COPY_UP_TO`), in a fraction of
         // the time. Larger files, where the space is, are always shared, one
         // at a time: block clones running side by side contend (6 s on one
-        // thread became 35 s on four). The copies run in parallel.
+        // thread became 35 s on four) and have a thread of their own, while
+        // the copies run in parallel on the others.
         use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
         let cluster = cluster_size(parent).unwrap_or(4096);
         let (copied, copy_us, clone_us) =
             (AtomicUsize::new(0), AtomicU64::new(0), AtomicU64::new(0));
-        let one_clone_at_a_time = std::sync::Mutex::new(());
         let clone_file = |from: &Path, to: &Path, meta: &fs::Metadata| {
             let started = std::time::Instant::now();
             if copies_instead(meta.len(), cluster) {
@@ -485,17 +507,16 @@ mod platform {
                 copy_us.fetch_add(started.elapsed().as_micros() as u64, Relaxed);
                 file
             } else {
-                let _turn = one_clone_at_a_time
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let file = block_clone_file(from, to, meta);
                 clone_us.fetch_add(started.elapsed().as_micros() as u64, Relaxed);
                 file
             }
         };
-        walk_clone(src, dst, &clone_file)?;
+        walk_clone(src, dst, &clone_file, &|meta: &fs::Metadata| {
+            !copies_instead(meta.len(), cluster)
+        })?;
         log::info!(
-            "[fast-worktrees] {} files of {} bytes or less were copied ({} ms), the rest block-cloned ({} ms, waits included)",
+            "[fast-worktrees] {} files of {} bytes or less were copied ({} ms over the threads), the rest block-cloned one at a time ({} ms)",
             copied.into_inner(),
             COPY_UP_TO.max(cluster),
             copy_us.into_inner() / 1000,
@@ -867,7 +888,7 @@ mod tests {
         let src = tmp.path().join("a");
         tree(&src);
         let dst = tmp.path().join("b");
-        walk_clone(&src, &dst, &copy_file).unwrap();
+        walk_clone(&src, &dst, &copy_file, &|_| false).unwrap();
         assert_eq!(
             fs::read(dst.join("pkg/lib/big.bin")).unwrap(),
             vec![7u8; 300_000]
@@ -886,7 +907,7 @@ mod tests {
             |_f: &Path, _t: &Path, _m: &fs::Metadata| Err(CloneError::Unsupported("no".into()));
         let dst2 = tmp.path().join("c");
         assert_eq!(
-            walk_clone(&src, &dst2, &unsupported),
+            walk_clone(&src, &dst2, &unsupported, &|_| false),
             Err(CloneError::Unsupported("no".into()))
         );
     }
@@ -926,7 +947,7 @@ mod tests {
             threads.lock().unwrap().insert(std::thread::current().id());
             copy_file(from, to, m)
         };
-        walk_clone(&src, &dst, &counting).unwrap();
+        walk_clone(&src, &dst, &counting, &|_| false).unwrap();
         assert_eq!(calls.into_inner(), n, "every file cloned once");
         for d in 0..20 {
             for f in 0..40 {
@@ -940,6 +961,38 @@ mod tests {
                 "the files were spread over threads"
             );
         }
+    }
+
+    #[test]
+    fn one_at_a_time_files_never_overlap_and_the_rest_still_run() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("a");
+        let n = many_files(&src);
+        // The 3-byte files ("d/f" with d, f < 10) are cloned one at a time.
+        let large = |m: &fs::Metadata| m.len() == 3;
+        let (now, most, calls) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        let cloner = |from: &Path, to: &Path, m: &fs::Metadata| {
+            calls.fetch_add(1, SeqCst);
+            if large(m) {
+                let at = now.fetch_add(1, SeqCst) + 1;
+                most.fetch_max(at, SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                now.fetch_sub(1, SeqCst);
+            }
+            copy_file(from, to, m)
+        };
+        walk_clone(&src, &tmp.path().join("b"), &cloner, &large).unwrap();
+        assert_eq!(calls.into_inner(), n, "every file cloned once");
+        assert_eq!(
+            most.into_inner(),
+            1,
+            "never two one-at-a-time files at once"
+        );
     }
 
     #[test]
@@ -995,7 +1048,7 @@ mod tests {
             copy_file(from, to, m)
         };
         assert_eq!(
-            walk_clone(&src, &tmp.path().join("b"), &fails_later),
+            walk_clone(&src, &tmp.path().join("b"), &fails_later, &|_| false),
             Err(CloneError::Failed("disk full".into()))
         );
         assert!(calls.into_inner() < 800, "the other threads stopped early");

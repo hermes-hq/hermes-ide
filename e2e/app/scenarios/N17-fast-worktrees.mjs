@@ -246,7 +246,7 @@ function timeFreshInstall() {
   cpSync(join(repo, "package-lock.json"), join(dir, "package-lock.json"));
   const ms = npmCi(dir);
   if (!existsSync(join(dir, "node_modules", "react", "package.json"))) throw new Error("npm ci left no react");
-  rmSync(dir, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   return ms;
 }
 
@@ -717,8 +717,15 @@ try {
       log("FAILED: the app did not quit cleanly");
     }
   }
-  if (homeDir) rmSync(homeDir, { recursive: true, force: true });
-  rmSync(workDir, { recursive: true, force: true });
+  // Windows may still hold a file in a worktree just after the app quit:
+  // retry, and never let the cleanup decide the result.
+  for (const dir of [homeDir, workDir].filter(Boolean)) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (e) {
+      log(`  (could not remove ${dir}: ${e.message})`);
+    }
+  }
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });
