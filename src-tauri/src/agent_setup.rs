@@ -1527,20 +1527,34 @@ mod tests {
 
     #[test]
     fn a_session_shells_children_are_read_with_their_arguments() {
-        // Spawns a real child of this test process and reads it back.
-        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
-            .args(if cfg!(windows) {
-                vec!["/C", "ping", "-n", "5", "127.0.0.1"]
-            } else {
-                vec!["5"]
-            })
-            .spawn()
-            .unwrap();
-        let mut sys = sysinfo::System::new();
-        let argvs = descendant_argv(&mut sys, std::process::id());
-        let _ = child.kill();
-        let _ = child.wait();
-        let want = if cfg!(windows) { "ping" } else { "5" };
+        // A real shell with a real child, read back from the shell's pid,
+        // as a pane's shell is. Rooted at that shell, not at this test
+        // process: on Linux every thread of the test harness is listed as a
+        // child of it, and other tests start and stop processes here too.
+        // The shell starts its child a moment after it starts itself, so
+        // the table is read until the child shows up (at most 10 s).
+        let mut shell = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/C", "ping -n 7 127.0.0.1 > NUL"])
+                .spawn()
+        } else {
+            std::process::Command::new("sh")
+                .args(["-c", "sleep 7 & wait"])
+                .spawn()
+        }
+        .unwrap();
+        let want = if cfg!(windows) { "127.0.0.1" } else { "7" };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let argvs = loop {
+            let argvs = descendant_argv(&mut sysinfo::System::new(), shell.id());
+            let found = argvs.iter().any(|a| a.iter().any(|t| t == want));
+            if found || std::time::Instant::now() >= deadline {
+                break argvs;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let _ = shell.kill();
+        let _ = shell.wait();
         assert!(
             argvs.iter().any(|a| a.iter().any(|t| t == want)),
             "the child's argv was not found: {argvs:?}"
