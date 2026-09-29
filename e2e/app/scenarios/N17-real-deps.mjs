@@ -8,9 +8,10 @@
 // fresh install (npm ci) of the same lockfile timed in the same run. The demo
 // server loads react from the clone.
 //
-// Needs this repo's node_modules installed (npm ci). Same copy-on-write
-// folder rules and negative control (HERMES_E2E_N17_NEGATIVE=1) as
-// N17-fast-worktrees.mjs.
+// The scenario installs the project folder itself (`npm ci` of this repo's
+// lockfile, scripts skipped; needs the registry or npm's cache, not this
+// checkout's node_modules). Same copy-on-write folder rules and negative
+// control (HERMES_E2E_N17_NEGATIVE=1) as N17-fast-worktrees.mjs.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/run.mjs N17-real-deps.mjs

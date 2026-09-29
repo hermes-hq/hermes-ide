@@ -35,8 +35,8 @@
 // Negative control: HERMES_E2E_N17_NEGATIVE=1 leaves the flag off, so session
 // A's worktree has no node_modules and the scenario must end in RESULT: FAIL.
 //
-// HERMES_E2E_N17_REAL_DEPS=1 uses this repo's own package.json, lockfile and
-// node_modules (about 700 MB) as the project folder's install, to measure
+// HERMES_E2E_N17_REAL_DEPS=1 uses this repo's own package.json and lockfile,
+// installed into the project folder with npm ci (about 700 MB), to measure
 // "a new worktree of this repo" rather than the synthetic one
 // (N17-real-deps.mjs runs it that way).
 //
@@ -197,10 +197,11 @@ function makeRepo() {
 function installInProjectFolder() {
   const nm = join(repo, "node_modules");
   if (REAL_DEPS) {
-    const src = join(REPO_ROOT, "node_modules");
-    const args = platform() === "darwin" ? ["-c", "-R", src, nm] : ["-R", "--reflink=auto", src, nm];
-    const res = spawnSync("cp", args, { encoding: "utf8" });
-    if (res.status !== 0) throw new Error(`cp ${args.join(" ")} failed: ${res.stderr}`);
+    // Installed here, from this repo's lockfile: the checkout running the
+    // scenario need not have node_modules (CI shard jobs do not install).
+    const ms = npmCi(repo);
+    log(`  npm ci of this repo's lockfile in the project folder: ${ms} ms`);
+    if (!existsSync(join(nm, "react", "package.json"))) throw new Error("npm ci left no react");
     return;
   }
   mkdirSync(join(nm, "n17-demo-dep"), { recursive: true });
@@ -218,16 +219,8 @@ function installInProjectFolder() {
   for (let written = 0; written < BLOB_BYTES; written += chunk) appendFileSync(blob, randomBytes(chunk));
 }
 
-/**
- * How long a fresh install of this repo's lockfile takes: `npm ci` in a new
- * folder on the same volume. Scripts are skipped and npm's cache is warm (CI
- * installed the repo earlier), so this is the fast case for npm.
- */
-function timeFreshInstall() {
-  const dir = join(workDir, "fresh-install");
-  mkdirSync(dir);
-  cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
-  cpSync(join(REPO_ROOT, "package-lock.json"), join(dir, "package-lock.json"));
+/** `npm ci` (scripts skipped) of the package.json and lockfile in `dir`; returns how long it took. */
+function npmCi(dir) {
   const started = Date.now();
   const res = spawnSync("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], {
     cwd: dir,
@@ -236,7 +229,22 @@ function timeFreshInstall() {
     maxBuffer: 64 * 1024 * 1024,
   });
   const ms = Date.now() - started;
-  if (res.status !== 0) throw new Error(`npm ci failed (${res.status}): ${res.stderr || res.stdout}`);
+  if (res.status !== 0) throw new Error(`npm ci in ${dir} failed (${res.status}): ${res.stderr || res.stdout}`);
+  return ms;
+}
+
+/**
+ * How long a fresh install of this repo's lockfile takes: `npm ci` in a new
+ * folder on the same volume. It runs after the project folder's own install,
+ * so npm's cache is warm and nothing is downloaded, and scripts are skipped:
+ * the fast case for npm.
+ */
+function timeFreshInstall() {
+  const dir = join(workDir, "fresh-install");
+  mkdirSync(dir);
+  cpSync(join(repo, "package.json"), join(dir, "package.json"));
+  cpSync(join(repo, "package-lock.json"), join(dir, "package-lock.json"));
+  const ms = npmCi(dir);
   if (!existsSync(join(dir, "node_modules", "react", "package.json"))) throw new Error("npm ci left no react");
   rmSync(dir, { recursive: true, force: true });
   return ms;
@@ -520,7 +528,7 @@ try {
   if (MEASURE_INSTALL) {
     log("step 0: baseline — a fresh install of the same lockfile on the same volume");
     installMs = timeFreshInstall();
-    log(`  npm ci --ignore-scripts --prefer-offline: ${installMs} ms`);
+    log(`  npm ci --ignore-scripts --prefer-offline (warm cache): ${installMs} ms`);
   }
 
   // ── run 1: fresh install, flag on ────────────────────────────────
