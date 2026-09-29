@@ -1810,7 +1810,10 @@ pub(crate) fn enumerate_child_pids(parent_pid: u32) -> Vec<u32> {
         };
 
         if ret > 0 {
-            let actual = ret as usize / std::mem::size_of::<libc::pid_t>();
+            // libproc's proc_listchildpids returns a number of pids (it
+            // divides proc_listpids' byte count by the size of a pid), not
+            // a number of bytes.
+            let actual = (ret as usize).min(pids.len());
             for &pid in &pids[..actual] {
                 if pid > 0 {
                     children.push(pid as u32);
@@ -1899,7 +1902,18 @@ pub fn write_to_session(
         // The shell's PID is known; we enumerate its children via sysctl
         // and send SIGINT to each child's process group.
         if let Some(shell_pid) = session.transport.pid() {
-            let child_pids = enumerate_child_pids(shell_pid);
+            // macOS: only the shell's own group. The trampoline gives the
+            // shell its controlling terminal (#214), so the line discipline
+            // interrupts a cooked-mode program itself, and a signal sent to
+            // a raw-mode program (an agent's TUI) would kill it instead of
+            // letting it handle the Ctrl+C it reads. That is also what macOS
+            // always got here: the child scan never listed a single child
+            // until it read proc_listchildpids' count correctly.
+            let child_pids = if cfg!(target_os = "macos") {
+                Vec::new()
+            } else {
+                enumerate_child_pids(shell_pid)
+            };
             if !child_pids.is_empty() {
                 for &cpid in &child_pids {
                     if cpid > 0 && cpid <= i32::MAX as u32 {
@@ -4804,6 +4818,23 @@ mod foreground_tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         false
+    }
+
+    /// The process-table scan hosted terminals rely on (the session host
+    /// owns their master, so the terminal cannot say who owns it).
+    #[cfg(unix)]
+    #[test]
+    fn enumerate_child_pids_finds_a_single_child() {
+        let mut shell = parent_with_child();
+        let seen = eventually(|| !super::enumerate_child_pids(shell.id()).is_empty());
+        let _ = shell.kill();
+        let _ = shell.wait();
+        assert!(seen, "the one running child was not listed");
+        let mut lone = lone_process();
+        let none = super::enumerate_child_pids(lone.id()).is_empty();
+        let _ = lone.kill();
+        let _ = lone.wait();
+        assert!(none, "a process with no child has none listed");
     }
 
     #[test]

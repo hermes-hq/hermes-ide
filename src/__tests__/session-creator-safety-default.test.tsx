@@ -146,7 +146,7 @@ describe("SessionCreator — one safety default (flag on)", () => {
 
 describe("SessionCreator — flag off", () => {
   it("a new Claude session keeps the plain default and shows no marker", async () => {
-    await initFeatureFlags({});
+    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: false }) });
     const onCreate = vi.fn<OnCreate>(async () => {});
     await openCreator(onCreate);
     fireEvent.click(providerCard("Claude"));

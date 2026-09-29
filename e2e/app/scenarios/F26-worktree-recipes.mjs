@@ -482,7 +482,7 @@ web = ${base}
   const appLog = app.appLog;
   await quit(app, { keepFiles: true });
   const hits = filesContaining(dataDir, SECRET);
-  log(`  scanned ${dataDir}`);
+  log(`  scanned ${dataDir}: ${JSON.stringify(hits.map((h) => h.slice(dataDir.length)))}`);
   // The worktrees themselves live under the data folder; the .env the
   // recipe copied into them is the one place the secret belongs.
   const inWorktrees = (p) => /[\\/]hermes-worktrees[\\/][^\\/]+[\\/][^\\/]+[\\/]\.env$/.test(p);

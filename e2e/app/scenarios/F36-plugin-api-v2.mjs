@@ -17,7 +17,9 @@
 // A synthetic git repository with .hermes/features/search-index/feature.md
 // is the working directory of one terminal session.
 //
-//   run 1  stable channel, pluginApiV2 flag at its default (off)
+//   run 0  a fresh install: the pluginApiV2 flag (on by default since 2.0)
+//          is switched off, the setting the hidden Flags tab writes
+//   run 1  stable channel, pluginApiV2 flag switched off
 //          -> e2e.v1 works and is not marked; the two v2 plugins are not
 //             started and Settings > Plugins says "not loaded"
 //          turn the flag on (the setting the hidden Flags tab writes)
@@ -170,7 +172,7 @@ const homeDir = onWindows ? undefined : mkdtempSync(join(tmpdir(), "hermes-e2e-f
 function launch(run, prepareDataDir) {
   const runDir = join(evidenceDir, `run-${run}`);
   return onWindows
-    ? launchApp({ runDir, log, home: "real", resetData: run === 1, prepareDataDir })
+    ? launchApp({ runDir, log, home: "real", resetData: run === 0, prepareDataDir })
     : launchApp({ runDir, log, home: "private", homeDir, prepareDataDir });
 }
 
@@ -279,8 +281,20 @@ let failed = false;
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}${BREAK ? `   BREAK=${BREAK} (negative control, must FAIL)` : ""}`);
 
+  // ── run 0: switch the flag off (on by default since 2.0) ────────────
+  log("step 0: a fresh install: switch pluginApiV2 off (the override the hidden Flags tab writes) and quit");
+  app = await launch(0);
+  await app.bridge.eval(`
+    // launchHelper (on by default since 2.0) would add the terminal's own
+    // status guesses to the events step 7 hands the observer; it stays off.
+    await window.__TAURI_INTERNALS__.invoke("set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ ${FLAG_ID}: false, launchHelper: false }) });
+    return true;
+  `);
+  let exit0 = await app.stop();
+  assert(!exit0.forced && exit0.code === 0, "the app quit cleanly");
+
   // ── run 1: flag off ────────────────────────────────────────────────
-  log("step 1: launch a fresh install (stable channel, pluginApiV2 off) with the three plugins in place");
+  log("step 1: launch again (stable channel, pluginApiV2 switched off) with the three plugins in place");
   app = await launch(1, async (dataDir) => {
     installPlugin(dataDir, SAMPLE, JSON.stringify(sampleManifest, null, 2), sampleBundle, sampleManifest.main);
     installPlugin(dataDir, V1, manifest(V1, "E2E v1 plugin", ["sessions.read"]), v1Bundle);

@@ -15,6 +15,7 @@ import {
   confidenceOfSource,
   deriveStatus,
   foldStatus,
+  lastReportedStatus,
   resumedIndex,
   resumesAfterInput,
   statusOfEvent,
@@ -263,5 +264,13 @@ describe("helpers", () => {
     const b = status(2, "idle", "guessed", "pty");
     expect(foldStatus([a, b]).kind).toBe("idle");
     expect(foldStatus([b, a]).kind).toBe("working");
+  });
+});
+
+describe("lastReportedStatus: what an agent said, never the terminal's guess", () => {
+  it("skips the terminal's guesses, keeps reports and exits", () => {
+    expect(lastReportedStatus(snapshotOf([status(1, "working", "guessed", "pty")]))).toBeNull();
+    expect(lastReportedStatus(snapshotOf([status(1, "needs_approval", "signal", "osc"), status(2, "working", "guessed", "pty")]))?.kind).toBe("needs_approval");
+    expect(lastReportedStatus(snapshotOf([status(1, "working", "exact", "hook:x"), { type: "exit", at: 2, source: "pty", code: 0, signal: null }]))?.kind).toBe("exited");
   });
 });

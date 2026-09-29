@@ -8,8 +8,9 @@
 // a question, finishes a turn, fails, starts sub-agents, prints a terminal
 // notification, prints the in-band Hermes marker.
 //
-//   run 0  fresh install, flag OFF: a Claude session shows no status strip
-//          (the negative control that the flag gates it). Turn the
+//   run 0  fresh install, the `launchHelper` flag switched OFF in Settings >
+//          Flags (it is on by default since 2.0): a Claude session shows no
+//          status strip (the negative control that the flag gates it). Turn the
 //          `launchHelper` and `agentCatalog` flags on in Settings > Flags.
 //   run 1  flag ON:
 //          - the strip says "idle · hook, exact" once the agent started;
@@ -406,9 +407,14 @@ try {
   undoRegistryPath = addFakeBinToRegistryPath();
 
   // ── run 0: flag off — no strip (negative control), then flags on ──
-  log("run 0: fresh install, flag OFF: a Claude session shows no status strip");
+  log("run 0: fresh install, flag switched OFF: a Claude session shows no status strip");
   app = await launch(0, { first: true });
   await completeOnboarding(app.bridge);
+  // On by default since 2.0: switch it off (the kill switch) and relaunch.
+  await setFlagOverrides(app.bridge, { launchHelper: "off" });
+  await quit(app);
+  app = await launch("0b");
+  await waitForReturningLaunch(app.bridge);
   const s0 = await createSession(app.bridge);
   await waitForRecords(1);
   await sleep(1500);

@@ -123,6 +123,11 @@ try {
   await sleep(300);
   await bridge.screenshot(join(evidenceDir, "01-shortcuts-panel-en.png"));
   let panel = await bridge.eval(READ_PANEL);
+  // With the Review Desk (on by default since 2.0) the Git panel's shortcut
+  // opens the desk, and the panel names it so.
+  const reviewDesk = await bridge.eval(`return window.__HERMES_E2E__.featureFlags().flags.reviewDesk.on;`);
+  const ids = EXPECTED_GROUPS.flatMap((g) => g.shortcuts.map((s) => s.id));
+  const EXPECTED_SHOWN = EXPECTED_ROWS.map((r, i) => (reviewDesk && ids[i] === "view.git-panel" ? { ...r, action: "Review Desk" } : r));
   log(`  groups shown: ${panel.groups.join(", ")}`);
   log(`  ${panel.rows.length} row(s): ${JSON.stringify(panel.rows)}`);
   assert(
@@ -130,11 +135,11 @@ try {
     `the groups are the menu's, in order: ${EXPECTED_GROUPS.map((g) => g.group).join(", ")}`,
   );
   const diff = (a, b) => a.filter((x) => !b.some((y) => y.action === x.action && y.keys === x.keys));
-  const missing = diff(EXPECTED_ROWS, panel.rows);
-  const extra = diff(panel.rows, EXPECTED_ROWS);
+  const missing = diff(EXPECTED_SHOWN, panel.rows);
+  const extra = diff(panel.rows, EXPECTED_SHOWN);
   assert(missing.length === 0, `no generated row is missing from the panel${missing.length ? `: ${JSON.stringify(missing)}` : ""}`);
   assert(extra.length === 0, `the panel has no row the sources don't define${extra.length ? `: ${JSON.stringify(extra)}` : ""}`);
-  assert(JSON.stringify(panel.rows) === JSON.stringify(EXPECTED_ROWS), `all ${EXPECTED_ROWS.length} rows match, in order`);
+  assert(JSON.stringify(panel.rows) === JSON.stringify(EXPECTED_SHOWN), `all ${EXPECTED_SHOWN.length} rows match, in order`);
   const find = (action) => panel.rows.find((r) => r.action === action);
   assert(!!expectedKeys("New Tab") && find("New Tab")?.keys === expectedKeys("New Tab"), `"New Tab" shows ${expectedKeys("New Tab")} (not the stale "Toggle Timeline")`);
   assert(!find("Toggle Timeline"), 'no "Toggle Timeline" row (that feature does not exist)');

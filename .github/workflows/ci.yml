@@ -461,7 +461,10 @@ jobs:
         # Keep in step with the "/3" in SHARD below.
         shard: [1, 2, 3]
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 45
+    # Nightly and manual runs repeat terminal-echo (REPEAT, 20 by default) on
+    # the shard that holds it, which then needs well over the 45 minutes a
+    # pull request's single run fits in.
+    timeout-minutes: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 120 || 45 }}
     env:
       SHARD: ${{ matrix.shard }}/3
     steps:

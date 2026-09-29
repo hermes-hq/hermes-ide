@@ -17,7 +17,7 @@
 // person's own terminal does. (Windows apps get the user's PATH from the
 // registry; there the check names node by its full path.)
 //
-//   run 1  launchHelper flag OFF (negative control): a turn end runs nothing
+//   run 1  launchHelper flag switched OFF (on by default since 2.0; negative control): a turn end runs nothing
 //          and shows no chip. Turn the flag on.
 //   run 2  flag ON:
 //          1. A turn end shows "checking…" and then the failing chip, within
@@ -308,9 +308,15 @@ try {
   undoRegistryPath = addFakeBinToRegistryPath();
 
   // ── run 1: flag off (negative control) ────────────────────────────
-  log("run 1: launchHelper flag OFF — a turn end runs no check and shows no chip");
+  log("run 1: launchHelper flag switched OFF — a turn end runs no check and shows no chip");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
+  // On by default since 2.0: switch it off (the kill switch) and relaunch.
+  await invoke(app.bridge, "set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ launchHelper: false }) });
+  await quit(app);
+  app = await launch("1b");
+  await app.bridge.waitFor("the app UI to be ready", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop");`);
+  await dismissWhatsNew(app.bridge);
   const off = await createShellSession(app.bridge);
   assert((await injectTurnEnd(app.bridge, off, 1)) === true, "a turn_end was injected");
   await sleep(CHECK_MS + 2000);
@@ -410,7 +416,9 @@ try {
     return s.status.kind === "check_failed" ? s.status : null;
   `);
   assert(st.confidence === "exact" && /check\.mjs/.test(st.detail), `status check_failed (exact): "${st.detail}"`);
-  const items = (await inbox(app.bridge)).filter((i) => i.sessionId === sid);
+  // Only the checks' own item: with the attention inbox on (the 2.0 default)
+  // the session's status raises its own items too.
+  const items = (await inbox(app.bridge)).filter((i) => i.sessionId === sid && i.source === "checks");
   assert(items.length === 1 && items[0].kind === "error" && items[0].source === "checks", `one error in the inbox: "${items[0]?.detail}"`);
   assert((await waitChip(app.bridge, "check_failed")) === "check failed", "the chip says check failed");
   const land = await invoke(app.bridge, "done_when_run", { sessionId: sid, trigger: "land", turn: null });
@@ -428,7 +436,7 @@ try {
   assert((await waitChip(app.bridge, "passed")) === "tests ✓", "tests ✓ again");
   const cleared = await snapshot(app.bridge, sid);
   assert(cleared.status.kind === "done_unread", `the status cleared (${cleared.status.kind})`);
-  assert((await inbox(app.bridge)).filter((i) => i.sessionId === sid).length === 0, "the inbox item was resolved");
+  assert((await inbox(app.bridge)).filter((i) => i.sessionId === sid && i.source === "checks").length === 0, "the inbox item was resolved");
 
   // 6. hi check at the shell prompt
   log("step 6: `hi check` at the shell prompt");

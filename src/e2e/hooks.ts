@@ -36,6 +36,8 @@ import { getAllOverlaps, setTurnSourceForTest } from "../fleet/radarStore";
 import { getFleetCaps } from "../fleet/fleetSettings";
 import { getOccupancy, listQueuedTasks } from "../fleet/taskQueue";
 import { getAllLoads } from "../fleet/fleetLoad";
+import { FEATURE_FLAGS, getFeatureFlagOverride, getReleaseChannel, isFeatureFlagEnabled } from "../featureFlags";
+import { PLATFORM } from "../utils/platform";
 
 /** A fake turn for the fake ledger: its number and what it changed. */
 interface FakeTurn {
@@ -72,6 +74,15 @@ function readLines(sessionId: string): string[] | null {
 }
 
 const hooks = {
+  /**
+   * Every feature flag as the app resolved it at startup: on or off, and
+   * the override when one is set; with the release channel and platform.
+   */
+  featureFlags: () => ({
+    channel: getReleaseChannel(),
+    platform: PLATFORM,
+    flags: Object.fromEntries(FEATURE_FLAGS.map((f) => [f.id, { on: isFeatureFlagEnabled(f.id), override: getFeatureFlagOverride(f.id) ?? null }])),
+  }),
   /**
    * Make one part of the UI throw on its next render, once — to prove the
    * crash stays inside it. Targets: "pane:<sessionId>",

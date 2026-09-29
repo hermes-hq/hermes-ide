@@ -21,7 +21,7 @@
 //          - B ends three more turns elsewhere: turn 1 is no longer among its
 //            latest turns, and both badges go away.
 //
-// Negative control: HERMES_E2E_F37_FLAG=off keeps the flag off; the scenario
+// Negative control: HERMES_E2E_F37_FLAG=off switches the flag off; the scenario
 // must end in RESULT: FAIL (no badge ever appears).
 //
 //   node e2e/app/build.mjs
@@ -46,7 +46,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   let app = await launch(1, { first: true });
   apps.push(app);
   await completeOnboarding(app.bridge, log);
-  if (FLAG_ON) await setFlagOverrides(app.bridge, { fleetControls: true });
+  await setFlagOverrides(app.bridge, { fleetControls: FLAG_ON });
   const exit1 = await app.stop();
   assert(!exit1.forced && exit1.code === 0, "run 1 quit cleanly");
 

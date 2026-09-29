@@ -7,7 +7,7 @@
 // --settings, runs the SessionStart hook from the settings file, and can act
 // like a vendor that shows a folder-trust prompt or rejects a resume.
 //
-//   run 0  fresh install, flag OFF: a Claude session starts the old way (the
+//   run 0  fresh install, flag switched OFF (on by default since 2.0): a Claude session starts the old way (the
 //          vendor command typed into the shell, no session id) — the negative
 //          control that proves the flag gates the new path. Turn the
 //          `launchHelper` flag on in the hidden Settings > Flags section.
@@ -434,9 +434,14 @@ try {
   setFakeMode("normal");
 
   // ── run 0: flag off — the old typed launch (negative control) ─────
-  log("run 0: fresh install, flag OFF: a Claude session starts the old way");
+  log("run 0: fresh install, flag switched OFF: a Claude session starts the old way");
   app = await launch(0, { first: true });
   await completeOnboarding(app.bridge);
+  // On by default since 2.0: switch it off (the kill switch) and relaunch.
+  await setLaunchHelperOverride(app.bridge, "off");
+  await quit(app);
+  app = await launch("0b");
+  await waitForReturningLaunch(app.bridge);
   const legacyId = await createClaudeSession(app.bridge);
   const legacy = (await waitForRecords(1))[0];
   log(`  fake saw argv ${JSON.stringify(legacy.argv)} (cwd ${legacy.cwd})`);

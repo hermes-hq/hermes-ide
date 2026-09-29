@@ -77,19 +77,24 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
     assert(label === "Agents running at once", `the field is labelled "${label}"`);
   }
 
+  // The screen as one text: a banner can share a row with the command that
+  // started it (a shell that did not echo the Enter yet) and wrap onto the
+  // next row.
+  const SCREEN_TEXT = `(H.readTerminal(id) || []).map((l) => l.replace(/\\s+$/, "")).join("")`;
+
   /** Terminal ids whose screen shows the task's banner, by task number. */
   const tasksOnScreen = () => bridge.eval(`
     const H = window.__HERMES_E2E__;
     const out = {};
     for (const id of H.terminalIds()) {
-      const lines = H.readTerminal(id) || [];
-      for (const l of lines) {
-        const m = /^FAKE-TASK READY (\\d+)\\s*$/.exec(l.trim());
-        if (m) out[m[1]] = id;
-      }
+      for (const m of ${SCREEN_TEXT}.matchAll(/FAKE-TASK READY (\\d+)(?!\\d)/g)) out[m[1]] = id;
     }
     return out;
   `);
+  const bannerShown = (n) => `
+    const H = window.__HERMES_E2E__;
+    return H.terminalIds().some((id) => new RegExp("FAKE-TASK READY ${n}(?!\\\\d)").test(${SCREEN_TEXT}));
+  `;
   const queueState = () => bridge.eval(`
     const q = e2e.first(".task-queue");
     if (!q) return null;
@@ -126,10 +131,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   log("step 2: launch five agent tasks");
   for (const n of [1, 2, 3]) {
     await launchTask(n);
-    await bridge.waitFor(`Task ${n}'s agent to start`, `
-      const H = window.__HERMES_E2E__;
-      return H.terminalIds().some((id) => (H.readTerminal(id) || []).some((l) => l.trim() === "FAKE-TASK READY ${n}"));
-    `, { timeoutMs: 60_000 });
+    await bridge.waitFor(`Task ${n}'s agent to start`, bannerShown(n), { timeoutMs: 60_000 });
   }
   await launchTask(4);
   await launchTask(5);
@@ -147,10 +149,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
 
   log("step 3: Task 2 finishes -> Task 4 starts on its own; Task 5 keeps waiting");
   await quitTask(2, running["2"]);
-  await bridge.waitFor("Task 4's agent to start", `
-    const H = window.__HERMES_E2E__;
-    return H.terminalIds().some((id) => (H.readTerminal(id) || []).some((l) => l.trim() === "FAKE-TASK READY 4"));
-  `, { timeoutMs: 60_000 });
+  await bridge.waitFor("Task 4's agent to start", bannerShown(4), { timeoutMs: 60_000 });
   await sleep(2000);
   running = await tasksOnScreen();
   const queue2 = await queueState();
@@ -161,10 +160,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
 
   log("step 4: Task 1 finishes -> Task 5 starts; the queue is gone");
   await quitTask(1, running["1"]);
-  await bridge.waitFor("Task 5's agent to start", `
-    const H = window.__HERMES_E2E__;
-    return H.terminalIds().some((id) => (H.readTerminal(id) || []).some((l) => l.trim() === "FAKE-TASK READY 5"));
-  `, { timeoutMs: 60_000 });
+  await bridge.waitFor("Task 5's agent to start", bannerShown(5), { timeoutMs: 60_000 });
   await bridge.waitFor("the queue to disappear", `return !e2e.first(".task-queue");`);
   running = await tasksOnScreen();
   await bridge.screenshot(join(evidenceDir, "03-queue-empty.png"));
@@ -184,10 +180,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   assert(!(await tasksOnScreen())["6"], "Task 6 has not started");
   await bridge.screenshot(join(evidenceDir, "04-memory-queued.png"));
   for (const n of ["3", "4", "5"]) await quitTask(n, running[n]);
-  await bridge.waitFor("Task 6's agent to start", `
-    const H = window.__HERMES_E2E__;
-    return H.terminalIds().some((id) => (H.readTerminal(id) || []).some((l) => l.trim() === "FAKE-TASK READY 6"));
-  `, { timeoutMs: 60_000 });
+  await bridge.waitFor("Task 6's agent to start", bannerShown(6), { timeoutMs: 60_000 });
   await bridge.waitFor("the queue to disappear", `return !e2e.first(".task-queue");`);
   log("  ok — Task 6 started once the running agents finished");
 });

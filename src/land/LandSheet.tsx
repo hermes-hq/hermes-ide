@@ -3,6 +3,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useSession } from "../state/SessionContext";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
+import { lastReportedStatus } from "../agent/status/deriveStatus";
 import { writeToSession } from "../api/sessions";
 import { utf8ToBase64 } from "../utils/encoding";
 import { getWorktreeUsage } from "../api/git";
@@ -120,7 +121,9 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
     () => (preview ? doneWhenCommands(feature, preview.worktreeToml) : []),
     [preview, feature],
   );
-  const doneWhen = doneWhenState(commands, events.status);
+  // What the checks (or the agent) last reported: the terminal's own
+  // guesses (with the launchHelper flag) must not hide a failing check.
+  const doneWhen = doneWhenState(commands, lastReportedStatus(events) ?? events.status);
   const turnCount = Math.max(turns.length, events.turn.completed);
   const draftInput = useMemo(
     () =>

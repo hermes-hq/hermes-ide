@@ -15,7 +15,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launchApp, sleep } from "../harness.mjs";
-import { completeOnboarding, finishWizard, openWizard, runScenario } from "../n11-steps.mjs";
+import { completeOnboarding, dismissWhatsNew, finishWizard, openWizard, runScenario } from "../n11-steps.mjs";
 
 const MARKER = "fake-copilot started";
 
@@ -30,10 +30,21 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
   for (const rc of [".zshenv", ".bashrc", ".bash_profile"]) writeFileSync(join(home, rc), pathLine);
 
   log("step 2: launch the test app on that home");
-  const app = await launchApp({ runDir: join(evidenceDir, "run"), log, homeDir: home });
+  const first = await launchApp({ runDir: join(evidenceDir, "run"), log, homeDir: home });
+  apps.push(first);
+  await completeOnboarding(first.bridge, log);
+  // The launch helper (on by default since 2.0) adds its own arguments to
+  // the agent's command line (the conversation id, the per-launch signal
+  // settings); this scenario compares the typed line with the preview, so
+  // it launches the old way.
+  await first.bridge.eval(`return await window.__TAURI_INTERNALS__.invoke("set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ launchHelper: false }) });`);
+  const firstExit = await first.stop();
+  assert(!firstExit.forced && firstExit.code === 0, "the first launch quit cleanly");
+  const app = await launchApp({ runDir: join(evidenceDir, "run-2"), log, homeDir: home });
   apps.push(app);
   const { bridge } = app;
-  await completeOnboarding(bridge, log);
+  await bridge.waitFor("the app UI (no onboarding this time)", `return !!e2e.first(".topbar") && !e2e.first(".onboarding-backdrop");`);
+  await dismissWhatsNew(bridge, log);
 
   const ghOnMachine = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"].some((p) => existsSync(p));
   log(`  gh installed on this machine: ${ghOnMachine ? "yes" : "no"}`);
@@ -65,16 +76,19 @@ await runScenario("N11-copilot-cli", async ({ evidenceDir, log, assert, apps, on
       (el.querySelector(".session-creator-provider-name")?.innerText ?? "").trim().includes("Copilot"));
     return e2e.click(e2e.must(c, "the Copilot card"));
   `);
+  // The preview settles once the agent's safety default is applied (Accept
+  // edits for Copilot, from the agent catalog, on by default since 2.0).
+  const COPILOT_PREVIEW = "copilot --allow-tool write";
   const preview = await bridge.waitFor("the launch preview for Copilot", `
     const t = e2e.first(".session-creator-launch-preview-cmd")?.innerText.trim();
-    return t ? t : null;
+    return t === ${JSON.stringify(COPILOT_PREVIEW)} ? t : null;
   `);
   log(`  launch preview: ${preview}`);
   await bridge.eval(`e2e.first(".session-creator-launch-preview")?.scrollIntoView({ block: "center" }); return true;`);
   await sleep(300);
   const previewShot = await bridge.screenshot(join(evidenceDir, "00-copilot-launch-preview.png"));
   log(`  screenshot saved: ${previewShot.file}`);
-  assert(preview === "copilot", "the wizard previews the copilot command the app actually runs");
+  assert(preview === COPILOT_PREVIEW, `the wizard previews the copilot command the app actually runs ("${preview}")`);
   const idsBefore = await bridge.terminalIds();
   await finishWizard(bridge, log);
   const sessionId = await bridge.waitFor(

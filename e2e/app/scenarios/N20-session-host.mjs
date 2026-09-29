@@ -6,7 +6,8 @@
 // its pid in a file, so the test can tell from outside whether it is alive
 // and from the screen whether the app replayed what it missed.
 //
-//   run 0  fresh install, flag OFF (the negative control): the streamer runs
+//   run 0  fresh install, flag switched OFF (on by default since 2.0 on macOS
+//          and Linux; the negative control): the streamer runs
 //          in a terminal owned by the app, so killing the app (no exit
 //          handler runs, like a crash) ends it; the relaunch shows a grey
 //          snapshot and no new lines. Turn the `sessionHost` flag on in the
@@ -344,10 +345,17 @@ async function run() {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   negative control: ${NEGATIVE}`);
 
   // ── run 0: flag OFF — the terminal dies with the app (negative control) ──
-  log("run 0: fresh install, flag OFF: killing the app ends the program in its terminal");
+  log("run 0: fresh install, flag switched OFF: killing the app ends the program in its terminal");
   app = await launch(0, { first: true });
   dataDir = app.dataDir;
   await completeOnboarding(app.bridge);
+  // On by default since 2.0 (macOS and Linux): switch it off (the kill
+  // switch) and relaunch.
+  await setFlagOverride(app.bridge, "off");
+  const exitOff = await app.stop();
+  assert(!exitOff.forced && exitOff.code === 0, "the app quit cleanly");
+  app = await launch(0.25);
+  await waitForReturningLaunch(app.bridge);
   const legacyId = await createPlainTerminal(app.bridge);
   const shell = await detectShell(app.bridge, legacyId);
   log(`  shell: ${shell}`);
@@ -393,7 +401,7 @@ async function run() {
   assert(legacyRestored && !legacyRestored.hosted, "flag off: the restore started a new in-process shell");
   await app.bridge.eval(`return await window.__TAURI_INTERNALS__.invoke("close_session", { sessionId: ${JSON.stringify(restoredLegacy)} });`);
   if (!NEGATIVE) await setFlagOverride(app.bridge, "on");
-  else log("  negative control: leaving the flag OFF");
+  else log("  negative control: keeping the flag switched OFF");
   const exit0 = await app.stop();
   assert(!exit0.forced && exit0.code === 0, "the app quit cleanly");
 
@@ -527,6 +535,9 @@ async function run() {
   writeFileSync(badRoot, "a file where the socket root should be\n");
   app = await launch(4, { env: { HERMES_HOST_SOCKET_ROOT: badRoot } });
   await waitForReturningLaunch(app.bridge);
+  // Run 3's session is saved (the programs stop after the save) and comes
+  // back first: let it, so the new terminal is told apart from it.
+  await app.bridge.waitFor("run 3's session to be restored", `return window.__HERMES_E2E__.terminalIds().includes(${JSON.stringify(sessionId)});`, { timeoutMs: 30_000 });
   const fallbackId = await createPlainTerminal(app.bridge);
   const notice = await app.bridge.waitFor("the fallback notice", `
     return e2e.all(".toast-message").map((el) => e2e.norm(el.innerText)).find((s) => s.includes("will not survive")) ?? null;

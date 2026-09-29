@@ -4,15 +4,17 @@
 // Proves, on the REAL app, with a fake agent (a tiny Node program written to
 // a temp folder; no real agent, no account):
 //
-//   run 1  fresh install, stable channel: the New Session agent step lists
-//          the catalog agents by name ("GitHub Copilot CLI", not the retired
-//          gh extension) and has NO Custom agent card (it is behind the
-//          agentCatalog flag). Force the flag on in Settings > Flags.
-//   run 2  relaunch: the Custom agent card is there. Its Next button stays
-//          disabled until a command is typed. Name it "Fake Agent", give it
-//          the fake agent's command, create the session: the fake agent
-//          starts in the session's terminal (its banner is on screen, it
-//          answers a typed line), and the sidebar shows "Fake Agent".
+//   run 1  fresh install, stable channel (the agentCatalog flag is on by
+//          default since 2.0): the New Session agent step lists the catalog
+//          agents by name ("GitHub Copilot CLI", not the retired gh
+//          extension), the agents new in 2.0 and the Custom agent card. Its
+//          Next button stays disabled until a command is typed. Name it
+//          "Fake Agent", give it the fake agent's command, create the
+//          session: the fake agent starts in the session's terminal (its
+//          banner is on screen, it answers a typed line), and the sidebar
+//          shows "Fake Agent". Then switch the flag off in Settings > Flags
+//          (the kill switch).
+//   run 2  relaunch: no Custom agent card and none of the agents new in 2.0.
 //
 // Negative control: HERMES_E2E_EXPECT_NAME=<something else> must end in
 // RESULT: FAIL (the sidebar check is real).
@@ -151,8 +153,8 @@ function setInput(bridge, selector, value) {
   `);
 }
 
-/** Opens Settings, unlocks the hidden Flags tab (7 clicks on the title) and forces the catalog flag on. */
-async function forceCatalogFlagOn(bridge) {
+/** Opens Settings, unlocks the hidden Flags tab (7 clicks on the title) and forces the catalog flag on or off. */
+async function forceCatalogFlag(bridge, value) {
   await bridge.clickByName("Settings");
   await bridge.waitFor("the Settings dialog", `return !!e2e.first('[role="dialog"] .settings-title');`);
   await bridge.eval(`
@@ -169,15 +171,15 @@ async function forceCatalogFlagOn(bridge) {
     const group = e2e.all(".settings-group").find((g) => e2e.norm(g.querySelector(".settings-label")?.textContent ?? "") === ${JSON.stringify(FLAG_LABEL)});
     const sel = e2e.must(group?.querySelector("select"), "the agentCatalog flag select");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
-    setter.call(sel, "on");
+    setter.call(sel, ${JSON.stringify(value)});
     sel.dispatchEvent(new Event("change", { bubbles: true }));
     return { value: sel.value };
   `);
-  assert(result.value === "on", "the agentCatalog flag select shows Force on");
+  assert(result.value === value, `the agentCatalog flag select shows Force ${value}`);
   await bridge.waitFor("the override to be saved", `
     const raw = await window.__TAURI_INTERNALS__.invoke("get_settings");
     const overrides = raw.feature_flag_overrides ? JSON.parse(raw.feature_flag_overrides) : {};
-    return overrides.agentCatalog === true;
+    return overrides.agentCatalog === ${value === "on" ? "true" : "false"};
   `);
   await bridge.click(".settings-close");
   await bridge.waitFor("the Settings dialog to close", `return !e2e.first(".settings-title");`);
@@ -195,32 +197,18 @@ let failed = false;
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   fake agent command: ${COMMAND}`);
 
-  // ── run 1: stable, flag off ──────────────────────────────────────
-  log("step 1: fresh launch on the stable channel: the agent step comes from the catalog, with no Custom agent");
+  // ── run 1: stable, no override (on by default since 2.0) ──────────
+  log("step 1: fresh launch on the stable channel: the agent step comes from the catalog, with the Custom agent");
   app = await launch(1, { first: true });
-  await completeOnboarding(app.bridge);
-  let cards = await openAgentStep(app.bridge);
+  const { bridge } = app;
+  await completeOnboarding(bridge);
+  let cards = await openAgentStep(bridge);
   log(`  agent cards: ${JSON.stringify(cards)}`);
   assert(cards.some((c) => c.id === "copilot" && c.name.startsWith("GitHub Copilot CLI")), "Copilot is the new GitHub Copilot CLI");
   assert(cards.some((c) => c.id === "gemini" && c.name.startsWith("Gemini CLI (legacy)")), "Gemini CLI is marked legacy");
-  assert(!cards.some((c) => c.id === "custom"), "no Custom agent card on stable without the flag");
-  assert(!cards.some((c) => c.id === "opencode" || c.id === "antigravity"), "no beta-channel agents on stable without the flag");
-  await app.bridge.screenshot(join(evidenceDir, "01-stable-agent-step.png"));
-  await app.bridge.click(".session-creator .settings-close");
-  await app.bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
-
-  log("step 2: force the agentCatalog flag on in Settings > Flags, then relaunch");
-  await forceCatalogFlagOn(app.bridge);
-  await quit(app);
-
-  // ── run 2: flag on ───────────────────────────────────────────────
-  app = await launch(2);
-  const { bridge } = app;
-  await waitForReturningLaunch(bridge);
-  cards = await openAgentStep(bridge);
-  log(`  agent cards: ${JSON.stringify(cards)}`);
-  assert(cards.some((c) => c.id === "antigravity" && c.name.startsWith("Antigravity CLI")), "Antigravity CLI is offered");
-  assert(cards.some((c) => c.id === "custom" && c.name === "Custom agent"), "the Custom agent card is offered");
+  assert(cards.some((c) => c.id === "antigravity" && c.name.startsWith("Antigravity CLI")), "Antigravity CLI is offered on stable with no override");
+  assert(cards.some((c) => c.id === "custom" && c.name === "Custom agent"), "the Custom agent card is offered on stable with no override");
+  await bridge.screenshot(join(evidenceDir, "01-stable-agent-step.png"));
 
   log("step 3: pick Custom agent; Next stays disabled until a command is typed");
   await bridge.click('.session-creator-provider-card[data-agent-id="custom"]');
@@ -307,6 +295,22 @@ try {
   await sleep(300);
   if (await bridge.exists(".close-dialog")) await bridge.click(".close-dialog .close-dialog-btn-confirm");
   await bridge.waitFor("the session to leave the session list", `return e2e.all(".session-item").length === 0;`);
+
+  log("step 8: switch the agentCatalog flag off in Settings > Flags (the kill switch), then relaunch");
+  await forceCatalogFlag(bridge, "off");
+  await quit(app);
+
+  // ── run 2: flag forced off ───────────────────────────────────────
+  app = await launch(2);
+  await waitForReturningLaunch(app.bridge);
+  cards = await openAgentStep(app.bridge);
+  log(`  agent cards: ${JSON.stringify(cards)}`);
+  assert(cards.some((c) => c.id === "copilot" && c.name.startsWith("GitHub Copilot CLI")), "the 1.x agents are still offered");
+  assert(!cards.some((c) => c.id === "custom"), "no Custom agent card with the flag switched off");
+  assert(!cards.some((c) => c.id === "opencode" || c.id === "antigravity"), "none of the agents new in 2.0 with the flag switched off");
+  await app.bridge.screenshot(join(evidenceDir, "04-flag-off-agent-step.png"));
+  await app.bridge.click(".session-creator .settings-close");
+  await app.bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);
@@ -326,7 +330,7 @@ try {
   }
 } finally {
   if (app?.isRunning()) {
-    log("step 8: quit the app");
+    log("step 9: quit the app");
     const exit = await app.stop();
     log(`  app exited: ${JSON.stringify(exit)}`);
     if (!failed && (exit.forced || exit.code !== 0)) {

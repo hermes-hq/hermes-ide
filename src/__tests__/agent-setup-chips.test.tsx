@@ -80,7 +80,7 @@ describe("AgentSetupChips", () => {
 	});
 
 	it("renders nothing and asks nothing with the flag off", async () => {
-		await initFeatureFlags({});
+		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: false }) });
 		renderChips("claude");
 		await act(async () => { await Promise.resolve(); });
 		expect(chips()).toBeNull();

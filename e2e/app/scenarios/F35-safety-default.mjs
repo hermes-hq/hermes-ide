@@ -67,7 +67,9 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   log("step 2: a new Claude session starts in the mapped default");
   const claude = await startAgentSession(bridge, log, { agent: "claude", prefix: fake.prefixFor("claude"), folders: [project], label: "F35 claude" });
   assert(claude.wizard.pillIsHermesDefault && claude.wizard.flags === "--permission-mode acceptEdits", "the wizard preselected Accept edits, marked Hermes default");
-  assert(/^FAKE-AGENT claude --permission-mode acceptEdits\b/.test(claude.bannerLine), "Claude runs with --permission-mode acceptEdits");
+  // Started through the launch helper (on by default since 2.0), the agent
+  // also gets its conversation id and per-launch settings file.
+  assert(/^FAKE-AGENT claude\b/.test(claude.bannerLine) && / --permission-mode acceptEdits\b/.test(claude.bannerLine), "Claude runs with --permission-mode acceptEdits");
   await settledChips("claude");
   await assertStaysDefault("Claude");
   await bridge.screenshot(join(evidenceDir, "01-claude-default.png"));
@@ -76,7 +78,7 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   log("step 3: a new Codex session starts in the mapped default");
   const codex = await startAgentSession(bridge, log, { agent: "codex", prefix: fake.prefixFor("codex"), folders: [project], label: "F35 codex" });
   assert(codex.wizard.pillIsHermesDefault && codex.wizard.flags === "--sandbox workspace-write --ask-for-approval on-request", "the wizard preselected Codex's sandboxed mode, marked Hermes default");
-  assert(/^FAKE-AGENT codex --sandbox workspace-write --ask-for-approval on-request$/.test(codex.bannerLine), "Codex runs with --sandbox workspace-write --ask-for-approval on-request");
+  assert(/^FAKE-AGENT codex\b/.test(codex.bannerLine) && / --sandbox workspace-write --ask-for-approval on-request\b/.test(codex.bannerLine), "Codex runs with --sandbox workspace-write --ask-for-approval on-request");
   await settledChips("codex");
   await assertStaysDefault("Codex");
   await bridge.screenshot(join(evidenceDir, "02-codex-default.png"));

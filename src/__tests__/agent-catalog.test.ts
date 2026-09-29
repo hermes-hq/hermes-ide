@@ -177,7 +177,7 @@ describe("agent catalog: what a build shows", () => {
 	beforeEach(() => __resetFeatureFlagsForTest());
 
 	it("Copilot's Accept edits (new in 2.0) is offered and launched only with the flag on", async () => {
-		await initFeatureFlags({});
+		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: false }) });
 		expect(getAvailableModes("copilot")).toEqual(["default", "plan", "auto", "bypassPermissions"]);
 		expect(permissionFlagText("copilot", "acceptEdits")).toBe("");
 		expect(buildLaunchPreview("copilot", "acceptEdits", "", "")).toBe("copilot");
@@ -194,8 +194,14 @@ describe("agent catalog: what a build shows", () => {
 
 	const ids = (list: AgentEntry[]) => list.map((a) => a.id);
 
-	it("stable without the flag: the 1.x agents only, no Custom agent", async () => {
+	it("stable with no override (the 2.0 default): every agent and the Custom agent", async () => {
 		await initFeatureFlags({});
+		expect(listAgents()).toHaveLength(10);
+		expect(customAgent()?.id).toBe("custom");
+	});
+
+	it("with the flag switched off: the 1.x agents only, no Custom agent", async () => {
+		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: false }) });
 		expect(ids(listAgents())).toEqual(["claude", "codex", "gemini", "copilot", "aider", "kiro"]);
 		expect(customAgent()).toBeUndefined();
 	});
@@ -208,7 +214,7 @@ describe("agent catalog: what a build shows", () => {
 
 	it("asks the backend to look for the beta agents only when the flag shows them", async () => {
 		h.invoke.mockResolvedValue({});
-		await initFeatureFlags({});
+		await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ agentCatalog: false }) });
 		await checkAiProviders();
 		expect(h.invoke).toHaveBeenLastCalledWith("check_ai_providers", { includeBeta: false });
 		__resetFeatureFlagsForTest();

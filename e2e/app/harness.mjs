@@ -482,12 +482,22 @@ export function prepareAppHome({ home, homeDir, resetData = true, privateTmp, re
  *          (settings, onboarding state) to prove something that only takes
  *          effect "on next launch", while still never touching the real
  *          home. The caller owns cleanup of this folder.
+ * flagDefaults: feature-flag defaults for this run (below any override the
+ *            app stores), passed to the e2e build as HERMES_E2E_FLAG_DEFAULTS.
+ *            Every flag is on by default since 2.0; the default here keeps
+ *            the task launcher off, because most scenarios drive the classic
+ *            welcome and New Session wizard. F15, F16 and RELEASE-2.0-defaults
+ *            (null: the real defaults) cover the launcher and the three-step
+ *            welcome.
  * resetData: only with home: "real" — false keeps the test app's data folder
  *            from the previous launch instead of wiping it, for the same
  *            "relaunch against the same data" scenarios on Windows (where
  *            the app's data lives under %APPDATA%, not HOME, so a private
  *            home does not isolate it). Default true.
  */
+/** The flag defaults launchApp gives the test app unless told otherwise. */
+export const E2E_FLAG_DEFAULTS = Object.freeze({ taskLauncher: false });
+
 export async function launchApp({
   runDir,
   log = () => {},
@@ -499,6 +509,7 @@ export async function launchApp({
   startupTimeoutMs = platform() === "linux" ? 120_000 : 60_000,
   tmp = "private",
   env: extraEnv = {},
+  flagDefaults = E2E_FLAG_DEFAULTS,
   // Called with the app's (empty) data folder before the app starts, e.g. to
   // put a database from an older release there.
   prepareDataDir,
@@ -541,6 +552,7 @@ export async function launchApp({
       TMPDIR: appTmp,
       TMP: appTmp,
       TEMP: appTmp,
+      ...(flagDefaults ? { HERMES_E2E_FLAG_DEFAULTS: JSON.stringify(flagDefaults) } : {}),
       ...extraEnv,
     },
     stdio: ["ignore", fd, fd],
@@ -601,11 +613,27 @@ export async function launchApp({
 
   // keepFiles: leave the private folders (and the data in them) for the
   // caller to inspect after the app quit; it then calls cleanup().
-  const stop = async ({ keepFiles = false } = {}) => {
+  // stopPrograms: when quitting asks whether to keep a working program
+  // running (the session host, on by default since 2.0), answer "Stop", as
+  // quitting did before terminals could outlive the app. False leaves the
+  // question to the scenario.
+  const stop = async ({ keepFiles = false, stopPrograms = true } = {}) => {
     if (!exited) {
       await bridge.quit();
       const until = Date.now() + 10_000;
-      while (!exited && Date.now() < until) await sleep(100);
+      let answered = !stopPrograms;
+      while (!exited && Date.now() < until) {
+        await sleep(100);
+        if (!answered && !exited) {
+          const clicked = await bridge
+            .eval(`const b = e2e.first('[data-testid="quit-with-agents-dialog"] .quit-dialog-btn-stop'); if (!b) return false; b.click(); return true;`)
+            .catch(() => false);
+          if (clicked) {
+            answered = true;
+            log?.("  quitting asked to keep a working program running: answered Stop");
+          }
+        }
+      }
     }
     if (!exited) {
       child.kill("SIGKILL");

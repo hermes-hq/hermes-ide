@@ -14,7 +14,8 @@
 // ledger (F20) is not filled yet, so the turns are injected through the
 // test bridge with exactly the patches git produced.
 //
-//   run 1  fresh install: the command palette's ⌘G entry is "Toggle Git
+//   run 1  fresh install with the reviewDesk flag switched off (it is on by
+//          default since 2.0): the command palette's ⌘G entry is "Toggle Git
 //          Panel"; the launchHelper and reviewDesk flags are turned on
 //   run 2  relaunch:
 //          - the ⌘G menu route opens the Review Desk, the palette entry
@@ -294,11 +295,14 @@ const setInput = (selector, value) => `
 `;
 const PRIMARY = ".session-creator-actions .session-creator-btn-primary, .session-creator-footer-actions .session-creator-btn-primary";
 async function clickPrimary(bridge, what) {
+  // The wizard may still be closing from the previous click (a slow
+  // runner): then there is nothing left to click.
   const r = await bridge.clickWhenReady(`
+    if (!e2e.first(".session-creator")) return { clicked: null };
     const b = e2e.must(e2e.first(${JSON.stringify(PRIMARY)}), "the wizard's primary button");
     return e2e.click(b);
   `);
-  log(`  wizard ${what}: clicked "${r.clicked}"`);
+  log(r.clicked === null ? `  wizard ${what}: already closed` : `  wizard ${what}: clicked "${r.clicked}"`);
   await sleep(300);
 }
 
@@ -359,9 +363,17 @@ async function createAgentSession(bridge, label, card = "Claude") {
         continue;
       }
     }
-    if (await bridge.exists('input.command-palette-input[placeholder="Session name (optional)"]')) {
-      await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
-    }
+    // Name the session when this step asks for one (checked and set in one
+    // go: the step can move on between two calls).
+    await bridge.eval(`
+      const el = e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');
+      if (!el) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      el.focus();
+      setter.call(el, ${JSON.stringify(label)});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    `);
     await clickPrimary(bridge, `step ${i + 1}`);
   }
   await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 20_000 });
@@ -459,7 +471,9 @@ async function typeInto(bridge, sessionId, text) {
   const r = await rawInvoke(bridge, "write_to_session", { sessionId, data: Buffer.from(text, "utf8").toString("base64") });
   assert(r.ok, `typed ${JSON.stringify(text)} into ${sessionId.slice(0, 8)}`);
 }
-const statusOf = (bridge, sessionId) => bridge.eval(`const s = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(sessionId)}); return { kind: s.status.kind, confidence: s.status.confidence };`);
+// The session's status as Hermes shows it (and as the desk reads it): the
+// terminal's own guesses never undo what the agent reported.
+const statusOf = (bridge, sessionId) => bridge.eval(`const s = window.__HERMES_E2E__.sessionStatus(${JSON.stringify(sessionId)}); return { kind: s.kind, confidence: s.confidence };`);
 async function waitForPrompts(sessionId, count, { timeoutMs = 15_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -485,14 +499,22 @@ try {
   setFakeMode("prompts");
 
   // ── run 1: fresh install, flags off ───────────────────────────────
-  log("run 1: fresh install — the ⌘G palette entry is the old git panel; turn the flags on");
+  log("run 1: fresh install, reviewDesk switched off — the ⌘G palette entry is the old git panel; turn the flags on");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
+  // On by default since 2.0: switch it off (the kill switch) and relaunch.
+  await setFlagOverride(app.bridge, "reviewDesk", "off");
+  await quit(app);
+  app = await launch("1b");
+  await waitForReturningLaunch(app.bridge);
   const labelBefore = await paletteLabelForGit(app.bridge);
   assert(labelBefore === "Toggle Git Panel", `with the flag off the palette's ⌘G entry is "${labelBefore}"`);
   assert(!(await deskOpen(app.bridge)), "no Review Desk without the flag");
   await setFlagOverride(app.bridge, "launchHelper", "on");
   await setFlagOverride(app.bridge, "reviewDesk", "on");
+  // Honest isolation (on by default since 2.0) would give each agent a
+  // worktree of its own; this scenario reviews agents in one repository.
+  await setFlagOverride(app.bridge, "honestIsolation", "off");
   await quit(app);
 
   // ── run 2: flags on ───────────────────────────────────────────────
@@ -647,8 +669,8 @@ try {
   // The person gives Agent A a long turn (the fake works 8 s, then runs its Stop hook).
   await typeInto(bridge, idA, "work 8000\r");
   const busyA = await bridge.waitFor("Agent A's status to be working (exact, from its prompt hook)", `
-    const s = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(idA)});
-    return s.status.kind === "working" && s.status.confidence === "exact" ? s.status : null;
+    const s = window.__HERMES_E2E__.sessionStatus(${JSON.stringify(idA)});
+    return s.kind === "working" && s.confidence === "exact" ? { kind: s.kind, confidence: s.confidence, source: s.source } : null;
   `, { timeoutMs: 10_000 });
   log(`  Agent A: ${JSON.stringify(busyA)}`);
   const promptsBefore = (await waitForPrompts(idA, 2)).length;
@@ -671,8 +693,8 @@ try {
   assert(!(await bridge.exists(".review-delivery[data-n='3'][data-state='delivered']")), "review 3 is not delivered yet");
   // The turn ends (the fake's Stop hook): Hermes still types nothing by itself.
   const endedA = await bridge.waitFor("Agent A's turn to end", `
-    const s = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(idA)});
-    return s.status.kind !== "working" ? s.status : null;
+    const s = window.__HERMES_E2E__.sessionStatus(${JSON.stringify(idA)});
+    return s.kind !== "working" ? { kind: s.kind, confidence: s.confidence, source: s.source } : null;
   `, { timeoutMs: 20_000 });
   log(`  Agent A after its turn: ${JSON.stringify(endedA)}`);
   const sendNowOn = await bridge.waitFor("Send now to come on once the turn ended", `

@@ -9,7 +9,7 @@
 // `.hermes/worktree.toml`, `done_when = ["node check.mjs"]`; check.mjs passes
 // once the work log has as many lines as `pass-at.txt` asks for.
 //
-//   run 1  launchHelper flag OFF (negative control): a Claude session gets no
+//   run 1  launchHelper flag switched OFF (on by default since 2.0; negative control): a Claude session gets no
 //          settings file, so nothing refuses its stop and no check chip shows.
 //          Turn the flag on (takes effect on the next launch).
 //   run 2  flag ON: the launch's settings file carries the Done-When Stop hook
@@ -298,9 +298,15 @@ try {
   setFakeMode("prompts work-log");
 
   // ── run 1: flag off (negative control) ────────────────────────────
-  log("run 1: launchHelper flag OFF — no Stop hook, no check chip");
+  log("run 1: launchHelper flag switched OFF — no Stop hook, no check chip");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
+  // On by default since 2.0: switch it off (the kill switch) and relaunch.
+  await setLaunchHelper(app.bridge, false);
+  await quit(app);
+  app = await launch("1b");
+  await app.bridge.waitFor("the app UI to be ready", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop");`);
+  await dismissWhatsNew(app.bridge);
   const off = await createClaudeSession(app.bridge);
   const offRec = await waitForRecord(() => true, "a launch");
   await app.bridge.waitForTerminal(off, /fake-cli: ready/, { timeoutMs: 30_000 });
@@ -356,7 +362,9 @@ try {
     return s.status.kind === "check_failed" ? s : null;
   `, { timeoutMs: 15_000 });
   assert(failedSnap.status.confidence === "exact" && /check\.mjs/.test(failedSnap.status.detail), `status check_failed (exact), detail "${failedSnap.status.detail}"`);
-  const items = (await inbox(app.bridge)).filter((i) => i.sessionId === sid);
+  // Only the checks' own item: with the attention inbox on (the 2.0 default)
+  // the session's status raises its own items too.
+  const items = (await inbox(app.bridge)).filter((i) => i.sessionId === sid && i.source === "checks");
   assert(items.length === 1 && items[0].kind === "error" && items[0].source === "checks" && /check\.mjs/.test(items[0].detail), `one error in the inbox: "${items[0]?.detail}"`);
   const c1 = await app.bridge.waitFor("the chip to say check failed", `
     const c = e2e.first(".done-when-chip");
@@ -387,7 +395,7 @@ try {
   assert(c2 === "tests ✓", `the chip says "${c2}"`);
   const cleared = await snapshot(app.bridge, sid);
   assert(cleared.status.kind === "done_unread" && cleared.status.confidence === "exact", `the status cleared to ${cleared.status.kind}`);
-  assert((await inbox(app.bridge)).filter((i) => i.sessionId === sid).length === 0, "the inbox item was resolved");
+  assert((await inbox(app.bridge)).filter((i) => i.sessionId === sid && i.source === "checks").length === 0, "the inbox item was resolved");
   await app.bridge.screenshot(join(evidenceDir, "02-tests-pass.png"));
 
   // c) what the backend recorded

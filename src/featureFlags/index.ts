@@ -1,9 +1,12 @@
 // ─── Feature flags ─────────────────────────────────────────────────────
 //
-// Off by default on stable, on for beta (the channel comes from the
-// `update_channel` setting the updater also uses — see ./channel.ts). Overridable per-flag from a hidden
-// section of Settings (Settings.tsx > "flags" tab, unlocked by clicking the
-// panel title 7 times) for testing before a feature ships to everyone.
+// Since 2.0, on by default on both channels (the channel comes from the
+// `update_channel` setting the updater also uses — see ./channel.ts), except
+// where a flag lists a platform it is not ready on (`stableOffOn` in
+// ./registry.ts: off there by default on stable, on for beta). Overridable
+// per-flag from a hidden section of Settings (Settings.tsx > "flags" tab,
+// unlocked by clicking the panel title 7 times): forcing a flag off is the
+// kill switch for a feature that misbehaves.
 //
 // Flags are read ONCE, at startup (see initFeatureFlags, called from
 // src/main.tsx before the app renders). Changing an override afterwards
@@ -17,8 +20,9 @@
 
 import { getVersion } from "@tauri-apps/api/app";
 import { getSettings, setSetting, type SettingsMap } from "../api/settings";
-import { FEATURE_FLAGS, type FeatureFlagId } from "./registry";
+import { FEATURE_FLAGS, type FeatureFlagDefinition, type FeatureFlagId } from "./registry";
 import { detectReleaseChannel, UPDATE_CHANNEL_KEY, type ReleaseChannel } from "./channel";
+import { PLATFORM, type Platform } from "../utils/platform";
 
 export { FEATURE_FLAGS };
 export type { FeatureFlagId, ReleaseChannel };
@@ -26,6 +30,13 @@ export { detectReleaseChannel, UPDATE_CHANNEL_KEY };
 
 /** Settings key: JSON-encoded `Partial<Record<FeatureFlagId, boolean>>`. */
 export const FEATURE_FLAG_OVERRIDES_KEY = "feature_flag_overrides";
+
+/**
+ * Test builds only (the real-app scenarios): this run's flag defaults, same
+ * shape, below any stored override. Only the e2e build's get_settings
+ * reports it; no stored setting can carry it.
+ */
+export const E2E_FLAG_DEFAULTS_KEY = "e2e_flag_defaults";
 
 export type FeatureFlagOverrides = Partial<Record<FeatureFlagId, boolean>>;
 
@@ -53,6 +64,8 @@ export function parseFeatureFlagOverrides(raw: string | undefined | null): Featu
 interface FlagState {
   channel: ReleaseChannel;
   overrides: FeatureFlagOverrides;
+  /** Test builds only: defaults for this run, below the overrides. */
+  testDefaults?: FeatureFlagOverrides;
 }
 
 let state: FlagState | null = null;
@@ -67,8 +80,8 @@ export const FEATURE_FLAG_INIT_TIMEOUT_MS = 2000;
  * (src/main.tsx does this).
  *
  * Never rejects. If the reads take longer than `timeoutMs`, it resolves with
- * every flag at its stable default and ignores the late answer, so flags
- * never change mid-session.
+ * every flag at its stable default (on, unless not ready on this platform)
+ * and ignores the late answer, so flags never change mid-session.
  */
 export async function initFeatureFlags(
   settings?: SettingsMap,
@@ -80,6 +93,7 @@ export async function initFeatureFlags(
   ]).then(([map, version]): FlagState => ({
     channel: detectReleaseChannel(map[UPDATE_CHANNEL_KEY], version),
     overrides: parseFeatureFlagOverrides(map[FEATURE_FLAG_OVERRIDES_KEY]),
+    testDefaults: parseFeatureFlagOverrides(map[E2E_FLAG_DEFAULTS_KEY]),
   }));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<FlagState>((resolve) => {
@@ -102,14 +116,29 @@ export function areFeatureFlagsReady(): boolean {
   return state !== null;
 }
 
+const STABLE_OFF_ON: ReadonlyMap<string, readonly Platform[]> = new Map(
+  (FEATURE_FLAGS as readonly FeatureFlagDefinition[]).map((f) => [f.id, f.stableOffOn ?? []]),
+);
+
 /**
- * Whether a flag is on: an override wins if one is set, otherwise it
- * follows the release channel (on for beta, off for stable).
+ * A flag's default with no override: on, except on the stable channel on a
+ * platform the flag lists as not ready (`stableOffOn`). Pure, for tests.
+ */
+export function featureFlagDefault(id: FeatureFlagId, channel: ReleaseChannel, platform: Platform): boolean {
+  if (channel === "beta") return true;
+  return !(STABLE_OFF_ON.get(id) ?? []).includes(platform);
+}
+
+/**
+ * Whether a flag is on: an override wins if one is set, otherwise the
+ * default for the release channel and this platform (featureFlagDefault).
  */
 export function isFeatureFlagEnabled(id: FeatureFlagId): boolean {
   const override = state?.overrides[id];
   if (typeof override === "boolean") return override;
-  return getReleaseChannel() === "beta";
+  const testDefault = state?.testDefaults?.[id];
+  if (typeof testDefault === "boolean") return testDefault;
+  return featureFlagDefault(id, getReleaseChannel(), PLATFORM);
 }
 
 /** The current override for a flag, or undefined if it follows the channel. */

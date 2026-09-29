@@ -535,7 +535,16 @@ try {
   assert(wtR3 && samePath(wtR3.worktreePath, wtR.worktreePath), "task R is still linked to its worktree");
   const shownR3 = await runInTerminal(app.bridge, idR, "git branch --show-current", /^hermes\/task-/);
   assert(shownR3 === wtR.branchName, `R's terminal answers, on ${shownR3} (not stuck at starting)`);
-  assert(!/starting/.test((await statusOf(app.bridge, "F09 task R")) ?? ""), "the session list does not show R as starting");
+  // The row's status follows the terminal a moment later (the session
+  // status reads the terminal's phase changes): give it that moment; a
+  // session stuck at starting never gets there.
+  const rowR3 = await app.bridge
+    .waitFor("R's row to leave starting", `
+      const item = e2e.all(".session-item").find((el) => el.innerText.includes("F09 task R"));
+      return item && !/starting/.test(item.innerText) ? item.innerText : null;
+    `, { timeoutMs: 10_000 })
+    .catch(() => null);
+  assert(rowR3 !== null, `the session list does not show R as starting (${JSON.stringify(await statusOf(app.bridge, "F09 task R"))})`);
   await app.bridge.waitFor("the workspace (with task R) to be saved again", `
     const s = await window.__TAURI_INTERNALS__.invoke("get_settings");
     return !!s.saved_workspace && s.saved_workspace.includes(${JSON.stringify(idR)});
@@ -562,7 +571,16 @@ try {
   const repoName = basename(repo);
   const shownDir = await runInTerminal(app.bridge, idR, "git rev-parse --show-toplevel", new RegExp(`${repoName}$`));
   assert(samePath(shownDir, repo), `R's terminal answers, in the project folder (${shownDir})`);
-  assert(!/starting/.test((await statusOf(app.bridge, "F09 task R")) ?? ""), "the session list does not show R as starting");
+  // The row's status follows the terminal a moment later (the session
+  // status reads the terminal's phase changes): give it that moment; a
+  // session stuck at starting never gets there.
+  const rowR4 = await app.bridge
+    .waitFor("R's row to leave starting", `
+      const item = e2e.all(".session-item").find((el) => el.innerText.includes("F09 task R"));
+      return item && !/starting/.test(item.innerText) ? item.innerText : null;
+    `, { timeoutMs: 10_000 })
+    .catch(() => null);
+  assert(rowR4 !== null, `the session list does not show R as starting (${JSON.stringify(await statusOf(app.bridge, "F09 task R"))})`);
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

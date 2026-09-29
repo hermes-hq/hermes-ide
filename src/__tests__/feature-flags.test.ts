@@ -5,8 +5,9 @@
  * - the registry cap (at most 15 flags alive at once during the 2.0 build)
  * - release-channel detection from the `update_channel` setting (which the
  *   updater's channel picker will write, N05) and from a -beta app version
- * - isFeatureFlagEnabled: off by default on stable, on for beta, and an
- *   override always wins
+ * - isFeatureFlagEnabled: since 2.0 on by default on stable and beta (the
+ *   2.0 experience for everyone), sessionHost off by default on stable
+ *   Windows only, and an override always wins (the kill switch)
  * - overrides persist through the settings API and survive a reload
  * - malformed / unknown override data is ignored rather than crashing
  */
@@ -30,8 +31,10 @@ import {
   setFeatureFlagOverride,
   parseFeatureFlagOverrides,
   areFeatureFlagsReady,
+  featureFlagDefault,
   __resetFeatureFlagsForTest,
   FEATURE_FLAG_OVERRIDES_KEY,
+  E2E_FLAG_DEFAULTS_KEY,
   UPDATE_CHANNEL_KEY,
   type FeatureFlagId,
 } from "../featureFlags";
@@ -115,6 +118,25 @@ describe("N07 parseFeatureFlagOverrides", () => {
   });
 });
 
+describe("2.0: every flag is on by default for everyone", () => {
+  const ids = FEATURE_FLAGS.map((f) => f.id);
+
+  it("on stable and beta, on every platform, except sessionHost on stable Windows", () => {
+    for (const id of ids) {
+      for (const platform of ["mac", "linux", "win"] as const) {
+        expect(featureFlagDefault(id, "beta", platform), `${id} beta ${platform}`).toBe(true);
+        const stable = id === "sessionHost" && platform === "win" ? false : true;
+        expect(featureFlagDefault(id, "stable", platform), `${id} stable ${platform}`).toBe(stable);
+      }
+    }
+  });
+
+  it("only sessionHost lists a platform it is not ready on", () => {
+    const limited = FEATURE_FLAGS.filter((f) => "stableOffOn" in f).map((f) => [f.id, (f as { stableOffOn?: readonly string[] }).stableOffOn]);
+    expect(limited).toEqual([["sessionHost", ["win"]]]);
+  });
+});
+
 describe("N07 isFeatureFlagEnabled", () => {
   beforeEach(() => {
     __resetFeatureFlagsForTest();
@@ -125,18 +147,18 @@ describe("N07 isFeatureFlagEnabled", () => {
     __resetFeatureFlagsForTest();
   });
 
-  it("before init, is not ready and defaults to stable (flag off)", () => {
+  it("before init, is not ready and defaults to stable (flag on: the 2.0 default)", () => {
     expect(areFeatureFlagsReady()).toBe(false);
     expect(getReleaseChannel()).toBe("stable");
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
   });
 
-  it("is off on stable with no override", async () => {
+  it("is on on stable with no override", async () => {
     h.getVersion.mockResolvedValue("1.4.0");
     await initFeatureFlags({});
     expect(areFeatureFlagsReady()).toBe(true);
     expect(getReleaseChannel()).toBe("stable");
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
   });
 
   it("is on for the beta channel with no override", async () => {
@@ -153,19 +175,30 @@ describe("N07 isFeatureFlagEnabled", () => {
     expect(isFeatureFlagEnabled(FLAG)).toBe(true);
   });
 
-  it("is off again when the person switches back to the stable update channel", async () => {
+  it("stays on when the person switches back to the stable update channel", async () => {
     h.getVersion.mockResolvedValue("1.4.0");
     await initFeatureFlags({ [UPDATE_CHANNEL_KEY]: "stable" });
     expect(getReleaseChannel()).toBe("stable");
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
   });
 
-  it("an override forces a flag on for stable", async () => {
+  it("an override forces a flag off for stable (the kill switch)", async () => {
     h.getVersion.mockResolvedValue("1.4.0");
-    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: true }) });
+    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: false }) });
     expect(getReleaseChannel()).toBe("stable");
-    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
-    expect(getFeatureFlagOverride(FLAG)).toBe(true);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(getFeatureFlagOverride(FLAG)).toBe(false);
+  });
+
+  it("test builds: a run's flag defaults sit below the stored overrides", async () => {
+    h.getVersion.mockResolvedValue("1.4.0");
+    await initFeatureFlags({
+      [E2E_FLAG_DEFAULTS_KEY]: JSON.stringify({ [FLAG]: false, sessionHost: false }),
+      [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ sessionHost: true }),
+    });
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false); // the run's default
+    expect(getFeatureFlagOverride(FLAG)).toBeUndefined(); // not an override
+    expect(isFeatureFlagEnabled("sessionHost")).toBe(true); // the stored override wins
   });
 
   it("an override forces a flag off for beta", async () => {
@@ -179,14 +212,14 @@ describe("N07 isFeatureFlagEnabled", () => {
     h.getVersion.mockResolvedValue("1.4.0");
     h.invoke.mockResolvedValue(undefined);
     await initFeatureFlags({});
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
 
-    await setFeatureFlagOverride(FLAG, true);
+    await setFeatureFlagOverride(FLAG, false);
     expect(h.invoke).toHaveBeenCalledWith("set_setting", {
       key: FEATURE_FLAG_OVERRIDES_KEY,
-      value: JSON.stringify({ [FLAG]: true }),
+      value: JSON.stringify({ [FLAG]: false }),
     });
-    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
 
     // Clearing the override (null) drops it back to the channel default.
     await setFeatureFlagOverride(FLAG, null);
@@ -194,20 +227,20 @@ describe("N07 isFeatureFlagEnabled", () => {
       key: FEATURE_FLAG_OVERRIDES_KEY,
       value: "{}",
     });
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
   });
 
   it("a persisted override survives a fresh initFeatureFlags call (simulating restart)", async () => {
     h.getVersion.mockResolvedValue("1.4.0");
-    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: true }) });
-    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: false }) });
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
 
     // Simulate quitting and relaunching: state is wiped, then re-read from
     // the same persisted settings map.
     __resetFeatureFlagsForTest();
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false); // not ready yet -> safe default
-    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: true }) });
-    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true); // not ready yet -> the stable default
+    await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: false }) });
+    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
   });
 
   it("falls back to getSettings() when initFeatureFlags is called with no argument", async () => {
@@ -233,7 +266,7 @@ describe("N07 isFeatureFlagEnabled", () => {
     await expect(initFeatureFlags()).resolves.toBeUndefined();
     expect(areFeatureFlagsReady()).toBe(true);
     expect(getReleaseChannel()).toBe("stable");
-    expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+    expect(isFeatureFlagEnabled(FLAG)).toBe(true);
   });
 
   describe("when the backend is slow", () => {
@@ -253,13 +286,13 @@ describe("N07 isFeatureFlagEnabled", () => {
       await init;
       expect(done).toBe(true);
       expect(areFeatureFlagsReady()).toBe(true);
-      expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+      expect(isFeatureFlagEnabled(FLAG)).toBe(true);
 
       // The real answer arrives later: flags must not change mid-session.
-      answer({ [UPDATE_CHANNEL_KEY]: "beta", [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: true }) });
+      answer({ [UPDATE_CHANNEL_KEY]: "beta", [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ [FLAG]: false }) });
       await vi.advanceTimersByTimeAsync(10);
       expect(getReleaseChannel()).toBe("stable");
-      expect(isFeatureFlagEnabled(FLAG)).toBe(false);
+      expect(isFeatureFlagEnabled(FLAG)).toBe(true);
     });
 
     it("uses the real answer when it arrives before the timeout", async () => {

@@ -1922,8 +1922,25 @@ pub fn get_all_memory(
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_all_settings()
+    #[allow(unused_mut)]
+    let mut settings = db.get_all_settings()?;
+    // e2e builds only: flag defaults for this run (a JSON map), below any
+    // override the app stores. The real-app scenarios keep the flags their
+    // steps were written for this way (see e2e/app/harness.mjs). The key
+    // cannot come from the settings table: set_setting refuses it.
+    #[cfg(feature = "e2e")]
+    if let Ok(defaults) = std::env::var(E2E_FLAG_DEFAULTS_ENV) {
+        settings.insert(E2E_FLAG_DEFAULTS_KEY.to_string(), defaults);
+    }
+    Ok(settings)
 }
+
+/// e2e builds: the environment variable with this run's flag defaults.
+#[cfg(feature = "e2e")]
+const E2E_FLAG_DEFAULTS_ENV: &str = "HERMES_E2E_FLAG_DEFAULTS";
+/// e2e builds: the key get_settings reports them under.
+#[cfg(feature = "e2e")]
+const E2E_FLAG_DEFAULTS_KEY: &str = "e2e_flag_defaults";
 
 /// Allowlist of valid setting keys that the frontend may write.
 ///

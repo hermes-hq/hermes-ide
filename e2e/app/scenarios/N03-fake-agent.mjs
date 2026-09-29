@@ -192,9 +192,13 @@ async function runFakeAgent(bridge, sessionId, shell, { tag, answer, expectExit,
 	if (answer === "ctrl-c") await pressCtrlC(bridge, sessionId);
 	else await bridge.typeInTerminal(sessionId, answer);
 	if (expectBusy) {
+		// The phase tag, or the session status (glyph + word) that replaces
+		// it when the launchHelper flag is on (the default since 2.0).
 		const tag = await bridge.waitFor("the session status to show Working", `
 			const el = e2e.first(".session-item .session-phase-tag");
-			return el?.getAttribute("data-phase") === "busy" ? e2e.norm(el.innerText) : null;
+			if (el?.getAttribute("data-phase") === "busy") return e2e.norm(el.innerText);
+			const st = e2e.first(".session-item .agent-status-tag");
+			return st?.getAttribute("data-status") === "working" ? e2e.norm(st.innerText) : null;
 		`, { timeoutMs: 5_000 });
 		assert(!!tag, `the session list shows "${tag}" while the agent works after the approval`);
 		if (shot) await bridge.screenshot(join(evidenceDir, `${shot}-working.png`));

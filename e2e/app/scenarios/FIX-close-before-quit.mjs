@@ -28,7 +28,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { E2E_FLAG_DEFAULTS, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+
+// This scenario is about the app's own workspace save racing a quit. The
+// session host (on by default on macOS and Linux) asks before quitting
+// while a terminal is busy, which a shell drawing its prompt can be at the
+// moment of a quick quit; N20 covers the host, so it stays off here.
+const FLAG_DEFAULTS = { ...E2E_FLAG_DEFAULTS, sessionHost: false };
 
 const SCENARIO = "FIX-close-before-quit";
 const startedAt = Date.now();
@@ -51,8 +57,8 @@ const homeDir = onWindows ? undefined : mkdtempSync(join(tmpdir(), "hermes-e2e-c
 function launch(run, { first = false } = {}) {
   const runDir = join(evidenceDir, `run-${run}`);
   return onWindows
-    ? launchApp({ runDir, log, home: "real", resetData: first })
-    : launchApp({ runDir, log, home: "private", homeDir });
+    ? launchApp({ runDir, log, home: "real", resetData: first, flagDefaults: FLAG_DEFAULTS })
+    : launchApp({ runDir, log, home: "private", homeDir, flagDefaults: FLAG_DEFAULTS });
 }
 
 async function dismissWhatsNew(bridge) {

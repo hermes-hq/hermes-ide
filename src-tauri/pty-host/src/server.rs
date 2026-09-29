@@ -79,6 +79,7 @@ impl HostSession {
             total_bytes: self.ring.total(),
             last_output_ms_ago: self.last_output.map(|t| t.elapsed().as_millis() as u64),
             started_at: self.started_at,
+            killed: self.kill_requested,
         }
     }
 }
@@ -213,6 +214,9 @@ fn janitor(sessions: Sessions, cfg: Arc<Config>, started: Instant) {
             let mut map = sessions.lock().unwrap_or_else(|e| e.into_inner());
             map.retain(|id, sess| {
                 let s = sess.lock().unwrap_or_else(|e| e.into_inner());
+                // A session ended on request is forgotten at once: nobody
+                // needs to be told it ended (Hermes stops idle terminals
+                // this way when it quits, then starts new ones on restore).
                 let gone = s.exited
                     && (s.exit_delivered
                         || s.kill_requested
@@ -463,6 +467,24 @@ fn spawn_session(
             io::ErrorKind::InvalidInput,
             "a session needs an id and a program",
         ));
+    }
+    // A session ended on request (and not yet forgotten) gives its id back:
+    // make sure it is gone, then start the new program under that id.
+    let stale = {
+        let map = sessions.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&id)
+            .filter(|s| s.lock().unwrap_or_else(|e| e.into_inner()).kill_requested)
+            .cloned()
+    };
+    if let Some(old) = stale {
+        // Ends it if it still runs (SIGHUP, then SIGKILL); its reader thread
+        // reaps it, as for any session.
+        kill_session(&old);
+        sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+        log(&format!("replaced {id}, ended on request"));
     }
     if sessions
         .lock()

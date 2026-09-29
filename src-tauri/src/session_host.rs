@@ -369,12 +369,36 @@ pub fn on_exit_requested(app: &AppHandle) -> bool {
             log::info!("[session-host] quitting; hosted sessions keep running");
             false
         }
-        _ => {
-            // Nothing is working (or the user chose to stop): hosted
-            // sessions end with the app, as in-process ones always did.
-            stop_all_hosted(&state);
-            false
+        // Nothing is working, or the user chose to stop: the exit goes
+        // ahead, and the hosted sessions end once the workspace is saved
+        // (stop_hosted_unless_kept) — stopping them now would let the save
+        // see them ended and leave them out of the workspace.
+        _ => false,
+    }
+}
+
+/// Called when the exit really goes ahead, after the workspace was saved:
+/// hosted sessions end with the app, as in-process ones always did, unless
+/// the person chose to keep them running. Sessions still working without an
+/// answer (an exit that could not ask) are left running.
+pub fn stop_hosted_unless_kept(app: &AppHandle) {
+    use tauri::Manager;
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let decision = app
+        .try_state::<SessionHostState>()
+        .and_then(|s| s.quit_decision.lock().ok().map(|d| *d))
+        .unwrap_or(None);
+    let stop = match decision {
+        Some(keep) => !keep,
+        None => {
+            let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+            working_hosted_sessions(&mgr).is_empty()
         }
+    };
+    if stop {
+        stop_all_hosted(&state);
     }
 }
 
@@ -439,21 +463,19 @@ pub async fn session_host_status(
     Ok(status)
 }
 
-/// The user's answer to "keep running or stop?": remember it, act on it,
-/// and quit. The exit request then goes through.
+/// The user's answer to "keep running or stop?": remember it and quit
+/// (the exit acts on it once the workspace is saved). The exit request then goes through.
 #[tauri::command]
 pub fn session_host_quit(
     app: AppHandle,
-    state: State<'_, AppState>,
     host_state: State<'_, SessionHostState>,
     keep_running: bool,
 ) -> Result<(), String> {
     if let Ok(mut d) = host_state.quit_decision.lock() {
         *d = Some(keep_running);
     }
-    if !keep_running {
-        stop_all_hosted(&state);
-    }
+    // The programs are stopped once the exit goes ahead, after the
+    // workspace is saved (stop_hosted_unless_kept).
     log::info!(
         "[session-host] quit: {}",
         if keep_running {
@@ -740,11 +762,14 @@ mod unix {
         cols: u16,
     ) -> Result<HostedOpen, String> {
         let mut conn = connect_or_start(app)?;
+        // A session Hermes itself ended (quitting with nothing working stops
+        // hosted terminals) is not reattached: like an in-process terminal,
+        // the restore starts a new program under the same id.
         let existing = conn
             .list()
             .map_err(|e| format!("host list: {e}"))?
             .into_iter()
-            .any(|s| s.id == session_id);
+            .any(|s| s.id == session_id && !s.killed);
         if !existing {
             let cmd = cmd.ok_or_else(|| {
                 format!("session {session_id} is not in the host and no command was given")

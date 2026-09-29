@@ -29,6 +29,7 @@ import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { workingSessionIds } from "./state/tileLayout";
 import { getSessionEventSnapshot } from "./agent/contract/sessionEventStore";
+import { lastReportedStatus } from "./agent/status/deriveStatus";
 import { isFeatureFlagEnabled } from "./featureFlags";
 import { getSetting } from "./api/settings";
 import { workingDirectoryRecoveryMessage, reusedCheckoutMessage, type WorkingDirectoryRecovery, type ReusedCheckout } from "./state/isolation";
@@ -1569,7 +1570,9 @@ function AppContent() {
           onOpenCostDashboard={fleetOn ? undefined : () => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
           onTileWorkingAgents={isFeatureFlagEnabled("fleetPerf") ? () => {
-            const ids = workingSessionIds(sidebarSessions, (id) => getSessionEventSnapshot(id).status.kind);
+            // What the agents reported: a plain shell's busy prompt (the
+            // terminal's own guess) is not an agent at work.
+            const ids = workingSessionIds(sidebarSessions, (id) => lastReportedStatus(getSessionEventSnapshot(id))?.kind ?? "idle");
             if (ids.length === 0) {
               toastStore.addToast({ message: t("fleet.noWorkingAgents"), type: "info", duration: 3000 });
               return;

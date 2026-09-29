@@ -2,7 +2,8 @@
 // Scenario (N11): the Workbench layout and a session's notes survive a
 // restart.
 //
-// A user opens an Agent-view session, switches the Workbench to the Git tab,
+// A user opens an Agent-view session, switches the Workbench to the Git tab
+// (Context when the Review Desk retires it),
 // drags the Files/Notes divider, writes a note, closes the window, and opens
 // Hermes again. The same tab, divider position and note must be back.
 //
@@ -54,9 +55,13 @@ await runScenario("N11-workbench-notes-restore", async ({ evidenceDir, log, asse
     log(`  Workbench before changes: ${JSON.stringify(initial)}`);
     assert(initial.tab === "Files" && initial.note === "", "a new Workbench starts on Files with an empty note");
 
-    await b1.clickByName("Git", { within: ".workbench-tabs" });
-    await b1.waitFor("the Git tab to be selected", `
-      return e2e.first('.workbench-tab[aria-selected="true"]')?.textContent.trim() === "Git";
+    // Any tab but the default one proves the tab comes back. Git, or
+    // Context when the Review Desk (on by default since 2.0) retires the
+    // Workbench's Git tab.
+    const TAB = (await b1.eval(`return e2e.all(".workbench-tabs .workbench-tab").map((t) => t.textContent.trim());`)).includes("Git") ? "Git" : "Context";
+    await b1.clickByName(TAB, { within: ".workbench-tabs" });
+    await b1.waitFor(`the ${TAB} tab to be selected`, `
+      return e2e.first('.workbench-tab[aria-selected="true"]')?.textContent.trim() === ${JSON.stringify(TAB)};
     `);
 
     // Drag the Files/Notes divider up by a third of the panel's height.
@@ -123,7 +128,7 @@ await runScenario("N11-workbench-notes-restore", async ({ evidenceDir, log, asse
     await sleep(500);
     await b2.screenshot(join(evidenceDir, "02-after-restart.png"));
 
-    assert(after.tab === "Git", "the Workbench reopened on the Git tab");
+    assert(after.tab === TAB, `the Workbench reopened on the ${TAB} tab`);
     assert(after.split === before.split, `the Files/Notes split is back at ${before.split}%`);
     assert(after.note === NOTE, `the session's note is back: "${after.note}"`);
 

@@ -218,3 +218,21 @@ export function deriveStatus({ snapshot, seenAt, inputTimes = NO_INPUT }: Derive
   }
   return folded;
 }
+
+const EXITED_STATUS: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
+
+/**
+ * The last status the agent (or a plugin, a hook, a notification) reported,
+ * an exit included; the terminal's own guesses (source "pty") left out.
+ * Null when nothing but the terminal said anything. For features that act on
+ * what an agent is doing (the task queue, tiling working agents), where a
+ * plain shell's busy prompt must not count.
+ */
+export function lastReportedStatus(snap: SessionEventSnapshot): AgentStatus | null {
+  for (let i = snap.events.length - 1; i >= 0; i--) {
+    const e = snap.events[i];
+    if (e.type === "exit") return EXITED_STATUS;
+    if (e.type === "status" && e.source !== PTY_SOURCE) return e.status;
+  }
+  return null;
+}

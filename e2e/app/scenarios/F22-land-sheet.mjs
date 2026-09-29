@@ -36,7 +36,7 @@
 //              the work is uncommitted again
 //   run 3  gh not installed: the PR option is disabled with an install link
 //
-// Negative control: HERMES_E2E_F22_NEGATIVE=1 leaves the landSheet flag off,
+// Negative control: HERMES_E2E_F22_NEGATIVE=1 switches the landSheet flag off,
 // so there is no Land button and the scenario must end in RESULT: FAIL.
 //
 //   node e2e/app/build.mjs
@@ -264,15 +264,25 @@ async function selectSession(bridge, label) {
   await sleep(300);
 }
 
-/** Open the session's Git panel, press Land…, wait for the sheet. */
+/**
+ * Open the session's Git panel (or the Review Desk that replaces it, on by
+ * default since 2.0), press Land…, wait for the sheet.
+ */
 async function openLandSheet(bridge, label) {
   await selectSession(bridge, label);
-  if (!(await bridge.exists(".session-git-panel"))) {
-    await bridge.click('.session-subview-btn[title="Git"]');
+  if (await bridge.exists('.session-subview-btn[title="Review Desk"]')) {
+    if (!(await bridge.exists(".review-desk"))) await bridge.click('.session-subview-btn[title="Review Desk"]');
+    await bridge.waitFor("the Review Desk", `return !!e2e.first(".review-desk");`);
+    await bridge.waitFor("the Land button", `return !!e2e.first(".review-desk .review-land-btn");`, { timeoutMs: 10_000 });
+    await bridge.click(".review-desk .review-land-btn");
+  } else {
+    if (!(await bridge.exists(".session-git-panel"))) {
+      await bridge.click('.session-subview-btn[title="Git"]');
+    }
+    await bridge.waitFor("the session Git panel", `return !!e2e.first(".session-git-panel");`);
+    await bridge.waitFor("the Land button", `return !!e2e.first(".session-git-land-btn");`, { timeoutMs: 10_000 });
+    await bridge.click(".session-git-land-btn");
   }
-  await bridge.waitFor("the session Git panel", `return !!e2e.first(".session-git-panel");`);
-  await bridge.waitFor("the Land button", `return !!e2e.first(".session-git-land-btn");`, { timeoutMs: 10_000 });
-  await bridge.click(".session-git-land-btn");
   await bridge.waitFor("the Land sheet to read the worktree", `
     return !!e2e.first(".land-sheet") && !!e2e.first('.land-sheet-option[data-mode="merge"]');
   `, { timeoutMs: 20_000 });
@@ -384,7 +394,7 @@ try {
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
   await quit(app);
-  setFlags(app.dataDir, NEGATIVE ? { honestIsolation: true } : { landSheet: true, honestIsolation: true });
+  setFlags(app.dataDir, NEGATIVE ? { landSheet: false, honestIsolation: true } : { landSheet: true, honestIsolation: true });
 
   // ── run 2 ──────────────────────────────────────────────────────────
   log("step 2: relaunch; task A in its own worktree");

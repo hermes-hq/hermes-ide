@@ -35,7 +35,7 @@
 // Also checked: opening a session writes nothing to the repository (no
 // refs/hermes ref exists until a turn changed something).
 //
-// Negative control of the whole scenario: HERMES_E2E_F20_FLAG=off leaves
+// Negative control of the whole scenario: HERMES_E2E_F20_FLAG=off switches
 // the flag off; the turn bar never appears and no refs/hermes ref is
 // written, so the scenario ends in RESULT: FAIL at step A (by design; the
 // chip check is real). Run by hand to see it fail.
@@ -446,9 +446,10 @@ try {
   log("step 0: fresh launch; turn the turnLedger and agentCatalog flags on (read at next start)");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
-  if (FLAG_ON) {
-    await invoke(app.bridge, "set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ turnLedger: true, agentCatalog: true }) });
-  }
+  // Every flag is on by default since 2.0: the negative control switches
+  // turnLedger off, and honest isolation (a branch of its own per task) is
+  // switched off so the session works in the test repository on main.
+  await invoke(app.bridge, "set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ turnLedger: FLAG_ON, agentCatalog: true, honestIsolation: false }) });
   const exit1 = await app.stop();
   assert(!exit1.forced && exit1.code === 0, "run 1 quit cleanly");
 

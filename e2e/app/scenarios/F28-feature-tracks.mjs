@@ -190,8 +190,19 @@ async function startPlainShellInRepo(bridge, label) {
       await bridge.waitFor("the test repo to be selected", `
         return e2e.all(".project-picker-item.project-picker-item-attached").some((el) => el.innerText.includes("f28-repo"));
       `);
-    } else if (await bridge.exists('input.command-palette-input[placeholder="Session name (optional)"]')) {
-      await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
+    } else if (
+      // Checked and set in one go: the step can move on between two calls.
+      await bridge.eval(`
+        const el = e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');
+        if (!el) return false;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        el.focus();
+        setter.call(el, ${JSON.stringify(label)});
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      `)
+    ) {
+      // named
     } else if (await bridge.exists(".session-creator-branch-multi")) {
       // The current branch is pre-selected, unless another session in the
       // same folder already uses it: then the person says so explicitly.
@@ -320,7 +331,9 @@ try {
   log("run 0: fresh install; turn the featureTracks flag on (read at next start)");
   app = await launch(0, { first: true });
   await completeOnboarding(app.bridge);
-  await invoke(app.bridge, "set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ featureTracks: true }) });
+  // Honest isolation (on by default since 2.0) would give each shell a
+  // worktree of its own; this scenario's sessions share the test repository.
+  await invoke(app.bridge, "set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ featureTracks: true, honestIsolation: false }) });
   await quit(app);
 
   // ── run 1 ──────────────────────────────────────────────────────────

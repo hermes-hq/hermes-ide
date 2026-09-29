@@ -133,11 +133,16 @@ features:
     status: shipped
     criteria:
       N07-1:
-        text: "A flagged feature is invisible on stable and visible on beta"
+        # Since 2.0 every flag is on by default on stable too; a flag only
+        # hides its feature when it is switched off (the kill switch).
+        text: "A flagged feature is visible on stable and on beta by default"
         scenarios: [N07-feature-flags.mjs]
       N07-2:
         text: "Turning a flag off hides the feature on next launch"
         scenarios: [N07-feature-flags.mjs]
+      N07-3:
+        text: "A fresh install on the stable channel gets every 2.0 feature (the session host on macOS and Linux only)"
+        scenarios: [RELEASE-2.0-defaults.mjs]
   N14:
     name: "Disk guard and worktree hygiene"
     status: partial

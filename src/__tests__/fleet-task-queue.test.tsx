@@ -228,6 +228,37 @@ describe("useFleetControls: cap 3, five tasks", () => {
     expect(listQueuedTasks()).toEqual([]);
   });
 
+  it("the terminal's own guesses (idle while the agent waits for input) do not free a slot", async () => {
+    const { launch, started } = mount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10); // the caps load
+    });
+    for (const label of ["one", "two", "three"]) {
+      await act(async () => {
+        await launch(label);
+      });
+    }
+    // The agents print their banner and wait: the terminal guesses idle.
+    await act(async () => {
+      for (const id of ["t1", "t2", "t3"]) {
+        dispatchSessionEvent(id, { type: "status", at: 1, source: "pty", status: { kind: "idle", confidence: "guessed", detail: "" } });
+      }
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    await act(async () => {
+      await launch("four");
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(started.map((o) => o.label)).toEqual(["one", "two", "three"]);
+    expect(listQueuedTasks().map((t) => t.label)).toEqual(["four"]);
+    // The agent itself saying its turn is done frees the slot.
+    await act(async () => {
+      dispatchSessionEvent("t3", { type: "status", at: 2, source: "hook:x", status: { kind: "done_unread", confidence: "exact", detail: "" } });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(started.map((o) => o.label)).toEqual(["one", "two", "three", "four"]);
+  });
+
   it("negative control: without a cap nothing waits", async () => {
     h.settings = {};
     const { launch, started } = mount();

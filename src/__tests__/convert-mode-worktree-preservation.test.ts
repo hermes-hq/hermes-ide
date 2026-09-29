@@ -223,14 +223,15 @@ describe("Bug 4 — restorePreservedWorktrees", () => {
       { projectId: "p2", branchName: "main" },
     ]);
 
-    expect(calls).toEqual([
+    // With fast worktrees on (diskGuard), each new worktree is also prepared.
+    expect(calls.filter((c) => c.cmd === "git_create_worktree")).toEqual([
       {
         cmd: "git_create_worktree",
-        args: { sessionId: "sess-1", projectId: "p1", branchName: "feature-x", createBranch: false, fromRemote: null },
+        args: { sessionId: "sess-1", projectId: "p1", branchName: "feature-x", createBranch: false, fromRemote: null, enforceDiskGuard: true },
       },
       {
         cmd: "git_create_worktree",
-        args: { sessionId: "sess-1", projectId: "p2", branchName: "main", createBranch: false, fromRemote: null },
+        args: { sessionId: "sess-1", projectId: "p2", branchName: "main", createBranch: false, fromRemote: null, enforceDiskGuard: true },
       },
     ]);
   });
@@ -253,7 +254,7 @@ describe("Bug 4 — restorePreservedWorktrees", () => {
       { projectId: "p2", branchName: "y" },
     ]);
 
-    expect(calls).toEqual([
+    expect(calls.filter((c) => c.startsWith("git_create_worktree:"))).toEqual([
       "git_create_worktree:p1",
       "git_create_worktree:p2",
     ]);

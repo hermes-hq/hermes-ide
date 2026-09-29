@@ -50,6 +50,10 @@ pub struct SessionInfo {
     pub last_output_ms_ago: Option<u64>,
     /// Unix time (ms) the session was spawned.
     pub started_at: u64,
+    /// A client asked the host to end it (Kill / KillAll): its end is not
+    /// news for a later client, and its id can be spawned again.
+    #[serde(default)]
+    pub killed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

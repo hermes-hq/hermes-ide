@@ -206,6 +206,9 @@ describe("ReviewDesk", () => {
     await open();
     act(() => {
       dispatchSessionEvent("sess-a", working(1));
+      // It works quietly: the terminal guesses it is idle (launchHelper on).
+      // The agent's own report stands.
+      dispatchSessionEvent("sess-a", { type: "status", at: 1, source: "pty", status: { kind: "idle", confidence: "guessed", detail: "" } });
     });
     await commentForA("Why 3?");
     fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
@@ -327,5 +330,39 @@ describe("ReviewDesk", () => {
     expect(turnForPath([a, b], "src/app.js")).toBe(b);
     expect(turnForPath([a], "nope")).toBeNull();
     expect(normalizePath("C:\\Repo\\")).toBe("c:/repo");
+  });
+});
+
+describe("ReviewDesk: what the git panel it replaces offered", () => {
+  const WORKTREE = { project_id: "p1", project_name: "repo", project_path: "/data/hermes-worktrees/abc/s_task", is_git_repo: true, branch: "hermes/task", files: [] };
+  const FOLDER = { ...WORKTREE, project_id: "p2", project_name: "folder", project_path: "/fixture/repo" };
+
+  it("offers Land for a project the session works on in a worktree of its own, closing the desk first", async () => {
+    backend({ git_status: () => ({ projects: [WORKTREE, FOLDER], timestamp: 0 }) });
+    const opened: unknown[] = [];
+    const onOpen = (e: Event) => opened.push((e as CustomEvent).detail);
+    window.addEventListener("hermes:open-land-sheet", onOpen);
+    try {
+      const onClose = await open();
+      const land = await screen.findByRole("button", { name: "Land…" });
+      expect(document.querySelectorAll(".review-land-btn")).toHaveLength(1); // not the shared project folder
+      fireEvent.click(land);
+      expect(onClose).toHaveBeenCalled();
+      expect(opened).toEqual([{ sessionId: "sess-a", projectId: "p1" }]);
+    } finally {
+      window.removeEventListener("hermes:open-land-sheet", onOpen);
+    }
+  });
+
+  it("offers no Land when nothing is in a worktree of its own", async () => {
+    backend({ git_status: () => ({ projects: [FOLDER], timestamp: 0 }) });
+    await open();
+    await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("git_status", { sessionId: "sess-a" }));
+    expect(document.querySelector(".review-land-btn")).toBeNull();
+  });
+
+  it("has a Worktrees tab (disk use and cleanup)", async () => {
+    await open();
+    expect(screen.getByRole("tab", { name: "Worktrees" })).toBeInTheDocument();
   });
 });

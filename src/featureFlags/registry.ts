@@ -1,9 +1,13 @@
 // ─── Feature flag registry ────────────────────────────────────────────
 //
-// A flag hides a not-yet-proven feature from stable users while it ships to
-// beta. Flags are meant to be SHORT-LIVED: delete a flag's entry (and the
-// `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
-// proven and shipping to everyone.
+// A flag gates a feature so it can be switched off without a new release.
+// Since 2.0 every flag here is ON by default on both channels (the 2.0
+// experience is for everyone); a flag can list the platforms where it is not
+// ready yet (`stableOffOn`: off there by default on the stable channel). The
+// hidden Settings > Flags section still forces any flag off: that is the
+// kill switch. Flags are meant to be SHORT-LIVED: delete a flag's entry (and
+// the `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
+// proven.
 //
 // At most 15 flags may exist at once (raised from 5 for the 2.0 build, where
 // every new feature ships behind its own flag; 15 once fleetControls,
@@ -14,12 +18,20 @@
 // once at startup from the app version + the `feature_flag_overrides`
 // setting — see src/featureFlags/index.ts).
 
+import type { Platform } from "../utils/platform";
+
 export interface FeatureFlagDefinition {
   readonly id: string;
   /** Short label shown in the hidden Settings > Flags section. */
   readonly label: string;
   /** One sentence explaining what the flag gates and why it exists. */
   readonly description: string;
+  /**
+   * Platforms where the feature is not ready: there it is off by default on
+   * the stable channel (an override still turns it on). Absent: on
+   * everywhere.
+   */
+  readonly stableOffOn?: readonly Platform[];
 }
 
 export const FEATURE_FLAGS = [
@@ -94,6 +106,8 @@ export const FEATURE_FLAGS = [
     label: "Sessions survive quit, update and crash",
     description:
       "Run terminals in a small background host so agents keep working while Hermes is closed, updated or crashes; Hermes reattaches to them and replays what you missed. Quitting with a working agent asks whether to keep it running. macOS and Linux.",
+    // Windows: a redraw wipes the restored snapshot, not ready yet.
+    stableOffOn: ["win"],
   },
   {
     id: "fleetControls",

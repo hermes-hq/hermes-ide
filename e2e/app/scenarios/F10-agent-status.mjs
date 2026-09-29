@@ -5,7 +5,9 @@
 // provider reports, as a glyph and a word (never colour alone), dimmed with
 // the word "guessed" when Hermes only guessed it.
 //
-//   run 1  flag OFF (fresh install): an Agent-view session with a replayed
+//   run 1  flag switched OFF (fresh install, then the launchHelper flag
+//          forced off in Settings > Flags, since it is on by default from
+//          2.0): an Agent-view session with a replayed
 //          agent (tools/fake-agents/replay-stdio.mjs + the F13 cassette) asks
 //          for approval; the session list shows the old phase tag and no
 //          status tag. This is the negative control for the flag and records
@@ -327,9 +329,16 @@ try {
   assert(existsSync(REPLAY) && existsSync(CASSETTE) && existsSync(FAKE_AGENT), "the fake agents and the approval cassette exist");
 
   // ── run 1: flag off ─────────────────────────────────────────────────
-  log("run 1: fresh install, flag OFF — an agent waiting on approval, as people saw it before");
+  log("run 1: fresh install, flag switched OFF — an agent waiting on approval, as people saw it before");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
+  log("  switching the launchHelper flag off (on by default since 2.0; takes effect on next launch)");
+  await setLaunchHelperOverride(app.bridge, "off");
+  let exit0 = await app.stop();
+  assert(!exit0.forced && exit0.code === 0, "the app quit cleanly");
+  app = await launch("1b");
+  await app.bridge.waitFor("the app UI to be ready (no onboarding this time)", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop");`);
+  await dismissWhatsNew(app.bridge);
   const oldId = await createAgentViewSession(app.bridge, join(work, "f10-project-1"));
   await askForApproval(app.bridge);
   const oldRow = await readRow(app.bridge, oldId);

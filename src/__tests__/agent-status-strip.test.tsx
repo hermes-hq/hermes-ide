@@ -41,9 +41,9 @@ import { initFeatureFlags, __resetFeatureFlagsForTest, FEATURE_FLAG_OVERRIDES_KE
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetAttentionStoreForTest } from "../agent/status/attentionStore";
 
-async function setFlag(on: boolean) {
+async function setFlag(on: boolean, others: Record<string, boolean> = {}) {
   __resetFeatureFlagsForTest();
-  await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ launchHelper: on }) });
+  await initFeatureFlags({ [FEATURE_FLAG_OVERRIDES_KEY]: JSON.stringify({ ...others, launchHelper: on }) });
 }
 
 function session(phase: string): SessionData {
@@ -88,7 +88,8 @@ afterEach(() => {
 
 describe("status strip", () => {
   it("flag off: the old phase capsule, no status tag", async () => {
-    await setFlag(false);
+    // The capsule for a question is the inbox's job while that flag is on.
+    await setFlag(false, { attentionInbox: false });
     currentSession = session("needs_input");
     const html = render();
     expect(html).toContain("status-capsule-needs");

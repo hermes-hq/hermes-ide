@@ -749,6 +749,7 @@ pub fn run() {
                             api.prevent_close();
                         } else {
                             save_workspace_state(&save_handle);
+                            session_host::stop_hosted_unless_kept(&save_handle);
                         }
                     }
                     tauri::WindowEvent::Destroyed => {
@@ -1116,6 +1117,7 @@ pub fn run() {
                 }
                 log::info!("[hermes] ExitRequested — saving workspace");
                 save_workspace_state(app);
+                session_host::stop_hosted_unless_kept(app);
             }
             tauri::RunEvent::Exit => {
                 log::info!("[hermes] Exit — saving workspace");

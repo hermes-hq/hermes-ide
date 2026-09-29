@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
+import { lastReportedStatus } from "../agent/status/deriveStatus";
 import { raiseInboxItem } from "../agent/contract/inbox";
 import { listAllWorktrees } from "../api/git";
 import type { CreateSessionOpts, SessionData } from "../types/session";
@@ -50,13 +51,17 @@ export function computeOccupancy(sessions: readonly SessionData[], now: number):
   let memoryBytes = 0;
   for (const s of sessions) {
     const events = getSessionEventSnapshot(s.id);
+    // What the agent reported (or its exit): the terminal's own guesses
+    // (source "pty", with the launchHelper flag) are no word from the
+    // agent, so they neither hold nor free a slot; the process table does.
+    const reported = lastReportedStatus(events);
     const load = loads.get(s.id) ?? null;
     const created = Date.parse(s.created_at);
     const held = occupiesSlot({
       isAgent: isAgentSession(s),
       closed: CLOSED_PHASES.has(s.phase),
-      status: events.status,
-      statusReported: events.events.some((e) => e.type === "status" || e.type === "exit"),
+      status: reported ?? events.status,
+      statusReported: reported !== null,
       startupEnded: s.agent_startup?.state === "ended",
       running: load ? load.running : false,
       seenRunning: load?.seenRunning ?? false,

@@ -38,7 +38,7 @@
 // (setWindowFocused): a hands-free test must not take the focus from
 // whoever uses the machine.
 //
-// Negative control: HERMES_E2E_F12_NEGATIVE=1 leaves the attentionInbox
+// Negative control: HERMES_E2E_F12_NEGATIVE=1 switches the attentionInbox
 // flag off, so the badge never appears and the run must end in RESULT: FAIL.
 //
 //   node e2e/app/build.mjs
@@ -113,13 +113,13 @@ async function completeOnboarding(bridge) {
   await dismissWhatsNew(bridge);
 }
 
-function enableFlag(dataDir) {
+function enableFlag(dataDir, on = true) {
   const db = new DatabaseSync(join(dataDir, DB_FILE));
   try {
     db.prepare(
       `INSERT INTO settings (key, value, updated_at) VALUES ('feature_flag_overrides', ?, datetime('now'))
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-    ).run(JSON.stringify({ attentionInbox: true }));
+    ).run(JSON.stringify({ attentionInbox: on }));
   } finally {
     db.close();
   }
@@ -290,8 +290,9 @@ try {
   await completeOnboarding(app.bridge);
   const exit1 = await app.stop();
   assert(!exit1.forced && exit1.code === 0, "first launch quit cleanly");
-  if (NEGATIVE) log("step 0: NEGATIVE CONTROL — leaving the attentionInbox flag off");
-  else enableFlag(app.dataDir);
+  // On by default since 2.0; the override makes the run independent of it.
+  if (NEGATIVE) log("step 0: NEGATIVE CONTROL — switching the attentionInbox flag off");
+  enableFlag(app.dataDir, !NEGATIVE);
 
   // ── run 2 ──────────────────────────────────────────────────────────
   app = await launch(2);

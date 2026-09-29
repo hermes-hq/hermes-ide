@@ -2,7 +2,9 @@
 
 .review-desk-backdrop {
   position: fixed;
-  inset: 0;
+  /* Below the title bar, which stays on top (window drag, the inbox badge):
+     the desk's header must not slide under it. */
+  inset: var(--topbar-h) 0 0 0;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
@@ -15,7 +17,7 @@
   display: flex;
   flex-direction: column;
   width: min(1240px, calc(100vw - 32px));
-  height: min(860px, calc(100vh - 32px));
+  height: min(860px, calc(100vh - var(--topbar-h) - 32px));
   background: var(--bg-1);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -81,6 +83,19 @@
   color: var(--text-0);
   background: var(--bg-2);
   border-color: var(--border-light);
+}
+
+.review-land-btn {
+  background: var(--accent);
+  color: var(--bg-0);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.review-land-btn:hover {
+  opacity: 0.9;
 }
 
 .review-close {
@@ -556,6 +571,11 @@
   flex: 1;
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-mono);
+}
+.review-worktrees {
+  overflow: auto;
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
 }
 .review-repo-project {
   margin-bottom: var(--space-4);

@@ -6,9 +6,12 @@
 // card in the New Session agent step, shown only when the "agentCatalog"
 // flag is on (see src/featureFlags/ and src/catalog/agentCatalog.ts).
 //
-//   run 1  fresh install, stable channel, no override  -> card absent
-//          force the flag on in the hidden Settings > Flags section
-//   run 2  relaunch                                    -> card present
+// Since 2.0 every flag is on by default on the stable channel too; the
+// hidden Settings > Flags section is the kill switch.
+//
+//   run 1  fresh install, stable channel, no override  -> card present
+//          force the flag off in the hidden Settings > Flags section
+//   run 2  relaunch                                    -> card absent
 //          put the flag back to "Default for channel"; quit; switch this
 //          install to the beta update channel (update_channel = beta)
 //   run 3  relaunch, beta channel, no override          -> card present
@@ -234,23 +237,23 @@ let failed = false;
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   flag: ${FLAG_ID}   card: ${CARD_ID}`);
 
-  // ── run 1: fresh install, stable, no override -> OFF ─────────────
-  log("step 1: fresh launch — stable channel, no override: the flagged card is absent");
+  // ── run 1: fresh install, stable, no override -> ON (2.0) ─────────
+  log("step 1: fresh launch — stable channel, no override: the flagged card is offered (on by default since 2.0)");
   app = await launch(1, { first: true });
   await completeOnboarding(app.bridge);
   assert((await app.bridge.eval(`return e2e.all(".session-item").length;`)) === 0, "a fresh install (no sessions)");
-  await assertSurfaceStays(app.bridge, false, "the flagged card is NOT offered on a fresh stable install", "01-stable-default.png");
+  await assertSurfaceStays(app.bridge, true, "the flagged card IS offered on a fresh stable install", "01-stable-default.png");
 
-  log("step 2: force the flag ON in the hidden Settings > Flags section");
-  await setFlagOverride(app.bridge, "on");
-  await assertSurfaceStays(app.bridge, false, "still absent in this session (flags are read once, at startup)");
+  log("step 2: force the flag OFF in the hidden Settings > Flags section (the kill switch)");
+  await setFlagOverride(app.bridge, "off");
+  await assertSurfaceStays(app.bridge, true, "still offered in this session (flags are read once, at startup)");
   await quit(app);
 
-  // ── run 2: stable, forced on -> ON ───────────────────────────────
-  log("step 3: relaunch — the forced-on override takes effect");
+  // ── run 2: stable, forced off -> OFF ─────────────────────────────
+  log("step 3: relaunch — the forced-off override takes effect");
   app = await launch(2);
   await waitForReturningLaunch(app.bridge);
-  await assertSurfaceStays(app.bridge, true, "the flagged card IS offered with the override forced on", "02-stable-forced-on.png");
+  await assertSurfaceStays(app.bridge, false, "the flagged card is NOT offered with the override forced off", "02-stable-forced-off.png");
 
   log("step 4: clear the override (Default for channel), quit, switch this install to the beta channel");
   await setFlagOverride(app.bridge, "default");

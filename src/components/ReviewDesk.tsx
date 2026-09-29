@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../state/SessionContext";
 import { useI18n } from "../i18n/I18nProvider";
-import { getSessionEventSnapshot, subscribeSessionEvents, useSessionEvents } from "../agent/contract/sessionEventStore";
+import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
 import type { SessionEvent } from "../agent/contract/events";
 import type { Turn } from "../agent/contract/turns";
 import { writeToSession } from "../api/sessions";
@@ -52,6 +52,11 @@ import { getTurnDiffFor, listTurnsFor } from "../review/turnSource";
 import { GitLogView } from "./GitLogView";
 import { GitStashSection } from "./GitStashSection";
 import { GitMergeBanner } from "./GitMergeBanner";
+import { getSessionStatus, useSessionStatus } from "../agent/status/attentionStore";
+import { WorktreeOverviewPanel } from "./WorktreeOverviewPanel";
+import { SessionWorktreeSetup } from "./WorktreeSetupSummary";
+import { openLandSheet } from "../land/LandSheetHost";
+import { isFeatureFlagEnabled } from "../featureFlags";
 import { GitConflictViewer } from "./GitConflictViewer";
 import "../styles/components/ReviewDesk.css";
 
@@ -75,7 +80,7 @@ export interface TurnEntry {
 }
 
 type GroupBy = "file" | "turn";
-type Tab = "review" | "repository";
+type Tab = "review" | "repository" | "worktrees";
 type Selection = { kind: "file"; path: string } | { kind: "turn"; sessionId: string; n: number };
 
 interface CommentDraft {
@@ -118,12 +123,15 @@ const SEND_DEPS = {
   writeFile: reviewWriteFile,
   paste: (sessionId: string, line: string) => writeToSession(sessionId, encodePaste(line)),
   onSessionEvent: watchSessionEvents,
-  status: (sessionId: string) => getSessionEventSnapshot(sessionId).status,
+  // The session's status as Hermes shows it: an agent's own "working" is
+  // not undone by the terminal's guesses (launchHelper flag) while it works
+  // quietly, so nothing is typed into a busy agent.
+  status: (sessionId: string) => getSessionStatus(sessionId),
 };
 
 /** "Send now" for a send held while the agent worked: enabled only once the turn has ended. */
 function SendNowButton({ sessionId, label, onClick }: { sessionId: string; label: string; onClick: () => void }) {
-  const busy = isBusy(useSessionEvents(sessionId).status);
+  const busy = isBusy(useSessionStatus(sessionId));
   return (
     <button type="button" className="review-btn review-btn-small review-send-now-btn" disabled={busy} data-busy={busy ? "1" : "0"} onClick={onClick}>
       {label}
@@ -623,7 +631,14 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
             <button type="button" role="tab" className="review-tab" aria-selected={tab === "repository"} onClick={() => setTab("repository")}>
               {t("review.tabRepository")}
             </button>
+            {/* Disk guard (diskGuard flag): the Worktrees view of the git panel this desk replaces. */}
+            {isFeatureFlagEnabled("diskGuard") && (
+              <button type="button" role="tab" className="review-tab" aria-selected={tab === "worktrees"} onClick={() => setTab("worktrees")}>
+                {t("review.tabWorktrees")}
+              </button>
+            )}
           </div>
+          <LandButtons sessionId={sessionId} onLand={onClose} />
           <button type="button" className="review-close" onClick={onClose} aria-label={t("common.close")} title={ESC_KEY}>
             ✕
           </button>
@@ -761,6 +776,11 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         )}
 
         {tab === "repository" && <RepositoryTab sessionId={sessionId} />}
+        {tab === "worktrees" && (
+          <div className="review-worktrees">
+            <WorktreeOverviewPanel />
+          </div>
+        )}
 
         {revert && (
           <div className="review-revert-backdrop" onClick={() => !revert.busy && setRevert(null)}>
@@ -799,6 +819,47 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The Land sheet's entry point (landSheet flag), which lived in the git
+ * panel this desk replaces: one button per project the session works on in
+ * a worktree of its own. The desk closes before the sheet opens.
+ */
+function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => void }) {
+  const { t } = useI18n();
+  const [landable, setLandable] = useState<GitProjectStatus[]>([]);
+  useEffect(() => {
+    if (!isFeatureFlagEnabled("landSheet")) return;
+    let live = true;
+    gitStatus(sessionId)
+      .then((s) => {
+        if (live) setLandable(s.projects.filter((p) => p.is_git_repo && /hermes-worktrees[\\/]/.test(p.project_path)));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [sessionId]);
+  return (
+    <>
+      {landable.map((project) => (
+        <button
+          key={project.project_id}
+          type="button"
+          className="review-land-btn"
+          data-project-id={project.project_id}
+          onClick={() => {
+            onLand();
+            openLandSheet(sessionId, project.project_id);
+          }}
+          title={t("review.landTitle")}
+        >
+          {landable.length === 1 ? t("review.land") : t("review.landProject", { project: project.project_name })}
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -863,6 +924,8 @@ function RepositoryTab({ sessionId }: { sessionId: string }) {
               <h3 className="review-repo-name">
                 {p.project_name} {p.branch && <span className="review-repo-branch">{p.branch}</span>}
               </h3>
+              {/* Fast worktrees (diskGuard flag): ports and cloned dependencies, as the git panel shows them. */}
+              {isFeatureFlagEnabled("diskGuard") && <SessionWorktreeSetup sessionId={sessionId} projectId={p.project_id} />}
               {m?.in_merge && (
                 <GitMergeBanner
                   mergeStatus={m}

@@ -366,6 +366,78 @@ fn a_session_ended_on_request_is_not_kept_and_the_host_exits() {
 }
 
 #[test]
+fn a_session_ended_on_request_is_forgotten_and_its_id_can_start_again() {
+    // exited-keep is 2 s here: forgetting must not wait for it.
+    let host = Host::start(60_000, 60_000);
+    let mut c = host.connect().unwrap();
+    c.spawn(
+        "idle",
+        sh("echo idle-1; exec sleep 60"),
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    // Nobody is attached (the app quit): a client asks for it to end.
+    c.kill("idle").unwrap();
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    loop {
+        let list = c.list().unwrap();
+        match list.iter().find(|s| s.id == "idle") {
+            None => break,
+            Some(s) => assert!(s.killed, "a session ended on request says so: {s:?}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a session ended on request was kept like one that ended by itself: {list:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // Right away (before it is even forgotten) the id can run a new program.
+    c.spawn(
+        "again",
+        sh("echo again-1; exec sleep 60"),
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    c.kill("again").unwrap();
+    c.spawn(
+        "again",
+        sh("echo again-2; exec sleep 60"),
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    let list = c.list().unwrap();
+    let again = list
+        .iter()
+        .find(|s| s.id == "again")
+        .expect("the new program runs");
+    assert!(
+        again.alive && !again.killed,
+        "the new program is alive: {again:?}"
+    );
+    let mut attached = host.connect().unwrap().attach("again", 24, 80).unwrap();
+    attached
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let mut reader = attached.take_reader().unwrap();
+    let text = read_until(&mut reader, "again-2", Duration::from_secs(10));
+    assert!(
+        !text.contains("again-1"),
+        "the replay is the new program's: {text:?}"
+    );
+    attached.kill().unwrap();
+}
+
+#[test]
 fn bad_token_wrong_protocol_and_junk_are_refused() {
     let host = Host::start(60_000, 60_000);
     let err = match Connection::connect(&host.socket, "wrong-token", Duration::from_secs(3)) {

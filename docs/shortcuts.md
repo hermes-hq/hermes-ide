@@ -57,8 +57,8 @@ their definitions so it can never drift from what the app actually does.
 | Copy Context | ⌘⇧C | Ctrl+Shift+C |  |
 | Focus Composer | ⌘⇧J | Ctrl+Shift+J | Agent sessions only |
 | Switch to Session 1–9 | ⌘1-9 | Ctrl+1-9 |  |
-| Jump to Next Waiting Agent | ⌘I | Ctrl+Shift+I | Beta: attention inbox; oldest first, repeat to cycle |
-| Attention Inbox | ⌘⇧I | Ctrl+Shift+A | Beta: attention inbox |
+| Jump to Next Waiting Agent | ⌘I | Ctrl+Shift+I | Oldest first, repeat to cycle |
+| Attention Inbox | ⌘⇧I | Ctrl+Shift+A |  |
 
 ## Panes
 

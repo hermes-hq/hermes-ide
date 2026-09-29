@@ -6,7 +6,7 @@
 // Claude Code, and token counts from which that analyzer ESTIMATES a cost
 // ($0.08), then works until interrupted.
 //
-//   run 1  flag off (stable): the estimate shows in the status bar, and the
+//   run 1  flag switched off (on by default since 2.0): the estimate shows in the status bar, and the
 //          Cost Dashboard is offered (View menu item enabled, listed in the
 //          command palette, the menu action opens it). This is the
 //          scenario's own control: the bait works, and the checks of run 2
@@ -31,7 +31,7 @@
 //          - A reports $2.00 -> nothing more happens (the cap is soft: once
 //            per cap value).
 //
-// Negative control: HERMES_E2E_F31_FLAG=off keeps the flag off in run 2;
+// Negative control: HERMES_E2E_F31_FLAG=off switches the flag off in run 2;
 // the scenario must end in RESULT: FAIL (the estimate is shown).
 //
 //   node e2e/app/build.mjs
@@ -87,10 +87,17 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   const statusCost = (bridge) => bridge.eval(`return e2e.norm(e2e.first(".status-bar-cost")?.innerText ?? "") || null;`);
 
   // ── run 1: flag off — the estimate is there to be hidden ────────────
-  log("run 1: fresh install, flag off: Hermes's own estimate shows in the status bar");
+  log("run 1: fresh install, flag switched off: Hermes's own estimate shows in the status bar");
   let app = await launch(1, { first: true });
   apps.push(app);
   await completeOnboarding(app.bridge, log);
+  // On by default since 2.0: switch it off (the kill switch) and relaunch.
+  await setFlagOverrides(app.bridge, { fleetControls: false });
+  const exit0 = await app.stop();
+  assert(!exit0.forced && exit0.code === 0, "run 1 quit cleanly after switching the flag off");
+  app = await launch("1b");
+  apps.push(app);
+  await waitForReturningLaunch(app.bridge, log);
   const legacy = await createPlainTerminal(app.bridge, log);
   await startFakeAgent(app.bridge, legacy, "run1");
   const estimate = await app.bridge.waitFor("the analyzer's estimated cost in the status bar", `
@@ -103,7 +110,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   log(`  Cost Dashboard with the flag off: ${JSON.stringify(offers1)}`);
   assert(offers1.menuEnabled === true && offers1.inPalette && offers1.opens, "without the flag the Cost Dashboard is in the View menu and the palette, and opens");
   await app.bridge.screenshot(join(evidenceDir, "01-flag-off-estimate.png"));
-  if (FLAG_ON) await setFlagOverrides(app.bridge, { fleetControls: true });
+  await setFlagOverrides(app.bridge, { fleetControls: FLAG_ON });
   await app.bridge.click(".session-item .session-item-close");
   await sleep(300);
   if (await app.bridge.exists(".close-dialog")) await app.bridge.click(".close-dialog .close-dialog-btn-confirm");

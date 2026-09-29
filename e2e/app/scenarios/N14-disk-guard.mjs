@@ -24,7 +24,7 @@
 //              removed in one action; git forgets the worktree; the session's
 //              own worktree is untouched
 //
-// Negative control: HERMES_E2E_N14_NEGATIVE=1 skips turning the flag on, so
+// Negative control: HERMES_E2E_N14_NEGATIVE=1 switches the flag off, so
 // run 2 creates the session anyway and the scenario must end in RESULT: FAIL.
 // Threshold control: HERMES_E2E_N14_LOW_FREE sets run 2's free bytes.
 // 9999999999 (just under 10 GB) must PASS; 10000000000 (exactly 10 GB) is
@@ -275,13 +275,13 @@ function dbCounts(dataDir) {
   }
 }
 
-function enableDiskGuardFlag(dataDir) {
+function enableDiskGuardFlag(dataDir, on = true) {
   const db = new DatabaseSync(join(dataDir, DB_FILE));
   try {
     db.prepare(
       `INSERT INTO settings (key, value, updated_at) VALUES ('feature_flag_overrides', ?, datetime('now'))
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-    ).run(JSON.stringify({ diskGuard: true }));
+    ).run(JSON.stringify({ diskGuard: on }));
   } finally {
     db.close();
   }
@@ -313,7 +313,7 @@ let app;
 let failed = false;
 
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL (flag left off)" : ""}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL (flag switched off)" : ""}`);
   makeRepo();
   log(`  throwaway repo: ${repo}`);
 
@@ -323,7 +323,9 @@ try {
   await completeOnboarding(app.bridge);
   await quit(app);
   if (NEGATIVE) {
-    log("step 2: NEGATIVE CONTROL — leaving the diskGuard flag off");
+    // On by default since 2.0: the negative control switches it off.
+    log("step 2: NEGATIVE CONTROL — switching the diskGuard flag off");
+    enableDiskGuardFlag(app.dataDir, false);
   } else {
     log("step 2: turn the diskGuard flag on (settings, app closed)");
     enableDiskGuardFlag(app.dataDir);
@@ -411,10 +413,16 @@ try {
   writeBytes(join(orphanB, "notes.bin"), 500_000);
   writeFileSync(join(goneRepoDir, "repo_path.txt"), join(workDir, "deleted-repo"));
 
-  log("step 8: open Git panel > Worktrees");
-  await app.bridge.click('.session-subview-btn[title="Git"]');
-  await app.bridge.waitFor("the session Git panel", `return !!e2e.first(".session-git-panel");`);
-  await app.bridge.clickByName("Worktrees", { within: ".session-git-panel" });
+  log("step 8: open Git panel > Worktrees (the Review Desk's Worktrees tab when the desk replaces the panel)");
+  if (await app.bridge.exists('.session-subview-btn[title="Review Desk"]')) {
+    await app.bridge.click('.session-subview-btn[title="Review Desk"]');
+    await app.bridge.waitFor("the Review Desk", `return !!e2e.first(".review-desk");`);
+    await app.bridge.clickByName("Worktrees", { within: ".review-desk" });
+  } else {
+    await app.bridge.click('.session-subview-btn[title="Git"]');
+    await app.bridge.waitFor("the session Git panel", `return !!e2e.first(".session-git-panel");`);
+    await app.bridge.clickByName("Worktrees", { within: ".session-git-panel" });
+  }
   const freeText = await app.bridge.waitFor("the free-space line", `
     const el = e2e.first(".worktree-disk-status");
     return el ? e2e.norm(el.innerText) : null;

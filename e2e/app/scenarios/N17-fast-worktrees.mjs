@@ -32,7 +32,7 @@
 // it: the temp folder on macOS (APFS). On Linux and Windows point
 // HERMES_E2E_COW_DIR at a btrfs/XFS or ReFS folder (CI mounts one).
 //
-// Negative control: HERMES_E2E_N17_NEGATIVE=1 leaves the flag off, so session
+// Negative control: HERMES_E2E_N17_NEGATIVE=1 switches the flag off, so session
 // A's worktree has no node_modules and the scenario must end in RESULT: FAIL.
 //
 // HERMES_E2E_N17_REAL_DEPS=1 uses this repo's own package.json and lockfile,
@@ -481,19 +481,42 @@ async function ask(port, path = "/") {
   return JSON.parse(await res.text());
 }
 
+/**
+ * Opens the session's worktree setup: the Git panel, or the Review Desk's
+ * Repository tab when the desk replaces the panel (reviewDesk flag on).
+ */
+async function openSetupView(bridge) {
+  if (await bridge.exists('.session-subview-btn[title="Review Desk"]')) {
+    await bridge.click('.session-subview-btn[title="Review Desk"]');
+    await bridge.waitFor("the Review Desk", `return !!e2e.first(".review-desk");`);
+    await bridge.clickByName("Repository", { within: ".review-desk" });
+  } else {
+    await bridge.click('.session-subview-btn[title="Git"]');
+  }
+}
+
+async function closeSetupView(bridge) {
+  if (await bridge.exists(".review-desk")) {
+    await bridge.click(".review-desk .review-close");
+    await bridge.waitFor("the Review Desk to close", `return !e2e.first(".review-desk");`);
+  } else {
+    await bridge.click('.session-subview-btn[title="Git"]');
+  }
+}
+
 async function quit(current) {
   const exit = await current.stop();
   log(`  app exited: ${JSON.stringify(exit)}`);
   assert(!exit.forced && exit.code === 0, "the app quit cleanly");
 }
 
-function enableFlag(dataDir) {
+function enableFlag(dataDir, on = true) {
   const db = new DatabaseSync(join(dataDir, DB_FILE));
   try {
     db.prepare(
       `INSERT INTO settings (key, value, updated_at) VALUES ('feature_flag_overrides', ?, datetime('now'))
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-    ).run(JSON.stringify({ diskGuard: true }));
+    ).run(JSON.stringify({ diskGuard: on }));
   } finally {
     db.close();
   }
@@ -520,7 +543,7 @@ let failed = false;
 const servers = [];
 
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL (flag left off)" : ""}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL (flag switched off)" : ""}`);
   log(`  copy-on-write folder: ${cowRoot}${process.env.HERMES_E2E_COW_DIR ? "" : " (the temp folder)"}`);
   makeRepo();
   installInProjectFolder();
@@ -539,7 +562,9 @@ try {
   const dataDir = app.dataDir;
   await quit(app);
   if (NEGATIVE) {
-    log("step 2: NEGATIVE CONTROL — leaving the diskGuard flag off");
+    // On by default since 2.0: the negative control switches it off.
+    log("step 2: NEGATIVE CONTROL — switching the diskGuard flag off");
+    enableFlag(dataDir, false);
   } else {
     log("step 2: turn the diskGuard flag on (settings, app closed)");
     enableFlag(dataDir);
@@ -600,8 +625,8 @@ try {
   writeFileSync(join(wtA.path, MARKER), "written in the worktree");
   assert(!existsSync(join(repo, MARKER)), "writing the clone leaves the project folder alone");
 
-  log("step 4: the session's Git panel shows the ports and the clone");
-  await app.bridge.click('.session-subview-btn[title="Git"]');
+  log("step 4: the session's Git panel (or the Review Desk replacing it) shows the ports and the clone");
+  await openSetupView(app.bridge);
   const shown = await app.bridge.waitFor("the worktree setup summary", `
     const el = e2e.first(".worktree-setup");
     if (!el) return null;
@@ -616,7 +641,7 @@ try {
   assert(shown.ports === `Ports ${shown.base}–${shown.base + 9} (PORT=${shown.base})`, "as a block of 10 with PORT");
   assert(shown.deps[0]?.status === "cloned" && shown.deps[0].text.startsWith("node_modules: cloned from demo-repo in"), "and says node_modules was cloned");
   await app.bridge.screenshot(join(evidenceDir, "02-git-panel-setup.png"));
-  await app.bridge.click('.session-subview-btn[title="Git"]');
+  await closeSetupView(app.bridge);
 
   log("step 5: A's terminal runs the dev server");
   const portA = await startServer(app.bridge, a.id);
@@ -682,7 +707,7 @@ try {
   assert(depE?.status === "copy_on_write_unavailable", "E's matching node_modules could not be cloned");
   assert(!existsSync(join(wtE.path, "node_modules")), "and nothing was copied instead");
   assert(!!wtE.setup.ports, "E still has its own ports");
-  await app.bridge.click('.session-subview-btn[title="Git"]');
+  await openSetupView(app.bridge);
   const fallback = await app.bridge.waitFor("the install-as-usual note", `
     const el = e2e.first('.worktree-setup-dep[data-status="copy_on_write_unavailable"]');
     return el ? e2e.norm(el.innerText) : null;

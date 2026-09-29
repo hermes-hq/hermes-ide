@@ -189,8 +189,26 @@ export function removeWorkspacePath(sessionId: string, path: string): Promise<vo
   return invoke("remove_workspace_path", { sessionId, path });
 }
 
+/** Writes still on their way to each session's terminal, newest last. */
+const pendingWrites = new Map<string, Promise<void>>();
+
+/**
+ * Send bytes to a session's terminal. Writes to one session go out one after
+ * the other: each keystroke is its own call, and two calls in flight at once
+ * can reach the backend in either order (seen on Windows as swapped
+ * characters in a fast-typed command line).
+ */
 export function writeToSession(sessionId: string, data: string): Promise<void> {
-  return invoke("write_to_session", { sessionId, data });
+  const before = pendingWrites.get(sessionId);
+  const send = () => invoke<void>("write_to_session", { sessionId, data });
+  // Nothing in flight: send now (no extra tick for a single keystroke).
+  const write = before ? before.catch(() => {}).then(send) : send();
+  pendingWrites.set(sessionId, write);
+  const forget = () => {
+    if (pendingWrites.get(sessionId) === write) pendingWrites.delete(sessionId);
+  };
+  write.then(forget, forget);
+  return write;
 }
 
 export function saveAllSnapshots(): Promise<void> {

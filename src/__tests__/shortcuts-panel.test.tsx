@@ -9,6 +9,7 @@
  *   - matchAppShortcut (the only key matching App.tsx's handler does) fires
  *     exactly on the declared accelerators, per platform.
  */
+import { isFeatureFlagEnabled } from "../featureFlags";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -53,7 +54,8 @@ describe("ShortcutsPanel", () => {
   it("shows every shortcut that applies on this platform, in English by default", () => {
     const { container } = renderPanel();
     const expected = visibleShortcutGroups(GENERATED_SHORTCUT_GROUPS).flatMap((g) =>
-      g.shortcuts.map((s) => ({ action: s.label, keys: fmt(s.keys) })),
+      // The Git panel's shortcut opens the Review Desk (on by default since 2.0).
+      g.shortcuts.map((s) => ({ action: s.id === "view.git-panel" && isFeatureFlagEnabled("reviewDesk") ? "Review Desk" : s.label, keys: fmt(s.keys) })),
     );
     expect(rows(container)).toEqual(expected);
     // The app-handled bindings are listed too, not only menu accelerators.

@@ -42,15 +42,14 @@
       "label": "Jump to Next Waiting Agent",
       "accelerators": ["CmdOrCtrl+I"],
       "pcAccelerators": ["Ctrl+Shift+I"],
-      "note": "Beta: attention inbox; oldest first, repeat to cycle"
+      "note": "Oldest first, repeat to cycle"
     },
     {
       "id": "app.attention-inbox",
       "group": "Session",
       "label": "Attention Inbox",
       "accelerators": ["CmdOrCtrl+Shift+I"],
-      "pcAccelerators": ["Ctrl+Shift+A"],
-      "note": "Beta: attention inbox"
+      "pcAccelerators": ["Ctrl+Shift+A"]
     },
     {
       "id": "app.focus-next-pane",

@@ -267,6 +267,15 @@ describe("what the sheet shows", () => {
     expect(h.shellOpen).toHaveBeenCalledWith("https://cli.github.com");
   });
 
+  it("a failing check stays failing when the terminal guesses afterwards (launch helper on)", async () => {
+    backend();
+    dispatchSessionEvent(SID, { type: "status", at: 1, source: "checks", status: { kind: "check_failed", confidence: "exact", detail: "npm test exited 1" } });
+    dispatchSessionEvent(SID, { type: "status", at: 2, source: "pty", status: { kind: "idle", confidence: "guessed", detail: "" } });
+    await openSheet();
+    expect(document.querySelector(".land-sheet-donewhen")?.textContent).toContain("Failing: npm test exited 1");
+    expect((document.querySelector(".land-sheet-land") as HTMLButtonElement).textContent).toBe("Land anyway");
+  });
+
   it("makes Land anyway secondary while Done-When fails", async () => {
     backend();
     dispatchSessionEvent(SID, {
