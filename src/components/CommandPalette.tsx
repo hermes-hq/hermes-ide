@@ -17,6 +17,8 @@ interface CommandPaletteProps {
   onOpenWorkspace: () => void;
   onOpenCostDashboard?: () => void;
   onToggleFlowMode?: () => void;
+  /** F24: tile the sessions whose agent is working (fleetPerf flag). */
+  onTileWorkingAgents?: () => void;
   onAttachProject?: () => void;
   onScanCwd?: () => void;
   onOpenComposer?: () => void;
@@ -45,7 +47,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
+  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -75,6 +77,7 @@ export function CommandPalette({
     { id: "workspace", label: t("app.folders"), category: t("app.app"), action: () => { onOpenWorkspace(); onClose(); } },
     ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: t("palette.costDashboard"), category: t("app.app"), shortcut: fmt("{mod}$"), action: () => { onOpenCostDashboard(); onClose(); } }] : []),
     ...(onToggleFlowMode ? [{ id: "flow-mode", label: t("palette.toggleFlowMode"), category: t("app.view"), shortcut: fmt("{mod}{shift}Z"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
+    ...(onTileWorkingAgents ? [{ id: "tile-working-agents", label: t("fleet.tileWorkingAgents"), category: t("app.view"), action: () => { onTileWorkingAgents(); onClose(); } }] : []),
     ...(onAttachProject ? [{ id: "attach-project", label: t("palette.addFolder"), category: t("app.folders"), action: () => { onAttachProject(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: t("palette.scanCurrentDirectory"), category: t("app.folders"), action: () => { onScanCwd(); onClose(); } }] : []),
     ...(onOpenComposer ? [{ id: "composer", label: t("palette.promptComposer"), category: t("app.tools"), shortcut: shortcutLabel("view.prompt-composer"), action: () => { onOpenComposer(); onClose(); } }] : []),
@@ -101,7 +104,7 @@ export function CommandPalette({
   // currentLanguage is intentionally in the deps: t() is referentially stable,
   // so without it the memoized labels would never update on a language switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
+  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

@@ -50,3 +50,28 @@ export interface ProcessFilter {
   showHermesOnly: boolean;
   showZombiesOnly: boolean;
 }
+
+/** F24: resident memory of one session's process tree (src-tauri/src/fleet.rs). */
+export interface SessionMemory {
+  sessionId: string;
+  bytes: number;
+  processes: number;
+}
+
+/** F24: the processes of one program in a breakdown. */
+export interface ProgramMemory {
+  name: string;
+  processes: number;
+  bytes: number;
+}
+
+/** F24: Hermes's own memory without its sessions, and each session's. */
+export interface FleetMemory {
+  appBytes: number;
+  appProcesses: number;
+  /** What appBytes is made of, by program, largest first. */
+  appByProgram: ProgramMemory[];
+  /** Strangers left by pid reuse that claim a parent in Hermes's tree; not counted. */
+  disowned: ProgramMemory[];
+  sessions: SessionMemory[];
+}

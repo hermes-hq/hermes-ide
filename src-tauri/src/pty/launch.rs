@@ -1747,6 +1747,14 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
     if let Some(stream) = stream {
         super::opencode_stream::watch(app.clone(), Arc::clone(&session), stream, confidence);
     }
+    // F14: the same spool names the agent's transcript; its own watcher
+    // reads the context usage from there.
+    crate::context_usage::watch(
+        app.clone(),
+        Arc::clone(&session),
+        session_dir.join(SIGNALS_FILE),
+        nonce.clone(),
+    );
     std::thread::spawn(move || {
         use crate::contract::signal::{map_signal_record, parse_signal_line, subagent_delta};
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));

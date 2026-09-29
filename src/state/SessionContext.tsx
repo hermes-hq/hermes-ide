@@ -60,6 +60,7 @@ import {
   replaceNode, removePane, collectPanes, updateSplitRatio,
   setPaneSession, removePanesBySession,
 } from "./layoutTypes";
+import { tileLayout } from "./tileLayout";
 import { DirtyWorktreeDialog } from "../components/DirtyWorktreeDialog";
 import type { DirtyWorktreeChange } from "../components/DirtyWorktreeDialog";
 
@@ -787,6 +788,18 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return {
         ...state,
         layout: { ...state.layout, root: resized },
+      };
+    }
+    case "TILE_SESSIONS": {
+      const ids = action.sessionIds.filter((id) => !!state.sessions[id]);
+      const root = tileLayout(ids);
+      if (!root) return state;
+      workspaceDirty = true;
+      const first = collectPanes(root)[0];
+      return {
+        ...state,
+        activeSessionId: first.sessionId,
+        layout: { root, focusedPaneId: first.id },
       };
     }
     case "SET_PANE_SESSION": {

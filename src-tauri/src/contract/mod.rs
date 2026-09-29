@@ -204,6 +204,32 @@ pub enum SessionEvent {
         resets_at: Option<i64>,
         window: Option<String>,
     },
+    /// How full the context window is, as the agent reports it (F14): the
+    /// input tokens of its last model call. `context_limit` is None when the
+    /// model's window is unknown, so nobody shows a percentage for it. Not
+    /// F31's `usage` (the session's totals): this is where the window stands.
+    #[serde(rename_all = "camelCase")]
+    Context {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
+        used_tokens: u32,
+        context_limit: Option<NonZeroU32>,
+        model: Option<String>,
+    },
+    /// The agent compacted its context (F14).
+    #[serde(rename_all = "camelCase")]
+    Compacted {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
+        trigger: Option<String>,
+        pre_tokens: Option<u32>,
+    },
 }
 
 /// Whether a [`SessionEvent::Limit`] starts or ends a limit.
@@ -293,7 +319,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 16);
+        assert_eq!(events.len(), 20);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -301,7 +327,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&event).unwrap(), raw);
             seen.insert(raw["type"].as_str().unwrap().to_string());
         }
-        assert_eq!(seen.len(), 11, "every variant appears: {seen:?}");
+        assert_eq!(seen.len(), 13, "every variant appears: {seen:?}");
     }
 
     #[test]

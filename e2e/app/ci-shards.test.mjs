@@ -6,8 +6,9 @@
 // fail on demand) and `xvfb-run` a stub that just runs its command, so what
 // is checked is what the steps do on a runner:
 //
-//   - together the shards run every scenario exactly once, and terminal-echo
-//     as many times as REPEAT says;
+//   - together the shards run every scenario exactly once, terminal-echo
+//     as many times as REPEAT says and the fleet scenario (F24) as many
+//     times as FLEET_REPEAT says;
 //   - a failing scenario fails its own shard's step, which names it, and no
 //     other shard;
 //   - a step's exit code is its own invocation's: an older failed run in
@@ -83,7 +84,7 @@ process.exit(1);
 
 // Stand-ins named like the real scenarios the plan treats specially, plus
 // ordinary ones.
-const ORDINARY = ["terminal-echo.mjs", ...Array.from({ length: 14 }, (_, i) => `S${String(i).padStart(2, "0")}-stand-in.mjs`)];
+const ORDINARY = ["terminal-echo.mjs", "F24-fleet-perf.mjs", ...Array.from({ length: 14 }, (_, i) => `S${String(i).padStart(2, "0")}-stand-in.mjs`)];
 const SPECIAL = [...Object.keys(CI_ELSEWHERE), ...Object.keys(CI_EXCLUDED)];
 const ALL = [...ORDINARY, ...SPECIAL];
 
@@ -125,7 +126,7 @@ exec "$@"
 }
 
 /** Run a step for one shard in a fresh output folder; returns the exit code, output and recorded runs. */
-function runStep(rig, step, { shard, repeat = "1", keepOut = false } = {}) {
+function runStep(rig, step, { shard, repeat = "1", fleetRepeat = "1", keepOut = false } = {}) {
   if (!keepOut) rmSync(rig.out, { recursive: true, force: true });
   const res = spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", stepScript(step)], {
     cwd: REPO_ROOT,
@@ -134,6 +135,7 @@ function runStep(rig, step, { shard, repeat = "1", keepOut = false } = {}) {
       HOME: rig.dir,
       HERMES_E2E_OUT: rig.out,
       REPEAT: repeat,
+      FLEET_REPEAT: fleetRepeat,
       ...(shard ? { SHARD: shard } : {}),
     },
     encoding: "utf8",
@@ -162,15 +164,16 @@ describe.skipIf(process.platform === "win32")("real-app shard steps in ci.yml", 
 
   for (const step of SCENARIO_STEPS) {
     describe(step, () => {
-      it("together the shards run every scenario once, and terminal-echo REPEAT times", () => {
+      it("together the shards run every scenario once, terminal-echo REPEAT times and F24 FLEET_REPEAT times", () => {
         const rig = makeRig();
         const seen = [];
         for (const k of shards) {
-          const { code, runs } = runStep(rig, step, { shard: shardValue(k), repeat: "3" });
+          const { code, runs } = runStep(rig, step, { shard: shardValue(k), repeat: "3", fleetRepeat: "2" });
           expect(code).toBe(0);
           seen.push(...runs.map((r) => `${r.scenario}.mjs#${r.run}`));
         }
-        const want = shardedScenarios(ALL).flatMap((f) => (f === "terminal-echo.mjs" ? [1, 2, 3] : [1]).map((n) => `${f}#${n}`));
+        const runsOf = (f) => (f === "terminal-echo.mjs" ? [1, 2, 3] : f === "F24-fleet-perf.mjs" ? [1, 2] : [1]);
+        const want = shardedScenarios(ALL).flatMap((f) => runsOf(f).map((n) => `${f}#${n}`));
         expect(seen.sort()).toEqual(want.sort());
         for (const f of SPECIAL) expect(seen.some((s) => s.startsWith(`${f}#`))).toBe(false);
       });

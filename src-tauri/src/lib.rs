@@ -6,6 +6,7 @@ mod analytics;
 mod attention;
 mod claude_config;
 mod clipboard;
+mod context_usage;
 pub mod contract;
 mod db;
 pub mod done_when;
@@ -18,6 +19,7 @@ mod e2e_evidence;
 #[cfg_attr(not(feature = "e2e"), allow(dead_code))]
 mod e2e_protocol;
 mod fleet;
+mod fleet_perf;
 mod git;
 mod inline_pty;
 mod instance;
@@ -1061,6 +1063,8 @@ pub fn run() {
             // Fleet controls (2.0: spend caps, task queue) — see fleet.rs.
             fleet::fleet_agent_load,
             fleet::interrupt_session_agent,
+            // Fleet performance (F24): memory per session and for Hermes.
+            fleet_perf::fleet_memory,
             // Claude config (~/.claude.json + ~/.claude/settings.json)
             // — see claude_config/mod.rs for the v1.0 TUI parity surface.
             claude_config::write_mcp_server,

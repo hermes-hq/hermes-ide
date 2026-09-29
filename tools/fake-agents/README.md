@@ -110,6 +110,13 @@ Hook groups with a `matcher` run only when it matches (the error of a
 `StopFailure`, the notification type of a `Notification`, the tool of a tool
 event), like the real CLI.
 
+With `HERMES_FAKE_DIR` set, the conversation's transcript is
+`<HERMES_FAKE_DIR>/transcripts/<id>.jsonl` (Claude Code's JSONL shape), and
+that path is the `transcript_path` its hooks receive. In the TUI, `c` appends
+a model call whose usage comes from `<HERMES_FAKE_DIR>/usage-next.json`, and
+`k` appends a compaction (`compact_boundary`); the F14 context-gauge
+scenario drives both.
+
 With `HERMES_FAKE_DIR` set, every launch is recorded to
 `<HERMES_FAKE_DIR>/launch-<n>.json`: argv, cwd, the Hermes environment it
 saw, the settings file's contents, which hooks ran and how it ended.

@@ -496,6 +496,44 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* F14: how full the agent's context window is, as the agent reports it. */
+.session-context-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text-2);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+.session-context-gauge-bar {
+  display: inline-block;
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-3, rgba(127, 127, 127, 0.25));
+  overflow: hidden;
+}
+.session-context-gauge-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.session-context-gauge[data-level="warn"] { color: var(--warning); }
+.session-context-gauge[data-level="warn"] .session-context-gauge-fill { background: var(--warning); }
+.session-context-gauge[data-level="critical"] { color: var(--danger); }
+.session-context-gauge[data-level="critical"] .session-context-gauge-fill { background: var(--danger); }
+
+/* F24: memory used by the session's processes. */
+.session-memory-tag {
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
 .session-item-destroyed { opacity: 0.5; }
 .session-phase-tag[data-phase="destroyed"] { color: var(--text-3); }
 

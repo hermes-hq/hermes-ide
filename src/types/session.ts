@@ -393,6 +393,8 @@ export type SessionAction =
   | { type: "FOCUS_PANE"; paneId: string }
   | { type: "RESIZE_SPLIT"; splitId: string; ratio: number }
   | { type: "SET_PANE_SESSION"; paneId: string; sessionId: string }
+  /** F24: replace the layout with a grid of these sessions (see state/tileLayout.ts). */
+  | { type: "TILE_SESSIONS"; sessionIds: string[] }
   // Close confirmation actions
   | { type: "REQUEST_CLOSE_SESSION"; id: string }
   | { type: "CANCEL_CLOSE_SESSION" }

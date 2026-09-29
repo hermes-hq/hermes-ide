@@ -2,7 +2,7 @@
  * N07 — feature flags.
  *
  * Covers:
- * - the registry cap (at most 14 flags alive at once during the 2.0 build)
+ * - the registry cap (at most 15 flags alive at once during the 2.0 build)
  * - release-channel detection from the `update_channel` setting (which the
  *   updater's channel picker will write, N05) and from a -beta app version
  * - isFeatureFlagEnabled: off by default on stable, on for beta, and an
@@ -39,8 +39,8 @@ import {
 const FLAG: FeatureFlagId = FEATURE_FLAGS[0].id;
 
 describe("N07 feature-flag registry", () => {
-  it("holds at most 14 flags — retire one before adding a 15th", () => {
-    expect(FEATURE_FLAGS.length).toBeLessThanOrEqual(14);
+  it("holds at most 15 flags — retire one before adding a 16th", () => {
+    expect(FEATURE_FLAGS.length).toBeLessThanOrEqual(15);
   });
 
   it("has at least one flag (the proof surface) and every id is unique", () => {

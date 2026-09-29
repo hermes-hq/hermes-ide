@@ -1004,3 +1004,33 @@ features:
       N19-2:
         text: "Continue in Codex opens a session that references the task and the changed files"
         scenarios: [N19-limits-and-handoff.mjs]
+  F14:
+    name: "Real context gauge"
+    # The gauge reads the transcript the agent names in its own hook signal,
+    # so it needs the launch helper (launchHelper flag); nothing to show
+    # without it. The fake claude writes a Claude-shaped transcript.
+    status: partial
+    criteria:
+      F14-1:
+        text: "The gauge matches reported input tokens / model limit to within 1 point"
+        scenarios: [F14-context-gauge.mjs]
+      F14-2:
+        text: "A compact_boundary event renders a divider in the transcript"
+        scenarios: [F14-context-gauge.mjs]
+      F14-3:
+        text: "Terminal sessions show no gauge rather than a guess"
+        scenarios: [F14-context-gauge.mjs]
+  F24:
+    name: "Fleet performance: many terminals"
+    # Behind the fleetPerf flag. Budgets per OS: e2e/app/fleet-budgets.json.
+    # "Only visible terminals hold a WebGL context" is asserted where the web
+    # view has WebGL (all three CI runners); without WebGL it checks that no
+    # terminal holds one.
+    status: partial
+    criteria:
+      F24-1:
+        text: "20 open terminal sessions stay responsive on all three OSes"
+        scenarios: [F24-fleet-perf.mjs]
+      F24-2:
+        text: "Idle and per-agent memory stay within the CI budgets"
+        scenarios: [F24-fleet-perf.mjs]

@@ -16,7 +16,7 @@ import {
 import { softInterruptAgent } from "../api/agent";
 import { useSession } from "../state/SessionContext";
 import { deriveActivity } from "./messageStore";
-import type { AgentSessionState, RenderedMessage } from "./messageStore";
+import type { AgentSessionState, CompactionMark, RenderedMessage } from "./messageStore";
 import { getOrCreateAgentSessionStore } from "./agentSessionStore";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
@@ -208,6 +208,12 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     [state.messages],
   );
   const turnCount = numbered.length === 0 ? 0 : numbered[numbered.length - 1].turn;
+  // F14: context compactions, drawn after the message that preceded them.
+  const compactionsAfter = useMemo(() => {
+    const byMessage = new Map<string | null, CompactionMark[]>();
+    for (const c of state.compactions) byMessage.set(c.afterMessageId, [...(byMessage.get(c.afterMessageId) ?? []), c]);
+    return byMessage;
+  }, [state.compactions]);
 
   // Working surface state — MUST live above the empty-state early
   // return (React #310, same reason as the other useMemos above).
@@ -314,6 +320,7 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
       <AgentHeader state={state} sessionId={sessionId} workspacePathCount={workspacePathCount} />
       <div className="agent-session-scroll" ref={scrollRef}>
         <div className="agent-session-messages">
+          {(compactionsAfter.get(null) ?? []).map((c) => <CompactionDivider key={`compact-${c.at}`} mark={c} />)}
           {numbered.flatMap(({ message, turn, isFirstOfTurn }, idx, arr) => {
             const prev = idx > 0 ? arr[idx - 1].message : null;
             const next = idx + 1 < arr.length ? arr[idx + 1].message : null;
@@ -360,6 +367,10 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
                   isFirstOfTurn={true}
                 />,
               );
+            }
+
+            for (const [i, c] of (compactionsAfter.get(message.id) ?? []).entries()) {
+              out.push(<CompactionDivider key={`${message.id}-compact-${i}`} mark={c} />);
             }
 
             return out;
@@ -729,6 +740,16 @@ function InteractivePermissionDispatcher({
         canPersist={!!projectDir}
       />
     </>
+  );
+}
+
+/** F14: where the agent compacted its context. */
+function CompactionDivider({ mark }: { mark: CompactionMark }) {
+  const t = useAgentErrorTranslate();
+  return (
+    <div className="agent-compaction-divider" role="separator" data-trigger={mark.trigger ?? undefined}>
+      <span className="agent-compaction-divider-label">{t("agent.contextCompacted")}</span>
+    </div>
   );
 }
 

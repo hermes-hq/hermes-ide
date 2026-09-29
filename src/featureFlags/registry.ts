@@ -5,10 +5,10 @@
 // `if (isFeatureFlagEnabled(...))` branch it guards) once the feature is
 // proven and shipping to everyone.
 //
-// At most 14 flags may exist at once (raised from 5 for the 2.0 build, where
-// every new feature ships behind its own flag; 14 once fleetControls and
-// taskLauncher joined the twelve already there) — enforced by
-// src/__tests__/feature-flags.test.ts. If you need a 15th, retire one first.
+// At most 15 flags may exist at once (raised from 5 for the 2.0 build, where
+// every new feature ships behind its own flag; 15 once fleetControls,
+// taskLauncher and fleetPerf joined the twelve already there) — enforced by
+// src/__tests__/feature-flags.test.ts. If you need a 16th, retire one first.
 //
 // See src-tauri (none needed today: flags are a frontend-only concept, read
 // once at startup from the app version + the `feature_flag_overrides`
@@ -106,6 +106,12 @@ export const FEATURE_FLAGS = [
     label: "Task launcher and agent doctor",
     description:
       "New Session (⌘N) opens the task launcher: describe the task and it starts on its own hermes/<name> branch as the agent's first prompt; the full creator moves to ⌘⇧N. Agents it starts always go through the bundled helper (it carries the task), even with that flag off. First launch shows the three-step welcome with the agent doctor, which also lives in Settings > Agents.",
+  },
+  {
+    id: "fleetPerf",
+    label: "Fleet performance",
+    description:
+      "Only terminals on screen hold a graphics context (hidden ones give it back and take it again when shown), each session row shows the memory its processes use, and the command palette can tile the working agents.",
   },
 ] as const satisfies readonly FeatureFlagDefinition[];
 

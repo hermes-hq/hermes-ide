@@ -37,6 +37,17 @@
 // meanwhile are queued and read only after the turn, as the real CLI does
 // (the Review Desk must not type into a working agent).
 //
+// Transcript (for the context gauge, F14): with HERMES_FAKE_DIR set, the
+// conversation's transcript is `<HERMES_FAKE_DIR>/transcripts/<id>.jsonl`,
+// and that is the `transcript_path` every hook receives (without it, a
+// made-up path under /fixture-home). Keys in the TUI write to it like the
+// real CLI does after a model call or a compaction:
+//   c  one assistant record whose `message.usage` is read from
+//      `<HERMES_FAKE_DIR>/usage-next.json` ({ input_tokens,
+//      cache_creation_input_tokens, cache_read_input_tokens, output_tokens,
+//      model, isSidechain }); a default when the file is missing
+//   k  one `system`/`compact_boundary` record (trigger "manual")
+//
 // Behaviour is chosen per launch with HERMES_FAKE_MODE, or the file
 // `<HERMES_FAKE_DIR>/mode` (so a test can change it between app launches).
 // The mode is one or more words:
@@ -185,6 +196,7 @@ if (probeExit !== null) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+const TRANSCRIPT_DIR = RECORD_DIR ? path.join(RECORD_DIR, "transcripts") : null;
 const mode = readMode();
 const modeWords = new Set(mode.split(/\s+/).filter(Boolean));
 const has = (word) => modeWords.has(word);
@@ -396,7 +408,7 @@ async function runHooks(event, extra = {}) {
 	const payload = {
 		hook_event_name: event,
 		session_id: sessionId,
-		transcript_path: `/fixture-home/.fake/${sessionId}.jsonl`,
+		transcript_path: transcriptPath(),
 		cwd: process.cwd(),
 		permission_mode: args.permissionMode || "default",
 		...extra,
@@ -477,6 +489,75 @@ async function failTurn(error) {
 		last_assistant_message: error === "rate_limit" ? "API Error: Rate limit reached" : "API Error: 500",
 	});
 	out(error === "rate_limit" ? "fake-cli: usage limit reached\r\n" : "fake-cli: the API failed\r\n");
+}
+
+// ─── Transcript (Claude Code's JSONL shape) ──────────────────────────
+
+function transcriptPath() {
+	return TRANSCRIPT_DIR ? path.join(TRANSCRIPT_DIR, `${sessionId}.jsonl`) : `/fixture-home/.fake/${sessionId}.jsonl`;
+}
+
+let transcriptLines = 0;
+function appendTranscript(record) {
+	if (!TRANSCRIPT_DIR) return false;
+	fs.mkdirSync(TRANSCRIPT_DIR, { recursive: true });
+	transcriptLines++;
+	const line = {
+		uuid: `fake-${process.pid}-${transcriptLines}`,
+		sessionId,
+		cwd: process.cwd(),
+		timestamp: new Date().toISOString(),
+		...record,
+	};
+	fs.appendFileSync(transcriptPath(), JSON.stringify(line) + "\n");
+	return true;
+}
+
+function nextUsage() {
+	const fallback = { input_tokens: 3, cache_creation_input_tokens: 1000, cache_read_input_tokens: 9000, output_tokens: 50, model: "claude-fake-1" };
+	if (!RECORD_DIR) return fallback;
+	try {
+		return { ...fallback, ...JSON.parse(fs.readFileSync(path.join(RECORD_DIR, "usage-next.json"), "utf8")) };
+	} catch {
+		return fallback;
+	}
+}
+
+function writeUsage() {
+	const u = nextUsage();
+	const ok = appendTranscript({
+		type: "assistant",
+		isSidechain: u.isSidechain === true,
+		message: {
+			id: `msg_fake_${transcriptLines + 1}`,
+			type: "message",
+			role: "assistant",
+			model: u.model,
+			content: [{ type: "text", text: "fake reply" }],
+			stop_reason: "end_turn",
+			usage: {
+				input_tokens: u.input_tokens,
+				cache_creation_input_tokens: u.cache_creation_input_tokens,
+				cache_read_input_tokens: u.cache_read_input_tokens,
+				output_tokens: u.output_tokens,
+			},
+		},
+	});
+	note("usage", { written: ok, usage: u });
+	out(ok ? `\r\nfake-cli: model call (${u.input_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens} input tokens)\r\n` : "\r\nfake-cli: no transcript folder\r\n");
+}
+
+function writeCompaction() {
+	const ok = appendTranscript({
+		type: "system",
+		subtype: "compact_boundary",
+		content: "Conversation compacted",
+		isMeta: false,
+		level: "info",
+		compactMetadata: { trigger: "manual", preTokens: 150000 },
+	});
+	note("compact", { written: ok });
+	out(ok ? "\r\nfake-cli: context compacted\r\n" : "\r\nfake-cli: no transcript folder\r\n");
 }
 
 // ─── Behaviour ───────────────────────────────────────────────────────
@@ -657,6 +738,15 @@ async function main() {
 			case "L":
 				// N19: another turn ends on the usage limit.
 				await failTurn("rate_limit");
+				continue;
+			case "c":
+				// F14: one model call in the transcript (its usage is read
+				// from <HERMES_FAKE_DIR>/usage-next.json when present).
+				writeUsage();
+				continue;
+			case "k":
+				// F14: a compaction boundary in the transcript.
+				writeCompaction();
 				continue;
 			case "u":
 				out("\r\nfake-cli: sub-agent started\r\n");

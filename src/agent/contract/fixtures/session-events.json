@@ -31,7 +31,11 @@
     { "type": "usage", "at": 1790000011000, "source": "hook:claude", "inputTokens": 12000, "outputTokens": 3400, "costUsd": 0.4125 },
     { "type": "usage", "at": 1790000011500, "inputTokens": 800, "outputTokens": null, "costUsd": null },
     { "type": "limit", "at": 1790000012000, "source": "hook:claude", "state": "limited", "resetsAt": 1790007200000, "window": "five_hour" },
-    { "type": "limit", "at": 1790000013000, "state": "cleared", "resetsAt": null, "window": null }
+    { "type": "limit", "at": 1790000013000, "state": "cleared", "resetsAt": null, "window": null },
+    { "type": "context", "at": 1790000014000, "source": "transcript:claude", "usedTokens": 83003, "contextLimit": 200000, "model": "fake-model-1" },
+    { "type": "context", "at": 1790000014500, "usedTokens": 0, "contextLimit": null, "model": null },
+    { "type": "compacted", "at": 1790000015000, "source": "transcript:claude", "trigger": "auto", "preTokens": 190000 },
+    { "type": "compacted", "at": 1790000015500, "trigger": null, "preTokens": null }
   ],
   "rejected": [
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
@@ -47,6 +51,14 @@
     { "type": "status", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
     { "type": "subagents", "at": 1790000009000, "running": -1 },
     { "type": "subagents", "at": 1790000009000 },
+    { "type": "context", "at": 1790000009000, "usedTokens": -1, "contextLimit": 200000, "model": null },
+    { "type": "context", "at": 1790000009000, "usedTokens": 4294967296, "contextLimit": 200000, "model": null },
+    { "type": "context", "at": 1790000009000, "usedTokens": 10, "contextLimit": 0, "model": null },
+    { "type": "context", "at": 1790000009000, "contextLimit": 200000, "model": null },
+    { "type": "context", "at": 1790000009000, "usedTokens": 1.5, "contextLimit": 200000, "model": null },
+    { "type": "context", "at": 1790000009000, "usedTokens": 10, "contextLimit": 200000, "model": 7 },
+    { "type": "compacted", "at": 1790000010000, "trigger": "auto", "preTokens": "many" },
+    { "type": "compacted", "at": 1790000010000, "trigger": 5, "preTokens": null },
     { "type": "nope", "at": 1790000000000 },
     { "type": "status", "at": 1790000009000, "tags": "hermes-review#3", "status": { "kind": "working", "confidence": "exact", "detail": "" } },
     { "type": "status", "at": 1790000009000, "tags": [3], "status": { "kind": "working", "confidence": "exact", "detail": "" } },

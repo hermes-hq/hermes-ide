@@ -27,6 +27,9 @@ import { installAppChordListener } from "./hooks/appChordListener";
 import { triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
+import { workingSessionIds } from "./state/tileLayout";
+import { getSessionEventSnapshot } from "./agent/contract/sessionEventStore";
+import { isFeatureFlagEnabled } from "./featureFlags";
 import { getSetting } from "./api/settings";
 import { workingDirectoryRecoveryMessage, reusedCheckoutMessage, type WorkingDirectoryRecovery, type ReusedCheckout } from "./state/isolation";
 import { SessionList } from "./components/SessionList";
@@ -79,7 +82,6 @@ import { useToastStore } from "./hooks/useToastStore";
 import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { launchFailedMessage } from "./catalog/agentCatalog";
-import { isFeatureFlagEnabled } from "./featureFlags";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { getAgent } from "./catalog/agentCatalog";
 import { getProjectsOrdered, getSessionProjects } from "./api/projects";
@@ -1566,6 +1568,14 @@ function AppContent() {
           onOpenWorkspace={() => setWorkspaceOpen(true)}
           onOpenCostDashboard={fleetOn ? undefined : () => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
+          onTileWorkingAgents={isFeatureFlagEnabled("fleetPerf") ? () => {
+            const ids = workingSessionIds(sidebarSessions, (id) => getSessionEventSnapshot(id).status.kind);
+            if (ids.length === 0) {
+              toastStore.addToast({ message: t("fleet.noWorkingAgents"), type: "info", duration: 3000 });
+              return;
+            }
+            dispatch({ type: "TILE_SESSIONS", sessionIds: ids });
+          } : undefined}
           onAttachProject={() => setProjectPickerOpen(true)}
           onOpenComposer={() => dispatch({ type: "OPEN_COMPOSER" })}
           onOpenShortcuts={() => { setShortcutsOpen(true); }}

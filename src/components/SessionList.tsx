@@ -28,6 +28,7 @@ import { TaskQueueSection } from "../fleet/TaskQueueSection";
 import { SessionLimitTag } from "./SessionLimitTag";
 import { HandoffDialog } from "./HandoffDialog";
 import { canHandOff, nestUnderParents, type HandoffKind } from "../limits/handoff";
+import { SessionContextGauge, SessionMemoryTag } from "./SessionFleetTags";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -1030,6 +1031,8 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 sessionId={session.id}
                 onHandOff={handoffEnabled && !session.ssh_info ? () => setHandoff({ sessionId: session.id, kind: "continue" }) : undefined}
               />
+              <SessionContextGauge sessionId={session.id} />
+              <SessionMemoryTag sessionId={session.id} />
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
             </div>
             <SessionIdentityChips session={session} />

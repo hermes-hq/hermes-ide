@@ -28,6 +28,10 @@ on:
         description: "How many times to run terminal-echo on each OS"
         required: false
         default: "20"
+      fleet_repeat:
+        description: "How many times to run the fleet performance scenario (F24) on each OS"
+        required: false
+        default: "1"
 
 # Superseded PR pushes are cancelled. Runs on main and in the merge queue are
 # never cancelled: each of those commits must finish its checks.
@@ -47,6 +51,9 @@ env:
   # flake rate; pull requests, the merge queue and pushes to main run it
   # once, like every other scenario. A manual run can choose the count.
   REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat || github.event_name == 'schedule' && '20' || '1' }}
+  # The fleet scenario (F24) measures memory and speed against per-OS
+  # budgets; a manual run can repeat it to show a measurement is stable.
+  FLEET_REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.fleet_repeat || '1' }}
 
 jobs:
   # ── Detect what changed to skip irrelevant jobs ──────────────────────
@@ -524,7 +531,7 @@ jobs:
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT"
+          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT"
 
       - name: Run scenarios
         if: runner.os != 'Linux'
@@ -532,7 +539,7 @@ jobs:
         env:
           CI: "true"
         run: |
-          node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT"
+          node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT"
 
       # F05: a focused terminal keeps Ctrl+letter. Real OS key presses
       # (xdotool / SendInput) go through the native menu and the webview.

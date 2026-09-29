@@ -45,6 +45,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { removeWorkDir } from "../n11-steps.mjs";
 
 const SCENARIO = "N12-launch-and-resume";
 const startedAt = Date.now();
@@ -669,13 +670,7 @@ try {
   } catch {
     /* best effort */
   }
-  // The app's last writes (and its terminals' shells) can land a moment
-  // after it quit; a cleanup race is not a test result.
-  try {
-    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  } catch (e) {
-    log(`  (could not remove the scratch folder: ${e.message})`);
-  }
+  removeWorkDir(work, log);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

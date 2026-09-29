@@ -45,6 +45,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { removeWorkDir } from "../n11-steps.mjs";
 
 const SCENARIO = "N13-interrupted-resume";
 const startedAt = Date.now();
@@ -523,7 +524,7 @@ try {
   } catch {
     /* best effort */
   }
-  rmSync(work, { recursive: true, force: true });
+  removeWorkDir(work, log);
 }
 
 finishScenario({ scenario: SCENARIO, evidenceDir, failed, startedAt, log });

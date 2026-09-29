@@ -3746,3 +3746,22 @@ html[data-agent-timeline-style="classic"] .agent-message {
   opacity: 0.6;
   cursor: default;
 }
+
+/* F14: the agent compacted its context here. A rule across the column
+ * with the word in the middle, quiet like the other flow markers. */
+.agent-compaction-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: var(--text-3);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agent-compaction-divider::before,
+.agent-compaction-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border, rgba(127, 127, 127, 0.35));
+}

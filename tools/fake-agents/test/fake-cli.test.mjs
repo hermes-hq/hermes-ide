@@ -588,3 +588,30 @@ describe("fake vendor CLI: usage limits (N19)", () => {
 		expect(records(dir)[0].hooksRan.find((h) => h.event === "StopFailure").results).toEqual([]);
 	});
 });
+
+describe("fake-cli transcript (F14 context gauge)", () => {
+	const lines = (file) => readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+
+	it("names its transcript in every hook and writes model calls and compactions there", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir);
+		writeFileSync(join(dir, "usage-next.json"), JSON.stringify({ input_tokens: 3, cache_creation_input_tokens: 12000, cache_read_input_tokens: 71000, model: "claude-fake-1" }));
+		const res = await run(["--session-id", "t-u", "--settings", file], { env: { HERMES_FAKE_DIR: dir }, keys: "ckq", afterMs: 1200 });
+		expect(res.code).toBe(0);
+		const transcript = join(dir, "transcripts", "t-u.jsonl");
+		const start = readFileSync(marks, "utf8").split("\n").find((l) => l.startsWith("SessionStart "));
+		expect(JSON.parse(start.slice("SessionStart ".length)).transcript_path).toBe(transcript);
+		const [call, compact] = lines(transcript);
+		expect(call).toMatchObject({ type: "assistant", isSidechain: false, sessionId: "t-u" });
+		expect(call.message.model).toBe("claude-fake-1");
+		expect(call.message.usage).toMatchObject({ input_tokens: 3, cache_creation_input_tokens: 12000, cache_read_input_tokens: 71000 });
+		expect(compact).toMatchObject({ type: "system", subtype: "compact_boundary", compactMetadata: { trigger: "manual", preTokens: 150000 } });
+		expect(res.stdout).toContain("model call (83003 input tokens)");
+	});
+
+	it("without a record folder it keeps a made-up path and writes nothing", async () => {
+		const res = await run(["--session-id", "t-v"], { keys: "cq", afterMs: 800 });
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("no transcript folder");
+	});
+});

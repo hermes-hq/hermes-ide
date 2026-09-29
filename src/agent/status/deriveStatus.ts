@@ -106,6 +106,9 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
     case "usage":
     // N19: a limit travels with its own `limited` status event.
     case "limit":
+    // F14: context reports and compactions say nothing about status.
+    case "context":
+    case "compacted":
       return null;
   }
 }
