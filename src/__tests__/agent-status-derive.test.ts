@@ -15,6 +15,9 @@ import {
   confidenceOfSource,
   deriveStatus,
   foldStatus,
+  isAgentReported,
+  isHeuristicSource,
+  isOsQuiet,
   lastReportedStatus,
   resumedIndex,
   resumesAfterInput,
@@ -121,6 +124,26 @@ describe("deriveStatus: precedence", () => {
     expect(d.confidence).toBe("guessed");
   });
 
+  it("an idle the agent reported itself never yields to a guess (rule 8; seen with the real Claude: its TUI drawing at startup read as work)", () => {
+    // SessionStart (hook) then the helper's "started" echo, then the screen.
+    const events = [status(1, "idle", "exact", "hook:claude"), status(2, "idle", "exact", "hi"), status(3, "working", "guessed", "pty"), status(4, "working", "guessed", "os")];
+    expect(derive(events)).toMatchObject({ kind: "idle", confidence: "exact", source: "hook:claude" });
+    // The agent's own next report still moves it.
+    expect(derive([...events, status(5, "working", "exact", "hook:claude")])).toMatchObject({ kind: "working", source: "hook:claude" });
+    // A different status from the helper still replaces it (equal certainty).
+    expect(derive([...events, status(5, "exited", "exact", "hi")]).kind).toBe("exited");
+    // Codex sends its start and its first prompt together; the helper's
+    // "started" lands after both and must not read as idle.
+    const codex = [status(1, "starting", "exact", "hi"), status(2, "idle", "exact", "hook:codex"), status(2, "working", "exact", "hook:codex"), status(3, "idle", "exact", "hi")];
+    expect(derive(codex)).toMatchObject({ kind: "working", source: "hook:codex" });
+    // With nothing from the agent, the helper's "started" still counts.
+    expect(derive([status(1, "starting", "exact", "hi"), status(2, "idle", "exact", "hi")]).kind).toBe("idle");
+    expect(isAgentReported("hook:claude")).toBe(true);
+    expect(isAgentReported("stream:opencode")).toBe(true);
+    expect(isAgentReported("hi")).toBe(false);
+    expect(isAgentReported("osc")).toBe(false);
+  });
+
   it("an exit always wins, whatever came before", () => {
     const d = derive([status(1, "needs_approval", "exact", "hook:x"), { type: "exit", at: 2, source: "pty", code: 1, signal: null }]);
     expect(d).toMatchObject({ kind: "exited", confidence: "exact" });
@@ -216,6 +239,58 @@ describe("deriveStatus: an answered signal yields when the agent resumes (rule 6
   });
 });
 
+describe("deriveStatus: the OS layer (rule 7) sits between named guesses and the screen", () => {
+  const osWork = (at: number, detail = "a command is running (zsh)") => status(at, "working", "guessed", "os", detail);
+  const osQuiet = (at: number) => status(at, "idle", "guessed", "os");
+  const pty = (at: number, kind: AgentStatusKind) => status(at, kind, "guessed", "pty");
+  // [name, events, expected kind, expected source]
+  const table: [string, SessionEvent[], AgentStatusKind, string | null][] = [
+    ["a command running beats the screen's shape", [pty(1, "needs_answer"), osWork(2)], "working", "os"],
+    ["the screen's later guess does not replace a process fact", [osWork(1), pty(2, "idle")], "working", "os"],
+    ["quiet again: back to the screen's latest guess", [pty(1, "needs_answer"), osWork(2), pty(3, "idle"), osQuiet(4)], "idle", "pty"],
+    ["quiet with no screen guess: no opinion but idle", [osWork(1), osQuiet(2)], "idle", "os"],
+    ["quiet replaces nothing it did not say", [pty(1, "needs_answer"), osQuiet(2)], "needs_answer", "pty"],
+    ["a guess never overrides exact: working from the OS after the agent's done", [status(1, "done_unread", "exact", "hook:x"), osWork(2)], "done_unread", "hook:x"],
+    ["nor an exact approval", [status(1, "needs_approval", "exact", "hook:x", "Bash"), osWork(2)], "needs_approval", "hook:x"],
+    ["nor does its quiet touch an exact status", [status(1, "working", "exact", "hook:x"), osQuiet(2)], "working", "hook:x"],
+    ["a helper's named guess outranks process facts", [status(1, "startup_prompt", "guessed", "hi"), osWork(2, "the agent is using the CPU")], "startup_prompt", "hi"],
+    ["a hook's own guess (Antigravity's approval) outranks them too", [status(1, "needs_approval", "guessed", "hook:antigravity", "run_command"), osWork(2)], "needs_approval", "hook:antigravity"],
+    ["an exact report replaces a process fact", [osWork(1), status(2, "needs_approval", "exact", "hook:x")], "needs_approval", "hook:x"],
+    ["even an exact idle holds: process facts count only below exact reports", [status(1, "idle", "exact", "hook:x"), osWork(2)], "idle", "hook:x"],
+    ["a signal's idle yields to process activity, and comes back once quiet", [status(1, "idle", "signal", "osc"), osWork(2), osQuiet(3)], "idle", "osc"],
+    ["a guessed idle yields, and the screen's newer guess wins once quiet", [status(1, "idle", "guessed", "hi"), osWork(2), pty(3, "needs_answer"), osQuiet(4)], "needs_answer", "pty"],
+    ["an OS exit is a fact like any exit", [status(1, "working", "exact", "hook:x"), { type: "exit", at: 2, source: "os", code: null, signal: null }], "exited", "os"],
+  ];
+  it.each(table)("%s", (_name, events, kind, source) => {
+    const d = derive(events);
+    expect(d.kind).toBe(kind);
+    expect(d.source).toBe(source);
+  });
+
+  it("an answered signal also yields to the OS layer seeing the agent work again", () => {
+    const asked = status(10, "needs_approval", "signal", "osc", "Approval requested");
+    const d = deriveStatus({ snapshot: snapshotOf([asked, osWork(30)]), seenAt: null, inputTimes: [20] });
+    expect(d).toMatchObject({ kind: "working", source: "os" });
+    expect(derive([asked, osWork(30)]).kind).toBe("needs_approval");
+    expect(resumedIndex([asked, osWork(30)], 0, [20])).toBe(1);
+  });
+
+  it("isHeuristicSource / isOsQuiet", () => {
+    expect(isHeuristicSource("pty")).toBe(true);
+    expect(isHeuristicSource("os")).toBe(true);
+    expect(isHeuristicSource("hook:x")).toBe(false);
+    expect(isHeuristicSource(null)).toBe(false);
+    expect(isOsQuiet(osQuiet(1))).toBe(true);
+    expect(isOsQuiet(osWork(1))).toBe(false);
+    expect(isOsQuiet(pty(1, "idle"))).toBe(false);
+  });
+
+  it("process facts are never what an agent reported", () => {
+    expect(lastReportedStatus(snapshotOf([osWork(1)]))).toBeNull();
+    expect(lastReportedStatus(snapshotOf([status(1, "done_unread", "exact", "hook:x"), osWork(2)]))?.kind).toBe("done_unread");
+  });
+});
+
 describe("deriveStatus: done until seen", () => {
   const done: SessionEvent[] = [{ type: "turn_end", at: 100, source: "hook:x", n: 1 }];
   it("is done while nobody looked", () => {
@@ -251,7 +326,9 @@ describe("helpers", () => {
   it("certaintyRank orders exact > signal > named guess > pty guess", () => {
     expect(certaintyRank("exact", "x")).toBeGreaterThan(certaintyRank("signal", "x"));
     expect(certaintyRank("signal", "x")).toBeGreaterThan(certaintyRank("guessed", "hi"));
-    expect(certaintyRank("guessed", "hi")).toBeGreaterThan(certaintyRank("guessed", "pty"));
+    expect(certaintyRank("guessed", "hi")).toBeGreaterThan(certaintyRank("guessed", "os"));
+    expect(certaintyRank("guessed", "os")).toBeGreaterThan(certaintyRank("guessed", "pty"));
+    expect(confidenceOfSource("os")).toBe("guessed");
   });
   it("statusOfEvent maps each event type", () => {
     expect(statusOfEvent({ type: "turn_start", at: 1, n: 1 })?.kind).toBe("working");

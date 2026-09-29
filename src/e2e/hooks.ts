@@ -21,6 +21,8 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import type { InboxRaise } from "../agent/contract/inbox";
 import { getAttentionSummary, getSessionStatus } from "../agent/status/attentionStore";
+import { stripStatus } from "../components/SessionStatusStrip";
+import { userInputTimes } from "../agent/status/userInput";
 import { attentionDebug } from "../attention/debug";
 import { setWindowFocusOverride } from "../attention/windowFocus";
 import { listReviewChecks, reviewInputFromPatch, runReviewChecks } from "../agent/contract/reviewChecks";
@@ -52,6 +54,16 @@ const outputWatches = new Map<
   string,
   { chunks: number; bytes: number; first: number; last: number; unlisten: () => void }
 >();
+
+/** What `recordSession` keeps per session (STATUS measurement). */
+interface Recording {
+  output: { t: number; d: string }[];
+  events: { t: number; event: unknown }[];
+  shown: { t: number; derived: { kind: string; confidence: string; source: string | null }; strip: { kind: string; confidence: string; source: string } }[];
+  version: number;
+  unlisten: (() => void)[];
+}
+const recordings = new Map<string, Recording>();
 
 /** Notifications each watched session's subscriber received (C0 proof). */
 const sessionEventWatches = new Map<string, { count: number; unsubscribe: () => void }>();
@@ -198,6 +210,56 @@ const hooks = {
     sessionEventWatches.set(sessionId, watch);
   },
   sessionEventNotifications: (sessionId: string): number => sessionEventWatches.get(sessionId)?.count ?? -1,
+  /**
+   * Status measurement (STATUS track): from now on, keep everything one
+   * session receives with the time it arrived: every output chunk (base64,
+   * as the backend sends it), every session event, and what the sidebar
+   * (deriveStatus) and the status strip then show. Read back with
+   * `recording(sessionId, from)`; nothing here changes what the app does.
+   */
+  recordSession: async (sessionId: string): Promise<void> => {
+    if (recordings.has(sessionId)) return;
+    const rec: Recording = { output: [], events: [], shown: [], version: getSessionEventSnapshot(sessionId).version, unlisten: [] };
+    recordings.set(sessionId, rec);
+    const noteShown = (t: number) => {
+      const d = getSessionStatus(sessionId);
+      const s = stripStatus(getSessionEventSnapshot(sessionId), pool.get(sessionId)?.sessionPhase ?? "", userInputTimes(sessionId));
+      const last = rec.shown[rec.shown.length - 1];
+      const row = { t, derived: { kind: d.kind, confidence: d.confidence, source: d.source }, strip: { kind: s.status.kind, confidence: s.status.confidence, source: s.source } };
+      if (last && JSON.stringify(last.derived) === JSON.stringify(row.derived) && JSON.stringify(last.strip) === JSON.stringify(row.strip)) return;
+      rec.shown.push(row);
+    };
+    rec.unlisten.push(
+      subscribeSessionEvents(sessionId, () => {
+        const t = Date.now();
+        const snap = getSessionEventSnapshot(sessionId);
+        const fresh = Math.min(snap.version - rec.version, snap.events.length);
+        for (const e of snap.events.slice(snap.events.length - fresh)) rec.events.push({ t, event: e });
+        rec.version = snap.version;
+        noteShown(t);
+      }),
+    );
+    rec.unlisten.push(
+      await listen<string>(`pty-output-${sessionId}`, (event) => {
+        rec.output.push({ t: Date.now(), d: event.payload });
+      }),
+    );
+    noteShown(Date.now());
+  },
+  recording: (sessionId: string, from: { output?: number; events?: number; shown?: number } = {}) => {
+    const rec = recordings.get(sessionId);
+    if (!rec) return null;
+    return {
+      output: rec.output.slice(from.output ?? 0),
+      events: rec.events.slice(from.events ?? 0),
+      shown: rec.shown.slice(from.shown ?? 0),
+      counts: { output: rec.output.length, events: rec.events.length, shown: rec.shown.length },
+    };
+  },
+  stopRecording: (sessionId: string): void => {
+    for (const u of recordings.get(sessionId)?.unlisten ?? []) u();
+    recordings.delete(sessionId);
+  },
   unwatchSessionEvents: (sessionId: string): void => {
     sessionEventWatches.get(sessionId)?.unsubscribe();
     sessionEventWatches.delete(sessionId);

@@ -1,9 +1,11 @@
 pub mod adapters;
 pub mod analyzer;
 pub mod commands;
+pub mod hook_trust;
 pub mod launch;
 pub mod models;
 pub mod opencode_stream;
+pub mod os_activity;
 pub mod osc_signals;
 pub mod patterns;
 pub mod session_markers;

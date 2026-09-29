@@ -148,6 +148,7 @@ pub fn notification_events(
                 let record = SignalRecord {
                     v: 1,
                     ts: at / 1000,
+                    ts_ms: None,
                     session: String::new(),
                     agent: agent.to_string(),
                     nonce: expected.to_string(),

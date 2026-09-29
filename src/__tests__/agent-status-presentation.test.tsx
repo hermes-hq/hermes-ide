@@ -17,6 +17,7 @@ import {
   STATUS_GLYPHS,
   STATUS_MESSAGE_KEYS,
   STATUS_TONES,
+  reporterOfSource,
   statusLabel,
   statusWordKey,
 } from "../agent/status/presentation";
@@ -115,5 +116,41 @@ describe("<AgentStatusTag>", () => {
     const html = render("nobody");
     expect(html).toContain('data-status="idle"');
     expect(html).toContain("guessed");
+  });
+
+  it("says 'exact' next to what an agent reported, and names the agent in the tooltip", () => {
+    dispatchSessionEvent("s3", { type: "status", at: 1, source: "hook:claude", status: { kind: "needs_approval", confidence: "exact", detail: "Bash" } });
+    const html = render("s3");
+    expect(html).toContain('<span class="agent-status-sure">exact</span>');
+    expect(html).toContain('data-source="hook:claude"');
+    expect(html).toContain("Reported by Claude Code itself");
+    expect(html).not.toContain("agent-status-guessed");
+  });
+
+  it("a notification says 'signal'; a process fact is a guess from the processes", () => {
+    dispatchSessionEvent("s4", { type: "status", at: 1, source: "osc", status: { kind: "needs_approval", confidence: "signal", detail: "" } });
+    expect(render("s4")).toContain('<span class="agent-status-sure">signal</span>');
+    dispatchSessionEvent("s5", { type: "status", at: 1, source: "os", status: { kind: "working", confidence: "guessed", detail: "a command is running (zsh)" } });
+    const html = render("s5");
+    expect(html).toContain(`<span class="agent-status-guessed">guessed</span>`);
+    expect(html).not.toContain("agent-status-sure");
+    expect(html).toContain("Guessed from the agent&#x27;s processes");
+  });
+});
+
+describe("reporterOfSource", () => {
+  it("names the agent of a hook, stream or protocol source, and nobody for Hermes's own", () => {
+    expect(reporterOfSource("hook:claude")).toBe("claude");
+    expect(reporterOfSource("hook:claude:osc")).toBe("claude");
+    expect(reporterOfSource("stream:opencode")).toBe("opencode");
+    expect(reporterOfSource("protocol:codex")).toBe("codex");
+    for (const s of ["osc", "os", "pty", "hi", "e2e", "hook", null, undefined]) expect(reporterOfSource(s)).toBeNull();
+  });
+  it("statusLabel names the reporter, or says a process guess is one", () => {
+    expect(statusLabel({ kind: "working", confidence: "exact", detail: "", agentName: "Codex" }, translate).title).toBe("Reported by Codex itself");
+    expect(statusLabel({ kind: "working", confidence: "exact", detail: "" }, translate).title).toBe("Reported by the agent itself");
+    expect(statusLabel({ kind: "working", confidence: "guessed", detail: "", source: "os" }, translate).title).toMatch(/processes/);
+    expect(statusLabel({ kind: "working", confidence: "exact", detail: "" }, translate).sure).toBe("exact");
+    expect(statusLabel({ kind: "working", confidence: "guessed", detail: "" }, translate).sure).toBeNull();
   });
 });

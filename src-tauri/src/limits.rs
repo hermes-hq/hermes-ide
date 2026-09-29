@@ -220,7 +220,7 @@ impl LimitTracker {
         if record.nonce != nonce {
             return Vec::new();
         }
-        let at = record.ts.saturating_mul(1000);
+        let at = record.at_ms();
         let source = Some(format!("hook:{}", record.agent));
         let mut out = Vec::new();
         match classify(record) {

@@ -24,7 +24,7 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem, type InboxKind } from "../agent/contract/inbox";
 import type { AgentStatus } from "../agent/contract/status";
 import { inboxKindForStatus } from "./model";
-import { PTY_SOURCE, resumedIndex } from "../agent/status/deriveStatus";
+import { isHeuristicSource, resumedIndex } from "../agent/status/deriveStatus";
 import { userInputTimes } from "../agent/status/userInput";
 
 const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
@@ -47,7 +47,7 @@ export function trustedStatus(snap: SessionEventSnapshot, inputTimes: readonly n
   for (let i = snap.events.length - 1; i >= 0; i--) {
     const e = snap.events[i];
     if (e.type === "exit") return EXITED;
-    if (e.type === "status" && e.source === PTY_SOURCE) {
+    if (e.type === "status" && isHeuristicSource(e.source)) {
       latestGuess ??= e.status;
       continue;
     }
