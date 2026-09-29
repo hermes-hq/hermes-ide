@@ -12,8 +12,10 @@
 //            keys, Enter opens the approval chip, → and Enter pick Plan
 //            first, Esc closes the menu and leaves the focus on the chip.
 //          - three tasks with Launch & next (⌘⏎ / Ctrl+Enter): the focus is
-//            back in the empty task field each time; the fourth with Enter,
-//            which closes the sheet.
+//            back in the empty task field each time, and stays there once the
+//            new session's terminal has attached behind the sheet (a terminal
+//            asked to take the keyboard while the sheet is open does not);
+//            the fourth with Enter, which closes the sheet.
 //          - four agents started, each on its own branch with its task and
 //            Plan first, all within 60 s of the app being started.
 //
@@ -120,7 +122,26 @@ try {
       await bridge.waitFor("the sheet to close", `return !e2e.first(".task-launcher-sheet");`, { timeoutMs: 30_000 });
     } else {
       await bridge.waitFor(`launch ${i + 1}`, `return new RegExp("Launched ${i + 1}\\\\b").test(e2e.first(".task-launcher-launched")?.innerText ?? "");`, { timeoutMs: 30_000 });
+      // The new session's terminal attaches behind the sheet (a pane it
+      // gives the keyboard to): once it has, and a few frames later, the
+      // keyboard is still in the launcher's task field.
+      await bridge.waitFor(`session ${i + 1}'s terminal`, `return window.__HERMES_E2E__.terminalIds().length >= ${i + 1};`, { timeoutMs: 30_000 });
+      await bridge.waitFor(`the focus back in the task field after task ${i + 1}`, `return document.activeElement === e2e.first(".task-launcher-task");`, { timeoutMs: 2_000 }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 400));
+      if (!(await focusIsTask(bridge))) {
+        const on = await bridge.eval(`const a = document.activeElement; return a ? a.tagName + "." + String(a.className) : "none";`);
+        log(`  (after task ${i + 1} the keyboard is on ${on})`);
+      }
       assert((await focusIsTask(bridge)) && (await bridge.eval(`return e2e.first(".task-launcher-task").value;`)) === "", `after task ${i + 1} the focus is back in the empty task field`);
+      if (i === 0) {
+        // A pane that becomes focused or attaches asks its terminal to take
+        // the keyboard (the path that pulled it out of the open sheet):
+        // with the launcher open, the terminal does not get it.
+        const [sid] = await bridge.terminalIds();
+        await bridge.eval(`window.__HERMES_E2E__.focusTerminal(${JSON.stringify(sid)}); return true;`);
+        await new Promise((r) => setTimeout(r, 100));
+        assert(await focusIsTask(bridge), "a terminal asked to take the keyboard while the launcher is open does not take it");
+      }
     }
   }
   const recs = await fx.waitForRecords(4, Math.max(1, BUDGET_MS - (Date.now() - t0)));

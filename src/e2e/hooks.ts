@@ -7,7 +7,7 @@
  * Everything else (clicking, typing) goes through the real DOM on purpose.
  * The one write is a crash switch, used to prove crash containment.
  */
-import { pool, getFocusedSessionId, isWebglAvailable, webglSessionIds } from "../terminal/pool";
+import { pool, getFocusedSessionId, isWebglAvailable, webglSessionIds, focusTerminal } from "../terminal/pool";
 import { armCrash } from "../components/CrashProbe";
 import { loadedViews } from "../utils/lazyView";
 import { getI18nSnapshot } from "../i18n/registry";
@@ -142,6 +142,9 @@ const hooks = {
       .sort(),
   /** Session ids that currently have a terminal. */
   terminalIds: (): string[] => [...pool.keys()],
+  /** Ask a terminal to take the keyboard, as a pane that becomes focused or
+   *  attaches does (the real path, focusTerminal). */
+  focusTerminal: (sessionId: string): void => focusTerminal(sessionId),
   /** The session whose terminal has keyboard focus inside the app. */
   focusedSessionId: (): string | null => getFocusedSessionId(),
   /** Logical lines of the terminal buffer (scrollback + screen). */
