@@ -269,7 +269,9 @@ async function startClaudeTask(bridge, label) {
   `);
   await clickPrimary(bridge, "folder");
   await bridge.waitFor("the branch step", `return !!e2e.first(".session-creator-branch-multi");`, { timeoutMs: 20_000 });
-  await bridge.waitFor("a default branch", `return !!e2e.first(".session-creator-branch-selected-label");`);
+  // Once the default branch is picked the project's panel folds away; until
+  // then its own "Create & Use Branch" is the first primary button.
+  await bridge.waitFor("a default branch", `return !!e2e.first(".session-creator-branch-selected-label") && !e2e.first(".session-creator-branch-project.expanded");`);
   await clickPrimary(bridge, "branch");
   await bridge.waitFor("the confirm step", `return !!e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');`);
   await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
