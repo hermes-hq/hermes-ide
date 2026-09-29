@@ -8,6 +8,8 @@ export interface RepoProbe {
   local_branches: string[];
   /** `.hermes/worktree.toml`, when the repository has one. */
   worktree_toml: string | null;
+  /** The branch checked out in the main checkout (null when detached). */
+  current_branch: string | null;
 }
 
 export function probeTaskRepo(path: string, branch?: string): Promise<RepoProbe> {

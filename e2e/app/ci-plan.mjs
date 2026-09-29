@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 export const CI_ELSEWHERE = {
   "N01-release-refuses-e2e.mjs": "build",
   "F05-terminal-keys.mjs": "keys",
+  "F15-launcher-tab.mjs": "keys",
   "UI-focus-ring.mjs": "keys",
   "N17-fast-worktrees.mjs": "cow",
   "N17-real-deps.mjs": "cow",
@@ -34,6 +35,7 @@ export const CI_EXCLUDED = {
   "REAL-models-claude.mjs": "local only: needs a signed-in real claude and costs a few tiny turns; it says SKIP in CI",
   "REAL-models-codex.mjs": "local only: needs a signed-in real codex and costs a few tiny turns; it says SKIP in CI",
   "REAL-models-agy.mjs": "local only: needs a signed-in real agy and costs a few tiny turns; it says SKIP in CI",
+  "REAL-launcher-claude.mjs": "local only: needs a signed-in real claude and costs a turn; it says SKIP in CI",
 };
 
 /** The scenarios the shard jobs split between them: every file not listed above. */

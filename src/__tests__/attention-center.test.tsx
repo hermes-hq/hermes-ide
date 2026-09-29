@@ -37,10 +37,13 @@ import { _resetMutesForTest } from "../attention/mutes";
 import { setWindowFocusOverride } from "../attention/windowFocus";
 import { attentionDebug } from "../attention/debug";
 import { _resetUserLabelsForTest, rememberUserLabel } from "../attention/userLabels";
+import { _resetStartupSessionsForTest, markStartupSession } from "../attention/startupSessions";
 import { isMac } from "../utils/platform";
 import type { SessionData } from "../types/session";
 
 let clock = 1_000_000;
+/** These tests are not about the morning view (the inbox opening by itself at startup). */
+const notAtStart = () => false;
 
 function session(id: string, label: string): SessionData {
   return { id, label, ai_provider: "claude", agent_name: "", detected_agent: null } as unknown as SessionData;
@@ -76,14 +79,14 @@ function setup(active: string | null = null) {
   let current = active;
   const ui = render(
     <I18nProvider>
-      <AttentionCenter sessions={SESSIONS} activeSessionId={current} onJump={onJump} />
+      <AttentionCenter canOpenOnStart={notAtStart} sessions={SESSIONS} activeSessionId={current} onJump={onJump} />
     </I18nProvider>,
   );
   onJump.mockImplementation((id: string) => {
     current = id;
     ui.rerender(
       <I18nProvider>
-        <AttentionCenter sessions={SESSIONS} activeSessionId={current} onJump={onJump} />
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={SESSIONS} activeSessionId={current} onJump={onJump} />
       </I18nProvider>,
     );
   });
@@ -213,7 +216,7 @@ describe("F12 attention center", () => {
     const { ui } = setup("D");
     ui.rerender(
       <I18nProvider>
-        <AttentionCenter sessions={SESSIONS} activeSessionId="D" onJump={() => {}} onOpenChange={onOpenChange} />
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={SESSIONS} activeSessionId="D" onJump={() => {}} onOpenChange={onOpenChange} />
       </I18nProvider>,
     );
     const xterm = document.createElement("div");
@@ -277,7 +280,7 @@ describe("F12 attention center", () => {
     const named = { ...SESSIONS, E: session("E", "Rotate the walrus-prod password") };
     render(
       <I18nProvider>
-        <AttentionCenter sessions={named} activeSessionId={null} onJump={() => {}} />
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={named} activeSessionId={null} onJump={() => {}} />
       </I18nProvider>,
     );
     status("E", "needs_approval");
@@ -295,7 +298,7 @@ describe("F12 attention center", () => {
     onJump("C");
     ui.rerender(
       <I18nProvider>
-        <AttentionCenter sessions={SESSIONS} activeSessionId="C" onJump={onJump} />
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={SESSIONS} activeSessionId="C" onJump={onJump} />
       </I18nProvider>,
     );
     expect(listInboxItems()).toEqual([]);
@@ -320,10 +323,97 @@ describe("F12 attention center", () => {
     delete rest.A;
     ui.rerender(
       <I18nProvider>
-        <AttentionCenter sessions={rest} activeSessionId={null} onJump={() => {}} />
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={rest} activeSessionId={null} onJump={() => {}} />
       </I18nProvider>,
     );
     expect(listInboxItems()).toEqual([]);
     expect(badge()).toHaveAttribute("data-count", "0");
+  });
+});
+
+describe("morning view and ⌘I position", () => {
+  beforeEach(() => {
+    _resetStartupSessionsForTest();
+    // B, C and D were restored when Hermes started; A is started later.
+    for (const id of ["B", "C", "D"]) markStartupSession(id);
+  });
+
+  function mount(opts: { canOpen?: () => boolean; onStartTasks?: () => void; active?: string | null } = {}) {
+    const onJump = vi.fn();
+    const view = (active: string | null) => (
+      <I18nProvider>
+        <AttentionCenter sessions={SESSIONS} activeSessionId={active} onJump={onJump} canOpenOnStart={opts.canOpen} onStartTasks={opts.onStartTasks} />
+      </I18nProvider>
+    );
+    const ui = render(view(opts.active ?? null));
+    return { ui, onJump, view };
+  }
+
+  it("opens by itself on the agents blocked at startup, oldest first, each with its place and how sure the status is", () => {
+    const onStartTasks = vi.fn();
+    mount({ onStartTasks });
+    status("B", "needs_approval", "Bash: npm install");
+    clock += 1_000;
+    status("C", "needs_answer", "Pin the timezone?");
+    const dialog = screen.getByRole("dialog", { name: "Attention inbox" });
+    expect(dialog).toHaveAttribute("data-morning", "true");
+    expect(within(dialog).getByText("2 agents are waiting on you")).toBeInTheDocument();
+    const options = within(dialog).getAllByRole("option");
+    expect(options.map((o) => o.getAttribute("data-session-id"))).toEqual(["B", "C"]);
+    expect(options.map((o) => o.querySelector(".attention-option-place")?.textContent)).toEqual(["1 of 2 waiting", "2 of 2 waiting"]);
+    expect(options.map((o) => o.querySelector(".attention-option-confidence")?.getAttribute("data-confidence"))).toEqual(["exact", "exact"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: /Start today's tasks/ }));
+    expect(onStartTasks).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Attention inbox" })).toBeNull();
+  });
+
+  it("opens only once, and not while something else has the screen", () => {
+    let busy = true;
+    mount({ canOpen: () => !busy });
+    status("B", "needs_approval");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    busy = false;
+    clock += 1_000;
+    status("C", "needs_answer");
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-morning", "true");
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    clock += 1_000;
+    status("A", "needs_approval");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays closed for a session started after Hermes started, even at once", () => {
+    mount();
+    status("A", "needs_approval");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    status("B", "needs_approval");
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-morning", "true");
+  });
+
+  it("stays closed for an agent that gets blocked later in the day", () => {
+    const now = Date.now();
+    const spy = vi.spyOn(Date, "now").mockReturnValue(now);
+    mount();
+    spy.mockReturnValue(now + 10 * 60_000);
+    status("B", "needs_approval");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("⌘I says where in the line the agent it jumped to is", () => {
+    const { ui, onJump, view } = mount({ canOpen: () => false });
+    status("B", "needs_approval");
+    clock += 1_000;
+    status("C", "needs_answer");
+    clock += 1_000;
+    status("A", "plan_ready");
+    pressNext();
+    expect(onJump).toHaveBeenLastCalledWith("B");
+    expect(document.querySelector(".attention-position")?.textContent).toBe("1 of 3 waiting");
+    ui.rerender(view("B"));
+    pressNext();
+    expect(onJump).toHaveBeenLastCalledWith("C");
+    expect(document.querySelector(".attention-position")?.textContent).toBe("2 of 3 waiting");
   });
 });

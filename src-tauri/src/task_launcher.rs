@@ -28,6 +28,9 @@ pub struct RepoProbe {
     pub local_branches: Vec<String>,
     /// The text of `<git_root>/.hermes/worktree.toml`, when there is one.
     pub worktree_toml: Option<String>,
+    /// The branch checked out in the main checkout (None when detached or
+    /// not a repository): what a new branch is cut from by default.
+    pub current_branch: Option<String>,
 }
 
 fn main_checkout(repo: &Repository) -> Option<PathBuf> {
@@ -46,6 +49,7 @@ pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
             branch_exists: false,
             local_branches: Vec::new(),
             worktree_toml: None,
+            current_branch: None,
         };
     };
     let root = main_checkout(&repo);
@@ -69,11 +73,22 @@ pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
         }
         std::fs::read_to_string(file).ok()
     });
+    let current_branch = root
+        .as_ref()
+        .and_then(|r| Repository::open(r).ok())
+        .and_then(|main| {
+            let head = main.head().ok()?;
+            if !head.is_branch() {
+                return None;
+            }
+            head.shorthand().map(str::to_string)
+        });
     RepoProbe {
         git_root: root.map(|r| dunce::simplified(&r).to_string_lossy().to_string()),
         branch_exists,
         local_branches,
         worktree_toml,
+        current_branch,
     }
 }
 
@@ -182,6 +197,34 @@ mod tests {
         );
         assert!(!probe_repo(dir.path(), Some("hermes/other")).branch_exists);
         assert!(!probe_repo(dir.path(), None).branch_exists);
+    }
+
+    #[test]
+    fn the_main_checkouts_branch_is_reported_even_from_a_linked_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let repo = repo_with_commit(&main);
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("develop", &head, false).unwrap();
+        repo.set_head("refs/heads/develop").unwrap();
+        let wt_path = dir.path().join("wt");
+        repo.worktree("wt", &wt_path, None).unwrap();
+        assert_eq!(
+            probe_repo(&main, None).current_branch.as_deref(),
+            Some("develop")
+        );
+        assert_eq!(
+            probe_repo(&wt_path, None).current_branch.as_deref(),
+            Some("develop")
+        );
+        // Detached: no branch to name.
+        repo.set_head_detached(head.id()).unwrap();
+        assert_eq!(probe_repo(&main, None).current_branch, None);
+        assert_eq!(
+            probe_repo(dir.path().join("nowhere").as_path(), None).current_branch,
+            None
+        );
     }
 
     #[test]

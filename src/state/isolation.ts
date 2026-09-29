@@ -105,6 +105,8 @@ export interface BranchSelection {
   branch: string;
   createNew: boolean;
   fromRemote?: string;
+  /** A new branch is cut from this one (default: the repository's current branch). */
+  baseBranch?: string;
 }
 
 export interface WorktreeDeps {
@@ -204,7 +206,7 @@ export async function createSessionWorktrees(
     let branch = sel.branch;
     let createNew = sel.createNew;
     let fromRemote = sel.fromRemote;
-    let baseBranch: string | undefined;
+    let baseBranch: string | undefined = sel.createNew && sel.baseBranch ? sel.baseBranch : undefined;
 
     for (let round = 0; ; round++) {
       try {

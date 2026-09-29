@@ -24,6 +24,7 @@ import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
 import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { agentDisplayName } from "../catalog/agentCatalog";
 
 // The agent view (and everything it pulls in: markdown, syntax
 // highlighting, tool cards) loads on demand, the first time an
@@ -381,7 +382,11 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           >
             {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}
             {session.mode !== "agent" && session.ai_provider && statusStripOn && isFeatureFlagEnabled("launchHelper") && (
-              <SessionStatusStrip sessionId={sessionId} phase={session.phase} />
+              <SessionStatusStrip
+                sessionId={sessionId}
+                phase={session.phase}
+                agentName={agentDisplayName(session) ?? getAgent(session.ai_provider)?.name ?? session.ai_provider}
+              />
             )}
             {/* 2.0: the CLI refused the launch; Hermes stopped it and says why. */}
             {session.mode !== "agent" && session.ai_provider && (

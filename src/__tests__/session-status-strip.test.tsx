@@ -40,10 +40,10 @@ const status = (kind: SessionEvent extends { type: "status"; status: { kind: inf
   status: { kind, confidence, detail },
 });
 
-function renderStrip(phase = "shell_ready") {
+function renderStrip(phase = "shell_ready", agentName: string | null = "Claude Code") {
   return render(
     <I18nProvider>
-      <SessionStatusStrip sessionId={SID} phase={phase} />
+      <SessionStatusStrip sessionId={SID} phase={phase} agentName={agentName} />
     </I18nProvider>,
   );
 }
@@ -139,7 +139,7 @@ describe("<SessionStatusStrip>", () => {
     expect(el.textContent).toContain(INBOX_SHORTCUT);
   });
 
-  it("shows needs approval with 'hook, exact' the moment the event lands, and the detail", () => {
+  it("shows needs approval as 'exact · reported by <agent>' the moment the event lands, and the detail", () => {
     renderStrip("busy");
     act(() => {
       dispatchSessionEvent(SID, status("needs_approval", "exact", "hook:claude", "Bash"));
@@ -150,11 +150,11 @@ describe("<SessionStatusStrip>", () => {
     expect(el.dataset.source).toBe("hook");
     expect(el.className).not.toContain("session-status-strip-guessed");
     expect(el.querySelector(".session-status-strip-word")?.textContent).toBe("needs approval");
-    expect(el.querySelector(".session-status-strip-source")?.textContent).toBe("hook, exact");
+    expect(el.querySelector(".session-status-strip-source")?.textContent).toBe("exact · reported by Claude Code");
     expect(el.querySelector(".session-status-strip-detail")?.textContent).toBe("Bash");
   });
 
-  it("marks a terminal notification as 'notification, signal', never exact", () => {
+  it("marks a terminal notification as 'signal · notification', never exact or reported by the agent", () => {
     renderStrip();
     act(() => {
       dispatchSessionEvent(SID, { type: "attention", at: 1, source: "osc", detail: "Approval requested" });
@@ -162,7 +162,16 @@ describe("<SessionStatusStrip>", () => {
     });
     const el = strip();
     expect(el.dataset.confidence).toBe("signal");
-    expect(el.querySelector(".session-status-strip-source")?.textContent).toBe("notification, signal");
+    expect(el.querySelector(".session-status-strip-source")?.textContent).toBe("signal · notification");
+  });
+
+  it("says 'exact' without a name when the agent's name is unknown, and 'guessed' before any signal", () => {
+    renderStrip("busy", null);
+    expect(strip().querySelector(".session-status-strip-source")?.textContent).toBe("guessed");
+    act(() => {
+      dispatchSessionEvent(SID, status("working", "exact", "hook:claude"));
+    });
+    expect(strip().querySelector(".session-status-strip-source")?.textContent).toBe("exact");
   });
 
   it("counts running sub-agents and drops the counter when the agent exits", () => {

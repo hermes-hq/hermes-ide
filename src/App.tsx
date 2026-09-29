@@ -90,7 +90,7 @@ import { getSessionWorktreeInfo } from "./api/git";
 import { writeTaskFeatureFile } from "./api/launcher";
 import { handleUndeliveredTask, launchTask, normalizeRepoPath, type UndeliveredTask } from "./launcher/launchTask";
 import { TASK_LAUNCHES_KEY } from "./launcher/taskLauncher";
-import type { TaskLaunchRequest } from "./components/TaskLauncher";
+import type { TaskLaunchRequest, TaskLaunchResult } from "./components/TaskLauncher";
 import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
@@ -1016,7 +1016,7 @@ function AppContent() {
     if (session) showSession(session.id);
   }, [createSession, showSession, t]);
 
-  const runTaskLaunch = useCallback(async (req: TaskLaunchRequest) => {
+  const runTaskLaunch = useCallback(async (req: TaskLaunchRequest): Promise<TaskLaunchResult> => {
     const result = await launchTask(req, {
       projectFor: async (root) => {
         const want = normalizeRepoPath(root, PLATFORM === "win");
@@ -1024,6 +1024,9 @@ function AppContent() {
         return known ? known.id : (await createProject(root, null)).id;
       },
       createSession,
+      // With a running-agents or memory cap and no free slot, the task
+      // waits in the queue instead of starting (N22).
+      queue: (opts, label) => fleet.queueIfFull(opts, label),
       place: (sessionId, index, firstSessionId) => {
         const paneId = layoutRef.current.focusedPaneId;
         if (index === 0 || !firstSessionId || !paneId) {
@@ -1043,9 +1046,9 @@ function AppContent() {
       writeRecords: (raw) => setSetting(TASK_LAUNCHES_KEY, raw),
       now: () => Date.now(),
     });
-    if (result.ok) setTaskLauncherOpen(false);
-    return result.ok;
-  }, [createSession, dispatch, showSession]);
+    if (!result.ok) return false;
+    return result.sessionIds.length === 0 && result.queued > 0 ? "queued" : true;
+  }, [createSession, dispatch, showSession, fleet]);
 
   // ── Instant session creation (Cmd+N / Cmd+T) ──
   const createSessionDirect = useCallback(async () => {
@@ -1177,7 +1180,14 @@ function AppContent() {
 
         {isFeatureFlagEnabled("attentionInbox") && (
           <Suspense fallback={null}>
-            <AttentionCenter sessions={state.sessions} activeSessionId={state.activeSessionId} onJump={jumpToSession} onOpenChange={setAttentionInboxOpen} />
+            <AttentionCenter
+              sessions={state.sessions}
+              activeSessionId={state.activeSessionId}
+              onJump={jumpToSession}
+              onOpenChange={setAttentionInboxOpen}
+              onStartTasks={openNewSession}
+              canOpenOnStart={() => !anyOverlayOpenRef.current}
+            />
           </Suspense>
         )}
 
@@ -1716,6 +1726,10 @@ function AppContent() {
             onClose={() => setTaskLauncherOpen(false)}
             onOpenAdvanced={openAdvancedCreator}
             onSignIn={(agentId) => void signInAgent(agentId)}
+            onManageAccounts={() => {
+              setTaskLauncherOpen(false);
+              setSettingsOpen("agents");
+            }}
             onLaunch={runTaskLaunch}
           />
         </Suspense>

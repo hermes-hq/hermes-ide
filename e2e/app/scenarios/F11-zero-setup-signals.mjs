@@ -449,7 +449,7 @@ try {
   assert(Object.values(hooks1).every((groups) => groups.every((g) => g.hooks.every((h) => Array.isArray(h.args) && (h.args[0] === "signal" || isDoneWhen(h))))), "every hook is `hi signal` (or F27's Done-When check) in exec form (no shell)");
 
   const { strip: started, ms: startedMs } = await waitForStrip(app.bridge, s1, { kind: "idle", confidence: "exact" }, { timeoutMs: 15_000 });
-  assert(started.source === "hook" && started.sourceText === "hook, exact" && !started.guessed, `once started the strip says "${started.word} · ${started.sourceText}" (${startedMs} ms after ready)`);
+  assert(started.source === "hook" && started.sourceText === "exact · reported by Claude Code" && !started.guessed, `once started the strip says "${started.word} · ${started.sourceText}" (${startedMs} ms after ready)`);
   const snap0 = await snapshotOf(app.bridge, s1);
   assert(snap0.identity.vendorSessionId === vendorId1, "the store knows the agent's conversation id from its SessionStart hook");
   await app.bridge.screenshot(join(evidenceDir, "01-started-idle-exact.png"));
@@ -457,7 +457,7 @@ try {
   // Approval: within one second of the agent asking.
   await app.bridge.typeInTerminal(s1, "p");
   const { strip: approval, ms: approvalMs } = await waitForStrip(app.bridge, s1, { kind: "needs_approval", confidence: "exact" });
-  assert(approval.source === "hook" && approval.sourceText === "hook, exact", `a permission request shows "${approval.word} · ${approval.sourceText}"`);
+  assert(approval.source === "hook" && approval.sourceText === "exact · reported by Claude Code", `a permission request shows "${approval.word} · ${approval.sourceText}"`);
   assert(approval.detail === "Bash", `with the tool as detail ("${approval.detail}")`);
   assert(approvalMs <= 1000, `and within one second of the agent asking (${approvalMs} ms, key press included)`);
   await app.bridge.screenshot(join(evidenceDir, "02-needs-approval-hook-exact.png"));
@@ -476,7 +476,7 @@ try {
 
   const seen1 = await driveSession(app.bridge, s1, { expectStrip: true });
   assert(seen1.find((s) => s.key === "e")?.detail === "server_error", "a failed turn shows the agent's own error as detail");
-  assert(seen1.every((s) => s.source === "hook" && s.sourceText === "hook, exact"), "every hook-driven status is hook, exact");
+  assert(seen1.every((s) => s.source === "hook" && s.sourceText === "exact · reported by Claude Code"), "every hook-driven status is exact, reported by Claude Code");
   // The agent's output so far, with the strip on, read while it is all
   // still on screen: the second session (strip off) is read at the same
   // point of its life and must show the same rows. Reading the first
@@ -509,7 +509,7 @@ try {
   // A vendor notification printed to the terminal: never exact.
   await app.bridge.typeInTerminal(s1, "o");
   const { strip: osc } = await waitForStrip(app.bridge, s1, { kind: "needs_approval", confidence: EXPECT_OSC_CONFIDENCE });
-  assert(osc.source === "osc" && osc.sourceText === "notification, signal", `a printed OSC 9 notification raises "${osc.word} · ${osc.sourceText}"`);
+  assert(osc.source === "osc" && osc.sourceText === "signal · notification", `a printed OSC 9 notification raises "${osc.word} · ${osc.sourceText}"`);
   assert(osc.confidence !== "exact", "and is never exact");
   await app.bridge.screenshot(join(evidenceDir, "04-osc-notification-signal.png"));
 

@@ -215,7 +215,7 @@ export interface CreateSessionOpts {
   branchName?: string;
   createNewBranch?: boolean;
   /** Per-project branch selections: projectId -> { branch, createNew, fromRemote? } */
-  branchSelections?: Record<string, { branch: string; createNew: boolean; fromRemote?: string }>;
+  branchSelections?: Record<string, { branch: string; createNew: boolean; fromRemote?: string; baseBranch?: string }>;
   channels?: string[];
   sshHost?: string;
   sshPort?: number;

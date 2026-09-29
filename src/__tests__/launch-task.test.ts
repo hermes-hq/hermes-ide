@@ -9,7 +9,36 @@ import { describe, expect, it, vi } from "vitest";
 import { handleUndeliveredTask, launchTask, normalizeRepoPath, type LaunchTaskDeps } from "../launcher/launchTask";
 import { parseTaskLaunches } from "../launcher/taskLauncher";
 import type { CreateSessionOpts, SessionData } from "../types/session";
-import type { TaskLaunchRequest } from "../components/TaskLauncher";
+import type { PlannedAgent, TaskLaunchRequest } from "../components/TaskLauncher";
+import type { LaunchChoice } from "../agent/capabilities/types";
+
+const CHOICE: LaunchChoice = {
+  agentId: "claude",
+  accountId: "default",
+  approvalModeId: "acceptEdits",
+  modelId: "default",
+  effort: null,
+  extraArgs: "",
+  prefix: "",
+  channels: [],
+  where: { kind: "new-worktree", baseBranch: "", branch: "" },
+  trackAsFeature: false,
+};
+
+/** One planned agent session: a new worktree on a new branch unless told otherwise. */
+function agent(id: string, mode: "terminal" | "agent", branch: string, over: Partial<PlannedAgent> = {}): PlannedAgent {
+  return {
+    id,
+    mode,
+    branch,
+    createBranch: true,
+    baseBranch: "",
+    worktree: true,
+    launch: { permissionMode: "acceptEdits", customPrefix: "", customSuffix: "", channels: [] },
+    choice: { ...CHOICE, agentId: id },
+    ...over,
+  };
+}
 
 function fakeDeps(over: Partial<LaunchTaskDeps> = {}) {
   const created: CreateSessionOpts[] = [];
@@ -47,9 +76,10 @@ function fakeDeps(over: Partial<LaunchTaskDeps> = {}) {
 const req = (over: Partial<TaskLaunchRequest> = {}): TaskLaunchRequest => ({
   task: "  Fix the login bug  ",
   repoRoot: "/fixture-home/repo",
-  agents: [{ id: "claude", mode: "terminal", branch: "hermes/fix-the-login-bug" }],
+  agents: [agent("claude", "terminal", "hermes/fix-the-login-bug")],
   track: "Quick",
   doneWhen: ["npm test"],
+  choice: CHOICE,
   ...over,
 });
 
@@ -67,6 +97,13 @@ describe("launchTask", () => {
         workingDirectory: "/fixture-home/repo",
         branchSelections: { "proj-1": { branch: "hermes/fix-the-login-bug", createNew: true } },
         initialPrompt: "Fix the login bug",
+        permissionMode: "acceptEdits",
+        customPrefix: undefined,
+        customSuffix: undefined,
+        channels: undefined,
+        agentName: undefined,
+        agentCommand: undefined,
+        agentLaunch: undefined,
       },
     ]);
     expect(f.placed).toEqual([["s1", 0, null]]);
@@ -93,8 +130,8 @@ describe("launchTask", () => {
     const r = await launchTask(
       req({
         agents: [
-          { id: "claude", mode: "agent", branch: "hermes/x" },
-          { id: "codex", mode: "terminal", branch: "hermes/x-codex" },
+          agent("claude", "agent", "hermes/x"),
+          agent("codex", "terminal", "hermes/x-codex"),
         ],
       }),
       f.deps,
@@ -124,7 +161,7 @@ describe("launchTask", () => {
       createSession: vi.fn(async () => (++calls === 1 ? ({ id: "s1" } as SessionData) : null)),
     });
     const r = await launchTask(
-      req({ agents: [{ id: "claude", mode: "terminal", branch: "a" }, { id: "codex", mode: "terminal", branch: "b" }] }),
+      req({ agents: [agent("claude", "terminal", "a"), agent("codex", "terminal", "b")] }),
       failSecond.deps,
     );
     expect(r).toMatchObject({ ok: true, sessionIds: ["s1"] });
@@ -142,7 +179,7 @@ describe("launchTask", () => {
 
   it("an agent that cannot take a first prompt gets the task on the clipboard", async () => {
     const f = fakeDeps();
-    const r = await launchTask(req({ agents: [{ id: "goose", mode: "terminal", branch: "hermes/g" }] }), f.deps);
+    const r = await launchTask(req({ agents: [agent("goose", "terminal", "hermes/g")] }), f.deps);
     expect(r.copiedFor).toEqual(["goose"]);
     expect(f.copied).toEqual(["Fix the login bug"]);
   });
@@ -152,6 +189,64 @@ describe("launchTask", () => {
     expect((await launchTask(req({ task: "  " }), f.deps)).ok).toBe(false);
     expect((await launchTask(req({ agents: [] }), f.deps)).ok).toBe(false);
     expect(f.created).toEqual([]);
+  });
+
+  it("carries the approval mode, prefix, model/effort flags, extra args, channels and account of the choice", async () => {
+    const f = fakeDeps();
+    await launchTask(
+      req({
+        agents: [
+          agent("claude", "terminal", "hermes/x", {
+            launch: {
+              permissionMode: "plan",
+              customPrefix: "caffeinate -i",
+              customSuffix: "--model opus --effort high --verbose",
+              channels: ["plugin:telegram"],
+              agentLaunch: { modelId: "opus", effort: "high", accountId: "work", purpose: "agent" },
+            },
+          }),
+        ],
+      }),
+      f.deps,
+    );
+    expect(f.created[0]).toMatchObject({
+      permissionMode: "plan",
+      customPrefix: "caffeinate -i",
+      customSuffix: "--model opus --effort high --verbose",
+      channels: ["plugin:telegram"],
+      agentLaunch: { modelId: "opus", effort: "high", accountId: "work", purpose: "agent" },
+    });
+  });
+
+  it("an existing branch gets a worktree without a new branch; the current checkout gets none; a base branch is passed on", async () => {
+    const f = fakeDeps();
+    await launchTask(req({ agents: [agent("claude", "terminal", "feature/inbox", { createBranch: false })] }), f.deps);
+    await launchTask(req({ agents: [agent("claude", "terminal", "", { createBranch: false, worktree: false })] }), f.deps);
+    await launchTask(req({ agents: [agent("claude", "terminal", "hermes/y", { baseBranch: "develop" })] }), f.deps);
+    expect(f.created.map((c) => c.branchSelections)).toEqual([
+      { "proj-1": { branch: "feature/inbox", createNew: false } },
+      undefined,
+      { "proj-1": { branch: "hermes/y", createNew: true, baseBranch: "develop" } },
+    ]);
+    expect(f.created[1].workingDirectory).toBe("/fixture-home/repo");
+  });
+
+  it("a Custom agent starts the command that was typed", async () => {
+    const f = fakeDeps();
+    await launchTask(req({ agents: [agent("custom", "terminal", "hermes/c", { launch: { permissionMode: "default", customPrefix: "", customSuffix: "", channels: [], agentCommand: "my-agent --fast" } })] }), f.deps);
+    expect(f.created[0]).toMatchObject({ aiProvider: "custom", agentCommand: "my-agent --fast", agentName: "my-agent --fast" });
+  });
+
+  it("with no free slot the sessions wait in the queue instead of starting", async () => {
+    const queued: [CreateSessionOpts, string][] = [];
+    const f = fakeDeps({ queue: (opts, label) => (queued.push([opts, label]), true) });
+    const r = await launchTask(req({ agents: [agent("claude", "terminal", "a"), agent("codex", "terminal", "b")] }), f.deps);
+    expect(r).toMatchObject({ ok: true, sessionIds: [], queued: 2 });
+    expect(f.created).toEqual([]);
+    expect(queued.map(([o, l]) => [o.aiProvider, o.initialPrompt, l])).toEqual([
+      ["claude", "Fix the login bug", "Fix the login bug"],
+      ["codex", "Fix the login bug", "Fix the login bug"],
+    ]);
   });
 
   it("a record that cannot be saved does not undo the launch", async () => {

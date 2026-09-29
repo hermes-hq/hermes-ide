@@ -25,10 +25,17 @@ function refuseUnlessAllowed() {
   if (platform() !== "linux" && platform() !== "win32") throw new Error(`no OS key driver for ${platform()}`);
 }
 
+/** Named keys a chord may end in, besides a letter, with xdotool's keysym (the Windows helper maps them to virtual keys). */
+const NAMED = {
+  tab: { keysym: "Tab" },
+  return: { keysym: "Return" },
+  escape: { keysym: "Escape" },
+};
+
 /**
  * Press chords on the real keyboard path of the app window owned by `pid`.
- * `chords` are xdotool-style names: "ctrl+d", "ctrl+shift+d", or "tab" /
- * "shift+tab" (moving keyboard focus).
+ * `chords` are xdotool-style names: "ctrl+d", "ctrl+shift+d", "tab",
+ * "shift+tab", "return", "escape".
  * Returns diagnostics (which window, whether it had focus).
  */
 /**
@@ -39,7 +46,7 @@ function refuseUnlessAllowed() {
 export async function pressChords(pid, chords, { delayMs = 150, clickAt = null } = {}) {
   refuseUnlessAllowed();
   for (const c of chords) {
-    if (!/^((ctrl|shift|alt)\+)+[a-z]$/.test(c) && !/^(shift\+)?tab$/.test(c)) throw new Error(`unsupported chord: ${c}`);
+    if (!/^((ctrl|shift|alt)\+)+[a-z]$/.test(c) && !/^((ctrl|shift|alt)\+)*(tab|return|escape)$/.test(c)) throw new Error(`unsupported chord: ${c}`);
   }
   return platform() === "linux" ? pressLinux(pid, chords, delayMs, clickAt) : pressWindows(pid, chords, delayMs, clickAt);
 }
@@ -86,8 +93,8 @@ async function pressLinux(pid, chords, delayMs, clickAt) {
     await sleep(300);
   }
   const focused = xdotool(["getwindowfocus"]).out;
-  const names = chords.map((c) => c.replace(/(^|\+)tab$/, "$1Tab"));
-  const res = xdotool(["key", "--clearmodifiers", "--delay", String(delayMs), ...names], 60_000);
+  const keysyms = chords.map((c) => c.replace(/(tab|return|escape)$/, (k) => NAMED[k].keysym));
+  const res = xdotool(["key", "--clearmodifiers", "--delay", String(delayMs), ...keysyms], 60_000);
   if (res.status !== 0) throw new Error(`xdotool key failed: ${res.err}`);
   return { driver: "xdotool", window: win, focusedWindow: focused, clicked, sent: chords.length };
 }
@@ -202,7 +209,12 @@ foreach ($c in $Chords.Split(',')) {
     }
   }
   $last = $parts[$parts.Length - 1]
-  if ($last -eq 'tab') { $key = [uint16]0x09 } else { $key = [uint16][char]($last.ToUpper()) }
+  switch ($last) {
+    'tab' { $key = [uint16]0x09 }
+    'return' { $key = [uint16]0x0D }
+    'escape' { $key = [uint16]0x1B }
+    default { $key = [uint16][char]($last.ToUpper()) }
+  }
   $n = [HermesKeys]::Chord($mods.ToArray(), $key)
   if ($n -eq 0) { throw "SendInput sent nothing for $c" }
   $sent++

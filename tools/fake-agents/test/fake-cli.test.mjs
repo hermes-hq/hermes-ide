@@ -262,6 +262,22 @@ describe("fake vendor CLI", () => {
 		expect(records(dir)[0].events.map((e) => e.ev)).toContain("start-hook-skipped");
 	});
 
+	it("ask-at-start: once ready it asks permission at once and waits for y/n; a prefix's proof variable is recorded", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["PermissionRequest", "PostToolUse"]);
+		const res = await run(["--session-id", "t-9", "--settings", file], {
+			env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "ask-at-start", HERMES_PREFIX_PROOF: "launcher" },
+			keys: "yq",
+			afterMs: 900,
+		});
+		expect(res.code).toBe(0);
+		expect(res.stdout).toContain("asking permission for Bash: npm install");
+		const events = readFileSync(marks, "utf8").split("\n").filter(Boolean).map((l) => l.split(" ")[0]);
+		expect(events.slice(0, 3)).toEqual(["SessionStart", "PermissionRequest", "PostToolUse"]);
+		const [rec] = records(dir);
+		expect(rec.env.HERMES_PREFIX_PROOF).toBe("launcher");
+	});
+
 	it("a pasted line followed by Enter is a prompt that runs the UserPromptSubmit hook with it", async () => {
 		const dir = tmp();
 		const { file, marks } = hookSettings(dir, ["UserPromptSubmit"]);
