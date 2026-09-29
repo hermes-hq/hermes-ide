@@ -19,7 +19,7 @@ function claudeCaps(over: Partial<AgentCapabilities> = {}): AgentCapabilities {
 		verifiedOnRealInstall: true,
 		accounts: [
 			{ id: "default", label: "Default profile", detail: "Max plan", signedIn: true },
-			{ id: "work", label: "Work", detail: "not signed in", signedIn: false, profileEnv: { name: "CLAUDE_CONFIG_DIR", value: "/Users/test/.claude-work" } },
+			{ id: "work", label: "Work", detail: "not signed in", signedIn: false, profileEnv: { name: "CLAUDE_CONFIG_DIR", value: "~/.claude-work" } },
 		],
 		activeAccountId: "default",
 		canAddAccount: true,
