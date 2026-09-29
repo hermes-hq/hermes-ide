@@ -234,6 +234,10 @@ try {
   await bridge
     .waitFor("the base-branch warning", `return e2e.all(".task-launcher-fallback li").some((l) => l.getAttribute("data-field") === "where");`, { timeoutMs: 10_000 })
     .catch(() => log("  (no base-branch warning within 10 s)"));
+  // "Hermes will run" is asked of the backend again after the fallback: it may trail the warning.
+  await bridge
+    .waitFor("the preview without the missing base", `return !/release\\/gone/.test(e2e.first(".task-launcher-command")?.textContent ?? "release/gone");`, { timeoutMs: 5_000 })
+    .catch(() => log("  (the preview still names the missing base after 5 s)"));
   st = await launcherState(bridge);
   log(`  fallback: ${JSON.stringify(st.fallback)}; preview: ${st.preview}; blocks: ${JSON.stringify(st.blocks)}`);
   assert(!!st.fallback && st.fallback.some((f) => f.field === "where" && f.text.includes("release/gone")), "the warning names the missing base branch");
