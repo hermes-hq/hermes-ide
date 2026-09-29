@@ -149,12 +149,14 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       next.limit = event.state === "limited" ? Object.freeze({ resetsAt: event.resetsAt, window: event.window }) : null;
       break;
     case "usage": {
-      // Totals as reported. A part that stopped being reported keeps the
+      // Totals as reported. A part the agent stopped reporting keeps the
       // last value; nothing is added up or guessed here. Once the agent
-      // itself reported its usage, an estimate never replaces it.
+      // itself reported its usage, an estimate never replaces it. An
+      // estimate is always Hermes's complete running total, so it is taken
+      // as it is: a null cost there means "no price" (n/a), not "unchanged".
       const confidence = event.confidence ?? "exact";
       if (confidence === "estimated" && prev.usage?.confidence === "exact") break;
-      const same = prev.usage?.confidence === confidence;
+      const same = confidence === "exact" && prev.usage?.confidence === "exact";
       next.usage = Object.freeze({
         inputTokens: event.inputTokens ?? (same ? prev.usage?.inputTokens : null) ?? null,
         outputTokens: event.outputTokens ?? (same ? prev.usage?.outputTokens : null) ?? null,

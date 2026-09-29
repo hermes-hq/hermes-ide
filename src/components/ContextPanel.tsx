@@ -636,17 +636,17 @@ export function ContextPanel({ session }: ContextPanelProps) {
         {fleetOn && reportedUsage && (
           <div className="ctx-section ctx-usage">
             <div className="ctx-section-title">
-              Tokens{" "}
+              {t("fleet.usageTokens")}{" "}
               <span className="ctx-cost" data-spend={reportedSpend.kind} title={reportedSpend.kind === "estimated" ? t("fleet.spendEstimatedTitle") : undefined}>
                 {spendText(reportedSpend, t)}
               </span>
             </div>
             <div className="ctx-tokens-row">
               <span className="ctx-token-in" data-tokens={reportedUsage.inputTokens ?? ""}>
-                {reportedUsage.inputTokens === null ? t("fleet.spendNa") : formatTokens(reportedUsage.inputTokens)} in
+                {t("fleet.tokensIn", { tokens: reportedUsage.inputTokens === null ? t("fleet.spendNa") : formatTokens(reportedUsage.inputTokens) })}
               </span>
               <span className="ctx-token-out" data-tokens={reportedUsage.outputTokens ?? ""}>
-                {reportedUsage.outputTokens === null ? t("fleet.spendNa") : formatTokens(reportedUsage.outputTokens)} out
+                {t("fleet.tokensOut", { tokens: reportedUsage.outputTokens === null ? t("fleet.spendNa") : formatTokens(reportedUsage.outputTokens) })}
               </span>
             </div>
           </div>

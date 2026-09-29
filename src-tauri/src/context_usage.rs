@@ -263,7 +263,10 @@ pub enum SpendRecord {
         id: Option<String>,
         model: Option<String>,
         input: u64,
+        /// All cache writes, the 1-hour ones included.
         cache_write: u64,
+        /// The part of `cache_write` written for an hour (priced higher).
+        cache_write_1h: u64,
         cache_read: u64,
         output: u64,
     },
@@ -290,6 +293,11 @@ fn spend_record(v: &Value) -> Option<SpendRecord> {
                 model,
                 input: as_u64(usage.get("input_tokens")),
                 cache_write: as_u64(usage.get("cache_creation_input_tokens")),
+                cache_write_1h: as_u64(
+                    usage
+                        .get("cache_creation")
+                        .and_then(|c| c.get("ephemeral_1h_input_tokens")),
+                ),
                 cache_read: as_u64(usage.get("cache_read_input_tokens")),
                 output: as_u64(usage.get("output_tokens")),
             })
@@ -309,13 +317,14 @@ fn spend_record(v: &Value) -> Option<SpendRecord> {
     }
 }
 
-/// US dollars per million tokens: input, output, cache write (5-minute),
-/// cache read.
+/// US dollars per million tokens: input, output, cache write (5-minute
+/// and 1-hour), cache read.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Price {
     pub input: f64,
     pub output: f64,
     pub cache_write: f64,
+    pub cache_write_1h: f64,
     pub cache_read: f64,
 }
 
@@ -324,6 +333,7 @@ const fn price(input: f64, output: f64, cache_read: f64) -> Price {
         input,
         output,
         cache_write: input * 1.25,
+        cache_write_1h: input * 2.0,
         cache_read,
     }
 }
@@ -372,6 +382,7 @@ pub fn claude_price(model: &str) -> Option<Price> {
 struct CallTokens {
     input: u64,
     cache_write: u64,
+    cache_write_1h: u64,
     cache_read: u64,
     output: u64,
 }
@@ -397,12 +408,14 @@ impl SpendTracker {
                 model,
                 input,
                 cache_write,
+                cache_write_1h,
                 cache_read,
                 output,
             } => {
                 let tokens = CallTokens {
                     input,
                     cache_write,
+                    cache_write_1h,
                     cache_read,
                     output,
                 };
@@ -439,13 +452,17 @@ impl SpendTracker {
                 .saturating_add(t.cache_read);
             output = output.saturating_add(t.output);
             cost = match (cost, model.as_deref().and_then(claude_price)) {
-                (Some(sum), Some(p)) => Some(
-                    sum + (t.input as f64 * p.input
-                        + t.output as f64 * p.output
-                        + t.cache_write as f64 * p.cache_write
-                        + t.cache_read as f64 * p.cache_read)
-                        / 1_000_000.0,
-                ),
+                (Some(sum), Some(p)) => {
+                    let write_1h = t.cache_write_1h.min(t.cache_write);
+                    Some(
+                        sum + (t.input as f64 * p.input
+                            + t.output as f64 * p.output
+                            + (t.cache_write - write_1h) as f64 * p.cache_write
+                            + write_1h as f64 * p.cache_write_1h
+                            + t.cache_read as f64 * p.cache_read)
+                            / 1_000_000.0,
+                    )
+                }
                 _ => None,
             };
         }
@@ -993,8 +1010,12 @@ mod tests {
         assert_eq!(p("claude-fable-5-1"), Some((10.0, 50.0, 0.25)));
         assert_eq!(p("claude-fable-5"), Some((10.0, 50.0, 1.0)));
         assert_eq!(p("CLAUDE-SONNET-4-6[1m]"), Some((3.0, 15.0, 0.30)));
-        // A cache write costs 1.25x the input price.
+        // A cache write costs 1.25x the input price, 2x when kept for an hour.
         assert_eq!(claude_price("claude-sonnet-4-6").unwrap().cache_write, 3.75);
+        assert_eq!(
+            claude_price("claude-sonnet-4-6").unwrap().cache_write_1h,
+            6.0
+        );
         assert_eq!(
             p("claude-fake-1"),
             None,
@@ -1065,6 +1086,35 @@ mod tests {
         ))
         .is_none());
         assert_eq!(spend.totals().unwrap().1, 3_000);
+    }
+
+    #[test]
+    fn a_one_hour_cache_write_costs_twice_the_input_price() {
+        let mut spend = SpendTracker::default();
+        let mut t = UsageTracker::default();
+        // 1M tokens written to the cache, 600k of them for an hour, on a
+        // model at $1/M input: 400k x $1.25 + 600k x $2.00 = $1.70.
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "id": "m1", "role": "assistant", "model": "claude-haiku-4-5",
+                "usage": {
+                    "input_tokens": 0,
+                    "cache_creation_input_tokens": 1_000_000,
+                    "cache_creation": {
+                        "ephemeral_5m_input_tokens": 400_000,
+                        "ephemeral_1h_input_tokens": 600_000
+                    },
+                    "cache_read_input_tokens": 0,
+                    "output_tokens": 0
+                }
+            }
+        })
+        .to_string();
+        let e = events_for_lines(&mut t, &mut spend, &[line], 1, "transcript:claude", false);
+        let (input, _, cost, _) = usage_of(&e).unwrap();
+        assert_eq!(input, Some(1_000_000));
+        assert!((cost.unwrap() - 1.70).abs() < 1e-9, "{cost:?}");
     }
 
     #[test]
