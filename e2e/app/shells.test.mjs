@@ -71,8 +71,10 @@ describe("shells", () => {
 
   it.runIf(POSIX)("POSIX shell: runs paths with spaces and quotes and reads the exit code", () => runsWithExitCode("posix"));
   it.runIf(POSIX)("POSIX shell: the probe says posix", () => probes("posix"));
-  it.runIf(PWSH)("PowerShell: runs paths with spaces and quotes and reads the exit code", () => runsWithExitCode("powershell"));
-  it.runIf(PWSH)("PowerShell: the probe says powershell", () => probes("powershell"));
+  // A cold PowerShell start on a busy CI runner (the whole unit suite in
+  // parallel) can take longer than vitest's default 5 s.
+  it.runIf(PWSH)("PowerShell: runs paths with spaces and quotes and reads the exit code", () => runsWithExitCode("powershell"), 30_000);
+  it.runIf(PWSH)("PowerShell: the probe says powershell", () => probes("powershell"), 30_000);
   it.runIf(CMD)("cmd.exe: runs paths with spaces and reads the exit code", () => runsWithExitCode("cmd"));
   it.runIf(CMD)("cmd.exe: the probe says cmd", () => probes("cmd"));
 });
