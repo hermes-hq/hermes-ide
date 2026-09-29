@@ -61,6 +61,8 @@ struct HostSession {
     exited_at: Option<Instant>,
     /// The attached client was told the program ended.
     exit_delivered: bool,
+    /// A client asked for it to end: nobody comes back for its exit code.
+    kill_requested: bool,
     last_output: Option<Instant>,
     started_at: u64,
 }
@@ -213,6 +215,7 @@ fn janitor(sessions: Sessions, cfg: Arc<Config>, started: Instant) {
                 let s = sess.lock().unwrap_or_else(|e| e.into_inner());
                 let gone = s.exited
                     && (s.exit_delivered
+                        || s.kill_requested
                         || s.exited_at.is_some_and(|t| t.elapsed() >= cfg.exited_keep));
                 if gone {
                     log(&format!("forgot ended session {id}"));
@@ -515,6 +518,7 @@ fn spawn_session(
         exit_code: None,
         exited_at: None,
         exit_delivered: false,
+        kill_requested: false,
         last_output: None,
         started_at: now_ms(),
     }));
@@ -652,7 +656,10 @@ fn resize(s: &HostSession, rows: u16, cols: u16) {
 /// Ends a session's program: hang-up first, then SIGKILL if it stays.
 fn kill_session(sess: &SessionRef) {
     let pid = {
-        let s = sess.lock().unwrap_or_else(|e| e.into_inner());
+        let mut s = sess.lock().unwrap_or_else(|e| e.into_inner());
+        // The client that asked may be gone before the end is reported
+        // (the app quitting): the ended session is not kept for it.
+        s.kill_requested = true;
         if s.exited || s.pid == 0 {
             return;
         }

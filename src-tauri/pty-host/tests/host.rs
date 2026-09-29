@@ -26,6 +26,11 @@ struct Host {
 
 impl Host {
     fn start(empty_exit_ms: u64, startup_grace_ms: u64) -> Host {
+        Self::start_keeping(empty_exit_ms, startup_grace_ms, 2000)
+    }
+
+    /// Also sets how long an ended session waits for a client to collect it.
+    fn start_keeping(empty_exit_ms: u64, startup_grace_ms: u64, exited_keep_ms: u64) -> Host {
         // A short socket path: macOS allows 104 bytes.
         let tmp = tempfile::Builder::new()
             .prefix("hph-")
@@ -38,7 +43,14 @@ impl Host {
         // The socket gets a folder of its own, as it does under Hermes.
         let socket = tmp.path().join("sock").join("host.sock");
         let log = std::fs::File::create(dir.join("host.log")).unwrap();
-        let child = Self::spawn(&dir, &socket, empty_exit_ms, startup_grace_ms, log);
+        let child = Self::spawn(
+            &dir,
+            &socket,
+            empty_exit_ms,
+            startup_grace_ms,
+            exited_keep_ms,
+            log,
+        );
         let host = Host {
             child,
             dir,
@@ -66,6 +78,7 @@ impl Host {
         socket: &Path,
         empty_exit_ms: u64,
         startup_grace_ms: u64,
+        exited_keep_ms: u64,
         log: std::fs::File,
     ) -> Child {
         Command::new(HOST)
@@ -78,7 +91,7 @@ impl Host {
             .arg("--startup-grace-ms")
             .arg(startup_grace_ms.to_string())
             .arg("--exited-keep-ms")
-            .arg("2000")
+            .arg(exited_keep_ms.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log)
@@ -335,6 +348,24 @@ fn an_ended_session_keeps_its_exit_code_until_a_client_collects_it() {
 }
 
 #[test]
+fn a_session_ended_on_request_is_not_kept_and_the_host_exits() {
+    // Kept for a minute if nobody collects it, as a program that ends on
+    // its own is; but this one was asked to end, and the client that asked
+    // is gone (the app quits right after): the host must not wait for it.
+    let mut host = Host::start_keeping(200, 200, 60_000);
+    let mut c = host.connect().unwrap();
+    c.spawn("stop-me", sh("sleep 30"), env_min(), "/", 24, 80)
+        .unwrap();
+    c.kill("stop-me").unwrap();
+    drop(c);
+    assert!(
+        host.wait_exit(Duration::from_secs(10)),
+        "host exits once the session it was asked to end is gone:\n{}",
+        host.log()
+    );
+}
+
+#[test]
 fn bad_token_wrong_protocol_and_junk_are_refused() {
     let host = Host::start(60_000, 60_000);
     let err = match Connection::connect(&host.socket, "wrong-token", Duration::from_secs(3)) {
@@ -397,7 +428,7 @@ fn a_socket_folder_that_is_a_symlink_or_open_to_others_is_refused_or_fixed() {
     let linked = tmp.path().join("sock-link");
     std::os::unix::fs::symlink(&elsewhere, &linked).unwrap();
     let log = std::fs::File::create(dir.join("host.log")).unwrap();
-    let mut child = Host::spawn(&dir, &linked.join("host.sock"), 500, 200, log);
+    let mut child = Host::spawn(&dir, &linked.join("host.sock"), 500, 200, 2000, log);
     let status = child.wait().unwrap();
     assert!(
         !status.success(),
@@ -413,7 +444,7 @@ fn a_socket_folder_that_is_a_symlink_or_open_to_others_is_refused_or_fixed() {
     std::fs::create_dir_all(&open).unwrap();
     std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
     let log = std::fs::File::create(dir.join("host.log")).unwrap();
-    let mut child = Host::spawn(&dir, &open.join("host.sock"), 500, 200, log);
+    let mut child = Host::spawn(&dir, &open.join("host.sock"), 500, 200, 2000, log);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !open.join("host.sock").exists() {
         assert!(Instant::now() < deadline, "host never bound its socket");
