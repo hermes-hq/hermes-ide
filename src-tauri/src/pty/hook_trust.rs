@@ -203,7 +203,7 @@ mod tests {
              "currentHash": "sha256:689b", "trustStatus": "untrusted"},
             {"key": "/<session-flags>/config.toml:pre_tool_use:0:0", "eventName": "preToolUse", "source": "sessionFlags",
              "command": "/usr/local/bin/something-else", "currentHash": "sha256:aaaa", "trustStatus": "untrusted"},
-            {"key": "/Users/test/.codex/config.toml:stop:0:0", "eventName": "stop", "source": "user",
+            {"key": "/fixture-home/.codex/config.toml:stop:0:0", "eventName": "stop", "source": "user",
              "command": "\"/Applications/Hermes.app/Contents/MacOS/hi\" signal", "currentHash": "sha256:bbbb", "trustStatus": "untrusted"}
         ], "warnings": [], "errors": []}]});
         parse_hooks_list(&response)
