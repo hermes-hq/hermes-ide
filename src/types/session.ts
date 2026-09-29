@@ -1,3 +1,5 @@
+import type { AgentLaunchOptions } from "../agent/capabilities/types";
+
 // ─── Session Types (mirror Rust structs) ─────────────────────────────
 
 export interface AgentInfo {
@@ -218,6 +220,9 @@ export interface CreateSessionOpts {
   seedPrompt?: string;
   /** N19 handoff: the session this one continues or duplicates. */
   parentSessionId?: string;
+  /** 2.0 launch contract (src/agent/capabilities): the model, effort and
+   *  account to start the agent with (helper launch only). */
+  agentLaunch?: AgentLaunchOptions;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────

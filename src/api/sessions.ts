@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import type { SessionData, SessionHistoryEntry, SessionMode, TmuxSessionEntry, TmuxWindowEntry, PortForward } from "../types/session";
+import type { AgentLaunchOptions } from "../agent/capabilities/types";
 
 export interface RemoteGitInfo {
   branch: string | null;
@@ -57,6 +58,8 @@ export function createSession(opts: {
   seedPrompt?: string | null;
   /** N19 handoff: the session this one continues or duplicates. */
   parentSessionId?: string | null;
+  /** 2.0 launch contract: model, effort and account (helper launch only). */
+  agentLaunch?: AgentLaunchOptions | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

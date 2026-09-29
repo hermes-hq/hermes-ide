@@ -126,6 +126,20 @@ export interface CompactedEvent extends EventBase {
   readonly preTokens: number | null;
 }
 
+/**
+ * The agent's CLI refused the launch within its first seconds (CAP, an
+ * addition to C0): a model it does not know or the account cannot use, an
+ * effort it rejects, or no sign-in. Hermes matched the CLI's own words
+ * (the catalog's `error_signatures`), stopped the launch and shows these
+ * words with what to do next. `vendorMessage` is the CLI's line, verbatim.
+ */
+export interface LaunchRejectedEvent extends EventBase {
+  readonly type: "launch_rejected";
+  readonly reason: "model" | "effort" | "signed_out" | "other";
+  readonly vendorMessage: string;
+  readonly suggestion: "retry-default" | "switch-account" | "sign-in";
+}
+
 export type SessionEvent =
   | StatusEvent
   | TurnStartEvent
@@ -139,7 +153,8 @@ export type SessionEvent =
   | UsageEvent
   | LimitEvent
   | ContextEvent
-  | CompactedEvent;
+  | CompactedEvent
+  | LaunchRejectedEvent;
 
 export type SessionEventType = SessionEvent["type"];
 
@@ -157,6 +172,7 @@ export const SESSION_EVENT_TYPES: readonly SessionEventType[] = [
   "limit",
   "context",
   "compacted",
+  "launch_rejected",
 ];
 
 function optionalString(v: unknown): string | null | undefined {
@@ -278,6 +294,12 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       const preTokens = tokenCount(v.preTokens, { nullable: true, min: 0 });
       if (trigger === undefined || preTokens === undefined) return null;
       return { ...base, type: "compacted", trigger, preTokens };
+    }
+    case "launch_rejected": {
+      if (v.reason !== "model" && v.reason !== "effort" && v.reason !== "signed_out" && v.reason !== "other") return null;
+      if (v.suggestion !== "retry-default" && v.suggestion !== "switch-account" && v.suggestion !== "sign-in") return null;
+      if (typeof v.vendorMessage !== "string") return null;
+      return { ...base, type: "launch_rejected", reason: v.reason, vendorMessage: v.vendorMessage, suggestion: v.suggestion };
     }
     default:
       return null;

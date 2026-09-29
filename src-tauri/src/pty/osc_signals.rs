@@ -172,6 +172,7 @@ pub fn notification_events(
                         | SessionEvent::Limit { at: t, .. }
                         | SessionEvent::Context { at: t, .. }
                         | SessionEvent::Compacted { at: t, .. }
+                        | SessionEvent::LaunchRejected { at: t, .. }
                         | SessionEvent::TurnStart { at: t, .. }
                         | SessionEvent::TurnEnd { at: t, .. }
                         | SessionEvent::TurnFailed { at: t, .. }

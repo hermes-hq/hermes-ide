@@ -35,7 +35,9 @@
     { "type": "context", "at": 1790000014000, "source": "transcript:claude", "usedTokens": 83003, "contextLimit": 200000, "model": "fake-model-1" },
     { "type": "context", "at": 1790000014500, "usedTokens": 0, "contextLimit": null, "model": null },
     { "type": "compacted", "at": 1790000015000, "source": "transcript:claude", "trigger": "auto", "preTokens": 190000 },
-    { "type": "compacted", "at": 1790000015500, "trigger": null, "preTokens": null }
+    { "type": "compacted", "at": 1790000015500, "trigger": null, "preTokens": null },
+    { "type": "launch_rejected", "at": 1790000016000, "source": "hermes", "reason": "model", "vendorMessage": "There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it. Run --model to pick a different model.", "suggestion": "retry-default" },
+    { "type": "launch_rejected", "at": 1790000016500, "reason": "signed_out", "vendorMessage": "Not logged in · Please run /login", "suggestion": "sign-in" }
   ],
   "rejected": [
     { "type": "status", "at": 1790000000000, "status": { "kind": "bogus", "confidence": "exact", "detail": "" } },
@@ -68,6 +70,9 @@
     { "type": "usage", "at": 1790000009000, "inputTokens": null, "outputTokens": null, "costUsd": "0.50" },
     { "type": "limit", "at": 1790000009000, "state": "waiting", "resetsAt": null, "window": null },
     { "type": "limit", "at": 1790000009000, "state": "limited", "resetsAt": "soon", "window": null },
+    { "type": "launch_rejected", "at": 1790000009000, "reason": "bogus", "vendorMessage": "x", "suggestion": "retry-default" },
+    { "type": "launch_rejected", "at": 1790000009000, "reason": "model", "vendorMessage": "x", "suggestion": "retry" },
+    { "type": "launch_rejected", "at": 1790000009000, "reason": "model", "suggestion": "retry-default" },
     "not an object"
   ]
 }

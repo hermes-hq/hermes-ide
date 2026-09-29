@@ -259,7 +259,8 @@ fn with_tags(mut event: SessionEvent, found: Vec<String>) -> SessionEvent {
         | SessionEvent::Usage { tags, .. }
         | SessionEvent::Limit { tags, .. }
         | SessionEvent::Context { tags, .. }
-        | SessionEvent::Compacted { tags, .. } => *tags = Some(found),
+        | SessionEvent::Compacted { tags, .. }
+        | SessionEvent::LaunchRejected { tags, .. } => *tags = Some(found),
     }
     event
 }

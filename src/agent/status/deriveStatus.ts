@@ -115,6 +115,9 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
     case "context":
     case "compacted":
       return null;
+    // CAP: the CLI refused the launch; Hermes stopped it (an exact error).
+    case "launch_rejected":
+      return make("error", event.vendorMessage, "exact");
   }
 }
 
