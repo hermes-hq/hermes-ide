@@ -676,6 +676,10 @@ mod unix {
         token: &str,
         start: impl FnOnce() -> Result<(), String>,
     ) -> Result<Connection, String> {
+        // One caller at a time: sessions created together (a restore) wait
+        // for the host the first one starts instead of starting their own.
+        static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one_at_a_time = STARTING.lock().unwrap_or_else(|e| e.into_inner());
         match try_connect(&paths.socket, token, Duration::from_secs(2)) {
             Found::Host(conn) => return Ok(conn),
             Found::Unusable(why) => {
@@ -971,6 +975,48 @@ mod unix_tests {
             }
         });
         listener
+    }
+
+    #[test]
+    fn sessions_opened_together_start_one_host() {
+        // Two sessions created at the same moment (off the main thread) while
+        // no host runs: the second waits for the host the first one starts.
+        let root = short_root();
+        let paths = Arc::new(test_paths(root.path()));
+        ensure_socket_dirs(&paths).unwrap();
+        let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let hosts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let callers: Vec<_> = (0..2)
+            .map(|_| {
+                let (paths, starts, hosts) =
+                    (Arc::clone(&paths), Arc::clone(&starts), Arc::clone(&hosts));
+                std::thread::spawn(move || {
+                    let socket = paths.socket.clone();
+                    connect_or_start_with(&paths, TOKEN, move || {
+                        starts.fetch_add(1, Ordering::SeqCst);
+                        // A host that takes a moment to listen, as a first start does.
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_millis(300));
+                            if let Ok(l) =
+                                std::panic::catch_unwind(|| fake_host(&socket, Answer::Good))
+                            {
+                                hosts.lock().unwrap().push(l);
+                            }
+                        });
+                        Ok(())
+                    })
+                    .map(|_| ())
+                })
+            })
+            .collect();
+        for caller in callers {
+            caller.join().unwrap().unwrap();
+        }
+        assert_eq!(
+            starts.load(Ordering::SeqCst),
+            1,
+            "one host is started, not one per session"
+        );
     }
 
     #[test]

@@ -792,9 +792,11 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
     })
 }
 
-// Tauri command handler — params come from frontend invocation
+// Tauri command handler — params come from frontend invocation. Off the main
+// thread: starting the session host can take seconds, and on the main thread
+// that would freeze the window.
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_session(
     app: AppHandle,
     state: State<'_, AppState>,
