@@ -18,7 +18,7 @@ import {
 	removeAgentAccount,
 	renameLaunchPreset,
 } from "../agent/capabilities/api";
-import type { AgentAccount, AgentCapabilities, CheckedPreset, LaunchChoice } from "../agent/capabilities/types";
+import type { AgentAccount, AgentCapabilities, CheckedPreset, ChoiceIssue, LaunchChoice } from "../agent/capabilities/types";
 import { getAgent } from "../catalog/agentCatalog";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -43,9 +43,31 @@ export function effortSummary(c: AgentCapabilities, t: T): string {
 	return values.length > 0 ? t("agentsSettings.effort", { levels: values.join(" · ") }) : t("agentsSettings.effortNone");
 }
 
+/**
+ * An account's short fact in the person's language. The backend says it in
+ * English from a closed set ("Max plan", "API key", "ChatGPT account"); a
+ * product name ("Amazon Bedrock") stays as it is.
+ */
+export function accountDetailText(detail: string, t: T): string {
+	const plan = /^(\S+) plan$/.exec(detail);
+	if (plan) return t("agentsSettings.detail.plan", { plan: plan[1] });
+	if (detail === "API key") return t("agentsSettings.detail.apiKey");
+	const account = /^(Claude|ChatGPT|Google) account$/.exec(detail);
+	if (account) return t("agentsSettings.detail.account", { vendor: account[1] });
+	return detail;
+}
+
+/** A preset's issue in the person's language (the English message when the code is unknown). */
+export function issueText(issue: ChoiceIssue, t: T): string {
+	const key = `agentsSettings.issue.${issue.code}`;
+	const text = issue.code ? t(key, issue.params ?? {}) : "";
+	if (!text || text === key) return issue.message;
+	return issue.alsoOn ? t("agentsSettings.issue.alsoOn", { issue: text }) : text;
+}
+
 function accountLine(a: AgentAccount, t: T, home: string | null): string {
 	const parts = [a.label];
-	if (a.detail && a.detail !== "not signed in" && a.detail !== "sign-in not checked") parts.push(a.detail);
+	if (a.detail && a.detail !== "not signed in" && a.detail !== "sign-in not checked") parts.push(accountDetailText(a.detail, t));
 	parts.push(
 		a.signInState === "signed-in" ? t("agentsSettings.signedIn") : a.signInState === "signed-out" ? t("agentsSettings.signedOut") : t("agentsSettings.signInUnknown"),
 	);
@@ -207,7 +229,7 @@ function PresetRow({ preset, t, onChanged }: { preset: CheckedPreset; t: T; onCh
 			)}
 			<span className="agents-settings-muted agents-settings-preset-choice">{choiceSummary(preset.choice)}</span>
 			{preset.issues.length > 0 && (
-				<span className="agents-settings-preset-issues">{t("agentsSettings.presetIssues", { issues: preset.issues.map((i) => i.message).join("; ") })}</span>
+				<span className="agents-settings-preset-issues">{t("agentsSettings.presetIssues", { issues: preset.issues.map((i) => issueText(i, t)).join("; ") })}</span>
 			)}
 			<span className="agents-settings-preset-actions">
 				{editing ? (

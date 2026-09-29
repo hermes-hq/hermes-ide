@@ -83,12 +83,24 @@ pub fn record_launch(
     now_ms: i64,
 ) -> Result<i64, String> {
     let key = combo_key(choice);
+    let uses: Vec<i64> = conn
+        .query_row(
+            "SELECT recent_uses FROM launch_history WHERE repo = ?1 AND combo_key = ?2",
+            params![repo, key],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    let uses = serde_json::to_string(&crate::agent_caps::choice::add_use(uses, now_ms))
+        .unwrap_or_else(|_| "[]".to_string());
     conn.execute(
-        "INSERT INTO launch_history (repo, combo_key, choice_json, count, first_used_at, last_used_at)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)
+        "INSERT INTO launch_history (repo, combo_key, choice_json, count, first_used_at, last_used_at, recent_uses)
+         VALUES (?1, ?2, ?3, 1, ?4, ?4, ?5)
          ON CONFLICT(repo, combo_key) DO UPDATE SET
-            count = count + 1, last_used_at = excluded.last_used_at, choice_json = excluded.choice_json",
-        params![repo, key, to_json(choice), now_ms],
+            count = count + 1, last_used_at = excluded.last_used_at, choice_json = excluded.choice_json,
+            recent_uses = excluded.recent_uses",
+        params![repo, key, to_json(choice), now_ms, uses],
     )
     .map_err(db_err)?;
     conn.query_row(
@@ -101,11 +113,12 @@ pub fn record_launch(
 
 /// A repository's history (None: every repository's rows).
 pub fn history(conn: &Connection, repo: Option<&str>) -> Result<Vec<HistoryRow>, String> {
-    type Raw = (String, String, i64, i64);
+    type Raw = (String, String, i64, i64, String);
     let read = |r: &rusqlite::Row<'_>| -> rusqlite::Result<Raw> {
-        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
     };
-    const COLUMNS: &str = "SELECT combo_key, choice_json, count, last_used_at FROM launch_history";
+    const COLUMNS: &str =
+        "SELECT combo_key, choice_json, count, last_used_at, recent_uses FROM launch_history";
     let raw: Vec<Raw> = match repo {
         Some(repo) => {
             let mut stmt = conn
@@ -123,12 +136,13 @@ pub fn history(conn: &Connection, repo: Option<&str>) -> Result<Vec<HistoryRow>,
     // A row a newer build wrote in a shape this one cannot read is skipped.
     Ok(raw
         .into_iter()
-        .filter_map(|(combo_key, json, count, last_used_at)| {
+        .filter_map(|(combo_key, json, count, last_used_at, uses)| {
             Some(HistoryRow {
                 combo_key,
                 choice: from_json(&json)?,
                 count,
                 last_used_at,
+                uses: serde_json::from_str(&uses).unwrap_or_default(),
             })
         })
         .collect())
@@ -407,6 +421,7 @@ mod tests {
             ),
             ("opus", 3, 3)
         );
+        assert_eq!(usual.uses, [1, 2, 3], "each launch's time is kept");
         // The branch is stored empty: the launcher derives it from the next task.
         assert_eq!(
             usual.choice.where_,

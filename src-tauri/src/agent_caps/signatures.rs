@@ -5,8 +5,17 @@
 //! Terminal output is not text: colours, cursor moves and redraws sit
 //! between the words. `output_lines` strips every escape sequence, turns
 //! cursor moves and carriage returns into line breaks, and trims the
-//! decoration a TUI puts before a line (box drawing, bullets, "■", "⎿"), so
-//! a `^Not logged in` still finds `  ⎿  Not logged in · Please run /login`.
+//! decoration a TUI puts around a line (box drawing, "■", "⎿"), so a
+//! `^Not logged in` still finds `  ⎿  Not logged in · Please run /login`.
+//!
+//! What is not the CLI's own error must never match (a match stops the
+//! agent). So the signatures are anchored to the CLI's error shapes, and:
+//! - the marks a TUI puts before the person's prompt (`>`, `›`, `❯`) and
+//!   before the agent's reply (`●`, `⏺`, `•`) are kept, so an echoed task
+//!   or an answer that quotes an error is not a line that starts with it;
+//! - a match inside text Hermes itself passed to the CLI (the task, the
+//!   context prompt) or the person typed is an echo, not a refusal
+//!   (`Signatures::find_excluding`).
 
 use std::sync::OnceLock;
 
@@ -93,13 +102,57 @@ pub fn output_lines(text: &str) -> Vec<String> {
         .split('\n')
         .map(|l| {
             l.trim_start_matches(|c: char| {
-                c.is_whitespace() || !c.is_ascii() || matches!(c, '>' | '|' | '*' | '-' | '+' | '#')
+                c.is_whitespace()
+                    || (!c.is_ascii() && !PROMPT_AND_REPLY_MARKS.contains(&c))
+                    || matches!(c, '|' | '*' | '-' | '+' | '#')
             })
-            .trim_end()
+            .trim_end_matches(|c: char| c.is_whitespace() || is_frame(c))
             .to_string()
         })
         .filter(|l| !l.is_empty())
         .collect()
+}
+
+/// The marks a TUI puts before the person's prompt (Claude Code `>`/`❯`,
+/// Codex `›`) and before the agent's reply (Claude Code `●`/`⏺`, Codex
+/// `•`). A line that starts with one is not the CLI's own error line.
+const PROMPT_AND_REPLY_MARKS: &[char] = &['>', '›', '❯', '»', '●', '⏺', '•'];
+
+/// Box drawing and block elements: a TUI's frame, never words.
+fn is_frame(c: char) -> bool {
+    ('\u{2500}'..='\u{259f}').contains(&c)
+}
+
+/// Text as the words it holds: no whitespace, no frame, no control
+/// characters. An echo of a task that the TUI wrapped or framed still reads
+/// the same.
+pub fn squeeze(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control() && !is_frame(*c))
+        .collect()
+}
+
+/// How much of a line around a match must also be in a passed-in text for
+/// the match to count as that text's echo.
+const ECHO_CONTEXT: usize = 16;
+
+/// Whether the match `start..end` of `line` is an echo of one of `given`
+/// (texts squeezed with `squeeze`): the match with up to `ECHO_CONTEXT`
+/// characters of the line on each side is part of one of them.
+fn is_echo(line: &str, start: usize, end: usize, given: &[String]) -> bool {
+    if given.is_empty() {
+        return false;
+    }
+    let phrase = squeeze(&line[start..end]);
+    if phrase.is_empty() || !given.iter().any(|g| g.contains(&phrase)) {
+        return false;
+    }
+    let before: Vec<char> = line[..start].chars().rev().take(ECHO_CONTEXT).collect();
+    let mut window: String = before.into_iter().rev().collect();
+    window.push_str(&line[start..end]);
+    window.extend(line[end..].chars().take(ECHO_CONTEXT));
+    let window = squeeze(&window);
+    given.iter().any(|g| g.contains(&window))
 }
 
 /// Compiled signatures of one agent (compiled once per agent).
@@ -131,13 +184,25 @@ impl Signatures {
 
     /// The first line (in output order) that one of the signatures matches;
     /// for a line, signatures are tried in catalog order.
+    #[cfg(test)]
     pub fn find(&self, text: &str) -> Option<Rejection> {
+        self.find_excluding(text, &[])
+    }
+
+    /// `find`, but a match that is an echo of one of `given` (texts Hermes
+    /// passed to the CLI or the person typed, squeezed with `squeeze`) does
+    /// not count.
+    pub fn find_excluding(&self, text: &str, given: &[String]) -> Option<Rejection> {
         if self.rules.is_empty() {
             return None;
         }
         for full in logical_lines(output_lines(text)) {
             for (re, sig) in &self.rules {
                 if let Some(caps) = re.captures(&full) {
+                    let whole = caps.get(0).expect("a match has group 0");
+                    if is_echo(&full, whole.start(), whole.end(), given) {
+                        continue;
+                    }
                     let mut message: String = full.chars().take(MAX_VENDOR_MESSAGE).collect();
                     if message.len() < full.len() {
                         message.push('…');
@@ -301,6 +366,61 @@ mod tests {
         assert!(find("codex", boxed).is_some());
         let osc = "\x1b]0;codex\x07\x1b[1G\x1b[2KERROR: unexpected status 401 Unauthorized: Missing bearer";
         assert!(find("codex", osc).is_some());
+    }
+
+    #[test]
+    fn an_echoed_prompt_or_an_answer_that_quotes_the_words_does_not_match() {
+        // The person's prompt as Claude Code and Codex draw it, and answers
+        // that quote an error (the agent's reply marks are kept).
+        for (agent, line) in [
+            ("claude", "> Not logged in · Please run /login shows after SSO"),
+            ("claude", "\u{276f} Not logged in · Please run /login"),
+            ("claude", "\u{23fa} Not logged in · Please run /login is what the CLI prints"),
+            ("claude", "\u{25cf} There's an issue with the selected model (x). It may not exist"),
+            ("codex", "\u{203a} ERROR: unexpected status 401 Unauthorized: Missing bearer"),
+            ("codex", "\u{2022} ERROR: unexpected status 401 Unauthorized: Missing bearer"),
+            ("codex", "prompt: Fix the 401 Unauthorized error on the login page"),
+            ("codex", "Fix the 401 Unauthorized error on the login page"),
+            ("codex", "The logs say Not logged in"),
+            ("codex", "I found `The model `gpt-5.5` does not exist or you do not have access to it` in the log"),
+            ("antigravity", "Why does agy print Authentication required?"),
+        ] {
+            assert!(find(agent, &format!("{line}\n")).is_none(), "{agent}: {line}");
+        }
+    }
+
+    #[test]
+    fn an_echo_of_a_passed_in_text_does_not_match_but_the_cli_still_does() {
+        let sigs = for_agent("codex");
+        let task =
+            "Users see:\nERROR: unexpected status 401 Unauthorized: Missing bearer\nplease fix";
+        let given = vec![squeeze(task)];
+        let echo = "ERROR: unexpected status 401 Unauthorized: Missing bearer\n";
+        assert!(
+            sigs.find(echo).is_some(),
+            "without the task it is the CLI's line"
+        );
+        assert!(
+            sigs.find_excluding(echo, &given).is_none(),
+            "with it, an echo"
+        );
+        // Wrapped mid-word and framed, still the echo.
+        let wrapped =
+            "\u{2502} ERROR: unexpected status 401 Unauth\r\norized: Missing bearer \u{2502}\n";
+        assert!(sigs.find_excluding(wrapped, &given).is_none());
+        // The CLI's own line has other words around the match.
+        let real =
+            "Reconnecting... 2/5\nERROR: unexpected status 401 Unauthorized: token expired\n";
+        assert!(sigs.find_excluding(real, &given).is_some());
+        // The one thing that cannot be told apart: the CLI printing the very
+        // words of the task around the match. Then it is taken for the echo,
+        // and the agent is left running (never the other way round).
+        let same =
+            "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication\n";
+        assert!(sigs.find_excluding(same, &given).is_none());
+        // A given text that does not hold the matched words changes nothing.
+        let other = vec![squeeze("Fix the 401 Unauthorized error on the login page")];
+        assert!(sigs.find_excluding(echo, &other).is_some());
     }
 
     #[test]

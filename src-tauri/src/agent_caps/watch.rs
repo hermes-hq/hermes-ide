@@ -8,15 +8,22 @@
 //!
 //! Only complete lines count (a line still being drawn is matched once it
 //! ends), only this launch's output (the watch starts when the launch line
-//! is written and ends at the first finished turn, three seconds after the
-//! agent exited, or after `REJECT_WINDOW`).
+//! is written and ends at the first finished turn, the first tool the agent
+//! ran, three seconds after the agent exited, or after `REJECT_WINDOW`).
+//!
+//! A false match stops a working agent, so what Hermes passed to the CLI
+//! (the task, the context prompt) and what the person typed never counts
+//! (`Signatures::find_excluding`), and a resumed conversation's replayed
+//! history is not read at all: on a resume the watch reads only what
+//! follows the person's first Enter (a resumed CLI asks its model nothing
+//! before that).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::signatures::{self, Rejection};
+use super::signatures::{self, squeeze, Rejection};
 use super::types::SessionLaunch;
 
 /// Output kept to find a line split across reads.
@@ -24,17 +31,61 @@ const TAIL_BYTES: usize = 16 * 1024;
 /// How long output is still read after the agent exited (its last words
 /// can be read after its exit is reported).
 pub const AFTER_EXIT: Duration = Duration::from_secs(3);
+/// How long a resumed agent may wait for the person's first message before
+/// a refusal of it is no longer looked for (`hi` polls as long).
+pub const RESUME_WAIT: Duration = Duration::from_secs(12 * 60 * 60);
+/// Most typed lines kept as "the person's words" (each at most
+/// `MAX_TYPED` characters).
+const MAX_TYPED_LINES: usize = 32;
+const MAX_TYPED: usize = 8 * 1024;
+
+/// How one launch is watched.
+#[derive(Debug, Clone, Default)]
+pub struct WatchStart {
+    /// The stop request `hi` polls for.
+    pub stop_file: PathBuf,
+    pub nonce: String,
+    /// How long after the start (a resume: after the first Enter).
+    pub window: Duration,
+    /// What the launch asked for (the banner says which model or account).
+    pub launch: SessionLaunch,
+    /// Texts Hermes passed to the CLI (the task, the context prompt): their
+    /// echo is never a refusal. A resume passes none of them (only `hi`'s
+    /// fresh start after an unknown conversation does, see `fresh_start`).
+    pub given: Vec<String>,
+    /// The launch resumes a saved conversation (its history is replayed).
+    pub resumes: bool,
+}
 
 struct Watch {
     agent: String,
     stop_file: PathBuf,
     nonce: String,
+    window: Duration,
     until: Instant,
     /// Output before this launch's marker (see `launch_marker`) is not
     /// read: a repaint of the screen can replay an earlier refusal.
     armed: bool,
+    /// A resume before the person's first Enter: the CLI is replaying the
+    /// conversation, which is not read.
+    replay: bool,
     tail: Vec<u8>,
     launch: SessionLaunch,
+    /// Passed-in texts and the person's typed lines, squeezed.
+    given: Vec<String>,
+    /// A resume's passed-in texts, which only its fresh start passes.
+    held: Vec<String>,
+    typed: Typed,
+}
+
+/// The line the person is typing, read from their keys.
+#[derive(Default)]
+struct Typed {
+    line: String,
+    /// 0: text; 1: after ESC; 2: in a CSI sequence (its bytes so far).
+    escape: u8,
+    csi: String,
+    pasting: bool,
 }
 
 /// The marker `hi run` prints (an OSC sequence terminals ignore) right
@@ -43,36 +94,146 @@ pub fn launch_marker(nonce: &str) -> String {
     format!("\x1b]777;hermes-launch;{nonce}\x07")
 }
 
+/// e2e builds only: `HERMES_E2E_REFUSAL_WATCH=off` never watches a launch,
+/// `=unfiltered` reads passed-in text and a resume's replay too. The
+/// negative controls of the CAP scenarios, which prove the watch and its
+/// filters are what the scenarios see.
+fn e2e_mode() -> Option<String> {
+    #[cfg(feature = "e2e")]
+    if std::env::var("HERMES_E2E").ok().as_deref() == Some("1") {
+        return std::env::var("HERMES_E2E_REFUSAL_WATCH").ok();
+    }
+    None
+}
+
 fn watches() -> &'static Mutex<HashMap<String, Watch>> {
     static W: OnceLock<Mutex<HashMap<String, Watch>>> = OnceLock::new();
     W.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn start(
-    session_id: &str,
-    agent: &str,
-    stop_file: PathBuf,
-    nonce: &str,
-    window: Duration,
-    launch: SessionLaunch,
-) {
-    if signatures::for_agent(agent).is_empty() {
+pub fn start(session_id: &str, agent: &str, how: WatchStart) {
+    let mode = e2e_mode();
+    if signatures::for_agent(agent).is_empty() || mode.as_deref() == Some("off") {
         end(session_id);
         return;
     }
+    let unfiltered = mode.as_deref() == Some("unfiltered");
+    let given = if unfiltered {
+        Vec::new()
+    } else {
+        how.given
+            .iter()
+            .map(|t| squeeze(t))
+            .filter(|t| !t.is_empty())
+            .collect()
+    };
+    let replay = how.resumes && !unfiltered;
+    // A resume does not pass the task: its words, said by the CLI, are the
+    // CLI's (a resumed conversation refused at its first message says the
+    // same words a task may quote).
+    let (given, held) = if how.resumes {
+        (Vec::new(), given)
+    } else {
+        (given, Vec::new())
+    };
     if let Ok(mut w) = watches().lock() {
         w.insert(
             session_id.to_string(),
             Watch {
                 agent: agent.to_string(),
-                stop_file,
-                nonce: nonce.to_string(),
-                until: Instant::now() + window,
+                stop_file: how.stop_file,
+                nonce: how.nonce,
+                window: how.window,
+                until: Instant::now() + if replay { RESUME_WAIT } else { how.window },
                 armed: false,
+                replay,
                 tail: Vec::new(),
-                launch,
+                launch: how.launch,
+                given,
+                held,
+                typed: Typed::default(),
             },
         );
+    }
+}
+
+/// The person typed into the session's terminal. Their lines are never a
+/// refusal, and on a resume their first Enter ends the replay: the watch
+/// reads from here on, for `window`.
+pub fn user_input(session_id: &str, data: &[u8]) {
+    let Ok(mut watches) = watches().lock() else {
+        return;
+    };
+    let Some(watch) = watches.get_mut(session_id) else {
+        return;
+    };
+    let unfiltered = e2e_mode().as_deref() == Some("unfiltered");
+    for c in String::from_utf8_lossy(data).chars() {
+        let t = &mut watch.typed;
+        match t.escape {
+            1 => {
+                t.escape = if c == '[' { 2 } else { 0 };
+                t.csi.clear();
+                continue;
+            }
+            2 => {
+                if ('\x40'..='\x7e').contains(&c) {
+                    t.escape = 0;
+                    if c == '~' {
+                        match t.csi.as_str() {
+                            "200" => t.pasting = true,
+                            "201" => t.pasting = false,
+                            _ => {}
+                        }
+                    }
+                } else {
+                    t.csi.push(c);
+                }
+                continue;
+            }
+            _ => {}
+        }
+        match c {
+            '\x1b' => t.escape = 1,
+            '\r' | '\n' => {
+                let line = squeeze(&std::mem::take(&mut t.line));
+                if !line.is_empty() && !unfiltered {
+                    if watch.given.len() >= MAX_TYPED_LINES {
+                        watch.given.remove(0);
+                    }
+                    watch.given.push(line);
+                }
+                if !t.pasting && watch.armed && watch.replay {
+                    // The person sent their first message: what the CLI
+                    // says from here on is about this launch.
+                    watch.replay = false;
+                    watch.tail.clear();
+                    watch.until = Instant::now() + watch.window;
+                }
+            }
+            '\x7f' | '\x08' => {
+                t.line.pop();
+            }
+            '\x03' | '\x15' => t.line.clear(),
+            c if !c.is_control() && t.line.len() < MAX_TYPED => t.line.push(c),
+            _ => {}
+        }
+    }
+}
+
+/// A resume the vendor did not know was replaced by a fresh start (`hi`'s
+/// fallback): nothing is replayed any more.
+pub fn fresh_start(session_id: &str) {
+    if let Ok(mut w) = watches().lock() {
+        if let Some(watch) = w.get_mut(session_id) {
+            let held = std::mem::take(&mut watch.held);
+            watch.given.extend(held);
+            if watch.replay {
+                watch.replay = false;
+                watch.tail.clear();
+                watch.until = Instant::now() + watch.window;
+            }
+        }
     }
 }
 
@@ -178,12 +339,18 @@ pub fn observe(session_id: &str, data: &[u8]) -> Option<Found> {
             }
         }
     }
+    if watch.replay {
+        // A resumed conversation's history: not this launch's words.
+        watch.tail.clear();
+        return None;
+    }
     if watch.tail.len() > TAIL_BYTES {
         let cut = watch.tail.len() - TAIL_BYTES;
         watch.tail.drain(..cut);
     }
     let text = String::from_utf8_lossy(&watch.tail).into_owned();
-    let rejection = signatures::for_agent(&watch.agent).find(complete_part(&text))?;
+    let rejection =
+        signatures::for_agent(&watch.agent).find_excluding(complete_part(&text), &watch.given)?;
     let request = format!(
         "{}\n{}\n",
         watch.nonce,
@@ -206,6 +373,16 @@ mod tests {
     use super::*;
     use crate::contract::RejectReason;
 
+    fn how(stop_file: PathBuf, nonce: &str, window: Duration, launch: SessionLaunch) -> WatchStart {
+        WatchStart {
+            stop_file,
+            nonce: nonce.to_string(),
+            window,
+            launch,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn only_complete_lines_are_matched() {
         assert_eq!(complete_part("abc"), "");
@@ -227,10 +404,7 @@ mod tests {
         start(
             "cap-w1",
             "claude",
-            stop.clone(),
-            "n0",
-            Duration::from_secs(30),
-            launch,
+            how(stop.clone(), "n0", Duration::from_secs(30), launch),
         );
         // A repaint of an earlier launch's refusal, before this launch began.
         assert!(observe(
@@ -266,10 +440,12 @@ mod tests {
         start(
             "cap-w2",
             "codex",
-            dir.path().join("s2"),
-            "n",
-            Duration::from_millis(0),
-            SessionLaunch::default(),
+            how(
+                dir.path().join("s2"),
+                "n",
+                Duration::from_millis(0),
+                SessionLaunch::default(),
+            ),
         );
         std::thread::sleep(Duration::from_millis(5));
         assert!(observe(
@@ -281,10 +457,12 @@ mod tests {
         start(
             "cap-w3",
             "codex",
-            dir.path().join("s3"),
-            "n",
-            Duration::from_secs(30),
-            SessionLaunch::default(),
+            how(
+                dir.path().join("s3"),
+                "n",
+                Duration::from_secs(30),
+                SessionLaunch::default(),
+            ),
         );
         assert!(observe(
             "cap-other",
@@ -302,10 +480,12 @@ mod tests {
         start(
             "cap-w4",
             "custom",
-            dir.path().join("s4"),
-            "n",
-            Duration::from_secs(30),
-            SessionLaunch::default(),
+            how(
+                dir.path().join("s4"),
+                "n",
+                Duration::from_secs(30),
+                SessionLaunch::default(),
+            ),
         );
         assert!(!is_watching("cap-w4"));
     }
@@ -316,15 +496,156 @@ mod tests {
         start(
             "cap-w5",
             "codex",
-            dir.path().join("s5"),
-            "n",
-            Duration::from_secs(60),
-            SessionLaunch::default(),
+            how(
+                dir.path().join("s5"),
+                "n",
+                Duration::from_secs(60),
+                SessionLaunch::default(),
+            ),
         );
         end_soon("cap-w5");
         assert!(
             observe("cap-w5", b"\x1b]777;hermes-launch;n\x07Not logged in\n").is_some(),
             "words right after the exit still count"
         );
+    }
+
+    fn launched(sid: &str, agent: &str, stop: PathBuf, given: &[&str], resumes: bool) {
+        start(
+            sid,
+            agent,
+            WatchStart {
+                given: given.iter().map(|g| g.to_string()).collect(),
+                resumes,
+                ..how(stop, "n", Duration::from_secs(30), SessionLaunch::default())
+            },
+        );
+        assert!(observe(sid, b"\x1b]777;hermes-launch;n\x07").is_none());
+    }
+
+    #[test]
+    fn the_task_hermes_passed_is_never_a_refusal_even_when_it_quotes_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let stop = dir.path().join("t1");
+        // The reviewer's case: the words, not the CLI's error shape.
+        let task = "Fix the 401 Unauthorized error on the login page";
+        launched("cap-t1", "codex", stop.clone(), &[task], false);
+        assert!(observe(
+            "cap-t1",
+            format!("prompt: {task}\r\n> {task}\r\n{task}\r\n").as_bytes()
+        )
+        .is_none());
+        // A task that carries the CLI's own error line (a pasted log),
+        // echoed line by line, wrapped and framed by the TUI.
+        end("cap-t1");
+        let pasted = "Users see this after SSO:\nERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header\nNot logged in\nFix the login flow.";
+        launched("cap-t2", "codex", stop.clone(), &[pasted], false);
+        let echo = "\x1b[2;1H\u{2502} Users see this after SSO:          \u{2502}\r\n\u{2502} ERROR: unexpected status 401 Unauthorized: Missing\r\n\u{2502} bearer or basic authentication in header \u{2502}\r\n\u{2502} Not logged in \u{2502}\r\n";
+        assert!(observe("cap-t2", echo.as_bytes()).is_none());
+        assert!(!stop.exists(), "nothing asked hi to stop");
+        assert!(is_watching("cap-t2"));
+        // The CLI's own error, in its own words, still counts.
+        let found = observe("cap-t2", b"\x1b[2K\rReconnecting... 2/5\r\nERROR: unexpected status 401 Unauthorized: token expired\r\n").unwrap();
+        assert_eq!(found.rejection.reason, RejectReason::SignedOut);
+        assert!(stop.exists());
+    }
+
+    #[test]
+    fn what_the_person_types_is_never_a_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let stop = dir.path().join("u1");
+        launched("cap-u1", "claude", stop.clone(), &[], false);
+        user_input("cap-u1", b"Not logged in \xc2\xb7 Please run /loginX\x7f");
+        user_input("cap-u1", b"\x1b[D\r");
+        assert!(observe(
+            "cap-u1",
+            "> Not logged in · Please run /login\r\nNot logged in · Please run /login\r\n"
+                .as_bytes()
+        )
+        .is_none());
+        assert!(!stop.exists());
+        end("cap-u1");
+    }
+
+    #[test]
+    fn a_resumed_conversation_is_read_only_after_the_first_enter() {
+        let dir = tempfile::tempdir().unwrap();
+        let stop = dir.path().join("r1");
+        launched("cap-r1", "codex", stop.clone(), &[], true);
+        // The replayed history holds an earlier refusal.
+        assert!(observe(
+            "cap-r1",
+            b"earlier:\r\nERROR: unexpected status 401 Unauthorized: Missing bearer\r\n"
+        )
+        .is_none());
+        // A paste with a line break is not the first message; typing is not either.
+        user_input("cap-r1", b"\x1b[200~line one\nline two\x1b[201~hello");
+        assert!(observe(
+            "cap-r1",
+            b"ERROR: unexpected status 401 Unauthorized: Missing bearer\r\n"
+        )
+        .is_none());
+        assert!(!stop.exists(), "the replay stopped nothing");
+        // Enter: the CLI now answers this launch's first message.
+        user_input("cap-r1", b"\r");
+        let found = observe(
+            "cap-r1",
+            b"Reconnecting... 1/5\r\nERROR: unexpected status 401 Unauthorized: Missing bearer\r\n",
+        )
+        .unwrap();
+        assert_eq!(found.rejection.reason, RejectReason::SignedOut);
+        assert!(stop.exists());
+
+        // hi fell back to a fresh start: it is read at once, and it passed
+        // the task, whose echo does not count.
+        launched(
+            "cap-r2",
+            "codex",
+            dir.path().join("r2"),
+            &["see: Not logged in"],
+            true,
+        );
+        fresh_start("cap-r2");
+        assert!(observe("cap-r2", b"prompt: see:\r\nNot logged in\r\n").is_none());
+        assert!(observe(
+            "cap-r2",
+            b"ERROR: unexpected status 401 Unauthorized: x\r\n"
+        )
+        .is_some());
+
+        // A resume passes no task: the CLI saying the words a task quoted is
+        // the CLI.
+        launched(
+            "cap-r4",
+            "claude",
+            dir.path().join("r4"),
+            &["Not logged in · Please run /login appears"],
+            true,
+        );
+        user_input("cap-r4", b"hello\r");
+        assert!(observe(
+            "cap-r4",
+            "hello\r\nNot logged in · Please run /login\r\n".as_bytes()
+        )
+        .is_some());
+
+        // An Enter before this launch's marker (typed while `hi` starts)
+        // does not end the replay.
+        start(
+            "cap-r3",
+            "codex",
+            WatchStart {
+                resumes: true,
+                ..how(
+                    dir.path().join("r3"),
+                    "n",
+                    Duration::from_secs(30),
+                    SessionLaunch::default(),
+                )
+            },
+        );
+        user_input("cap-r3", b"\r");
+        assert!(observe("cap-r3", b"\x1b]777;hermes-launch;n\x07Not logged in\r\n").is_none());
+        end("cap-r3");
     }
 }

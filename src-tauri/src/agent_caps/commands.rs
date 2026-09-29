@@ -595,6 +595,12 @@ pub fn session_launch(
     {
         return Err("A model name cannot contain control characters".to_string());
     }
+    if model_id
+        .as_deref()
+        .is_some_and(super::choice::looks_like_a_flag)
+    {
+        return Err("A model name cannot start with \"-\"".to_string());
+    }
     // A CLI that falls back to another model without a word when given one
     // it does not know (Antigravity 1.2 in its interactive mode) never gets
     // a model its own list does not have: the launch would run on a model
@@ -645,6 +651,7 @@ pub fn session_launch(
         profile_env,
         login: options.purpose.as_deref() == Some("login"),
         relaunch: false,
+        resumed: false,
     })
 }
 
@@ -765,9 +772,13 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
 
     let prepared = {
         let mut s = session.lock().map_err(|e| e.to_string())?;
+        // A refused fresh launch never started a conversation: start fresh.
+        // A refused resume resumes the same conversation again (if the
+        // vendor no longer knows it, `hi`'s resume fallback starts fresh).
+        if !launch.resumed || e2e_relaunch_fresh() {
+            s.vendor_session_id = None;
+        }
         s.agent_launch = launch;
-        // The refused launch never started a conversation: start fresh.
-        s.vendor_session_id = None;
         match crate::pty::launch::prepare_helper_launch(app, &mut s) {
             crate::pty::launch::HelperLaunch::Prepared(p) => {
                 s.phase = crate::pty::SessionPhase::LaunchingAgent;
@@ -792,6 +803,17 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
     log::info!("[CAPS] {session_id}: relaunched {provider} after a refused launch");
     crate::pty::launch::watch_signals(app.clone(), session, prepared.watch);
     Ok(())
+}
+
+/// e2e builds only: `HERMES_E2E_RELAUNCH_FRESH=1` starts every relaunch
+/// fresh (as before refused resumes were resumed again): the negative
+/// control of the CAP-refusal-safety scenario.
+fn e2e_relaunch_fresh() -> bool {
+    #[cfg(feature = "e2e")]
+    if std::env::var("HERMES_E2E").ok().as_deref() == Some("1") {
+        return std::env::var("HERMES_E2E_RELAUNCH_FRESH").ok().as_deref() == Some("1");
+    }
+    false
 }
 
 #[cfg(test)]

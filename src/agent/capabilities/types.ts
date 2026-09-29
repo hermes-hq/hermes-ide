@@ -32,6 +32,8 @@ export interface ModelOption {
 	efforts: string[];
 	available: boolean;
 	unavailableReason?: string;
+	/** Why, as a code: "refused" (the account refused it at a launch). */
+	unavailableCode?: "refused";
 }
 
 export interface ApprovalModeOption {
@@ -116,7 +118,25 @@ export interface ChoiceIssue {
 	was: string | null;
 	/** What the choice uses now (null: nothing could replace it). */
 	now: string | null;
+	/** What happened, for the UI key agentsSettings.issue.<code> (with `params`). */
+	code: ChoiceIssueCode;
+	params: Record<string, string>;
+	/** About the choice's "Also on" agent. */
+	alsoOn?: boolean;
 }
+
+export type ChoiceIssueCode =
+	| "agentMissing"
+	| "accountGone"
+	| "accountGoneUsing"
+	| "accountSignedOut"
+	| "accountSignedOutUsing"
+	| "modelRefused"
+	| "modelGone"
+	| "modelUnavailable"
+	| "effortNone"
+	| "effortChanged"
+	| "approvalGone";
 
 /** A stored choice checked against the current capabilities. */
 export interface CheckedChoice {

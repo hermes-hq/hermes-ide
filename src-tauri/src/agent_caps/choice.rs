@@ -67,7 +67,16 @@ pub fn nearest_effort(stored: Option<&str>, allowed: &[String]) -> Option<String
 
 /// The model entry for an id. A typed name on an agent that takes one gets
 /// the default's efforts.
+/// Whether a model or effort would read as a flag of the CLI (it goes right
+/// after `--model`/`-m`): never passed.
+pub fn looks_like_a_flag(value: &str) -> bool {
+    value.trim_start().starts_with('-')
+}
+
 pub fn find_model(caps: &AgentCapabilities, model_id: &str) -> Option<ModelOption> {
+    if looks_like_a_flag(model_id) {
+        return None;
+    }
     if let Some(m) = caps.models.iter().find(|m| m.id == model_id) {
         return Some(m.clone());
     }
@@ -85,17 +94,30 @@ pub fn find_model(caps: &AgentCapabilities, model_id: &str) -> Option<ModelOptio
             efforts,
             available: true,
             unavailable_reason: None,
+            unavailable_code: None,
         });
     }
     None
 }
 
-fn issue(field: &str, message: String, was: Option<&str>, now: Option<&str>) -> ChoiceIssue {
+fn issue(
+    field: &str,
+    (code, params): (&str, &[(&str, &str)]),
+    message: String,
+    was: Option<&str>,
+    now: Option<&str>,
+) -> ChoiceIssue {
     ChoiceIssue {
         field: field.to_string(),
         message,
         was: was.map(str::to_string),
         now: now.map(str::to_string),
+        code: code.to_string(),
+        params: params
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        also_on: false,
     }
 }
 
@@ -114,6 +136,7 @@ pub fn reconcile(
     if !caps.installed {
         issues.push(issue(
             "agent",
+            ("agentMissing", &[("agent", name)]),
             format!("{name} is not installed"),
             Some(&choice.agent_id),
             None,
@@ -128,19 +151,32 @@ pub fn reconcile(
             .iter()
             .find(|a| Some(&a.id) == caps.active_account_id.as_ref() && a.signed_in)
             .or_else(|| caps.accounts.iter().find(|a| a.signed_in));
-        let why = match account {
-            None => format!(
-                "The account \"{}\" is not set up for {name} any more",
-                choice.account_id
+        let (why, code, who) = match account {
+            None => (
+                format!(
+                    "The account \"{}\" is not set up for {name} any more",
+                    choice.account_id
+                ),
+                "accountGone",
+                choice.account_id.as_str(),
             ),
-            Some(a) => format!("{} is signed out", a.label),
+            Some(a) => (
+                format!("{} is signed out", a.label),
+                "accountSignedOut",
+                a.label.as_str(),
+            ),
         };
-        let message = match active {
-            Some(a) => format!("{why}; using {}", a.label),
-            None => why,
+        let (message, code) = match active {
+            Some(a) => (format!("{why}; using {}", a.label), format!("{code}Using")),
+            None => (why, code.to_string()),
         };
+        let using = active.map(|a| a.label.as_str()).unwrap_or("");
         issues.push(issue(
             "account",
+            (
+                &code,
+                &[("account", who), ("agent", name), ("using", using)],
+            ),
             message,
             Some(&choice.account_id),
             active.map(|a| a.id.as_str()),
@@ -154,11 +190,24 @@ pub fn reconcile(
     let model = match find_model(caps, &choice.model_id) {
         Some(m) if m.available => m,
         other => {
+            let code = match &other {
+                Some(m) if m.unavailable_code.as_deref() == Some("refused") => "modelRefused",
+                Some(m) if m.unavailable_reason.is_some() => "modelUnavailable",
+                _ => "modelGone",
+            };
             let why = other.and_then(|m| m.unavailable_reason).unwrap_or_else(|| {
                 format!("{} is not offered by {name} any more", choice.model_id)
             });
             issues.push(issue(
                 "model",
+                (
+                    code,
+                    &[
+                        ("model", &choice.model_id),
+                        ("agent", name),
+                        ("reason", &why),
+                    ],
+                ),
                 format!("{why}; using the default model"),
                 Some(&choice.model_id),
                 Some(DEFAULT_MODEL),
@@ -175,6 +224,7 @@ pub fn reconcile(
                     efforts: Vec::new(),
                     available: true,
                     unavailable_reason: None,
+                    unavailable_code: None,
                 })
         }
     };
@@ -192,8 +242,22 @@ pub fn reconcile(
                 choice.effort.as_deref().unwrap_or("")
             ),
         };
+        let was = choice.effort.as_deref().unwrap_or("");
+        let code = match &effort {
+            None => "effortNone",
+            Some(_) => "effortChanged",
+        };
         issues.push(issue(
             "effort",
+            (
+                code,
+                &[
+                    ("model", &model.label),
+                    ("agent", name),
+                    ("was", was),
+                    ("now", effort.as_deref().unwrap_or("")),
+                ],
+            ),
             message,
             choice.effort.as_deref(),
             effort.as_deref(),
@@ -214,6 +278,14 @@ pub fn reconcile(
             .unwrap_or(&caps.approval_modes[0]);
         issues.push(issue(
             "approval",
+            (
+                "approvalGone",
+                &[
+                    ("agent", name),
+                    ("mode", &choice.approval_mode_id),
+                    ("using", &fallback.label),
+                ],
+            ),
             format!(
                 "{name} has no \"{}\" mode; using {}",
                 choice.approval_mode_id, fallback.label
@@ -229,6 +301,7 @@ pub fn reconcile(
         out.also_on = Some(Box::new(checked.choice));
         for mut i in checked.issues {
             i.message = format!("Also on: {}", i.message);
+            i.also_on = true;
             issues.push(i);
         }
         launchable &= checked.launchable;
@@ -336,13 +409,18 @@ pub fn model_effort_args(
     let Some(caps) = agent.capabilities.as_ref() else {
         return (args, env);
     };
+    // A value that reads as a flag (a stored or preset "--dangerously-...")
+    // is never put after the model or effort flag.
     if let (Some(model), Some(flag)) = (
-        model_id.filter(|m| !m.is_empty() && *m != DEFAULT_MODEL),
+        model_id.filter(|m| !m.is_empty() && *m != DEFAULT_MODEL && !looks_like_a_flag(m)),
         caps.model.flag.as_ref(),
     ) {
         args.extend(fill(flag, "model", model));
     }
-    if let (Some(effort), Some(ec)) = (effort.filter(|e| !e.is_empty()), caps.effort.as_ref()) {
+    if let (Some(effort), Some(ec)) = (
+        effort.filter(|e| !e.is_empty() && !looks_like_a_flag(e)),
+        caps.effort.as_ref(),
+    ) {
         if let Some(flag) = &ec.flag {
             args.extend(fill(flag, "effort", effort));
         } else if let Some(name) = &ec.env {
@@ -456,20 +534,50 @@ pub fn stored_form(choice: &LaunchChoice) -> LaunchChoice {
 pub struct HistoryRow {
     pub combo_key: String,
     pub choice: LaunchChoice,
+    /// Launches ever.
     pub count: i64,
     pub last_used_at: i64,
+    /// When it was launched within RECENT_MS of its last launch (epoch ms,
+    /// oldest first).
+    pub uses: Vec<i64>,
+}
+
+impl HistoryRow {
+    /// Launches within RECENT_MS of `now_ms`.
+    pub fn recent_count(&self, now_ms: i64) -> usize {
+        self.uses
+            .iter()
+            .filter(|t| now_ms - **t <= RECENT_MS)
+            .count()
+    }
 }
 
 /// How far back "recent" reaches for the usual combination.
 pub const RECENT_MS: i64 = 60 * 24 * 60 * 60 * 1000;
+/// Most launch times kept per combination.
+pub const MAX_USES: usize = 500;
 
-/// The most frequent recent combination (tie: the most recent). Rows older
-/// than RECENT_MS count only when nothing is recent.
+/// The combination launched most often in the last RECENT_MS (tie: the most
+/// recent). When nothing is recent: the most launched ever (tie: the most
+/// recent).
 pub fn pick_usual(rows: &[HistoryRow], now_ms: i64) -> Option<&HistoryRow> {
-    fn best<'a>(rows: impl Iterator<Item = &'a HistoryRow>) -> Option<&'a HistoryRow> {
-        rows.max_by(|a, b| (a.count, a.last_used_at).cmp(&(b.count, b.last_used_at)))
+    let recent = rows
+        .iter()
+        .filter(|r| r.recent_count(now_ms) > 0)
+        .max_by_key(|r| (r.recent_count(now_ms), r.last_used_at));
+    recent.or_else(|| rows.iter().max_by_key(|r| (r.count, r.last_used_at)))
+}
+
+/// A row's launch times with one more: only the ones within RECENT_MS of
+/// it, at most MAX_USES.
+pub fn add_use(mut uses: Vec<i64>, now_ms: i64) -> Vec<i64> {
+    uses.push(now_ms);
+    uses.retain(|t| now_ms - *t <= RECENT_MS);
+    uses.sort_unstable();
+    if uses.len() > MAX_USES {
+        uses.drain(..uses.len() - MAX_USES);
     }
-    best(rows.iter().filter(|r| now_ms - r.last_used_at <= RECENT_MS)).or_else(|| best(rows.iter()))
+    uses
 }
 
 /// Rows of several repositories summed per combination (the global usual).
@@ -479,6 +587,8 @@ pub fn merge_rows(rows: Vec<HistoryRow>) -> Vec<HistoryRow> {
         match out.iter_mut().find(|o| o.combo_key == r.combo_key) {
             Some(o) => {
                 o.count += r.count;
+                o.uses.extend(r.uses);
+                o.uses.sort_unstable();
                 if r.last_used_at > o.last_used_at {
                     o.last_used_at = r.last_used_at;
                     o.choice = r.choice;
@@ -533,6 +643,7 @@ pub(crate) mod tests {
             efforts: v(efforts),
             available: true,
             unavailable_reason: None,
+            unavailable_code: None,
         }
     }
 
@@ -658,6 +769,77 @@ pub(crate) mod tests {
             nearest_effort(Some("bogus"), &v(&["low", "high"])).as_deref(),
             Some("low")
         );
+    }
+
+    #[test]
+    fn a_model_that_reads_as_a_flag_is_never_passed() {
+        let mut c = choice();
+        c.model_id = "--dangerously-skip-permissions".into();
+        // Claude takes typed models, but not this one.
+        assert!(find_model(&claude_caps(), &c.model_id).is_none());
+        assert!(matches!(
+            validate(&c, &claude_caps()),
+            LaunchValidation::Refused { .. }
+        ));
+        let r = reconcile(&c, &claude_caps(), None);
+        assert_eq!(r.choice.model_id, "default");
+        let claude = crate::agent_catalog::agent("claude").unwrap();
+        let (args, _) = model_effort_args(claude, Some(" -x"), Some("--max"));
+        assert!(args.is_empty(), "{args:?}");
+        let (args, _) = model_effort_args(claude, Some("opus"), Some("high"));
+        assert_eq!(args, ["--model", "opus", "--effort", "high"]);
+    }
+
+    #[test]
+    fn each_issue_carries_a_code_and_its_words_for_the_ui() {
+        let p = |i: &ChoiceIssue, k: &str| i.params.get(k).cloned().unwrap_or_default();
+        let mut c = choice();
+        c.account_id = "work".into();
+        c.model_id = "claude-opus-4-6".into();
+        c.effort = Some("xhigh".into());
+        c.approval_mode_id = "yolo".into();
+        let r = reconcile(&c, &claude_caps(), None);
+        let codes: Vec<&str> = r.issues.iter().map(|i| i.code.as_str()).collect();
+        assert_eq!(
+            codes,
+            ["accountSignedOutUsing", "effortChanged", "approvalGone"]
+        );
+        assert_eq!(
+            (p(&r.issues[0], "account"), p(&r.issues[0], "using")),
+            ("Work".into(), "Default profile".into())
+        );
+        assert_eq!(
+            (
+                p(&r.issues[1], "model"),
+                p(&r.issues[1], "was"),
+                p(&r.issues[1], "now")
+            ),
+            ("Opus 4.6".into(), "xhigh".into(), "high".into())
+        );
+        assert_eq!(p(&r.issues[2], "mode"), "yolo");
+
+        let mut caps = claude_caps();
+        let opus = caps.models.iter_mut().find(|m| m.id == "opus").unwrap();
+        opus.available = false;
+        opus.unavailable_reason =
+            Some("opus was refused by this account at its last launch".into());
+        opus.unavailable_code = Some("refused".into());
+        let r = reconcile(&choice(), &caps, None);
+        assert_eq!(
+            (r.issues[0].code.as_str(), p(&r.issues[0], "model")),
+            ("modelRefused", "opus".into())
+        );
+        let mut c = choice();
+        c.model_id = "gone".into();
+        assert_eq!(
+            reconcile(&c, &claude_caps(), None).issues[0].code,
+            "modelUnavailable"
+        );
+        let mut c = choice();
+        c.also_on = Some(Box::new(choice()));
+        c.also_on.as_mut().unwrap().account_id = "nobody".into();
+        let r = reconcile(&c, &claude_caps(), Some(&claude_caps()));
+        assert!(r.issues[0].also_on && r.issues[0].code == "accountGoneUsing");
     }
 
     #[test]
@@ -854,7 +1036,28 @@ pub(crate) mod tests {
             choice: c,
             count,
             last_used_at: last,
+            uses: vec![last; count as usize],
         }
+    }
+
+    #[test]
+    fn frequent_long_ago_does_not_beat_frequent_lately() {
+        let now = 1_800_000_000_000;
+        let day = 24 * 60 * 60 * 1000;
+        // Used 100 times long ago and once yesterday...
+        let mut veteran = row("veteran", 101, now - day);
+        veteran.uses = vec![now - day];
+        // ...against five times this month.
+        let mut lately = row("lately", 5, now - 3 * day);
+        lately.uses = (0..5).map(|i| now - (3 + i) * day).collect();
+        let rows = [veteran, lately];
+        assert_eq!(pick_usual(&rows, now).unwrap().combo_key, "lately");
+        // Launch times older than RECENT_MS fall out; at most MAX_USES stay.
+        let uses = add_use(vec![now - RECENT_MS - 1, now - day], now);
+        assert_eq!(uses, [now - day, now]);
+        let many = (0..MAX_USES as i64 + 10).fold(Vec::new(), |u, i| add_use(u, now + i));
+        assert_eq!(many.len(), MAX_USES);
+        assert_eq!(*many.last().unwrap(), now + MAX_USES as i64 + 9);
     }
 
     #[test]

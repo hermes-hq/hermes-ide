@@ -802,6 +802,7 @@ fn create_launch_choice_tables(conn: &Connection) -> rusqlite::Result<()> {
             count INTEGER NOT NULL DEFAULT 0,
             first_used_at INTEGER NOT NULL,
             last_used_at INTEGER NOT NULL,
+            recent_uses TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (repo, combo_key)
         );
         CREATE INDEX IF NOT EXISTS idx_launch_history_last

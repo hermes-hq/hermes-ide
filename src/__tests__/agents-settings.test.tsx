@@ -13,10 +13,11 @@ const h = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: vi.fn(async () => "/home-fixture") }));
 
-import { AgentsSettings, choiceSummary, effortSummary, modelsSummary, tildePath } from "../components/AgentsSettings";
+import { AgentsSettings, accountDetailText, choiceSummary, effortSummary, issueText, modelsSummary, tildePath } from "../components/AgentsSettings";
 import type { AgentCapabilities, CheckedPreset } from "../agent/capabilities/types";
 import { I18nProvider } from "../i18n/I18nProvider";
-import { translate } from "../i18n/registry";
+import { translate, translateIn } from "../i18n/registry";
+import { dePack } from "../i18n/packs/de";
 
 const t = (k: string, v?: Record<string, string | number>) => translate(k, v);
 
@@ -48,7 +49,16 @@ const preset: CheckedPreset = {
 	id: "p1",
 	name: "Deep",
 	choice: { agentId: "claude", accountId: "work", approvalModeId: "acceptEdits", modelId: "opus", effort: "high", extraArgs: "", prefix: "", channels: [], where: { kind: "current-checkout" }, trackAsFeature: false },
-	issues: [{ field: "account", message: "Work is signed out; using Default profile", was: "work", now: "default" }],
+	issues: [
+		{
+			field: "account",
+			message: "Work is signed out; using Default profile",
+			was: "work",
+			now: "default",
+			code: "accountSignedOutUsing",
+			params: { account: "Work", agent: "Claude Code", using: "Default profile" },
+		},
+	],
 	launchable: true,
 	effective: { agentId: "claude", accountId: "default", approvalModeId: "acceptEdits", modelId: "opus", effort: "high", extraArgs: "", prefix: "", channels: [], where: { kind: "current-checkout" }, trackAsFeature: false },
 };
@@ -138,5 +148,26 @@ describe("AgentsSettings", () => {
 		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("rename_launch_preset", { id: "p1", name: "Deeper" }));
 		fireEvent.click(r.getByText("Delete"));
 		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("delete_launch_preset", { id: "p1" }));
+	});
+});
+
+describe("Settings > Agents in the person's language", () => {
+	const de = (k: string, v?: Record<string, string | number>) => translateIn(dePack, k, v);
+
+	it("says a preset's issues from their codes, not the backend's English", () => {
+		const issue = preset.issues[0];
+		expect(issueText(issue, t)).toBe("Work is signed out; using Default profile");
+		expect(issueText(issue, de)).toBe("Work ist abgemeldet; stattdessen Default profile");
+		expect(issueText({ ...issue, message: "Also on: Work is signed out; using Default profile", alsoOn: true }, de)).toBe("Auch auf: Work ist abgemeldet; stattdessen Default profile");
+		// A code this build does not know: the backend's sentence.
+		expect(issueText({ ...issue, code: "somethingNew" as never }, de)).toBe(issue.message);
+	});
+
+	it("says an account's plan or sign-in method in the person's language; product names stay", () => {
+		expect(accountDetailText("Max plan", de)).toBe("Max-Tarif");
+		expect(accountDetailText("API key", de)).toBe("API-Schlüssel");
+		expect(accountDetailText("ChatGPT account", de)).toBe("ChatGPT-Konto");
+		expect(accountDetailText("Max plan", t)).toBe("Max plan");
+		expect(accountDetailText("Amazon Bedrock", de)).toBe("Amazon Bedrock");
 	});
 });

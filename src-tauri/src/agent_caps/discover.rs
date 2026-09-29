@@ -389,6 +389,7 @@ pub fn discover(
         efforts: default_efforts,
         available: true,
         unavailable_reason: None,
+        unavailable_code: None,
     });
     if let Some(spec) = spec {
         if spec.model.flag.is_some() {
@@ -400,6 +401,7 @@ pub fn discover(
                     efforts: parse::efforts_for(effort, &a.id, None),
                     available: true,
                     unavailable_reason: None,
+                    unavailable_code: None,
                 });
             }
             for m in &listed {
@@ -413,6 +415,7 @@ pub fn discover(
                     efforts: parse::efforts_for(effort, &m.id, m.efforts.as_deref()),
                     available: true,
                     unavailable_reason: None,
+                    unavailable_code: None,
                 });
             }
         }
@@ -440,6 +443,7 @@ pub fn discover(
                 "{} was refused by this account at its last launch",
                 m.id
             ));
+            m.unavailable_code = Some("refused".to_string());
         }
     }
     caps
@@ -501,6 +505,38 @@ impl Host for RealHost {
 const VERSION_RECHECK: Duration = Duration::from_secs(60);
 /// How long a result is kept at most (sign-in can change outside Hermes).
 const MAX_AGE: Duration = Duration::from_secs(2 * 60);
+/// The same for a CLI whose probe rewrites its own sign-in files on every
+/// run (Antigravity's `agy models` rewrites ~/.gemini/oauth_creds.json):
+/// it is run at most this often, unless the person asks for a refresh or a
+/// launch was refused.
+const QUIET_MAX_AGE: Duration = Duration::from_secs(30 * 60);
+
+/// Whether an agent's account probe rewrites the CLI's own files when it
+/// runs (so it runs as rarely as possible).
+fn probe_rewrites_vendor_files(agent: &Agent) -> bool {
+    agent
+        .capabilities
+        .as_ref()
+        .and_then(|c| c.accounts.probe.as_ref())
+        .is_some_and(|p| p.parser == "agy_models")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Freshness {
+    Good,
+    IfSameVersion,
+    Stale,
+}
+
+fn freshness(age: Duration, quiet: bool) -> Freshness {
+    if age < VERSION_RECHECK || (quiet && age < QUIET_MAX_AGE) {
+        Freshness::Good
+    } else if age < MAX_AGE {
+        Freshness::IfSameVersion
+    } else {
+        Freshness::Stale
+    }
+}
 
 struct Cached {
     caps: AgentCapabilities,
@@ -521,18 +557,15 @@ pub fn cached(
 ) -> Option<AgentCapabilities> {
     let map = cache().lock().ok()?;
     let hit = map.get(&(agent.id.clone(), account.to_string()))?;
-    let age = hit.at.elapsed();
-    if age < VERSION_RECHECK {
-        return Some(hit.caps.clone());
-    }
-    if age < MAX_AGE {
-        let caps = hit.caps.clone();
-        drop(map);
-        if current_version() == caps.cli_version {
-            return Some(caps);
+    match freshness(hit.at.elapsed(), probe_rewrites_vendor_files(agent)) {
+        Freshness::Good => Some(hit.caps.clone()),
+        Freshness::IfSameVersion => {
+            let caps = hit.caps.clone();
+            drop(map);
+            (current_version() == caps.cli_version).then_some(caps)
         }
+        Freshness::Stale => None,
     }
-    None
 }
 
 /// Any cached result of an agent, whatever its age or account (the model
@@ -765,6 +798,23 @@ pub(crate) mod tests {
         );
         assert_eq!(caps.accounts[0].detail, "ChatGPT account");
         assert!(!caps.accepts_typed_model);
+    }
+
+    #[test]
+    fn a_probe_that_rewrites_the_clis_files_runs_at_most_every_half_hour() {
+        let agy = crate::agent_catalog::agent("antigravity").unwrap();
+        let claude = crate::agent_catalog::agent("claude").unwrap();
+        assert!(probe_rewrites_vendor_files(agy) && !probe_rewrites_vendor_files(claude));
+        let min = |m: u64| Duration::from_secs(m * 60);
+        assert_eq!(freshness(min(0), false), Freshness::Good);
+        assert_eq!(
+            freshness(min(1) + Duration::from_secs(1), false),
+            Freshness::IfSameVersion
+        );
+        assert_eq!(freshness(min(3), false), Freshness::Stale);
+        assert_eq!(freshness(min(3), true), Freshness::Good);
+        assert_eq!(freshness(min(29), true), Freshness::Good);
+        assert_eq!(freshness(min(31), true), Freshness::Stale);
     }
 
     #[test]

@@ -88,7 +88,16 @@ describe("reconcileChoice", () => {
 	it("an unavailable model falls back to default and says why", () => {
 		const r = reconcileChoice(choice({ modelId: "gone" }), claudeCaps());
 		expect(r.choice.modelId).toBe("default");
-		expect(r.issues).toEqual([{ field: "model", message: "gone is not available on this account; using the default model", was: "gone", now: "default" }]);
+		expect(r.issues).toEqual([
+			{
+				field: "model",
+				message: "gone is not available on this account; using the default model",
+				was: "gone",
+				now: "default",
+				code: "modelUnavailable",
+				params: { model: "gone", agent: "Claude Code", reason: "gone is not available on this account" },
+			},
+		]);
 		expect(r.launchable).toBe(true);
 	});
 
@@ -107,7 +116,16 @@ describe("reconcileChoice", () => {
 	it("an effort the model does not take moves to the nearest, or is dropped", () => {
 		const nearest = reconcileChoice(choice({ modelId: "claude-opus-4-6", effort: "xhigh" }), claudeCaps());
 		expect(nearest.choice.effort).toBe("high");
-		expect(nearest.issues).toEqual([{ field: "effort", message: "Opus 4.6 does not take effort xhigh; using high", was: "xhigh", now: "high" }]);
+		expect(nearest.issues).toEqual([
+			{
+				field: "effort",
+				message: "Opus 4.6 does not take effort xhigh; using high",
+				was: "xhigh",
+				now: "high",
+				code: "effortChanged",
+				params: { model: "Opus 4.6", agent: "Claude Code", was: "xhigh", now: "high" },
+			},
+		]);
 		const none = reconcileChoice(choice({ modelId: "haiku", effort: "max" }), claudeCaps());
 		expect(none.choice.effort).toBeNull();
 		expect(none.issues[0].message).toBe("Haiku has no effort levels; the effort is left to Claude Code");
@@ -116,7 +134,14 @@ describe("reconcileChoice", () => {
 	it("a signed-out or removed account falls back to the active account", () => {
 		const out = reconcileChoice(choice({ accountId: "work" }), claudeCaps());
 		expect(out.choice.accountId).toBe("default");
-		expect(out.issues[0]).toEqual({ field: "account", message: "Work is signed out; using Default profile", was: "work", now: "default" });
+		expect(out.issues[0]).toEqual({
+			field: "account",
+			message: "Work is signed out; using Default profile",
+			was: "work",
+			now: "default",
+			code: "accountSignedOutUsing",
+			params: { account: "Work", agent: "Claude Code", using: "Default profile" },
+		});
 		const gone = reconcileChoice(choice({ accountId: "old" }), claudeCaps());
 		expect(gone.choice.accountId).toBe("default");
 		expect(gone.launchable).toBe(true);

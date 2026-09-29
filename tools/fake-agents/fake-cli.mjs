@@ -124,6 +124,21 @@
 // the real TUI; Codex's 404 inside its minute-long "Reconnecting... n/5"
 // loop; Antigravity's "error: invalid model selection …" and exit 1. It
 // runs no hook and no turn, so a test can tell that nothing ran.
+// A resumed conversation is refused like the real TUIs refuse it: the
+// history is replayed and "ready" shown, and the refusal comes only when
+// the first message is sent (Enter), since a resumed CLI asks its model
+// nothing before that.
+//
+// Conversation history (with HERMES_FAKE_DIR): what a conversation showed —
+// its prompt, the answers of `quote-errors`, the prompts typed, a refusal —
+// is kept in `<HERMES_FAKE_DIR>/history/<id>.txt` and replayed on resume,
+// as the real CLIs replay a resumed conversation.
+// Two more mode words for the refusal-safety scenario:
+//   wrap-prompt   the first prompt is drawn in rows of at most 40
+//                 characters (word-wrapped), as a TUI in a narrow pane does
+//   quote-errors  once ready, the agent "answers" with its reply mark
+//                 (Claude Code `⏺`, Codex `•`) quoting its CLI's own refusal
+//                 words, as an agent explaining an error does
 //
 // Every launch is recorded to `<HERMES_FAKE_DIR>/launch-<n>.json` (argv, cwd,
 // the Hermes environment it saw, the settings file's contents, which hooks
@@ -732,12 +747,14 @@ async function refuse(kind) {
 		finish(1, `refused-${kind}`);
 		return;
 	}
-	// Claude Code: the message, then the idle TUI (nothing is sent).
-	out(
+	// Claude Code: the message, then the idle TUI (nothing is sent). A
+	// conversation keeps the refusal in its history.
+	const said =
 		kind === "signed-out"
-			? "\r\nNot logged in · Please run /login\r\n"
-			: `\r\n"${model}" isn't described by this version's model catalog; update Claude Code, or map it with behavesAs…\r\nThere's an issue with the selected model (${model}). It may not exist or you may not have access to it. Run --model to pick a different model.\r\n`,
-	);
+			? "Not logged in · Please run /login"
+			: `There's an issue with the selected model (${model}). It may not exist or you may not have access to it. Run --model to pick a different model.`;
+	if (resumed) remember([said]);
+	out(kind === "signed-out" ? `\r\n${said}\r\n` : `\r\n"${model}" isn't described by this version's model catalog; update Claude Code, or map it with behavesAs…\r\n${said}\r\n`);
 	out("> ");
 	for (;;) {
 		const key = await nextKey();
@@ -748,18 +765,59 @@ async function refuse(kind) {
 	}
 }
 
+/** The conversation's history file (none without HERMES_FAKE_DIR). */
+const historyFile = RECORD_DIR ? path.join(RECORD_DIR, "history", `${sessionId}.txt`) : null;
+function remember(lines) {
+	if (!historyFile) return;
+	fs.mkdirSync(path.dirname(historyFile), { recursive: true });
+	fs.appendFileSync(historyFile, lines.map((l) => `${l}\n`).join(""));
+}
+function history() {
+	try {
+		return historyFile ? fs.readFileSync(historyFile, "utf8").split("\n").filter(Boolean) : [];
+	} catch {
+		return [];
+	}
+}
+
+/** Word-wrap at `width` columns, as a TUI draws a prompt in a narrow pane. */
+function wrapRows(text, width = 40) {
+	const rows = [];
+	let row = "";
+	for (const word of text.split(/\s+/).filter(Boolean)) {
+		if (row && row.length + 1 + word.length > width) {
+			rows.push(row);
+			row = word;
+		} else row = row ? `${row} ${word}` : word;
+	}
+	if (row) rows.push(row);
+	return rows;
+}
+
+/** What `quote-errors` answers: the CLI's refusal words, as a reply. */
+function quotedErrors() {
+	const mark = FAKE_AGENT === "codex" ? "\u2022" : "\u23fa";
+	return FAKE_AGENT === "codex"
+		? [`${mark} ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header`, `${mark} Not logged in`]
+		: [`${mark} Not logged in · Please run /login`, `${mark} There's an issue with the selected model (opus). It may not exist or you may not have access to it.`];
+}
+
+/** Which refusal this launch gets, if any (see the header). */
+function refusalKind() {
+	const refused = refusedModels();
+	if (args.model && (refused.includes(args.model) || refused.includes("*"))) return "model";
+	// Signed out: refused in a profile Hermes added (an empty profile is
+	// signed out), or anywhere with the mode word `refuse-signed-out`.
+	if ((profileDir() || has("refuse-signed-out")) && !isSignedIn()) return "signed-out";
+	return null;
+}
+
 async function main() {
 	note("start", { sessionId, resumed });
 
-	const refused = refusedModels();
-	if (args.model && (refused.includes(args.model) || refused.includes("*"))) {
-		await refuse("model");
-		return;
-	}
-	// Signed out: refused in a profile Hermes added (an empty profile is
-	// signed out), or anywhere with the mode word `refuse-signed-out`.
-	if ((profileDir() || has("refuse-signed-out")) && !isSignedIn()) {
-		await refuse("signed-out");
+	const refusal = refusalKind();
+	if (refusal && !resumed) {
+		await refuse(refusal);
 		return;
 	}
 
@@ -808,11 +866,41 @@ async function main() {
 	}
 
 	out(`\r\nfake-cli 0.1 · session ${sessionId} (${resumed ? `resumed from ${args.resumeId}` : "new"})\r\n`);
-	if (record.prompt) out(`prompt: ${record.prompt}\r\n`);
+	if (resumed) {
+		const earlier = history();
+		if (earlier.length) out(`fake-cli: earlier in this conversation:\r\n${earlier.map((l) => `${l}\r\n`).join("")}`);
+		note("replayed", { lines: earlier.length });
+	}
+	if (record.prompt) {
+		const rows = has("wrap-prompt") ? wrapRows(record.prompt) : [`prompt: ${record.prompt}`];
+		out(rows.map((r) => `${r}\r\n`).join(""));
+		remember(rows);
+	}
+	if (refusal) {
+		// A resumed conversation: refused at the first message.
+		out("fake-cli: ready\r\n");
+		for (;;) {
+			const key = await nextKey();
+			if (key === null || key === "\x03") {
+				finish(1, "interrupted-before-refusal");
+				return;
+			}
+			if (key === "\r" || key === "\n") break;
+			out(key);
+		}
+		await refuse(refusal);
+		return;
+	}
 	out("fake-cli: type q to quit\r\n");
 	if (has("no-start-hook")) note("start-hook-skipped");
 	else await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
+	if (has("quote-errors")) {
+		const reply = quotedErrors();
+		out(`\r\n${reply.map((l) => `${l}\r\n`).join("")}`);
+		remember(reply);
+		note("quoted-errors");
+	}
 	if (mode === "rate-limit") await workThenFail("rate_limit");
 	else if (mode === "server-error") await workThenFail("server_error");
 
@@ -1007,6 +1095,7 @@ function workStep(label) {
 
 async function submitPrompt(text) {
 	record.prompts.push(text);
+	remember([`> ${text.split("\n")[0].slice(0, 200)}`]);
 	note("prompt", { chars: text.length });
 	out(`fake-cli: prompt received (${text.length} chars)\r\n`);
 	const entry = { prompt: text.slice(0, 2000), stops: [] };

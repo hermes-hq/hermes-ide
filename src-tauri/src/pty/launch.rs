@@ -222,6 +222,10 @@ pub struct LaunchPlan {
     /// True when the agent's stop runs the Done-When checks itself (F27),
     /// so Hermes does not run them again at its turn end.
     pub check_hook: bool,
+    /// The first prompt as it goes to the CLI (on the fresh command, and on
+    /// a resume's fresh fallback), for the refusal watch: its echo is never
+    /// a refusal.
+    pub first_prompt: Option<String>,
 }
 
 fn split_words(fragment: &str) -> Vec<String> {
@@ -862,11 +866,9 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         (Some(seed), Some(task)) => Some(format!("{seed}\n\n{task}")),
         (seed, task) => seed.or(task).map(str::to_string),
     };
-    let prompt_args: Vec<String> = match (
-        &terminal.initial_prompt,
-        first_prompt(task_text.as_deref(), input.context_path),
-    ) {
-        (Some(template), Some(prompt)) => fill(template, &[("prompt", &prompt)]),
+    let prompt = first_prompt(task_text.as_deref(), input.context_path);
+    let prompt_args: Vec<String> = match (&terminal.initial_prompt, &prompt) {
+        (Some(template), Some(prompt)) => fill(template, &[("prompt", prompt)]),
         _ => Vec::new(),
     };
     let context_in_args = !prompt_args.is_empty() && input.context_path.is_some();
@@ -943,7 +945,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             program,
             args,
             fallback,
-            stop: stop_spec(agent, input.session_dir),
+            stop: stop_spec(agent, input.session_dir, resumes),
             clear_screen: input.clear_screen,
         },
         files: signals.files,
@@ -960,19 +962,27 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         stream: signals.stream,
         confidence: agent.terminal.signals.confidence.clone(),
         check_hook: signals.check_hook,
+        first_prompt: prompt.filter(|_| terminal.initial_prompt.is_some()),
     })
 }
 
 /// The stop request `hi` watches for, for an agent whose catalog says how
-/// its CLI refuses a launch.
-fn stop_spec(agent: &Agent, session_dir: &Path) -> Option<StopSpec> {
+/// its CLI refuses a launch. A resumed CLI asks its model nothing before the
+/// person's first message, so a resume is watched until then
+/// (`crate::agent_caps::watch::RESUME_WAIT`).
+fn stop_spec(agent: &Agent, session_dir: &Path, resumes: bool) -> Option<StopSpec> {
     let has_signatures = agent
         .capabilities
         .as_ref()
         .is_some_and(|c| !c.error_signatures.is_empty());
+    let window = if resumes {
+        crate::agent_caps::watch::RESUME_WAIT
+    } else {
+        REJECT_WINDOW
+    };
     has_signatures.then(|| StopSpec {
         file: session_dir.join(STOP_FILE).to_string_lossy().to_string(),
-        window_ms: REJECT_WINDOW.as_millis() as u64,
+        window_ms: window.as_millis() as u64,
     })
 }
 
@@ -1024,6 +1034,7 @@ fn plan_login(agent: &Agent, input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         stream: None,
         confidence: "guessed".to_string(),
         check_hook: false,
+        first_prompt: None,
     })
 }
 
@@ -1397,16 +1408,23 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
     }
     // A refusal by the CLI (unknown model, signed out) within the first
     // seconds stops the launch (`crate::agent_caps::watch`).
+    s.agent_launch.resumed = plan.resumes;
     match &plan.spec.stop {
         Some(stop) => {
             let _ = std::fs::remove_file(&stop.file);
             crate::agent_caps::watch::start(
                 &s.id,
                 &plan.spec.agent,
-                PathBuf::from(&stop.file),
-                &plan.nonce,
-                REJECT_WINDOW,
-                s.agent_launch.clone(),
+                crate::agent_caps::watch::WatchStart {
+                    stop_file: PathBuf::from(&stop.file),
+                    nonce: plan.nonce.clone(),
+                    window: REJECT_WINDOW,
+                    launch: s.agent_launch.clone(),
+                    // What Hermes hands the CLI as words: its echo is
+                    // never a refusal.
+                    given: plan.first_prompt.iter().cloned().collect(),
+                    resumes: plan.resumes,
+                },
             );
         }
         None => crate::agent_caps::watch::end(&s.id),
@@ -2075,6 +2093,11 @@ impl Identity {
 }
 
 /// A finished turn: the launch was taken, so a refusal can no longer come.
+/// A hook that says a tool ran (`PostToolUse`, with or without its tool).
+fn ran_a_tool(event: &str) -> bool {
+    event == "PostToolUse" || event.starts_with("PostToolUse:")
+}
+
 fn ends_launch_watch(event: &crate::contract::SessionEvent) -> bool {
     use crate::contract::{AgentStatusKind, SessionEvent};
     match event {
@@ -2137,6 +2160,11 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 // told as a `limit` event and a `limited` status; its plain
                 // meaning (an error for the rate-limited stop, an attention
                 // for a quota notice) is not sent as well.
+                if record.nonce == nonce && ran_a_tool(&record.event) {
+                    // The model answered with a tool call: the CLI took the
+                    // launch, and what the tool prints is not its error.
+                    crate::agent_caps::watch::end(&session_id);
+                }
                 let limit_events = limits.observe(&record, &nonce);
                 let is_limit = record.nonce == nonce
                     && crate::limits::classify(&record) == crate::limits::LimitSignal::Limited;
@@ -2209,6 +2237,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             guess.new_attempt(Instant::now());
+                            // The fresh start replays nothing.
+                            crate::agent_caps::watch::fresh_start(&session_id);
                         }
                         if !matches!(event, SpoolEvent::Other) {
                             // Started, gone or replaced: the resume's own
@@ -2475,6 +2505,8 @@ mod tests {
         };
         assert!(ends_launch_watch(&status));
         assert!(!ends_launch_watch(&first));
+        assert!(ran_a_tool("PostToolUse") && ran_a_tool("PostToolUse:Bash"));
+        assert!(!ran_a_tool("PreToolUse") && !ran_a_tool("UserPromptSubmit"));
     }
 
     #[test]
@@ -3037,6 +3069,12 @@ mod tests {
             fb.vendor_session_id.as_deref(),
             Some("11111111-2222-4333-8444-555555555555")
         );
+        // A resumed CLI refuses only at the person's first message, which
+        // can come much later than a fresh start's first seconds.
+        assert_eq!(
+            plan.spec.stop.as_ref().unwrap().window_ms,
+            crate::agent_caps::watch::RESUME_WAIT.as_millis() as u64
+        );
         assert!(fb.message.contains("starting a new one"));
         // Only Claude's own "not found" (exit 1 and its message, which
         // Hermes watches the terminal for) replaces the conversation.
@@ -3222,6 +3260,12 @@ mod tests {
         assert!(prompt.starts_with(task), "{prompt}");
         assert!(prompt.ends_with("for project context about the attached workspaces."));
         assert!(both.context_in_args);
+        // The refusal watch knows the exact words the CLI was given.
+        assert_eq!(both.first_prompt.as_deref(), Some(prompt.as_str()));
+        assert!(
+            plan_launch(&goose).unwrap().first_prompt.is_none(),
+            "goose takes no first prompt"
+        );
         // A blank task is no task.
         let mut blank = input("claude", None, hi, dir);
         blank.task = Some("  \n ");

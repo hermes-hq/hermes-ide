@@ -136,7 +136,9 @@ try {
   assert(turnEnded(mSnap), "the turn ended");
   const mChip = await chip(bridge, m.sid);
   log(`  chip: ${JSON.stringify(mChip)}; identity ${JSON.stringify(mSnap.identity)}`);
-  assert(mChip && (mChip.source === "reported" ? /sonnet/.test(mChip.text) : mChip.text === "sonnet · low · requested"), `the model chip shows the reported model, else the request (${mChip?.text})`);
+  // Claude reports its model in its SessionStart hook, so the chip must be
+  // the reported one here (the "requested" fallback would hide a broken report).
+  assert(mChip?.source === "reported" && /sonnet/.test(mChip.text), `the model chip shows the model Claude reported (${JSON.stringify(mChip)})`);
   await bridge.screenshot(join(evidenceDir, "02-sonnet-low.png"));
   await quitAgent(bridge, m.sid, "/exit");
 

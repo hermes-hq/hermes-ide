@@ -24,8 +24,13 @@
 //   5. After a restart, each agent resumes its conversation in its account's
 //      profile with its model and effort (the saved workspace keeps them).
 //
-// Negative control: HERMES_E2E_CAP_NEGATIVE=1 lets the fakes accept every
-// model, so the refusal never shows and step 2 FAILS.
+// Negative controls (each must FAIL at step 2):
+//   HERMES_E2E_CAP_NEGATIVE=1        the fakes accept every model, so the
+//                                    refusal never shows.
+//   HERMES_E2E_CAP_NEGATIVE=product  the fakes refuse as always, but the
+//                                    app's refusal watch is off
+//                                    (HERMES_E2E_REFUSAL_WATCH=off): proves
+//                                    the banner and the stop are Hermes's.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/CAP-launch-choice.mjs
@@ -62,6 +67,7 @@ rmSync(logFile, { force: true });
 mkdirSync(evidenceDir, { recursive: true });
 const log = createLogger(logFile);
 const NEGATIVE = process.env.HERMES_E2E_CAP_NEGATIVE === "1";
+const PRODUCT_NEGATIVE = process.env.HERMES_E2E_CAP_NEGATIVE === "product";
 
 function assert(condition, message) {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -138,8 +144,8 @@ async function clickAction(bridge, sid, kind, account) {
 let app;
 let failed = false;
 try {
-  log(`scenario: ${SCENARIO}${NEGATIVE ? " (NEGATIVE CONTROL: the fakes accept every model)" : ""}`);
-  app = await launch(f, evidenceDir, log, 1, { first: true });
+  log(`scenario: ${SCENARIO}${NEGATIVE ? " (NEGATIVE CONTROL: the fakes accept every model)" : PRODUCT_NEGATIVE ? " (NEGATIVE CONTROL: the app's refusal watch is off)" : ""}`);
+  app = await launch(f, evidenceDir, log, 1, { first: true, env: PRODUCT_NEGATIVE ? { HERMES_E2E_REFUSAL_WATCH: "off" } : {} });
   const { bridge } = app;
   await completeOnboarding(bridge);
 

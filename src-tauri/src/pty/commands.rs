@@ -1945,6 +1945,10 @@ pub fn write_to_session(
         w.flush().map_err(|e| format!("Flush failed: {}", e))?;
     }
 
+    // What the person types is never the CLI refusing the launch, and their
+    // first Enter in a resumed agent ends its replayed history.
+    crate::agent_caps::watch::user_input(&session_id, &bytes);
+
     // A key typed at an agent's startup prompt answers it: the "waiting at
     // a startup prompt" report must not outlive the prompt.
     if let Ok(mut s) = session.session.lock() {

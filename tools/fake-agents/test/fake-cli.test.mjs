@@ -674,6 +674,31 @@ describe("fake vendor CLI: models, effort and accounts (2.0 launch contract)", (
 		expect(agy.stdout).toContain('error: invalid model selection (--model "nope" --effort ""): model nope is not recognized');
 	});
 
+	it("a resumed conversation replays its history and is refused only at its first message", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir);
+		const task = "Users report this error after SSO today: Not logged in · Please run /login appears";
+		const first = await run(["--session-id", "h-1", "--settings", file, task], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "wrap-prompt quote-errors" }, keys: "q" });
+		expect(first.code).toBe(0);
+		// Wrapped at 40 columns: a row starts with the CLI's own words.
+		expect(first.stdout).toContain("\r\nNot logged in · Please run /login\r\n");
+		expect(first.stdout).toContain("\u23fa Not logged in · Please run /login\r\n");
+		const signedOut = { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "refuse-signed-out", HERMES_FAKE_AUTH: "out" };
+		// Nothing typed: replayed, ready, not refused.
+		const idle = await run(["--resume", "h-1", "--settings", file], { env: signedOut, keys: "\x03" });
+		expect(idle.stdout).toContain("fake-cli: earlier in this conversation:");
+		expect(idle.stdout).toContain("fake-cli: ready");
+		expect(idle.stdout.split("fake-cli: ready")[1]).not.toContain("Please run /login");
+		// The first message: refused, and the refusal joins the history.
+		const sent = await run(["--resume", "h-1", "--settings", file], { env: signedOut, keys: "hi\rq", afterMs: 500 });
+		expect(sent.stdout.split("fake-cli: ready")[1]).toContain("Not logged in · Please run /login");
+		const again = await run(["--resume", "h-1", "--settings", file], { env: { HERMES_FAKE_DIR: dir }, keys: "q" });
+		expect(again.code).toBe(0);
+		expect(again.stdout.split("fake-cli: ready")[0].match(/Not logged in · Please run \/login/g).length).toBe(3);
+		// A refused resume ran no hook.
+		expect(readFileSync(marks, "utf8").split("\n").filter((l) => l.startsWith("SessionStart ")).length).toBe(2);
+	}, 30_000);
+
 	it("an empty profile refuses the launch as signed out", async () => {
 		const res = await run(["--session-id", "s-1"], { env: { HERMES_FAKE_DIR: tmp(), CLAUDE_CONFIG_DIR: join(tmp(), ".claude-new") }, keys: "q" });
 		expect(res.stdout).toContain("Not logged in · Please run /login");

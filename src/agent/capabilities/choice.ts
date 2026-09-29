@@ -8,7 +8,7 @@
 // mode the agent lacks to its safety default. Tested against the same
 // cases as the Rust side (src/agent/capabilities/__tests__).
 
-import type { AgentCapabilities, ChoiceIssue, CheckedChoice, LaunchChoice, AgentLaunchOptions, ModelOption } from "./types";
+import type { AgentCapabilities, ChoiceIssue, ChoiceIssueCode, CheckedChoice, LaunchChoice, AgentLaunchOptions, ModelOption } from "./types";
 
 /** Every effort word any agent uses, weakest first. "Nearest" is measured on this scale. */
 export const EFFORT_SCALE: readonly string[] = ["none", "off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
@@ -66,7 +66,7 @@ export function reconcileChoice(
 	const name = caps.agentName ?? caps.agentId;
 
 	if (!caps.installed) {
-		issues.push({ field: "agent", message: `${name} is not installed`, was: choice.agentId, now: null });
+		issues.push({ field: "agent", message: `${name} is not installed`, was: choice.agentId, now: null, code: "agentMissing", params: { agent: name } });
 		launchable = false;
 	}
 
@@ -75,7 +75,9 @@ export function reconcileChoice(
 	if (!account || !account.signedIn) {
 		const active = caps.accounts.find((a) => a.id === caps.activeAccountId && a.signedIn) ?? caps.accounts.find((a) => a.signedIn) ?? null;
 		const why = !account ? `The account "${choice.accountId}" is not set up for ${name} any more` : `${account.label} is signed out`;
-		issues.push({ field: "account", message: active ? `${why}; using ${active.label}` : why, was: choice.accountId, now: active?.id ?? null });
+		const code = `${account ? "accountSignedOut" : "accountGone"}${active ? "Using" : ""}` as ChoiceIssueCode;
+		const params = { account: account?.label ?? choice.accountId, agent: name, using: active?.label ?? "" };
+		issues.push({ field: "account", message: active ? `${why}; using ${active.label}` : why, was: choice.accountId, now: active?.id ?? null, code, params });
 		if (active) out.accountId = active.id;
 		else launchable = false;
 	}
@@ -84,7 +86,8 @@ export function reconcileChoice(
 	let model = findModel(caps, choice.modelId);
 	if (!model || !model.available) {
 		const why = model?.unavailableReason ?? `${choice.modelId} is not offered by ${name} any more`;
-		issues.push({ field: "model", message: `${why}; using the default model`, was: choice.modelId, now: DEFAULT_MODEL_ID });
+		const code: ChoiceIssueCode = model?.unavailableCode === "refused" ? "modelRefused" : model?.unavailableReason ? "modelUnavailable" : "modelGone";
+		issues.push({ field: "model", message: `${why}; using the default model`, was: choice.modelId, now: DEFAULT_MODEL_ID, code, params: { model: choice.modelId, agent: name, reason: why } });
 		out.modelId = DEFAULT_MODEL_ID;
 		model = caps.models.find((m) => m.id === DEFAULT_MODEL_ID) ?? { id: DEFAULT_MODEL_ID, label: "Default", efforts: [], available: true };
 	}
@@ -96,21 +99,35 @@ export function reconcileChoice(
 			effort === null
 				? `${model.label} has no effort levels; the effort is left to ${name}`
 				: `${model.label} does not take effort ${choice.effort}; using ${effort}`;
-		issues.push({ field: "effort", message, was: choice.effort, now: effort });
+		issues.push({
+			field: "effort",
+			message,
+			was: choice.effort,
+			now: effort,
+			code: effort === null ? "effortNone" : "effortChanged",
+			params: { model: model.label, agent: name, was: choice.effort ?? "", now: effort ?? "" },
+		});
 		out.effort = effort;
 	}
 
 	// Approval mode: one the agent has, else its safety default.
 	if (caps.approvalModes.length > 0 && !caps.approvalModes.some((m) => m.id === choice.approvalModeId)) {
 		const fallback = caps.approvalModes.find((m) => m.id === caps.defaultApprovalModeId) ?? caps.approvalModes[0];
-		issues.push({ field: "approval", message: `${name} has no "${choice.approvalModeId}" mode; using ${fallback.label}`, was: choice.approvalModeId, now: fallback.id });
+		issues.push({
+			field: "approval",
+			message: `${name} has no "${choice.approvalModeId}" mode; using ${fallback.label}`,
+			was: choice.approvalModeId,
+			now: fallback.id,
+			code: "approvalGone",
+			params: { agent: name, mode: choice.approvalModeId, using: fallback.label },
+		});
 		out.approvalModeId = fallback.id;
 	}
 
 	if (choice.alsoOn && alsoOnCaps) {
 		const inner = reconcileChoice(choice.alsoOn, alsoOnCaps, null);
 		out.alsoOn = inner.choice;
-		for (const i of inner.issues) issues.push({ ...i, message: `Also on: ${i.message}` });
+		for (const i of inner.issues) issues.push({ ...i, message: `Also on: ${i.message}`, alsoOn: true });
 		if (!inner.launchable) launchable = false;
 	}
 	return { choice: out, issues, launchable };

@@ -35,6 +35,9 @@ pub struct ModelOption {
     pub available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unavailable_reason: Option<String>,
+    /// Why, as a code: "refused" (the account refused it at a launch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,9 +123,18 @@ pub struct LaunchChoice {
 pub struct ChoiceIssue {
     /// "agent", "model", "effort", "account" or "approval".
     pub field: String,
+    /// The sentence in English (`code` and `params` say it in the person's
+    /// language: the UI key `agentsSettings.issue.<code>`).
     pub message: String,
     pub was: Option<String>,
     pub now: Option<String>,
+    #[serde(default)]
+    pub code: String,
+    #[serde(default)]
+    pub params: std::collections::BTreeMap<String, String>,
+    /// About the choice's "Also on" agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub also_on: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,6 +251,10 @@ pub struct SessionLaunch {
     /// saved or sent.
     #[serde(skip)]
     pub relaunch: bool,
+    /// The last launch resumed a saved conversation, so starting again
+    /// after its refusal resumes that conversation too. Never saved or sent.
+    #[serde(skip)]
+    pub resumed: bool,
 }
 
 impl SessionLaunch {
