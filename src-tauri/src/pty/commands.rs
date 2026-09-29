@@ -853,8 +853,18 @@ pub fn create_session(
     seed_prompt: Option<String>,
     // N19: the session this one continues or duplicates.
     parent_session_id: Option<String>,
+    // 2.0 launch contract: the model, effort and account to start the agent
+    // with (helper launch only), or "login" to run the CLI's sign-in in the
+    // account's profile (Add account).
+    agent_launch: Option<crate::agent_caps::AgentLaunchOptions>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
+    let agent_launch = match (&ai_provider, &agent_launch) {
+        (Some(provider), Some(options)) if ssh_host.is_none() => {
+            crate::agent_caps::commands::session_launch(&app, provider, options)?
+        }
+        _ => Default::default(),
+    };
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     state.closed_sessions.mark_created(&session_id);
     let shell = state
@@ -973,6 +983,7 @@ pub fn create_session(
             && project_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
         last_nudged_version: 0,
         pending_nudge: None,
+        agent_launch,
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
             port: ssh_port.unwrap_or(22),
@@ -1383,6 +1394,17 @@ pub fn create_session(
                         }
                         let data = &buf[..n];
                         crate::pty::launch::observe_output(&event_session_id, data);
+                        // 2.0: a CLI that refuses the launch (unknown model,
+                        // signed out) is stopped and the session says why.
+                        if let Some(found) =
+                            crate::agent_caps::watch::observe(&event_session_id, data)
+                        {
+                            crate::agent_caps::commands::on_rejected(
+                                &app_clone,
+                                &event_session_id,
+                                found,
+                            );
+                        }
 
                         if let Ok(mut a) = analyzer_clone.lock() {
                             a.process(data);

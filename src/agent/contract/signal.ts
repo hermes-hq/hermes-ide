@@ -123,6 +123,12 @@ function payloadStr(payload: Record<string, unknown>, key: string): string | nul
   return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 }
 
+/** The model the agent says it runs (`model`, or Antigravity's `modelName`). Mirrors `reported_model`. */
+export function reportedModel(payload: Record<string, unknown>): string | null {
+  const m = payloadStr(payload, "model") ?? payloadStr(payload, "modelName");
+  return m === null ? null : m.slice(0, 200);
+}
+
 const cap = (s: string): string => s.slice(0, 200);
 
 function detailOf(payload: Record<string, unknown>): string {
@@ -237,8 +243,9 @@ export function mapSignalRecord(record: SignalRecord, expectedNonce: string, con
   if (record.event === "SessionStart" || record.event === "hermes.resume_fallback" || record.event === "agent-turn-complete") {
     const vendorSessionId = vendorSessionIdOf(payload);
     const permissionMode = payloadStr(payload, "permission_mode");
-    if (vendorSessionId !== null || permissionMode !== null) {
-      out.push({ type: "identity", at, source, vendorSessionId, model: null, permissionMode });
+    const model = reportedModel(payload);
+    if (vendorSessionId !== null || permissionMode !== null || model !== null) {
+      out.push({ type: "identity", at, source, vendorSessionId, model, permissionMode });
     }
   }
   let primary: SessionEvent;

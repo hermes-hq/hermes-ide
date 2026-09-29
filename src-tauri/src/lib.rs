@@ -1,4 +1,5 @@
 mod agent;
+pub mod agent_caps;
 mod agent_catalog;
 mod agent_doctor;
 mod agent_setup;
@@ -797,6 +798,22 @@ pub fn run() {
             pty::check_ai_providers,
             // Agent doctor (F16) and the task launcher's repo facts (F15)
             agent_doctor::agent_doctor,
+            // 2.0 launch contract: models, effort, accounts, presets
+            agent_caps::commands::get_agent_capabilities,
+            agent_caps::commands::list_agent_capabilities,
+            agent_caps::commands::validate_launch,
+            agent_caps::commands::preview_launch,
+            agent_caps::commands::remember_launch_choice,
+            agent_caps::commands::get_remembered_launch_choice,
+            agent_caps::commands::dismiss_preset_suggestion,
+            agent_caps::commands::get_usual_launch_choice,
+            agent_caps::commands::list_launch_presets,
+            agent_caps::commands::save_launch_preset,
+            agent_caps::commands::rename_launch_preset,
+            agent_caps::commands::delete_launch_preset,
+            agent_caps::commands::add_agent_account,
+            agent_caps::commands::remove_agent_account,
+            agent_caps::commands::relaunch_agent,
             task_launcher::task_repo_probe,
             task_launcher::task_write_feature_file,
             // Session management
@@ -1310,6 +1327,7 @@ mod tests {
             hosted: false,
             reattached: false,
             parent_session_id: None,
+            agent_launch: Default::default(),
         };
         database.create_session_v2(&update).unwrap();
 

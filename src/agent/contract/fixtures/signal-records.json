@@ -2,6 +2,44 @@
   "_comment": "How hi signal spool records map to SessionEvents (F11). Read by src/__tests__/contract-signal.test.ts and src-tauri/src/contract/signal.rs: both sides must produce exactly these events. `confidence` is the agent's catalog confidence. Synthetic data only.",
   "cases": [
     {
+      "name": "claude SessionStart with the model it runs (CAP: the model chip)",
+      "nonce": "n-abc",
+      "confidence": "exact",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "SessionStart",
+        "payload": {
+          "session_id": "vs-0002",
+          "model": "fake-model-haiku-4-5",
+          "source": "startup"
+        }
+      },
+      "events": [
+        {
+          "type": "identity",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "vendorSessionId": "vs-0002",
+          "model": "fake-model-haiku-4-5",
+          "permissionMode": null
+        },
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "idle",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ]
+    },
+    {
       "name": "claude SessionStart names the conversation and is idle",
       "nonce": "n-abc",
       "confidence": "exact",

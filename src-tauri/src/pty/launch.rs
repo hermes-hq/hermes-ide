@@ -123,6 +123,13 @@ pub struct LaunchInput<'a> {
     /// exposes a local event stream (OpenCode). Unused by the others.
     pub stream_port: u16,
     pub stream_secret: &'a str,
+    /// 2.0 launch contract: the model (None: the default, no flag), the
+    /// effort, the account's profile variable, and whether this launch runs
+    /// the CLI's sign-in instead of the agent (Add account).
+    pub model_id: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub profile_env: Option<(&'a str, &'a str)>,
+    pub login: bool,
 }
 
 /// The launch file `hi run` reads. Field names are the wire format.
@@ -137,7 +144,23 @@ pub struct LaunchSpec {
     pub args: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<FallbackSpec>,
+    /// Where Hermes asks `hi` to stop a launch the CLI refused (the agent's
+    /// catalog `error_signatures` matched its output), and for how long.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<StopSpec>,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StopSpec {
+    pub file: String,
+    pub window_ms: u64,
+}
+
+/// The file Hermes writes to stop a refused launch (`hi` polls it).
+pub const STOP_FILE: &str = "launch-stop";
+/// How long after the start a refusal stops the launch. Codex retries a
+/// refused request for about a minute before it gives up.
+pub const REJECT_WINDOW: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct FallbackSpec {
@@ -747,14 +770,22 @@ pub(crate) fn ssh_signal_args(s: &Session) -> Option<(String, String)> {
 /// recipe (the caller then falls back to the typed vendor line).
 pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     let agent = recipe_for(input.provider)?;
+    if input.login {
+        return plan_login(agent, input);
+    }
     let terminal = &agent.terminal;
     let prefix = split_words(input.custom_prefix);
     let suffix = split_words(input.custom_suffix);
-    let permission: Vec<String> = terminal
+    let mut permission: Vec<String> = terminal
         .permission_flags
         .get(input.permission_mode)
         .cloned()
         .unwrap_or_default();
+    // The model and effort the person chose travel with the permission
+    // flags, on the fresh command and on a resume alike.
+    let (choice_args, choice_env) =
+        crate::agent_caps::choice::model_effort_args(agent, input.model_id, input.effort);
+    permission.extend(choice_args);
 
     // The command head: an optional wrapper (caffeinate, nice, wsl) then the
     // agent program and its fixed arguments.
@@ -775,6 +806,12 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     );
     env.insert("HERMES_AGENT".to_string(), agent.id.clone());
     env.insert("HERMES_SIGNAL_NONCE".to_string(), input.nonce.to_string());
+    for (k, v) in choice_env {
+        env.insert(k, v);
+    }
+    if let Some((name, value)) = input.profile_env {
+        env.insert(name.to_string(), value.to_string());
+    }
     env.insert(
         "HERMES_SIGNAL_FILE".to_string(),
         input
@@ -900,6 +937,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             program,
             args,
             fallback,
+            stop: stop_spec(agent, input.session_dir),
         },
         files: signals.files,
         vendor_session_id,
@@ -915,6 +953,69 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         stream: signals.stream,
         confidence: agent.terminal.signals.confidence.clone(),
         check_hook: signals.check_hook,
+    })
+}
+
+/// The stop request `hi` watches for, for an agent whose catalog says how
+/// its CLI refuses a launch.
+fn stop_spec(agent: &Agent, session_dir: &Path) -> Option<StopSpec> {
+    let has_signatures = agent
+        .capabilities
+        .as_ref()
+        .is_some_and(|c| !c.error_signatures.is_empty());
+    has_signatures.then(|| StopSpec {
+        file: session_dir.join(STOP_FILE).to_string_lossy().to_string(),
+        window_ms: REJECT_WINDOW.as_millis() as u64,
+    })
+}
+
+/// Add account: the CLI's own sign-in command in the account's profile,
+/// started through `hi` like any launch (no hooks, no first prompt).
+fn plan_login(agent: &Agent, input: &LaunchInput<'_>) -> Option<LaunchPlan> {
+    let login = agent.capabilities.as_ref()?.accounts.login.as_ref()?;
+    let (program, args) = login.split_first()?;
+    let mut env = BTreeMap::new();
+    env.insert(
+        "HERMES_SESSION_ID".to_string(),
+        input.session_id.to_string(),
+    );
+    env.insert("HERMES_AGENT".to_string(), agent.id.clone());
+    env.insert("HERMES_SIGNAL_NONCE".to_string(), input.nonce.to_string());
+    env.insert(
+        "HERMES_SIGNAL_FILE".to_string(),
+        input
+            .session_dir
+            .join(SIGNALS_FILE)
+            .to_string_lossy()
+            .to_string(),
+    );
+    if let Some((name, value)) = input.profile_env {
+        env.insert(name.to_string(), value.to_string());
+    }
+    Some(LaunchPlan {
+        spec: LaunchSpec {
+            v: SPEC_VERSION,
+            session_id: input.session_id.to_string(),
+            agent: agent.id.clone(),
+            cwd: input.cwd.to_string(),
+            env,
+            program: program.clone(),
+            args: args.to_vec(),
+            fallback: None,
+            stop: None,
+        },
+        files: Vec::new(),
+        vendor_session_id: None,
+        resumes: false,
+        expects_start_signal: false,
+        context_in_args: false,
+        seed_in_args: false,
+        nonce: input.nonce.to_string(),
+        not_found_output: Vec::new(),
+        git_excludes: Vec::new(),
+        stream: None,
+        confidence: "guessed".to_string(),
+        check_hook: false,
     })
 }
 
@@ -1250,6 +1351,14 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
         nonce: &nonce,
         stream_port: free_loopback_port(),
         stream_secret: &stream_secret,
+        model_id: s.agent_launch.model_id.as_deref(),
+        effort: s.agent_launch.effort.as_deref(),
+        profile_env: s
+            .agent_launch
+            .profile_env
+            .as_ref()
+            .map(|p| (p.name.as_str(), p.value.as_str())),
+        login: s.agent_launch.login,
     }) else {
         return HelperLaunch::TypeCommand;
     };
@@ -1275,6 +1384,22 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
         end_output_watch(&s.id);
     } else {
         start_output_watch(&s.id, &plan.not_found_output, evidence, &plan.nonce);
+    }
+    // A refusal by the CLI (unknown model, signed out) within the first
+    // seconds stops the launch (`crate::agent_caps::watch`).
+    match &plan.spec.stop {
+        Some(stop) => {
+            let _ = std::fs::remove_file(&stop.file);
+            crate::agent_caps::watch::start(
+                &s.id,
+                &plan.spec.agent,
+                PathBuf::from(&stop.file),
+                &plan.nonce,
+                REJECT_WINDOW,
+                s.agent_launch.clone(),
+            );
+        }
+        None => crate::agent_caps::watch::end(&s.id),
     }
     if s.seed_prompt.is_some() && !plan.seed_in_args {
         log::warn!(
@@ -1854,6 +1979,90 @@ impl PromptGuess {
 /// nonce-verified line also becomes the SessionEvents it means (F11), on
 /// the one channel the frontend store reads; sub-agent hooks move a
 /// counter that is reported as a `subagents` event.
+/// What the agent reported about itself during one launch (the identity
+/// events of the contract are sent complete).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Identity {
+    vendor_session_id: Option<String>,
+    model: Option<String>,
+    permission_mode: Option<String>,
+}
+
+impl Identity {
+    /// Fold an identity event into what is known and return it complete;
+    /// any other event passes through. `named_model` is set when the event
+    /// carried the model.
+    pub fn merge(
+        &mut self,
+        event: crate::contract::SessionEvent,
+        named_model: &mut bool,
+    ) -> crate::contract::SessionEvent {
+        use crate::contract::SessionEvent;
+        match event {
+            SessionEvent::Identity {
+                at,
+                source,
+                tags,
+                vendor_session_id,
+                model,
+                permission_mode,
+            } => {
+                if vendor_session_id.is_some() {
+                    self.vendor_session_id = vendor_session_id;
+                }
+                if model.is_some() {
+                    *named_model = true;
+                    self.model = model;
+                }
+                if permission_mode.is_some() {
+                    self.permission_mode = permission_mode;
+                }
+                SessionEvent::Identity {
+                    at,
+                    source,
+                    tags,
+                    vendor_session_id: self.vendor_session_id.clone(),
+                    model: self.model.clone(),
+                    permission_mode: self.permission_mode.clone(),
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// A record that names a model other than the one known (the agent
+    /// switched with /model): the identity with the new model.
+    pub fn model_report(
+        &mut self,
+        record: &crate::contract::signal::SignalRecord,
+        source: &str,
+    ) -> Option<crate::contract::SessionEvent> {
+        let model = crate::contract::signal::reported_model(&record.payload)?;
+        if self.model.as_deref() == Some(model.as_str()) {
+            return None;
+        }
+        self.model = Some(model);
+        Some(crate::contract::SessionEvent::Identity {
+            at: record.ts.saturating_mul(1000),
+            source: Some(source.to_string()),
+            tags: None,
+            vendor_session_id: self.vendor_session_id.clone(),
+            model: self.model.clone(),
+            permission_mode: self.permission_mode.clone(),
+        })
+    }
+}
+
+/// A finished turn: the launch was taken, so a refusal can no longer come.
+fn ends_launch_watch(event: &crate::contract::SessionEvent) -> bool {
+    use crate::contract::{AgentStatusKind, SessionEvent};
+    match event {
+        SessionEvent::TurnEnd { .. } => true,
+        SessionEvent::Status { status, .. } => status.kind == AgentStatusKind::DoneUnread,
+        _ => false,
+    }
+}
+
 pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, watch: SignalWatch) {
     let SignalWatch {
         session_dir,
@@ -1884,6 +2093,10 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         let mut subagents: i32 = 0;
         // N19: usage limits the agent reports, as contract session events.
         let mut limits = crate::limits::LimitTracker::new();
+        // What the agent said about itself so far: every identity sent is
+        // complete, so a later report of the model alone (a status line, an
+        // Antigravity hook) never hides the conversation id or the mode.
+        let mut identity = Identity::default();
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
@@ -1904,8 +2117,19 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 let is_limit = record.nonce == nonce
                     && crate::limits::classify(&record) == crate::limits::LimitSignal::Limited;
                 if !is_limit {
+                    let mut named_model = false;
                     for event in map_signal_record(&record, &nonce, confidence, &source) {
+                        let event = identity.merge(event, &mut named_model);
+                        if ends_launch_watch(&event) {
+                            // A finished turn: the CLI took the launch.
+                            crate::agent_caps::watch::end(&session_id);
+                        }
                         crate::contract::emit_session_event(&app, &session_id, event);
+                    }
+                    if record.nonce == nonce && !named_model {
+                        if let Some(event) = identity.model_report(&record, &source) {
+                            crate::contract::emit_session_event(&app, &session_id, event);
+                        }
                     }
                 }
                 for event in limit_events {
@@ -1948,6 +2172,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                         }
                         if let SpoolEvent::Check(report) = &event {
                             checks.push(report.clone());
+                        }
+                        if let SpoolEvent::Exited { .. } = &event {
+                            crate::agent_caps::watch::end_soon(&session_id);
                         }
                         if let SpoolEvent::Exited { exit_code, error } = &event {
                             log::info!(
@@ -2130,7 +2357,165 @@ mod tests {
             nonce: "n0nce",
             stream_port: 4321,
             stream_secret: "s3cret",
+            model_id: None,
+            effort: None,
+            profile_env: None,
+            login: false,
         }
+    }
+
+    #[test]
+    fn identities_are_sent_complete_and_a_model_change_is_reported_once() {
+        use crate::contract::signal::parse_signal_line;
+        use crate::contract::SessionEvent;
+        let mut id = Identity::default();
+        let mut named = false;
+        let first = id.merge(
+            SessionEvent::Identity {
+                at: 1,
+                source: None,
+                tags: None,
+                vendor_session_id: Some("vs".into()),
+                model: None,
+                permission_mode: Some("plan".into()),
+            },
+            &mut named,
+        );
+        assert!(!named);
+        assert!(
+            matches!(first, SessionEvent::Identity { ref vendor_session_id, .. } if vendor_session_id.as_deref() == Some("vs"))
+        );
+        let line = r#"{"v":1,"ts":5,"session":"s","agent":"claude","nonce":"n","event":"StatusLine","payload":{"model":"fake-model-2"}}"#;
+        let record = parse_signal_line(line).unwrap();
+        let ev = id.model_report(&record, "hook:claude").unwrap();
+        match ev {
+            SessionEvent::Identity {
+                vendor_session_id,
+                model,
+                permission_mode,
+                at,
+                ..
+            } => {
+                assert_eq!(
+                    (
+                        vendor_session_id.as_deref(),
+                        model.as_deref(),
+                        permission_mode.as_deref(),
+                        at
+                    ),
+                    (Some("vs"), Some("fake-model-2"), Some("plan"), 5000)
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            id.model_report(&record, "hook:claude").is_none(),
+            "the same model is not reported again"
+        );
+        let status = SessionEvent::Status {
+            at: 1,
+            source: None,
+            tags: None,
+            status: crate::contract::AgentStatus {
+                kind: crate::contract::AgentStatusKind::DoneUnread,
+                confidence: crate::contract::Confidence::Exact,
+                detail: String::new(),
+            },
+        };
+        assert!(ends_launch_watch(&status));
+        assert!(!ends_launch_watch(&first));
+    }
+
+    #[test]
+    fn a_chosen_model_effort_and_account_travel_on_the_launch() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let mut i = input("claude", None, hi, dir);
+        i.model_id = Some("opus");
+        i.effort = Some("high");
+        i.profile_env = Some(("CLAUDE_CONFIG_DIR", "/profiles/.claude-work"));
+        let plan = plan_launch(&i).unwrap();
+        let args = &plan.spec.args;
+        let at = args.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(&args[at..at + 4], ["--model", "opus", "--effort", "high"]);
+        assert!(
+            at < args.iter().position(|a| a == "--settings").unwrap(),
+            "before Hermes's own flags"
+        );
+        assert_eq!(
+            plan.spec.env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/profiles/.claude-work")
+        );
+        let stop = plan.spec.stop.as_ref().unwrap();
+        assert_eq!(stop.file, dir.join(STOP_FILE).to_string_lossy());
+        assert_eq!(stop.window_ms, 90_000);
+
+        // A resume keeps the profile (the conversation lives there) and the model.
+        let mut r = input("claude", Some("abc"), hi, dir);
+        r.model_id = Some("opus");
+        r.profile_env = Some(("CLAUDE_CONFIG_DIR", "/profiles/.claude-work"));
+        let plan = plan_launch(&r).unwrap();
+        assert!(plan.spec.args.windows(2).any(|w| w == ["--model", "opus"]));
+        assert_eq!(
+            plan.spec.env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/profiles/.claude-work")
+        );
+
+        // The default model adds no flag.
+        let plan = plan_launch(&input("claude", None, hi, dir)).unwrap();
+        assert!(!plan
+            .spec
+            .args
+            .iter()
+            .any(|a| a == "--model" || a == "--effort"));
+
+        // Codex takes -m and -c model_reasoning_effort="…".
+        let mut c = input("codex", None, hi, dir);
+        c.model_id = Some("gpt-5.6-luna");
+        c.effort = Some("medium");
+        let plan = plan_launch(&c).unwrap();
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w == ["-m", "gpt-5.6-luna"]));
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w == ["-c", "model_reasoning_effort=\"medium\""]));
+    }
+
+    #[test]
+    fn a_login_launch_runs_the_clis_sign_in_in_the_profile_and_nothing_else() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-9");
+        let mut i = input("claude", None, hi, dir);
+        i.login = true;
+        i.profile_env = Some(("CLAUDE_CONFIG_DIR", "/profiles/.claude-work"));
+        i.task = Some("ignored");
+        let plan = plan_launch(&i).unwrap();
+        assert_eq!(
+            (plan.spec.program.as_str(), plan.spec.args.clone()),
+            ("claude", vec!["auth".to_string(), "login".to_string()])
+        );
+        assert_eq!(
+            plan.spec.env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/profiles/.claude-work")
+        );
+        assert!(plan.files.is_empty() && plan.spec.stop.is_none() && plan.spec.fallback.is_none());
+        let mut c = input("codex", None, hi, dir);
+        c.login = true;
+        assert_eq!(
+            plan_launch(&c).unwrap().spec.args,
+            vec!["login".to_string()]
+        );
+        let mut a = input("antigravity", None, hi, dir);
+        a.login = true;
+        assert!(
+            plan_launch(&a).is_none(),
+            "an agent without a sign-in command has no login launch"
+        );
     }
 
     #[test]
@@ -3515,6 +3900,7 @@ mod tests {
             has_initial_context: false,
             last_nudged_version: 0,
             pending_nudge: None,
+            agent_launch: Default::default(),
             ssh_info: None,
             mode: SessionMode::Terminal,
             vendor_session_id: None,

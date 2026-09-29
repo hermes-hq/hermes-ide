@@ -114,6 +114,14 @@ fn error_detail(payload: &Map<String, Value>) -> String {
     String::new()
 }
 
+/// The model the agent says it runs (`model`, or Antigravity's
+/// `modelName`; `hi` keeps a status line's `model.id` as `model`).
+pub fn reported_model(payload: &Map<String, Value>) -> Option<String> {
+    payload_str(payload, "model")
+        .or_else(|| payload_str(payload, "modelName"))
+        .map(cap)
+}
+
 /// The agent's own conversation id, whatever the vendor calls it.
 pub fn vendor_session_id(payload: &Map<String, Value>) -> Option<String> {
     [
@@ -306,13 +314,14 @@ pub fn map_signal_record(
     ) {
         let id = vendor_session_id(payload);
         let mode = payload_str(payload, "permission_mode").map(str::to_string);
-        if id.is_some() || mode.is_some() {
+        let model = reported_model(payload);
+        if id.is_some() || mode.is_some() || model.is_some() {
             out.push(SessionEvent::Identity {
                 at,
                 source: source.clone(),
                 tags: None,
                 vendor_session_id: id,
-                model: None,
+                model,
                 permission_mode: mode,
             });
         }
