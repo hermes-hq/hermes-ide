@@ -110,7 +110,8 @@ export function validateChoice(choice: LaunchChoice, caps: AgentCapabilities | u
   const account = caps.accounts.find((a) => a.id === choice.accountId);
   if (caps.accounts.length > 0 && !account) return { ok: false, field: "account", message: choice.accountId };
   const m = modelOf(caps, choice.modelId);
-  const typed = !m && (caps.acceptsTypedModel || caps.modelSource === "free-text") && choice.modelId.trim() !== "";
+  // A typed model that reads as a flag ("--yolo") is never passed (as validate_launch refuses it).
+  const typed = !m && (caps.acceptsTypedModel || caps.modelSource === "free-text") && choice.modelId.trim() !== "" && !choice.modelId.trim().startsWith("-");
   if (choice.modelId !== "default" && !typed && (!m || !m.available)) return { ok: false, field: "model", message: choice.modelId };
   if (choice.effort) {
     const efforts = m?.efforts ?? caps.models.find((x) => x.id === "default")?.efforts ?? [];

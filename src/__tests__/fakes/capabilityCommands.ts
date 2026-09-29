@@ -12,9 +12,11 @@
 //   - remember_launch_choice says suggestPreset every time a combination
 //     reaches 3 launches in a repository until it is a preset or was
 //     dismissed (the backend does not remember that it was offered);
-//   - the usual combination is the most frequent of the repository's last
-//     30 launches (tie: the latest), else across repositories, else the
-//     catalog default for the first installed agent;
+//   - the usual combination is the one launched most often in the
+//     repository in the last 60 days (tie: the latest; when nothing is that
+//     recent, the most launched ever), else the same across repositories,
+//     else the catalog default for the first installed agent (a launch's
+//     `at` is its time in ms);
 //   - a stored choice comes back checked (reconcileChoice).
 //
 // Test-only: the app never falls back to these lists.
@@ -36,7 +38,8 @@ import { defaultChoice, rememberedForm } from "../../launcher/choice";
 import { validateChoice } from "../../launcher/backend";
 
 export const SUGGEST_AFTER = 3;
-const USUAL_WINDOW = 30;
+/** How far back "recent" reaches for the usual combination (choice.rs RECENT_MS). */
+const RECENT_MS = 60 * 24 * 60 * 60 * 1000;
 
 export interface FakeLaunch {
   repo: string;
@@ -181,9 +184,10 @@ export function fakeCapabilityCommands(doctor: () => DoctorRow[]): FakeCapabilit
           return { value: fakePreview(choice, String(args.task ?? ""), caps(choice.agentId)) };
         case "get_usual_launch_choice": {
           const repo = (args.repo as string | null) ?? null;
-          const sorted = [...self.history].sort((a, b) => a.at - b.at);
-          const inRepo = repo ? mostFrequent(sorted.filter((e) => e.repo === repo).slice(-USUAL_WINDOW)) : null;
-          const pick = inRepo ?? mostFrequent(sorted.slice(-USUAL_WINDOW));
+          const now = Math.max(clock, ...self.history.map((e) => e.at));
+          const usual = (entries: FakeLaunch[]) => mostFrequent(entries.filter((e) => now - e.at <= RECENT_MS)) ?? mostFrequent(entries);
+          const inRepo = repo ? usual(self.history.filter((e) => e.repo === repo)) : null;
+          const pick = inRepo ?? usual(self.history);
           if (pick) return { value: { ...check(pick.choice), source: inRepo ? "repo" : "global", count: pick.count, lastUsedAt: pick.last } };
           const first = listAgents().find((a) => !a.custom && row(a.id)?.installed)?.id ?? "claude";
           const c = caps(first);

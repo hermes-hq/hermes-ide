@@ -548,6 +548,21 @@ describe("TaskLauncher: presets", () => {
     expect(onLaunch.mock.calls[0][0].agents[0]).toMatchObject({ id: "codex", launch: { permissionMode: "auto", agentLaunch: { modelId: null, effort: "high" } } });
   });
 
+  it("a preset whose second agent lost a model says the fallback is about the second agent", async () => {
+    const base = { accountId: "default", extraArgs: "", prefix: "", channels: [], where: { kind: "new-worktree", baseBranch: "", branch: "" }, trackAsFeature: false };
+    h.cap.presets = [
+      { id: "p1", name: "Pair", choice: { ...base, agentId: "claude", approvalModeId: "acceptEdits", modelId: "haiku", effort: null, alsoOn: { ...base, agentId: "codex", approvalModeId: "auto", modelId: "gpt-4-retired", effort: null } } },
+    ];
+    await open();
+    fireEvent.keyDown(task(), { key: "1", ...modKey });
+    await settle();
+    const warning = document.querySelector(".task-launcher-fallback") as HTMLElement;
+    expect(warning).not.toBeNull();
+    expect([...warning.querySelectorAll("li")].map((l) => [l.getAttribute("data-field"), l.textContent])).toEqual([
+      ["model", "Also on: Model gpt-4-retired is not available: using default"],
+    ]);
+  });
+
   it("after 3 identical launches: 'Save as preset?' once; saving it makes a preset chip, and ⌘N opens on it as the usual", async () => {
     const { onLaunch } = await open();
     await pick("model", '[data-model-id="sonnet"]');

@@ -91,6 +91,13 @@ describe("checks", () => {
     expect(effortsFor(caps, "haiku")).toEqual([]);
     expect(effortsFor(fakeCapabilities("opencode", row("opencode")), "anything/typed")).toEqual([]);
   });
+  it("a typed model is taken, but never one that reads as a flag (validate_launch refuses it)", () => {
+    const oc = fakeCapabilities("opencode", row("opencode"));
+    const typed = (modelId: string) => validateChoice(c({ agentId: "opencode", approvalModeId: oc.defaultApprovalModeId ?? "default", modelId }), oc);
+    expect(typed("anthropic/typed-model")).toEqual({ ok: true });
+    expect(typed("--dangerously-skip-permissions")).toMatchObject({ ok: false, field: "model" });
+    expect(typed(" -m")).toMatchObject({ ok: false, field: "model" });
+  });
   it("a stored choice the agent can no longer do falls back and says so", () => {
     const codex = fakeCapabilities("codex", row("codex"));
     const r = reconcileChoice(c({ agentId: "codex", approvalModeId: "plan", modelId: "gpt-4-retired", effort: "ultra" }), codex);

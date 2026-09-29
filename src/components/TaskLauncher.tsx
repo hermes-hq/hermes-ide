@@ -106,7 +106,7 @@ const PROBE_DELAY_MS = 200;
 const RECENT_COUNT = 3;
 type Menu = null | "agent" | "project" | "where" | "approval" | "model" | "effort";
 /** A part of a stored choice that is not available now; "where": a base branch this repository does not have. */
-type LauncherIssue = Omit<ChoiceIssue, "field"> & { field: ChoiceIssue["field"] | "where" };
+type LauncherIssue = Omit<ChoiceIssue, "field" | "code"> & { field: ChoiceIssue["field"] | "where"; code: ChoiceIssue["code"] | "baseBranchMissing" };
 
 function samePath(a: string, b: string): boolean {
   const norm = (p: string) => {
@@ -418,7 +418,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     setChoice({ ...choice, where: { ...choice.where, baseBranch: "" } });
     setFallbacks((f) => ({
       source: f?.source ?? choiceSource.current ?? "repo",
-      list: [...(f?.list ?? []), { field: "where", message: `${was} is not a branch of this repository; using the current branch`, was, now: null }],
+      list: [...(f?.list ?? []), { field: "where", message: `${was} is not a branch of this repository; using the current branch`, was, now: null, code: "baseBranchMissing", params: { branch: was } }],
       launchable: f?.launchable ?? true,
     }));
   }, [choice, probed, gitRoot, branchSet]);
@@ -797,9 +797,12 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       if (f.field === "model" && v === "default") return t("launcher.modelDefault");
       return v;
     };
-    return f.now === null
-      ? t(`launcher.fallbackGone.${f.field}`, { from: name(f.was) })
-      : t(`launcher.fallback.${f.field}`, { from: name(f.was), to: name(f.now) });
+    const text =
+      f.now === null
+        ? t(`launcher.fallbackGone.${f.field}`, { from: name(f.was) })
+        : t(`launcher.fallback.${f.field}`, { from: name(f.was), to: name(f.now) });
+    // About a preset's second agent: said so.
+    return f.alsoOn ? t("agentsSettings.issue.alsoOn", { issue: text }) : text;
   };
 
   // ── rendering pieces ────────────────────────────────────────────
