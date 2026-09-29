@@ -99,6 +99,9 @@ jobs:
               - 'docs/readme-claims.yml'
               - 'scripts/pack-bridge-runtime*.mjs'
               - 'scripts/ci/**'
+              - '.stylelintrc.json'
+              - 'scripts/lint-css*.mjs'
+              - 'scripts/contrast-audit*.mjs'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -179,7 +182,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          fetch-depth: 1
+          # Two commits: HEAD^1 is the base the stylesheet lint compares
+          # against (a PR's merge commit, a merge-group commit, or the
+          # previous commit on main).
+          fetch-depth: 2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: 22
@@ -189,6 +195,15 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint
         run: npx eslint .
+      # Design-system rules (.stylelintrc.json): every line of src/styles/ui
+      # and of new stylesheets, and the added lines of the older ones — no
+      # new raw px, raw colours, hand-rolled shadows or outline:none.
+      - name: Stylesheet lint (new and changed lines)
+        run: node scripts/lint-css.mjs --base HEAD^1
+      # Every theme's control colours meet the contrast rules (also run by
+      # the unit tests; this prints the failing pairs by name).
+      - name: Theme contrast
+        run: node scripts/contrast-audit.mjs
       # Unused files, exports and dependencies (config: knip.json).
       - name: Unused code (knip)
         run: npx knip

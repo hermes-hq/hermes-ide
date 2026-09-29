@@ -28,36 +28,32 @@ out.
 
 ### Verification
 
-When adding a new theme or changing a text token, run:
+`scripts/contrast-audit.mjs` resolves every theme's tokens from
+`tokens.css` and `themes.css` and checks the pairs the controls rely on:
+the four text tokens on every surface (`--bg-0`, `--bg-1`, `--bg-2`,
+`--bg-elevated`, `--popover-bg`), labels on every button fill including
+hover and pressed, placeholders, links, badge inks on their tints, and the
+non-text pairs (field edges, focus ring, brass marks, toggle track and
+knob). Text must reach 4.5:1 and non-text 3:1 in all eight themes; the unit
+tests run it, and CI prints any failing pair by name:
 
 ```bash
-npx pa11y http://localhost:1420 \
-  --standard WCAG2AA \
-  --include-warnings
+node scripts/contrast-audit.mjs          # failures only
+node scripts/contrast-audit.mjs --all    # every pair with its ratio
 ```
-
-Or use the Chrome DevTools Accessibility panel's contrast check on a
-sample of UI elements per theme.
 
 ## Focus ring
 
 Every focusable element MUST display a visible focus ring on every
-theme. The ring is tokenized so each theme can express its archetype:
+theme: one solid ring, 2 px wide and 2 px away from the control, in the
+theme's `--focus-ring` (brass — the operator's hand; ≥ 3:1 on every
+surface).
 
 ```css
 :root {
-  --focus-ring: var(--voice-user);
-  --focus-ring-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 35%, transparent);
-}
-
-html[data-theme="newsprint"] {
-  /* Black-on-white needs a sharp double-rule that survives any backdrop */
-  --focus-ring-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px var(--ink-emphasis);
-}
-
-html[data-theme="phosphor"] {
-  /* CRT theme deserves an accent glow */
-  --focus-ring-shadow: 0 0 0 2px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 }
 ```
 
@@ -65,13 +61,20 @@ Global rule in `base.css`:
 
 ```css
 :focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-shadow);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  box-shadow: none;
 }
 ```
 
-**Rule:** No component may declare `outline: none` without also
-declaring its own `:focus-visible` style with `--focus-ring-shadow`.
+Inside a container that would clip it (a segmented well, a tab bar) the
+ring is drawn inset (`outline-offset: calc(-1 * var(--focus-ring-width))`).
+`--focus-ring-shadow` draws the same ring for the few components that
+still show focus with a box-shadow.
+
+**Rule:** No component may declare `outline: none` without drawing the
+same ring another way; `scripts/lint-css.mjs` rejects a new
+`outline: none`.
 
 ## Motion sensitivity
 

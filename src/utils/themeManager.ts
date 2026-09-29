@@ -160,7 +160,8 @@ const BASE_TOKENS = {
   "--radius": 3,
   "--radius-sm": 3,
   "--radius-lg": 6,
-  "--radius-pill": 10,
+  // --radius-pill is not here: it is an alias of --radius-full (999px, or
+  // 1px in the sharp themes) and must stay a pill at every scale.
   // Icons + buttons — slightly bigger than the previous 18px for comfort
   "--icon-size": 18,            // tab icons (kept at 18 since SVGs render at viewBox 0 0 18 18)
   "--icon-size-sm": 14,
@@ -187,27 +188,23 @@ const THEME_TOKEN_OVERRIDES: Record<string, Partial<Record<string, number>>> = {
     "--radius": 6,
     "--radius-sm": 4,
     "--radius-lg": 10,
-    "--radius-pill": 14,
   },
   "frosted-light": {
     "--radius": 6,
     "--radius-sm": 4,
     "--radius-lg": 10,
-    "--radius-pill": 14,
   },
   // Phosphor — sharp corners (a CRT terminal doesn't round).
   "phosphor": {
     "--radius": 0,
     "--radius-sm": 0,
     "--radius-lg": 1,
-    "--radius-pill": 1,
   },
   // Newsprint — also sharp; broadside grid wants right angles.
   "newsprint": {
     "--radius": 0,
     "--radius-sm": 0,
     "--radius-lg": 0,
-    "--radius-pill": 1,
   },
 };
 

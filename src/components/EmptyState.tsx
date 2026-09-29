@@ -49,7 +49,7 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
           <div className="es-eyebrow">
             <span className="es-eyebrow-dot" aria-hidden="true" />
             HERMES <span className="es-eyebrow-sep" aria-hidden="true">·</span> WORKSHOP
-            <span className="es-eyebrow-sep" aria-hidden="true">·</span> v1.1
+            <span className="es-eyebrow-sep" aria-hidden="true">·</span> <span className="es-eyebrow-version">{`v${__APP_VERSION__}`}</span>
           </div>
 
           <h1 className="es-title" aria-label="Hermes IDE">

@@ -66,6 +66,13 @@ describe("EmptyState — workshop-atelier hero (v1.1 redesign)", () => {
     expect(html).toContain(">II.<");
   });
 
+  it("shows the running app's version in the masthead, not a fixed one", () => {
+    const html = renderEmpty([]);
+    expect(__APP_VERSION__).toMatch(/^\d+\.\d+\.\d+/);
+    expect(html).toContain(`<span class="es-eyebrow-version">v${__APP_VERSION__}</span>`);
+    expect(html).not.toMatch(/·<\/span> v1\.1\b/);
+  });
+
   it("renders the three primary tiles", () => {
     const html = renderEmpty([]);
     expect(html).toContain("New session");

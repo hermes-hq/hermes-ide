@@ -1,0 +1,31 @@
+{
+  "$comment": "Stylesheet rules from docs/design-system/09-migration.md. scripts/lint-css.mjs applies them to every line of src/styles/ui/ and of new stylesheets, and only to added or changed lines of the older ones (their existing lines are the baseline). tokens.css and themes.css are where raw values belong.",
+  "ignoreFiles": ["src/styles/tokens.css", "src/styles/themes.css", "dist/**", "node_modules/**", "src-tauri/**"],
+  "rules": {
+    "color-no-hex": [true, { "message": "Use a colour token (var(--…)) instead of a hex colour (docs/design-system/02-color.md)" }],
+    "color-named": ["never", { "message": "Use a colour token (var(--…)) instead of a named colour" }],
+    "function-disallowed-list": [
+      ["rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch"],
+      { "message": "Use a colour token (var(--…)) instead of a raw colour function" }
+    ],
+    "unit-disallowed-list": [
+      ["px"],
+      { "message": "Use a size token (var(--space-…), var(--control-…), var(--radius-…), var(--text-…)) instead of raw px (docs/design-system/03-spacing-density.md)" }
+    ],
+    "declaration-property-value-disallowed-list": [
+      {
+        "/^outline(-style)?$/": ["none", "0"],
+        "/^font-weight$/": ["/^[1-9]00$/", "bold", "normal"],
+        "/^line-height$/": ["/^[0-9.]+$/"],
+        "/^(transition|transition-timing-function|animation|animation-timing-function)$/": ["/cubic-bezier/"]
+      },
+      { "message": "Not allowed by the design system: no outline:none (draw the focus ring), weights and line heights from tokens, easing from --ease-* (docs/design-system/09-migration.md)" }
+    ],
+    "declaration-property-value-allowed-list": [
+      {
+        "/^box-shadow$/": ["none", "/^var\\(--shadow-[1-4]\\)$/", "/^var\\(--focus-ring-shadow\\)$/"]
+      },
+      { "message": "Shadows come from --shadow-1…4 or --focus-ring-shadow (docs/design-system/04-elevation.md)" }
+    ]
+  }
+}

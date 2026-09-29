@@ -34,7 +34,7 @@ import { writeToSession } from "../api/sessions";
 import { gitStatus, gitMergeStatus, gitResolveConflict, gitAbortMerge } from "../api/git";
 import type { GitProjectStatus, MergeStatus, ConflictStrategy } from "../types/git";
 import type { SessionData } from "../types/session";
-import { reviewDiff, reviewRevertPatch, reviewRevertPreview, reviewWriteFile, type ReviewDiff, type RevertPreview } from "../review/api";
+import { isNotAGitRepository, reviewDiff, reviewRevertPatch, reviewRevertPreview, reviewWriteFile, type ReviewDiff, type RevertPreview } from "../review/api";
 import { parsePatch, type DiffLine, type ParsedFile } from "../review/patch";
 import { riskFlagsFor, type RiskFlag } from "../review/riskFlags";
 import { commentsForSession, encodePaste, pasteLine, reviewMarkdown, type ReviewComment } from "../review/reviewModel";
@@ -148,6 +148,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
 
   const [diff, setDiff] = useState<ReviewDiff | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
+  // The folder is not a git repository (or the session has none): a plain empty state, not an error.
+  const [noRepository, setNoRepository] = useState(false);
   const [loading, setLoading] = useState(true);
   const [turns, setTurns] = useState<TurnEntry[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>("file");
@@ -169,11 +171,13 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   const load = useCallback(async () => {
     if (!repoPath) {
       setLoading(false);
-      setDiffError("this session has no folder");
+      setDiffError(null);
+      setNoRepository(true);
       return;
     }
     setLoading(true);
     setDiffError(null);
+    setNoRepository(false);
     const [diffResult, turnResult] = await Promise.all([
       reviewDiff(repoPath).then((d) => ({ ok: true as const, d })).catch((e: unknown) => ({ ok: false as const, e })),
       Promise.all(
@@ -191,6 +195,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
       ),
     ]);
     if (diffResult.ok) setDiff(diffResult.d);
+    else if (isNotAGitRepository(diffResult.e)) setNoRepository(true);
     else setDiffError(String(diffResult.e));
     setTurns(turnResult.flat().sort((a, b) => a.turn.startedAt - b.turn.startedAt || a.turn.n - b.turn.n));
     setLoading(false);
@@ -675,7 +680,12 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               <nav className="review-nav" aria-label={groupBy === "file" ? t("review.byFile") : t("review.byTurn")}>
                 {loading && <div className="review-empty">{t("review.loading")}</div>}
                 {!loading && diffError && <div className="review-error">{diffError}</div>}
-                {!loading && !diffError && groupBy === "file" && files.length === 0 && <div className="review-empty">{t("review.nothingChanged")}</div>}
+                {!loading && noRepository && (
+                  <div className="review-empty" data-empty="no-repository">
+                    {t("review.noRepository")}
+                  </div>
+                )}
+                {!loading && !diffError && !noRepository && groupBy === "file" && files.length === 0 && <div className="review-empty">{t("review.nothingChanged")}</div>}
                 {!loading && groupBy === "file" &&
                   files.map(({ file }) => (
                     <div
@@ -913,8 +923,12 @@ function RepositoryTab({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="review-repository">
-      {error && <div className="review-error">{error}</div>}
-      {projects.length === 0 && !error && <div className="review-empty">{t("review.noRepository")}</div>}
+      {error && !isNotAGitRepository(error) && <div className="review-error">{error}</div>}
+      {!projects.some((p) => p.is_git_repo) && (!error || isNotAGitRepository(error)) && (
+        <div className="review-empty" data-empty="no-repository">
+          {t("review.noRepository")}
+        </div>
+      )}
       {projects
         .filter((p) => p.is_git_repo)
         .map((p) => {

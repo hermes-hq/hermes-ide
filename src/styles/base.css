@@ -2,25 +2,22 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* Global focus ring — tokenized per theme.
- * Components MAY override their own :focus-visible if they need a
- * scoped style, but they MUST use --focus-ring-shadow as the box-shadow
- * value so theme overrides flow through (see docs/design-system/07-accessibility.md). */
+/* Form controls take the UI font and ink of where they sit, instead of the
+ * browser's system font and black. */
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+/* One focus ring for everything: a solid 2px outline, 2px away from the
+ * control, in the theme's --focus-ring (≥ 3:1 on every surface, checked by
+ * scripts/contrast-audit.mjs). Never remove it without drawing the same
+ * ring another way (see docs/design-system/07-accessibility.md). */
 :focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-shadow);
-}
-
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-shadow);
-}
-
-button:active:not(:disabled) {
-  transform: scale(0.97);
-  transition: transform 0s;
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  box-shadow: none;
 }
 
 html, body, #root {
@@ -140,18 +137,6 @@ kbd {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: var(--radius-sm); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
-
-/* ─── Input Focus Suppression ────────────────────────────── */
-
-.command-palette-input:focus-visible,
-.workspace-scan-input:focus-visible,
-.session-context-menu-input:focus-visible,
-.role-selector-search:focus-visible,
-.style-selector-search:focus-visible,
-.prompt-composer-save-input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
 
 /* ─── Accessibility: Min Touch Targets ───────────────────── */
 

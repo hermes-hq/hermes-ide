@@ -106,8 +106,11 @@ sweep the rest in dedicated migration PRs.
 }
 ```
 
-(These are intent — actual enforcement may stage in to avoid a flood of
-errors on the existing tree. See `package.json` for the live config.)
+The live config is `.stylelintrc.json` (the rules above, plus no raw
+colours, no raw px and no `outline: none`). `node scripts/lint-css.mjs`
+enforces it on every line of `src/styles/ui/` and of new stylesheets, and on
+the added lines of older ones, so existing lines are a baseline that
+migrates with its screen (see 06-components.md · Controls).
 
 ## ThinkingBlock-specific migration
 

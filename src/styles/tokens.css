@@ -76,6 +76,7 @@
   --font-code:      "JetBrains Mono", ui-monospace, "SF Mono", "Fira Code", Menlo, monospace;
   --font-numeric:   var(--font-ui);          /* paired with font-variant-numeric */
   --font-mono:      var(--font-code);        /* legacy alias */
+  --mono:           var(--font-code);        /* legacy alias (agent surface) */
   --font-sans:      var(--font-ui);          /* legacy alias */
 
   /* Font features */
@@ -134,8 +135,8 @@
   /* Ink */
   --text-0: #f5f5f7;   /* ≥ 12:1 contrast vs bg-1 */
   --text-1: #d6d6d9;   /* ≥  7:1 */
-  --text-2: #8e8e93;   /* ≥ 4.5:1 */
-  --text-3: #5c5c61;   /* ≥ 4.5:1 (or 3:1 large) */
+  --text-2: #a1a1a8;   /* ≥ 4.5:1 on every surface and hover fill */
+  --text-3: #939399;   /* ≥ 4.5:1 on every surface and hover fill */
 
   /* Voice */
   --voice-user:  #ffb340;
@@ -193,6 +194,22 @@
   --tool-web:    var(--info);
   --tool-error:  var(--danger);
 
+  /* Legacy colour aliases that were used without ever being defined. */
+  --blue:          var(--info-ink);
+
+  /* Control colour roles. Per-theme values live in themes.css
+   * ("Controls" section); these are the formulas every theme shares. */
+  --popover-bg:           var(--bg-elevated);
+  --quiet-hover-bg:       color-mix(in srgb, var(--text-0) 8%, transparent);
+  --quiet-active-bg:      color-mix(in srgb, var(--text-0) 12%, transparent);
+  --chip-selected-bg:     color-mix(in srgb, var(--primary-bg) 16%, transparent);
+  --chip-selected-border: color-mix(in srgb, var(--primary-bg) 45%, transparent);
+  --danger-border:        color-mix(in srgb, var(--danger-fg) 40%, transparent);
+  --danger-solid-fg:      #ffffff;
+  --danger-solid-bg-hover: color-mix(in srgb, var(--danger-solid-bg) 88%, #000000);
+  --toggle-off-bg:        var(--field-border);
+  --disabled-opacity:     0.45;
+
   /* Shadow tint (per theme) */
   --shadow-tint: #000;
   --scanline-opacity: 0;
@@ -211,8 +228,14 @@
    * FOCUS RING
    * ───────────────────────────────────────────────────────── */
 
+  /* One ring for everything: a solid 2px outline 2px away from the
+   * control (base.css). ≥ 3:1 against every surface — checked by
+   * scripts/contrast-audit.mjs. --focus-ring-shadow is the same ring for
+   * the few components that draw focus with box-shadow. */
   --focus-ring:        var(--voice-user);
-  --focus-ring-shadow: 0 0 0 3px rgba(255, 179, 64, 0.35);
+  --focus-ring-width:  2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring);
 
   /* ─────────────────────────────────────────────────────────
    * SPACING & DENSITY
@@ -239,11 +262,55 @@
   --statusbar-h: calc(28px * var(--density-y));
   --btn-size:    calc(28px * var(--density-y));
 
+  /* Controls (docs/design-system/06-components.md · Controls).
+   * Three heights; md is the default, sm only in dense chrome, lg only on
+   * the welcome / empty state. */
+  --control-h-sm:    calc(28px * var(--density-y));
+  --control-h-md:    calc(32px * var(--density-y));
+  --control-h-lg:    calc(36px * var(--density-y));
+  --control-px-sm:   var(--space-2);
+  --control-px-md:   var(--space-3);
+  --control-px-lg:   var(--space-4);
+  --control-font-sm: var(--text-sm);
+  --control-font-md: var(--text-base);
+  --control-font-lg: var(--text-md);
+  --control-weight:  var(--weight-medium);
+  --control-border-width: 1px;
+  --field-px:        10px;             /* text inset of fields and select triggers */
+  --field-affordance: 32px;            /* room for the select chevron */
+  --textarea-min-h:  76px;
+  --chip-h-sm:       24px;
+  --chip-h-md:       28px;
+  --badge-h:         18px;
+  --counter-h:       16px;
+  --choice-size:     16px;             /* checkbox and radio box */
+  --choice-border-width: 1.5px;
+  --radio-dot:       6px;
+  --check-mark:      10px;
+  --toggle-w:        32px;
+  --toggle-h:        18px;
+  --toggle-knob:     14px;
+  --rail-width:      2px;              /* selected tab / current row */
+  --segment-inset:   2px;              /* padding of the segmented well */
+  --press-offset:    0.5px;            /* a pressed button moves down this much */
+  --popover-max-h:   320px;
+  --popover-offset:  4px;
+  --z-popover:       100000;           /* above every dialog */
+  --z-dev-screen:    10000;            /* the hidden controls preview */
+  --space-1-5:       6px;              /* icon ↔ label gap */
+  --sr-only-size:    1px;              /* visually hidden text */
+  /* The check mark of a checked box, used as a mask so it takes any colour. */
+  --glyph-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.2l2.2 2.2 4.2-4.8' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --space-0-5:       2px;
+
   /* Radius */
+  --radius-xs:   3px;
   --radius:      6px;
   --radius-sm:   4px;
+  --radius-md:   var(--radius);
   --radius-lg:   10px;
-  --radius-pill: 14px;
+  --radius-full: 999px;
+  --radius-pill: var(--radius-full);   /* deprecated alias of --radius-full */
 
   /* Icons. The activity-bar inline SVGs have viewBox="0 0 18 18", so
    * --icon-size stays at 18 to render at native crispness. The -sm and
@@ -251,6 +318,8 @@
   --icon-size:    18px;
   --icon-size-sm: 14px;
   --icon-size-lg: 22px;
+  --icon-size-md: 16px;
+  --icon-size-xs: 12px;                /* the Close × */
 
   /* Layout widths (24px snap grid).
    * Activity bar stays at 36px to match the existing inline-SVG icon

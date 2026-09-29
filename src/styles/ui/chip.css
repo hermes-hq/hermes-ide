@@ -1,0 +1,62 @@
+/* ─── Chip ───────────────────────────────────────────────────────── */
+
+.h-chip {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--chip-h-md);
+  padding: 0 var(--field-px);
+  border: var(--control-border-width) solid var(--control-border);
+  border-radius: var(--radius-full);
+  background: var(--control-bg);
+  color: var(--control-fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--control-weight);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+}
+.h-chip--sm { height: var(--chip-h-sm); }
+
+/* A selectable chip: the whole pill is the button. */
+.h-chip--interactive { padding: 0; }
+.h-chip-button {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--field-px);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.h-chip--interactive:hover:not(.h-chip--selected) { background: var(--control-bg-hover); }
+.h-chip-button:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+
+.h-chip--selected {
+  background: var(--chip-selected-bg);
+  border-color: var(--chip-selected-border);
+  color: var(--chip-selected-fg);
+}
+
+/* Removable: a trailing 16 px × */
+.h-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-size-md);
+  height: var(--icon-size-md);
+  margin-right: calc(-1 * var(--space-1));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+.h-chip--interactive .h-chip-remove { margin: 0 var(--space-1-5) 0 calc(-1 * var(--space-1)); }
+.h-chip-remove svg { width: var(--check-mark); height: var(--check-mark); }
+.h-chip-remove:hover { background: var(--quiet-hover-bg); }

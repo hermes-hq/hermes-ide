@@ -1,0 +1,131 @@
+/* ─── Button · IconButton · CloseButton ──────────────────────────────
+ * docs/design-system/06-components.md · Controls. Tokens only: sizes,
+ * colours and motion all come from tokens.css / themes.css.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.h-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1-5);
+  height: var(--control-h-md);
+  padding: 0 var(--control-px-md);
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-md);
+  font-weight: var(--control-weight);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  cursor: pointer;
+  overflow: hidden;
+  user-select: none;
+  transition:
+    background-color var(--dur-quick) var(--ease-out-soft),
+    border-color var(--dur-quick) var(--ease-out-soft),
+    color var(--dur-quick) var(--ease-out-soft),
+    transform var(--dur-tap) var(--ease-out-soft);
+}
+
+.h-btn--sm { height: var(--control-h-sm); padding: 0 var(--control-px-sm); font-size: var(--control-font-sm); }
+.h-btn--lg { height: var(--control-h-lg); padding: 0 var(--control-px-lg); font-size: var(--control-font-lg); }
+
+.h-btn:active:not(:disabled, [aria-disabled="true"]) { transform: translateY(var(--press-offset)); }
+
+.h-btn-icon { display: inline-flex; flex-shrink: 0; }
+.h-btn-icon svg { width: var(--icon-size-sm); height: var(--icon-size-sm); }
+.h-btn--lg .h-btn-icon svg { width: var(--icon-size-md); height: var(--icon-size-md); }
+
+/* primary — brass; at most one per surface */
+.h-btn--primary { background: var(--primary-bg); color: var(--primary-fg); }
+.h-btn--primary:hover:not(:disabled, [aria-disabled="true"]) { background: var(--primary-bg-hover); }
+.h-btn--primary:active:not(:disabled, [aria-disabled="true"]) { background: var(--primary-bg-active); }
+
+/* secondary — the default */
+.h-btn--secondary { background: var(--control-bg); border-color: var(--control-border); color: var(--control-fg); }
+.h-btn--secondary:hover:not(:disabled, [aria-disabled="true"]) { background: var(--control-bg-hover); }
+.h-btn--secondary:active:not(:disabled, [aria-disabled="true"]) { background: var(--control-bg-active); }
+
+/* quiet — no fill until hovered */
+.h-btn--quiet { background: transparent; color: var(--text-1); }
+.h-btn--quiet:hover:not(:disabled, [aria-disabled="true"]) { background: var(--quiet-hover-bg); color: var(--text-1); }
+.h-btn--quiet:active:not(:disabled, [aria-disabled="true"]) { background: var(--quiet-active-bg); color: var(--text-0); }
+
+/* danger — the secondary shape in the danger ink */
+.h-btn--danger { background: var(--control-bg); border-color: var(--danger-border); color: var(--danger-fg); }
+.h-btn--danger:hover:not(:disabled, [aria-disabled="true"]) { background: var(--danger-dim); }
+
+/* danger-solid — only as the primary of a confirm dialog */
+.h-btn--danger-solid { background: var(--danger-solid-bg); color: var(--danger-solid-fg); }
+.h-btn--danger-solid:hover:not(:disabled, [aria-disabled="true"]) { background: var(--danger-solid-bg-hover); }
+
+/* link — inline "Sign in" / "Check again" */
+.h-btn--link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--link-fg);
+  overflow: visible;
+}
+.h-btn--link:hover:not(:disabled, [aria-disabled="true"]) { text-decoration: underline; }
+.h-btn--link:active:not(:disabled) { transform: none; }
+
+/* disabled — exempt from contrast, as WCAG allows */
+.h-btn:disabled,
+.h-btn[aria-disabled="true"]:not(.h-btn--loading) {
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* loading — the label stays; a brass sweep runs along the bottom edge */
+.h-btn--loading { cursor: progress; }
+.h-btn-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--rail-width);
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  overflow: hidden;
+}
+.h-btn-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 33%;
+  background: currentColor;
+  animation: hermes-progress-sweep 1.2s var(--ease-out-soft) infinite;
+}
+
+/* ─── Icon button ─────────────────────────────────────────────────── */
+
+.h-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  padding: 0;
+  border: var(--control-border-width) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-out-soft),
+    color var(--dur-quick) var(--ease-out-soft);
+}
+.h-icon-btn--sm { width: var(--control-h-sm); height: var(--control-h-sm); }
+.h-icon-btn-icon { display: inline-flex; }
+.h-icon-btn-icon svg { width: var(--icon-size-md); height: var(--icon-size-md); }
+.h-icon-btn--sm .h-icon-btn-icon svg { width: var(--icon-size-sm); height: var(--icon-size-sm); }
+.h-icon-btn:hover:not(:disabled) { background: var(--quiet-hover-bg); color: var(--text-0); }
+.h-icon-btn:active:not(:disabled) { background: var(--quiet-active-bg); color: var(--text-0); }
+.h-icon-btn[aria-pressed="true"] { background: var(--quiet-active-bg); color: var(--text-0); }
+.h-icon-btn:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+
+/* Close: one drawn ×, 12 px, 1.5 stroke */
+.h-close-btn .h-icon-btn-icon svg { width: var(--icon-size-xs); height: var(--icon-size-xs); }

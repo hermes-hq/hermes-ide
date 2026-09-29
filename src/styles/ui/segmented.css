@@ -1,0 +1,44 @@
+/* ─── Segmented: a recessed well, the selected segment a raised keycap ── */
+
+.h-segmented {
+  box-sizing: border-box;
+  display: inline-flex;
+  gap: var(--space-0-5);
+  height: var(--control-h-md);
+  padding: var(--segment-inset);
+  border: var(--control-border-width) solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--field-bg);
+}
+.h-segmented--sm { height: var(--control-h-sm); }
+
+.h-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 var(--control-px-md);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-md);
+  font-weight: var(--control-weight);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-out-soft),
+    color var(--dur-quick) var(--ease-out-soft);
+}
+.h-segmented--sm .h-segment { padding: 0 var(--control-px-sm); font-size: var(--control-font-sm); }
+.h-segment:hover:not(:disabled, [aria-checked="true"]) { color: var(--text-1); }
+.h-segment[aria-checked="true"] {
+  background: var(--selected-bg);
+  color: var(--text-0);
+  box-shadow: var(--shadow-1);
+}
+.h-segment:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+/* Inside the well the ring is drawn inset so the well never clips it. */
+.h-segment:focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }

@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { Bridge, e2eDataDir, inheritedEnv, pngFlatColour, pngPixel, pngPixels, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
+import { Bridge, e2eDataDir, inheritedEnv, pngColourCount, pngFlatColour, pngPixel, pngPixels, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
 
 const TOKEN = "t".repeat(64);
 let server;
@@ -212,6 +212,26 @@ describe("pngFlatColour", () => {
     const file = join(dir, "junk.png");
     writeFileSync(file, "not a png");
     expect(() => pngFlatColour(file)).toThrow(/not a PNG/);
+  });
+});
+
+describe("pngColourCount", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hermes-png-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("counts the pixels near a colour, in RGB, RGBA and greyscale pictures", () => {
+    const rgb = join(dir, "ring.png");
+    // A 2 px brass frame inside a 20x10 dark picture: 2*(20+10)*2 - 16 corner overlaps = 104 px.
+    writeFileSync(rgb, encodePng(20, 10, (x, y) => (x < 2 || x > 17 || y < 2 || y > 7 ? [255, 179, 64] : [26, 28, 32]), { filter: 1 }));
+    expect(pngColourCount(rgb, "#ffb340")).toBe(104);
+    expect(pngColourCount(rgb, "#fab545", 8)).toBe(104);
+    expect(pngColourCount(rgb, "#fab545", 2)).toBe(0);
+    const rgba = join(dir, "rgba.png");
+    writeFileSync(rgba, encodePng(4, 4, () => [10, 20, 30, 255]));
+    expect(pngColourCount(rgba, "#0a141e", 0)).toBe(16);
+    const grey = join(dir, "grey.png");
+    writeFileSync(grey, encodePng(3, 3, (x) => [x === 0 ? 200 : 0]));
+    expect(pngColourCount(grey, "#c8c8c8", 0)).toBe(3);
   });
 });
 

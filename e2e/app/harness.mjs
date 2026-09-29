@@ -325,6 +325,24 @@ export function pngPixels(file, points) {
   });
 }
 
+/**
+ * How many pixels of a PNG are within `tolerance` (per channel) of a colour
+ * ("#rrggbb"), e.g. to find a focus ring by its colour.
+ */
+export function pngColourCount(file, colour, tolerance = 24) {
+  const want = [1, 3, 5].map((i) => parseInt(colour.slice(i, i + 2), 16));
+  const { width, height, channels, rows } = readPng(file);
+  let count = 0;
+  for (let y = 0; y < height; y++) {
+    const row = rows[y];
+    for (let x = 0; x < width * channels; x += channels) {
+      const px = channels < 3 ? [row[x], row[x], row[x]] : [row[x], row[x + 1], row[x + 2]];
+      if (px.every((v, i) => Math.abs(v - want[i]) <= tolerance)) count++;
+    }
+  }
+  return count;
+}
+
 /** Width, height and the unfiltered pixel rows of a PNG. */
 function readPng(file) {
   const buf = readFileSync(file);

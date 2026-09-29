@@ -1,0 +1,89 @@
+/* ─── Input · Textarea · Select trigger · NativeSelect ──────────────
+ * One box for every field. Focus is the global outline ring (base.css);
+ * the border does not change colour on focus.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.h-input {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: var(--control-h-md);
+  padding: 0 var(--field-px);
+  border: var(--control-border-width) solid var(--field-border);
+  border-radius: var(--radius-md);
+  background: var(--field-bg);
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-md);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-tight);
+  transition: border-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-input--sm { height: var(--control-h-sm); font-size: var(--control-font-sm); }
+.h-input::placeholder { color: var(--text-3); opacity: 1; }
+.h-input:hover:not(:disabled, [aria-disabled="true"], .h-input--invalid) { border-color: var(--field-border-hover); }
+.h-input--invalid { border-color: var(--danger-fg); }
+.h-input:disabled,
+.h-input[aria-disabled="true"] { opacity: var(--disabled-opacity); cursor: not-allowed; }
+
+/* Paths, branches, commands */
+.h-input--code {
+  font-family: var(--font-code);
+  font-size: var(--control-font-sm);
+  font-feature-settings: var(--font-code-features);
+}
+
+.h-textarea {
+  display: block;
+  height: auto;
+  min-height: var(--textarea-min-h);
+  padding: var(--space-2) var(--field-px);
+  line-height: var(--leading-normal);
+  resize: vertical;
+}
+
+/* A field with its error message under it */
+.h-field { display: inline-flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.h-field-error { color: var(--danger-fg); font-size: var(--text-sm); line-height: var(--leading-snug); }
+
+/* ─── Select trigger (custom listbox) ─────────────────────────────── */
+
+.h-select-trigger {
+  position: relative;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+}
+.h-select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-select-value--placeholder { color: var(--text-3); }
+.h-select-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-2);
+  pointer-events: none;
+}
+.h-select-chevron svg { width: var(--icon-size-md); height: var(--icon-size-md); }
+.h-select-trigger[data-open] .h-select-chevron { color: var(--text-0); }
+.h-select-trigger--disabled { cursor: not-allowed; }
+
+/* ─── NativeSelect: the OS list, the same trigger look ────────────── */
+
+.h-native-select { position: relative; display: inline-flex; min-width: 0; }
+.h-native-select-field {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding-right: var(--field-affordance);
+  cursor: pointer;
+}
+.h-native-select .h-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  transform: translateY(-50%);
+}
+.h-native-select-field:disabled + .h-select-chevron { opacity: var(--disabled-opacity); }
