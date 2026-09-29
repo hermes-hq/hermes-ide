@@ -19,12 +19,14 @@
 //!   choices and models an account rejected (SQLite, migration 5).
 //! - `signatures`: matching a CLI's output against the catalog's
 //!   `error_signatures` during a launch's first seconds (`watch`).
+//! - `report`: the model an agent reports outside its hooks (Codex's rollout).
 //! - `commands`: the Tauri commands.
 
 pub mod choice;
 pub mod commands;
 pub mod discover;
 pub mod parse;
+pub mod report;
 pub mod signatures;
 pub mod store;
 pub mod types;

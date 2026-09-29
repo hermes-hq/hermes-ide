@@ -16,6 +16,7 @@
 //      model_reasoning_effort="low"): the flags are on the running codex and
 //      one tiny turn ends. A listed model the account refuses is reported
 //      and the next cheapest is tried (Codex's list is not filtered by plan).
+//      The model chip shows the model Codex's rollout reports for the turn.
 //   4. An invalid model: Codex's own refusal shows in the banner, the codex
 //      process is gone well before Codex's minute of reconnecting would end,
 //      and no turn ran.
@@ -162,7 +163,12 @@ try {
   }
   assert(ran, "one explicit model with effort low ran a turn");
   assert(turnEnded(ran.snap), "its turn ended, reported by Codex");
-  log(`  chip: ${JSON.stringify(await chip(bridge, ran.sid))}`);
+  const reported = await bridge.waitFor("the reported model chip", `
+    const row = e2e.first('.session-item[data-session-item-id="${ran.sid}"]');
+    const c = row && row.querySelector('[data-testid="session-model-chip"][data-source="reported"]');
+    return c ? e2e.norm(c.innerText) : null;
+  `, { timeoutMs: 20_000 });
+  assert(reported === ran.model.id, `the model chip shows the model Codex reports in its rollout (${reported})`);
   await bridge.screenshot(join(evidenceDir, "02-explicit.png"));
   await quitAgent(bridge, ran.sid, "/quit");
 

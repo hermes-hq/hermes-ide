@@ -2039,12 +2039,22 @@ impl Identity {
         source: &str,
     ) -> Option<crate::contract::SessionEvent> {
         let model = crate::contract::signal::reported_model(&record.payload)?;
+        self.with_model(model, record.ts.saturating_mul(1000), source)
+    }
+
+    /// The identity with `model`, when it is news.
+    pub fn with_model(
+        &mut self,
+        model: String,
+        at: i64,
+        source: &str,
+    ) -> Option<crate::contract::SessionEvent> {
         if self.model.as_deref() == Some(model.as_str()) {
             return None;
         }
         self.model = Some(model);
         Some(crate::contract::SessionEvent::Identity {
-            at: record.ts.saturating_mul(1000),
+            at,
             source: Some(source.to_string()),
             tags: None,
             vendor_session_id: self.vendor_session_id.clone(),
@@ -2098,6 +2108,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         // complete, so a later report of the model alone (a status line, an
         // Antigravity hook) never hides the conversation id or the mode.
         let mut identity = Identity::default();
+        let reports_in_rollout = crate::agent_catalog::agent(&agent)
+            .and_then(|a| a.capabilities.as_ref())
+            .is_some_and(|c| c.model_report == "rollout");
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
@@ -2129,6 +2142,27 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     }
                     if record.nonce == nonce && !named_model {
                         if let Some(event) = identity.model_report(&record, &source) {
+                            crate::contract::emit_session_event(&app, &session_id, event);
+                        }
+                    }
+                    // An agent that reports its model in a rollout file
+                    // (Codex): read it when a turn completes.
+                    if record.nonce == nonce
+                        && reports_in_rollout
+                        && record.event == "agent-turn-complete"
+                    {
+                        let profile = session
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.agent_launch.profile_env.clone());
+                        let model = crate::contract::signal::vendor_session_id(&record.payload)
+                            .zip(crate::agent_caps::report::codex_home(profile.as_ref()))
+                            .and_then(|(tid, home)| {
+                                crate::agent_caps::report::codex_rollout_model(&home, &tid)
+                            });
+                        if let Some(event) = model.and_then(|m| {
+                            identity.with_model(m, record.ts.saturating_mul(1000), &source)
+                        }) {
                             crate::contract::emit_session_event(&app, &session_id, event);
                         }
                     }
