@@ -84,7 +84,33 @@ describe("usage in the session store (contract addition)", () => {
     expect(getSessionEventSnapshot("s").usage).toBeNull();
     dispatchSessionEvent("s", { type: "usage", at: 1, inputTokens: 10, outputTokens: 2, costUsd: 0.1 });
     dispatchSessionEvent("s", { type: "usage", at: 2, inputTokens: 30, outputTokens: null, costUsd: 0.3 });
-    expect(getSessionEventSnapshot("s").usage).toEqual({ inputTokens: 30, outputTokens: 2, costUsd: 0.3, at: 2 });
+    expect(getSessionEventSnapshot("s").usage).toEqual({ inputTokens: 30, outputTokens: 2, costUsd: 0.3, confidence: "exact", at: 2 });
+  });
+
+  it("an estimate is marked, follows later estimates, and never replaces what the agent reported", () => {
+    dispatchSessionEvent("s", { type: "usage", at: 1, inputTokens: 100, outputTokens: 5, costUsd: 0.2, confidence: "estimated" });
+    expect(getSessionEventSnapshot("s").usage).toEqual({ inputTokens: 100, outputTokens: 5, costUsd: 0.2, confidence: "estimated", at: 1 });
+    dispatchSessionEvent("s", { type: "usage", at: 2, inputTokens: 300, outputTokens: 9, costUsd: null, confidence: "estimated" });
+    // A later estimate without a price keeps the last estimated cost.
+    expect(getSessionEventSnapshot("s").usage?.costUsd).toBe(0.2);
+    // The agent's own report takes over, and its null parts are "n/a", not the estimate's.
+    dispatchSessionEvent("s", { type: "usage", at: 3, inputTokens: 400, outputTokens: null, costUsd: 0.5 });
+    expect(getSessionEventSnapshot("s").usage).toEqual({ inputTokens: 400, outputTokens: null, costUsd: 0.5, confidence: "exact", at: 3 });
+    dispatchSessionEvent("s", { type: "usage", at: 4, inputTokens: 999, outputTokens: 99, costUsd: 9, confidence: "estimated" });
+    expect(getSessionEventSnapshot("s").usage).toEqual({ inputTokens: 400, outputTokens: null, costUsd: 0.5, confidence: "exact", at: 3 });
+  });
+
+  it("the parser keeps an estimate's mark and refuses an unknown one", () => {
+    expect(parseSessionEvent({ type: "usage", at: 1, costUsd: 1, confidence: "estimated" })).toEqual({
+      type: "usage",
+      at: 1,
+      inputTokens: null,
+      outputTokens: null,
+      costUsd: 1,
+      confidence: "estimated",
+    });
+    expect(parseSessionEvent({ type: "usage", at: 1, costUsd: 1, confidence: "guessed" })).toBeNull();
+    expect(parseSessionEvent({ type: "usage", at: 1, costUsd: 1, confidence: null })).toEqual({ type: "usage", at: 1, inputTokens: null, outputTokens: null, costUsd: 1 });
   });
 
   it("the parser refuses a negative, fractional or string amount", () => {

@@ -15,7 +15,7 @@ import { useSyncExternalStore } from "react";
 import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { InboxItem, InboxRaise } from "../agent/contract/inbox";
 import type { FleetCaps } from "./fleetSettings";
-import { evaluateSpendCaps, type CapTrip, type FeatureRef, type SpendSession } from "./spend";
+import { cappableCost, evaluateSpendCaps, type CapTrip, type FeatureRef, type SpendSession } from "./spend";
 
 export interface SpendWatcherDeps {
   readonly sessions: () => readonly { readonly id: string; readonly label: string }[];
@@ -83,7 +83,8 @@ export function createSpendCapWatcher(deps: SpendWatcherDeps): SpendCapWatcher {
       const sessions: SpendSession[] = deps.sessions().map((s) => ({
         id: s.id,
         label: s.label,
-        costUsd: getSessionEventSnapshot(s.id).usage?.costUsd ?? null,
+        // A cap acts only on what the agent itself reported, never on an estimate.
+        costUsd: cappableCost(getSessionEventSnapshot(s.id).usage),
         feature: deps.featureOf(s.id),
       }));
       const caps = deps.caps();
