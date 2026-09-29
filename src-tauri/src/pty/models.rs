@@ -276,6 +276,12 @@ pub struct Session {
     /// `launchHelper`) instead of typing the vendor command into the shell.
     #[serde(skip)]
     pub launch_helper: bool,
+    /// The `launchHelper` flag itself is on (`launch_helper` is also set by
+    /// a launcher task with the flag off). With the flag on, a build that
+    /// cannot launch through the helper refuses the launch and says so;
+    /// with it off, the vendor command is typed as before.
+    #[serde(skip)]
+    pub launch_helper_required: bool,
     /// The per-launch secret the agent's signals must carry (F11). Set when
     /// the launch configured the agent's hooks; an in-band terminal marker
     /// (`OSC 777 ... hermes-signal;v1:<nonce>:<Event>`) is only exact when

@@ -972,7 +972,8 @@ fn hi_file_name() -> &'static str {
 }
 
 /// Where the bundled `hi` helper is: next to the app binary, or in the
-/// app's resource folder. None when this build ships without it.
+/// app's resource folder. None when this build ships without it (or with a
+/// copy that cannot run).
 pub fn hi_path<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     let name = hi_file_name();
     if let Some(dir) = std::env::current_exe()
@@ -980,7 +981,7 @@ pub fn hi_path<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
     {
         let candidate = dir.join(name);
-        if candidate.is_file() {
+        if is_executable_file(&candidate) {
             return Some(candidate);
         }
     }
@@ -988,12 +989,82 @@ pub fn hi_path<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
         // The Windows and Linux bundles carry it as the resource helpers/hi
         // (tauri.<platform>.conf.json).
         for candidate in [resources.join("helpers").join(name), resources.join(name)] {
-            if candidate.is_file() {
+            if is_executable_file(&candidate) {
                 return Some(candidate);
             }
         }
     }
     None
+}
+
+/// A regular file this process may execute (on Windows, any regular file).
+pub fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// The one line a session shows when this build cannot start agents
+/// through the helper. Reinstalling is the fix: the helper ships inside the
+/// app (every bundle carries it since 2.0), so a missing one means a broken
+/// or hand-built install.
+pub const HELPER_MISSING_MESSAGE: &str = "Launch helper missing from this build — reinstall Hermes";
+
+/// Which way an agent starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchRoute {
+    /// `hi run <session>`: the helper at this path.
+    Helper(PathBuf),
+    /// The vendor command typed into the shell, as before the helper: only
+    /// when the person turned the launchHelper flag off, over SSH (no `hi`
+    /// on the remote host; hooks print in-band markers instead) or for an
+    /// agent the catalog has no recipe for.
+    TypeCommand,
+    /// The flag is on and the helper should carry the launch, but this
+    /// build cannot: nothing is typed (a typed launch would drop the task,
+    /// the hooks and the exact status without a word), the session shows
+    /// the message and the log says why.
+    Refused(String),
+}
+
+/// The pure decision behind `prepare_helper_launch`. `launch_helper`: this
+/// launch wants the helper (the flag, or a launcher task with the flag
+/// off); `required`: the flag itself is on. SSH, a missing recipe and the
+/// helper found (or not) decide the rest. A missing helper is refused only
+/// with the flag on: a person who turned it off keeps the typed command
+/// (a launcher task then goes to the clipboard with a notice, as before).
+pub fn launch_route(
+    launch_helper: bool,
+    required: bool,
+    ssh: bool,
+    has_recipe: bool,
+    helper: Option<PathBuf>,
+) -> LaunchRoute {
+    if !launch_helper || ssh || !has_recipe {
+        return LaunchRoute::TypeCommand;
+    }
+    match helper {
+        Some(path) => LaunchRoute::Helper(path),
+        None if required => LaunchRoute::Refused(HELPER_MISSING_MESSAGE.to_string()),
+        None => {
+            log::warn!(
+                "[LAUNCH] hi helper not found next to the app; typing the command instead (launchHelper flag off)"
+            );
+            LaunchRoute::TypeCommand
+        }
+    }
 }
 
 /// `<app data>/launch`: one sub-folder per session with its launch file,
@@ -1056,6 +1127,16 @@ pub fn remove_session_files<R: tauri::Runtime>(app: &AppHandle<R>, session_id: &
 
 // ─── Runtime ─────────────────────────────────────────────────────────
 
+/// What `prepare_helper_launch` decided.
+pub(crate) enum HelperLaunch {
+    /// Type the helper line and watch its spool.
+    Prepared(PreparedLaunch),
+    /// Type the vendor command as before (see `LaunchRoute::TypeCommand`).
+    TypeCommand,
+    /// Start nothing; the session shows this line (see `LaunchRoute::Refused`).
+    Refused(String),
+}
+
 /// What the caller types and watches after `prepare_helper_launch`.
 pub(crate) struct PreparedLaunch {
     /// The shell-neutral line to type: `hi run <session id>`.
@@ -1097,25 +1178,48 @@ fn free_loopback_port() -> u16 {
 }
 
 /// Write the launch file for a session and return the line to type, or None
-/// when the helper path does not apply (flag off, SSH, no recipe, no `hi`),
-/// in which case the caller types the vendor command as before.
+/// when the helper path does not apply (flag off, SSH, no recipe), in which
+/// case the caller types the vendor command as before. With the flag on and
+/// no runnable `hi` (or no launch file), nothing is typed: the caller shows
+/// why on the session instead.
 ///
 /// Mutates the session: records the pre-assigned or resumed conversation id
 /// and marks the agent as launching.
-pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<PreparedLaunch> {
-    if !s.launch_helper || s.ssh_info.is_some() {
-        return None;
-    }
-    let provider = s.ai_provider.clone()?;
-    let agent = recipe_for(&provider)?;
-    let Some(hi) = hi_path(app) else {
-        log::warn!(
-            "[LAUNCH] hi helper not found next to the app; typing the {} command instead",
-            provider
-        );
-        return None;
+pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperLaunch {
+    let Some(provider) = s.ai_provider.clone() else {
+        return HelperLaunch::TypeCommand;
     };
-    let session_dir = launch_dir(app).ok()?.join(&s.id);
+    let recipe = recipe_for(&provider);
+    let hi = match launch_route(
+        s.launch_helper,
+        s.launch_helper_required,
+        s.ssh_info.is_some(),
+        recipe.is_some(),
+        hi_path(app),
+    ) {
+        LaunchRoute::Helper(hi) => hi,
+        LaunchRoute::TypeCommand => return HelperLaunch::TypeCommand,
+        LaunchRoute::Refused(message) => {
+            log::error!(
+                "[LAUNCH] {}: cannot start {} — no runnable hi helper next to the app or in its resources ({}); nothing is typed",
+                s.id,
+                provider,
+                message
+            );
+            return HelperLaunch::Refused(message);
+        }
+    };
+    let agent = recipe.expect("a helper route has a recipe");
+    let session_dir = match launch_dir(app) {
+        Ok(dir) => dir.join(&s.id),
+        Err(e) => {
+            log::error!(
+                "[LAUNCH] {}: no launch folder ({e}); nothing is typed",
+                s.id
+            );
+            return HelperLaunch::Refused(format!("Could not prepare the launch: {e}"));
+        }
+    };
     let context_path = if s.has_initial_context {
         crate::project::attunement::session_context_path(app, &s.id)
             .ok()
@@ -1126,7 +1230,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
     let new_session_id = uuid::Uuid::new_v4().to_string();
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let stream_secret = uuid::Uuid::new_v4().simple().to_string();
-    let plan = plan_launch(&LaunchInput {
+    let Some(plan) = plan_launch(&LaunchInput {
         session_id: &s.id,
         provider: &provider,
         permission_mode: &s.permission_mode,
@@ -1146,16 +1250,17 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         nonce: &nonce,
         stream_port: free_loopback_port(),
         stream_secret: &stream_secret,
-    })?;
+    }) else {
+        return HelperLaunch::TypeCommand;
+    };
 
     if let Err(e) = write_plan(&session_dir, &plan) {
-        log::warn!(
-            "[LAUNCH] could not write the launch file for {}: {}; typing the {} command instead",
+        log::error!(
+            "[LAUNCH] {}: could not write the launch file for {} ({e}); nothing is typed",
             s.id,
-            e,
             provider
         );
-        return None;
+        return HelperLaunch::Refused(format!("Could not write the launch file: {e}"));
     }
     log::info!(
         "[LAUNCH] {} → hi run (agent {}, {}{})",
@@ -1192,7 +1297,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
             .then(|| "resuming the previous conversation".to_string()),
     });
     crate::done_when::set_hook(app, &s.id, plan.check_hook);
-    Some(PreparedLaunch {
+    HelperLaunch::Prepared(PreparedLaunch {
         line: format!("hi run {}", s.id),
         context_in_args: plan.context_in_args,
         watch: SignalWatch {
@@ -1206,9 +1311,24 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
     })
 }
 
+/// The status a session shows when its launch was refused: an exact error
+/// with the one line to act on.
+pub fn refused_launch_event(message: &str) -> crate::contract::SessionEvent {
+    crate::contract::SessionEvent::Status {
+        at: crate::turn_ledger::now_ms(),
+        source: Some("hermes".to_string()),
+        tags: None,
+        status: crate::contract::AgentStatus {
+            kind: crate::contract::AgentStatusKind::Error,
+            confidence: crate::contract::Confidence::Exact,
+            detail: message.to_string(),
+        },
+    }
+}
+
 /// A launcher task (F15) the typed vendor command cannot carry: the helper
-/// launch fell through (no `hi` next to the app, no recipe, the launch file
-/// not written), so without this the task would be lost silently. Only for
+/// never applied to this launch (the flag is off, or the agent has no
+/// recipe), so without this the task would be lost silently. Only for
 /// agents the catalog says take a first prompt; for the others the task
 /// launcher already put the task on the clipboard. Taken, so it is reported
 /// once.
@@ -1890,6 +2010,99 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
 
 #[cfg(test)]
 mod tests {
+    mod launch_route {
+        use super::super::*;
+
+        fn helper() -> Option<PathBuf> {
+            Some(PathBuf::from("/app/Contents/MacOS/hi"))
+        }
+
+        #[test]
+        fn the_helper_carries_the_launch_when_it_is_there() {
+            for required in [true, false] {
+                assert_eq!(
+                    launch_route(true, required, false, true, helper()),
+                    LaunchRoute::Helper(PathBuf::from("/app/Contents/MacOS/hi"))
+                );
+            }
+        }
+
+        #[test]
+        fn with_the_flag_on_a_missing_helper_refuses_the_launch_instead_of_typing() {
+            let route = launch_route(true, true, false, true, None);
+            assert_eq!(
+                route,
+                LaunchRoute::Refused(HELPER_MISSING_MESSAGE.to_string())
+            );
+            assert!(HELPER_MISSING_MESSAGE.contains("reinstall Hermes"));
+        }
+
+        #[test]
+        fn the_typed_command_stays_only_where_the_person_turned_the_flag_off() {
+            // Flag off, no task: typed, helper or not.
+            assert_eq!(
+                launch_route(false, false, false, true, helper()),
+                LaunchRoute::TypeCommand
+            );
+            assert_eq!(
+                launch_route(false, false, false, true, None),
+                LaunchRoute::TypeCommand
+            );
+            // Flag off, a launcher task (the helper is wanted for it): typed
+            // when the helper is missing (the task goes to the clipboard).
+            assert_eq!(
+                launch_route(true, false, false, true, None),
+                LaunchRoute::TypeCommand
+            );
+        }
+
+        #[test]
+        fn ssh_and_agents_without_a_recipe_never_use_the_helper() {
+            // SSH: no `hi` on the remote host; the hooks print markers.
+            assert_eq!(
+                launch_route(true, true, true, true, helper()),
+                LaunchRoute::TypeCommand
+            );
+            // An agent without a recipe, with or without a helper.
+            assert_eq!(
+                launch_route(true, true, false, false, None),
+                LaunchRoute::TypeCommand
+            );
+            assert_eq!(
+                launch_route(true, true, false, false, helper()),
+                LaunchRoute::TypeCommand
+            );
+        }
+
+        #[test]
+        fn a_refused_launch_is_an_exact_error_on_the_session() {
+            match refused_launch_event(HELPER_MISSING_MESSAGE) {
+                crate::contract::SessionEvent::Status { status, source, .. } => {
+                    assert_eq!(status.kind, crate::contract::AgentStatusKind::Error);
+                    assert_eq!(status.confidence, crate::contract::Confidence::Exact);
+                    assert_eq!(status.detail, HELPER_MISSING_MESSAGE);
+                    assert_eq!(source.as_deref(), Some("hermes"));
+                }
+                other => panic!("expected a status event, got {other:?}"),
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_helper_that_cannot_run_counts_as_missing() {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::tempdir().unwrap();
+            let hi = dir.path().join("hi");
+            std::fs::write(&hi, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&hi, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(!is_executable_file(&hi));
+            std::fs::set_permissions(&hi, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(is_executable_file(&hi));
+            assert!(!is_executable_file(dir.path()));
+            assert!(!is_executable_file(&dir.path().join("absent")));
+        }
+    }
+
     use super::*;
 
     fn input<'a>(
@@ -3308,6 +3521,7 @@ mod tests {
             agent_startup: None,
             hosted: false,
             launch_helper: true,
+            launch_helper_required: true,
             signal_nonce: None,
             task_prompt: None,
             seed_prompt: None,

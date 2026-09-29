@@ -702,16 +702,33 @@ struct AgentLaunch {
 fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Option<AgentLaunch> {
     let mut s = session.lock().ok()?;
     let provider = s.ai_provider.clone()?;
-    if let Some(prepared) = crate::pty::launch::prepare_helper_launch(app, &mut s) {
-        return Some(AgentLaunch {
-            cmd: prepared.line,
-            provider,
-            context_in_args: prepared.context_in_args,
-            watch: Some(prepared.watch),
-        });
+    match crate::pty::launch::prepare_helper_launch(app, &mut s) {
+        crate::pty::launch::HelperLaunch::Prepared(prepared) => {
+            return Some(AgentLaunch {
+                cmd: prepared.line,
+                provider,
+                context_in_args: prepared.context_in_args,
+                watch: Some(prepared.watch),
+            });
+        }
+        // This build cannot launch through the helper although it should:
+        // the session says so (an exact error line) and no command is
+        // typed, so nothing starts without its task, hooks and status.
+        crate::pty::launch::HelperLaunch::Refused(message) => {
+            s.task_prompt = None;
+            s.seed_prompt = None;
+            crate::contract::emit_session_event(
+                app,
+                &s.id,
+                crate::pty::launch::refused_launch_event(&message),
+            );
+            return None;
+        }
+        crate::pty::launch::HelperLaunch::TypeCommand => {}
     }
-    // The typed command cannot carry a launcher task: hand it to the UI,
-    // which puts it on the clipboard and says so, instead of dropping it.
+    // The typed command (flag off) cannot carry a launcher task: hand it to
+    // the UI, which puts it on the clipboard and says so, instead of
+    // dropping it.
     if let Some(task) = crate::pty::launch::take_undelivered_task(&mut s) {
         log::warn!(
             "[LAUNCH] {} starts {} without its task (no helper launch); handing the task to the UI",
@@ -811,6 +828,10 @@ pub fn create_session(
     // Feature flag `launchHelper` (evaluated by the frontend): start the
     // agent through the bundled `hi` helper and resume it on restore.
     launch_helper: Option<bool>,
+    // The `launchHelper` flag as such: with it on, a launch the helper
+    // cannot carry (no runnable `hi` in this build) is refused with an
+    // error on the session instead of typed (see `launch.rs`).
+    launch_helper_required: Option<bool>,
     // A restored session's saved conversation id; with the helper on, the
     // agent resumes it (see `launch.rs`).
     vendor_session_id: Option<String>,
@@ -964,6 +985,7 @@ pub fn create_session(
         agent_startup: None,
         hosted: false,
         launch_helper: launch_helper.unwrap_or(false),
+        launch_helper_required: launch_helper_required.unwrap_or(false),
         signal_nonce: None,
         task_prompt: initial_prompt
             .map(|t| t.trim().to_string())

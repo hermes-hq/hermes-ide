@@ -38,6 +38,10 @@ export function createSession(opts: {
   /** Feature flag `launchHelper`: start the agent through the bundled `hi`
    *  helper (shell-neutral launch, resume on restore, startup-prompt guess). */
   launchHelper?: boolean;
+  /** The `launchHelper` flag itself is on: a launch the helper cannot carry
+   *  (no runnable helper in this build) is refused with an error on the
+   *  session instead of typed into the shell. */
+  launchHelperRequired?: boolean;
   /** A restored session's saved conversation id to resume (helper only). */
   vendorSessionId?: string | null;
   /** Feature flag `featureTracks`: put the bundled `hi` helper on the

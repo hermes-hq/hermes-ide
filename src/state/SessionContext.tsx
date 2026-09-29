@@ -1664,6 +1664,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 // Terminal-agent resume (launchHelper flag): hand the saved
                 // conversation id back so the agent continues it.
                 launchHelper: isFeatureFlagEnabled("launchHelper"),
+                launchHelperRequired: isFeatureFlagEnabled("launchHelper"),
                 featureTracks: isFeatureFlagEnabled("featureTracks"),
                 vendorSessionId: saved.vendor_session_id ?? null,
                 // Session host (sessionHost flag): reattach to the program
@@ -1970,6 +1971,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // A launcher task travels as an argument, which only the helper can
         // pass without any shell quoting.
         launchHelper: isFeatureFlagEnabled("launchHelper") || (mode === "terminal" && !!opts?.initialPrompt?.trim()),
+        launchHelperRequired: isFeatureFlagEnabled("launchHelper"),
         featureTracks: isFeatureFlagEnabled("featureTracks"),
         sessionHost: isFeatureFlagEnabled("sessionHost"),
         initialPrompt: mode === "terminal" ? opts?.initialPrompt?.trim() || null : null,
@@ -2439,6 +2441,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           sshJumpHost: session.ssh_info?.jump_host || null,
           mode: "terminal",
           launchHelper: isFeatureFlagEnabled("launchHelper"),
+          launchHelperRequired: isFeatureFlagEnabled("launchHelper"),
           featureTracks: isFeatureFlagEnabled("featureTracks"),
           vendorSessionId: session.vendor_session_id ?? null,
           sessionHost: isFeatureFlagEnabled("sessionHost"),
