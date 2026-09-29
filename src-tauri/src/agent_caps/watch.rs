@@ -14,9 +14,19 @@
 //! A false match stops a working agent, so what Hermes passed to the CLI
 //! (the task, the context prompt) and what the person typed never counts
 //! (`Signatures::find_excluding`), and a resumed conversation's replayed
-//! history is not read at all: on a resume the watch reads only what
-//! follows the person's first Enter (a resumed CLI asks its model nothing
-//! before that).
+//! history is not read at all. A resumed CLI asks its model nothing before
+//! the person's first message, so on a resume the watch reads only what
+//! follows the Enter that sent it. An Enter alone does not say that: it may
+//! answer a prompt the CLI shows before it replays (a trust prompt, a
+//! resume-from-summary choice). The message was sent when this launch's
+//! prompt hook reports it (`message_sent`: Claude Code's `UserPromptSubmit`,
+//! Gemini's `BeforeAgent`); the output since the last Enter before that is
+//! the answer. A launch without such a hook (Codex today) is never read
+//! after a resume, only after `hi`'s fresh start. Lines the replay showed
+//! that look like a refusal are kept, and once the CLI repaints the screen
+//! (a redraw after a resize replays them again) they no longer count; a
+//! refusal worded exactly like one in the history is then missed, which
+//! stops nothing.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -38,6 +48,11 @@ pub const RESUME_WAIT: Duration = Duration::from_secs(12 * 60 * 60);
 /// `MAX_TYPED` characters).
 const MAX_TYPED_LINES: usize = 32;
 const MAX_TYPED: usize = 8 * 1024;
+/// Most refusal-like lines of a replay kept.
+const MAX_REPLAYED: usize = 64;
+/// The vendor events that say this launch sent the person's message to its
+/// model (Claude Code, Codex hooks; Gemini).
+pub const PROMPT_SENT_EVENTS: &[&str] = &["UserPromptSubmit", "BeforeAgent"];
 
 /// How one launch is watched.
 #[derive(Debug, Clone, Default)]
@@ -66,9 +81,17 @@ struct Watch {
     /// Output before this launch's marker (see `launch_marker`) is not
     /// read: a repaint of the screen can replay an earlier refusal.
     armed: bool,
-    /// A resume before the person's first Enter: the CLI is replaying the
-    /// conversation, which is not read.
+    /// A resume before its prompt hook reported the person's first
+    /// message: the CLI is replaying the conversation, which is not read.
     replay: bool,
+    /// While `replay`: an Enter was pressed; `tail` holds what followed the
+    /// last one (the answer, if that Enter sent the message).
+    entered: bool,
+    /// Refusal-like lines the replay showed, squeezed.
+    replayed: Vec<String>,
+    /// The screen was repainted since the message: `replayed` lines no
+    /// longer count.
+    repainted: bool,
     tail: Vec<u8>,
     launch: SessionLaunch,
     /// Passed-in texts and the person's typed lines, squeezed.
@@ -95,9 +118,10 @@ pub fn launch_marker(nonce: &str) -> String {
 }
 
 /// e2e builds only: `HERMES_E2E_REFUSAL_WATCH=off` never watches a launch,
-/// `=unfiltered` reads passed-in text and a resume's replay too. The
-/// negative controls of the CAP scenarios, which prove the watch and its
-/// filters are what the scenarios see.
+/// `=unfiltered` reads passed-in text and a resume's replay too,
+/// `=first-enter` ends a resume's replay at its first Enter (without the
+/// prompt hook). The negative controls of the CAP scenarios, which prove
+/// the watch and its filters are what the scenarios see.
 fn e2e_mode() -> Option<String> {
     #[cfg(feature = "e2e")]
     if std::env::var("HERMES_E2E").ok().as_deref() == Some("1") {
@@ -147,6 +171,9 @@ pub fn start(session_id: &str, agent: &str, how: WatchStart) {
                 until: Instant::now() + if replay { RESUME_WAIT } else { how.window },
                 armed: false,
                 replay,
+                entered: false,
+                replayed: Vec::new(),
+                repainted: false,
                 tail: Vec::new(),
                 launch: how.launch,
                 given,
@@ -158,8 +185,9 @@ pub fn start(session_id: &str, agent: &str, how: WatchStart) {
 }
 
 /// The person typed into the session's terminal. Their lines are never a
-/// refusal, and on a resume their first Enter ends the replay: the watch
-/// reads from here on, for `window`.
+/// refusal. On a resume an Enter closes what the replay showed so far; what
+/// follows it is read if the prompt hook then says a message was sent
+/// (`message_sent`).
 pub fn user_input(session_id: &str, data: &[u8]) {
     let Ok(mut watches) = watches().lock() else {
         return;
@@ -167,7 +195,9 @@ pub fn user_input(session_id: &str, data: &[u8]) {
     let Some(watch) = watches.get_mut(session_id) else {
         return;
     };
-    let unfiltered = e2e_mode().as_deref() == Some("unfiltered");
+    let mode = e2e_mode();
+    let unfiltered = mode.as_deref() == Some("unfiltered");
+    let first_enter = mode.as_deref() == Some("first-enter");
     for c in String::from_utf8_lossy(data).chars() {
         let t = &mut watch.typed;
         match t.escape {
@@ -204,11 +234,18 @@ pub fn user_input(session_id: &str, data: &[u8]) {
                     watch.given.push(line);
                 }
                 if !t.pasting && watch.armed && watch.replay {
-                    // The person sent their first message: what the CLI
-                    // says from here on is about this launch.
-                    watch.replay = false;
+                    // Maybe the first message, maybe the answer to a prompt
+                    // the CLI shows before it replays: what came before
+                    // this Enter is the replay either way.
+                    let text = String::from_utf8_lossy(&watch.tail).into_owned();
+                    keep_replayed(watch, complete_part(&text));
                     watch.tail.clear();
-                    watch.until = Instant::now() + watch.window;
+                    watch.entered = true;
+                    if first_enter {
+                        // The negative control: the pre-fix behaviour.
+                        watch.replay = false;
+                        watch.until = Instant::now() + watch.window;
+                    }
                 }
             }
             '\x7f' | '\x08' => {
@@ -219,6 +256,56 @@ pub fn user_input(session_id: &str, data: &[u8]) {
             _ => {}
         }
     }
+}
+
+/// Remember the refusal-like lines a replay showed (see `repainted`).
+fn keep_replayed(watch: &mut Watch, text: &str) {
+    for line in signatures::for_agent(&watch.agent).matching_lines(text) {
+        if watch.replayed.len() >= MAX_REPLAYED {
+            break;
+        }
+        if !watch.replayed.contains(&line) {
+            watch.replayed.push(line);
+        }
+    }
+}
+
+/// Whether terminal output repaints the screen: erases it, or moves the
+/// cursor to its top-left corner (how a TUI and the Windows console redraw
+/// everything, a resumed transcript included).
+fn repaints(data: &[u8]) -> bool {
+    [
+        &b"\x1b[2J"[..],
+        b"\x1b[3J",
+        b"\x1bc",
+        b"\x1b[H",
+        b"\x1b[1;1H",
+    ]
+    .iter()
+    .any(|seq| find_bytes(data, seq).is_some())
+}
+
+/// This launch's prompt hook reported that the CLI sent the person's
+/// message (see `PROMPT_SENT_EVENTS`): a resume's replay is over, and the
+/// output since the Enter that sent it is read now (it may already hold
+/// the CLI's refusal). Returns the refusal, like `observe`.
+pub fn message_sent(session_id: &str) -> Option<Found> {
+    let mut watches = watches().lock().ok()?;
+    let watch = watches.get_mut(session_id)?;
+    if !watch.replay || !watch.armed {
+        return None;
+    }
+    if !watch.entered {
+        // No Enter seen (the message came some other way): everything so
+        // far is the replay.
+        let text = String::from_utf8_lossy(&watch.tail).into_owned();
+        keep_replayed(watch, complete_part(&text));
+        watch.tail.clear();
+    }
+    watch.replay = false;
+    watch.until = Instant::now() + watch.window;
+    watch.repainted = repaints(&watch.tail);
+    scan(&mut watches, session_id)
 }
 
 /// A resume the vendor did not know was replaced by a fresh start (`hi`'s
@@ -340,17 +427,53 @@ pub fn observe(session_id: &str, data: &[u8]) -> Option<Found> {
         }
     }
     if watch.replay {
-        // A resumed conversation's history: not this launch's words.
-        watch.tail.clear();
+        // A resumed conversation's history: not this launch's words. What
+        // follows an Enter is kept until the prompt hook says whether it
+        // sent the message; a long replay is set aside line by line.
+        if watch.tail.len() > TAIL_BYTES {
+            let text = String::from_utf8_lossy(&watch.tail).into_owned();
+            keep_replayed(watch, complete_part(&text));
+            match watch.tail.iter().rposition(|b| matches!(b, b'\n' | b'\r')) {
+                Some(at) => {
+                    watch.tail.drain(..=at);
+                }
+                None => {
+                    let cut = watch.tail.len() - TAIL_BYTES;
+                    watch.tail.drain(..cut);
+                }
+            }
+        }
         return None;
     }
+    if !watch.repainted && !watch.replayed.is_empty() && repaints(data) {
+        watch.repainted = true;
+    }
+    scan(&mut watches, session_id)
+}
+
+/// Match the watch's output so far; on a refusal, write the stop request
+/// for `hi` and end the watch.
+fn scan(watches: &mut HashMap<String, Watch>, session_id: &str) -> Option<Found> {
+    let watch = watches.get_mut(session_id)?;
     if watch.tail.len() > TAIL_BYTES {
         let cut = watch.tail.len() - TAIL_BYTES;
         watch.tail.drain(..cut);
     }
     let text = String::from_utf8_lossy(&watch.tail).into_owned();
+    let excluded: Vec<String>;
+    let given = if watch.repainted && !watch.replayed.is_empty() {
+        excluded = watch
+            .given
+            .iter()
+            .chain(watch.replayed.iter())
+            .cloned()
+            .collect();
+        &excluded
+    } else {
+        &watch.given
+    };
     let rejection =
-        signatures::for_agent(&watch.agent).find_excluding(complete_part(&text), &watch.given)?;
+        signatures::for_agent(&watch.agent).find_excluding(complete_part(&text), given)?;
     let request = format!(
         "{}\n{}\n",
         watch.nonce,
@@ -568,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn a_resumed_conversation_is_read_only_after_the_first_enter() {
+    fn a_resumed_conversation_is_read_only_after_its_prompt_hook() {
         let dir = tempfile::tempdir().unwrap();
         let stop = dir.path().join("r1");
         launched("cap-r1", "codex", stop.clone(), &[], true);
@@ -578,21 +701,24 @@ mod tests {
             b"earlier:\r\nERROR: unexpected status 401 Unauthorized: Missing bearer\r\n"
         )
         .is_none());
-        // A paste with a line break is not the first message; typing is not either.
+        // A paste with a line break is not an Enter; typing is not either.
         user_input("cap-r1", b"\x1b[200~line one\nline two\x1b[201~hello");
         assert!(observe(
             "cap-r1",
             b"ERROR: unexpected status 401 Unauthorized: Missing bearer\r\n"
         )
         .is_none());
-        assert!(!stop.exists(), "the replay stopped nothing");
-        // Enter: the CLI now answers this launch's first message.
+        // An Enter alone does not say the message was sent: nothing is read.
         user_input("cap-r1", b"\r");
-        let found = observe(
+        assert!(observe(
             "cap-r1",
             b"Reconnecting... 1/5\r\nERROR: unexpected status 401 Unauthorized: Missing bearer\r\n",
         )
-        .unwrap();
+        .is_none());
+        assert!(!stop.exists(), "the replay stopped nothing");
+        // The prompt hook: the output since that Enter is the answer, read
+        // at once (it arrived before the hook's record was read).
+        let found = message_sent("cap-r1").unwrap();
         assert_eq!(found.rejection.reason, RejectReason::SignedOut);
         assert!(stop.exists());
 
@@ -623,14 +749,15 @@ mod tests {
             true,
         );
         user_input("cap-r4", b"hello\r");
+        assert!(message_sent("cap-r4").is_none());
         assert!(observe(
             "cap-r4",
             "hello\r\nNot logged in · Please run /login\r\n".as_bytes()
         )
         .is_some());
 
-        // An Enter before this launch's marker (typed while `hi` starts)
-        // does not end the replay.
+        // An Enter and a prompt hook before this launch's marker (while `hi`
+        // starts) do not end the replay.
         start(
             "cap-r3",
             "codex",
@@ -645,7 +772,91 @@ mod tests {
             },
         );
         user_input("cap-r3", b"\r");
+        assert!(message_sent("cap-r3").is_none());
         assert!(observe("cap-r3", b"\x1b]777;hermes-launch;n\x07Not logged in\r\n").is_none());
         end("cap-r3");
+    }
+
+    const TRUST: &str = "\x1b[?25l\r\n\u{250c}\u{2500}\u{2500}\u{2510}\r\n\u{2502} Do you trust the files in this folder? \u{2502}\r\n\u{2502} [y] Yes, proceed    [n] No, exit \u{2502}\r\n\u{2514}\u{2500}\u{2500}\u{2518}\r\n";
+    const REPLAY: &str = "Trusted. Starting\u{2026}\r\n\r\nfake-cli 0.1 \u{b7} session c1 (resumed from c1)\r\nfake-cli: earlier in this conversation:\r\nprompt: Say hello\r\nNot logged in \u{b7} Please run /login\r\nfake-cli: type q to quit\r\nfake-cli: ready\r\n";
+
+    #[test]
+    fn an_enter_at_a_prompt_shown_before_the_replay_does_not_end_it() {
+        // The re-review's case: a signed-in resume whose history holds the
+        // refusal line; the person accepts the trust prompt with Enter, and
+        // the replay follows that Enter.
+        let dir = tempfile::tempdir().unwrap();
+        let stop = dir.path().join("p1");
+        launched("cap-p1", "claude", stop.clone(), &[], true);
+        assert!(observe("cap-p1", TRUST.as_bytes()).is_none());
+        user_input("cap-p1", b"\r");
+        assert!(observe("cap-p1", REPLAY.as_bytes()).is_none());
+        assert!(
+            !stop.exists(),
+            "the replay after the trust prompt stopped nothing"
+        );
+        assert!(is_watching("cap-p1"));
+        // The first message, answered.
+        user_input("cap-p1", b"hello\r");
+        assert!(observe("cap-p1", "> hello\r\n".as_bytes()).is_none());
+        assert!(message_sent("cap-p1").is_none());
+        assert!(observe("cap-p1", "\u{23fa} Hi! What shall we do?\r\n".as_bytes()).is_none());
+        // A redraw of the whole transcript (a resize) replays the old line:
+        // not a refusal once the screen was repainted.
+        let redraw = format!("\x1b[2J\x1b[3J\x1b[H{REPLAY}> hello\r\n");
+        assert!(observe("cap-p1", redraw.as_bytes()).is_none());
+        assert!(!stop.exists(), "the redraw stopped nothing");
+        // A refusal the history never showed still counts.
+        let found = observe(
+            "cap-p1",
+            b"There's an issue with the selected model (x). It may not exist or you may not have access to it.\r\n",
+        )
+        .unwrap();
+        assert_eq!(found.rejection.reason, RejectReason::Model);
+
+        // Signed out behind the same trust prompt: the refusal of the first
+        // message is caught once its prompt hook is read, even when its
+        // words are the history's (no repaint in between).
+        let stop2 = dir.path().join("p2");
+        launched("cap-p2", "claude", stop2.clone(), &[], true);
+        assert!(observe("cap-p2", TRUST.as_bytes()).is_none());
+        user_input("cap-p2", b"\r");
+        assert!(observe("cap-p2", REPLAY.as_bytes()).is_none());
+        user_input("cap-p2", b"hello\r");
+        assert!(observe(
+            "cap-p2",
+            "> hello\r\n  \u{23bf}  Not logged in \u{b7} Please run /login\r\n".as_bytes()
+        )
+        .is_none());
+        assert!(!stop2.exists(), "nothing before the prompt hook");
+        let found = message_sent("cap-p2").unwrap();
+        assert_eq!(found.rejection.reason, RejectReason::SignedOut);
+        assert_eq!(
+            found.rejection.vendor_message,
+            "Not logged in \u{b7} Please run /login"
+        );
+        assert!(stop2.exists());
+    }
+
+    #[test]
+    fn a_long_replay_is_set_aside_line_by_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let stop = dir.path().join("l1");
+        launched("cap-l1", "claude", stop.clone(), &[], true);
+        let mut history = String::from("Not logged in \u{b7} Please run /login\r\n");
+        while history.len() < 3 * TAIL_BYTES {
+            history.push_str("an earlier answer, long enough to fill the tail\r\n");
+        }
+        assert!(observe("cap-l1", history.as_bytes()).is_none());
+        user_input("cap-l1", b"hi\r");
+        assert!(message_sent("cap-l1").is_none());
+        // Its refusal line was kept: a repaint drawing it again is not read.
+        assert!(observe(
+            "cap-l1",
+            "\x1b[H\x1b[2JNot logged in \u{b7} Please run /login\r\n".as_bytes()
+        )
+        .is_none());
+        assert!(!stop.exists());
+        end("cap-l1");
     }
 }

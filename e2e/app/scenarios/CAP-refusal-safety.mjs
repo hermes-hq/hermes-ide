@@ -21,6 +21,11 @@
 //   3. Signed in again, Try again resumes the SAME conversation (the fake's
 //      --resume id is the first launch's --session-id), and although the
 //      replay now holds the refusal itself, the agent keeps running.
+//   4. After another restart the CLI first shows its trust prompt, and the
+//      person accepts it with Enter; the replay that follows that Enter
+//      (which holds the refusal line) stops nothing, and neither does the
+//      first message, which the CLI sends (its UserPromptSubmit hook runs)
+//      and answers.
 //
 // Negative controls (each must FAIL):
 //   HERMES_E2E_CAP_SAFETY_NEGATIVE=echo    the first app run reads passed-in
@@ -30,6 +35,10 @@
 //     step 2 stops the resumed agent before its first message.
 //   HERMES_E2E_CAP_SAFETY_NEGATIVE=fresh   a relaunch starts a new
 //     conversation (HERMES_E2E_RELAUNCH_FRESH=1): step 3's resume check fails.
+//   HERMES_E2E_CAP_SAFETY_NEGATIVE=trust   the third app run ends a resume's
+//     replay at its first Enter, not at the prompt hook
+//     (HERMES_E2E_REFUSAL_WATCH=first-enter, the behaviour before the fix):
+//     step 4 stops the signed-in agent after the trust prompt.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/CAP-refusal-safety.mjs
@@ -211,6 +220,34 @@ try {
 
   const exit2 = await app.stop();
   assert(exit2.code === 0, "the app quit cleanly again");
+
+  // ─── 4. Enter at a trust prompt shown before the replay ───────────
+  log("step 4: after a restart the CLI asks for trust first; Enter there, then the replay with the refusal line, stops nothing");
+  setFakeMode(f, "trust-prompt prompts");
+  const seen4 = new Set(recordsOf(cl).map((r) => r.file));
+  app = await launch(f, evidenceDir, log, 3, { env: NEGATIVE === "trust" ? { HERMES_E2E_REFUSAL_WATCH: "first-enter" } : {} });
+  bridge = app.bridge;
+  const trusted = await waitForRecord(f, "the claude session resumed behind its trust prompt", (r) => r.env?.HERMES_SESSION_ID === cl && !seen4.has(r.file), 60_000);
+  assert(trusted.resumeIdArg === conversation, `it resumed its conversation (--resume ${trusted.resumeIdArg})`);
+  await waitForTerminalText(bridge, cl, (t) => t.includes("Do you trust the files in this folder?"), "the trust prompt", 30_000);
+  await bridge.screenshot(join(evidenceDir, "05-trust-prompt.png"));
+  await sleep(300);
+  await bridge.typeInTerminal(cl, "\r");
+  await waitForTerminalText(bridge, cl, (t) => t.includes("Trusted. Starting") && t.split("Trusted. Starting").at(-1).includes("earlier in this conversation:") && t.split("Trusted. Starting").at(-1).includes("fake-cli: ready"), "the replay after the trust prompt, then ready", 30_000);
+  const replay4 = (await terminalText(bridge, cl)).split("Trusted. Starting").at(-1);
+  assert(replay4.split("\n").some((r) => r.trim() === "Not logged in · Please run /login"), "the replay after the trust prompt holds the refusal line");
+  await staysRunning(bridge, cl, "the resumed Claude after Enter at its trust prompt");
+  await bridge.screenshot(join(evidenceDir, "06-trusted-replayed.png"));
+
+  log("        the first message is sent and answered");
+  await bridge.typeInTerminal(cl, "hello\r");
+  const sent = await waitForRecord(f, "the first message's prompt hook", (r) => r.file === trusted.file && r.hooksRan?.some((h) => h.event === "UserPromptSubmit"), 20_000);
+  assert(sent.prompts?.includes("hello"), "the CLI took the message (its UserPromptSubmit hook ran)");
+  await staysRunning(bridge, cl, "the resumed Claude after its first message");
+  await bridge.screenshot(join(evidenceDir, "07-first-message.png"));
+
+  const exit3 = await app.stop();
+  assert(exit3.code === 0, "the app quit cleanly a third time");
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

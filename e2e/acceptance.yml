@@ -1138,8 +1138,9 @@ features:
     # fake CLIs that answer like the real ones. Negative control of both
     # scenarios: HERMES_E2E_CAP_NEGATIVE=1 (the fakes); of CAP-launch-choice
     # also HERMES_E2E_CAP_NEGATIVE=product (the app's refusal watch off); of
-    # CAP-refusal-safety HERMES_E2E_CAP_SAFETY_NEGATIVE=echo|replay|fresh
-    # (the app's filters off, or a relaunch that starts fresh).
+    # CAP-refusal-safety HERMES_E2E_CAP_SAFETY_NEGATIVE=echo|replay|fresh|trust
+    # (the app's filters off, a relaunch that starts fresh, or a resume's
+    # replay ended by any Enter instead of the prompt hook).
     # CAP-1's "else the choice labelled requested" chip supersedes F08's "no
     # chip when the agent reports no model" (the 2026-09-29 launch contract).
     status: partial
@@ -1166,7 +1167,7 @@ features:
         text: "The usual combination of a repository is its most frequent recent launch (tie: the most recent), else the global usual, else the catalog default; stored choices are checked on read; Save as preset? comes once after three identical launches"
         scenarios: [CAP-agents-settings.mjs]
       CAP-8:
-        text: "Only the CLI's own refusal stops a launch: a task, the person's typing, an agent's answer or a resumed conversation's replay that shows a refusal's words stops nothing"
+        text: "Only the CLI's own refusal stops a launch: a task, the person's typing, an agent's answer or a resumed conversation's replay that shows a refusal's words stops nothing, also when the replay follows an Enter that answered the CLI's trust prompt"
         scenarios: [CAP-refusal-safety.mjs]
       CAP-9:
         text: "A refused resume (for example, signed out since the last run) is refused at its first message, and Try again resumes the same conversation"

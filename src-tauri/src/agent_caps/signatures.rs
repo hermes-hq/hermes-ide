@@ -220,6 +220,23 @@ impl Signatures {
     }
 }
 
+impl Signatures {
+    /// Every line of `text` one of the signatures matches, squeezed (see
+    /// `squeeze`): what a resumed conversation's replay showed, so that the
+    /// same line drawn again later is not read as a new refusal.
+    pub fn matching_lines(&self, text: &str) -> Vec<String> {
+        if self.rules.is_empty() {
+            return Vec::new();
+        }
+        logical_lines(output_lines(text))
+            .into_iter()
+            .filter(|line| self.rules.iter().any(|(re, _)| re.is_match(line)))
+            .map(|line| squeeze(&line))
+            .filter(|line| !line.is_empty())
+            .collect()
+    }
+}
+
 /// A TUI wraps a long message at the terminal's width: a line that stops
 /// mid-sentence and a next line that goes on in lower case are one line
 /// (at most four rows joined), so a pattern that spans the wrap still

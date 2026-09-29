@@ -2160,6 +2160,15 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 // told as a `limit` event and a `limited` status; its plain
                 // meaning (an error for the rate-limited stop, an attention
                 // for a quota notice) is not sent as well.
+                if record.nonce == nonce
+                    && crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&record.event.as_str())
+                {
+                    // The CLI sent the person's message: a resume's replay
+                    // is over, and its answer may already be a refusal.
+                    if let Some(found) = crate::agent_caps::watch::message_sent(&session_id) {
+                        crate::agent_caps::commands::on_rejected(&app, &session_id, found);
+                    }
+                }
                 if record.nonce == nonce && ran_a_tool(&record.event) {
                     // The model answered with a tool call: the CLI took the
                     // launch, and what the tool prints is not its error.

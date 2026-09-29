@@ -127,7 +127,9 @@
 // A resumed conversation is refused like the real TUIs refuse it: the
 // history is replayed and "ready" shown, and the refusal comes only when
 // the first message is sent (Enter), since a resumed CLI asks its model
-// nothing before that.
+// nothing before that. Like Claude Code 2.1 signed out, it runs its
+// SessionStart hooks at the start and its UserPromptSubmit hooks with that
+// message, right before the refusal (nothing else runs).
 //
 // Conversation history (with HERMES_FAKE_DIR): what a conversation showed —
 // its prompt, the answers of `quote-errors`, the prompts typed, a refusal —
@@ -878,7 +880,9 @@ async function main() {
 	}
 	if (refusal) {
 		// A resumed conversation: refused at the first message.
+		await runHooks("SessionStart", { source: "resume" });
 		out("fake-cli: ready\r\n");
+		let typed = "";
 		for (;;) {
 			const key = await nextKey();
 			if (key === null || key === "\x03") {
@@ -886,8 +890,10 @@ async function main() {
 				return;
 			}
 			if (key === "\r" || key === "\n") break;
+			typed += key;
 			out(key);
 		}
+		await runHooks("UserPromptSubmit", { prompt: typed });
 		await refuse(refusal);
 		return;
 	}

@@ -676,7 +676,7 @@ describe("fake vendor CLI: models, effort and accounts (2.0 launch contract)", (
 
 	it("a resumed conversation replays its history and is refused only at its first message", async () => {
 		const dir = tmp();
-		const { file, marks } = hookSettings(dir);
+		const { file, marks } = hookSettings(dir, ["UserPromptSubmit"]);
 		const task = "Users report this error after SSO today: Not logged in · Please run /login appears";
 		const first = await run(["--session-id", "h-1", "--settings", file, task], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "wrap-prompt quote-errors" }, keys: "q" });
 		expect(first.code).toBe(0);
@@ -695,8 +695,14 @@ describe("fake vendor CLI: models, effort and accounts (2.0 launch contract)", (
 		const again = await run(["--resume", "h-1", "--settings", file], { env: { HERMES_FAKE_DIR: dir }, keys: "q" });
 		expect(again.code).toBe(0);
 		expect(again.stdout.split("fake-cli: ready")[0].match(/Not logged in · Please run \/login/g).length).toBe(3);
-		// A refused resume ran no hook.
-		expect(readFileSync(marks, "utf8").split("\n").filter((l) => l.startsWith("SessionStart ")).length).toBe(2);
+		// A refused resume ran its SessionStart hooks, and its
+		// UserPromptSubmit hooks with the first message only (like Claude
+		// Code 2.1 signed out); nothing else.
+		const ran = readFileSync(marks, "utf8").split("\n").filter(Boolean).map((l) => l.split(" ")[0]);
+		expect(ran.filter((e) => e === "SessionStart").length).toBe(4);
+		const prompts = readFileSync(marks, "utf8").split("\n").filter((l) => l.startsWith("UserPromptSubmit "));
+		expect(prompts.length).toBe(1);
+		expect(JSON.parse(prompts[0].slice("UserPromptSubmit ".length)).prompt).toBe("hi");
 	}, 30_000);
 
 	it("an empty profile refuses the launch as signed out", async () => {
