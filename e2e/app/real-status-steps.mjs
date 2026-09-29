@@ -30,7 +30,7 @@ import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CI, REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "./harness.mjs";
+import { IS_CI, createLogger, finishScenario, launchApp, outDir, sleep } from "./harness.mjs";
 
 /** How long after its hook a state must be on the strip. */
 export const WITHIN_MS = 2000;
@@ -66,62 +66,6 @@ function pressKey(bridge, sessionId, name) {
 }
 
 // ─── The UI path: welcome, ⌘N, the launcher ──────────────────────────
-
-/** Every feature flag's id, from the registry the app is built from. */
-function allFlagIds() {
-  const registry = readFileSync(join(REPO_ROOT, "src", "featureFlags", "registry.ts"), "utf8");
-  return [...registry.matchAll(/^\s+id: "([A-Za-z0-9]+)",$/gm)].map((m) => m[1]);
-}
-
-/** The classic first-launch welcome (the 2.0 flags off). */
-async function classicWelcome(bridge) {
-  await bridge.waitFor("the welcome dialog", `return !!e2e.first(".onboarding-dialog");`, { timeoutMs: 30_000 });
-  for (let i = 0; i < 3; i++) {
-    await bridge.click(".onboarding-actions .onboarding-btn-primary");
-    await sleep(150);
-  }
-  await bridge.waitFor("the privacy screen", `return e2e.all(".onboarding-privacy-checkbox input").length === 2;`);
-  await bridge.clickWhenReady(`
-    const [analytics, policy] = e2e.all(".onboarding-privacy-checkbox input");
-    if (analytics.checked) e2e.click(analytics);
-    if (!policy.checked) e2e.click(policy);
-    return true;
-  `);
-  await bridge.waitFor("the Finish button to become enabled", `const b = e2e.first(".onboarding-actions .onboarding-btn-primary"); return !!b && !b.disabled;`);
-  await bridge.click(".onboarding-actions .onboarding-btn-primary");
-  await bridge.waitFor("the welcome dialog to close", `return !e2e.first(".onboarding-backdrop");`);
-  await sleep(300);
-}
-
-async function dismissWhatsNew(bridge) {
-  if (await bridge.exists(".whatsnew-backdrop")) {
-    await bridge.click(".whatsnew-footer .whatsnew-btn-primary");
-    await bridge.waitFor("the what's-new dialog to close", `return !e2e.first(".whatsnew-backdrop");`);
-  }
-}
-
-/**
- * The app as a 2.0 user has it: every feature flag on. A build whose flags
- * are still off by default gets them from the stored overrides (what the
- * hidden Flags tab writes), read at the next launch.
- */
-async function launchWithEveryFlag(evidenceDir, log) {
-  const first = await launchApp({ runDir: join(evidenceDir, "run-0"), log, home: "real", resetData: true, tmp: "shared" });
-  if (await first.bridge.exists(".setup-dialog")) await threeStepWelcome(first.bridge);
-  else await classicWelcome(first.bridge);
-  await dismissWhatsNew(first.bridge);
-  const overrides = Object.fromEntries(allFlagIds().map((id) => [id, true]));
-  log(`  every flag on: ${Object.keys(overrides).join(", ")}`);
-  await first.bridge.eval(`
-    await window.__TAURI_INTERNALS__.invoke("set_setting", { key: "feature_flag_overrides", value: ${JSON.stringify(JSON.stringify(overrides))} });
-    return true;
-  `);
-  await first.stop();
-  const app = await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: false, tmp: "shared" });
-  await app.bridge.waitFor("the app UI to be ready", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop, .setup-backdrop");`, { timeoutMs: 30_000 });
-  await dismissWhatsNew(app.bridge);
-  return app;
-}
 
 async function threeStepWelcome(bridge) {
   await bridge.waitFor("the first-launch welcome", `return !!e2e.first(".setup-dialog, .onboarding-dialog");`, { timeoutMs: 30_000 });
@@ -359,8 +303,9 @@ export async function runRealStatus(cfg) {
   try {
     log(`scenario: ${cfg.scenario}   ${cfg.bin}: ${binPath} (${version})   repo: ${repo}`);
     log(`  corpus: ${corpus}`);
-    app = await launchWithEveryFlag(evidenceDir, log);
+    app = await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, tmp: "shared", flagDefaults: null });
     const { bridge } = app;
+    await threeStepWelcome(bridge);
 
     log(`step 1: ⌘N, the task, ${cfg.agentId} in a terminal`);
     await openLauncher(bridge);

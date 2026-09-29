@@ -25,9 +25,6 @@
 //      back within two seconds ("working · guessed"); the tool's own report
 //      follows when the command ends.
 //
-// The 2.0 flags this needs (launch helper, attention inbox, agent catalog)
-// are switched on in Settings' stored overrides, then the app relaunched.
-//
 // Negative controls (each must end in RESULT: FAIL):
 //   HERMES_E2E_OSL_NO_SHELL=1   the fakes run their "command" without a
 //                               shell (HERMES_FAKE_TOOL_SHELL=0), so there
@@ -253,24 +250,13 @@ try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   fake agents: ${fakeBin}   negative control (no shell): ${NO_SHELL}   part C only: ${AGY_ONLY}`);
   undoRegistryPath = addFakeBinToRegistryPath();
   const env = { HERMES_FAKE_DIR: recordDir, HERMES_FAKE_TOOL_MS: String(TOOL_MS), ...(NO_SHELL ? { HERMES_FAKE_TOOL_SHELL: "0" } : {}) };
-  const launch = (run, first) =>
-    launchApp(
-      onWindows
-        ? { runDir: join(evidenceDir, `run-${run}`), log, env, home: "real", resetData: first }
-        : { runDir: join(evidenceDir, `run-${run}`), log, env, home: "private", homeDir: privateHome },
-    );
-  app = await launch(1, true);
-  await completeOnboarding(app.bridge);
-  log("switching on the 2.0 flags this needs (stored overrides, read at the next launch)");
-  await app.bridge.eval(`
-    await window.__TAURI_INTERNALS__.invoke("set_setting", { key: "feature_flag_overrides", value: ${JSON.stringify(JSON.stringify({ launchHelper: true, attentionInbox: true, agentCatalog: true }))} });
-    return true;
-  `);
-  await app.stop();
-  app = await launch(2, false);
+  app = await launchApp(
+    onWindows
+      ? { runDir: join(evidenceDir, "run-1"), log, env, home: "real", resetData: true }
+      : { runDir: join(evidenceDir, "run-1"), log, env, home: "private", homeDir: privateHome },
+  );
   const { bridge } = app;
-  await bridge.waitFor("the app UI to be ready", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop");`, { timeoutMs: 30_000 });
-  await dismissWhatsNew(bridge);
+  await completeOnboarding(bridge);
   // Away (not looking at the window): a blocked item would notify.
   await bridge.eval(`window.__HERMES_E2E__.setWindowFocused(false); return true;`);
 
