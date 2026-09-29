@@ -366,3 +366,120 @@ describe("ReviewDesk: what the git panel it replaces offered", () => {
     expect(screen.getByRole("tab", { name: "Worktrees" })).toBeInTheDocument();
   });
 });
+
+// Regression audit item 4 (#126, #177): the git actions the replaced panels
+// offered live on in the desk's Changes section.
+describe("ReviewDesk: Changes", () => {
+  const file = (path: string, area: "staged" | "unstaged" | "untracked", status = area === "untracked" ? "untracked" : "modified") => ({ path, area, status, old_path: null });
+  const REPO = {
+    project_id: "p1",
+    project_name: "repo",
+    project_path: "/fixture/repo",
+    is_git_repo: true,
+    branch: "hermes/task",
+    remote_branch: null,
+    ahead: 0,
+    behind: 0,
+    files: [file("src/app.js", "staged"), file("package-lock.json", "unstaged"), file("notes.txt", "untracked")],
+    has_conflicts: false,
+    stash_count: 0,
+    error: null,
+  };
+  const BRANCHES = [
+    { name: "hermes/task", is_current: true, is_remote: false, upstream: null, ahead: 0, behind: 0, last_commit_summary: null },
+    { name: "main", is_current: false, is_remote: false, upstream: null, ahead: 0, behind: 0, last_commit_summary: null },
+  ];
+  const ok = () => ({ success: true, message: "" });
+  const calls = (cmd: string) => h.invoke.mock.calls.filter((c) => c[0] === cmd).map((c) => c[1]);
+  const section = () => document.querySelector<HTMLElement>('.review-changes .git-project-section[data-project-id="p1"]')!;
+  const row = (path: string) => section().querySelector<HTMLElement>(`.git-file-row[data-path="${path}"]`)!;
+  const button = (path: string, name: string) => [...row(path).querySelectorAll("button")].find((b) => b.textContent === name)!;
+
+  beforeEach(() => {
+    backend({
+      git_status: () => ({ projects: [REPO], timestamp: 0 }),
+      get_settings: () => ({}),
+      git_merge_status: () => ({ in_merge: false, conflicted_files: [], merge_message: null }),
+      git_stage: ok,
+      git_unstage: ok,
+      git_discard_changes: ok,
+      git_commit: () => ({ success: true, message: "Committed" }),
+      git_push: () => ({ success: true, message: "Pushed to origin" }),
+      git_pull: () => ({ success: true, message: "Already up to date" }),
+      git_list_branches: () => BRANCHES,
+      git_branches_ahead_behind: () => ({}),
+      git_checkout_branch: () => ({ success: true, message: "Switched to main" }),
+    });
+  });
+
+  it("sits at the top of the Review tab, per file, with history and stash left to the Repository tab", async () => {
+    await open();
+    await waitFor(() => expect(section()).toBeInTheDocument());
+    const nav = document.querySelector(".review-nav")!;
+    expect(nav.firstElementChild?.classList.contains("review-changes")).toBe(true);
+    expect(screen.getByText("Changes", { selector: ".review-changes-title" })).toBeInTheDocument();
+    expect(row("src/app.js").dataset.area).toBe("staged");
+    expect(row("package-lock.json").dataset.area).toBe("unstaged");
+    expect(section().querySelector(".git-view-toggle")).toBeNull();
+    expect(section().querySelector('[data-testid="git-stash-stub"]')).toBeNull();
+  });
+
+  it("stages and unstages one file, and the review reloads", async () => {
+    await open();
+    await waitFor(() => expect(section()).toBeInTheDocument());
+    const diffsBefore = calls("review_diff").length;
+    fireEvent.click(button("package-lock.json", "Stage"));
+    await waitFor(() => expect(calls("git_stage")).toEqual([{ sessionId: "sess-a", projectId: "p1", paths: ["package-lock.json"] }]));
+    await waitFor(() => expect(calls("review_diff").length).toBeGreaterThan(diffsBefore));
+    fireEvent.click(button("src/app.js", "Unstage"));
+    await waitFor(() => expect(calls("git_unstage")).toEqual([{ sessionId: "sess-a", projectId: "p1", paths: ["src/app.js"] }]));
+  });
+
+  it("discards only after the confirm, and Cancel discards nothing", async () => {
+    await open();
+    await waitFor(() => expect(section()).toBeInTheDocument());
+    fireEvent.click(button("package-lock.json", "Discard"));
+    expect(calls("git_discard_changes")).toEqual([]);
+    fireEvent.click(button("package-lock.json", "Cancel"));
+    expect(calls("git_discard_changes")).toEqual([]);
+    fireEvent.click(button("package-lock.json", "Discard"));
+    fireEvent.click(button("package-lock.json", "Confirm"));
+    await waitFor(() => expect(calls("git_discard_changes")).toEqual([{ sessionId: "sess-a", projectId: "p1", paths: ["package-lock.json"] }]));
+  });
+
+  it("commits with the message drafted from the turns, then pushes and pulls", async () => {
+    await open();
+    const box = await waitFor(() => {
+      const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-input")!;
+      expect(el.value).toContain("2 turns:");
+      return el;
+    });
+    // Subject from the branch, then one line per turn (as the Land sheet drafts it).
+    expect(box.value.split("\n")[0]).toBe("Task");
+    expect(box.value).toContain("- Turn 1: 1 file, +1 -1 (src/app.js)");
+    expect(box.value).toContain("- Turn 2: 1 file, +1 -1 (package-lock.json)");
+    expect(screen.getByText("Commit message (drafted from the turns)")).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: "Fix the flaky login test" } });
+    fireEvent.click([...section().querySelectorAll("button")].find((b) => b.textContent === "Commit")!);
+    await waitFor(() => expect(calls("git_commit")).toHaveLength(1));
+    expect(calls("git_commit")[0]).toMatchObject({ sessionId: "sess-a", projectId: "p1", message: "Fix the flaky login test" });
+    expect(await screen.findByText("Committed successfully")).toBeInTheDocument();
+    fireEvent.click(section().querySelector(".git-btn-push")!);
+    await waitFor(() => expect(calls("git_push")).toEqual([{ sessionId: "sess-a", projectId: "p1", remote: null }]));
+    fireEvent.click(section().querySelector(".git-btn-pull")!);
+    await waitFor(() => expect(calls("git_pull")).toEqual([{ sessionId: "sess-a", projectId: "p1", remote: null }]));
+  });
+
+  it("switches the branch from the branch name", async () => {
+    await open();
+    await waitFor(() => expect(section()).toBeInTheDocument());
+    fireEvent.click(section().querySelector(".git-project-branch-clickable")!);
+    const main = await waitFor(() => {
+      const el = [...document.querySelectorAll<HTMLElement>(".git-branch-item")].find((b) => b.textContent?.includes("main"));
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.click(main);
+    await waitFor(() => expect(calls("git_checkout_branch")).toEqual([{ sessionId: "sess-a", projectId: "p1", name: "main" }]));
+  });
+});

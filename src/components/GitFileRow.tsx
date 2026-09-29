@@ -34,7 +34,7 @@ export const GitFileRow = memo(function GitFileRow({
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   return (
-    <div className="git-file-row" onClick={() => onClick?.(file)} onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); e.stopPropagation(); onContextMenu(e, file); } }}>
+    <div className="git-file-row" data-path={file.path} data-area={file.area} onClick={() => onClick?.(file)} onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); e.stopPropagation(); onContextMenu(e, file); } }}>
       <span className={`git-file-status ${info.className}`}>{info.letter}</span>
       <span className="git-file-path" title={file.path}>
         {file.path}
