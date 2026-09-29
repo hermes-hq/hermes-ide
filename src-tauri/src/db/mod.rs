@@ -1920,6 +1920,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "ai_agent_prefixes",
     // Per-agent Terminal / Agent view choice (JSON map of providerId -> "terminal" | "agent")
     "session_mode_by_provider",
+    // Task launcher (F15): what each launched task was (task, track, done-when), per session
+    "task_launches",
     // Keyboard shortcuts
     "command_palette_shortcut",
     // Plugin updates
@@ -2910,6 +2912,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "away_notify_url",
     // Worktree recipes the user allowed to run (project id -> file hash)
     "worktree_recipe_trust",
+    // Task launcher records — per session, with task text and branch names
+    "task_launches",
 ];
 
 /// Validate a settings file path for export or import.

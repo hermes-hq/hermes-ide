@@ -1,0 +1,238 @@
+/**
+ * F15 — the task launcher's decisions (src/launcher/taskLauncher.ts):
+ * branch and label from the task, the blocking rows, the Full-track
+ * feature.md (read back through the C0 contract parser), the launch records
+ * and the preselected agent.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  MAX_TASK_LAUNCHES,
+  appendTaskLaunches,
+  blockingRows,
+  canLaunch,
+  doneWhenFromToml,
+  featureMarkdown,
+  formatBytes,
+  isUsableBranchName,
+  nextFreeBranch,
+  parseTaskLaunches,
+  pickDefaultAgent,
+  secondAgentBranch,
+  taskBranch,
+  taskLabel,
+  taskSlug,
+  type LaunchCheckInput,
+  type TaskLaunchRecord,
+} from "../launcher/taskLauncher";
+import { parseFeatureFrontMatter } from "../agent/contract/featureFrontMatter";
+import type { DoctorRow } from "../api/doctor";
+
+function row(id: string, over: Partial<DoctorRow> = {}): DoctorRow {
+  return {
+    id,
+    name: id,
+    installed: true,
+    version: "1.0.0",
+    min_version: null,
+    version_ok: null,
+    signed_in: "yes",
+    signals: "exact",
+    resume: true,
+    retired: false,
+    retired_note: null,
+    beta: false,
+    ...over,
+  };
+}
+
+const GB = 1024 ** 3;
+
+function check(over: Partial<LaunchCheckInput> = {}): LaunchCheckInput {
+  return {
+    agents: [{ id: "claude", branch: "hermes/fix-login" }],
+    doctor: { claude: row("claude") },
+    repoPath: "/fixture-home/repo",
+    gitRoot: "/fixture-home/repo",
+    branchExists: () => false,
+    disk: { freeBytes: 50 * GB, requiredBytes: 10 * GB, belowThreshold: false },
+    ...over,
+  };
+}
+
+describe("branch and label from the task", () => {
+  it("takes the first words as a branch-safe slug", () => {
+    expect(taskSlug("Fix the flaky login test on CI please")).toBe("fix-the-flaky-login-test-on");
+    expect(taskBranch("Add dark mode")).toBe("hermes/add-dark-mode");
+    expect(taskBranch("Ünïcode café — naïve")).toBe("hermes/unicode-cafe-naive");
+    expect(taskBranch("   ")).toBe("hermes/task");
+    expect(taskBranch("!!! ???")).toBe("hermes/task");
+  });
+
+  it("keeps the slug short enough for a branch", () => {
+    const slug = taskSlug("a".repeat(30) + " " + "b".repeat(30));
+    expect(slug.length).toBeLessThanOrEqual(40);
+    expect(slug.endsWith("-")).toBe(false);
+  });
+
+  it("names the second agent's branch after the agent", () => {
+    expect(secondAgentBranch("hermes/fix-login", "codex")).toBe("hermes/fix-login-codex");
+  });
+
+  it("suggests the first free -n branch", () => {
+    const taken = new Set(["hermes/x", "hermes/x-2"]);
+    expect(nextFreeBranch("hermes/x", (b) => taken.has(b))).toBe("hermes/x-3");
+  });
+
+  it("refuses names git would refuse", () => {
+    for (const ok of ["hermes/a", "feature/x-1", "a.b"]) expect(isUsableBranchName(ok)).toBe(true);
+    for (const bad of ["", " ", "-x", "a b", "a..b", "a~1", "a^", "a:b", "a?", "a*", "a[", "a\\b", "x.lock", "x/", "/x", "a//b", "a@{1}", "x."]) {
+      expect(isUsableBranchName(bad), bad).toBe(false);
+    }
+  });
+
+  it("labels the session with the task's first line", () => {
+    expect(taskLabel("Fix login\nmore detail")).toBe("Fix login");
+    const long = taskLabel("x".repeat(100));
+    expect(long.length).toBe(48);
+    expect(long.endsWith("…")).toBe(true);
+  });
+});
+
+describe("done when, from .hermes/worktree.toml", () => {
+  it("reads done_when through the contract parser", () => {
+    expect(doneWhenFromToml('done_when = ["npm test", "npm run lint"]\n')).toEqual({ commands: ["npm test", "npm run lint"], error: null });
+    expect(doneWhenFromToml("setup = [\"npm ci\"]\n")).toEqual({ commands: [], error: null });
+    expect(doneWhenFromToml(null)).toEqual({ commands: [], error: null });
+  });
+
+  it("says which line it could not read", () => {
+    const r = doneWhenFromToml("done_when = [\n");
+    expect(r.commands).toEqual([]);
+    expect(r.error).toMatch(/^line \d+: /);
+  });
+});
+
+describe("blocking rows", () => {
+  it("none when everything is ready", () => {
+    expect(blockingRows(check())).toEqual([]);
+    expect(canLaunch("do it", "/fixture-home/repo", [])).toBe(true);
+  });
+
+  it("a signed-out agent blocks Launch", () => {
+    const rows = blockingRows(check({ doctor: { claude: row("claude", { signed_in: "no" }) } }));
+    expect(rows).toEqual([{ kind: "signed-out", agentId: "claude" }]);
+    expect(canLaunch("do it", "/fixture-home/repo", rows)).toBe(false);
+  });
+
+  it("an unknown sign-in state does not block (the CLI asks itself)", () => {
+    expect(blockingRows(check({ doctor: { claude: row("claude", { signed_in: "unknown" }) } }))).toEqual([]);
+  });
+
+  it("a missing agent blocks; an agent the doctor has not answered for yet does not", () => {
+    expect(blockingRows(check({ doctor: { claude: row("claude", { installed: false }) } }))).toEqual([
+      { kind: "not-installed", agentId: "claude" },
+    ]);
+    expect(blockingRows(check({ doctor: {} }))).toEqual([]);
+  });
+
+  it("an existing branch blocks and suggests a free one", () => {
+    const taken = new Set(["hermes/fix-login", "hermes/fix-login-2"]);
+    expect(blockingRows(check({ branchExists: (b) => taken.has(b) }))).toEqual([
+      { kind: "branch-exists", branch: "hermes/fix-login", suggestion: "hermes/fix-login-3" },
+    ]);
+  });
+
+  it("a folder that is not a repository blocks, and no branch is judged there", () => {
+    expect(blockingRows(check({ gitRoot: null, branchExists: () => true }))).toEqual([{ kind: "not-git", path: "/fixture-home/repo" }]);
+    expect(blockingRows(check({ repoPath: "  ", gitRoot: undefined }))).toEqual([{ kind: "no-repo" }]);
+    // Still checking: nothing to say yet, and Launch waits.
+    expect(blockingRows(check({ gitRoot: undefined }))).toEqual([]);
+    expect(canLaunch("do it", undefined, [])).toBe(false);
+  });
+
+  it("low disk blocks", () => {
+    const rows = blockingRows(check({ disk: { freeBytes: 3 * GB, requiredBytes: 10 * GB, belowThreshold: true } }));
+    expect(rows).toEqual([{ kind: "low-disk", freeBytes: 3 * GB, requiredBytes: 10 * GB }]);
+  });
+
+  it("checks the second agent and its branch too", () => {
+    const rows = blockingRows(
+      check({
+        agents: [
+          { id: "claude", branch: "hermes/x" },
+          { id: "codex", branch: "hermes/x-codex" },
+        ],
+        doctor: { claude: row("claude"), codex: row("codex", { signed_in: "no" }) },
+        branchExists: (b) => b === "hermes/x-codex",
+      }),
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["signed-out", "branch-exists"]);
+  });
+
+  it("an empty task never launches", () => {
+    expect(canLaunch("   ", "/fixture-home/repo", [])).toBe(false);
+  });
+
+  it("formats sizes for people", () => {
+    expect(formatBytes(12.34e9)).toBe("12.3 GB");
+    expect(formatBytes(10e9)).toBe("10.0 GB");
+    expect(formatBytes(512e6)).toBe("512 MB");
+  });
+});
+
+describe("Full track: the first feature.md", () => {
+  it("is what the contract parser reads back", () => {
+    const text = featureMarkdown({ slug: "fix-login", task: "Fix the login bug\n\nIt breaks on Safari.", doneWhen: ["npm test", 'grep -q "ok" out # not a comment'] });
+    const parsed = parseFeatureFrontMatter(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.meta).toMatchObject({ slug: "fix-login", track: "Full", phase: "questions", gate: "none" });
+    expect(parsed.meta.doneWhen).toEqual(["npm test", 'grep -q "ok" out # not a comment']);
+    expect(parsed.body.trim()).toBe("Fix the login bug\n\nIt breaks on Safari.");
+  });
+
+  it("with no check, done_when is an empty list", () => {
+    const parsed = parseFeatureFrontMatter(featureMarkdown({ slug: "x", task: "t", doneWhen: [] }));
+    expect(parsed.ok && parsed.meta.doneWhen).toEqual([]);
+  });
+});
+
+describe("launch records", () => {
+  const rec = (id: string): TaskLaunchRecord => ({
+    sessionId: id,
+    task: "t",
+    agentId: "claude",
+    mode: "terminal",
+    repo: "/fixture-home/repo",
+    branch: "hermes/t",
+    track: "Quick",
+    doneWhen: [],
+    pairedWith: null,
+    createdAt: 1,
+  });
+
+  it("drops malformed entries and keeps the newest", () => {
+    expect(parseTaskLaunches("not json")).toEqual([]);
+    expect(parseTaskLaunches(JSON.stringify([rec("a"), { sessionId: 3 }, { ...rec("b"), track: "Huge" }]))).toEqual([rec("a")]);
+    const many = Array.from({ length: MAX_TASK_LAUNCHES + 5 }, (_, i) => rec(`s${i}`));
+    const kept = appendTaskLaunches(many.slice(0, MAX_TASK_LAUNCHES), many.slice(MAX_TASK_LAUNCHES));
+    expect(kept.length).toBe(MAX_TASK_LAUNCHES);
+    expect(kept[kept.length - 1].sessionId).toBe(`s${MAX_TASK_LAUNCHES + 4}`);
+    expect(appendTaskLaunches([rec("a")], [{ ...rec("a"), task: "new" }])).toEqual([{ ...rec("a"), task: "new" }]);
+  });
+});
+
+describe("the preselected agent", () => {
+  const ids = ["claude", "codex", "gemini"];
+  it("is the last used one while it is installed", () => {
+    expect(pickDefaultAgent("codex", ids, { claude: row("claude"), codex: row("codex") })).toBe("codex");
+  });
+  it("else the first installed one", () => {
+    expect(pickDefaultAgent("codex", ids, { claude: row("claude", { installed: false }), codex: row("codex", { installed: false }), gemini: row("gemini") })).toBe("gemini");
+  });
+  it("else the last used, else the first in the catalog", () => {
+    expect(pickDefaultAgent("codex", ids, {})).toBe("codex");
+    expect(pickDefaultAgent(null, ids, {})).toBe("claude");
+    expect(pickDefaultAgent("gone", ids, {})).toBe("claude");
+  });
+});

@@ -1949,9 +1949,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         initialRows: initialDims.rows,
         initialCols: initialDims.cols,
         mode,
-        launchHelper: isFeatureFlagEnabled("launchHelper"),
+        // A launcher task travels as an argument, which only the helper can
+        // pass without any shell quoting.
+        launchHelper: isFeatureFlagEnabled("launchHelper") || (mode === "terminal" && !!opts?.initialPrompt?.trim()),
         featureTracks: isFeatureFlagEnabled("featureTracks"),
         sessionHost: isFeatureFlagEnabled("sessionHost"),
+        initialPrompt: mode === "terminal" ? opts?.initialPrompt?.trim() || null : null,
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.
@@ -1973,12 +1976,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // the SDK hasn't yet persisted (the visible failure was the
         // "No conversation found with session ID" stderr).
         claudeAddDirs.current.set(session.id, [...session.workspace_paths]);
+        // Task launcher (F15): the task is the conversation's first message,
+        // sent once the agent is up.
+        const firstMessage = opts?.initialPrompt?.trim() ? buildUserEnvelope(opts.initialPrompt.trim(), []) : null;
         spawnAgentSession({
           sessionId: session.id,
           workingDir: session.working_directory,
           addDirs: session.workspace_paths,
         })
-          .then((uuid) => { claudeUuids.current.set(session.id, uuid); })
+          .then(async (uuid) => {
+            claudeUuids.current.set(session.id, uuid);
+            if (!firstMessage) return;
+            try {
+              await echoUserEnvelope(session.id, firstMessage);
+              await sendUserEnvelope(session.id, firstMessage);
+            } catch (err) {
+              console.warn("[SessionContext] Failed to send the task as the first message:", err);
+            }
+          })
           .catch((err) => {
             console.error("[SessionContext] Failed to spawn Claude agent:", err);
             void reportAgentSpawnFailure({

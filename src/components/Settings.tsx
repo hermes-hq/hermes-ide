@@ -29,6 +29,7 @@ import { setAnalyticsEnabled } from "../utils/analytics";
 import { normalizeUpdateChannel } from "../api/updater";
 import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import { visibleShortcutGroups } from "../utils/shortcuts";
+import { AgentDoctor } from "./AgentDoctor";
 import { useI18n } from "../i18n/I18nProvider";
 import { setStatusStripEnabled } from "../statusStrip/preference";
 import {
@@ -74,9 +75,13 @@ interface SettingsProps {
   onConfirmPluginUpdate?: (plugin: import("../plugins/types").RegistryPlugin) => void;
   onConfirmPluginUpdateAll?: (plugins: import("../plugins/types").RegistryPlugin[]) => void;
   pluginRefreshTrigger?: number;
+  /** Agents tab (flag taskLauncher): open a terminal running an agent's CLI to sign in. */
+  onSignInAgent?: (agentId: string) => void;
+  /** Agents tab: open the full creator, where a Custom agent is set up. */
+  onOpenAdvancedCreator?: () => void;
 }
 
-export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, onConfirmPluginUpdateAll, pluginRefreshTrigger }: SettingsProps) {
+export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, onConfirmPluginUpdateAll, pluginRefreshTrigger, onSignInAgent, onOpenAdvancedCreator }: SettingsProps) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
@@ -247,6 +252,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     { id: "ai-agent", label: t("settings.aiAgent") },
     // 2.0 fleet controls: spend caps and the running-agents cap.
     ...(isFeatureFlagEnabled("fleetControls") ? [{ id: "limits", label: t("settings.limits") }] : []),
+    // The agent doctor (F16), the same one the welcome screens show.
+    ...(isFeatureFlagEnabled("taskLauncher") ? [{ id: "agents", label: t("settings.agents") }] : []),
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
     { id: "privacy", label: t("settings.privacy") },
@@ -889,6 +896,26 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
                 <Suspense fallback={null}><PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} onConfirmUpdateAll={onConfirmPluginUpdateAll} refreshTrigger={pluginRefreshTrigger} /></Suspense>
               </>
+            )}
+
+            {activeTab === "agents" && isFeatureFlagEnabled("taskLauncher") && (
+              <div className="settings-section settings-agents-doctor">
+                <p className="settings-hint">{t("settings.agentsDoctorHint")}</p>
+                <AgentDoctor
+                  onSignIn={(agentId) => {
+                    onSignInAgent?.(agentId);
+                    onClose();
+                  }}
+                  onOpenAdvanced={
+                    onOpenAdvancedCreator
+                      ? () => {
+                          onClose();
+                          onOpenAdvancedCreator();
+                        }
+                      : undefined
+                  }
+                />
+              </div>
             )}
 
             {activeTab === "privacy" && (

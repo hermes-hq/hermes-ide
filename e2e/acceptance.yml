@@ -946,3 +946,43 @@ features:
       N22-1:
         text: "With the cap at 3 and 5 tasks launched, 2 wait and start as others finish"
         scenarios: [N22-task-queue.mjs]
+  F15:
+    name: "⌘N task launcher"
+    # partial: the Agent view path (the task as the first message of a
+    # Claude Agent view session) is covered by unit tests only, and the empty
+    # state opens the launcher through its tile rather than showing it inline.
+    # On Windows the scenario needs the fake agents on the registry Path, so
+    # it runs there on CI runners only.
+    status: partial
+    criteria:
+      F15-1:
+        text: "Typing a task and pressing Enter starts the agent in a terminal on a new hermes/<slug> worktree with the task as its first prompt"
+        scenarios: [F15-task-launcher.mjs]
+      F15-2:
+        text: "A signed-out agent disables Launch and offers Sign in"
+        scenarios: [F15-task-launcher.mjs]
+      F15-3:
+        text: "The advanced creator opens with its own shortcut and still offers SSH"
+        scenarios: [F15-task-launcher.mjs]
+      F15-4:
+        text: "An existing branch, a folder that is not a git repository and low disk each block Launch with their own row"
+        scenarios: [F15-task-launcher.mjs]
+  F16:
+    name: "Three-step onboarding and agent doctor"
+    # partial: the doctor's sign-in check is exactly what the catalog says
+    # (auth.check); agents without one show "Unknown". Real vendor CLIs are
+    # never run in tests: fake CLIs answer --version and the sign-in check.
+    status: partial
+    criteria:
+      F16-1:
+        text: "A fresh install reaches a running first task in 3 screens"
+        scenarios: [F16-onboarding-doctor.mjs]
+      F16-2:
+        text: "With no agents installed, Continue stays enabled and ⌘T opens a shell"
+        scenarios: [F16-onboarding-doctor.mjs]
+      F16-3:
+        text: "The doctor shows the version and auth state for Claude, Codex and OpenCode when installed"
+        scenarios: [F16-onboarding-doctor.mjs]
+      F16-4:
+        text: "The usage stats line reads 'off'"
+        scenarios: [F16-onboarding-doctor.mjs]

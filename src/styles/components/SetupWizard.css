@@ -1,0 +1,137 @@
+/* ─── First-launch setup: agents, repo, first task (F16) ─────────────── */
+
+.setup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.setup-dialog {
+  width: min(94vw, 720px);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+}
+
+.setup-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.setup-title { font-size: var(--text-lg); font-weight: 600; color: var(--text-0); }
+.setup-step { color: var(--text-3); font-size: var(--text-xs); }
+
+.setup-body {
+  padding: var(--space-3);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.setup-intro { margin: 0; color: var(--text-1); line-height: 1.5; }
+
+.setup-section-label {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.setup-recent { display: flex; flex-direction: column; gap: 4px; }
+
+.setup-repo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--text-0);
+}
+.setup-repo:hover { background: var(--bg-hover); }
+.setup-repo.selected { border-color: var(--accent); background: var(--accent-dim); }
+.setup-repo-name { font-weight: 500; }
+.setup-repo-path { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); }
+
+.setup-repo-row { display: flex; gap: var(--space-2); }
+.setup-repo-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-0);
+  color: var(--text-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.setup-repo-input:focus { outline: none; border-color: var(--accent); }
+
+.setup-repo-state { font-size: var(--text-xs); }
+.setup-repo-state.ok { color: var(--green); }
+.setup-repo-state.bad { color: var(--yellow); }
+
+.setup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.setup-footer-note { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-xs); }
+.setup-usage { color: var(--text-1); }
+.setup-muted { color: var(--text-3); }
+.setup-actions { display: flex; gap: var(--space-2); }
+
+.setup-btn {
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 14px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.setup-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.setup-btn:disabled { opacity: 0.45; cursor: default; }
+.setup-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--bg-0); font-weight: 600; }
+.setup-btn-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+
+.setup-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: min(90vw, 480px);
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--text-0);
+  font-size: var(--text-sm);
+}

@@ -19,6 +19,7 @@ their definitions so it can never drift from what the app actually does.
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
 | New Session | ⌘N | Ctrl+Shift+N | Windows / Linux: also Ctrl+N when no terminal has focus |
+| New Session (Advanced) | ⌘⇧N | Ctrl+Shift+H |  |
 | New Tab | ⌘T | Ctrl+Shift+T | Windows / Linux: also Ctrl+T when no terminal has focus |
 | Close Pane | ⌘W | Ctrl+Shift+W | Windows / Linux: also Ctrl+W when no terminal has focus |
 | File Explorer | ⌘F | Ctrl+Shift+O | Windows / Linux: also Ctrl+F when no terminal has focus |

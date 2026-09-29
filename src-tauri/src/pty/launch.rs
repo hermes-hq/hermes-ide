@@ -96,6 +96,9 @@ pub struct LaunchInput<'a> {
     /// The session's context file, when the session has project context to
     /// hand to the agent on its first prompt.
     pub context_path: Option<&'a str>,
+    /// The task the user described in the task launcher (F15), handed to
+    /// the agent as its first prompt on a fresh start.
+    pub task: Option<&'a str>,
     /// The conversation to resume (a restored session's saved id).
     pub resume_id: Option<&'a str>,
     /// Absolute path of the `hi` helper.
@@ -192,6 +195,30 @@ fn split_words(fragment: &str) -> Vec<String> {
 
 fn context_prompt(context_path: &str) -> String {
     format!("Read the file at {context_path} for project context about the attached workspaces.")
+}
+
+/// The first prompt of a fresh start: the launcher's task, then the pointer
+/// to the session's context file, or whichever of the two there is. On
+/// Windows it is one line, because an agent installed as a `.cmd` shim is
+/// started through cmd.exe, which cannot take a line break in an argument.
+fn first_prompt(task: Option<&str>, context_path: Option<&str>) -> Option<String> {
+    let task = task.map(str::trim).filter(|t| !t.is_empty());
+    let text = match (task, context_path) {
+        (Some(t), Some(ctx)) => format!("{t}\n\n{}", context_prompt(ctx)),
+        (Some(t), None) => t.to_string(),
+        (None, Some(ctx)) => context_prompt(ctx),
+        (None, None) => return None,
+    };
+    Some(if cfg!(windows) { one_line(&text) } else { text })
+}
+
+/// Line breaks become single spaces.
+fn one_line(text: &str) -> String {
+    text.split(['\r', '\n'])
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Path as it goes into a hook command string: forward slashes work for
@@ -700,11 +727,14 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         .new_session_id
         .as_ref()
         .map(|_| input.new_session_id.to_string());
-    let prompt_args: Vec<String> = match (&terminal.initial_prompt, input.context_path) {
-        (Some(template), Some(ctx)) => fill(template, &[("prompt", &context_prompt(ctx))]),
+    let prompt_args: Vec<String> = match (
+        &terminal.initial_prompt,
+        first_prompt(input.task, input.context_path),
+    ) {
+        (Some(template), Some(prompt)) => fill(template, &[("prompt", &prompt)]),
         _ => Vec::new(),
     };
-    let context_in_args = !prompt_args.is_empty();
+    let context_in_args = !prompt_args.is_empty() && input.context_path.is_some();
     let fresh_args = {
         let mut args = head.clone();
         args.extend(base.iter().cloned());
@@ -1011,6 +1041,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
         channels: &s.channels,
         cwd: &s.working_directory,
         context_path: context_path.as_deref(),
+        task: s.task_prompt.as_deref(),
         resume_id: s.vendor_session_id.as_deref(),
         hi: &hi,
         session_dir: &session_dir,
@@ -1066,6 +1097,22 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> Option<
             stream: plan.stream,
         },
     })
+}
+
+/// A launcher task (F15) the typed vendor command cannot carry: the helper
+/// launch fell through (no `hi` next to the app, no recipe, the launch file
+/// not written), so without this the task would be lost silently. Only for
+/// agents the catalog says take a first prompt; for the others the task
+/// launcher already put the task on the clipboard. Taken, so it is reported
+/// once.
+pub(crate) fn take_undelivered_task(s: &mut Session) -> Option<String> {
+    let task = s.task_prompt.take()?;
+    let provider = s.ai_provider.as_deref()?;
+    crate::agent_catalog::agent(provider)?
+        .terminal
+        .initial_prompt
+        .as_ref()?;
+    Some(task)
 }
 
 fn write_plan(session_dir: &Path, plan: &LaunchPlan) -> std::io::Result<()> {
@@ -1731,6 +1778,7 @@ mod tests {
             channels: &[],
             cwd: "/fixture-home/repo",
             context_path: None,
+            task: None,
             resume_id,
             hi,
             session_dir,
@@ -2340,6 +2388,83 @@ mod tests {
     }
 
     #[test]
+    fn the_launcher_task_is_the_first_prompt_of_a_fresh_start_only() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let task = "Fix the login bug; it's in \"auth.ts\" & $HOME stays literal";
+        // Claude: a positional prompt, one argument, nothing expanded.
+        let mut inp = input("claude", None, hi, dir);
+        inp.task = Some(task);
+        let plan = plan_launch(&inp).unwrap();
+        assert_eq!(plan.spec.args.last().map(String::as_str), Some(task));
+        assert!(!plan.context_in_args, "no context file was handed over");
+        // Codex and OpenCode take it the way their catalog entry says.
+        let mut codex = input("codex", None, hi, dir);
+        codex.task = Some("add tests");
+        assert_eq!(
+            plan_launch(&codex)
+                .unwrap()
+                .spec
+                .args
+                .last()
+                .map(String::as_str),
+            Some("add tests")
+        );
+        let mut opencode = input("opencode", None, hi, dir);
+        opencode.task = Some("add tests");
+        let args = plan_launch(&opencode).unwrap().spec.args;
+        assert_eq!(&args[args.len() - 2..], ["--prompt", "add tests"]);
+        // An agent with no way to take a first prompt gets none.
+        let mut goose = input("goose", None, hi, dir);
+        goose.task = Some("add tests");
+        assert!(!plan_launch(&goose)
+            .unwrap()
+            .spec
+            .args
+            .iter()
+            .any(|a| a == "add tests"));
+        // With a context file, the task comes first and the pointer follows.
+        inp.context_path = Some("/data/context/hermes-1.md");
+        let both = plan_launch(&inp).unwrap();
+        let prompt = both.spec.args.last().unwrap();
+        assert!(prompt.starts_with(task), "{prompt}");
+        assert!(prompt.ends_with("for project context about the attached workspaces."));
+        assert!(both.context_in_args);
+        // A blank task is no task.
+        let mut blank = input("claude", None, hi, dir);
+        blank.task = Some("  \n ");
+        assert_eq!(
+            plan_launch(&blank).unwrap().spec.args,
+            plan_launch(&input("claude", None, hi, dir))
+                .unwrap()
+                .spec
+                .args
+        );
+        // A resumed conversation never gets the task again.
+        let mut resumed = input("claude", Some("old-id"), hi, dir);
+        resumed.task = Some(task);
+        assert!(!plan_launch(&resumed)
+            .unwrap()
+            .spec
+            .args
+            .iter()
+            .any(|a| a == task));
+    }
+
+    #[test]
+    fn a_multi_line_task_is_one_argument() {
+        let prompt = first_prompt(Some("line one\nline two\r\n\nline three"), None).unwrap();
+        if cfg!(windows) {
+            assert_eq!(prompt, "line one line two line three");
+        } else {
+            assert_eq!(prompt, "line one\nline two\r\n\nline three");
+        }
+        assert_eq!(one_line(" a \r\n\n b\n"), "a b");
+        assert_eq!(first_prompt(None, None), None);
+        assert_eq!(first_prompt(Some(""), None), None);
+    }
+
+    #[test]
     fn prefix_suffix_context_and_channels_become_plain_arguments() {
         let hi = Path::new("/app/hi");
         let dir = Path::new("/data/launch/hermes-1");
@@ -2858,6 +2983,33 @@ mod tests {
         assert!(reader.poll().is_empty());
     }
 
+    #[test]
+    fn a_task_the_fallback_launch_cannot_carry_is_handed_back_once() {
+        let mut s = test_session();
+        s.task_prompt = Some("fix the login bug".into());
+        assert_eq!(
+            take_undelivered_task(&mut s).as_deref(),
+            Some("fix the login bug")
+        );
+        assert_eq!(s.task_prompt, None);
+        assert_eq!(take_undelivered_task(&mut s), None);
+    }
+
+    #[test]
+    fn no_task_means_nothing_to_hand_back() {
+        let mut s = test_session();
+        assert_eq!(take_undelivered_task(&mut s), None);
+    }
+
+    #[test]
+    fn an_agent_without_a_first_prompt_already_had_its_task_copied() {
+        let mut s = test_session();
+        s.ai_provider = Some("custom".into());
+        s.task_prompt = Some("fix the login bug".into());
+        assert_eq!(take_undelivered_task(&mut s), None);
+        assert_eq!(s.task_prompt, None);
+    }
+
     fn test_session() -> Session {
         use super::super::models::{SessionMetrics, SessionMode};
         use std::collections::HashMap;
@@ -2910,6 +3062,7 @@ mod tests {
             hosted: false,
             launch_helper: true,
             signal_nonce: None,
+            task_prompt: None,
         }
     }
 }

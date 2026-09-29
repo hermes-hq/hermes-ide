@@ -710,6 +710,19 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
             watch: Some(prepared.watch),
         });
     }
+    // The typed command cannot carry a launcher task: hand it to the UI,
+    // which puts it on the clipboard and says so, instead of dropping it.
+    if let Some(task) = crate::pty::launch::take_undelivered_task(&mut s) {
+        log::warn!(
+            "[LAUNCH] {} starts {} without its task (no helper launch); handing the task to the UI",
+            s.id,
+            provider
+        );
+        let _ = app.emit(
+            "task-prompt-undelivered",
+            serde_json::json!({ "sessionId": s.id, "agentId": provider, "task": task }),
+        );
+    }
     // Only launch known/allowed AI providers (reject unknown values)
     let Some(launch_cmd) = ai_launch_command(
         &provider,
@@ -801,6 +814,9 @@ pub fn create_session(
     // terminal in the background session host, and reattach to a program
     // the host still has under this session id (see `session_host.rs`).
     session_host: Option<bool>,
+    // The task launcher's task (F15): handed to the agent as its first
+    // prompt through the `hi` helper.
+    initial_prompt: Option<String>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let session_id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -918,6 +934,9 @@ pub fn create_session(
         hosted: false,
         launch_helper: launch_helper.unwrap_or(false),
         signal_nonce: None,
+        task_prompt: initial_prompt
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
     };
 
     // ─── Agent-mode short-circuit ───────────────────────────────────────

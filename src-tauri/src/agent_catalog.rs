@@ -22,7 +22,15 @@ pub struct Catalog {
 #[derive(Debug, Deserialize)]
 pub struct Agent {
     pub id: String,
+    /// Display name (the agent doctor reports it).
+    #[serde(default)]
     pub name: String,
+    /// `current`, or `legacy` for a tool its vendor has retired.
+    #[serde(default)]
+    pub status: String,
+    /// Why a `legacy` tool is retired, shown by the agent doctor.
+    #[serde(default)]
+    pub status_note: Option<String>,
     /// `stable` (everyone) or `beta` (behind the agentCatalog flag in the UI).
     pub channel: String,
     /// The "Custom agent" entry: the user types the command.
@@ -34,6 +42,9 @@ pub struct Agent {
     /// servers (`crate::agent_setup`). Absent for the Custom agent.
     #[serde(default)]
     pub setup: Option<Setup>,
+    /// How to ask the CLI whether it is signed in (the agent doctor).
+    #[serde(default)]
+    pub auth: Option<Auth>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +84,14 @@ pub struct McpSource {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct Auth {
+    /// `[binary, args...]` that exits 0 when signed in, or null when the
+    /// CLI has no such command.
+    #[serde(default)]
+    pub check: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Terminal {
     /// Starts a new session; every other argument list is appended to it.
     pub argv: Vec<String>,
@@ -90,6 +109,9 @@ pub struct Terminal {
     pub signals: Signals,
     /// Permission mode (`default`, `acceptEdits`, ...) -> extra arguments.
     pub permission_flags: HashMap<String, Vec<String>>,
+    /// Oldest version Hermes supports, or null.
+    #[serde(default)]
+    pub min_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

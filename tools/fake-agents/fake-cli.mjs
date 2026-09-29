@@ -121,6 +121,51 @@ function readMode() {
 	return "normal";
 }
 
+// ─── Doctor probes (F16) ──────────────────────────────────────────────
+//
+// The agent doctor runs `<cli> --version` and the catalog's sign-in check
+// (`claude auth status`, `codex login status`, `opencode providers list`,
+// `hermes status`). The fake answers those at once and records nothing:
+//   HERMES_FAKE_AGENT    which agent this shim stands in for (default claude)
+//   version              HERMES_FAKE_VERSION, or <HERMES_FAKE_DIR>/version-<agent>
+//   signed in or out     HERMES_FAKE_AUTH=in|out, or <HERMES_FAKE_DIR>/auth-<agent>
+const FAKE_AGENT = (process.env.HERMES_FAKE_AGENT || "claude").trim();
+const AUTH_CHECKS = [["auth", "status"], ["login", "status"], ["providers", "list"], ["status"]];
+
+function fakeSetting(envName, file, fallback) {
+	if (process.env[envName]) return process.env[envName].trim();
+	if (RECORD_DIR) {
+		try {
+			const v = fs.readFileSync(path.join(RECORD_DIR, `${file}-${FAKE_AGENT}`), "utf8").trim();
+			if (v) return v;
+		} catch {
+			/* not set */
+		}
+	}
+	return fallback;
+}
+
+function answerDoctorProbe(argv) {
+	if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v")) {
+		process.stdout.write(`${fakeSetting("HERMES_FAKE_VERSION", "version", "0.1.0")} (fake ${FAKE_AGENT})\n`);
+		return 0;
+	}
+	if (AUTH_CHECKS.some((c) => c.length === argv.length && c.every((w, i) => w === argv[i]))) {
+		const signedIn = fakeSetting("HERMES_FAKE_AUTH", "auth", "in") !== "out";
+		process.stdout.write(signedIn ? "Signed in (fake)\n" : "Not signed in (fake)\n");
+		return signedIn ? 0 : 1;
+	}
+	return null;
+}
+
+const probeExit = answerDoctorProbe(process.argv.slice(2));
+if (probeExit !== null) {
+	process.exitCode = probeExit;
+	process.stdout.write("", () => process.exit(probeExit));
+	// Nothing below runs for a probe.
+	await new Promise(() => {});
+}
+
 const args = parseArgs(process.argv.slice(2));
 const mode = readMode();
 const modeWords = new Set(mode.split(/\s+/).filter(Boolean));

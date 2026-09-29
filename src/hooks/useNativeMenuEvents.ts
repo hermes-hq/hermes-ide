@@ -24,6 +24,8 @@ const TRACKED_ACTIONS: Record<string, string> = {
 interface MenuEventHandlers {
   dispatch: (action: any) => void;
   createSession: () => void;
+  /** The full creator (SSH, tmux, an existing branch); ⌘⇧N. */
+  createSessionAdvanced: () => void;
   createSessionDirect: () => void;
   requestCloseSession: (id: string) => void;
   activeSessionId: string | null;
@@ -44,6 +46,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
   const {
     dispatch,
     createSession,
+    createSessionAdvanced,
     createSessionDirect,
     activeSessionId,
     focusedPaneId,
@@ -68,6 +71,9 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
         // ── File menu ──
         case "file.new-session":
           createSession();
+          break;
+        case "file.new-session-advanced":
+          createSessionAdvanced();
           break;
         case "file.new-session-tab":
           createSessionDirect();
@@ -184,6 +190,7 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
     [
       dispatch,
       createSession,
+      createSessionAdvanced,
       createSessionDirect,
       activeSessionId,
       focusedPaneId,

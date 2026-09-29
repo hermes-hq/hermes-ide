@@ -282,6 +282,10 @@ pub struct Session {
     /// it carries this nonce.
     #[serde(skip)]
     pub signal_nonce: Option<String>,
+    /// The task typed into the task launcher (F15): the agent's first prompt
+    /// on its first start. Never saved; a restored session resumes instead.
+    #[serde(skip)]
+    pub task_prompt: Option<String>,
     /// Deferred nudge: stored when context is applied while the agent is busy.
     /// Delivered when the session phase transitions to NeedsInput.
     #[serde(skip)]

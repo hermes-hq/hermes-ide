@@ -206,6 +206,11 @@ export interface CreateSessionOpts {
   sshJumpHost?: string;
   /** Frontend-chosen session mode.  Defaults to `agent` for Claude, `terminal` otherwise. */
   mode?: SessionMode;
+  /** Task launcher (F15): the task, handed to the agent as its first prompt.
+   *  A terminal agent gets it on its launch line through the `hi` helper
+   *  (so the helper is used for this session whatever the launchHelper
+   *  flag says); the Agent view gets it as the first message. */
+  initialPrompt?: string;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────

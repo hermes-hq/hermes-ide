@@ -90,6 +90,15 @@ Behaviour per launch, from `HERMES_FAKE_MODE` or the file
 | `work-log` | each turn's work appends a line to `.fake-work.log` in the agent's folder |
 | `ignore-stop-hooks` | runs the `Stop` hooks but stops even when one refuses (a vendor without blocking stops; the negative control of the Done-When scenario) |
 
+It also answers the agent doctor's probes at once, without recording a
+launch: `--version` prints `HERMES_FAKE_VERSION` (or the file
+`<HERMES_FAKE_DIR>/version-<agent>`), and the catalog's sign-in checks
+(`auth status`, `login status`, `providers list`, `status`) exit 0 or 1 by
+`HERMES_FAKE_AUTH=in|out` (or `<HERMES_FAKE_DIR>/auth-<agent>`). A shim sets
+`HERMES_FAKE_AGENT` to the agent it stands in for (default `claude`).
+`e2e/app/scenarios/F15-task-launcher.mjs` and `F16-onboarding-doctor.mjs`
+use this.
+
 With `HERMES_FAKE_DIR` set, every launch is recorded to
 `<HERMES_FAKE_DIR>/launch-<n>.json`: argv, cwd, the Hermes environment it
 saw, the settings file's contents, which hooks ran and how it ended.

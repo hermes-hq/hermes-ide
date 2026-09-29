@@ -47,6 +47,8 @@ export function createSession(opts: {
    *  host (it survives quit, update and crash) and reattach to a program the
    *  host still has under this session id. */
   sessionHost?: boolean;
+  /** Task launcher (F15): the agent's first prompt (helper only). */
+  initialPrompt?: string | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }

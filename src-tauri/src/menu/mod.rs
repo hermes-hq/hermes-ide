@@ -187,6 +187,12 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let new_session = MenuItemBuilder::with_id("file.new-session", "New Session")
         .accelerator(app_accel("file.new-session")?)
         .build(app)?;
+    // The full creator (SSH, tmux, an existing branch, a plain shell); with
+    // the task launcher on, New Session opens the launcher instead (F15).
+    let new_session_advanced =
+        MenuItemBuilder::with_id("file.new-session-advanced", "New Session (Advanced)")
+            .accelerator(app_accel("file.new-session-advanced")?)
+            .build(app)?;
     let new_tab = MenuItemBuilder::with_id("file.new-session-tab", "New Tab")
         .accelerator(app_accel("file.new-session-tab")?)
         .build(app)?;
@@ -199,6 +205,7 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_session)
+        .item(&new_session_advanced)
         .item(&new_tab)
         .item(&close_pane)
         .separator()
@@ -641,6 +648,7 @@ mod tests {
     const MENU_ACTIONS_WITH_CHORDS: &[&str] = &[
         "hermes.settings",
         "file.new-session",
+        "file.new-session-advanced",
         "file.new-session-tab",
         "file.close-pane",
         "file.file-explorer",

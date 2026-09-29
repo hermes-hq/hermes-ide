@@ -113,6 +113,10 @@ async function waitForReturningLaunch(bridge) {
 async function openAgentStep(bridge) {
   if (await bridge.exists("button.es-tile-primary")) await bridge.click("button.es-tile-primary");
   else await bridge.clickByName("New session");
+  // With the task launcher on (every flag is on for beta), New Session opens
+  // the launcher; its Advanced link opens the full creator.
+  await bridge.waitFor("the New Session wizard or the task launcher", `return !!e2e.first(".session-creator, .task-launcher-sheet");`, { timeoutMs: 20_000 });
+  if (await bridge.exists(".task-launcher-sheet")) await bridge.click(".task-launcher-advanced");
   await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   // Terminal is the default for every agent (N09); an older wizard started
   // with a mode step, where terminal has to be picked first.

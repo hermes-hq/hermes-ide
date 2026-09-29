@@ -460,3 +460,33 @@ describe("fake vendor CLI", () => {
 		expect(readdirSync(work)).toEqual([]);
 	});
 });
+
+describe("fake vendor CLI: agent doctor probes", () => {
+	it("answers --version with the version it was given and records no launch", async () => {
+		const dir = tmp();
+		writeFileSync(join(dir, "version-codex"), "0.150.2\n");
+		const res = await run(["--version"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_AGENT: "codex" } });
+		expect(res.code).toBe(0);
+		expect(res.stdout.trim()).toBe("0.150.2 (fake codex)");
+		expect(readdirSync(dir).filter((f) => f.startsWith("launch-"))).toEqual([]);
+	});
+
+	it("reports signed in (exit 0) or signed out (exit 1) for each vendor's check", async () => {
+		const dir = tmp();
+		const signedIn = await run(["auth", "status"], { env: { HERMES_FAKE_DIR: dir } });
+		expect(signedIn.code).toBe(0);
+		writeFileSync(join(dir, "auth-codex"), "out\n");
+		const out = await run(["login", "status"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_AGENT: "codex" } });
+		expect(out.code).toBe(1);
+		expect(out.stdout).toContain("Not signed in");
+		const env = await run(["providers", "list"], { env: { HERMES_FAKE_AUTH: "out", HERMES_FAKE_AGENT: "opencode" } });
+		expect(env.code).toBe(1);
+	});
+
+	it("a launch whose prompt is a probe word is still a launch", async () => {
+		const dir = tmp();
+		const res = await run(["--session-id", "p-1", "status"], { env: { HERMES_FAKE_DIR: dir }, keys: "q" });
+		expect(res.code).toBe(0);
+		expect(records(dir)[0].prompt).toBe("status");
+	});
+});

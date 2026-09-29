@@ -1,0 +1,85 @@
+/* ─── Agent doctor (welcome step 1 and Settings > Agents) ─────────────── */
+
+.agent-doctor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+.agent-doctor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 24px;
+}
+
+.agent-doctor-status { color: var(--text-2); }
+
+.agent-doctor-recheck,
+.agent-doctor-action {
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.agent-doctor-recheck:hover:not(:disabled),
+.agent-doctor-action:hover { background: var(--bg-hover); }
+.agent-doctor-recheck:disabled { opacity: 0.5; cursor: default; }
+
+.agent-doctor-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.agent-doctor-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.agent-doctor-table td {
+  padding: 5px 6px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.agent-doctor-row.missing td { color: var(--text-3); }
+.agent-doctor-row.missing .agent-doctor-name { color: var(--text-2); }
+.agent-doctor-name { color: var(--text-0); white-space: nowrap; }
+.agent-doctor-muted { color: var(--text-3); white-space: normal; }
+.agent-doctor-actions { text-align: right; }
+
+.agent-doctor-badge {
+  margin-left: 6px;
+  font-size: var(--text-xs);
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  color: var(--text-2);
+}
+.agent-doctor-badge.retired { background: var(--yellow-dim); color: var(--text-0); }
+
+.agent-doctor-warn {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--yellow);
+}
+
+.agent-doctor-none {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--text-1);
+}
