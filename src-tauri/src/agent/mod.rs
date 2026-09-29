@@ -812,6 +812,13 @@ async fn spawn_child(
         let enriched = enriched_path_var();
         cmd.env("PATH", &enriched);
     }
+    // Started from inside another agent session, Hermes carries that
+    // session's marks (CLAUDECODE, CLAUDE_CODE_CHILD_SESSION, ...); the
+    // agent must not inherit them or it stops saving its transcript (see
+    // pty/session_markers.rs).
+    for name in crate::pty::session_markers::session_markers_present() {
+        cmd.env_remove(name);
+    }
     cmd.current_dir(&plan.working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -6,6 +6,7 @@ pub mod models;
 pub mod opencode_stream;
 pub mod osc_signals;
 pub mod patterns;
+pub mod session_markers;
 pub mod shell_integration;
 pub mod spawn;
 pub mod transport;

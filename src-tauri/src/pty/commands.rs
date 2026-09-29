@@ -1091,10 +1091,15 @@ pub fn create_session(
         #[cfg(unix)]
         {
             let mut c = CommandBuilder::new("env");
-            c.arg("-u");
-            c.arg("CLAUDECODE");
-            c.arg("-u");
-            c.arg("CLAUDE_CODE");
+            // A parent agent session's marks (CLAUDECODE, CLAUDE_CODE_*,
+            // ...) must not reach the agent this session starts, or it
+            // believes it is nested and stops saving its transcript. On the
+            // command line, so a session the background host starts is
+            // scrubbed the same way (see pty/session_markers.rs).
+            for name in crate::pty::session_markers::session_markers_present() {
+                c.arg("-u");
+                c.arg(name);
+            }
             // Strip COLUMNS/LINES so the shell reads actual PTY dimensions
             // from ioctl instead of inheriting stale values from the GUI app.
             c.arg("-u");
@@ -1128,8 +1133,10 @@ pub fn create_session(
         #[cfg(windows)]
         {
             let mut c = CommandBuilder::new(&shell);
-            c.env_remove("CLAUDECODE");
-            c.env_remove("CLAUDE_CODE");
+            // See the unix branch: a parent agent session's marks stay out.
+            for name in crate::pty::session_markers::session_markers_present() {
+                c.env_remove(name);
+            }
             c
         }
     };
