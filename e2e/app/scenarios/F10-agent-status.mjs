@@ -21,8 +21,11 @@
 //        focused on it).
 //     B  a plain terminal session (TerminalProvider, every agent): idle,
 //        guessed, dimmed; the fake terminal agent (tools/fake-agents/
-//        fake-agent.mjs) works after its approval box is answered: the row
-//        says "working · guessed"; back to idle afterwards. Before that, the
+//        fake-agent.mjs), which reports only through its own terminal
+//        notifications, says "needs approval" while its box waits and works
+//        after the box is answered: the row leaves "needs approval" for
+//        "working · guessed"; afterwards it settles (idle, or done from the
+//        agent's own turn-complete notification). Before that, the
 //        launch helper reporting its agent ended makes the row say exited
 //        while the shell idles; the fake agent's work then replaces it.
 //     C  every status in the vocabulary, pushed through the Rust side of the
@@ -437,14 +440,19 @@ try {
     const s = e2e.first(${JSON.stringify(ROW(termId) + " .agent-status-tag")})?.getAttribute("data-status");
     return s && s !== "working" ? s : null;
   `, { timeoutMs: 10_000 });
-  log(`  while the fake agent's approval box waits the row says: ${whileBox} (guessed)`);
+  log(`  while the fake agent's approval box waits the row says: ${whileBox}`);
+  assert(whileBox === "needs_approval", `the agent's own notification says it waits for approval (${whileBox})`);
   await bridge.typeInTerminal(termId, "y");
   await waitForRowStatus(bridge, termId, "working", "the row to say working while the fake agent works", { timeoutMs: 5_000 });
   const working = await readRow(bridge, termId);
   assert(working.tag.word === "working" && working.tag.guessed === "guessed" && working.tag.glyph.trim() !== "", `the row says "${working.tag.glyph} working · guessed" (the terminal's activity replaced the ended agent's exited)`);
   await bridge.screenshot(join(evidenceDir, "03-terminal-working-guessed.png"));
   await bridge.waitForTerminal(termId, /fake-agent: task done/, { timeoutMs: 20_000 });
-  await waitForRowStatus(bridge, termId, ["idle", "needs_answer"], "the row to settle after the agent exits", { timeoutMs: 15_000 });
+  // The agent ends with its own "Agent turn complete" notification: a done
+  // turn (signal) until someone looks, or the terminal's settled guess.
+  await waitForRowStatus(bridge, termId, ["idle", "needs_answer", "done_unread"], "the row to settle after the agent exits", { timeoutMs: 15_000 });
+  const settled = await readRow(bridge, termId);
+  assert(settled.tag.status !== "done_unread" || settled.tag.confidence === "signal", `the row settled on "${settled.tag.word}" (${settled.tag.confidence}); a done turn comes from the agent's own notification`);
 
   // C — every status, through the Rust side of the channel
   log("C: every status in the vocabulary shows with its own glyph and word (agent session in the background)");
