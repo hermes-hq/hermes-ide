@@ -123,7 +123,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     return s && e2e.norm(s.innerText) === ${JSON.stringify(EXPECTED_TEXT)} ? { text: e2e.norm(s.innerText), kind: s.dataset.spend, title: s.title } : null;
   `, { timeoutMs: 15_000 });
   assert(row.kind === "estimated", `the row marks it estimated (${row.kind})`);
-  assert(/estimated/i.test(row.title) && row.title.includes(expectedIn.toLocaleString("en-US")), `its tooltip says why and has the tokens: ${JSON.stringify(row.title)}`);
+  // The webview's locale decides the digit grouping ("265,003", "265003", "265 003").
+  const digits = row.title.replace(/(\d)[\s,.  ](?=\d{3}\b)/g, "$1");
+  assert(/estimated/i.test(row.title) && digits.includes(String(expectedIn)), `its tooltip says why and has the tokens: ${JSON.stringify(row.title)}`);
 
   const snap = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(claude)});`);
   log(`  store: ${JSON.stringify(snap.usage)}`);
