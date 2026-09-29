@@ -488,6 +488,13 @@ pub fn stop_requested(file: &Path, nonce: Option<&str>) -> Option<String> {
 pub const TERMINAL_RESET: &str =
     "\x1b[?1047l\x1b[?25h\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b>";
 
+/// An invisible marker (an OSC sequence terminals ignore) that says where
+/// this launch's output starts; Hermes matches the agent's refusal only after
+/// it. Mirror of `agent_caps::watch::launch_marker` in the app.
+pub fn launch_marker(nonce: &str) -> String {
+    format!("\x1b]777;hermes-launch;{nonce}\x07")
+}
+
 /// The lines `hi` prints after stopping a refused launch.
 pub fn stopped_text(agent: &str, vendor_message: &str) -> String {
     let who = if agent.is_empty() { "the agent" } else { agent };
@@ -860,6 +867,16 @@ fn cmd_run(arg: &str) -> i32 {
         eprintln!("hi: {error}");
         return reporter.exited(EXIT_NOT_FOUND, Some(&error));
     };
+    // Hermes reads the agent's refusal only from output after this marker:
+    // a terminal that repaints its screen (Windows' ConPTY) would otherwise
+    // replay an earlier launch's refusal into this one.
+    if spec.stop.is_some() {
+        if let Some(nonce) = reporter.nonce.as_deref() {
+            let mut out = std::io::stdout();
+            let _ = write!(out, "{}", launch_marker(nonce));
+            let _ = out.flush();
+        }
+    }
     let started = Instant::now();
     let stop_watch = spec.stop.as_ref().map(|st| StopWatch {
         file: &st.file,
@@ -2121,5 +2138,10 @@ mod tests {
             status.success() && message.is_none(),
             "another launch's stop is ignored"
         );
+    }
+
+    #[test]
+    fn the_launch_marker_is_an_osc_the_app_knows() {
+        assert_eq!(launch_marker("n0"), "\x1b]777;hermes-launch;n0\x07");
     }
 }

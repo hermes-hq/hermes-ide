@@ -30,8 +30,17 @@ struct Watch {
     stop_file: PathBuf,
     nonce: String,
     until: Instant,
+    /// Output before this launch's marker (see `launch_marker`) is not
+    /// read: a repaint of the screen can replay an earlier refusal.
+    armed: bool,
     tail: Vec<u8>,
     launch: SessionLaunch,
+}
+
+/// The marker `hi run` prints (an OSC sequence terminals ignore) right
+/// before it starts the agent. Mirror of `launch_marker` in `hi`.
+pub fn launch_marker(nonce: &str) -> String {
+    format!("\x1b]777;hermes-launch;{nonce}\x07")
 }
 
 fn watches() -> &'static Mutex<HashMap<String, Watch>> {
@@ -59,6 +68,7 @@ pub fn start(
                 stop_file,
                 nonce: nonce.to_string(),
                 until: Instant::now() + window,
+                armed: false,
                 tail: Vec::new(),
                 launch,
             },
@@ -129,6 +139,13 @@ pub fn complete_part(text: &str) -> &str {
     &text[..end]
 }
 
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 /// Feed a session's terminal output. Returns the refusal the first time one
 /// shows, after writing the stop request for `hi`; the watch then ends.
 pub fn observe(session_id: &str, data: &[u8]) -> Option<Found> {
@@ -142,6 +159,25 @@ pub fn observe(session_id: &str, data: &[u8]) -> Option<Found> {
         return None;
     }
     watch.tail.extend_from_slice(data);
+    if !watch.armed {
+        // Keep only what follows this launch's marker (a marker split
+        // across reads is found once its rest arrives).
+        let marker = launch_marker(&watch.nonce);
+        match find_bytes(&watch.tail, marker.as_bytes()) {
+            Some(at) => {
+                watch.tail.drain(..at + marker.len());
+                watch.armed = true;
+            }
+            None => {
+                let keep = marker.len().saturating_sub(1);
+                if watch.tail.len() > keep {
+                    let cut = watch.tail.len() - keep;
+                    watch.tail.drain(..cut);
+                }
+                return None;
+            }
+        }
+    }
     if watch.tail.len() > TAIL_BYTES {
         let cut = watch.tail.len() - TAIL_BYTES;
         watch.tail.drain(..cut);
@@ -196,7 +232,16 @@ mod tests {
             Duration::from_secs(30),
             launch,
         );
-        assert!(observe("cap-w1", b"\x1b[1;1HWelcome to Claude Code\r\n").is_none());
+        // A repaint of an earlier launch's refusal, before this launch began.
+        assert!(observe(
+            "cap-w1",
+            b"There's an issue with the selected model (old). It may not exist.\r\n"
+        )
+        .is_none());
+        assert!(!stop.exists());
+        // The marker, split across two reads.
+        assert!(observe("cap-w1", b"hi run cap-w1\r\n\x1b]777;hermes-la").is_none());
+        assert!(observe("cap-w1", b"unch;n0\x07\x1b[1;1HWelcome to Claude Code\r\n").is_none());
         // Split across reads, and not finished: nothing yet.
         assert!(observe(
             "cap-w1",
@@ -227,7 +272,11 @@ mod tests {
             SessionLaunch::default(),
         );
         std::thread::sleep(Duration::from_millis(5));
-        assert!(observe("cap-w2", b"ERROR: unexpected status 401 Unauthorized\r\n").is_none());
+        assert!(observe(
+            "cap-w2",
+            b"\x1b]777;hermes-launch;n\x07ERROR: unexpected status 401 Unauthorized\r\n"
+        )
+        .is_none());
         assert!(!dir.path().join("s2").exists());
         start(
             "cap-w3",
@@ -237,7 +286,17 @@ mod tests {
             Duration::from_secs(30),
             SessionLaunch::default(),
         );
-        assert!(observe("cap-other", b"Not logged in\r\n").is_none());
+        assert!(observe(
+            "cap-other",
+            b"\x1b]777;hermes-launch;n\x07Not logged in\r\n"
+        )
+        .is_none());
+        // Another launch's marker does not arm this one.
+        assert!(observe(
+            "cap-w3",
+            b"\x1b]777;hermes-launch;other\x07Not logged in\r\n"
+        )
+        .is_none());
         assert!(is_watching("cap-w3"));
         end("cap-w3");
         start(
@@ -264,7 +323,7 @@ mod tests {
         );
         end_soon("cap-w5");
         assert!(
-            observe("cap-w5", b"Not logged in\n").is_some(),
+            observe("cap-w5", b"\x1b]777;hermes-launch;n\x07Not logged in\n").is_some(),
             "words right after the exit still count"
         );
     }
