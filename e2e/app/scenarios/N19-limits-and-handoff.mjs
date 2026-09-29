@@ -391,6 +391,9 @@ try {
     if (!t) return null;
     return {
       word: e2e.norm(t.querySelector(".session-limit-word")?.innerText),
+      // With the launch helper the row's status tag carries the word.
+      statusWord: e2e.norm(row.querySelector(".agent-status-tag .agent-status-word")?.innerText ?? ""),
+      saysLimited: (row.querySelector(".session-item-meta")?.innerText.match(/limited/g) ?? []).length,
       detail: e2e.norm(t.querySelector(".session-limit-detail")?.innerText),
       button: e2e.norm(t.querySelector(".session-limit-handoff")?.innerText),
       resetsAt: t.dataset.resetsAt,
@@ -413,7 +416,11 @@ try {
   );
   log(`  tag: ${JSON.stringify(tag)}; expected time ${expectedTime}`);
   assert(tag.resetsAt === String(RESETS_AT * 1000), "the reset time is exactly the one the agent reported");
-  assert(tag.word === "limited" && tag.detail === `resets ${expectedTime}`, `the row says "${tag.word} · ${tag.detail}"`);
+  // The word is said once: by the status tag when it says the session is
+  // limited (launch helper on), else by the limit tag itself.
+  const word = tag.word || tag.statusWord;
+  assert(/limited$/.test(word) && tag.detail === `resets ${expectedTime}`, `the row says "${word} · ${tag.detail}"`);
+  assert(tag.saysLimited === 1, `"limited" shows once in the row (${tag.saysLimited}; status tag "${tag.statusWord}", limit tag "${tag.word}")`);
   assert(FLAG_ON ? tag.button === "Hand off…" : !tag.button, `the handoff is offered with the launch helper (${tag.button || "no button"})`);
   assert(tag.confidence === "exact", "the limit comes from the agent's own hook (exact)");
   assert(tag.detailWhole === true, "the reset time is shown whole in the row, not cut off");
@@ -581,7 +588,7 @@ try {
     log(`  (could not restore the registry Path: ${e.message})`);
   }
   try {
-    rmSync(work, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     /* a worktree folder may still be locked on Windows */
   }

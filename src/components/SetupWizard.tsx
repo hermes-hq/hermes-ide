@@ -1,6 +1,7 @@
 import "../styles/components/SetupWizard.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { useI18n } from "../i18n/I18nProvider";
 import { getProjectsOrdered } from "../api/projects";
 import { setSetting } from "../api/settings";
@@ -30,11 +31,24 @@ export interface SetupWizardProps {
 
 const RECENT_REPOS = 6;
 
+/** The Privacy Policy the classic welcome asks people to accept, too. */
+export const PRIVACY_POLICY_URL = "https://hermes-ide.com/legal";
+
+/** A translated sentence with an element spliced in at its {placeholder}. */
+function withNodes(text: string, nodes: Record<string, ReactNode>): ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 === 1 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
+}
+
 /**
  * First launch, terminal first (F16): 1 Your agents (the doctor), 2 Pick a
  * repo, 3 First task (the launcher). No step needs an agent: with none
- * installed, Continue still works and Hermes is a terminal. Theme and
- * privacy live in Settings; usage stats are off unless turned on there.
+ * installed, Continue still works and Hermes is a terminal. As in the
+ * classic welcome, the Privacy Policy must be accepted first: Continue on
+ * step 1 waits for it, and the welcome only completes after it, so the
+ * completed welcome (onboarding_completed, the setting both welcomes write)
+ * is the record that it was accepted; nobody who finished either welcome is
+ * asked again. Theme lives in Settings; usage stats are off unless turned on
+ * there.
  */
 export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWizardProps) {
   const { t } = useI18n();
@@ -45,6 +59,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
   const [projects, setProjects] = useState<ProjectOrdered[]>([]);
   const [repo, setRepo] = useState("");
   const [repoState, setRepoState] = useState<{ path: string; root: string | null } | null>(null);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
   const doctor = useAgentDoctor();
 
   const idx = SETUP_STEPS.indexOf(step);
@@ -138,6 +153,36 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
             <>
               <p className="setup-intro">{t("doctor.intro")}</p>
               <AgentDoctor onSignIn={signIn} />
+              <div className="setup-policy">
+                <input
+                  id="setup-policy-accept"
+                  type="checkbox"
+                  checked={policyAccepted}
+                  onChange={(e) => setPolicyAccepted(e.target.checked)}
+                />
+                <label htmlFor="setup-policy-accept">
+                  {withNodes(t("onboarding.policyAccept"), {
+                    policy: (
+                      <a
+                        href={PRIVACY_POLICY_URL}
+                        className="setup-policy-link"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void openUrl(PRIVACY_POLICY_URL);
+                        }}
+                      >
+                        {t("onboarding.privacyPolicy")}
+                      </a>
+                    ),
+                  })}
+                </label>
+                {!policyAccepted && (
+                  <span id="setup-policy-hint" className="setup-policy-hint">
+                    {t("onboarding.policyRequired")}
+                  </span>
+                )}
+              </div>
             </>
           )}
 
@@ -209,7 +254,13 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
               </button>
             )}
             {step === "agents" && (
-              <button type="button" className="setup-btn setup-btn-primary setup-continue" onClick={() => setStep("repo")}>
+              <button
+                type="button"
+                className="setup-btn setup-btn-primary setup-continue"
+                disabled={!policyAccepted}
+                aria-describedby={policyAccepted ? undefined : "setup-policy-hint"}
+                onClick={() => setStep("repo")}
+              >
                 {t("onboarding.continue")}
               </button>
             )}

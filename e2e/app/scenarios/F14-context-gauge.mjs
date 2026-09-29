@@ -42,7 +42,7 @@ const CONTEXT_WINDOW = 200_000;
 await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }) => {
   log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? `   NEGATIVE CONTROL: ${NEGATIVE}` : ""}`);
   const work = mkdtempSync(join(tmpdir(), "hermes-e2e-f14-"));
-  onCleanup(() => rmSync(work, { recursive: true, force: true }));
+  onCleanup(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const recordDir = join(work, "records");
   const privateHome = join(work, "home");
   mkdirSync(recordDir, { recursive: true });

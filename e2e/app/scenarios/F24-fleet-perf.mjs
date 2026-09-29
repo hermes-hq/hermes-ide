@@ -83,7 +83,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   log(`scenario: ${SCENARIO}   platform: ${OS}   flag: ${FLAG}   budget scale: ${SCALE}   sessions: ${SESSIONS}`);
   log(`  budgets: ${JSON.stringify(BUDGET)}`);
   const work = mkdtempSync(join(tmpdir(), "hermes-e2e-f24-"));
-  onCleanup(() => rmSync(work, { recursive: true, force: true }));
+  onCleanup(() => rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   const privateHome = join(work, "home");
   mkdirSync(privateHome, { recursive: true });
   const metrics = { platform: OS, flag: FLAG, budgets: BUDGET };

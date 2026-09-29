@@ -7,7 +7,9 @@
 //          flags are turned on while the first welcome is still open, and
 //          the app quits without finishing it.
 //   run 2  the welcome is the new one, three screens:
-//          1 Your agents — the doctor shows each fake's version and sign-in
+//          1 Your agents — as in the classic welcome, the Privacy Policy
+//            must be accepted first (same link): Continue waits for it and
+//            says why. The doctor shows each fake's version and sign-in
 //            state read from the CLI itself (Claude 2.1.300 signed in; Codex
 //            0.100.0, below the catalog minimum, signed out, with Sign in;
 //            OpenCode 1.18.2), signals and resume; "Usage stats: off"; no
@@ -20,8 +22,12 @@
 //            the welcome is done (usage stats still off).
 //          Settings > Agents shows the same doctor.
 //   run 3+4  fresh install again, with no agent on the doctor's PATH: the
-//          doctor says none was found, Continue stays enabled, the last
-//          screen offers a shell, and ⌘T opens another shell.
+//          doctor says none was found, Continue is enabled once the Privacy
+//          Policy is accepted (no agent does not block it), the last screen
+//          offers a shell, and ⌘T opens another shell.
+//   run 5  that profile again: the welcome is not shown again.
+//   run 6+7  a profile that accepted the Privacy Policy in the classic
+//          welcome (flag off) is not asked again once the flag is on.
 //
 // Negative control (must end in RESULT: FAIL):
 //   HERMES_E2E_F16_FLAG=off   the flag stays off: the classic 4-step
@@ -206,6 +212,47 @@ async function freshInstallWithFlags(run, homeDir) {
   await app.stop();
 }
 
+/** Screen 1's Privacy Policy acceptance, as a person reads it. */
+const policy = (bridge) =>
+  bridge.eval(`
+    const box = e2e.first("#setup-policy-accept");
+    if (!box) return null;
+    const link = e2e.first(".setup-policy-link");
+    const cont = e2e.first(".setup-continue");
+    return {
+      label: e2e.norm(document.querySelector('label[for="setup-policy-accept"]')?.innerText),
+      checked: box.checked,
+      href: link?.getAttribute("href") ?? null,
+      continueDisabled: !!cont?.disabled,
+      hint: e2e.norm(e2e.first("#setup-policy-hint")?.innerText ?? ""),
+      describedBy: cont?.getAttribute("aria-describedby") ?? null,
+    };
+  `);
+/** Tick "I accept the Privacy Policy" the way a click does. */
+async function acceptPolicy(bridge) {
+  await bridge.click("#setup-policy-accept");
+  await bridge.waitFor("Continue to be enabled", `return e2e.first("#setup-policy-accept")?.checked === true && !e2e.first(".setup-continue").disabled;`);
+}
+
+/** The classic four-step welcome, accepting its Privacy Policy. */
+async function completeClassicWelcome(bridge) {
+  await bridge.waitFor("the classic welcome", `return !!e2e.first(".onboarding-dialog");`, { timeoutMs: 30_000 });
+  for (let i = 0; i < 3; i++) {
+    await bridge.click(".onboarding-actions .onboarding-btn-primary");
+    await sleep(150);
+  }
+  await bridge.waitFor("the privacy screen", `return e2e.all(".onboarding-privacy-checkbox input").length === 2;`);
+  await bridge.clickWhenReady(`
+    const [analytics, accept] = e2e.all(".onboarding-privacy-checkbox input");
+    if (analytics.checked) e2e.click(analytics);
+    if (!accept.checked) e2e.click(accept);
+    return true;
+  `);
+  await bridge.waitFor("Finish to be enabled", `const b = e2e.first(".onboarding-actions .onboarding-btn-primary"); return !!b && !b.disabled;`);
+  await bridge.click(".onboarding-actions .onboarding-btn-primary");
+  await bridge.waitFor("the classic welcome to close", `return !e2e.first(".onboarding-backdrop");`);
+}
+
 async function waitForSetup(bridge) {
   await bridge.waitFor("the three-step welcome", `
     if (e2e.first(".onboarding-dialog")) throw new Error("the classic four-step wizard showed instead of the three-step welcome");
@@ -251,6 +298,15 @@ try {
   assert(gemini && gemini.installed === "false" && gemini.actions.includes("Copy install command"), "an agent that is not installed offers its install command");
   assert(await bridge.eval(`return !!document.querySelector('tr.agent-doctor-row[data-agent-id="gemini"] .agent-doctor-badge.retired');`), "the retired Gemini CLI is flagged");
   assert(await bridge.eval(`return !!document.querySelector('tr.agent-doctor-row.custom');`), "the Custom agent has a row");
+  log("  the Privacy Policy comes first, as in the classic welcome");
+  const p0 = await policy(bridge);
+  log(`  policy: ${JSON.stringify(p0)}`);
+  assert(p0 && p0.label === "I accept the Privacy Policy" && p0.checked === false, "screen 1 asks to accept the Privacy Policy, unticked");
+  assert(p0.href === "https://hermes-ide.com/legal", "the link is the same Privacy Policy the classic welcome links");
+  assert(p0.continueDisabled && p0.hint === "Accept the Privacy Policy to continue" && p0.describedBy === "setup-policy-hint", "Continue waits for it, and says why (for a screen reader too)");
+  await bridge.eval(`e2e.first(".setup-continue").click(); return true;`);
+  await sleep(300);
+  assert((await step(bridge)).step === "agents", "Continue does nothing until it is accepted");
   const texts = await bridge.eval(`return { usage: e2e.norm(e2e.first(".setup-usage")?.innerText), all: document.querySelector(".setup-dialog").innerText };`);
   assert(texts.usage === "Usage stats: off", "the usage stats line reads off");
   assert(!/agent view/i.test(texts.all), "no Agent-view words on the welcome");
@@ -272,6 +328,8 @@ try {
   await waitForSetup(bridge);
   await bridge.waitFor("codex signed in after Check again", `return document.querySelector('tr.agent-doctor-row[data-agent-id="codex"]')?.getAttribute("data-signed-in") === "yes";`, { timeoutMs: 60_000 });
   log("  back to setup; the doctor now reports Codex signed in");
+  await acceptPolicy(bridge);
+  await bridge.screenshot(join(evidenceDir, "02b-policy-accepted.png"));
   await bridge.click(".setup-continue");
 
   log("screen 2: Pick a repo");
@@ -354,7 +412,9 @@ try {
   const installed = await bridge.eval(`return e2e.all('tr.agent-doctor-row[data-installed="true"]').length;`);
   assert(installed === 0, "no agent is reported installed");
   assert(await bridge.exists(".agent-doctor-none"), "the doctor says none was found and a shell still works");
-  assert(await bridge.eval(`return !e2e.first(".setup-continue").disabled;`), "Continue stays enabled");
+  assert((await policy(bridge))?.continueDisabled === true, "a fresh install asks for the Privacy Policy here too");
+  await acceptPolicy(bridge);
+  assert(await bridge.eval(`return !e2e.first(".setup-continue").disabled;`), "Continue stays enabled (no agent does not block it)");
   await bridge.screenshot(join(evidenceDir, "06-no-agents.png"));
   await bridge.click(".setup-continue");
   await bridge.waitFor("screen 2", `return e2e.first(".setup-dialog")?.getAttribute("data-step") === "repo";`);
@@ -377,6 +437,29 @@ try {
   await bridge.waitFor("⌘T to open another shell", `return window.__HERMES_E2E__.terminalIds().filter((id) => !${JSON.stringify(before)}.includes(id)).length === 1;`, { timeoutMs: 30_000 });
   log("  ⌘T opened a shell");
   await bridge.screenshot(join(evidenceDir, "07-shell.png"));
+  await app.stop();
+
+  // ── run 5: this profile finished the welcome: not asked again ───────
+  log("run 5: the same profile again: the welcome (and its Privacy Policy) is not shown again");
+  app = await launch(5, home2, { env: { HERMES_E2E_AGENT_PATH: emptyBin } });
+  await app.bridge.waitFor("the app UI", `return !!e2e.first(".topbar");`, { timeoutMs: 30_000 });
+  await sleep(2000);
+  assert(!(await app.bridge.exists(".setup-dialog, .onboarding-dialog, #setup-policy-accept")), "a profile that finished the welcome is not asked again");
+  await app.stop();
+
+  // ── runs 6 and 7: accepted in the classic welcome, then the new one ──
+  const home3 = newHome();
+  log("run 6: a profile that accepted the Privacy Policy in the classic welcome (flag off)");
+  app = await launch(6, home3, { first: true });
+  await completeClassicWelcome(app.bridge);
+  await invoke(app.bridge, "set_setting", { key: "feature_flag_overrides", value: JSON.stringify({ taskLauncher: true, agentCatalog: true, launchHelper: false }) });
+  await app.stop();
+  log("run 7: the three-step welcome is on now; that profile is not asked again");
+  app = await launch(7, home3);
+  await app.bridge.waitFor("the app UI", `return !!e2e.first(".topbar");`, { timeoutMs: 30_000 });
+  await sleep(2000);
+  assert(!(await app.bridge.exists(".setup-dialog, .onboarding-dialog, #setup-policy-accept")), "a profile that accepted in the classic welcome is not asked again");
+  await app.bridge.screenshot(join(evidenceDir, "08-existing-profile.png"));
   await app.stop();
   app = null;
 } catch (err) {
@@ -406,8 +489,8 @@ try {
   }
   if (!failed) {
     try {
-      rmSync(work, { recursive: true, force: true });
-      for (const h of homes) rmSync(h, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      for (const h of homes) rmSync(h, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       /* best effort */
     }

@@ -1029,6 +1029,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               )}
               <SessionLimitTag
                 sessionId={session.id}
+                withStatusTag={agentStatus && session.phase !== "disconnected"}
                 onHandOff={handoffEnabled && !session.ssh_info ? () => setHandoff({ sessionId: session.id, kind: "continue" }) : undefined}
               />
               <SessionContextGauge sessionId={session.id} />

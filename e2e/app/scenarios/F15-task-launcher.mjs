@@ -542,8 +542,8 @@ try {
   }
   if (!failed) {
     try {
-      rmSync(work, { recursive: true, force: true });
-      if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      if (homeDir) rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       /* best effort */
     }

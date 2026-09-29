@@ -160,6 +160,8 @@ async function openWizard() {
 }
 
 const stepTitle = () => document.querySelector(".setup-title")?.textContent;
+/** Step 1: tick "I accept the Privacy Policy", as the classic welcome asks too. */
+const acceptPolicy = () => fireEvent.click(screen.getByRole("checkbox", { name: "I accept the Privacy Policy" }));
 
 describe("SetupWizard", () => {
   it("reaches a launched first task in three screens", async () => {
@@ -169,6 +171,7 @@ describe("SetupWizard", () => {
     expect(stepTitle()).toBe("Your agents");
     expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
     expect(screen.getByText("Usage stats: off")).toBeInTheDocument();
+    acceptPolicy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     await settle();
@@ -196,6 +199,7 @@ describe("SetupWizard", () => {
   it("with no agent installed, Continue stays enabled and Open a shell finishes", async () => {
     h.doctor = [row("claude", "Claude Code", { installed: false })];
     const { onOpenShell, onDone } = await openWizard();
+    acceptPolicy();
     const cont = screen.getByRole("button", { name: "Continue" });
     expect(cont).toBeEnabled();
     fireEvent.click(cont);
@@ -211,12 +215,41 @@ describe("SetupWizard", () => {
 
   it("a folder that is not a repository cannot be picked", async () => {
     await openWizard();
+    acceptPolicy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await settle();
     fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/fixture-home/plain" } });
     await settle();
     expect(screen.getByText("Not a git repository")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+
+  it("asks for the Privacy Policy first: Continue waits until it is accepted, and says why", async () => {
+    const { open: openUrl } = await import("@tauri-apps/plugin-shell");
+    h.doctor = [row("claude", "Claude Code")];
+    const { onDone } = await openWizard();
+    const cont = screen.getByRole("button", { name: "Continue" });
+    const box = screen.getByRole("checkbox", { name: "I accept the Privacy Policy" });
+    expect(box).not.toBeChecked();
+    expect(cont).toBeDisabled();
+    expect(cont).toHaveAccessibleDescription("Accept the Privacy Policy to continue");
+    // The link opens the same policy as the classic welcome, and ticks nothing.
+    fireEvent.click(screen.getByRole("link", { name: "Privacy Policy" }));
+    expect(openUrl).toHaveBeenCalledWith("https://hermes-ide.com/legal");
+    expect(box).not.toBeChecked();
+    fireEvent.click(cont);
+    expect(stepTitle()).toBe("Your agents");
+    // Keyboard: the box toggles like any checkbox.
+    box.focus();
+    fireEvent.click(box);
+    expect(box).toBeChecked();
+    expect(cont).toBeEnabled();
+    expect(screen.queryByText("Accept the Privacy Policy to continue")).toBeNull();
+    fireEvent.click(cont);
+    await settle();
+    expect(stepTitle()).toBe("Pick a repo");
+    expect(onDone).not.toHaveBeenCalled();
+    expect(h.settings.get("onboarding_completed")).toBeUndefined();
   });
 
   it("Sign in steps aside until Back to setup, which checks again", async () => {

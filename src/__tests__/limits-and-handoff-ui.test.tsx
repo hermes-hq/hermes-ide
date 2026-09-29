@@ -138,6 +138,37 @@ describe("SessionLimitTag", () => {
   });
 });
 
+describe("SessionLimitTag next to the status tag", () => {
+  it("says \"limited\" once: the status tag has the word, this tag the reset time and the handoff", async () => {
+    const { AgentStatusTag } = await import("../components/AgentStatusTag");
+    const onHandOff = vi.fn();
+    const { container } = wrap(
+      <div className="session-item-meta">
+        <AgentStatusTag sessionId="s3" />
+        <SessionLimitTag sessionId="s3" onHandOff={onHandOff} withStatusTag />
+      </div>,
+    );
+    const resetsAt = Date.now() + 3_600_000;
+    act(() => {
+      dispatchSessionEvent("s3", { type: "limit", at: 1, state: "limited", resetsAt, window: "five_hour" });
+      dispatchSessionEvent("s3", { type: "status", at: 1, status: { kind: "limited", confidence: "exact", detail: "" } });
+    });
+    const text = container.querySelector(".session-item-meta")!.textContent ?? "";
+    expect(text.match(/limited/g)).toHaveLength(1); // "rate limited", from the status tag
+    expect(container.querySelector(".session-limit-word")).toBeNull();
+    expect(container.querySelector(".session-limit-tag")?.textContent).toMatch(/resets \d/);
+    expect(screen.getByText("Hand off…")).toBeTruthy();
+  });
+
+  it("keeps its word when the row shows no status tag", () => {
+    const { container } = wrap(<SessionLimitTag sessionId="s4" />);
+    act(() => {
+      dispatchSessionEvent("s4", { type: "status", at: 1, status: { kind: "limited", confidence: "exact", detail: "" } });
+    });
+    expect(container.querySelector(".session-limit-word")?.textContent).toBe("limited");
+  });
+});
+
 describe("HandoffDialog", () => {
   it("continue: ready agents only, the seed names the task and the files, Start creates the session with it", async () => {
     act(() => {
