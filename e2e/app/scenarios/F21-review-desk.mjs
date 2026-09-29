@@ -474,6 +474,19 @@ async function typeInto(bridge, sessionId, text) {
 // The session's status as Hermes shows it (and as the desk reads it): the
 // terminal's own guesses never undo what the agent reported.
 const statusOf = (bridge, sessionId) => bridge.eval(`const s = window.__HERMES_E2E__.sessionStatus(${JSON.stringify(sessionId)}); return { kind: s.kind, confidence: s.confidence };`);
+/**
+ * Waits, as a person would, until the session does not show "working": the
+ * desk never types into a busy agent, and the terminal's own guess can say
+ * "working" for a moment on output (a Windows console repaints on its own).
+ */
+async function untilNotWorking(bridge, sessionId, who) {
+  const s = await bridge.waitFor(`${who} not to show working`, `
+    const s = window.__HERMES_E2E__.sessionStatus(${JSON.stringify(sessionId)});
+    return s.kind !== "working" ? { kind: s.kind, confidence: s.confidence, source: s.source } : null;
+  `, { timeoutMs: 15_000 });
+  log(`  ${who} before Send: ${JSON.stringify(s)}`);
+  return s;
+}
 async function waitForPrompts(sessionId, count, { timeoutMs = 15_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -609,6 +622,7 @@ try {
   await bridge.screenshot(join(evidenceDir, "02-by-turn-with-comments.png"));
 
   log("step 5: Send to Agent A — one tagged line reaches A's terminal, its prompt hook reports it, Hermes shows delivered");
+  await untilNotWorking(bridge, idA, "Agent A");
   await bridge.click(`.review-send[data-session="${idA}"] .review-send-btn`);
   const deliveredA = await bridge.waitFor("delivery to Agent A", `
     const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-state") === "delivered");
@@ -631,6 +645,7 @@ try {
   await bridge.screenshot(join(evidenceDir, "03-delivered-to-agent-a.png"));
 
   log("step 6: Send to Agent B — the line arrives, no signal comes back, Hermes shows not delivered with Retry");
+  await untilNotWorking(bridge, idB, "Agent B");
   await bridge.click(`.review-send[data-session="${idB}"] .review-send-btn`);
   const sendingB = await bridge.waitFor("the send to start", `
     const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "2");
@@ -664,7 +679,7 @@ try {
   await bridge.waitFor("turn 1's file", `return e2e.all(".review-turn-file").length === 1;`);
   const c3 = await commentOn(bridge, "src/app.js", "Add a comment saying why it is 3.");
   assert(c3.session === idA, "a new comment for Agent A");
-  const idleA = await statusOf(bridge, idA);
+  const idleA = await untilNotWorking(bridge, idA, "Agent A");
   assert(idleA.kind !== "working", `Agent A is not working before the turn (${idleA.kind}, ${idleA.confidence})`);
   // The person gives Agent A a long turn (the fake works 8 s, then runs its Stop hook).
   await typeInto(bridge, idA, "work 8000\r");
