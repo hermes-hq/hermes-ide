@@ -32,6 +32,14 @@
 // launch's nonce, `x` the same marker with a forged nonce.
 // With no hook at all (for the OS layer): `z` runs a command (a shell
 // child) for HERMES_FAKE_TOOL_MS (4000), `b` keeps a core busy as long.
+// `a` is a tool call the way Antigravity makes one: PreToolUse (run_command),
+// then it waits for the person's y/n without reporting that it waits; `y`
+// runs the command (a shell child, as long as `z`) and then PostToolUse.
+//
+// As HERMES_FAKE_AGENT=antigravity, with no --settings, the hooks come from
+// `.agents/hooks.json` in the folder it runs in, in Antigravity's shape: one
+// entry per owner ({"enabled": true, "<Event>": [...]}), tool events as
+// groups with a matcher, the others as flat lists of handlers.
 //
 // In the `prompts` mode (F21, F27) those keys are plain text instead: a line
 // of typed text followed by Enter is a prompt too. A prompt of the form
@@ -236,6 +244,37 @@ if (args.settings) {
 	} catch (e) {
 		settingsError = String(e.message || e);
 	}
+} else if (FAKE_AGENT === "antigravity") {
+	const file = path.join(process.cwd(), ".agents", "hooks.json");
+	try {
+		settings = agyHooksAsSettings(JSON.parse(fs.readFileSync(file, "utf8")));
+	} catch (e) {
+		if (e.code !== "ENOENT") settingsError = String(e.message || e);
+	}
+}
+
+/**
+ * Antigravity's `.agents/hooks.json` as the settings shape the rest of this
+ * fake reads: every enabled entry's events, a flat handler list becoming one
+ * group without a matcher. A group where a flat list belongs (or the other
+ * way round) is dropped, as agy silently runs nothing for it.
+ */
+function agyHooksAsSettings(file) {
+	const hooks = {};
+	const toolEvent = (event) => event === "PreToolUse" || event === "PostToolUse";
+	for (const entry of Object.values(file ?? {})) {
+		if (!entry || typeof entry !== "object" || entry.enabled === false) continue;
+		for (const [event, list] of Object.entries(entry)) {
+			if (event === "enabled" || !Array.isArray(list)) continue;
+			const groups = toolEvent(event)
+				? list.filter((g) => g && typeof g.matcher === "string" && Array.isArray(g.hooks))
+				: list.every((h) => h && h.type === "command")
+					? [{ hooks: list }]
+					: [];
+			(hooks[event] ??= []).push(...groups);
+		}
+	}
+	return { hooks };
 }
 
 const record = {
@@ -807,6 +846,37 @@ async function main() {
 				note("tool", { shell: TOOL_IN_SHELL, ms: TOOL_MS });
 				runChild(toolCommand(), "command finished");
 				continue;
+			case "a": {
+				// Antigravity's tool call: announced, then a wait for the
+				// person that no hook reports.
+				out("\r\nfake-cli: run_command wants to run a command  [y/n]\r\n");
+				await runHooks("PreToolUse", { tool_name: "run_command", tool_input: { CommandLine: "make test" } });
+				for (;;) {
+					const answer = await nextKey();
+					if (answer === null || answer === "\x03") {
+						await quit("interrupted-at-approval");
+						return;
+					}
+					if (answer === "y" || answer === "Y") {
+						out(`fake-cli: approved, running the command for ${TOOL_MS} ms\r\n`);
+						note("tool", { shell: TOOL_IN_SHELL, ms: TOOL_MS, approved: true });
+						const argv = toolCommand();
+						await new Promise((resolve) => {
+							const child = spawn(argv[0], argv.slice(1), { stdio: "ignore", windowsHide: true });
+							child.on("exit", resolve);
+							child.on("error", resolve);
+						});
+						out("fake-cli: command finished\r\n");
+						await runHooks("PostToolUse", { tool_name: "run_command", tool_input: { CommandLine: "make test" }, tool_response: {} });
+						break;
+					}
+					if (answer === "n" || answer === "N") {
+						out("fake-cli: denied\r\n");
+						break;
+					}
+				}
+				continue;
+			}
 			case "b":
 				// The agent keeping a core busy (a child that is not a shell, spinning).
 				out(`\r\nfake-cli: busy for ${TOOL_MS} ms (no hook)\r\n`);

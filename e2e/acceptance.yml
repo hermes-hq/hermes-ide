@@ -528,6 +528,12 @@ features:
       F11-7:
         text: "A guess never overrides an exact report: an agent's exact \"done\" stays on the strip and in the sidebar while it runs a command or uses the CPU"
         scenarios: [F11-os-layer.mjs]
+      F11-8:
+        # Negative control: HERMES_E2E_OSL_AGY_ONLY=1 with
+        # HERMES_E2E_OSL_NO_SHELL=1 (no command after the approval, so the
+        # guess is never taken back).
+        text: "Antigravity waiting for an approval it never reports shows \"needs approval · guessed\" within 3.5 s, raises no inbox item and sends no notification, and goes back to working within two seconds of the approved command starting"
+        scenarios: [F11-os-layer.mjs]
   C0:
     name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
     # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).

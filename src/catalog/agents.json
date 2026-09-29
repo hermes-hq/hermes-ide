@@ -174,7 +174,7 @@
           "default": [],
           "bypassPermissions": ["--dangerously-skip-permissions"]
         },
-        "min_version": "1.0.6",
+        "min_version": "1.2.13",
         "safety": {
           "default_mode": "default",
           "fit": "stricter",
@@ -189,7 +189,7 @@
       },
       "detect": { "command": ["agy", "--version"] },
       "auth": { "check": null, "hint": "Run 'agy' and sign in with Google in the browser, or set GEMINI_API_KEY" },
-      "evidence": { "level": "help", "version": "1.0.6" },
+      "evidence": { "level": "help", "version": "1.2.13" },
       "setup": {
         "instructions": { "project": ["AGENTS.md", "GEMINI.md"], "global": ["~/.gemini/GEMINI.md"], "imports": false },
         "settings": { "project": [".agents/hooks.json"], "global": [] },

@@ -1244,8 +1244,9 @@ fn free_loopback_port() -> u16 {
 /// and marks the agent as launching.
 /// For an agent whose catalog asks for it (`hook_trust`), the hook state
 /// that trusts exactly Hermes's own hooks for this launch (see
-/// `super::hook_trust`), or None. It may start the agent's app server for a
-/// moment, so callers run it outside the session lock.
+/// `super::hook_trust`), or None. It may wait up to
+/// `hook_trust::LAUNCH_WAIT` for the agent's app server, so callers run it
+/// outside the session lock.
 pub(crate) fn hook_trust_for(app: &AppHandle, provider: &str, cwd: &str) -> Option<String> {
     let agent = recipe_for(provider)?;
     if agent.terminal.signals.hook_trust.as_deref() != Some("app_server_hooks_list") {
@@ -1254,7 +1255,13 @@ pub(crate) fn hook_trust_for(app: &AppHandle, provider: &str, cwd: &str) -> Opti
     let hi = hi_path(app)?;
     let flags = toml_hook_flags(agent, &hi);
     let program = super::hook_trust::find_program(&agent.terminal.argv[0])?;
-    super::hook_trust::trusted_state(&program, &flags, Path::new(cwd), &hook_path(&hi))
+    super::hook_trust::trusted_state(
+        &program,
+        &flags,
+        Path::new(cwd),
+        &hook_path(&hi),
+        super::hook_trust::LAUNCH_WAIT,
+    )
 }
 
 pub(crate) fn prepare_helper_launch(

@@ -8,7 +8,10 @@
 //!   itself is gone without having said so (a killed helper);
 //! - whether a tool command runs under the agent: a shell among its
 //!   descendants (Claude, Codex and Antigravity run every command through
-//!   one; MCP servers and the agent's own helpers are not shells);
+//!   one; MCP servers and the agent's own helpers are not shells). A shell
+//!   that has been there since the agent started (an MCP server or helper
+//!   started through one) or one a package runner started (`npx` running an
+//!   MCP server, `npm run dev` in the background) is not a command;
 //! - how much CPU the agent's process tree used since the last look.
 //!
 //! What it concludes goes out as ordinary session events with the source
@@ -24,7 +27,11 @@
 //! by the agent's own hook that neither starts a command nor finishes within
 //! [`APPROVAL_GUESS_AFTER`], while the tree is quiet, is most likely waiting
 //! for the person's approval. That guess is sent with the hook's own source,
-//! so the agent's next report (the tool finishing) replaces it.
+//! so the agent's next report (the tool finishing) replaces it, and at
+//! `guessed` confidence, so it never raises an inbox item (the frontend's
+//! status bridge). Once a command starts under the agent, or the tree gets
+//! busy, after the guess, the person has answered: the layer takes the
+//! guess back with a guessed `working` under the same source.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -60,6 +67,15 @@ pub const STARTED_AFTER: Duration = Duration::from_secs(3);
 /// After the helper disappeared, how many ticks to wait for its own exit
 /// report before saying the agent is gone.
 const GONE_GRACE_TICKS: u32 = 3;
+/// A watched session whose helper never showed up in this long (the launch
+/// line was never run: the shell closed first, or the person typed over it)
+/// is dropped.
+pub const HELPER_WAIT: Duration = Duration::from_secs(60);
+/// A shell started within this many seconds of the agent itself (process
+/// start times have a one-second resolution) is part of the agent's own
+/// startup (an MCP server or a helper started through a shell), not a
+/// command it runs for the person.
+pub const STARTUP_SHELL_GRACE_S: u64 = 2;
 
 // ─── Pure parts ──────────────────────────────────────────────────────
 
@@ -87,6 +103,43 @@ pub fn is_tool_process(name: &str) -> bool {
             | "powershell"
             | "cmd"
     )
+}
+
+/// Whether a process is a package runner (`npx`, `npm exec`, `npm run`,
+/// pnpm, yarn, bun): a shell below one is the program it runs (an MCP
+/// server, a dev server), not a command the agent runs.
+pub fn is_package_runner(name: &str, cmd: &[String]) -> bool {
+    const RUNNERS: [&str; 7] = ["npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx"];
+    const SCRIPTS: [&str; 5] = [
+        "npm-cli.js",
+        "npx-cli.js",
+        "pnpm.cjs",
+        "yarn.js",
+        "yarn.cjs",
+    ];
+    let base = |s: &str| {
+        let b = s
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(s)
+            .to_ascii_lowercase();
+        let b = b.strip_suffix(".exe").unwrap_or(&b).to_string();
+        b.strip_suffix(".cmd").unwrap_or(&b).to_string()
+    };
+    if RUNNERS.contains(&base(name).as_str()) {
+        return true;
+    }
+    // npm sets its process title to "npm exec ...", which is what the
+    // process table shows as its first argument.
+    let first = cmd.first().map(|a| a.as_str()).unwrap_or("");
+    let first_word = first.split_whitespace().next().unwrap_or("");
+    if RUNNERS.contains(&base(first_word).as_str()) {
+        return true;
+    }
+    cmd.iter()
+        .skip(1)
+        .take(2)
+        .any(|a| SCRIPTS.contains(&base(a).as_str()))
 }
 
 /// Whether a command line is `hi run <session_id>` (the helper may be
@@ -248,6 +301,34 @@ pub fn mark_started_by_process(s: &mut Session) -> bool {
     true
 }
 
+/// After a guessed approval: the reason to take it back, when the person
+/// has evidently answered (a command started under the agent, or the layer
+/// newly saw it working), else None. `verdict`: what the layer concluded
+/// from this sample, if it changed its mind.
+pub fn approval_answered(verdict: Option<&Verdict>, sample: &Sample) -> Option<String> {
+    match (verdict, &sample.tool) {
+        (Some(Verdict::Working(reason)), _) => Some(reason.clone()),
+        (_, Some(tool)) => Some(format!("a command is running ({tool})")),
+        _ => None,
+    }
+}
+
+/// Taking a guessed approval back: a guessed `working` under the guess's
+/// own source, so it replaces the guess (a source may correct itself) and
+/// yields to the agent's next report.
+pub fn approval_answered_event(reason: &str, source: &str, at: i64) -> SessionEvent {
+    SessionEvent::Status {
+        at,
+        source: Some(source.to_string()),
+        tags: None,
+        status: AgentStatus {
+            kind: AgentStatusKind::Working,
+            confidence: Confidence::Guessed,
+            detail: reason.to_string(),
+        },
+    }
+}
+
 /// The guessed "needs approval" for a pending tool call.
 pub fn approval_guess_event(tool: &str, source: &str, at: i64) -> SessionEvent {
     SessionEvent::Status {
@@ -272,6 +353,8 @@ pub struct Proc {
     pub name: String,
     pub cmd: Vec<String>,
     pub cpu_ms: u64,
+    /// When the process started, seconds since the epoch.
+    pub start_s: u64,
 }
 
 /// Every descendant of `root` (not `root` itself).
@@ -331,7 +414,7 @@ pub fn sample_of(
     let below = descendants(procs, agent.pid);
     let tool = below
         .iter()
-        .find(|p| is_tool_process(&p.name))
+        .find(|p| is_command_shell(procs, agent, p))
         .map(|p| p.name.clone());
     let total: u64 = agent.cpu_ms + below.iter().map(|p| p.cpu_ms).sum::<u64>();
     let cpu_ms = cpu_before.map_or(0, |b| total.saturating_sub(b));
@@ -345,6 +428,32 @@ pub fn sample_of(
         },
         total,
     )
+}
+
+/// Whether `shell`, a descendant of `agent`, is a command the agent runs: a
+/// shell that started after the agent's own startup, and not below a
+/// package runner (see the module docs).
+fn is_command_shell(procs: &[Proc], agent: &Proc, shell: &Proc) -> bool {
+    if !is_tool_process(&shell.name) {
+        return false;
+    }
+    if shell.start_s <= agent.start_s + STARTUP_SHELL_GRACE_S {
+        return false;
+    }
+    let mut parent = shell.parent;
+    while let Some(pid) = parent {
+        if pid == agent.pid {
+            return true;
+        }
+        let Some(p) = procs.iter().find(|p| p.pid == pid) else {
+            return true;
+        };
+        if is_package_runner(&p.name, &p.cmd) {
+            return false;
+        }
+        parent = p.parent;
+    }
+    true
 }
 
 /// Read the process table: names and parents for everything, command lines
@@ -370,6 +479,7 @@ fn read_processes(sys: &mut sysinfo::System) -> Vec<Proc> {
                 .map(|a| a.to_string_lossy().to_string())
                 .collect(),
             cpu_ms: p.accumulated_cpu_time(),
+            start_s: p.start_time(),
         })
         .collect()
 }
@@ -388,6 +498,8 @@ struct Watched {
     judge: Judge,
     cpu_total: Option<u64>,
     last: Instant,
+    /// When the watch began, for [`HELPER_WAIT`].
+    since: Instant,
     seen_helper: bool,
     gone_ticks: u32,
     pending: Option<Pending>,
@@ -424,6 +536,7 @@ pub fn watch(
                 judge: Judge::default(),
                 cpu_total: None,
                 last: Instant::now(),
+                since: Instant::now(),
                 seen_helper: false,
                 gone_ticks: 0,
                 pending: None,
@@ -496,7 +609,13 @@ fn run() {
                 if sample.helper_alive {
                     w.seen_helper = true;
                     w.gone_ticks = 0;
-                } else if w.seen_helper {
+                } else if !w.seen_helper {
+                    // The launch line never ran: nothing to watch.
+                    if w.since.elapsed() >= HELPER_WAIT {
+                        done.push(sid.clone());
+                    }
+                    continue;
+                } else {
                     // The helper is gone and has not reported it (its
                     // report unwatches the session first).
                     w.gone_ticks += 1;
@@ -516,8 +635,9 @@ fn run() {
                     }
                     continue;
                 }
-                if let Some(verdict) = w.judge.observe(&sample) {
-                    out.push((w.app.clone(), sid.clone(), verdict_event(&verdict, now_ms)));
+                let verdict = w.judge.observe(&sample);
+                if let Some(verdict) = &verdict {
+                    out.push((w.app.clone(), sid.clone(), verdict_event(verdict, now_ms)));
                 }
                 if sample.agent_alive {
                     let since = *w.alive_since.get_or_insert_with(Instant::now);
@@ -531,8 +651,20 @@ fn run() {
                 } else {
                     w.alive_since = None;
                 }
+                let mut answered = false;
                 if let Some(p) = w.pending.as_mut() {
-                    if !p.reported && approval_due(p.since.elapsed(), &sample) {
+                    if p.reported {
+                        // The guess stands until the person evidently
+                        // answered it.
+                        if let Some(reason) = approval_answered(verdict.as_ref(), &sample) {
+                            answered = true;
+                            out.push((
+                                w.app.clone(),
+                                sid.clone(),
+                                approval_answered_event(&reason, &p.source, now_ms),
+                            ));
+                        }
+                    } else if approval_due(p.since.elapsed(), &sample) {
                         p.reported = true;
                         out.push((
                             w.app.clone(),
@@ -540,6 +672,9 @@ fn run() {
                             approval_guess_event(&p.tool, &p.source, now_ms),
                         ));
                     }
+                }
+                if answered {
+                    w.pending = None;
                 }
             }
             for sid in done {
@@ -710,7 +845,14 @@ mod tests {
             name: name.to_string(),
             cmd: cmd.iter().map(|s| s.to_string()).collect(),
             cpu_ms,
+            start_s: 1000,
         }
+    }
+
+    /// A process that started `secs` after the others.
+    fn later(mut proc: Proc, secs: u64) -> Proc {
+        proc.start_s += secs;
+        proc
     }
 
     #[test]
@@ -728,7 +870,10 @@ mod tests {
         assert_eq!(first.cpu_ms, 0, "no delta on the first look");
         assert_eq!(total, 1300);
         procs[2].cpu_ms = 1200;
-        procs.push(p(14, 12, "zsh", &["/bin/zsh", "-c", "npm test"], 10));
+        procs.push(later(
+            p(14, 12, "zsh", &["/bin/zsh", "-c", "npm test"], 10),
+            30,
+        ));
         let (second, total) = sample_of(&procs, "s-1", Some(total), 500);
         assert_eq!(second.tool.as_deref(), Some("zsh"));
         assert_eq!(second.cpu_ms, 210);
@@ -740,6 +885,110 @@ mod tests {
         assert!(!none.helper_alive);
     }
 
+    #[test]
+    fn shells_from_the_agents_startup_or_a_package_runner_are_not_commands() {
+        let base = vec![
+            p(11, 1, "hi", &["/app/hi", "run", "s-1"], 1),
+            p(12, 11, "agy", &["agy"], 100),
+            // An MCP server the agent started through a shell at startup.
+            p(13, 12, "sh", &["/bin/sh", "-c", "mcp-server-git"], 1),
+            // One started later through npx (npm's process title), and a
+            // dev server started by `npm run dev` long after.
+            later(p(14, 12, "node", &["npm exec @mcp/fetch"], 5), 20),
+            later(p(15, 14, "sh", &["sh", "-c", "mcp-fetch"], 1), 21),
+            later(
+                p(
+                    16,
+                    12,
+                    "node",
+                    &[
+                        "node",
+                        "/usr/lib/node_modules/npm/bin/npm-cli.js",
+                        "run",
+                        "dev",
+                    ],
+                    5,
+                ),
+                40,
+            ),
+            later(p(17, 16, "sh", &["sh", "-c", "vite"], 1), 41),
+        ];
+        let (s, _) = sample_of(&base, "s-1", None, 500);
+        assert!(s.agent_alive);
+        assert_eq!(s.tool, None, "long-lived shells are not commands");
+        // Within the grace, still startup; after it, a command.
+        let mut procs = base.clone();
+        procs.push(later(
+            p(18, 12, "zsh", &["/bin/zsh", "-c", "ls"], 1),
+            STARTUP_SHELL_GRACE_S,
+        ));
+        assert_eq!(sample_of(&procs, "s-1", None, 500).0.tool, None);
+        procs.push(later(
+            p(19, 12, "zsh", &["/bin/zsh", "-c", "cargo test"], 1),
+            60,
+        ));
+        assert_eq!(
+            sample_of(&procs, "s-1", None, 500).0.tool.as_deref(),
+            Some("zsh")
+        );
+        // A command the agent runs that itself uses npm still counts: its
+        // own shell is the agent's.
+        let mut npm_test = base.clone();
+        npm_test.push(later(p(20, 12, "bash", &["bash", "-c", "npm test"], 1), 60));
+        npm_test.push(later(p(21, 20, "npm", &["npm", "test"], 1), 60));
+        npm_test.push(later(p(22, 21, "sh", &["sh", "-c", "vitest"], 1), 61));
+        assert_eq!(
+            sample_of(&npm_test, "s-1", None, 500).0.tool.as_deref(),
+            Some("bash")
+        );
+    }
+
+    #[test]
+    fn package_runners_are_known_by_name_title_or_script() {
+        let cmd = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(is_package_runner("npx", &[]));
+        assert!(is_package_runner("npm.cmd", &[]));
+        assert!(is_package_runner("C:\\nodejs\\pnpm.exe", &[]));
+        assert!(is_package_runner("node", &cmd(&["npm exec @scope/server"])));
+        assert!(is_package_runner(
+            "node",
+            &cmd(&["node", "/x/npm/bin/npx-cli.js", "-y", "server"])
+        ));
+        assert!(!is_package_runner("node", &cmd(&["node", "server.js"])));
+        assert!(!is_package_runner("zsh", &cmd(&["zsh", "-c", "npm test"])));
+    }
+
+    #[test]
+    fn a_guessed_approval_is_taken_back_once_a_command_starts_or_the_agent_works() {
+        let quiet = sample(None, 0);
+        assert_eq!(approval_answered(None, &quiet), None, "still waiting");
+        assert_eq!(
+            approval_answered(None, &sample(Some("zsh"), 0)),
+            Some("a command is running (zsh)".to_string())
+        );
+        assert_eq!(
+            approval_answered(
+                Some(&Verdict::Working("the agent is using the CPU".into())),
+                &sample(None, 400)
+            ),
+            Some("the agent is using the CPU".to_string())
+        );
+        assert_eq!(approval_answered(Some(&Verdict::Quiet), &quiet), None);
+        match approval_answered_event("a command is running (zsh)", "hook:antigravity", 9) {
+            SessionEvent::Status { source, status, .. } => {
+                assert_eq!(
+                    source.as_deref(),
+                    Some("hook:antigravity"),
+                    "the guess's own source"
+                );
+                assert_eq!(status.kind, AgentStatusKind::Working);
+                assert_eq!(status.confidence, Confidence::Guessed);
+                assert_eq!(status.detail, "a command is running (zsh)");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     /// The real process table: a helper started as `hi run <id>` (a shell
     /// script named hi), its agent, and a command the agent starts later.
     #[cfg(unix)]
@@ -748,11 +997,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let hi = dir.path().join("hi");
-        // The "agent" (a shell) waits, then runs a "tool command" (another
-        // shell) for a while.
+        // The "agent" (a shell) waits past its startup, then runs a "tool
+        // command" (another shell) for a while.
         std::fs::write(
             &hi,
-            "#!/bin/sh\n/bin/sh -c 'sleep 1; /bin/sh -c \"sleep 3; true\"; sleep 2'\n",
+            "#!/bin/sh\n/bin/sh -c 'sleep 4; /bin/sh -c \"sleep 3; true\"; sleep 2'\n",
         )
         .unwrap();
         std::fs::set_permissions(&hi, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -762,7 +1011,7 @@ mod tests {
             .spawn()
             .unwrap();
         let mut sys = sysinfo::System::new();
-        let deadline = Instant::now() + Duration::from_secs(8);
+        let deadline = Instant::now() + Duration::from_secs(12);
         let (mut saw_agent, mut saw_tool) = (false, false);
         while Instant::now() < deadline && !(saw_agent && saw_tool) {
             let procs = read_processes(&mut sys);

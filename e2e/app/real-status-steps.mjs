@@ -30,7 +30,7 @@ import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CI, createLogger, finishScenario, launchApp, outDir, sleep } from "./harness.mjs";
+import { IS_CI, REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "./harness.mjs";
 
 /** How long after its hook a state must be on the strip. */
 export const WITHIN_MS = 2000;
@@ -66,6 +66,62 @@ function pressKey(bridge, sessionId, name) {
 }
 
 // ─── The UI path: welcome, ⌘N, the launcher ──────────────────────────
+
+/** Every feature flag's id, from the registry the app is built from. */
+function allFlagIds() {
+  const registry = readFileSync(join(REPO_ROOT, "src", "featureFlags", "registry.ts"), "utf8");
+  return [...registry.matchAll(/^\s+id: "([A-Za-z0-9]+)",$/gm)].map((m) => m[1]);
+}
+
+/** The classic first-launch welcome (the 2.0 flags off). */
+async function classicWelcome(bridge) {
+  await bridge.waitFor("the welcome dialog", `return !!e2e.first(".onboarding-dialog");`, { timeoutMs: 30_000 });
+  for (let i = 0; i < 3; i++) {
+    await bridge.click(".onboarding-actions .onboarding-btn-primary");
+    await sleep(150);
+  }
+  await bridge.waitFor("the privacy screen", `return e2e.all(".onboarding-privacy-checkbox input").length === 2;`);
+  await bridge.clickWhenReady(`
+    const [analytics, policy] = e2e.all(".onboarding-privacy-checkbox input");
+    if (analytics.checked) e2e.click(analytics);
+    if (!policy.checked) e2e.click(policy);
+    return true;
+  `);
+  await bridge.waitFor("the Finish button to become enabled", `const b = e2e.first(".onboarding-actions .onboarding-btn-primary"); return !!b && !b.disabled;`);
+  await bridge.click(".onboarding-actions .onboarding-btn-primary");
+  await bridge.waitFor("the welcome dialog to close", `return !e2e.first(".onboarding-backdrop");`);
+  await sleep(300);
+}
+
+async function dismissWhatsNew(bridge) {
+  if (await bridge.exists(".whatsnew-backdrop")) {
+    await bridge.click(".whatsnew-footer .whatsnew-btn-primary");
+    await bridge.waitFor("the what's-new dialog to close", `return !e2e.first(".whatsnew-backdrop");`);
+  }
+}
+
+/**
+ * The app as a 2.0 user has it: every feature flag on. A build whose flags
+ * are still off by default gets them from the stored overrides (what the
+ * hidden Flags tab writes), read at the next launch.
+ */
+async function launchWithEveryFlag(evidenceDir, log) {
+  const first = await launchApp({ runDir: join(evidenceDir, "run-0"), log, home: "real", resetData: true, tmp: "shared" });
+  if (await first.bridge.exists(".setup-dialog")) await threeStepWelcome(first.bridge);
+  else await classicWelcome(first.bridge);
+  await dismissWhatsNew(first.bridge);
+  const overrides = Object.fromEntries(allFlagIds().map((id) => [id, true]));
+  log(`  every flag on: ${Object.keys(overrides).join(", ")}`);
+  await first.bridge.eval(`
+    await window.__TAURI_INTERNALS__.invoke("set_setting", { key: "feature_flag_overrides", value: ${JSON.stringify(JSON.stringify(overrides))} });
+    return true;
+  `);
+  await first.stop();
+  const app = await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: false, tmp: "shared" });
+  await app.bridge.waitFor("the app UI to be ready", `return !!e2e.first(".topbar-title, .topbar") && !e2e.first(".onboarding-backdrop, .setup-backdrop");`, { timeoutMs: 30_000 });
+  await dismissWhatsNew(app.bridge);
+  return app;
+}
 
 async function threeStepWelcome(bridge) {
   await bridge.waitFor("the first-launch welcome", `return !!e2e.first(".setup-dialog, .onboarding-dialog");`, { timeoutMs: 30_000 });
@@ -303,9 +359,8 @@ export async function runRealStatus(cfg) {
   try {
     log(`scenario: ${cfg.scenario}   ${cfg.bin}: ${binPath} (${version})   repo: ${repo}`);
     log(`  corpus: ${corpus}`);
-    app = await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, tmp: "shared", flagDefaults: null });
+    app = await launchWithEveryFlag(evidenceDir, log);
     const { bridge } = app;
-    await threeStepWelcome(bridge);
 
     log(`step 1: ⌘N, the task, ${cfg.agentId} in a terminal`);
     await openLauncher(bridge);
@@ -370,8 +425,31 @@ export async function runRealStatus(cfg) {
     });
     await bridge.screenshot(join(evidenceDir, "01-needs-approval.png"));
     await sleep(1200);
+    const blockedItems = () =>
+      bridge.eval(`return window.__HERMES_E2E__.inboxItems().filter((i) => i.sessionId === ${JSON.stringify(sid)} && i.kind === "blocked").length;`);
+    if (cfg.approvalConfidence === "guessed") {
+      assert((await blockedItems()) === 0, "a guessed approval raises no 'blocked on you' item");
+    }
     mark("approve");
+    const approvedAt = Date.now();
     await pressKey(bridge, sid, "enter");
+    if (cfg.approvalConfidence === "guessed") {
+      // Once approved, the guess goes: taken back by the OS layer when the
+      // command starts, or replaced by the tool's own report.
+      let left = null;
+      const until = approvedAt + 5_000;
+      while (Date.now() < until && !left) {
+        const now = await strip();
+        if (now && now.kind !== "needs_approval") left = { ...now, ms: Date.now() - approvedAt };
+        else await sleep(100);
+      }
+      const retracted = (await recording()).events.some(
+        (r) => r.t >= approvedAt && r.event?.type === "status" && r.event.source === `hook:${cfg.agentId}` && r.event.status?.confidence === "guessed" && r.event.status?.kind === "working",
+      );
+      log(`  after the approval the strip showed ${JSON.stringify(left)} (${retracted ? "taken back by the OS layer" : "replaced by the agent's own report"})`);
+      assert(left && left.ms <= 5_000, `the guessed approval is gone within 5 s of the approval (${left?.ms ?? "never"} ms)`);
+      assert((await blockedItems()) === 0, "still no 'blocked on you' item");
+    }
 
     log("step 4: the turn ends (approving anything else it asks on the way)");
     // Every approval the agent asked for since `since` gets one Enter (an

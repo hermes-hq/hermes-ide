@@ -20,6 +20,7 @@ import type { SessionEvent } from "../agent/contract/events";
 import { INBOX_SHORTCUT, SessionStatusStrip, guessedStatus, stripSourceText, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
 import { PLATFORM } from "../utils/platform";
 import { AGENT_STATUS_KINDS } from "../agent/contract/status";
+import { foldStatus } from "../agent/status/deriveStatus";
 import {
   _resetStatusStripPreferenceForTest,
   initStatusStripPreference,
@@ -166,6 +167,27 @@ describe("guessedStatus / stripStatus", () => {
     dispatchSessionEvent(SID, at(status("working", "exact", "hook:codex"), 2)); // UserPromptSubmit, same poll
     dispatchSessionEvent(SID, at(status("idle", "exact", "hi"), 3)); // the helper's "started"
     expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toMatchObject({ status: { kind: "working", confidence: "exact" }, source: "hook", reporter: "codex" });
+  });
+
+  it("Antigravity's guessed approval shows until the OS layer takes it back when the command starts", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("working", "exact", "hook:antigravity"), 1_000));
+    dispatchSessionEvent(SID, at(status("working", "exact", "hook:antigravity"), 1_100)); // PreToolUse
+    dispatchSessionEvent(SID, at(status("needs_approval", "guessed", "hook:antigravity", "run_command"), 2_700));
+    const input = [4_000];
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input).status).toEqual({ kind: "needs_approval", confidence: "guessed", detail: "run_command" });
+    // The process facts alone do not replace the named guess...
+    dispatchSessionEvent(SID, at(status("working", "guessed", "os", "a command is running (zsh)"), 4_500));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input).status.kind).toBe("needs_approval");
+    // ...the OS layer's retraction, under the guess's own source, does.
+    dispatchSessionEvent(SID, at(status("working", "guessed", "hook:antigravity", "a command is running (zsh)"), 4_500));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input).status).toEqual({ kind: "working", confidence: "guessed", detail: "a command is running (zsh)" });
+    expect(foldStatus(getSessionEventSnapshot(SID).events, undefined, input)).toMatchObject({ kind: "working", confidence: "guessed", source: "hook:antigravity" });
+    // The command ends (the OS layer goes quiet): still working until the tool's own report.
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "os"), 9_000));
+    expect(foldStatus(getSessionEventSnapshot(SID).events, undefined, input).kind).toBe("working");
+    dispatchSessionEvent(SID, at(status("done_unread", "exact", "hook:antigravity"), 9_500));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input)).toMatchObject({ status: { kind: "done_unread", confidence: "exact" }, source: "hook", reporter: "antigravity" });
   });
 
   it("an exit Hermes saw itself (the terminal's process) is exact, from Hermes", () => {

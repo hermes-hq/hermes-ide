@@ -8,6 +8,7 @@
  * The one write is a crash switch, used to prove crash containment.
  */
 import { pool, getFocusedSessionId, isWebglAvailable, webglSessionIds } from "../terminal/pool";
+import { createTerminal } from "../terminal/TerminalPool";
 import { armCrash } from "../components/CrashProbe";
 import { loadedViews } from "../utils/lazyView";
 import { getI18nSnapshot } from "../i18n/registry";
@@ -111,6 +112,13 @@ const hooks = {
       .sort(),
   /** Session ids that currently have a terminal. */
   terminalIds: (): string[] => [...pool.keys()],
+  /**
+   * Give a session id its terminal before the backend creates the session
+   * (what New Session does), so a scenario can start a session in a folder
+   * the wizard does not offer with `invoke("create_session", { sessionId })`
+   * and still read everything its terminal prints.
+   */
+  prepareTerminal: (sessionId: string): Promise<void> => createTerminal(sessionId, ""),
   /** The session whose terminal has keyboard focus inside the app. */
   focusedSessionId: (): string | null => getFocusedSessionId(),
   /** Logical lines of the terminal buffer (scrollback + screen). */

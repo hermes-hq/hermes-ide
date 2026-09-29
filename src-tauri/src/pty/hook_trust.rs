@@ -11,18 +11,26 @@
 //! config, and a hook anyone else configured still needs the person's trust.
 //!
 //! The answer depends only on the Codex binary and the flags, so it is kept
-//! for the life of the app. When Codex cannot say (an old version, a
-//! timeout) the launch goes ahead without it and Codex shows its review
-//! screen, as it would for any new hook.
+//! for the life of the app. The question runs on a thread of its own, and a
+//! launch waits for it at most [`LAUNCH_WAIT`] (Codex answers in about
+//! 120 ms): a slow app server never holds the terminal for long. When Codex
+//! cannot say (an old version, a timeout) the launch goes ahead without it
+//! and Codex shows its review screen, as it would for any new hook; a failed
+//! answer is not asked for again before [`RETRY_AFTER`].
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
+/// How long the app server may take to answer.
 const TIMEOUT: Duration = Duration::from_secs(8);
+/// How long a launch waits for the answer.
+pub const LAUNCH_WAIT: Duration = Duration::from_secs(2);
+/// After a failed answer, how long launches go without asking again.
+pub const RETRY_AFTER: Duration = Duration::from_secs(600);
 
 /// One hook as Codex's `hooks/list` reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,13 +137,44 @@ fn ask(program: &Path, flags: &[String], cwd: &Path) -> Result<Vec<ListedHook>, 
     let answer = rx
         .recv_timeout(TIMEOUT)
         .unwrap_or_else(|_| Err("no answer in time".to_string()));
-    let _ = child.kill();
-    let _ = child.wait();
+    kill_tree(&mut child);
     answer
 }
 
-/// (agent program, hook flags) -> the trust value, or None when there was none.
-type TrustCache = HashMap<(PathBuf, Vec<String>), Option<String>>;
+/// End the app server and whatever it started. On Windows the program may
+/// be an npm `.cmd` shim, whose `node` child would outlive the shim.
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// What is known about one (program, flags) pair.
+#[derive(Debug, Clone)]
+enum Answer {
+    /// Never asked.
+    Untried,
+    /// The app server is being asked.
+    Asking,
+    /// Its answer: the trust value, or None when there was none to give.
+    Known(Option<String>),
+    /// It could not say, at this moment.
+    Failed(Instant),
+}
+
+type Slot = Arc<(Mutex<Answer>, Condvar)>;
+/// (agent program, hook flags) -> what the app server said.
+type TrustCache = HashMap<(PathBuf, Vec<String>), Slot>;
 
 fn cache() -> &'static Mutex<TrustCache> {
     static CACHE: OnceLock<Mutex<TrustCache>> = OnceLock::new();
@@ -143,33 +182,74 @@ fn cache() -> &'static Mutex<TrustCache> {
 }
 
 /// The `-c hooks.state=...` value that trusts exactly Hermes's hooks in
-/// `flags`, or None (see the module docs).
-pub fn trusted_state(program: &Path, flags: &[String], cwd: &Path, hi: &str) -> Option<String> {
+/// `flags`, or None (see the module docs). Waits at most `wait` for an
+/// answer not known yet; the question goes on in the background, for the
+/// next launch.
+pub fn trusted_state(
+    program: &Path,
+    flags: &[String],
+    cwd: &Path,
+    hi: &str,
+    wait: Duration,
+) -> Option<String> {
     let key = (program.to_path_buf(), flags.to_vec());
-    if let Some(hit) = cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
-        return hit;
-    }
-    let started = std::time::Instant::now();
-    let value = match ask(program, flags, cwd) {
-        Ok(hooks) => trust_table(&hooks, hi),
-        Err(e) => {
-            log::warn!("[LAUNCH] could not read the hook hashes from {}: {e}; the agent will ask to review Hermes's hooks", program.display());
-            // Not cached: the next launch tries again.
-            return None;
-        }
+    let slot: Slot = {
+        let mut c = cache().lock().ok()?;
+        Arc::clone(
+            c.entry(key)
+                .or_insert_with(|| Arc::new((Mutex::new(Answer::Untried), Condvar::new()))),
+        )
     };
-    log::info!(
-        "[LAUNCH] hook trust for {} read in {} ms ({} hooks)",
-        program.display(),
-        started.elapsed().as_millis(),
-        value
-            .as_ref()
-            .map_or(0, |v| v.matches("trusted_hash").count())
-    );
-    if let Ok(mut c) = cache().lock() {
-        c.insert(key, value.clone());
+    let (lock, ready) = &*slot;
+    let mut answer = lock.lock().ok()?;
+    match &*answer {
+        Answer::Known(value) => return value.clone(),
+        Answer::Failed(at) if at.elapsed() < RETRY_AFTER => return None,
+        Answer::Failed(_) | Answer::Untried => {
+            *answer = Answer::Asking;
+            let slot = Arc::clone(&slot);
+            let (program, flags, cwd, hi) = (
+                program.to_path_buf(),
+                flags.to_vec(),
+                cwd.to_path_buf(),
+                hi.to_string(),
+            );
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let result = match ask(&program, &flags, &cwd) {
+                    Ok(hooks) => {
+                        let value = trust_table(&hooks, &hi);
+                        log::info!(
+                            "[LAUNCH] hook trust for {} read in {} ms ({} hooks)",
+                            program.display(),
+                            started.elapsed().as_millis(),
+                            value
+                                .as_ref()
+                                .map_or(0, |v| v.matches("trusted_hash").count())
+                        );
+                        Answer::Known(value)
+                    }
+                    Err(e) => {
+                        log::warn!("[LAUNCH] could not read the hook hashes from {}: {e}; the agent will ask to review Hermes's hooks (not asked again for {} s)", program.display(), RETRY_AFTER.as_secs());
+                        Answer::Failed(Instant::now())
+                    }
+                };
+                let (lock, ready) = &*slot;
+                if let Ok(mut a) = lock.lock() {
+                    *a = result;
+                }
+                ready.notify_all();
+            });
+        }
+        Answer::Asking => {}
     }
-    value
+    let (answer, _) = ready
+        .wait_timeout_while(answer, wait, |a| matches!(a, Answer::Asking))
+        .ok()?;
+    match &*answer {
+        Answer::Known(value) => value.clone(),
+        _ => None,
+    }
 }
 
 /// Find `name` in the folders a new terminal would search.
@@ -228,5 +308,137 @@ mod tests {
         );
         assert_eq!(trust_table(&hooks, "/elsewhere/hi"), None);
         assert!(parse_hooks_list(&serde_json::json!({})).is_empty());
+    }
+
+    /// A stand-in app server: a shell script that counts its starts in
+    /// `starts`, waits `delay` seconds, then answers `initialize` and
+    /// `hooks/list` with one of Hermes's hooks (or exits at once, `broken`).
+    #[cfg(unix)]
+    fn fake_app_server(dir: &Path, delay: &str, broken: bool) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let starts = dir.join("starts");
+        let program = dir.join("codex");
+        let list = r#"{"id":2,"result":{"data":[{"cwd":"/repo","hooks":[{"key":"k:stop","source":"sessionFlags","command":"/app/hi signal","currentHash":"sha256:1"}]}]}}"#;
+        let body = if broken {
+            format!("#!/bin/sh\necho x >> '{}'\nexit 1\n", starts.display())
+        } else {
+            format!(
+                "#!/bin/sh\necho x >> '{}'\nsleep {delay}\nread a\necho '{{\"id\":1,\"result\":{{}}}}'\nread b\nread c\necho '{list}'\n",
+                starts.display()
+            )
+        };
+        std::fs::write(&program, body).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (program, starts)
+    }
+
+    #[cfg(unix)]
+    fn starts(file: &Path) -> usize {
+        std::fs::read_to_string(file).map_or(0, |s| s.lines().count())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_answer_is_asked_once_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (program, count) = fake_app_server(dir.path(), "0", false);
+        let flags = vec!["-c".to_string(), "hooks.Stop=1".to_string()];
+        let first = trusted_state(
+            &program,
+            &flags,
+            dir.path(),
+            "/app/hi",
+            Duration::from_secs(5),
+        );
+        assert_eq!(
+            first.as_deref(),
+            Some(r#"{"k:stop"={trusted_hash="sha256:1"}}"#)
+        );
+        let again = trusted_state(
+            &program,
+            &flags,
+            dir.path(),
+            "/app/hi",
+            Duration::from_secs(5),
+        );
+        assert_eq!(again, first);
+        assert_eq!(starts(&count), 1, "the app server was started once");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_app_server_holds_a_launch_only_briefly_and_answers_the_next() {
+        let dir = tempfile::tempdir().unwrap();
+        let (program, count) = fake_app_server(dir.path(), "1", false);
+        let flags = vec!["-c".to_string(), "hooks.Stop=2".to_string()];
+        let t0 = Instant::now();
+        let first = trusted_state(
+            &program,
+            &flags,
+            dir.path(),
+            "/app/hi",
+            Duration::from_millis(200),
+        );
+        assert_eq!(first, None, "no answer within the launch's wait");
+        assert!(
+            t0.elapsed() < Duration::from_millis(900),
+            "waited {:?}",
+            t0.elapsed()
+        );
+        // The question went on in the background: a later launch has it.
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut later = None;
+        while later.is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+            later = trusted_state(
+                &program,
+                &flags,
+                dir.path(),
+                "/app/hi",
+                Duration::from_millis(10),
+            );
+        }
+        assert!(later.is_some(), "the background answer was kept");
+        assert_eq!(
+            starts(&count),
+            1,
+            "asked once, however many launches waited"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_answer_is_not_asked_for_again_at_every_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (program, count) = fake_app_server(dir.path(), "0", true);
+        let flags = vec!["-c".to_string(), "hooks.Stop=3".to_string()];
+        assert_eq!(
+            trusted_state(
+                &program,
+                &flags,
+                dir.path(),
+                "/app/hi",
+                Duration::from_secs(5)
+            ),
+            None
+        );
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            assert_eq!(
+                trusted_state(
+                    &program,
+                    &flags,
+                    dir.path(),
+                    "/app/hi",
+                    Duration::from_secs(5)
+                ),
+                None
+            );
+        }
+        assert!(
+            t0.elapsed() < Duration::from_millis(100),
+            "the failure is remembered"
+        );
+        assert_eq!(starts(&count), 1, "the broken app server was started once");
     }
 }
