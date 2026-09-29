@@ -470,6 +470,32 @@ describe("ReviewDesk: Changes", () => {
     await waitFor(() => expect(calls("git_pull")).toEqual([{ sessionId: "sess-a", projectId: "p1", remote: null }]));
   });
 
+  it("without turns, the message is only a subject from the branch, not the branch's totals", async () => {
+    clearFakeTurns();
+    await open();
+    const box = await waitFor(() => {
+      const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-input")!;
+      expect(el.value).toBe("Task");
+      return el;
+    });
+    expect(box.value).not.toContain("Changes:");
+    expect(screen.getByText("Commit message")).toBeInTheDocument();
+    expect(screen.queryByText("Commit message (drafted from the turns)")).toBeNull();
+  });
+
+  it("Escape in the commit message leaves the field and keeps the desk and the text; a second Escape closes", async () => {
+    const onClose = await open();
+    const box = await waitFor(() => section().querySelector<HTMLTextAreaElement>("textarea.git-commit-input")!);
+    box.focus();
+    fireEvent.change(box, { target: { value: "My own message" } });
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(box);
+    expect(box.value).toBe("My own message");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("switches the branch from the branch name", async () => {
     await open();
     await waitFor(() => expect(section()).toBeInTheDocument());

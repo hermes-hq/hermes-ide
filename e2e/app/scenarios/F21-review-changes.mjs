@@ -9,9 +9,11 @@
 //   1. the Changes section sits at the top of the Review tab and lists both
 //      files as changed, on the session's branch;
 //   2. Stage on one file stages exactly that file (git says so);
-//   3. the commit message box starts from a draft (subject from the branch);
-//      Commit makes a commit with exactly that message and only the staged
-//      file; the other file is still changed;
+//   3. the commit message box starts from a draft: a plain shell has no
+//      turns, so it is only the subject (from the branch), labelled "Commit
+//      message" and never the branch's totals; Commit makes a commit with
+//      exactly that message and only the staged file; the other file is
+//      still changed;
 //   4. Discard on the other file asks first: Cancel leaves it changed, and
 //      only Confirm restores it;
 //   5. Push puts the branch on the bare remote; a commit pushed there from
@@ -20,9 +22,12 @@
 //      checks it out (git says so) and the section follows;
 //   7. the Repository tab still has the log (with the commit), and the stash.
 //
-// Negative control: HERMES_E2E_F21C_FLAG=off starts the app with the
-// reviewDesk flag off: ⌘G opens the old git panel, there is no Review Desk,
-// and the scenario must end in RESULT: FAIL.
+// Negative controls (each must end in RESULT: FAIL):
+//   HERMES_E2E_F21C_FLAG=off starts the app with the reviewDesk flag off:
+//     ⌘G opens the old git panel and there is no Review Desk.
+//   HERMES_E2E_F21C_NEGATIVE=no-section keeps the flag on, so the Review
+//     Desk opens, but a style rule hides its Changes section: the desk is
+//     there without the section.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F21-review-changes.mjs
@@ -37,10 +42,11 @@ import { invoke, menuAction, setInput } from "../fleet-steps.mjs";
 
 const SCENARIO = "F21-review-changes";
 const FLAG_ON = (process.env.HERMES_E2E_F21C_FLAG || "on") !== "off";
+const NO_SECTION = process.env.HERMES_E2E_F21C_NEGATIVE === "no-section";
 const onWindows = platform() === "win32";
 
 await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }) => {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}   reviewDesk flag: ${FLAG_ON ? "on" : "OFF (negative control)"}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}   reviewDesk flag: ${FLAG_ON ? "on" : "OFF (negative control)"}${NO_SECTION ? "   Changes section HIDDEN (negative control)" : ""}`);
 
   // ── A throwaway repository and a local bare remote (synthetic identity) ──
   const work = realpathSync.native(mkdtempSync(join(tmpdir(), "hermes-e2e-f21c-")));
@@ -143,6 +149,15 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   log("step 1: ⌘G opens the Review Desk with its Changes section on top");
   await menuAction(bridge, "view.git-panel");
   await bridge.waitFor("the Review Desk", `return !!e2e.first(".review-desk");`, { timeoutMs: 10_000 });
+  if (NO_SECTION) {
+    await bridge.eval(`
+      const s = document.createElement("style");
+      s.textContent = ".review-changes { display: none !important; }";
+      document.head.appendChild(s);
+      return true;
+    `);
+    log("  negative control: the Changes section is hidden; the desk is open");
+  }
   const SECTION = ".review-changes .git-project-section";
   const rowsNow = () => bridge.eval(`
     return e2e.all(${JSON.stringify(SECTION + " .git-file-row")}).map((r) => r.dataset.area + ":" + r.dataset.path).sort();
@@ -178,14 +193,15 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   assert(JSON.stringify(await rowsNow()) === JSON.stringify(["staged:a.txt", "unstaged:b.txt"]), "the section shows a.txt staged and b.txt changed");
 
   // ── 3. Commit with the drafted message ─────────────────────────────
-  log("step 3: commit with the message drafted from the turns");
+  log("step 3: commit with the drafted message (no turns: the subject only)");
   const draft = await bridge.waitFor("the drafted commit message", `
     const box = e2e.first(${JSON.stringify(SECTION)} + " textarea.git-commit-input");
     return box && box.value.trim() ? { value: box.value, label: e2e.norm(e2e.first(${JSON.stringify(SECTION)} + " .git-commit-label")?.innerText ?? "") } : null;
   `);
   log(`  drafted: ${JSON.stringify(draft.value)}`);
-  assert(/drafted from the turns/i.test(draft.label), `the box is labelled "${draft.label}"`);
-  assert(draft.value.split("\n")[0].trim().length > 0 && !draft.value.includes("undefined"), "the draft has a subject line");
+  assert(/^commit message$/i.test(draft.label), `no turns, so the box is labelled "${draft.label}", not "drafted from the turns"`);
+  assert(draft.value.trim().length > 0 && !draft.value.includes("undefined"), "the draft has a subject line");
+  assert(!draft.value.trim().includes("\n") && !/Changes:/.test(draft.value), "the draft is only the subject, not the branch's totals");
   await bridge.clickWhenReady(`
     const b = [...document.querySelectorAll(${JSON.stringify(SECTION + " .git-btn-commit")})][0];
     return e2e.click(e2e.must(b, "Commit"));

@@ -63,7 +63,7 @@ import { GitConflictViewer } from "./GitConflictViewer";
 import { GitProjectSection } from "./GitProjectSection";
 import type { GitToast } from "./GitPanel";
 import { useGitStatus } from "../hooks/useGitStatus";
-import { draftMessage } from "../land/draft";
+import { draftMessage, draftSubject, type DraftInput } from "../land/draft";
 import "../styles/components/ReviewDesk.css";
 
 // A key name, shown as printed on the keyboard in every language.
@@ -214,20 +214,20 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   }, [files]);
   const flagCount = useMemo(() => [...flagsByPath.values()].reduce((n, l) => n + l.length, 0), [flagsByPath]);
   const totals = useMemo(() => ({ add: files.reduce((n, f) => n + f.file.additions, 0), del: files.reduce((n, f) => n + f.file.deletions, 0) }), [files]);
-  // The Changes section's commit message starts from the turns (as the Land sheet drafts it).
-  const commitDraft = useMemo(
-    () =>
-      diff
-        ? draftMessage({
-            branch: diff.branch ?? "",
-            label: focused ? agentLabel(focused, focused.id.slice(0, 8)) : "",
-            turns: turns.map((e) => ({ turn: e.turn, files: e.files.map((f) => f.path) })),
-            feature: null,
-            diffstat: { files: files.length, insertions: totals.add, deletions: totals.del },
-          })
-        : "",
-    [diff, focused, turns, files.length, totals],
-  );
+  // The Changes section's commit message starts from the turns (as the Land
+  // sheet drafts it). Without turns it is only the subject (from the branch):
+  // the review's totals cover the whole branch, not what is staged.
+  const commitDraft = useMemo(() => {
+    if (!diff) return "";
+    const input: DraftInput = {
+      branch: diff.branch ?? "",
+      label: focused ? agentLabel(focused, focused.id.slice(0, 8)) : "",
+      turns: turns.map((e) => ({ turn: e.turn, files: e.files.map((f) => f.path) })),
+      feature: null,
+      diffstat: { files: files.length, insertions: totals.add, deletions: totals.del },
+    };
+    return input.turns.length > 0 ? draftMessage(input) : draftSubject(input);
+  }, [diff, focused, turns, files.length, totals]);
   const reloadReview = useCallback(() => setReloadTick((x) => x + 1), []);
   const selectChangedFile = useCallback((path: string) => {
     setGroupBy("file");
@@ -412,6 +412,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         e.preventDefault();
         if (revert) setRevert(null);
         else if (draft) setDraft(null);
+        // In another text field (the commit message): leave the field, keep the desk and the text.
+        else if (typing) target.blur();
         else onClose();
         return;
       }
@@ -698,7 +700,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
 
             <div className="review-body">
               <nav className="review-nav" aria-label={groupBy === "file" ? t("review.byFile") : t("review.byTurn")}>
-                <ChangesSection sessionId={sessionId} draft={commitDraft} onChanged={reloadReview} onSelectFile={selectChangedFile} />
+                <ChangesSection sessionId={sessionId} draft={commitDraft} fromTurns={turns.length > 0} onChanged={reloadReview} onSelectFile={selectChangedFile} />
                 {loading && <div className="review-empty">{t("review.loading")}</div>}
                 {!loading && diffError && <div className="review-error">{diffError}</div>}
                 {!loading && !diffError && groupBy === "file" && files.length === 0 && <div className="review-empty">{t("review.nothingChanged")}</div>}
@@ -899,11 +901,14 @@ function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => v
 function ChangesSection({
   sessionId,
   draft,
+  fromTurns,
   onChanged,
   onSelectFile,
 }: {
   sessionId: string;
   draft: string;
+  /** The draft lists the turns ("drafted from the turns"); else it is only a subject. */
+  fromTurns: boolean;
   onChanged: () => void;
   onSelectFile: (path: string) => void;
 }) {
@@ -937,7 +942,7 @@ function ChangesSection({
           onToast={onToast}
           variant="changes"
           draftMessage={draft}
-          commitLabel={t("review.commitDrafted")}
+          commitLabel={t(fromTurns ? "review.commitDrafted" : "review.commitMessage")}
         />
       ))}
       {toast && (

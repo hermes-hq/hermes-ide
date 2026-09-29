@@ -812,7 +812,9 @@ features:
         scenarios: [F21-review-desk.mjs]
       # F21-8 restores what the replaced git panels offered (regression
       # audit item 4, #126 #177), against a local bare remote. Negative
-      # control: HERMES_E2E_F21C_FLAG=off must end in RESULT: FAIL.
+      # controls, each must end in RESULT: FAIL: HERMES_E2E_F21C_FLAG=off (no
+      # desk) and HERMES_E2E_F21C_NEGATIVE=no-section (the desk without its
+      # Changes section).
       F21-8:
         text: "The Review Desk's Changes section stages one file, commits it with a drafted message, discards only after a confirm, pushes, pulls and switches the branch; log and stash stay in the Repository tab"
         scenarios: [F21-review-changes.mjs]
