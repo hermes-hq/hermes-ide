@@ -457,9 +457,26 @@ export async function runRealStatus(cfg) {
     const approveMore = async (since, alreadyAnswered) => {
       let answered = alreadyAnswered;
       let lastPress = Date.now();
+      let guessSince = null;
       return async () => {
+        if (Date.now() - lastPress < 2500) return;
+        // An agent that never reports its approvals (Antigravity): answer
+        // what the strip has shown as a guessed approval for a moment.
+        if (cfg.approvalConfidence === "guessed") {
+          const now = await strip();
+          if (now?.kind !== "needs_approval") guessSince = null;
+          else if (guessSince === null) guessSince = Date.now();
+          else if (Date.now() - guessSince >= 1500) {
+            log(`  another guessed approval (${now.text}); answering Yes`);
+            mark("approve");
+            await pressKey(bridge, sid, "enter");
+            lastPress = Date.now();
+            guessSince = null;
+          }
+          return;
+        }
         const asked = spool.filter((s) => s.seen >= since && (cfg.hooks.anyApproval ?? cfg.hooks.approval)(s.line));
-        if (asked.length <= answered || Date.now() - lastPress < 2500) return;
+        if (asked.length <= answered) return;
         const next = asked[answered];
         log(`  another approval (${next.line.payload?.tool_name ?? next.line.event}); answering Yes`);
         await sleep(1200);
