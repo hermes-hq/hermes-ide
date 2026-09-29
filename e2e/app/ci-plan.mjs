@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 export const CI_ELSEWHERE = {
   "N01-release-refuses-e2e.mjs": "build",
   "F05-terminal-keys.mjs": "keys",
+  "UI-focus-ring.mjs": "keys",
   "N17-fast-worktrees.mjs": "cow",
   "N17-real-deps.mjs": "cow",
 };

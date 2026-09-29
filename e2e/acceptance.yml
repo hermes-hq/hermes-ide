@@ -1094,7 +1094,9 @@ features:
     # pairs by scripts/contrast-audit.test.mjs. The focus ring is measured
     # on the preview's copy of the :focus-visible rules, because the test
     # window has no keyboard focus locally (the log says whether the real
-    # :focus-visible matched as well).
+    # :focus-visible matched as well). UI-focus-ring checks the ring on
+    # today's screens in the real cascade order, and presses Tab for real
+    # on the Linux and Windows CI runners.
     status: partial
     criteria:
       UI-1:
@@ -1118,3 +1120,11 @@ features:
       UI-7:
         text: "The Review Desk of a folder that is not a git repository shows the plain empty state, not git's raw error"
         scenarios: [UI-audit-fixes.mjs]
+      UI-8:
+        # Real cascade order: each stylesheet's own :focus rules are copied
+        # in place, so a more specific or later `outline: none` still wins.
+        text: "Every control of the three-step welcome (task launcher included), of every Settings tab, and the model/effort picker rows, New Session prefix chips, notes sheet and composer, role, style, project and command-search fields draws the solid focus ring"
+        scenarios: [UI-focus-ring.mjs]
+      UI-9:
+        text: "With real key presses, Tab in Settings moves focus onto a control, :focus-visible matches and the control draws the solid ring"
+        scenarios: ["UI-focus-ring.mjs@linux,win32"]

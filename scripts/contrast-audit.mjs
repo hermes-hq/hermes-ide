@@ -298,6 +298,9 @@ export function contrastPairs() {
   text("--text-0", "--selected-bg", "selected segment");
   text("--text-1", "--row-active-bg", "current row");
   text("--text-2", "--row-active-bg", "current row metadata");
+  // The session list still marks its current row with --bg-active; the
+  // row's close button is drawn in --text-2 there.
+  ui("--text-2", "--bg-active", "close button on the current session row");
   for (const s of SURFACES) text("--chip-selected-fg", [s, "--chip-selected-bg"], "selected chip");
   // Badges.
   for (const s of ["--bg-1", "--popover-bg"]) {

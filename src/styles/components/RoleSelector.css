@@ -179,7 +179,6 @@
   font-size: var(--text-md);
   font-family: inherit;
   color: var(--text-0);
-  outline: none;
 }
 .role-selector-create-field input:focus,
 .role-selector-create-field textarea:focus {

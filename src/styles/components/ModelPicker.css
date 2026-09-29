@@ -46,7 +46,11 @@
 .model-picker-item:focus-visible {
   background: var(--bg-active);
   color: var(--text-0);
-  outline: none;
+}
+/* Keyboard focus takes the global ring, drawn inside so the list's scroll
+ * box does not clip it. */
+.model-picker-item:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
 .model-picker-item-current {

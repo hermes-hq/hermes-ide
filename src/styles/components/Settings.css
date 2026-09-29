@@ -490,7 +490,6 @@
   border-color: var(--accent);
   color: var(--text-0);
   background: var(--bg-1);
-  outline: none;
 }
 
 .settings-agent-prefix-preview {

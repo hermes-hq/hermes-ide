@@ -96,7 +96,7 @@
   font-size: var(--text-md);
   line-height: 1.4;
 }
-.task-launcher-task:focus { outline: none; border-color: var(--accent); }
+.task-launcher-task:focus { border-color: var(--accent); }
 
 .task-launcher-grid {
   display: grid;
@@ -126,7 +126,7 @@
 }
 .task-launcher-field input { font-family: var(--font-mono); }
 .task-launcher-field select:focus,
-.task-launcher-field input:focus { outline: none; border-color: var(--accent); }
+.task-launcher-field input:focus { border-color: var(--accent); }
 
 .task-launcher-view,
 .task-launcher-track {

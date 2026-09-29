@@ -90,7 +90,6 @@
   font-family: var(--font-ui);
   padding: 8px 10px;
   resize: vertical;
-  outline: none;
   transition: border-color 0.15s;
   line-height: 1.5;
 }

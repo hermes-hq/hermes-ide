@@ -11,7 +11,11 @@ export interface TabItem<V extends string = string> {
 }
 
 export interface TabsProps<V extends string = string> {
-  /** Prefix for the tab and panel ids; pair each panel with <TabPanel idPrefix=…>. */
+  /**
+   * Prefix for the tab and panel ids. Render one <TabPanel idPrefix=…> for
+   * the selected tab only: the selected tab alone points at its panel
+   * (aria-controls), so no tab names a panel that is not in the page.
+   */
   idPrefix: string;
   tabs: readonly TabItem<V>[];
   value: V;
@@ -81,7 +85,7 @@ export function Tabs<V extends string = string>({
           type="button"
           role="tab"
           aria-selected={t.value === value}
-          aria-controls={tabPanelId(idPrefix, t.value)}
+          aria-controls={t.value === value ? tabPanelId(idPrefix, t.value) : undefined}
           tabIndex={i === current ? 0 : -1}
           disabled={t.disabled}
           className="h-tab"
