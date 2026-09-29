@@ -980,7 +980,7 @@ export const jaPack: LanguagePack = {
     "agentsSettings.signedOut": "未サインイン",
     "agentsSettings.signInUnknown": "サインイン未確認",
     "agentsSettings.profile": "プロファイル {path}",
-    "agentsSettings.defaultProfile": "既定のプロファイル",
+    "launchRejected.defaultAccount": "既定",
     "agentsSettings.signIn": "サインイン",
     "agentsSettings.removeAccount": "削除",
     "agentsSettings.addAccount": "+ アカウントを追加 (サインイン用のターミナルを開きます)",

@@ -980,7 +980,7 @@ export const frPack: LanguagePack = {
     "agentsSettings.signedOut": "non connecté",
     "agentsSettings.signInUnknown": "connexion non vérifiée",
     "agentsSettings.profile": "profil {path}",
-    "agentsSettings.defaultProfile": "profil par défaut",
+    "launchRejected.defaultAccount": "par défaut",
     "agentsSettings.signIn": "Se connecter",
     "agentsSettings.removeAccount": "Retirer",
     "agentsSettings.addAccount": "+ Ajouter un compte (ouvre un terminal pour se connecter)",

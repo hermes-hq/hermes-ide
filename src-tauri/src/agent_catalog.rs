@@ -78,6 +78,10 @@ pub struct ModelCaps {
     pub list: Option<ModelList>,
     /// A model that is not listed may be typed.
     pub typed: bool,
+    /// The CLI runs another model without a word when given one it does
+    /// not know, so a model its list does not have is never launched.
+    #[serde(default)]
+    pub silent_fallback: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]

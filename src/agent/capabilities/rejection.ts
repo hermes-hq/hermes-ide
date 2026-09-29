@@ -24,10 +24,11 @@ export interface RejectionView {
 	actions: RejectionAction[];
 }
 
-/** The account's name for the title: its label, or "default" for the CLI's own profile. */
-function accountLabel(caps: AgentCapabilities | null, accountId: string | null | undefined): string {
+/** The account's name for the title: its label, or `defaultLabel` for the CLI's own profile. */
+function accountLabel(caps: AgentCapabilities | null, accountId: string | null | undefined, defaultLabel: string): string {
 	const id = accountId || "default";
-	return caps?.accounts.find((a) => a.id === id)?.label ?? (id === "default" ? "Default profile" : id);
+	if (id === "default") return defaultLabel;
+	return caps?.accounts.find((a) => a.id === id)?.label ?? id;
 }
 
 /**
@@ -39,10 +40,12 @@ export function rejectionView(
 	agentName: string,
 	launch: SessionAgentLaunch | null | undefined,
 	caps: AgentCapabilities | null,
+	/** How the CLI's own profile is named in the title ("default"). */
+	defaultLabel = "default",
 ): RejectionView {
 	const model = launch?.modelId ?? null;
 	const accountId = launch?.accountId ?? null;
-	const account = accountLabel(caps, accountId);
+	const account = accountLabel(caps, accountId, defaultLabel);
 	const current = accountId || "default";
 	const others: AgentAccount[] = (caps?.accounts ?? []).filter((a) => a.id !== current && a.signedIn && a.signInState !== "unknown");
 	const actions: RejectionAction[] = [];
@@ -57,7 +60,7 @@ export function rejectionView(
 			} else {
 				titleKey = "launchRejected.titleDefaultModel";
 			}
-			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.label });
+			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.id === "default" ? defaultLabel : a.label });
 			actions.push({ kind: "pick-model" });
 			break;
 		case "effort":
@@ -69,12 +72,12 @@ export function rejectionView(
 		case "signed_out":
 			titleKey = "launchRejected.titleSignedOut";
 			actions.push({ kind: "sign-in", accountId });
-			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.label });
+			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.id === "default" ? defaultLabel : a.label });
 			actions.push({ kind: "try-again" });
 			break;
 		default:
 			titleKey = "launchRejected.titleOther";
-			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.label });
+			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.id === "default" ? defaultLabel : a.label });
 			if (model) actions.push({ kind: "retry-default" });
 			actions.push({ kind: "try-again" });
 	}

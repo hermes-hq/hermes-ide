@@ -51,7 +51,7 @@ export const FEATURE_FLAGS = [
     id: "agentCatalog",
     label: "More agents and Custom agent",
     description:
-      "Shows the agents new in 2.0 (Antigravity CLI, OpenCode, goose, Hermes Agent) and the Custom agent card in the New Session agent step. Also, from the same catalog: new sessions start in each agent's mapping of Hermes's one safety default, a terminal pane shows the instruction files its agent loads (with Link CLAUDE.md to AGENTS.md) and a Looser than default chip, and MCP servers added in the Agent view go to the project's .mcp.json.",
+      "Shows the agents new in 2.0 (Antigravity CLI, OpenCode, goose, Hermes Agent) and the Custom agent card in the New Session agent step. Also, from the same catalog: new sessions start in each agent's mapping of Hermes's one safety default, a terminal pane shows the instruction files its agent loads (with Link CLAUDE.md to AGENTS.md) and a Looser than default chip, and MCP servers added in the Agent view go to the project's .mcp.json. Settings > Agents shows each installed agent's accounts (add one: a profile of its own, signed in with the agent's own sign-in), the models and effort levels it offers at launch, and the saved launch presets.",
   },
   {
     id: "honestIsolation",

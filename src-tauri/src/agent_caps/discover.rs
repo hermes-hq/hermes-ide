@@ -535,6 +535,16 @@ pub fn cached(
     None
 }
 
+/// Any cached result of an agent, whatever its age or account (the model
+/// list is the same for every account of the CLIs that list models).
+pub fn peek(agent_id: &str) -> Option<AgentCapabilities> {
+    let map = cache().lock().ok()?;
+    map.iter()
+        .filter(|((a, _), _)| a == agent_id)
+        .max_by_key(|(_, c)| c.at)
+        .map(|(_, c)| c.caps.clone())
+}
+
 pub fn store_cached(caps: &AgentCapabilities, requested_account: &str) {
     if let Ok(mut map) = cache().lock() {
         map.insert(

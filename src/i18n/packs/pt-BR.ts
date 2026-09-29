@@ -980,7 +980,7 @@ export const ptBRPack: LanguagePack = {
     "agentsSettings.signedOut": "não conectado",
     "agentsSettings.signInUnknown": "login não verificado",
     "agentsSettings.profile": "perfil {path}",
-    "agentsSettings.defaultProfile": "perfil padrão",
+    "launchRejected.defaultAccount": "padrão",
     "agentsSettings.signIn": "Entrar",
     "agentsSettings.removeAccount": "Remover",
     "agentsSettings.addAccount": "+ Adicionar conta (abre um terminal para entrar)",

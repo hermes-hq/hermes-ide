@@ -980,7 +980,7 @@ export const ruPack: LanguagePack = {
     "agentsSettings.signedOut": "вход не выполнен",
     "agentsSettings.signInUnknown": "вход не проверялся",
     "agentsSettings.profile": "профиль {path}",
-    "agentsSettings.defaultProfile": "профиль по умолчанию",
+    "launchRejected.defaultAccount": "по умолчанию",
     "agentsSettings.signIn": "Войти",
     "agentsSettings.removeAccount": "Удалить",
     "agentsSettings.addAccount": "+ Добавить аккаунт (откроет терминал для входа)",

@@ -135,11 +135,11 @@ impl Signatures {
         if self.rules.is_empty() {
             return None;
         }
-        for line in output_lines(text) {
+        for full in logical_lines(output_lines(text)) {
             for (re, sig) in &self.rules {
-                if let Some(caps) = re.captures(&line) {
-                    let mut message: String = line.chars().take(MAX_VENDOR_MESSAGE).collect();
-                    if message.len() < line.len() {
+                if let Some(caps) = re.captures(&full) {
+                    let mut message: String = full.chars().take(MAX_VENDOR_MESSAGE).collect();
+                    if message.len() < full.len() {
                         message.push('…');
                     }
                     return Some(Rejection {
@@ -153,6 +153,40 @@ impl Signatures {
         }
         None
     }
+}
+
+/// A TUI wraps a long message at the terminal's width: a line that stops
+/// mid-sentence and a next line that goes on in lower case are one line
+/// (at most four rows joined), so a pattern that spans the wrap still
+/// matches and the message is read whole.
+fn logical_lines(rows: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut joined = 0;
+    for row in rows {
+        match out.last_mut() {
+            Some(last)
+                if joined < 3
+                    && !ends_sentence(last)
+                    && row.starts_with(|c: char| c.is_lowercase()) =>
+            {
+                last.push(' ');
+                last.push_str(&row);
+                joined += 1;
+            }
+            _ => {
+                out.push(row);
+                joined = 0;
+            }
+        }
+    }
+    out
+}
+
+/// Whether a line ends like a finished sentence or record (so the next line
+/// is not its continuation).
+fn ends_sentence(line: &str) -> bool {
+    line.trim_end()
+        .ends_with(['.', '!', '?', ')', ']', '}', '"', '…', ':'])
 }
 
 /// The compiled signatures of a catalog agent (empty for one without any).
@@ -285,6 +319,33 @@ mod tests {
         )
         .is_none());
         assert!(find("custom", "Not logged in").is_none());
+    }
+
+    #[test]
+    fn a_message_the_tui_wrapped_is_read_whole() {
+        let wrapped = "There's an issue with the selected model (not-a-model). It may not exist or you may not have\r\naccess to it. Run --model to pick a different model.\r\n> \r\n";
+        assert_eq!(
+            find("claude", wrapped).unwrap().vendor_message,
+            "There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it. Run --model to pick a different model."
+        );
+        // A finished line, or one followed by something else, is not joined.
+        let done = "Not logged in · Please run /login.\r\nsomething else\r\n";
+        assert_eq!(
+            find("claude", done).unwrap().vendor_message,
+            "Not logged in · Please run /login."
+        );
+        let status = "Not logged in · Please run /login\r\n? for shortcuts\r\nOpus 5.5 · Max\r\n";
+        assert_eq!(
+            find("claude", status).unwrap().vendor_message,
+            "Not logged in · Please run /login"
+        );
+        // Codex 0.145's TUI, as seen on a real run: the pattern spans the wrap.
+        let codex = "\u{25a0} {\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.2-codex' model\r\nis not supported when using Codex with a ChatGPT account.\"}}\r\n";
+        let r = find("codex", codex).unwrap();
+        assert_eq!(r.reason, RejectReason::Model);
+        assert!(r.vendor_message.ends_with(
+            "The 'gpt-5.2-codex' model is not supported when using Codex with a ChatGPT account.\"}}"
+        ));
     }
 
     #[test]

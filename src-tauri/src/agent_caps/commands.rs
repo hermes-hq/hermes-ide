@@ -595,6 +595,24 @@ pub fn session_launch(
     {
         return Err("A model name cannot contain control characters".to_string());
     }
+    // A CLI that falls back to another model without a word when given one
+    // it does not know (Antigravity 1.2 in its interactive mode) never gets
+    // a model its own list does not have: the launch would run on a model
+    // nobody chose. Checked against what discovery already knows; the
+    // launcher validated the choice before this.
+    let silent = agent
+        .capabilities
+        .as_ref()
+        .is_some_and(|c| c.model.silent_fallback);
+    if let (true, Some(model), Some(caps)) = (silent, model_id.as_deref(), discover::peek(provider))
+    {
+        if caps.model_source == "cli-list" && !caps.models.iter().any(|m| m.id == model) {
+            return Err(format!(
+                "{} does not offer the model \"{model}\"; pick one from its list",
+                agent.name
+            ));
+        }
+    }
     let effort = options
         .effort
         .as_deref()

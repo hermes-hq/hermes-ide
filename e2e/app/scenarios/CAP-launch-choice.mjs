@@ -158,7 +158,7 @@ try {
   const { banner: b2, ms: bannerMs } = await waitForBanner(bridge, s2, 30_000);
   log(`  banner after ${Date.now() - t2} ms: ${JSON.stringify(b2)}`);
   assert(b2.reason === "model", "the banner says the model was refused");
-  assert(b2.title === "not-a-model isn't available on your Default profile Claude Code account", `plain title ("${b2.title}")`);
+  assert(b2.title === "not-a-model isn't available on your default Claude Code account", `plain title ("${b2.title}")`);
   assert(b2.body.includes("There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it.") && b2.body.includes("Nothing ran."), "Claude's own line and \"Nothing ran.\"");
   assert(b2.actions.map((a) => a.kind).join(",") === "retry-default,pick-model", `offers Retry with default model and Pick another model (${b2.actions.map((a) => a.text).join(" | ")})`);
   assert(bannerMs < 15_000, `within seconds (${bannerMs} ms)`);

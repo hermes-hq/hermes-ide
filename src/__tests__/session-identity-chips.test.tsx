@@ -120,4 +120,27 @@ describe("SessionIdentityChips (F08)", () => {
     const { container } = renderChips(makeSession({ id: "sess-1" }));
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("2.0: shows the launch's model as requested until the agent reports its own", () => {
+    const launched = makeSession({ ai_provider: "claude", agent_launch: { modelId: "opus", effort: "high", accountId: null } });
+    const { getByTestId, rerender } = renderChips(launched);
+    expect(getByTestId("session-model-chip")).toHaveTextContent("opus · high · requested");
+    expect(getByTestId("session-model-chip").dataset.source).toBe("requested");
+    dispatchSessionEvent("sess-1", { type: "identity", at: 1, vendorSessionId: null, model: "claude-opus-5-5", permissionMode: null });
+    rerender(
+      <I18nProvider>
+        <SessionIdentityChips session={launched} />
+      </I18nProvider>,
+    );
+    expect(getByTestId("session-model-chip")).toHaveTextContent("claude-opus-5-5");
+    expect(getByTestId("session-model-chip").dataset.source).toBe("reported");
+  });
+
+  it("2.0: no requested chip for the default model or a sign-in session", () => {
+    const { container } = renderChips(makeSession({ ai_provider: "claude", agent_launch: { modelId: null, effort: "high" } }));
+    expect(container).toBeEmptyDOMElement();
+    cleanup();
+    const login = renderChips(makeSession({ ai_provider: "claude", agent_launch: { modelId: "opus", login: true } }));
+    expect(login.container).toBeEmptyDOMElement();
+  });
 });

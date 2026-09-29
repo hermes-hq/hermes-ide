@@ -100,6 +100,8 @@ export interface AgentCapabilitiesSpec {
 		aliases: readonly { id: string; label: string; note?: string }[];
 		list: { command: AgentArgs; parser: "codex_debug_models" | "agy_models" | "lines" } | { source: "claude_model_cache" } | null;
 		typed: boolean;
+		/** The CLI runs another model without a word when given one it does not know. */
+		silent_fallback?: boolean;
 	};
 	effort: {
 		flag: AgentArgs | null;

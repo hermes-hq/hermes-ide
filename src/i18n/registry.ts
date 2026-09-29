@@ -1010,7 +1010,7 @@ const ENGLISH_PACK: LanguagePack = {
     "agentsSettings.signedOut": "not signed in",
     "agentsSettings.signInUnknown": "sign-in not checked",
     "agentsSettings.profile": "profile {path}",
-    "agentsSettings.defaultProfile": "default profile",
+    "launchRejected.defaultAccount": "default",
     "agentsSettings.signIn": "Sign in",
     "agentsSettings.removeAccount": "Remove",
     "agentsSettings.addAccount": "+ Add account (opens a terminal to sign in)",

@@ -7,7 +7,8 @@ import { ProviderActionsBar } from "./ProviderActionsBar";
 import { AgentSetupChips } from "./AgentSetupChips";
 import { TerminalPane } from "./TerminalPane";
 import { SessionStatusStrip } from "./SessionStatusStrip";
-import { LaunchRejectedBanner } from "./LaunchRejectedBanner";
+import { useSessionEvents } from "../agent/contract/sessionEventStore";
+import type { SessionData } from "../types/session";
 import { splitAfterCreateActions } from "../state/splitAfterCreate";
 import { getAgent } from "../catalog/agentCatalog";
 import { useStatusStripEnabled } from "../statusStrip/preference";
@@ -28,6 +29,19 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 // highlighting, tool cards) loads on demand, the first time an
 // Agent-mode session is shown.
 const AgentSessionView = lazyView("AgentSessionView", () => import("../agent/AgentSessionView").then((m) => m.AgentSessionView));
+// 2.0: the refused-launch banner loads only when a launch was refused.
+const LaunchRejectedBanner = lazyView("LaunchRejectedBanner", () => import("./LaunchRejectedBanner").then((m) => m.LaunchRejectedBanner));
+
+/** Mounts the refused-launch banner (and loads its code) only for a session whose launch was refused. */
+function LaunchRejectedSlot({ session, onSignIn }: { session: SessionData; onSignIn: (agentId: string, accountId: string | null) => void }) {
+  const { rejection } = useSessionEvents(session.id);
+  if (!rejection) return null;
+  return (
+    <Suspense fallback={null}>
+      <LaunchRejectedBanner session={session} onSignIn={onSignIn} />
+    </Suspense>
+  );
+}
 
 // Use text/plain with a prefix so it works in all WebViews
 const DRAG_PREFIX = "hermes-session:";
@@ -371,7 +385,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             )}
             {/* 2.0: the CLI refused the launch; Hermes stopped it and says why. */}
             {session.mode !== "agent" && session.ai_provider && (
-              <LaunchRejectedBanner
+              <LaunchRejectedSlot
                 session={session}
                 onSignIn={(agentId, accountId) => {
                   void createSession({

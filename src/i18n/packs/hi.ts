@@ -1013,7 +1013,7 @@ export const hiPack: LanguagePack = {
     "agentsSettings.signedOut": "साइन इन नहीं",
     "agentsSettings.signInUnknown": "साइन इन जाँचा नहीं गया",
     "agentsSettings.profile": "प्रोफ़ाइल {path}",
-    "agentsSettings.defaultProfile": "डिफ़ॉल्ट प्रोफ़ाइल",
+    "launchRejected.defaultAccount": "डिफ़ॉल्ट",
     "agentsSettings.signIn": "साइन इन करें",
     "agentsSettings.removeAccount": "हटाएँ",
     "agentsSettings.addAccount": "+ खाता जोड़ें (साइन इन के लिए टर्मिनल खुलता है)",

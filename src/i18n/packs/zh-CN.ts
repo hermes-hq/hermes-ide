@@ -980,7 +980,7 @@ export const zhCNPack: LanguagePack = {
     "agentsSettings.signedOut": "未登录",
     "agentsSettings.signInUnknown": "未检查登录",
     "agentsSettings.profile": "配置目录 {path}",
-    "agentsSettings.defaultProfile": "默认配置",
+    "launchRejected.defaultAccount": "默认",
     "agentsSettings.signIn": "登录",
     "agentsSettings.removeAccount": "移除",
     "agentsSettings.addAccount": "+ 添加账户（打开终端登录）",

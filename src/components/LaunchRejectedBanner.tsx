@@ -59,8 +59,8 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 
 	const agentName = getAgent(agentId)?.name ?? agentId;
 	const view = useMemo(
-		() => (rejection ? rejectionView(rejection, agentName, session.agent_launch, caps) : null),
-		[rejection, agentName, session.agent_launch, caps],
+		() => (rejection ? rejectionView(rejection, agentName, session.agent_launch, caps, t("launchRejected.defaultAccount")) : null),
+		[rejection, agentName, session.agent_launch, caps, t],
 	);
 	if (!visible || !rejection || !view || !ready) return null;
 

@@ -980,7 +980,7 @@ export const esPack: LanguagePack = {
     "agentsSettings.signedOut": "sin sesión",
     "agentsSettings.signInUnknown": "sesión no comprobada",
     "agentsSettings.profile": "perfil {path}",
-    "agentsSettings.defaultProfile": "perfil predeterminado",
+    "launchRejected.defaultAccount": "predeterminada",
     "agentsSettings.signIn": "Iniciar sesión",
     "agentsSettings.removeAccount": "Quitar",
     "agentsSettings.addAccount": "+ Añadir cuenta (abre un terminal para iniciar sesión)",

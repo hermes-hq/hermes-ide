@@ -91,6 +91,8 @@ const hooks = {
     effort?: string | null;
     accountId?: string;
     purpose?: "agent" | "login";
+    /** Extra arguments after the agent's own (the launcher's extra args). */
+    suffix?: string;
   }): Promise<string | null> => {
     const bridge = getE2ESessionBridge();
     if (!bridge) throw new Error("the session provider has not registered its e2e bridge");
@@ -108,6 +110,7 @@ const hooks = {
       workingDirectory: opts.cwd,
       projectIds,
       initialPrompt: opts.task,
+      customSuffix: opts.suffix,
       agentLaunch: { ...launch, purpose: opts.purpose ?? "agent" },
     });
     if (!session) return null;

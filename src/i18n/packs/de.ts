@@ -980,7 +980,7 @@ export const dePack: LanguagePack = {
     "agentsSettings.signedOut": "nicht angemeldet",
     "agentsSettings.signInUnknown": "Anmeldung nicht geprüft",
     "agentsSettings.profile": "Profil {path}",
-    "agentsSettings.defaultProfile": "Standardprofil",
+    "launchRejected.defaultAccount": "Standard",
     "agentsSettings.signIn": "Anmelden",
     "agentsSettings.removeAccount": "Entfernen",
     "agentsSettings.addAccount": "+ Konto hinzufügen (öffnet ein Terminal zur Anmeldung)",

@@ -924,6 +924,10 @@
             "typed": {
               "description": "A model name that is not listed may be typed.",
               "type": "boolean"
+            },
+            "silent_fallback": {
+              "description": "The CLI runs another model without a word when given one it does not know (Antigravity 1.2 in its interactive mode), so Hermes never launches a model its list does not have.",
+              "type": "boolean"
             }
           }
         },
