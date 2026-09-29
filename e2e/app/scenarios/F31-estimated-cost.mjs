@@ -13,11 +13,16 @@
 //      status bar and the Context panel all say "≈$1.04 (estimated)", the
 //      store holds the transcript's token totals, tagged estimated, from
 //      source transcript:claude;
-//   3. a plain shell session shows no spend at all.
+//   3. a third call on a model Hermes has no list price for (as after a
+//      /model switch): the tokens keep rising and the row, the project
+//      header, the status bar and the Context panel all go back to "n/a" —
+//      never the frozen earlier estimate;
+//   4. a plain shell session shows no spend at all.
 //
 // Negative control: HERMES_E2E_F31E_NEGATIVE=unpriced writes the calls on a
 // model Hermes has no list price for; the cost stays "n/a" and the scenario
-// must end in RESULT: FAIL.
+// must end in RESULT: FAIL. (Step 3 failed against the store that kept the
+// previous estimate when a later one had no price.)
 //
 // Windows: the fake `claude` has to be on the user's registry Path, which is
 // only changed on a CI runner; elsewhere the scenario reports RESULT: SKIP.
@@ -155,8 +160,39 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   assert(ctx.input === expectedIn && ctx.output === expectedOut, "and the same token totals");
   await bridge.screenshot(join(evidenceDir, "01-estimated-everywhere.png"));
 
-  // ── 3. A plain shell has no spend ──────────────────────────────────
-  log("step 3: the plain shell shows no spend");
+  // ── 3. A call on a model without a list price: n/a, not the old figure ─
+  log("step 3: a call on a model Hermes has no price for (a /model switch)");
+  const UNPRICED = { model: "claude-fake-1", input_tokens: 5_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 50 };
+  writeFileSync(join(recordDir, "usage-next.json"), JSON.stringify(UNPRICED));
+  await bridge.typeInTerminal(claude, "c");
+  await bridge.waitForTerminal(claude, new RegExp(`model call \\(${UNPRICED.input_tokens} input tokens\\)`), { timeoutMs: 10_000 });
+  const risenIn = expectedIn + UNPRICED.input_tokens;
+  const unpricedSnap = await bridge.waitFor("the store to take the new total", `
+    const u = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(claude)}).usage;
+    return u && u.inputTokens === ${risenIn} ? u : null;
+  `, { timeoutMs: 15_000 });
+  log(`  store: ${JSON.stringify(unpricedSnap)}`);
+  assert(unpricedSnap.costUsd === null && unpricedSnap.confidence === "estimated", `the cost is unknown now, not the earlier estimate (${unpricedSnap.costUsd})`);
+  const naRow = await bridge.waitFor("the row to say n/a", `
+    const s = document.querySelector('.session-item[data-session-item-id="${claude}"] .session-spend');
+    return s ? { text: e2e.norm(s.innerText), kind: s.dataset.spend } : null;
+  `, { timeoutMs: 10_000 });
+  assert(naRow.kind === "na" && naRow.text === "n/a", `the row says ${JSON.stringify(naRow)}`);
+  const naHeader = await headerCost();
+  assert(naHeader === null || !/estimated/.test(naHeader.text), `the project header no longer shows an estimate (${JSON.stringify(naHeader)})`);
+  const naStatus = await statusCost();
+  assert(naStatus === null || !/estimated/.test(naStatus.text), `the status bar no longer shows an estimate (${JSON.stringify(naStatus)})`);
+  const naCtx = await bridge.waitFor("the Context panel's tokens to rise", `
+    const s = e2e.first(".ctx-usage");
+    if (!s || Number(s.querySelector(".ctx-token-in").dataset.tokens) !== ${risenIn}) return null;
+    const c = s.querySelector(".ctx-cost");
+    return { text: e2e.norm(c.innerText), kind: c.dataset.spend };
+  `, { timeoutMs: 10_000 });
+  assert(naCtx.kind === "na" && naCtx.text === "n/a", `the Context panel says ${JSON.stringify(naCtx)} with ${risenIn} tokens in`);
+  await bridge.screenshot(join(evidenceDir, "02-unpriced-na.png"));
+
+  // ── 4. A plain shell has no spend ──────────────────────────────────
+  log("step 4: the plain shell shows no spend");
   const shellRow = await rowState(bridge, shell);
   assert(shellRow && shellRow.spend === null, "the plain shell row has no spend badge");
   const shellSnap = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(shell)});`);
