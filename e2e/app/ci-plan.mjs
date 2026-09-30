@@ -43,6 +43,18 @@ export const CI_EXCLUDED = {
   "REAL-status-agy.mjs": "local only: needs a signed-in real agy and costs a few turns; it says SKIP in CI",
 };
 
+/**
+ * Scenarios a CI job of their own runs, by the job's id in
+ * .github/workflows/ci.yml. A pull request that does not touch what such a
+ * job tests skips it; the acceptance gate is then told so
+ * (`acceptance-check.mjs --skipped-job <id>`), and these scenarios are not
+ * applicable to that run instead of missing. Pushes to main, the merge queue
+ * and the nightly run always run the job.
+ */
+export const CI_JOB_SCENARIOS = {
+  "e2e-installers": ["F25-appimage-update.mjs", "F25-winget-install.mjs"],
+};
+
 /** The scenarios the shard jobs split between them: every file not listed above. */
 export function shardedScenarios(files) {
   return files.filter((f) => !(f in CI_ELSEWHERE) && !(f in CI_EXCLUDED));
