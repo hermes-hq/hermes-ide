@@ -175,6 +175,29 @@ describe("createSessionWorktrees", () => {
     expect(d.attachWorktree).not.toHaveBeenCalled();
   });
 
+  it("'use the existing X' from the choice asks for that branch as it is, not as a new one", async () => {
+    const create = vi.fn(async (_s: string, _p: string, branch: string) => {
+      if (branch === "main") throw inUse("main", "/tmp/hermes-test/repo", { projectFolder: true });
+      return ok(branch);
+    });
+    const d = deps({ createWorktree: create }, [{ kind: "existing-branch", name: "develop" }]);
+    const out = await createSessionWorktrees("s1", ["p1"], { p1: { branch: "main", createNew: false } }, d);
+    expect(create.mock.calls[1]).toEqual(["s1", "p1", "develop", false, undefined, undefined]);
+    expect(out).toEqual({ succeeded: 1, errors: [], reused: [], cancelled: false });
+  });
+
+  it("a name the backend refuses as an existing branch is reported in words, not as the raw error", async () => {
+    const d = deps({
+      createWorktree: vi.fn(async () => {
+        throw 'BRANCH_NAME_CLASH:{"name":"Develop","existing":"develop","kind":"case"}';
+      }),
+    });
+    const out = await createSessionWorktrees("s1", ["p1"], { p1: { branch: "Develop", createNew: true } }, d);
+    expect(out.errors).toHaveLength(1);
+    expect(out.errors[0]).toMatch(/^p1: Branch develop already exists/);
+    expect(out.errors[0]).not.toContain("BRANCH_NAME_CLASH");
+  });
+
   it("stops asking after a few rounds of new names that are also in use", async () => {
     const d = deps(
       { createWorktree: vi.fn(async (_s: string, _p: string, b: string) => { throw inUse(b, "/tmp/hermes-test/z"); }) },

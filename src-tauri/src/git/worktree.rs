@@ -139,23 +139,22 @@ pub fn local_branch_clash(repo: &Repository, name: &str) -> Option<BranchClash> 
 
 /// Prefix of the error returned when a branch cannot be created or used
 /// because its name collides with an existing branch (see `BranchClash`).
-/// The rest of the message says which branch, for a person to read.
+/// The rest of the message is JSON: `{"name", "existing", "kind"}` (kind is
+/// `same`, `case` or `folder`); the frontend turns it into a sentence in
+/// the person's language (`src/utils/branchClash.ts`).
 pub const BRANCH_NAME_CLASH_PREFIX: &str = "BRANCH_NAME_CLASH:";
 
 /// The error for `name`, which collides as `clash` says.
 pub fn branch_clash_error(name: &str, clash: &BranchClash) -> String {
-    let why = match clash {
-        BranchClash::Same(b) => format!("a branch named '{b}' already exists"),
-        BranchClash::Case(b) => format!(
-            "it differs from the existing branch '{b}' only in letter case, and on macOS and Windows they are the same branch"
-        ),
-        BranchClash::Folder(b) => format!(
-            "its folder differs from the one of the existing branch '{b}' only in letter case, and on macOS and Windows they are the same folder"
-        ),
+    let kind = match clash {
+        BranchClash::Same(_) => "same",
+        BranchClash::Case(_) => "case",
+        BranchClash::Folder(_) => "folder",
     };
     format!(
-        "{BRANCH_NAME_CLASH_PREFIX} cannot use the branch name '{name}': {why}. Choose '{}' as an existing branch, or pick another name.",
-        clash.existing()
+        "{}{}",
+        BRANCH_NAME_CLASH_PREFIX,
+        serde_json::json!({ "name": name, "existing": clash.existing(), "kind": kind })
     )
 }
 
@@ -725,11 +724,21 @@ pub fn create_worktree_from(
     // A name that differs from an existing branch only in letter case (or
     // whose folder does) is never used, new or not: on macOS and Windows
     // `git worktree add … Develop` would check out `develop`, and the
-    // session's commits would move it. An existing branch is used only under
-    // its exact name, as before (the branch-in-use choice relies on it: a
-    // branch held elsewhere comes back as BRANCH_IN_USE).
+    // session's commits would move it. An existing branch is used only when
+    // it was chosen as one, under its exact name.
     match local_branch_clash(&repo, branch_name) {
         Some(clash @ (BranchClash::Case(_) | BranchClash::Folder(_))) => {
+            return Err(branch_clash_error(branch_name, &clash));
+        }
+        // Asked for a NEW branch under the exact name of an existing one:
+        // never take the existing one instead (the session's commits would
+        // move it). One that is checked out elsewhere still comes back as
+        // BRANCH_IN_USE, so the person chooses what to do (reuse it on
+        // purpose, another name, or cancel); a free one is refused.
+        Some(clash @ BranchClash::Same(_)) if create_branch => {
+            if let Some(path) = find_existing_worktree_for_branch(repo_path, branch_name) {
+                return Err(branch_in_use_error(branch_name, &path));
+            }
             return Err(branch_clash_error(branch_name, &clash));
         }
         Some(BranchClash::Same(_)) => {}
@@ -2625,9 +2634,12 @@ mod tests {
             branch_name_clash("Dev", ["dev", "Dev"]),
             Some(BranchClash::Same("Dev".into()))
         );
-        assert!(
-            branch_clash_error("Develop", &BranchClash::Case("develop".into()))
-                .starts_with(BRANCH_NAME_CLASH_PREFIX)
+        let err = branch_clash_error("Develop", &BranchClash::Case("develop".into()));
+        let json: serde_json::Value =
+            serde_json::from_str(err.strip_prefix(BRANCH_NAME_CLASH_PREFIX).unwrap()).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "name": "Develop", "existing": "develop", "kind": "case" })
         );
     }
 
@@ -2664,7 +2676,7 @@ mod tests {
             create_worktree(app_data.path(), &repo_path, "s1", "Develop", true, None).unwrap_err();
         assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
         assert!(
-            err.contains("'develop'"),
+            err.contains(r#""existing":"develop""#),
             "names the existing branch: {err}"
         );
 
@@ -2695,10 +2707,80 @@ mod tests {
         git_out(&repo_path, &["branch", "feature/inbox"]);
         let err = create_worktree(app_data.path(), &repo_path, "s2", "Feature/new", true, None)
             .unwrap_err();
-        assert!(err.contains("'feature/inbox'"), "got: {err}");
+        assert!(err.contains(r#""existing":"feature/inbox""#), "got: {err}");
         assert!(!local_branches(&repo_path)
             .iter()
             .any(|b| b.eq_ignore_ascii_case("feature/new")));
+    }
+
+    #[test]
+    fn test_a_new_branch_named_exactly_like_a_free_existing_one_is_refused() {
+        let app_data = create_test_app_data_dir();
+        let (_repo_dir, repo_path) = repo_with_develop();
+        let develop_before = git_out(&repo_path, &["rev-parse", "develop"]);
+        let branches_before = local_branches(&repo_path);
+
+        // `develop` exists and nothing has it checked out: asked as a NEW
+        // branch, it is refused instead of being handed back.
+        let err =
+            create_worktree(app_data.path(), &repo_path, "s1", "develop", true, None).unwrap_err();
+        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
+        assert!(
+            err.contains(r#""existing":"develop""#),
+            "names the branch: {err}"
+        );
+        // Also when the new branch is cut from another one (the Branch In
+        // Use dialog's "new branch").
+        let err = create_worktree_from(
+            app_data.path(),
+            &repo_path,
+            "s1",
+            "develop",
+            true,
+            None,
+            Some("develop"),
+        )
+        .unwrap_err();
+        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
+
+        // Nothing was made, and develop did not move.
+        assert_eq!(local_branches(&repo_path), branches_before);
+        assert_eq!(
+            git_out(&repo_path, &["rev-parse", "develop"]),
+            develop_before
+        );
+        let wt_path = worktree_path_for_session(app_data.path(), &repo_path, "s1", "develop");
+        assert!(!wt_path.exists());
+        assert!(!git_out(&repo_path, &["worktree", "list"]).contains("[develop]"));
+    }
+
+    #[test]
+    fn test_a_new_branch_named_like_one_checked_out_elsewhere_is_in_use() {
+        let app_data = create_test_app_data_dir();
+        let (_repo_dir, repo_path) = repo_with_develop();
+        // The project folder has the current branch checked out.
+        let current = git_out(&repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .trim()
+            .to_string();
+        let err =
+            create_worktree(app_data.path(), &repo_path, "s1", &current, true, None).unwrap_err();
+        let (branch, _path) = parse_branch_in_use_error(&err)
+            .unwrap_or_else(|| panic!("expected BRANCH_IN_USE, got: {err}"));
+        assert_eq!(branch, current);
+
+        // Another session's worktree holds develop.
+        let held =
+            create_worktree(app_data.path(), &repo_path, "s2", "develop", false, None).unwrap();
+        let err =
+            create_worktree(app_data.path(), &repo_path, "s3", "develop", true, None).unwrap_err();
+        let (branch, path) = parse_branch_in_use_error(&err)
+            .unwrap_or_else(|| panic!("expected BRANCH_IN_USE, got: {err}"));
+        assert_eq!(branch, "develop");
+        assert_eq!(
+            Path::new(&path).canonicalize().unwrap(),
+            Path::new(&held.worktree_path).canonicalize().unwrap(),
+            "names the checkout that holds it"
+        );
     }
 
     #[test]

@@ -451,6 +451,12 @@ features:
       FIX-branch-case-3:
         text: "Choosing the existing develop on purpose puts the session on develop, and only then does a commit there move it"
         scenarios: [FIX-branch-case.mjs]
+      FIX-branch-case-4:
+        text: "A new branch asked under the exact name of an existing one is never handed that branch: refused when it is free, and the Branch In Use choice when another checkout has it"
+        scenarios: [FIX-branch-case.mjs]
+      FIX-branch-case-5:
+        text: "The Branch In Use choice and the Git panel's New Branch check a new name against every local branch, letter case included, say which branch it is in words, and the choice offers that branch on purpose"
+        scenarios: [FIX-branch-case.mjs, F09-honest-isolation.mjs, F09-isolation-edge-cases.mjs]
   FIX-overlay-focus:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
     # main before the fix ends in RESULT: FAIL (the keyboard ends on <body>,
@@ -470,12 +476,20 @@ features:
     # finished opening, and the whole window froze with it. The test build
     # holds the opening (HERMES_E2E_SLOW_SPAWN_MS). Negative control (run by
     # hand): a build of main with only that hook added ends in RESULT: FAIL
-    # with the same "the webview did not answer".
+    # with the same "the webview did not answer"; this branch without the
+    # "closed while it was being opened" check fails step 2b (the closed
+    # session is listed again).
     name: "A terminal that is slow to open never freezes the app"
     status: shipped
     criteria:
       FIX-spawn-no-freeze-1:
         text: "While a terminal is being opened (held for 8 s) the app answers within 2.5 s, the window is drawn, the terminal opens once the hold ends, and Quit works while another one is being opened"
+        scenarios: [FIX-spawn-no-freeze.mjs]
+      FIX-spawn-no-freeze-2:
+        text: "A terminal closed while it is being opened stays closed: it is never listed again and nothing is left running for it"
+        scenarios: [FIX-spawn-no-freeze.mjs]
+      FIX-spawn-no-freeze-3:
+        text: "Typing and a resize sent while a terminal is being opened are kept and reach it once it opens"
         scenarios: [FIX-spawn-no-freeze.mjs]
   FIX-launcher-reopen:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of

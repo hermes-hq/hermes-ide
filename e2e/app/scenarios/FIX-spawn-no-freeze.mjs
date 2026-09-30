@@ -16,18 +16,26 @@
 //      at once, three times over (the sessions list, a command that needs
 //      the PTY manager and runs on the main thread), and the window is
 //      still drawn (a screenshot);
-//   2. the terminal opens once the hold ends and is listed;
+//      Typing and a resize sent to it meanwhile are accepted, not refused
+//      as "not found";
+//   2. the terminal opens once the hold ends and is listed, and what was
+//      typed meanwhile ran in it, at the size asked meanwhile (`stty size`
+//      written to a file; on Windows the file alone);
+//   2b. a terminal closed while it is being opened stays closed: opening it
+//      fails, it is never listed, and typing into it is refused (before
+//      this, the closed session came back to life once its spawn returned);
 //   3. another terminal is being opened (held again): Quit still works, and
 //      the app exits by itself.
 //
-// Negative control (must end in RESULT: FAIL): a build of main with only the
+// Negative controls (must end in RESULT: FAIL): a build of main with only the
 // test hook added (the PTY manager held across the spawn) — the app stops
-// answering during step 1.
+// answering during step 1; and this branch without the "closed while
+// opening" check — step 2b finds the closed session listed again.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/FIX-spawn-no-freeze.mjs
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
@@ -64,9 +72,10 @@ try {
 
   log("step 1: while a terminal is being opened, the app keeps answering");
   const opening = Date.now();
+  const FIRST = "spawnfreeze-first";
   await bridge.eval(`
     window.__spawnFreeze = window.__TAURI_INTERNALS__
-      .invoke("create_session", { label: "slow terminal" })
+      .invoke("create_session", { sessionId: ${JSON.stringify(FIRST)}, label: "slow terminal" })
       .then((s) => ({ id: s.id }), (e) => ({ error: String(e) }));
     return true;
   `);
@@ -84,6 +93,20 @@ try {
   assert(times.every((t) => typeof t.sessions === "number" && t.ms < ANSWER_MS), `the app answered each time within ${ANSWER_MS} ms (${times.map((t) => t.ms).join(", ")} ms)`);
   const stillOpening = await bridge.eval(`return await Promise.race([window.__spawnFreeze, new Promise((r) => setTimeout(() => r("opening"), 50))]);`);
   assert(stillOpening === "opening", "the terminal was still being opened while the app was asked");
+  // Typing and a resize while it is being opened: kept for it, not refused.
+  const marker = join(evidenceDir, "typed-while-opening.txt");
+  rmSync(marker, { force: true });
+  const line = onWindows ? `echo typed > "${marker}"\r` : `stty size > '${marker}'\r`;
+  const sent = await bridge.eval(`
+    const out = {};
+    try { await window.__TAURI_INTERNALS__.invoke("resize_session", { sessionId: ${JSON.stringify(FIRST)}, rows: 33, cols: 111 }); out.resize = "ok"; } catch (e) { out.resize = String(e); }
+    try { await window.__TAURI_INTERNALS__.invoke("write_to_session", { sessionId: ${JSON.stringify(FIRST)}, data: btoa(${JSON.stringify(line)}) }); out.write = "ok"; } catch (e) { out.write = String(e); }
+    out.still = await Promise.race([window.__spawnFreeze, new Promise((r) => setTimeout(() => r("opening"), 50))]);
+    return out;
+  `);
+  log(`  resize and typing while opening: ${JSON.stringify(sent)}`);
+  assert(sent.resize === "ok" && sent.write === "ok", "a resize and typing sent while it is being opened are accepted");
+  assert(sent.still === "opening", "(it was still being opened then)");
   await bridge.screenshot(join(evidenceDir, "01-while-opening.png"));
   log("  ok — the window was still drawn (screenshot)");
 
@@ -95,6 +118,48 @@ try {
   assert(created && created.id, `the terminal opened (${JSON.stringify(created)}) after ${Date.now() - opening} ms`);
   const listed = await bridge.eval(`return (await window.__TAURI_INTERNALS__.invoke("get_sessions")).some((s) => s.id === ${JSON.stringify(created.id)});`);
   assert(listed, "it is listed with the app's sessions");
+  let typed = null;
+  for (let i = 0; i < 100 && typed === null; i++) {
+    if (existsSync(marker)) typed = readFileSync(marker, "utf8").replace(/\0/g, "").trim();
+    if (!typed) {
+      typed = null;
+      await sleep(200);
+    }
+  }
+  log(`  written by the line typed while opening: ${JSON.stringify(typed)}`);
+  assert(typed !== null, "what was typed while it was being opened ran in it once it opened");
+  if (!onWindows) assert(typed === "33 111", `at the size asked while it was being opened (stty size: ${typed})`);
+
+  log("step 2b: a terminal closed while it is being opened stays closed");
+  const CLOSED = "spawnfreeze-closed";
+  await bridge.eval(`
+    window.__spawnClosed = window.__TAURI_INTERNALS__
+      .invoke("create_session", { sessionId: ${JSON.stringify(CLOSED)}, label: "closed while opening" })
+      .then((s) => ({ id: s.id }), (e) => ({ error: String(e) }));
+    return true;
+  `);
+  await sleep(1_500);
+  const closed = await bridge.eval(`
+    try { await window.__TAURI_INTERNALS__.invoke("close_session", { sessionId: ${JSON.stringify(CLOSED)} }); return "closed"; } catch (e) { return String(e); }
+  `, { timeoutMs: 6_000 });
+  log(`  close_session during the opening: ${closed}`);
+  assert(closed === "closed", "closing it while it is being opened answers at once");
+  const outcome = await bridge.waitFor("the opening to end", `
+    return await Promise.race([window.__spawnClosed, new Promise((res) => setTimeout(() => res(null), 50))]);
+  `, { timeoutMs: HOLD_MS + 20_000 });
+  log(`  create_session returned: ${JSON.stringify(outcome)}`);
+  assert(outcome && !outcome.id && /closed while it was being opened/.test(outcome.error ?? ""), "opening it fails, saying it was closed meanwhile");
+  const listedClosed = async () => bridge.eval(`return (await window.__TAURI_INTERNALS__.invoke("get_sessions")).filter((s) => s.id === ${JSON.stringify(CLOSED)}).map((s) => ({ id: s.id, phase: s.phase }));`);
+  const nowListed = await listedClosed();
+  await sleep(1_500);
+  const laterListed = await listedClosed();
+  log(`  get_sessions after the close: ${JSON.stringify(nowListed)}, 1.5 s later: ${JSON.stringify(laterListed)}`);
+  assert(nowListed.length === 0 && laterListed.length === 0, "the closed session is not listed (it did not come back)");
+  const typedClosed = await bridge.eval(`
+    try { await window.__TAURI_INTERNALS__.invoke("write_to_session", { sessionId: ${JSON.stringify(CLOSED)}, data: btoa("echo hi\\r") }); return "accepted"; } catch (e) { return String(e); }
+  `);
+  log(`  typing into it: ${typedClosed}`);
+  assert(/not found/.test(typedClosed), "typing into it is refused: it has no terminal");
 
   log("step 3: Quit works while another terminal is being opened");
   await bridge.eval(`window.__TAURI_INTERNALS__.invoke("create_session", { label: "slow terminal 2" }).catch(() => {}); return true;`);

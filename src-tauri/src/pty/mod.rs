@@ -47,6 +47,22 @@ pub(crate) struct PtySession {
 pub struct PtyManager {
     pub(crate) sessions: HashMap<String, PtySession>,
     pub(crate) session_counter: usize,
+    /// Terminals `create_session` is opening without holding the manager
+    /// (the spawn can take seconds): a close, typing or a resize that
+    /// arrives meanwhile is recorded here instead of being lost.
+    pub(crate) opening: HashMap<String, Opening>,
+}
+
+/// What happened to a terminal while it was being opened.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Opening {
+    /// `close_session` ran meanwhile: the new terminal is killed, and never
+    /// registered or written to the database.
+    pub(crate) closed: bool,
+    /// Input typed meanwhile, written once the terminal is registered.
+    pub(crate) input: Vec<u8>,
+    /// The last size asked for meanwhile, applied once it is registered.
+    pub(crate) size: Option<(u16, u16)>,
 }
 
 impl Default for PtyManager {
@@ -60,6 +76,53 @@ impl PtyManager {
         Self {
             sessions: HashMap::new(),
             session_counter: 0,
+            opening: HashMap::new(),
+        }
+    }
+
+    /// A terminal starts being opened (the manager is about to be released).
+    pub(crate) fn begin_opening(&mut self, session_id: &str) {
+        self.opening
+            .insert(session_id.to_string(), Opening::default());
+    }
+
+    /// The opening is over (registered, failed or refused): what happened
+    /// meanwhile, or None if it was not being opened.
+    pub(crate) fn finish_opening(&mut self, session_id: &str) -> Option<Opening> {
+        self.opening.remove(session_id)
+    }
+
+    /// A close for a session that is still being opened: true if it was.
+    pub(crate) fn close_opening(&mut self, session_id: &str) -> bool {
+        match self.opening.get_mut(session_id) {
+            Some(o) => {
+                o.closed = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Input for a session that is still being opened: kept for it (true),
+    /// or false if it is not being opened (or was closed meanwhile).
+    pub(crate) fn queue_opening_input(&mut self, session_id: &str, bytes: &[u8]) -> bool {
+        match self.opening.get_mut(session_id) {
+            Some(o) if !o.closed => {
+                o.input.extend_from_slice(bytes);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A resize for a session that is still being opened: the last one wins.
+    pub(crate) fn queue_opening_resize(&mut self, session_id: &str, rows: u16, cols: u16) -> bool {
+        match self.opening.get_mut(session_id) {
+            Some(o) if !o.closed => {
+                o.size = Some((rows, cols));
+                true
+            }
+            _ => false,
         }
     }
 
@@ -355,6 +418,51 @@ mod tests {
     use super::adapters::{is_input_needed_line, is_shell_prompt, LineAnalysis, PhaseHint};
     use super::analyzer::OutputAnalyzer;
     use super::models::SessionPhase;
+    use super::{Opening, PtyManager};
+
+    // ── terminals being opened ──
+
+    #[test]
+    fn a_close_during_the_opening_is_remembered_for_create_session() {
+        let mut mgr = PtyManager::new();
+        mgr.begin_opening("s1");
+        assert!(mgr.close_opening("s1"));
+        // Input after the close is refused (nothing is kept for a dead session).
+        assert!(!mgr.queue_opening_input("s1", b"ls\r"));
+        assert!(!mgr.queue_opening_resize("s1", 40, 120));
+        let opened = mgr.finish_opening("s1").expect("was being opened");
+        assert!(opened.closed);
+        assert!(opened.input.is_empty());
+        assert_eq!(opened.size, None);
+        // Finished: nothing is left behind.
+        assert!(mgr.finish_opening("s1").is_none());
+        assert!(mgr.opening.is_empty());
+    }
+
+    #[test]
+    fn a_close_of_a_session_that_is_not_being_opened_marks_nothing() {
+        let mut mgr = PtyManager::new();
+        assert!(!mgr.close_opening("s1"));
+        mgr.begin_opening("s2");
+        assert!(!mgr.close_opening("s1"));
+        assert_eq!(mgr.finish_opening("s2"), Some(Opening::default()));
+    }
+
+    #[test]
+    fn input_and_resize_during_the_opening_are_kept_in_order_and_last_size_wins() {
+        let mut mgr = PtyManager::new();
+        mgr.begin_opening("s1");
+        assert!(mgr.queue_opening_input("s1", b"ec"));
+        assert!(mgr.queue_opening_input("s1", b"ho hi\r"));
+        assert!(mgr.queue_opening_resize("s1", 30, 100));
+        assert!(mgr.queue_opening_resize("s1", 40, 120));
+        // Another session's input is not kept for it.
+        assert!(!mgr.queue_opening_input("other", b"x"));
+        let opened = mgr.finish_opening("s1").unwrap();
+        assert!(!opened.closed);
+        assert_eq!(opened.input, b"echo hi\r".to_vec());
+        assert_eq!(opened.size, Some((40, 120)));
+    }
 
     // ── is_input_needed_line ──
 

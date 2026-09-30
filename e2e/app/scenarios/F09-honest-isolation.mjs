@@ -400,7 +400,9 @@ try {
   await startTask(bridge, { label: "F09 task E", pickBranch: "main" });
   await bridge.waitFor("the Branch In Use choice", `return !!e2e.first(".branch-conflict-modal");`, { timeoutMs: 20_000 });
   await bridge.eval(setInput(".branch-conflict-create-input", wtA.branchName));
-  await bridge.clickByName("Use new branch", { within: ".branch-conflict-actions" });
+  // An existing branch is never taken as a new one: the choice offers it as
+  // itself, and asking for it brings the choice for whoever holds it.
+  await bridge.clickWhenReady(`const b = e2e.first(".branch-conflict-use-existing"); return b && b.getAttribute("data-branch") === ${JSON.stringify(wtA.branchName)} ? e2e.click(b) : false;`, { timeoutMs: 10_000 });
   await bridge.waitFor("a second Branch In Use choice naming task A", `
     const m = e2e.first(".branch-conflict-modal");
     return !!m && m.innerText.includes("F09 task A");
