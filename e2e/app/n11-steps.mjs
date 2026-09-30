@@ -4,7 +4,7 @@
 
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { createLogger, finishScenario, outDir, sleep } from "./harness.mjs";
+import { ScenarioSkip, createLogger, finishScenario, inSkippableBody, outDir, skipScenario, sleep } from "./harness.mjs";
 
 /** Evidence folder + logger + assert for one scenario. */
 export function scenarioContext(name) {
@@ -29,16 +29,22 @@ export async function runScenario(name, body) {
   const apps = [];
   const cleanups = [];
   let failed = false;
+  let skipped = null;
   try {
-    await body({ ...ctx, apps, onCleanup: (fn) => cleanups.push(fn) });
+    await inSkippableBody(() => body({ ...ctx, apps, onCleanup: (fn) => cleanups.push(fn) }));
   } catch (e) {
-    failed = true;
-    ctx.log(`FAILED: ${e?.stack ?? e}`);
-    for (const app of apps) {
-      try {
-        if (app.isRunning()) await app.bridge.screenshot(join(ctx.evidenceDir, "99-failure.png"));
-      } catch (inner) {
-        ctx.log(`  (could not capture failure evidence: ${inner.message})`);
+    if (e instanceof ScenarioSkip) {
+      // The scenario cannot run here: quit the app and clean up, then skip.
+      skipped = e.reason;
+    } else {
+      failed = true;
+      ctx.log(`FAILED: ${e?.stack ?? e}`);
+      for (const app of apps) {
+        try {
+          if (app.isRunning()) await app.bridge.screenshot(join(ctx.evidenceDir, "99-failure.png"));
+        } catch (inner) {
+          ctx.log(`  (could not capture failure evidence: ${inner.message})`);
+        }
       }
     }
   } finally {
@@ -59,6 +65,8 @@ export async function runScenario(name, body) {
         ctx.log(`  (cleanup failed: ${e.message})`);
       }
     }
+    // Writes a skip result.json and exits 0 (a skip is never a pass).
+    if (skipped !== null) skipScenario({ scenario: name, evidenceDir: ctx.evidenceDir, reason: skipped, startedAt, log: ctx.log });
   }
   // Writes result.json (read by run.mjs and the acceptance gate) and exits.
   finishScenario({ scenario: name, evidenceDir: ctx.evidenceDir, failed, startedAt, log: ctx.log });

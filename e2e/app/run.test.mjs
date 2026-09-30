@@ -119,6 +119,27 @@ process.exit(3);
     expect(out).toContain("FAILED: odd (run 1/1, exit 3, result skip)");
   });
 
+  it("a skip inside a runScenario body still runs the scenario's cleanups", () => {
+    const steps = JSON.stringify(pathToFileURL(join(REPO_ROOT, "e2e", "app", "n11-steps.mjs")).href);
+    const harness = JSON.stringify(pathToFileURL(join(REPO_ROOT, "e2e", "app", "harness.mjs")).href);
+    const inBody = `import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { skipScenario } from ${harness};
+import { runScenario } from ${steps};
+await runScenario("inbody", async ({ evidenceDir, log, onCleanup }) => {
+  onCleanup(() => writeFileSync(join(process.env.HERMES_E2E_OUT, "cleaned-up"), "yes"));
+  skipScenario({ scenario: "inbody", evidenceDir, reason: "Windows outside CI", log });
+  throw new Error("the body went on after the skip");
+});
+`;
+    const r = rig({ "inbody.mjs": inBody });
+    const { code, out, results } = run(r, ["inbody.mjs"]);
+    expect(code).toBe(0);
+    expect(out).toContain("=== inbody (1/1): SKIP (Windows outside CI)");
+    expect(results.map((x) => `${x.scenario}:${x.status}`)).toEqual(["inbody:skip"]);
+    expect(existsSync(join(r.dir, "cleaned-up"))).toBe(true);
+  });
+
   it("stops at the first failure without --keep-going and says what did not run", () => {
     const r = rig({ "a.mjs": FAIL, "b.mjs": PASS, "c.mjs": PASS });
     const { code, out, results } = run(r, []);
