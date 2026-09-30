@@ -313,7 +313,8 @@ fn eval_js(app: &AppHandle, label: &str, script: &str, timeout: Duration) -> Res
             &window,
             poll.clone(),
             remaining.max(Duration::from_millis(250)),
-        )?;
+        )
+        .map_err(|e| format!("{e}; {}", who_is_busy(app)))?;
         if let Some(text) = got.as_str() {
             return serde_json::from_str::<Value>(text)
                 .map_err(|e| format!("could not decode script result: {}", e));

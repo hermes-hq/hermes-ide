@@ -30,10 +30,20 @@
 //   3. another terminal is being opened (held again): Quit still works, and
 //      the app exits by itself.
 //
+// The same for the AI tools check (the onboarding's AI tools screen, the New
+// Session wizard) and the shell list (Settings), which start a process per
+// agent or shell (`where` on Windows) and took seconds on the Windows CI
+// runner: on the main thread the window froze meanwhile (F02: "the webview
+// did not answer"). The test build holds them (HERMES_E2E_SLOW_PROBE_MS):
+//
+//   0. while both are held, the app answers at once, three times over, and
+//      both then return their answer (before step 1).
+//
 // Negative controls (must end in RESULT: FAIL): a build of main with only the
 // test hook added (the PTY manager held across the spawn) — the app stops
-// answering during step 1; and this branch without the "closed while
-// opening" check — step 2b finds the closed session listed again.
+// answering during step 1; this branch without the "closed while opening"
+// check — step 2b finds the closed session listed again; and this branch with
+// the AI tools check and the shell list synchronous again — step 0.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/FIX-spawn-no-freeze.mjs
@@ -66,12 +76,42 @@ let app = null;
 let failed = false;
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   hold: ${HOLD_MS} ms`);
-  const env = { HERMES_E2E_SLOW_SPAWN_MS: String(HOLD_MS) };
+  const env = { HERMES_E2E_SLOW_SPAWN_MS: String(HOLD_MS), HERMES_E2E_SLOW_PROBE_MS: String(HOLD_MS) };
   app = onWindows
     ? await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, env })
     : await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "private", homeDir, env });
   const { bridge } = app;
   await completeOnboarding(bridge, log);
+
+  log("step 0: while the AI tools check and the shell list run, the app keeps answering");
+  const probing = Date.now();
+  await bridge.eval(`
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    window.__probeFreeze = Promise.all([
+      invoke("check_ai_providers", { includeBeta: false }).then((r) => Object.keys(r).length, (e) => ({ error: String(e) })),
+      invoke("get_available_shells").then((r) => r.length, (e) => ({ error: String(e) })),
+    ]);
+    return true;
+  `);
+  await sleep(1_000);
+  const probeTimes = [];
+  for (let i = 0; i < 3; i++) {
+    const t0 = Date.now();
+    const n = await bridge
+      .eval(`return (await window.__TAURI_INTERNALS__.invoke("get_sessions")).length;`, { timeoutMs: 6_000 })
+      .catch((e) => `no answer: ${e.message}`);
+    probeTimes.push({ ms: Date.now() - t0, sessions: n, at: Date.now() - probing });
+    await sleep(600);
+  }
+  log(`  answers while checking: ${JSON.stringify(probeTimes)}`);
+  assert(probeTimes.every((t) => typeof t.sessions === "number" && t.ms < ANSWER_MS), `the app answered each time within ${ANSWER_MS} ms (${probeTimes.map((t) => t.ms).join(", ")} ms)`);
+  const stillProbing = await bridge.eval(`return await Promise.race([window.__probeFreeze, new Promise((r) => setTimeout(() => r("checking"), 50))]);`);
+  assert(stillProbing === "checking", "the AI tools check and the shell list were still running while the app was asked");
+  const probed = await bridge.waitFor("the AI tools check and the shell list to answer", `
+    return await Promise.race([window.__probeFreeze, new Promise((res) => setTimeout(() => res(null), 50))]);
+  `, { timeoutMs: HOLD_MS + 20_000 });
+  log(`  answered after ${Date.now() - probing} ms: ${JSON.stringify(probed)}`);
+  assert(Array.isArray(probed) && probed[0] > 0 && probed[1] > 0, "both then answered (the agents looked for, the shells found)");
 
   log("step 1: while a terminal is being opened, the app keeps answering");
   const opening = Date.now();

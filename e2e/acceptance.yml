@@ -478,7 +478,10 @@ features:
     # hand): a build of main with only that hook added ends in RESULT: FAIL
     # with the same "the webview did not answer"; this branch without the
     # "closed while it was being opened" check fails step 2b (the closed
-    # session is listed again).
+    # session is listed again). Criterion 4 was found as F02's "the webview
+    # did not answer" on the Windows CI runner (the AI tools check ran on the
+    # main thread); with that check and the shell list synchronous again,
+    # step 0 fails.
     name: "A terminal that is slow to open never freezes the app"
     status: shipped
     criteria:
@@ -490,6 +493,9 @@ features:
         scenarios: [FIX-spawn-no-freeze.mjs]
       FIX-spawn-no-freeze-3:
         text: "Typing and a resize sent while a terminal is being opened are accepted, and reach it once it opens (checked to run, at that size, on macOS and Linux; on Windows the shell drops keys typed before it starts)"
+        scenarios: [FIX-spawn-no-freeze.mjs]
+      FIX-spawn-no-freeze-4:
+        text: "While the AI tools check and the shell list run (held for 8 s) the app answers within 2.5 s, and both then answer"
         scenarios: [FIX-spawn-no-freeze.mjs]
   FIX-launcher-reopen:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of

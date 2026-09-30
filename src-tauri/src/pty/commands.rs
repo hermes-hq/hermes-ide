@@ -678,9 +678,21 @@ pub async fn ssh_tmux_rename_window(
     Ok(())
 }
 
+/// Which agent CLIs are installed. Off the main thread: the check starts a
+/// process per agent (`where` on Windows, a login shell elsewhere), which
+/// takes seconds on a slow machine, and a synchronous command runs on the
+/// main thread, so the window froze meanwhile (F02 on the Windows CI runner:
+/// the onboarding's AI tools screen, then "the webview did not answer").
 #[tauri::command]
-pub fn check_ai_providers(include_beta: Option<bool>) -> std::collections::HashMap<String, bool> {
-    crate::platform::check_ai_cli_availability(include_beta.unwrap_or(false))
+pub async fn check_ai_providers(
+    include_beta: Option<bool>,
+) -> Result<HashMap<String, bool>, String> {
+    tokio::task::spawn_blocking(move || {
+        e2e_hold("HERMES_E2E_SLOW_PROBE_MS", "the AI tools check");
+        crate::platform::check_ai_cli_availability(include_beta.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| format!("the AI tools check failed: {e}"))
 }
 
 /// The line typed into a session's shell to start its agent.
@@ -806,25 +818,29 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
 }
 
 /// Test builds only: `HERMES_E2E_SLOW_SPAWN_MS=<ms>` makes opening a
-/// terminal take that long, as a spawn stuck in the OS does, so a scenario
-/// can check the app keeps answering meanwhile. Needs the `e2e` cargo feature
-/// (never in a release build) AND `HERMES_E2E=1` at run time.
-fn e2e_slow_spawn() {
+/// terminal take that long, as a spawn stuck in the OS does, and
+/// `HERMES_E2E_SLOW_PROBE_MS=<ms>` the AI tools check and the shell list, as
+/// a slow machine does, so a scenario can check the app keeps answering
+/// meanwhile. Needs the `e2e` cargo feature (never in a release build) AND
+/// `HERMES_E2E=1` at run time.
+fn e2e_hold(var: &str, what: &str) {
     #[cfg(feature = "e2e")]
     {
         if !crate::e2e_protocol::is_enabled(std::env::var("HERMES_E2E").ok().as_deref()) {
             return;
         }
-        let ms = std::env::var("HERMES_E2E_SLOW_SPAWN_MS")
+        let ms = std::env::var(var)
             .ok()
             .and_then(|v| v.trim().parse::<u64>().ok())
             .unwrap_or(0)
             .min(60_000);
         if ms > 0 {
-            log::warn!("[e2e] opening this terminal is held for {} ms", ms);
+            log::warn!("[e2e] {} is held for {} ms", what, ms);
             std::thread::sleep(std::time::Duration::from_millis(ms));
         }
     }
+    #[cfg(not(feature = "e2e"))]
+    let _ = (var, what);
 }
 
 /// Ends a session's opening (see `PtyManager::opening`) on every early
@@ -1375,7 +1391,7 @@ pub fn create_session(
     // host that cannot be reached falls back to this process, with a log
     // line), otherwise this process as always.
     let mut ended_before_attach: Option<Option<i32>> = None;
-    e2e_slow_spawn();
+    e2e_hold("HERMES_E2E_SLOW_SPAWN_MS", "opening this terminal");
     let (mut transport, reattached): (Box<dyn PtyTransport>, bool) = if use_host {
         match crate::session_host::open_hosted(&app, &session_id, Some(&cmd), pty_rows, pty_cols) {
             Ok(opened) => {
@@ -3282,8 +3298,19 @@ pub fn get_session_metadata(
 }
 
 /// Returns a list of `{ name, path }` objects for shells found on this machine.
+/// Off the main thread, like `check_ai_providers`: on Windows it starts
+/// `where` for each PowerShell (Settings opening froze the window meanwhile).
 #[tauri::command]
-pub fn get_available_shells() -> Vec<ShellInfo> {
+pub async fn get_available_shells() -> Result<Vec<ShellInfo>, String> {
+    tokio::task::spawn_blocking(|| {
+        e2e_hold("HERMES_E2E_SLOW_PROBE_MS", "the shell list");
+        available_shells()
+    })
+    .await
+    .map_err(|e| format!("could not list the shells: {e}"))
+}
+
+fn available_shells() -> Vec<ShellInfo> {
     let mut shells: Vec<ShellInfo> = Vec::new();
 
     #[cfg(unix)]
