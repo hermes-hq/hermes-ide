@@ -154,6 +154,13 @@ try {
     const kinds = ${JSON.stringify(started)}.map((id) => window.__HERMES_E2E__.sessionEventSnapshot(id).status.kind);
     return kinds.every((k) => k === "working") ? kinds : null;
   `, { timeoutMs: 20_000 });
+  // The queue counts what the agents themselves report (their hooks), not
+  // the terminal's guess above, which can come first: until both hold their
+  // slot, a third task would still start.
+  await bridge.waitFor("both agents holding a slot", `
+    const held = window.__HERMES_E2E__.fleetState().occupancy.sessionIds;
+    return ${JSON.stringify(started)}.every((id) => held.includes(id)) ? held : null;
+  `, { timeoutMs: 20_000 });
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Queued task");
   await waitLaunchEnabled(bridge);
