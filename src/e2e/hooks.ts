@@ -52,6 +52,8 @@ interface FakeTurn {
   patch?: string;
 }
 import { listen } from "@tauri-apps/api/event";
+import { GALLERY_EVENT } from "./DialogGalleryHost";
+import { WHATS_NEW_PREVIEW_STORAGE_KEY } from "../components/startupDialogSettings";
 
 /** Output each watched session received (F24 throughput). */
 const outputWatches = new Map<
@@ -235,6 +237,15 @@ const hooks = {
       relaunchCalls: 0,
     };
     window.__HERMES_TEST_UPDATE__.forcedUpdate = { version, body };
+  },
+  /**
+   * UI-D: open one of the dialogs whose real trigger needs state a test run
+   * cannot make cheaply (src/e2e/DialogGallery.tsx lists them), or close it
+   * with null. The dialog is the app's own component, in the app's providers.
+   */
+  showDialog: (name: string | null): void => {
+    if (name === null) window.localStorage.removeItem(WHATS_NEW_PREVIEW_STORAGE_KEY);
+    window.dispatchEvent(new CustomEvent(GALLERY_EVENT, { detail: name }));
   },
   /** Read back how many times the (faked) install/relaunch pipeline ran. */
   updateTestState: () => window.__HERMES_TEST_UPDATE__ ?? null,

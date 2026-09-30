@@ -103,6 +103,11 @@
   min-width: 0;
 }
 
+.branch-conflict-error {
+  color: var(--danger-fg);
+  font-size: var(--text-sm);
+}
+
 .branch-conflict-other-row {
   display: flex;
   justify-content: flex-end;

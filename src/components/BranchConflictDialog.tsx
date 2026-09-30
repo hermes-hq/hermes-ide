@@ -105,13 +105,20 @@ export function BranchConflictDialog({
                   if (e.key === "Enter") handleCreate();
                 }}
                 placeholder="new-branch-name"
-                error={validationError ?? undefined}
+                invalid={!!validationError}
+                aria-describedby={validationError ? "branch-conflict-error" : undefined}
                 autoFocus
               />
               <Button variant="primary" className="branch-conflict-btn-create" onClick={handleCreate}>
                 Use new branch
               </Button>
             </div>
+
+            {validationError && (
+              <div id="branch-conflict-error" className="branch-conflict-error" role="alert">
+                {validationError}
+              </div>
+            )}
 
             <div className="branch-conflict-other-row">
               <Button variant="quiet" className="branch-conflict-btn-cancel" onClick={onCancel}>
