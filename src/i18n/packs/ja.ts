@@ -1066,6 +1066,7 @@ export const jaPack: LanguagePack = {
     "fleet.spendEstimatedTitle": "エージェントのトランスクリプトにあるトークン数から、Hermes が定価で推定した金額です。エージェントは利用額を報告していません。実際の金額より低くなることがあります。",
     "fleet.spendUnknownOne": "{count} セッションは不明",
     "fleet.spendUnknownMany": "{count} セッションは不明",
+    "fleet.spendUnknownShort": "{count} 件不明",
     "fleet.spendUnknownTitle": "利用額が不明なセッション:",
     "fleet.usageTokens": "トークン",
     "fleet.tokensIn": "入力 {tokens}",

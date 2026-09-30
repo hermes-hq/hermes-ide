@@ -92,7 +92,9 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         }
         break;
       case "status.copy-cost":
-        navigator.clipboard.writeText(`$${totalCost.toFixed(2)}`).catch(console.error);
+        // What the bar shows: "n/a", or the known part with its ≈ and how
+        // many sessions' cost is unknown, never a bare "$0.00".
+        navigator.clipboard.writeText(costText).catch(console.error);
         break;
       case "status.copy-tokens": {
         const total = totalTokens.input + totalTokens.output;
@@ -100,7 +102,7 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         break;
       }
     }
-  }, [active, totalCost, totalTokens]);
+  }, [active, costText, totalTokens]);
   const { showMenu: showStatusMenu } = useContextMenu(handleStatusBarAction);
 
   // Update elapsed time every 30s

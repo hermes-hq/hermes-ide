@@ -8,17 +8,24 @@
 //   1. before any model call no cost is known: the project header and the
 //      status bar say "n/a" (not nothing, and never "$0.00");
 //   2. session A makes a call on a priced model, session B none yet: the
-//      header and the status bar say "≈$0.37 (estimated) · 1 session n/a",
-//      and their tooltips name B (and not A, nor the plain shell);
+//      status bar says "≈$0.37 (estimated) · 1 session n/a", the narrow
+//      project header "≈$0.37 (estimated) · 1 n/a" (its tooltip in full),
+//      and both tooltips name B (and not A, nor the plain shell);
 //   3. session B makes a call on a model Hermes has no list price for: its
 //      tokens are known but its cost is not, so the texts stay the same;
-//   4. the plain shell is never counted.
+//   4. the plain shell is never counted;
+//   5. at the default sidebar width (240 px) the header's amount and its
+//      "1 session n/a" are on screen whole, not cut off by the ellipsis
+//      (only " (estimated)" may be cut short; the tooltip has it all).
 //
-// Negative control: HERMES_E2E_F31P_NEGATIVE=priced puts B's call on a
+// Negative controls: HERMES_E2E_F31P_NEGATIVE=priced puts B's call on a
 // priced model too, so nothing is unknown and the scenario must end in
-// RESULT: FAIL at step 3. Against a build without the fix, step 1 fails
-// (the header shows nothing and the status bar no cost) and step 2 shows
-// "≈$0.37 (estimated)" as if it were the total.
+// RESULT: FAIL at step 3. HERMES_E2E_F31P_NEGATIVE=clip puts back the
+// header's old one-line ellipsis (the whole text cut at the right edge),
+// and the scenario must end in RESULT: FAIL at step 2's on-screen check.
+// Against a build without the fix, step 1 fails (the header shows nothing
+// and the status bar no cost) and step 2 shows "≈$0.37 (estimated)" as if
+// it were the total.
 //
 // Windows: the fake `claude` has to be on the user's registry Path, which is
 // only changed on a CI runner; elsewhere the scenario reports RESULT: SKIP.
@@ -47,6 +54,8 @@ const PRICED = { model: "claude-sonnet-4-6", input_tokens: 4_000, cache_creation
 const UNPRICED = { model: "claude-fake-1", input_tokens: 5_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 50 };
 const B_CALL = NEGATIVE === "priced" ? { ...PRICED, output_tokens: 100 } : UNPRICED;
 const PARTIAL = "≈$0.37 (estimated) · 1 session n/a";
+// The project header counts them short; its tooltip starts with PARTIAL.
+const HEADER_PARTIAL = "≈$0.37 (estimated) · 1 n/a";
 
 await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }) => {
   log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? `   NEGATIVE CONTROL: ${NEGATIVE}` : ""}`);
@@ -95,22 +104,57 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const headerCost = () => bridge.eval(`
     const section = e2e.all(".project-section").find((s) => s.querySelector('[data-session-item-id="${a}"]'));
     const c = section?.querySelector(".project-header-cost");
-    return c ? { text: e2e.norm(c.innerText), kind: c.dataset.spend, unknown: c.dataset.unknown, title: c.title } : null;
+    // All of its text, a part the header cuts short included: what is on
+    // screen is checked apart (assertHeaderFits).
+    return c ? { text: e2e.norm(c.textContent), kind: c.dataset.spend, unknown: c.dataset.unknown, title: c.title } : null;
   `);
   const statusCost = () => bridge.eval(`
     const c = e2e.first(".status-bar-cost");
     return c ? { text: e2e.norm(c.innerText), kind: c.dataset.spend, unknown: c.dataset.unknown, title: c.title } : null;
   `);
-  const waitForBoth = async (what, text) => {
+  const waitForBoth = async (what, text, headerText = text) => {
     const read = async () => ({ header: await headerCost(), status: await statusCost() });
     const deadline = Date.now() + 15_000;
     let seen = await read();
-    while (Date.now() < deadline && !(seen.header?.text === text && seen.status?.text === text)) {
+    while (Date.now() < deadline && !(seen.header?.text === headerText && seen.status?.text === text)) {
       await sleep(200);
       seen = await read();
     }
     log(`  ${what}: header ${JSON.stringify(seen.header)}; status bar ${JSON.stringify(seen.status)}`);
     return seen;
+  };
+  // What of the header's spend is on screen: each part's box against the
+  // spend's own box and the project header's, and whether any is cut.
+  const headerFit = () => bridge.eval(`
+    const section = e2e.all(".project-section").find((s) => s.querySelector('[data-session-item-id="${a}"]'));
+    const c = section?.querySelector(".project-header-cost");
+    if (!c) return null;
+    const header = c.closest(".project-header");
+    const box = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width }; };
+    const within = (inner, outer) => inner.width > 0 && inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5;
+    const part = (cls) => {
+      const el = c.querySelector("." + cls);
+      if (!el) return null;
+      const b = box(el);
+      return { text: el.textContent, whole: el.scrollWidth <= el.clientWidth, inSpend: within(b, box(c)), inHeader: within(b, box(header)) };
+    };
+    return {
+      sidebarWidth: e2e.first(".session-list")?.offsetWidth ?? null,
+      spend: { scrollWidth: c.scrollWidth, clientWidth: c.clientWidth, inHeader: within(box(c), box(header)) },
+      amount: part("project-header-cost-amount"),
+      qualifier: part("project-header-cost-qualifier"),
+      unknown: part("project-header-cost-unknown"),
+    };
+  `);
+  const assertHeaderFits = async (what) => {
+    const fit = await headerFit();
+    log(`  ${what}: on screen ${JSON.stringify(fit)}`);
+    assert(fit?.sidebarWidth === 240, `the sidebar is at its default width, 240 px (${fit?.sidebarWidth})`);
+    for (const name of ["amount", "unknown"]) {
+      const p = fit[name];
+      assert(p && p.whole && p.inSpend && p.inHeader, `the header's ${JSON.stringify(p?.text ?? null)} is on screen whole (${JSON.stringify(p)})`);
+    }
+    assert(fit.spend.scrollWidth <= fit.spend.clientWidth + 1 && fit.spend.inHeader, `nothing of the header's spend runs past its edge (${fit.spend.scrollWidth} px of text in ${fit.spend.clientWidth} px)`);
   };
   const tooltipNames = (title) => {
     const lines = String(title ?? "").split("\n");
@@ -147,8 +191,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     return s && s.dataset.spend === "estimated" ? e2e.norm(s.innerText) : null;
   `, { timeoutMs: 15_000 });
   assert(rowA === "≈$0.37 (estimated)", `the row of ${LABEL_A} says "${rowA}"`);
-  const partial = await waitForBoth("A priced, B unknown", PARTIAL);
-  assert(partial.header?.text === PARTIAL, `the "${PROJECT}" header says "${partial.header?.text}", not the known part as the total`);
+  const partial = await waitForBoth("A priced, B unknown", PARTIAL, HEADER_PARTIAL);
+  assert(partial.header?.text === HEADER_PARTIAL, `the "${PROJECT}" header says "${partial.header?.text}", not the known part as the total`);
+  assert(partial.header.title.split("\n")[0] === PARTIAL, `the header's tooltip says it in full: "${partial.header.title.split("\n")[0]}"`);
   assert(partial.status?.text === PARTIAL, `the status bar says "${partial.status?.text}"`);
   assert(partial.header.kind === "estimated" && partial.status.kind === "estimated", "both mark the sum as estimated");
   for (const [where, seen] of [["header", partial.header], ["status bar", partial.status]]) {
@@ -156,7 +201,18 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     assert(names.length === 1 && names[0] === LABEL_B, `the ${where}'s tooltip names the session whose cost is unknown: ${JSON.stringify(names)}`);
     assert(/Estimated by Hermes/.test(seen.title), `the ${where}'s tooltip says the known part is an estimate`);
   }
+  if (NEGATIVE === "clip") {
+    log("  NEGATIVE CONTROL: the header's spend is one line cut at the right edge again");
+    await bridge.eval(`
+      const st = document.createElement("style");
+      st.textContent = ".project-header .project-header-cost[data-spend] { display: block !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }";
+      document.head.appendChild(st);
+      return true;
+    `);
+    await sleep(300);
+  }
   await bridge.screenshot(join(evidenceDir, "02-partial-sum.png"));
+  await assertHeaderFits("A priced, B unknown, at the default sidebar width");
 
   // ── 3. B's call has tokens but no price ────────────────────────────
   log(`step 3: ${LABEL_B} makes a call on a model Hermes has no list price for${NEGATIVE === "priced" ? " (NEGATIVE CONTROL: a priced one)" : ""}`);
@@ -167,10 +223,11 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   `, { timeoutMs: 15_000 });
   log(`  ${LABEL_B} usage: ${JSON.stringify(usageB)}`);
   await sleep(500);
-  const still = await waitForBoth("B's tokens without a price", PARTIAL);
-  assert(still.header?.text === PARTIAL && still.status?.text === PARTIAL, `B's tokens have no price: still "${PARTIAL}" (header "${still.header?.text}", status bar "${still.status?.text}")`);
+  const still = await waitForBoth("B's tokens without a price", PARTIAL, HEADER_PARTIAL);
+  assert(still.header?.text === HEADER_PARTIAL && still.status?.text === PARTIAL, `B's tokens have no price: still "${PARTIAL}" (header "${still.header?.text}", status bar "${still.status?.text}")`);
   assert(still.header.unknown === "1" && still.status.unknown === "1", "one session is counted as unknown");
   await bridge.screenshot(join(evidenceDir, "03-unpriced-tokens.png"));
+  await assertHeaderFits("B's tokens without a price");
 
   // ── 4. The plain shell ─────────────────────────────────────────────
   log("step 4: the plain shell has no spend and is not in the tooltips");

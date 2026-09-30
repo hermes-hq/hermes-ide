@@ -1096,6 +1096,7 @@ const ENGLISH_PACK: LanguagePack = {
     "fleet.spendEstimatedTitle": "Estimated by Hermes from the token counts in the agent's transcript, at list prices. The agent does not report a cost. It can be lower than the real cost.",
     "fleet.spendUnknownOne": "{count} session n/a",
     "fleet.spendUnknownMany": "{count} sessions n/a",
+    "fleet.spendUnknownShort": "{count} n/a",
     "fleet.spendUnknownTitle": "No cost known for:",
     "fleet.usageTokens": "Tokens",
     "fleet.tokensIn": "{tokens} in",

@@ -180,8 +180,11 @@ describe("a total where some sessions' cost is unknown", () => {
 
   it("the header and the status bar show the known sum and 1 session n/a", () => {
     dispatchSessionEvent("s1", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.37 });
+    // The narrow header counts them short; its tooltip says it in full.
+    expect(text(header())).toContain("$0.37 · 1 n/a");
+    expect(title(header(), "project-header-cost")).toContain("$0.37 · 1 session n/a");
+    expect(text(bar())).toContain("$0.37 · 1 session n/a");
     for (const [html, cls] of [[header(), "project-header-cost"], [bar(), "status-bar-cost"]] as const) {
-      expect(text(html)).toContain("$0.37 · 1 session n/a");
       expect(html).toContain('data-unknown="1"');
       const tip = title(html, cls) ?? "";
       expect(tip).toContain("No cost known for:");
@@ -192,14 +195,15 @@ describe("a total where some sessions' cost is unknown", () => {
 
   it("an estimate in the partial sum keeps the ≈ and the (estimated) mark", () => {
     dispatchSessionEvent("s1", { type: "usage", at: 1, source: "transcript:claude", inputTokens: 10, outputTokens: 10, costUsd: 0.37, confidence: "estimated" });
-    expect(text(header())).toContain("≈$0.37 (estimated) · 1 session n/a");
+    expect(text(header())).toContain("≈$0.37 (estimated) · 1 n/a");
     expect(text(bar())).toContain("≈$0.37 (estimated) · 1 session n/a");
   });
 
   it("a session whose tokens have no price counts as unknown too; two are counted as two", () => {
     dispatchSessionEvent("s1", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.37 });
     dispatchSessionEvent("s3", { type: "usage", at: 1, source: "transcript:claude", inputTokens: 5, outputTokens: 5, costUsd: null, confidence: "estimated" });
-    expect(text(header())).toContain("$0.37 · 2 sessions n/a");
+    expect(text(header())).toContain("$0.37 · 2 n/a");
+    expect(title(header(), "project-header-cost")).toContain("$0.37 · 2 sessions n/a");
   });
 
   it("when no cost is known at all, both say n/a", () => {

@@ -89,16 +89,43 @@ export function spendText(view: SpendView, t: (key: string, vars?: Record<string
 }
 
 /**
+ * A total's text in three parts, so a narrow place can give up the least
+ * useful one first: the amount ("≈$0.42", "$0.42" or "n/a"), what kind it
+ * is (" (estimated)", or ""), and how many sessions' cost is unknown
+ * (" · 1 session n/a", or " · 1 n/a" when `short`; or ""). Null when there
+ * is no session to add up.
+ */
+export interface SpendTotalParts {
+  readonly amount: string;
+  readonly qualifier: string;
+  readonly unknown: string;
+}
+
+export function spendTotalParts(
+  total: SpendTotal,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  { short = false }: { short?: boolean } = {},
+): SpendTotalParts | null {
+  if (total.costUsd === null) return total.unknown > 0 ? { amount: t("fleet.spendNa"), qualifier: "", unknown: "" } : null;
+  const known = spendText(total, t);
+  // Every language writes the estimate as the amount and then its mark.
+  const cost = formatUsd(total.costUsd);
+  const at = known.indexOf(cost);
+  const split = at < 0 ? known.length : at + cost.length;
+  // `short` ("1 n/a") is for a place as narrow as a project header.
+  const unknownKey = short ? "fleet.spendUnknownShort" : total.unknown === 1 ? "fleet.spendUnknownOne" : "fleet.spendUnknownMany";
+  const unknown = total.unknown === 0 ? "" : ` · ${t(unknownKey, { count: total.unknown })}`;
+  return { amount: known.slice(0, split), qualifier: known.slice(split), unknown };
+}
+
+/**
  * A total's text: "$0.42", "≈$0.42 (estimated) · 1 session n/a" when some
  * sessions' cost is unknown, "n/a" when none is known, and null when there
  * is no session to add up (nothing is shown).
  */
 export function spendTotalText(total: SpendTotal, t: (key: string, vars?: Record<string, string | number>) => string): string | null {
-  if (total.costUsd === null) return total.unknown > 0 ? t("fleet.spendNa") : null;
-  const known = spendText(total, t);
-  if (total.unknown === 0) return known;
-  const unknown = t(total.unknown === 1 ? "fleet.spendUnknownOne" : "fleet.spendUnknownMany", { count: total.unknown });
-  return `${known} · ${unknown}`;
+  const parts = spendTotalParts(total, t);
+  return parts && `${parts.amount}${parts.qualifier}${parts.unknown}`;
 }
 
 /** The cost a spend cap acts on: only what the agent itself reported. */

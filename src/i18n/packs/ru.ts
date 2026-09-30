@@ -1066,6 +1066,7 @@ export const ruPack: LanguagePack = {
     "fleet.spendEstimatedTitle": "Оценка Hermes по числу токенов в журнале агента, по прейскуранту. Агент не сообщает стоимость. Она может быть ниже фактической стоимости.",
     "fleet.spendUnknownOne": "сессий без данных: {count}",
     "fleet.spendUnknownMany": "сессий без данных: {count}",
+    "fleet.spendUnknownShort": "н/д: {count}",
     "fleet.spendUnknownTitle": "Стоимость неизвестна для:",
     "fleet.usageTokens": "Токены",
     "fleet.tokensIn": "{tokens} на входе",

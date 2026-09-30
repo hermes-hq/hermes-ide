@@ -1066,6 +1066,7 @@ export const dePack: LanguagePack = {
     "fleet.spendEstimatedTitle": "Von Hermes aus den Token-Zahlen im Transkript des Agenten zu Listenpreisen geschätzt. Der Agent meldet keine Kosten. Sie kann niedriger sein als die tatsächlichen Kosten.",
     "fleet.spendUnknownOne": "{count} Sitzung k. A.",
     "fleet.spendUnknownMany": "{count} Sitzungen k. A.",
+    "fleet.spendUnknownShort": "{count} k. A.",
     "fleet.spendUnknownTitle": "Keine Kosten bekannt für:",
     "fleet.usageTokens": "Tokens",
     "fleet.tokensIn": "{tokens} ein",

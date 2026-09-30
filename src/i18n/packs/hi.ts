@@ -1099,6 +1099,7 @@ export const hiPack: LanguagePack = {
     "fleet.spendEstimatedTitle": "एजेंट के ट्रांसक्रिप्ट में टोकन गिनती से Hermes का सूची-मूल्य पर अनुमान। एजेंट ख़र्च नहीं बताता। यह असली ख़र्च से कम हो सकता है।",
     "fleet.spendUnknownOne": "{count} सत्र का ख़र्च उपलब्ध नहीं",
     "fleet.spendUnknownMany": "{count} सत्रों का ख़र्च उपलब्ध नहीं",
+    "fleet.spendUnknownShort": "{count} उपलब्ध नहीं",
     "fleet.spendUnknownTitle": "इनका ख़र्च पता नहीं:",
     "fleet.usageTokens": "टोकन",
     "fleet.tokensIn": "{tokens} इनपुट",

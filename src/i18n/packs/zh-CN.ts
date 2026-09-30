@@ -1066,6 +1066,7 @@ export const zhCNPack: LanguagePack = {
     "fleet.spendEstimatedTitle": "由 Hermes 根据智能体记录中的令牌数按标价估算。智能体未报告花费。可能低于实际花费。",
     "fleet.spendUnknownOne": "{count} 个会话不适用",
     "fleet.spendUnknownMany": "{count} 个会话不适用",
+    "fleet.spendUnknownShort": "{count} 个不适用",
     "fleet.spendUnknownTitle": "以下会话的花费未知：",
     "fleet.usageTokens": "令牌",
     "fleet.tokensIn": "输入 {tokens}",

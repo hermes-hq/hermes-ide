@@ -1066,6 +1066,7 @@ export const frPack: LanguagePack = {
     "fleet.spendEstimatedTitle": "Estimé par Hermes à partir des jetons du journal de l'agent, au prix catalogue. L'agent n'indique pas de coût. Il peut être inférieur au coût réel.",
     "fleet.spendUnknownOne": "{count} session n/d",
     "fleet.spendUnknownMany": "{count} sessions n/d",
+    "fleet.spendUnknownShort": "{count} n/d",
     "fleet.spendUnknownTitle": "Aucun coût connu pour :",
     "fleet.usageTokens": "Jetons",
     "fleet.tokensIn": "{tokens} en entrée",

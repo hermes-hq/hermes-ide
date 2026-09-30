@@ -11,7 +11,7 @@ import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { useI18n } from "../i18n/I18nProvider";
 import type { SessionData } from "../types/session";
 import { useSessionOverlap } from "./radarStore";
-import { formatUsd, spendOf, spendText, spendTotalText } from "./spend";
+import { formatUsd, spendOf, spendText, spendTotalParts, spendTotalText } from "./spend";
 import { useSessionCapTrip } from "./spendCapWatcher";
 import { spendTotalTitle, totalOf, useReportedTotals, type SpendMember } from "./useReportedTotals";
 
@@ -71,17 +71,23 @@ export function SessionOverlapBadge({ sessionId, labelOf }: { sessionId: string;
 /**
  * A project header's spend: the sum of its sessions' usage, the same
  * numbers their rows show, and how many of them have no known cost
- * ("≈$0.37 (estimated) · 1 session n/a"); "n/a" when none has. Nothing
+ * ("≈$0.37 (estimated) · 1 n/a"); "n/a" when none has. Nothing
  * when the project has no agent session.
  */
 export function ProjectSpend({ sessions }: { sessions: readonly SpendMember[] }) {
   const { t } = useI18n();
   const totals = useReportedTotals(sessions);
-  const text = spendTotalText(totalOf(totals), t);
-  if (text === null) return null;
+  // The header is narrow: the count is short ("≈$0.37 (estimated) · 1 n/a"),
+  // and " (estimated)" is cut short first, so the amount and the count stay
+  // whole. The tooltip has it all ("… · 1 session n/a" and the names).
+  const parts = spendTotalParts(totalOf(totals), t, { short: true });
+  if (parts === null) return null;
+  const full = spendTotalText(totalOf(totals), t) ?? "";
   return (
-    <span className="project-header-cost" data-spend={totals.spend} data-unknown={totals.unknown.length} title={spendTotalTitle(text, totals, t)}>
-      {text}
+    <span className="project-header-cost" data-spend={totals.spend} data-unknown={totals.unknown.length} title={spendTotalTitle(full, totals, t)}>
+      <span className="project-header-cost-amount">{parts.amount}</span>
+      {parts.qualifier && <span className="project-header-cost-qualifier">{parts.qualifier}</span>}
+      {parts.unknown && <span className="project-header-cost-unknown">{parts.unknown}</span>}
     </span>
   );
 }

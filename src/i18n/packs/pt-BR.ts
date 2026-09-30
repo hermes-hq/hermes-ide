@@ -1066,6 +1066,7 @@ export const ptBRPack: LanguagePack = {
     "fleet.spendEstimatedTitle": "Estimado pelo Hermes a partir dos tokens na transcrição do agente, a preço de tabela. O agente não informa um custo. Pode ser menor que o custo real.",
     "fleet.spendUnknownOne": "{count} sessão n/d",
     "fleet.spendUnknownMany": "{count} sessões n/d",
+    "fleet.spendUnknownShort": "{count} n/d",
     "fleet.spendUnknownTitle": "Sem custo conhecido para:",
     "fleet.usageTokens": "Tokens",
     "fleet.tokensIn": "{tokens} de entrada",

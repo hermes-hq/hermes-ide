@@ -4,7 +4,7 @@
  * cap value.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { evaluateSpendCaps, formatUsd, spendOf, spendText, spendTotalText, sumReported, totalSpend, tripKeyFor, type SpendSession } from "../fleet/spend";
+import { evaluateSpendCaps, formatUsd, spendOf, spendText, spendTotalParts, spendTotalText, sumReported, totalSpend, tripKeyFor, type SpendSession } from "../fleet/spend";
 import { createSpendCapWatcher, getCapTrip, _resetCapTripsForTest } from "../fleet/spendCapWatcher";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetInboxForTest, listInboxItems, raiseInboxItem } from "../agent/contract/inbox";
@@ -62,6 +62,7 @@ describe("spendTotalText: a partial sum never passes for the total", () => {
       "fleet.spendEstimated": `≈${vars?.cost} (estimated)`,
       "fleet.spendUnknownOne": `${vars?.count} session n/a`,
       "fleet.spendUnknownMany": `${vars?.count} sessions n/a`,
+      "fleet.spendUnknownShort": `${vars?.count} n/a`,
     })[key] ?? key;
   const text = (usages: Parameters<typeof totalSpend>[0]) => spendTotalText(totalSpend(usages), t);
 
@@ -79,6 +80,24 @@ describe("spendTotalText: a partial sum never passes for the total", () => {
   it("none known: n/a; no session at all: nothing", () => {
     expect(text([null, { costUsd: null, confidence: "estimated" }])).toBe("n/a");
     expect(text([])).toBeNull();
+  });
+
+  it("in parts: the amount, its mark (what a narrow header cuts first) and the count", () => {
+    const parts = (usages: Parameters<typeof totalSpend>[0], tr = t) => spendTotalParts(totalSpend(usages), tr);
+    expect(parts([{ costUsd: 0.37, confidence: "estimated" }, null])).toEqual({ amount: "≈$0.37", qualifier: " (estimated)", unknown: " · 1 session n/a" });
+    expect(parts([{ costUsd: 0.37, confidence: "exact" }, null, null])).toEqual({ amount: "$0.37", qualifier: "", unknown: " · 2 sessions n/a" });
+    expect(parts([{ costUsd: 0.42, confidence: "exact" }])).toEqual({ amount: "$0.42", qualifier: "", unknown: "" });
+    expect(parts([null])).toEqual({ amount: "n/a", qualifier: "", unknown: "" });
+    expect(parts([])).toBeNull();
+    // A place as narrow as a project header counts them short.
+    expect(spendTotalParts(totalSpend([{ costUsd: 0.37, confidence: "estimated" }, null, null]), t, { short: true })).toEqual({
+      amount: "≈$0.37",
+      qualifier: " (estimated)",
+      unknown: " · 2 n/a",
+    });
+    // A language whose mark follows the amount without a space.
+    const ja = (key: string, vars?: Record<string, string | number>) => (key === "fleet.spendEstimated" ? `≈${vars?.cost}（推定）` : t(key, vars));
+    expect(parts([{ costUsd: 1.5, confidence: "estimated" }], ja)).toEqual({ amount: "≈$1.50", qualifier: "（推定）", unknown: "" });
   });
 });
 

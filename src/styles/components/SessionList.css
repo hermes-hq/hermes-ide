@@ -790,7 +790,9 @@
   color: var(--text-3);
 }
 
-/* A spend like "≈$1.04 (estimated)" gives way before the project name does. */
+/* A spend like "≈$1.04 (estimated) · 1 session n/a" gives way before the
+   project name does: " (estimated)" is cut short first; the amount and the
+   count of sessions with no known cost stay whole. */
 .project-header > .project-header-left:has(+ .project-header-right > .project-header-cost[data-spend]) {
   min-width: var(--space-8);
 }
@@ -799,10 +801,19 @@
   min-width: 0;
 }
 .project-header-cost[data-spend] {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+}
+.project-header-cost[data-spend] > span {
+  flex-shrink: 0;
+  white-space: pre;
+}
+.project-header-cost[data-spend] > .project-header-cost-qualifier {
+  flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .project-header-add-btn {
