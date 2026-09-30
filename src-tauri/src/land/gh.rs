@@ -432,9 +432,12 @@ mod tests {
     }
 
     /// A stand-in gh: a shell script that logs its arguments and runs `body`.
+    /// `sh` reads the script rather than the script being executed itself: a
+    /// file written a moment ago can still be open for writing in a process
+    /// another test is forking in parallel, and executing it then fails with
+    /// "Text file busy" (ETXTBSY) on Linux.
     #[cfg(unix)]
     fn script_gh(dir: &Path, body: &str) -> (GhCommand, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let log = dir.join("gh.log");
         let script = dir.join("gh");
         fs::write(
@@ -445,11 +448,10 @@ mod tests {
             ),
         )
         .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         (
             GhCommand {
-                program: script,
-                prefix: vec![],
+                program: PathBuf::from("/bin/sh"),
+                prefix: vec![script.display().to_string()],
             },
             log,
         )
