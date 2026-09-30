@@ -13,8 +13,14 @@
 //   --results <path>      a results.json, or a folder searched for them
 //                         (repeatable; CI passes the downloaded artifacts)
 //   --platforms a,b,c     platforms that must be green (default: all three)
+//   --skipped-job <id>    a CI job the plan skipped in this run (repeatable):
+//                         its scenarios (CI_JOB_SCENARIOS in app/ci-plan.mjs)
+//                         are not applicable when they have no result. CI
+//                         passes it only on a pull request whose change the
+//                         job does not test.
 
 import { resolve } from "node:path";
+import { CI_JOB_SCENARIOS } from "./app/ci-plan.mjs";
 import {
   ALL_PLATFORMS,
   collectResults,
@@ -25,7 +31,7 @@ import {
 } from "./app/acceptance.mjs";
 
 const args = process.argv.slice(2);
-const opts = { ledger: "e2e/acceptance.yml", scenarios: "e2e/app/scenarios", results: [], platforms: ALL_PLATFORMS };
+const opts = { ledger: "e2e/acceptance.yml", scenarios: "e2e/app/scenarios", results: [], platforms: ALL_PLATFORMS, skippedJobs: [] };
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   const next = () => {
@@ -36,8 +42,12 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--scenarios") opts.scenarios = next();
   else if (a === "--results") opts.results.push(next());
   else if (a === "--platforms") opts.platforms = next().split(",").map((p) => p.trim()).filter(Boolean);
-  else if (a === "--help" || a === "-h") {
-    console.log("usage: node e2e/acceptance-check.mjs [--ledger f] [--scenarios d] [--results p]... [--platforms a,b]");
+  else if (a === "--skipped-job") {
+    const job = next();
+    if (!Object.hasOwn(CI_JOB_SCENARIOS, job)) throw new Error(`--skipped-job: unknown job ${JSON.stringify(job)} (have: ${Object.keys(CI_JOB_SCENARIOS).join(", ")})`);
+    opts.skippedJobs.push(job);
+  } else if (a === "--help" || a === "-h") {
+    console.log("usage: node e2e/acceptance-check.mjs [--ledger f] [--scenarios d] [--results p]... [--platforms a,b] [--skipped-job id]...");
     process.exit(0);
   } else throw new Error(`unknown option ${a}`);
 }
@@ -47,11 +57,15 @@ const ledger = loadLedger(ledgerFile);
 const scenarioFiles = listScenarioFiles(resolve(opts.scenarios));
 const results = opts.results.length ? opts.results.flatMap((p) => collectResults(resolve(p))) : null;
 
-const { errors, warnings, rows } = evaluateLedger(ledger, { scenarioFiles, results, platforms: opts.platforms });
+const notRun = new Map();
+for (const job of opts.skippedJobs) for (const file of CI_JOB_SCENARIOS[job]) notRun.set(file, `${job} skipped`);
+
+const { errors, warnings, rows } = evaluateLedger(ledger, { scenarioFiles, results, platforms: opts.platforms, notRun });
 
 console.log(`acceptance ledger: ${ledgerFile}`);
 console.log(`features: ${ledger.features.map((f) => `${f.id}=${f.status}`).join(", ") || "(none)"}`);
 console.log(`scenario files: ${scenarioFiles.length}; results: ${results ? `${results.length} run(s)` : "not checked"}`);
+if (notRun.size) console.log(`not applicable to this run (their CI job was skipped): ${[...notRun.keys()].join(", ")}`);
 if (rows.length) {
   console.log("");
   console.log(formatRows(rows));

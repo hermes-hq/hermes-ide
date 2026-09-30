@@ -1,6 +1,7 @@
 // Behavioural tests for the acceptance ledger: the YAML reader, the ledger
 // rules, and the repository's own ledger against its own scenarios folder.
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import {
   parseYaml,
 } from "./acceptance.mjs";
 import { REPO_ROOT, SCENARIOS_DIR } from "./harness.mjs";
+import { CI_EXCLUDED, CI_JOB_SCENARIOS } from "./ci-plan.mjs";
 
 describe("parseYaml (ledger subset)", () => {
   it("reads nested maps, block lists, flow lists, quotes and comments", () => {
@@ -137,6 +139,69 @@ describe("evaluateLedger", () => {
     const { errors } = evaluateLedger(ledger("partial"), { scenarioFiles: ["s.mjs"], results: [run("darwin", "fail")] });
     expect(errors).toContain("F/F-1: s.mjs failed 1 of 1 run(s) on darwin");
     expect(evaluateLedger(ledger("partial", []), { scenarioFiles: [] }).errors).toEqual([]);
+  });
+
+  it("a scenario whose CI job the plan skipped is not applicable when it has no result, and still counts when it has one", () => {
+    const l = ledger("partial", ["s.mjs@linux"]);
+    // Without the note: missing, the gate is red (a pull request that does not touch packaging).
+    expect(evaluateLedger(l, { scenarioFiles: ["s.mjs"], results: [] }).errors).toEqual(["F/F-1: s.mjs has no result on linux"]);
+    const notRun = new Map([["s.mjs", "e2e-installers skipped"]]);
+    const skipped = evaluateLedger(l, { scenarioFiles: ["s.mjs"], results: [], notRun });
+    expect(skipped.errors).toEqual([]);
+    expect(formatRows(skipped.rows)).toContain("not run here (e2e-installers skipped)");
+    // A red result is red, skipped job or not.
+    expect(evaluateLedger(l, { scenarioFiles: ["s.mjs"], results: [run("linux", "fail")], notRun }).errors).toEqual([
+      "F/F-1: s.mjs failed 1 of 1 run(s) on linux",
+    ]);
+    // Other scenarios are still required.
+    const two = ledger("shipped", ["s.mjs@linux", "t.mjs@linux"]);
+    expect(evaluateLedger(two, { scenarioFiles: ["s.mjs", "t.mjs"], results: [], notRun }).errors).toEqual(["F/F-1: t.mjs has no result on linux"]);
+  });
+});
+
+describe("acceptance-check.mjs --skipped-job", () => {
+  const check = (...args) =>
+    spawnSync(process.execPath, [join(REPO_ROOT, "e2e", "acceptance-check.mjs"), ...args], { cwd: REPO_ROOT, encoding: "utf8" });
+
+  it("names only jobs the CI plan knows, and every one of their scenarios is run nowhere else", () => {
+    const r = check("--skipped-job", "no-such-job");
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/unknown job "no-such-job"/);
+    for (const files of Object.values(CI_JOB_SCENARIOS)) {
+      for (const f of files) {
+        expect(listScenarioFiles(SCENARIOS_DIR)).toContain(f);
+        expect(CI_EXCLUDED[f]).toBeTruthy();
+      }
+    }
+  });
+
+  it("with the installer job skipped, the installer scenarios' missing results do not fail the gate; without it they do", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hermes-gate-"));
+    try {
+      // Green results for every scenario on every platform the ledger asks for, except the installers.
+      const l = loadLedger(join(REPO_ROOT, "e2e", "acceptance.yml"));
+      const installers = new Set(CI_JOB_SCENARIOS["e2e-installers"]);
+      const runs = [];
+      for (const f of l.features) {
+        for (const c of f.criteria) {
+          for (const { file, platforms } of c.scenarios) {
+            if (installers.has(file)) continue;
+            for (const platform of platforms) runs.push({ scenario: file.replace(/\.mjs$/, ""), platform, status: "pass" });
+          }
+        }
+      }
+      mkdirSync(join(dir, "e2e-evidence-x"), { recursive: true });
+      writeFileSync(join(dir, "e2e-evidence-x", "results.json"), JSON.stringify({ runs }));
+      const red = check("--results", dir);
+      expect(red.status).toBe(1);
+      expect(red.stdout).toMatch(/F25-winget-install\.mjs has no result on win32/);
+      expect(red.stdout).toMatch(/F25-appimage-update\.mjs has no result on linux/);
+      const green = check("--results", dir, "--skipped-job", "e2e-installers");
+      expect(green.stdout).toContain("ACCEPTANCE GATE: PASS");
+      expect(green.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
