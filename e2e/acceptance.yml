@@ -489,7 +489,7 @@ features:
         text: "A terminal closed while it is being opened stays closed: it is never listed again and nothing is left running for it"
         scenarios: [FIX-spawn-no-freeze.mjs]
       FIX-spawn-no-freeze-3:
-        text: "Typing and a resize sent while a terminal is being opened are kept and reach it once it opens"
+        text: "Typing and a resize sent while a terminal is being opened are accepted, and reach it once it opens (checked to run, at that size, on macOS and Linux; on Windows the shell drops keys typed before it starts)"
         scenarios: [FIX-spawn-no-freeze.mjs]
   FIX-launcher-reopen:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
