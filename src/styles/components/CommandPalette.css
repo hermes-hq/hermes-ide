@@ -1,4 +1,6 @@
 /* ─── Command Palette ──────────────────────────────────────── */
+/* Rows are the control set's ListRow (32 px, highlight and current row
+ * from src/styles/ui/row.css). The input stays the one hero field. */
 
 .command-palette-overlay {
   position: fixed;
@@ -12,19 +14,21 @@
 }
 
 .command-palette {
-  background: var(--bg-1);
-  border: 1px solid var(--border-light);
+  background: var(--popover-bg);
+  border: var(--control-border-width) solid var(--rule-zone);
   border-radius: var(--radius-lg);
   width: 520px;
   max-height: 380px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-4);
   overflow: hidden;
   align-self: flex-start;
-  animation: paletteIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: paletteIn var(--dur-slow) var(--ease-out-expo);
 }
 
+/* Also the session creator's name and description fields (until they move
+ * to the control set's Input). */
 .command-palette-input {
   background: transparent;
   border: none;
@@ -32,29 +36,19 @@
   color: var(--text-0);
   padding: 14px 16px;
   font-size: var(--text-xl);
-  outline: none;
   font-family: var(--font-ui);
 }
+/* The one focus ring, drawn inside the field so the palette's edge does not clip it. */
+.command-palette-input:focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
 .command-palette-input::placeholder { color: var(--text-3); }
 
-.command-palette-results { overflow-y: auto; padding: 4px; }
-
-.command-palette-item {
+.command-palette-results {
   display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  cursor: pointer;
-  border-radius: var(--radius);
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-0-5);
+  overflow-y: auto;
+  padding: var(--space-1);
 }
-.command-palette-item-selected { background: var(--bg-hover); }
-.command-palette-label { flex: 1; color: var(--text-0); font-size: var(--text-lg); }
-.command-palette-category { font-size: var(--text-base); color: var(--text-3); }
-.command-palette-shortcut {
-  font-size: var(--text-base);
-  color: var(--text-2);
-  background: var(--bg-3);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-}
-.command-palette-empty { padding: 20px; text-align: center; color: var(--text-3); }
+
+.command-palette-label { color: var(--text-0); }
+.command-palette-empty { padding: var(--space-5); text-align: center; color: var(--text-2); }

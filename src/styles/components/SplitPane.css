@@ -38,11 +38,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* One dense-chrome line: small chips and the small Close (28 px). */
 .split-pane-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
+  gap: var(--space-1-5);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-0-5) 0 var(--space-2);
   font-size: var(--text-base);
   color: var(--text-2);
 }
@@ -53,24 +55,16 @@
   font-size: var(--text-sm);
 }
 
+/* The one Close (a small icon button), shown on the pane in use, on hover
+ * and whenever it has the keyboard. */
 .split-pane-close {
   margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--text-3);
-  font-size: var(--text-lg);
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
 }
 .split-pane:hover .split-pane-close,
-.split-pane-focused .split-pane-close {
+.split-pane-focused .split-pane-close,
+.split-pane-close:focus-visible {
   opacity: 1;
-}
-.split-pane-close:hover {
-  color: var(--text-0);
 }
 
 .split-pane-content {

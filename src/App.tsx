@@ -1583,6 +1583,7 @@ function AppContent() {
         <CommandPalette
           onClose={() => dispatch({ type: "TOGGLE_PALETTE" })}
           sessions={sessions}
+          activeSessionId={state.activeSessionId}
           onSelectSession={setActive}
           onNewSession={openNewSession}
           onToggleContext={() => dispatch({ type: "TOGGLE_CONTEXT" })}

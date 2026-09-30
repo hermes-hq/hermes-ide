@@ -13,11 +13,16 @@ import "@testing-library/jest-dom/vitest";
 import { useToastStore } from "../hooks/useToastStore";
 import { useWorktreeErrorToasts } from "../hooks/useWorktreeErrorToasts";
 import { ToastContainer } from "../components/ToastContainer";
+import { I18nProvider } from "../i18n/I18nProvider";
 
 function Harness() {
 	const toastStore = useToastStore();
 	useWorktreeErrorToasts(toastStore.addToast);
-	return <ToastContainer toasts={toastStore.toasts} onDismiss={toastStore.dismissToast} />;
+	return (
+		<I18nProvider>
+			<ToastContainer toasts={toastStore.toasts} onDismiss={toastStore.dismissToast} />
+		</I18nProvider>
+	);
 }
 
 function dispatchWorktreeErrors(detail: { errors: string[]; sessionLabel?: string; fatal?: boolean }) {

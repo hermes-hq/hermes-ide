@@ -133,18 +133,7 @@
 
 /* ─── Close Button ─────────────────────────────────────────── */
 
+/* The one Close (the control set's small icon button). */
 .toast-close {
-	background: none;
-	border: none;
-	color: var(--text-3);
-	cursor: pointer;
-	font-size: var(--text-lg);
-	padding: 0 2px;
-	line-height: 1;
-	flex-shrink: 0;
-	transition: color 0.1s;
-}
-
-.toast-close:hover {
-	color: var(--text-0);
+	align-self: flex-start;
 }

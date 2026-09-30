@@ -291,6 +291,8 @@
   --toggle-h:        18px;
   --toggle-knob:     14px;
   --rail-width:      2px;              /* selected tab / current row */
+  --row-h-sm:        var(--control-h-md);           /* one-line list row (command palette) */
+  --row-h-lg:        calc(44px * var(--density-y)); /* two-line list row (inbox) */
   --segment-inset:   2px;              /* padding of the segmented well */
   --press-offset:    0.5px;            /* a pressed button moves down this much */
   --popover-max-h:   320px;

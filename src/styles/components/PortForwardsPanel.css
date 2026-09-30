@@ -15,20 +15,6 @@
   color: var(--text-0);
 }
 
-.port-forwards-close {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: 16px;
-  padding: 0 4px;
-  line-height: 1;
-}
-
-.port-forwards-close:hover {
-  color: var(--text-0);
-}
-
 .port-forwards-list {
   margin-bottom: 8px;
 }
@@ -59,20 +45,6 @@
 .port-forward-label {
   color: var(--accent);
   font-size: 11px;
-}
-
-.port-forward-remove {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0 2px;
-  line-height: 1;
-}
-
-.port-forward-remove:hover {
-  color: var(--error, #f47067);
 }
 
 .port-forwards-empty {
