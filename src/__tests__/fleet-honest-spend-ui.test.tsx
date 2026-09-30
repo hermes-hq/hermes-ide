@@ -117,7 +117,8 @@ describe("the session row's spend", () => {
 describe("an estimated cost", () => {
   const estimate = (id: string, costUsd: number | null) =>
     dispatchSessionEvent(id, { type: "usage", at: 1, source: "transcript:claude", inputTokens: 96000, outputTokens: 2100, costUsd, confidence: "estimated" });
-  const header = (ids: string[]) => renderToString(<I18nProvider><ProjectSpend sessionIds={ids} /></I18nProvider>);
+  const header = (ids: string[]) =>
+    renderToString(<I18nProvider><ProjectSpend sessions={ids.map((id) => ({ id, label: `label-${id}`, agent: true }))} /></I18nProvider>);
 
   it("the row says ≈$1.23 (estimated), marked as such", () => {
     estimate("s1", 1.2345);
@@ -135,15 +136,17 @@ describe("an estimated cost", () => {
     expect(text(html)).toContain("≈$1.23 (estimated)");
   });
 
-  it("the project header shows the same sum, and nothing when no cost is known", () => {
+  it("the project header shows the same sum, and n/a when no cost is known", () => {
     estimate("s1", 1.0);
     dispatchSessionEvent("s2", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.23 });
     expect(text(header(["s1", "s2"]))).toContain("≈$1.23 (estimated)");
+    expect(text(header(["s1", "s2"]))).not.toContain("n/a");
     expect(header(["s2"])).toContain('data-spend="exact"');
     expect(text(header(["s2"]))).toContain("$0.23");
     expect(text(header(["s2"]))).not.toContain("estimated");
     estimate("s3", null);
-    expect(header(["s3"])).toBe("");
+    expect(header(["s3"])).toContain('data-spend="na"');
+    expect(text(header(["s3"])).trim()).toBe("n/a");
   });
 
   it("tokens without a price stay n/a in the row", () => {
@@ -151,5 +154,65 @@ describe("an estimated cost", () => {
     const html = chip("s1", "claude");
     expect(html).toContain('data-spend="na"');
     expect(text(html)).not.toContain("estimated");
+  });
+});
+
+// A project (or the whole app) where one agent's cost is known and
+// another's is not: the known sum is shown with how many sessions are n/a,
+// never as if it were the total; the tooltip names them.
+describe("a total where some sessions' cost is unknown", () => {
+  const members = [
+    { id: "s1", label: "priced", agent: true },
+    { id: "s2", label: "unpriced", agent: true },
+    { id: "s3", label: "plain shell", agent: false },
+  ];
+  const header = () => renderToString(<I18nProvider><ProjectSpend sessions={members} /></I18nProvider>);
+  const title = (html: string, cls: string) => new RegExp(`class="[^"]*${cls}[^"]*"[^>]*title="([^"]*)"`).exec(html)?.[1] ?? null;
+
+  beforeEach(() => {
+    h.flag = true;
+    h.sessions = [
+      { id: "s1", label: "priced", ai_provider: "claude", detected_agent: null },
+      { id: "s2", label: "unpriced", ai_provider: "codex", detected_agent: null },
+      { id: "s3", label: "plain shell", ai_provider: null, detected_agent: null },
+    ];
+  });
+
+  it("the header and the status bar show the known sum and 1 session n/a", () => {
+    dispatchSessionEvent("s1", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.37 });
+    for (const [html, cls] of [[header(), "project-header-cost"], [bar(), "status-bar-cost"]] as const) {
+      expect(text(html)).toContain("$0.37 · 1 session n/a");
+      expect(html).toContain('data-unknown="1"');
+      const tip = title(html, cls) ?? "";
+      expect(tip).toContain("No cost known for:");
+      expect(tip).toContain("unpriced");
+      expect(tip).not.toContain("plain shell");
+    }
+  });
+
+  it("an estimate in the partial sum keeps the ≈ and the (estimated) mark", () => {
+    dispatchSessionEvent("s1", { type: "usage", at: 1, source: "transcript:claude", inputTokens: 10, outputTokens: 10, costUsd: 0.37, confidence: "estimated" });
+    expect(text(header())).toContain("≈$0.37 (estimated) · 1 session n/a");
+    expect(text(bar())).toContain("≈$0.37 (estimated) · 1 session n/a");
+  });
+
+  it("a session whose tokens have no price counts as unknown too; two are counted as two", () => {
+    dispatchSessionEvent("s1", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.37 });
+    dispatchSessionEvent("s3", { type: "usage", at: 1, source: "transcript:claude", inputTokens: 5, outputTokens: 5, costUsd: null, confidence: "estimated" });
+    expect(text(header())).toContain("$0.37 · 2 sessions n/a");
+  });
+
+  it("when no cost is known at all, both say n/a", () => {
+    expect(text(header()).trim()).toBe("n/a");
+    expect(header()).toContain('data-spend="na"');
+    const out = text(bar());
+    expect(out).toContain("n/a");
+    expect(out).not.toMatch(/\$\d/);
+  });
+
+  it("the known sum alone never passes for the total", () => {
+    dispatchSessionEvent("s1", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.37 });
+    expect(text(header()).trim()).not.toBe("$0.37");
+    expect(text(bar())).not.toMatch(/\$0\.37(?! ·)/);
   });
 });

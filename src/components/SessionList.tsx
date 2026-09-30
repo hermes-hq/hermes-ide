@@ -24,6 +24,7 @@ import { isAgentStatusEnabled } from "../agent/status/flag";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { ProjectSpend, SessionOverlapBadge, SessionSpendChip } from "../fleet/FleetRowBadges";
+import { spendMember } from "../fleet/useReportedTotals";
 import { TaskQueueSection } from "../fleet/TaskQueueSection";
 import { SessionLimitTag } from "./SessionLimitTag";
 import { HandoffDialog } from "./HandoffDialog";
@@ -1303,7 +1304,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
                 </div>
                 <div className="project-header-right">
                   {fleetOn ? (
-                    <ProjectSpend sessionIds={groupSessions.map((s) => s.id)} />
+                    <ProjectSpend sessions={groupSessions.map(spendMember)} />
                   ) : (
                     groupCost > 0 && <span className="project-header-cost">{formatCost(groupCost)}</span>
                   )}

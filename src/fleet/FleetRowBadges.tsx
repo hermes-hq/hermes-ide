@@ -11,9 +11,9 @@ import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { useI18n } from "../i18n/I18nProvider";
 import type { SessionData } from "../types/session";
 import { useSessionOverlap } from "./radarStore";
-import { formatUsd, spendOf, spendText } from "./spend";
+import { formatUsd, spendOf, spendText, spendTotalText } from "./spend";
 import { useSessionCapTrip } from "./spendCapWatcher";
-import { useReportedTotals } from "./useReportedTotals";
+import { spendTotalTitle, totalOf, useReportedTotals, type SpendMember } from "./useReportedTotals";
 
 /** Shown for every session with an agent (started as one, or recognised in
  *  its terminal) and for any session whose agent reported usage. */
@@ -70,17 +70,17 @@ export function SessionOverlapBadge({ sessionId, labelOf }: { sessionId: string;
 
 /**
  * A project header's spend: the sum of its sessions' usage, the same
- * numbers their rows show. Nothing when none of them has a known cost.
+ * numbers their rows show, and how many of them have no known cost
+ * ("≈$0.37 (estimated) · 1 session n/a"); "n/a" when none has. Nothing
+ * when the project has no agent session.
  */
-export function ProjectSpend({ sessionIds }: { sessionIds: readonly string[] }) {
+export function ProjectSpend({ sessions }: { sessions: readonly SpendMember[] }) {
   const { t } = useI18n();
-  const totals = useReportedTotals(sessionIds);
-  if (totals.costUsd === null) return null;
-  const text = spendText({ kind: totals.spend, costUsd: totals.costUsd }, t);
-  // A narrow sidebar may cut the text short: the tooltip keeps all of it.
-  const why = totals.spend === "estimated" ? t("fleet.spendEstimatedTitle") : t("fleet.spendReported");
+  const totals = useReportedTotals(sessions);
+  const text = spendTotalText(totalOf(totals), t);
+  if (text === null) return null;
   return (
-    <span className="project-header-cost" data-spend={totals.spend} title={`${text}\n${why}`}>
+    <span className="project-header-cost" data-spend={totals.spend} data-unknown={totals.unknown.length} title={spendTotalTitle(text, totals, t)}>
       {text}
     </span>
   );
