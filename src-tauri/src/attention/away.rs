@@ -246,6 +246,20 @@ mod tests {
     }
 
     #[test]
+    fn a_state_of_up_to_32_characters_is_kept() {
+        let with_state = |state: String| AwayPayload { state, ..payload() };
+        let at_cap = "a".repeat(MAX_STATE_CHARS);
+        assert_eq!(
+            with_state(at_cap.clone()).sanitized().unwrap().state,
+            at_cap
+        );
+        assert!(with_state("a".repeat(MAX_STATE_CHARS + 1))
+            .sanitized()
+            .is_err());
+        assert!(with_state("done".into()).sanitized().is_ok());
+    }
+
+    #[test]
     fn no_address_means_no_request() {
         assert_eq!(build_request("", &payload()).unwrap(), None);
         assert_eq!(build_request("   ", &payload()).unwrap(), None);

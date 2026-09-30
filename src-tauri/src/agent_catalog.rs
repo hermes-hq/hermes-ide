@@ -344,6 +344,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn signals_without_a_confidence_are_guessed() {
+        let s: Signals = serde_json::from_str(r#"{"method":"none"}"#).unwrap();
+        assert_eq!(s.confidence, "guessed");
+        let s: Signals = serde_json::from_str(r#"{"method":"none","confidence":"exact"}"#).unwrap();
+        assert_eq!(s.confidence, "exact");
+    }
+
+    #[test]
     fn embedded_catalog_parses_and_has_the_expected_agents() {
         let ids: Vec<&str> = catalog().agents.iter().map(|a| a.id.as_str()).collect();
         for id in [
