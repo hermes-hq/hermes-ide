@@ -303,7 +303,10 @@ const opacityOf = (el) => { let o = 1; for (let n = el; n && n.nodeType === 1; n
 const tokenColour = (el, token) => {
   const probe = document.createElement("span");
   probe.style.color = "var(" + token + ")";
-  el.appendChild(probe);
+  // A field cannot hold a child with its own style (WebView2 gives it plain
+  // black), so a field's token is read in its parent, where it inherits from.
+  const host = /^(INPUT|TEXTAREA|SELECT|IMG)$/.test(el.tagName) ? el.parentElement : el;
+  host.appendChild(probe);
   const c = getComputedStyle(probe).color;
   probe.remove();
   return c;
