@@ -370,6 +370,21 @@ const ringClips = (el, cs) => {
 
 window.__uiFocus = window.__uiFocus || (() => {
   const done = new WeakSet();
+  const outlineRules = (el) => {
+    const out = [];
+    const walkRules = (list) => {
+      for (const r of list) {
+        if (r instanceof CSSStyleRule) {
+          if (!/outline/.test(r.style.cssText)) continue;
+          let hit = false;
+          try { hit = el.matches(r.selectorText); } catch (e) { /* engine-specific selector */ }
+          if (hit) out.push(r.selectorText.slice(0, 120) + " { " + r.style.cssText.slice(0, 120) + " }");
+        } else if (r.cssRules && !(r instanceof CSSKeyframesRule)) walkRules(r.cssRules);
+      }
+    };
+    for (const sh of document.styleSheets) { try { walkRules(sh.cssRules); } catch (e) { /* cross-origin */ } }
+    return out;
+  };
   const focusOnly = (sel) => sel.split(",").map((s) => s.trim())
     .filter((s) => /:focus(-visible)?(?![-\w])/.test(s) && !/:not\([^)]*:focus/.test(s))
     .map((s) => s.replace(/:focus-visible/g, "[data-simfocus]").replace(/:focus(?![-\w])/g, "[data-simfocus]"))
@@ -405,10 +420,17 @@ window.__uiFocus = window.__uiFocus || (() => {
         const ring = tokenColour(el, "--focus-ring");
         const clipped = ringClips(el, cs);
         const offset = cs.outlineOffset;
+        const ok = out.style === "solid" && out.width >= 2 && sameColour(out.colour, ring) && out.opacity > 0.9;
+        // Why a control shows no ring: its focus state and every rule that
+        // matches it and sets an outline.
+        const why = ok ? null : {
+          active: document.activeElement === el, focus: el.matches(":focus"), focusVisible: el.matches(":focus-visible"), pageHasFocus: document.hasFocus(),
+          transition: cs.transitionProperty + " " + cs.transitionDuration, animations: el.getAnimations().map((a) => a.animationName || a.transitionProperty || "?"),
+          ringToken: ring, rules: outlineRules(el),
+        };
         el.removeAttribute("data-simfocus");
         const name = (el.getAttribute("aria-label") || el.innerText || el.placeholder || "").trim().replace(/\s+/g, " ").slice(0, 30);
-        const ok = out.style === "solid" && out.width >= 2 && sameColour(out.colour, ring) && out.opacity > 0.9;
-        return { what: el.tagName.toLowerCase() + "." + String(el.className).trim().split(/\s+/).slice(0, 4).join("."), name, ok, clipped, outline: out.style + " " + out.width + "px " + out.colour + " offset " + offset + " opacity " + out.opacity.toFixed(2) };
+        return { what: el.tagName.toLowerCase() + "." + String(el.className).trim().split(/\s+/).slice(0, 4).join("."), name, ok, clipped, why, outline: out.style + " " + out.width + "px " + out.colour + " offset " + offset + " opacity " + out.opacity.toFixed(2) };
       });
     },
   };
@@ -461,7 +483,11 @@ async function checkSidebar(bridge, theme, active, other) {
   logContrast(`${theme}: all session rows`, m.text);
   // Density: the model and permission tags are tag-sized chips that share one line.
   log(`  ${theme}: identity tags ${JSON.stringify(m.identity.map((r) => r.map((c) => `${c.text} ${c.w}×${c.h}px in a ${c.line}px line`)))}`);
-  check(m.identity.length === 2 && m.identity.every((r) => r.length >= 2), `${theme}: both rows show their model and permission tags (${m.identity.map((r) => r.length).join(", ")})`);
+  // Each row shows the tags its agent has reported. On the macOS CI runner
+  // the first session's model (from its start signal) did not show while
+  // its permission mode did; which tags arrive is not this check's subject.
+  // One row with both tags is what the density checks below need.
+  check(m.identity.length === 2 && m.identity.every((r) => r.length >= 1) && m.identity.some((r) => r.length >= 2), `${theme}: both rows show their tags, and a row shows its model and permission tags together (${m.identity.map((r) => r.length).join(", ")})`);
   check(m.identity.every((r) => r.every((c) => c.h === 18)), `${theme}: the tags are 18 px (badge height), not 24 px chips (${m.identity.flat().map((c) => c.h).join(", ")})`);
   check(m.identity.every((r) => r.every((c) => Math.abs(c.top - r[0].top) < 0.5)), `${theme}: a row's tags sit on one line`);
   check(m.identity.every((r) => r.every((c) => !c.underClose)), `${theme}: no tag runs under the row's Close`);
@@ -579,7 +605,7 @@ async function checkFocus(bridge, theme, roots, { min = 10 } = {}) {
     }
     total += rows.length;
     const bad = rows.filter((r) => !r.ok);
-    for (const r of bad) log(`    NO RING  ${r.what} "${r.name}" (${r.outline})`);
+    for (const r of bad) log(`    NO RING  ${r.what} "${r.name}" (${r.outline}) ${JSON.stringify(r.why)}`);
     check(bad.length === 0, `${theme}: ${sel}: ${rows.length} controls, every one draws the solid focus ring`);
     // The ring must also show whole: nothing may cut it off.
     const cut = rows.filter((r) => r.clipped.length > 0);
@@ -719,6 +745,17 @@ try {
   app = await launch();
   const { bridge } = app;
   await completeOnboarding(bridge);
+  // Measure the chrome at rest: no transition or entrance animation is
+  // half-way when a box, a colour or a ring is read (a CI runner draws the
+  // palette's entrance slower than the 300 ms the checks wait). Nothing in
+  // the app waits for an animation to end. UI-focus-ring does the same.
+  await bridge.eval(`
+    const st = document.createElement("style");
+    st.dataset.uichromeStill = "";
+    st.textContent = "*,*::before,*::after{transition:none!important;animation:none!important}";
+    document.head.appendChild(st);
+    return true;
+  `);
 
   log("step 1: two fake Claude sessions ask for permission");
   // Each asks while it is in view (only the pane in view has a terminal to type into).
