@@ -37,6 +37,7 @@ import { hasAddDirDrift } from "../utils/agentDrift";
 import {
   createWorktree, worktreeHasChanges, stashWorktree, getSessionWorktreeInfo,
   attachWorktree, detachWorktree, removeWorktree, commitWorktree,
+  gitListBranchesForProject,
 } from "../api/git";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import {
@@ -1350,6 +1351,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [pendingBranchConflict, setPendingBranchConflict] = useState<{
     conflict: BranchInUse & { projectId: string };
     heldBy: string;
+    /** The repository's local branches, so a new name that is one is refused. */
+    localBranches: string[];
     resolve: (choice: BranchConflictChoice) => void;
   } | null>(null);
 
@@ -1870,12 +1873,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           attachWorktree,
           removeWorktree,
           detachWorktree,
-          resolveConflict: (conflict) => {
-            if (!askUser) return Promise.resolve({ kind: "reuse" });
+          resolveConflict: async (conflict) => {
+            if (!askUser) return { kind: "reuse" };
             const holder = conflict.sessionId ? stateRef.current.sessions[conflict.sessionId] : undefined;
             const heldBy = describeBranchHolder(conflict, holder?.label ?? null);
+            // Without the list the backend still refuses such a name.
+            const localBranches = await gitListBranchesForProject(conflict.projectId)
+              .then((all) => all.filter((b) => !b.is_remote).map((b) => b.name))
+              .catch(() => [] as string[]);
             return new Promise<BranchConflictChoice>((resolve) => {
-              setPendingBranchConflict({ conflict, heldBy, resolve });
+              setPendingBranchConflict({ conflict, heldBy, localBranches, resolve });
             });
           },
         });
@@ -2883,6 +2890,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           branchName={pendingBranchConflict.conflict.branch}
           heldBy={pendingBranchConflict.heldBy}
           path={pendingBranchConflict.conflict.path}
+          localBranches={pendingBranchConflict.localBranches}
+          onUseExisting={(name) => {
+            setPendingBranchConflict(null);
+            pendingBranchConflict.resolve({ kind: "existing-branch", name });
+          }}
           onReuse={() => {
             setPendingBranchConflict(null);
             pendingBranchConflict.resolve({ kind: "reuse" });

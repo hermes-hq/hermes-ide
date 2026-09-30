@@ -11,7 +11,7 @@
 // Kept free of React so every decision is unit-tested directly.
 
 import type { SessionWorktree, WorktreeCreateResult } from "../types/git";
-import { findBranchClash } from "../utils/branchClash";
+import { findBranchClash, gitErrorMessage } from "../utils/branchClash";
 
 /** Prefix of the backend's "branch already checked out" error (git/worktree.rs). */
 export const BRANCH_IN_USE_PREFIX = "BRANCH_IN_USE:";
@@ -108,6 +108,8 @@ export function pickRestoreId(
 export type BranchConflictChoice =
   | { kind: "reuse" }
   | { kind: "new-branch"; name: string }
+  /** An existing branch, chosen on purpose (the new name typed was one). */
+  | { kind: "existing-branch"; name: string }
   | { kind: "cancel" };
 
 export interface BranchSelection {
@@ -226,7 +228,7 @@ export async function createSessionWorktrees(
       } catch (err) {
         const conflict = parseBranchInUseError(err);
         if (!conflict || round >= MAX_CONFLICT_ROUNDS) {
-          outcome.errors.push(`${projectId}: ${err instanceof Error ? err.message : String(err)}`);
+          outcome.errors.push(`${projectId}: ${gitErrorMessage(err)}`);
           break;
         }
         const choice = await deps.resolveConflict({ ...conflict, projectId });
@@ -248,11 +250,18 @@ export async function createSessionWorktrees(
           }
           break;
         }
+        fromRemote = undefined;
+        if (choice.kind === "existing-branch") {
+          // That existing branch as it is (it may be in use too: asked again).
+          baseBranch = undefined;
+          branch = choice.name;
+          createNew = false;
+          continue;
+        }
         // New branch cut from the one that is in use.
         baseBranch = conflict.branch;
         branch = choice.name;
         createNew = true;
-        fromRemote = undefined;
       }
     }
   }

@@ -1,3 +1,5 @@
+import { translate } from "../i18n/registry";
+
 // Branch names that collide with an existing branch, letter case included.
 //
 // Git keeps a branch as a file under .git/refs/heads/. On a file system that
@@ -44,4 +46,39 @@ export function findBranchClash(name: string, existing: Iterable<string>): Branc
   if (caseClash !== null) return { kind: "case", existing: caseClash };
   if (folderClash !== null) return { kind: "folder", existing: folderClash };
   return null;
+}
+
+/** Prefix of the backend's "branch name collides" error (BRANCH_NAME_CLASH_PREFIX in git/worktree.rs). */
+export const BRANCH_NAME_CLASH_PREFIX = "BRANCH_NAME_CLASH:";
+
+/** The name refused and how it collides, from a backend BRANCH_NAME_CLASH error; null for any other error. */
+export function parseBranchClashError(err: unknown): { name: string; clash: BranchClash } | null {
+  const text = err instanceof Error ? err.message : String(err);
+  const at = text.indexOf(BRANCH_NAME_CLASH_PREFIX);
+  if (at < 0) return null;
+  try {
+    const v = JSON.parse(text.slice(at + BRANCH_NAME_CLASH_PREFIX.length)) as Record<string, unknown>;
+    const { name, existing, kind } = v;
+    if (typeof name !== "string" || typeof existing !== "string") return null;
+    if (kind !== "same" && kind !== "case" && kind !== "folder") return null;
+    return { name, clash: { kind, existing } };
+  } catch {
+    return null;
+  }
+}
+
+/** How a branch name collides with an existing branch, for a person to read (in their language). */
+export function branchClashMessage(clash: BranchClash): string {
+  const key = clash.kind === "same" ? "branch.exists" : clash.kind === "case" ? "branch.caseClash" : "branch.folderClash";
+  return translate(key, { branch: clash.existing });
+}
+
+/**
+ * A git error for a person to read: a BRANCH_NAME_CLASH refusal becomes the
+ * sentence saying which branch it collides with; anything else as it is.
+ */
+export function gitErrorMessage(err: unknown): string {
+  const parsed = parseBranchClashError(err);
+  if (parsed) return branchClashMessage(parsed.clash);
+  return err instanceof Error ? err.message : String(err);
 }

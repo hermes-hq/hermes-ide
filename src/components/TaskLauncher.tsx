@@ -879,11 +879,13 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
                   ? t("launcher.block.branchCaseClash", { branch: row.branch, existing: row.existing })
                   : t("launcher.block.branchFolderClash", { branch: row.branch, existing: row.existing })}
             </span>
-            {row.branch === branch.trim() && (
+            {row.branch === branch.trim() && row.suggestion && (
               <Button
                 variant="link"
                 className="task-launcher-link task-launcher-use-branch"
+                data-branch={row.suggestion}
                 onClick={() => {
+                  if (!row.suggestion) return;
                   setBranch(row.suggestion);
                   setBranchEdited(true);
                 }}

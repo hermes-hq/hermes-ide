@@ -61,6 +61,41 @@ export function nextFreeBranch(branch: string, taken: (b: string) => boolean, li
   return `${branch}-${Date.now().toString(36)}`;
 }
 
+/**
+ * A free branch to offer instead of `branch`, which collides with one of
+ * `branches` (see findBranchClash), or null when none is found. When the
+ * clash is a folder that differs only in letter case (`Feature/new` next to
+ * `feature/inbox`), no `-2` suffix frees it: the folders are spelled as the
+ * existing branch spells them first (`feature/new`).
+ */
+export function freeBranchFor(branch: string, branches: readonly string[]): string | null {
+  const taken = (b: string) => findBranchClash(b, branches) !== null;
+  let base = branch;
+  for (let i = 0; i < 8; i++) {
+    const clash = findBranchClash(base, branches);
+    if (!clash || clash.kind === "same") break;
+    const respelled = respellFolders(base, clash.existing);
+    if (respelled === base) break;
+    base = respelled;
+  }
+  if (!taken(base)) return base;
+  const next = nextFreeBranch(base, taken);
+  return taken(next) ? null : next;
+}
+
+/** `name` with its folders spelled as `other` spells the same ones (letter case only). */
+function respellFolders(name: string, other: string): string {
+  const parts = name.split("/");
+  const otherParts = other.split("/");
+  const folders = Math.min(parts.length, otherParts.length) - 1;
+  for (let i = 0; i < folders; i++) {
+    if (parts[i] === otherParts[i]) continue;
+    if (parts[i].toLowerCase() !== otherParts[i].toLowerCase()) break;
+    parts[i] = otherParts[i];
+  }
+  return parts.join("/");
+}
+
 /** A branch name the user may type: git's rules, loosely (no spaces, no "..", no leading "-"). */
 export function isUsableBranchName(branch: string): boolean {
   const b = branch.trim();
@@ -105,7 +140,7 @@ export type BlockingRow =
    * whose name (or folder) differs only in letter case, which macOS and
    * Windows treat as the same (`existing` is that branch's name).
    */
-  | { kind: "branch-exists"; branch: string; suggestion: string; existing: string; clash: BranchClash["kind"] }
+  | { kind: "branch-exists"; branch: string; suggestion: string | null; existing: string; clash: BranchClash["kind"] }
   | { kind: "bad-branch"; branch: string }
   | { kind: "low-disk"; freeBytes: number; requiredBytes: number };
 
@@ -145,8 +180,7 @@ export function blockingRows(input: LaunchCheckInput): BlockingRow[] {
       } else {
         const clash = findBranchClash(branch, input.branches);
         if (clash) {
-          const taken = (b: string) => findBranchClash(b, input.branches) !== null;
-          rows.push({ kind: "branch-exists", branch, suggestion: nextFreeBranch(branch, taken), existing: clash.existing, clash: clash.kind });
+          rows.push({ kind: "branch-exists", branch, suggestion: freeBranchFor(branch, input.branches), existing: clash.existing, clash: clash.kind });
         }
       }
     }

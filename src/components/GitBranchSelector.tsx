@@ -3,6 +3,7 @@ import type { GitBranch } from "../types/git";
 import { gitListBranches, gitBranchesAheadBehind, gitCreateBranch, gitCheckoutBranch, gitDeleteBranch } from "../api/git";
 import type { GitToast } from "./GitPanel";
 import { useContextMenu, buildBranchMenuItems } from "../hooks/useContextMenu";
+import { branchClashMessage, findBranchClash, gitErrorMessage } from "../utils/branchClash";
 
 interface GitBranchSelectorProps {
   sessionId: string;
@@ -210,7 +211,7 @@ export function GitBranchSelector({ sessionId, projectId, currentBranch, onRefre
       onRefresh();
       onClose();
     } catch (e) {
-      setError(String(e));
+      setError(gitErrorMessage(e));
     }
   }, [sessionId, projectId, onRefresh, onToast, onClose]);
 
@@ -218,6 +219,13 @@ export function GitBranchSelector({ sessionId, projectId, currentBranch, onRefre
     const validationError = validateBranchName(newName);
     if (validationError) {
       setError(validationError);
+      return;
+    }
+    // An existing branch, also when only the letter case differs (on macOS
+    // and Windows `Develop` IS `develop`): said here, before git is asked.
+    const clash = findBranchClash(newName.trim(), branches.filter((b) => !b.is_remote).map((b) => b.name));
+    if (clash) {
+      setError(branchClashMessage(clash));
       return;
     }
     try {
@@ -229,9 +237,9 @@ export function GitBranchSelector({ sessionId, projectId, currentBranch, onRefre
       onRefresh();
       onClose();
     } catch (e) {
-      setError(String(e));
+      setError(gitErrorMessage(e));
     }
-  }, [sessionId, projectId, newName, onRefresh, onToast, onClose]);
+  }, [sessionId, projectId, newName, branches, onRefresh, onToast, onClose]);
 
   const handleDelete = useCallback(async (name: string, force: boolean) => {
     try {
