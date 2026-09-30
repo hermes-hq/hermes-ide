@@ -805,6 +805,28 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
     })
 }
 
+/// Test builds only: `HERMES_E2E_SLOW_SPAWN_MS=<ms>` makes opening a
+/// terminal take that long, as a spawn stuck in the OS does, so a scenario
+/// can check the app keeps answering meanwhile. Needs the `e2e` cargo feature
+/// (never in a release build) AND `HERMES_E2E=1` at run time.
+fn e2e_slow_spawn() {
+    #[cfg(feature = "e2e")]
+    {
+        if !crate::e2e_protocol::is_enabled(std::env::var("HERMES_E2E").ok().as_deref()) {
+            return;
+        }
+        let ms = std::env::var("HERMES_E2E_SLOW_SPAWN_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+            .min(60_000);
+        if ms > 0 {
+            log::warn!("[e2e] opening this terminal is held for {} ms", ms);
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
+}
+
 // Tauri command handler — params come from frontend invocation. Off the main
 // thread: starting the session host can take seconds, and on the main thread
 // that would freeze the window.
@@ -953,9 +975,19 @@ pub fn create_session(
         let _ = app.emit(WORKING_DIRECTORY_RECOVERED_EVENT, &recovery);
     }
 
-    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    mgr.session_counter += 1;
-    let counter = mgr.session_counter;
+    // The PTY manager is NOT held while the terminal is opened below: opening
+    // a PTY and starting its shell (or reaching the session host) can take
+    // seconds, or hang in the OS, and most commands that need the manager
+    // (typing, resizing, listing the sessions, quitting) run on the main
+    // thread. Held across the spawn, one stuck spawn froze the whole window,
+    // Quit included (the webview stopped answering; N20 on the macOS CI
+    // runner). It is taken for the counter here, and again once the terminal
+    // exists, before its reader starts, until the session is registered.
+    let counter = {
+        let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        mgr.session_counter += 1;
+        mgr.session_counter
+    };
 
     let session_label = label.unwrap_or_else(|| format!("Session {}", counter));
     let session_color = color.unwrap_or_default();
@@ -1046,8 +1078,8 @@ pub fn create_session(
     //   3. Emit `session-updated` so the UI can render `<AgentSessionView>`
     //      immediately, even before the agent has fully booted.
     //
-    // Note: `mgr` (the PtyManager guard) is held above; we don't insert a
-    // PtySession into it for agent-mode sessions because there is no PTY.
+    // Note: we don't insert a PtySession into the PtyManager for agent-mode
+    // sessions because there is no PTY.
     // That's fine — code that iterates `mgr.sessions` will simply skip
     // agent sessions, and writes via `write_to_session` will return a
     // "not found" error, which is the right behaviour (composer should
@@ -1089,10 +1121,6 @@ pub fn create_session(
 
         let result = SessionUpdate::from(&s);
         let _ = app.emit("session-updated", &result);
-
-        // Drop the PTY-manager lock before touching the DB so we don't hold
-        // two locks at once.
-        drop(mgr);
 
         if let Ok(db) = state.db.lock() {
             db.create_session_v2(&result).ok();
@@ -1303,6 +1331,7 @@ pub fn create_session(
     // host that cannot be reached falls back to this process, with a log
     // line), otherwise this process as always.
     let mut ended_before_attach: Option<Option<i32>> = None;
+    e2e_slow_spawn();
     let (mut transport, reattached): (Box<dyn PtyTransport>, bool) = if use_host {
         match crate::session_host::open_hosted(&app, &session_id, Some(&cmd), pty_rows, pty_cols) {
             Ok(opened) => {
@@ -1330,6 +1359,9 @@ pub fn create_session(
     } else {
         (Box::new(InProcessPty::spawn(cmd, pty_size)?), false)
     };
+    // The terminal exists: from its first output on, anything that looks the
+    // session up waits until it is registered below (as it always did).
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     if let Ok(mut s) = session_arc.lock() {
         s.hosted = transport.hosted();
         if reattached {

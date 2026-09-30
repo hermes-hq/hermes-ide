@@ -208,6 +208,28 @@ export async function completeClassicOnboarding(bridge) {
   await dismissWhatsNew(bridge);
 }
 
+/**
+ * The three-step welcome of a fresh install with the real flag defaults:
+ * agents, the repository `repo` (registered first), then the first-task step
+ * closed without a task. Returns the registered project.
+ */
+export async function completeTaskWelcome(bridge, repo) {
+  await bridge.waitFor("the welcome's agent check", `return e2e.first(".setup-dialog")?.getAttribute("data-step") === "agents" && e2e.first(".agent-doctor")?.getAttribute("data-loading") === "false";`, { timeoutMs: 60_000 });
+  const project = await invoke(bridge, "create_project", { path: repo, name: null });
+  await bridge.clickWhenReady(`const box = e2e.must(e2e.first("#setup-policy-accept"), "policy"); return box.checked ? true : e2e.click(box);`);
+  await bridge.waitFor("Continue", `return !e2e.first(".setup-continue").disabled;`);
+  await bridge.click(".setup-continue");
+  await bridge.waitFor("the repository step", `return e2e.first(".setup-dialog")?.getAttribute("data-step") === "repo" && e2e.all(".setup-recent input[type=radio]").length >= 1;`, { timeoutMs: 20_000 });
+  await bridge.clickWhenReady(`const r = e2e.all(".setup-recent input[type=radio]")[0]; return r.checked ? true : e2e.click(r);`);
+  await bridge.waitFor("the repository accepted", `return e2e.first(".setup-repo-state")?.getAttribute("data-git") === "true";`, { timeoutMs: 20_000 });
+  await bridge.click(".setup-continue");
+  await bridge.waitFor("the task step", `return e2e.first(".setup-dialog")?.getAttribute("data-step") === "task";`, { timeoutMs: 30_000 });
+  await bridge.click(".setup-finish");
+  await bridge.waitFor("the welcome to close", `return !e2e.first(".setup-backdrop, .setup-pill");`, { timeoutMs: 20_000 });
+  await dismissWhatsNew(bridge);
+  return project;
+}
+
 export async function waitForReturningLaunch(bridge) {
   await bridge.waitFor("the app UI (returning launch)", `return !!e2e.first(".topbar, .activity-bar") && !e2e.first(".onboarding-backdrop, .setup-backdrop");`, { timeoutMs: 30_000 });
   await dismissWhatsNew(bridge);
@@ -243,6 +265,34 @@ export async function openLauncher(bridge) {
     return !!e2e.first(".task-launcher-sheet .task-launcher");
   `, { timeoutMs: 20_000 });
   await bridge.waitFor("the launcher's starting choice", `return e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+}
+
+/**
+ * After Launch: the sheet finishes the launch (the sessions start, the launch
+ * is recorded) and closes itself. The next step must not start on the
+ * closing sheet.
+ */
+export async function waitLauncherClosed(bridge) {
+  await bridge.waitFor("the launcher to close after the launch", `return !e2e.first(".task-launcher-sheet");`, { timeoutMs: 30_000 });
+}
+
+/**
+ * Presses Launch and, in the same moment (the launch still running), ⌘N:
+ * a person who launches a task and at once asks for the next one.
+ */
+export async function launchThenPressNewTask(bridge) {
+  const r = await bridge.eval(`
+    e2e.click(e2e.must(e2e.first(".task-launcher-launch"), "Launch"));
+    const launching = e2e.first(".task-launcher-launch")?.disabled === true || !!e2e.first(".task-launcher-sheet");
+    if (${JSON.stringify(onMac)}) {
+      await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", { event: "menu-action", payload: { action: "file.new-session" } });
+    } else {
+      const target = document.activeElement || document.body;
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    }
+    return { launching, sheetOpen: !!e2e.first(".task-launcher-sheet") };
+  `);
+  return r;
 }
 
 /** Types into a React-controlled field the way typing does. */

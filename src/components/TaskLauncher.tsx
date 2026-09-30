@@ -40,6 +40,7 @@ import {
   uniquePresetName,
 } from "../launcher/choice";
 import { clearLauncherDraft, saveLauncherDraft, setPendingSuggestion, takeLauncherDraft, takePendingSuggestion } from "../launcher/draft";
+import { overlayOpened } from "../state/overlays";
 import {
   TASK_LAUNCHES_KEY,
   agentTakesFirstPrompt,
@@ -83,6 +84,8 @@ export interface TaskLaunchRequest {
   doneWhen: string[];
   /** The full combination (the main agent's choice, with the second agent under alsoOn). */
   choice: LaunchChoice;
+  /** The sheet stays open after this launch (Launch & next, or the inline launcher). */
+  staysOpen?: boolean;
 }
 
 /** true: started; "queued": waits for a free slot (running-agents cap); false: failed. */
@@ -532,7 +535,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       doctor: byId,
       repoPath,
       gitRoot,
-      branchExists: (b) => branchSet.has(b),
+      branches: localBranches,
       disk: disk ? { freeBytes: disk.free_bytes, requiredBytes: disk.required_bytes, belowThreshold: disk.below_threshold } : null,
     });
     // Agents that do not create a branch are still judged for install / sign-in.
@@ -541,7 +544,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       doctor: byId,
       repoPath: "x",
       gitRoot: null,
-      branchExists: () => false,
+      branches: [],
       disk: null,
     }).filter((r) => r.kind === "not-installed" || r.kind === "signed-out");
     const out: BlockingRow[] = [...all, ...extra.filter((r) => r.kind !== "not-installed" || getAgent(r.agentId)?.custom !== true)];
@@ -553,7 +556,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     }
     const newWorktree = plannedAgents.some((a) => a.worktree);
     return out.filter((r) => !(r.kind === "not-installed" && getAgent(r.agentId)?.custom) && (r.kind !== "low-disk" || newWorktree));
-  }, [plannedAgents, byId, repoPath, gitRoot, branchSet, disk, where, caps]);
+  }, [plannedAgents, byId, repoPath, gitRoot, branchSet, localBranches, disk, where, caps]);
 
   const customMissing = isCustom && !choice?.extraArgs.trim();
   // A base branch the repository lacks, until the effect above has replaced it: never launched.
@@ -608,6 +611,15 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     [choice, task, repoPath, branch, branchEdited, checks, checksEdited, expanded, onClose],
   );
 
+  // One overlay at a time: the sheet closes (keeping what was typed) when the
+  // inbox or the palette opens, and opening it closes them (state/overlays.ts).
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (inline) return;
+    return overlayOpened("launcher", () => closeRef.current(true));
+  }, [inline]);
+
   const launch = useCallback(
     async (next: boolean) => {
       if (!canGo || !effective || !gitRoot) return;
@@ -631,6 +643,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           track: effective.trackAsFeature ? "Full" : "Quick",
           doneWhen: checks.map((c) => c.trim()).filter(Boolean),
           choice: plannedAgents[0].choice,
+          ...(next || inline ? { staysOpen: true } : {}),
         });
       } catch (err) {
         console.error("[TaskLauncher] launch failed:", err);
@@ -858,8 +871,14 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         );
       case "branch-exists":
         return (
-          <div className="task-launcher-block" data-kind={row.kind} key={key}>
-            <span>{t("launcher.block.branchExists", { branch: row.branch })}</span>
+          <div className="task-launcher-block" data-kind={row.kind} data-clash={row.clash} data-existing={row.existing} key={key}>
+            <span>
+              {row.clash === "same"
+                ? t("launcher.block.branchExists", { branch: row.branch })
+                : row.clash === "case"
+                  ? t("launcher.block.branchCaseClash", { branch: row.branch, existing: row.existing })
+                  : t("launcher.block.branchFolderClash", { branch: row.branch, existing: row.existing })}
+            </span>
             {row.branch === branch.trim() && (
               <Button
                 variant="link"
@@ -870,6 +889,15 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
                 }}
               >
                 {t("launcher.useBranch", { branch: row.suggestion })}
+              </Button>
+            )}
+            {row.branch === branch.trim() && row.clash !== "folder" && (
+              <Button
+                variant="link"
+                className="task-launcher-link task-launcher-use-existing"
+                onClick={() => update({ where: { kind: "existing-branch", branch: row.existing } })}
+              >
+                {t("launcher.useExisting", { branch: row.existing })}
               </Button>
             )}
           </div>

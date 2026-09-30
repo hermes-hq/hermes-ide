@@ -39,6 +39,7 @@ import { attentionDebug } from "../attention/debug";
 import { _resetUserLabelsForTest, rememberUserLabel } from "../attention/userLabels";
 import { _resetStartupSessionsForTest, markStartupSession } from "../attention/startupSessions";
 import { isMac } from "../utils/platform";
+import { openOverlays, overlayOpened } from "../state/overlays";
 import type { SessionData } from "../types/session";
 
 let clock = 1_000_000;
@@ -300,6 +301,103 @@ describe("F12 attention center", () => {
     });
     expect(terminal).toHaveFocus();
     xterm.remove();
+  });
+
+  describe("closing gives the keyboard back to the terminal it came from", () => {
+    function terminalInPage() {
+      const xterm = document.createElement("div");
+      xterm.className = "xterm";
+      const terminal = document.createElement("textarea");
+      xterm.appendChild(terminal);
+      document.body.appendChild(xterm);
+      return { terminal, remove: () => xterm.remove() };
+    }
+
+    it("Esc", () => {
+      setup("D");
+      const { terminal, remove } = terminalInPage();
+      status("B", "needs_approval");
+      terminal.focus();
+      pressInbox();
+      const list = screen.getByRole("listbox", { name: "Attention inbox" });
+      expect(list).toHaveFocus();
+      act(() => {
+        fireEvent.keyDown(list, { key: "Escape" });
+      });
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(document.activeElement).not.toBe(document.body);
+      expect(terminal).toHaveFocus();
+      remove();
+    });
+
+    it("the shortcut that opened it", () => {
+      setup("D");
+      const { terminal, remove } = terminalInPage();
+      status("B", "needs_approval");
+      terminal.focus();
+      pressInbox();
+      expect(screen.getByRole("listbox", { name: "Attention inbox" })).toHaveFocus();
+      pressInbox();
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(terminal).toHaveFocus();
+      remove();
+    });
+
+    it("the badge, also when clicking the badge took the focus first", () => {
+      const { badge } = setup("D");
+      const { terminal, remove } = terminalInPage();
+      status("B", "needs_approval");
+      terminal.focus();
+      // A click focuses the button it lands on (WebKitGTK, Chromium) before it opens the inbox.
+      act(() => {
+        badge().focus();
+        fireEvent.click(badge());
+      });
+      expect(screen.getByRole("listbox", { name: "Attention inbox" })).toHaveFocus();
+      act(() => {
+        badge().focus();
+        fireEvent.click(badge());
+      });
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(terminal).toHaveFocus();
+      remove();
+    });
+
+    it("a terminal that is gone: the session in view gets the keyboard", () => {
+      const { onJump } = setup("D");
+      const { terminal, remove } = terminalInPage();
+      status("B", "needs_approval");
+      terminal.focus();
+      pressInbox();
+      remove();
+      act(() => {
+        fireEvent.keyDown(screen.getByRole("listbox", { name: "Attention inbox" }), { key: "Escape" });
+      });
+      expect(onJump).toHaveBeenLastCalledWith("D");
+    });
+  });
+
+  it("one overlay at a time: the palette opening closes the inbox, and the inbox opening closes the palette", () => {
+    setup("D");
+    status("B", "needs_approval");
+    pressInbox();
+    expect(screen.getByRole("listbox", { name: "Attention inbox" })).toBeInTheDocument();
+    expect(openOverlays()).toEqual(["inbox"]);
+    const closePalette = vi.fn();
+    let paletteClosed: () => void = () => {};
+    act(() => {
+      paletteClosed = overlayOpened("palette", closePalette);
+    });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(openOverlays()).toEqual(["palette"]);
+    expect(closePalette).not.toHaveBeenCalled();
+    pressInbox();
+    expect(screen.getByRole("listbox", { name: "Attention inbox" })).toBeInTheDocument();
+    expect(closePalette).toHaveBeenCalledTimes(1);
+    paletteClosed();
+    expect(openOverlays()).toEqual(["inbox"]);
+    pressInbox();
+    expect(openOverlays()).toEqual([]);
   });
 
   it("an auto-named session's away message carries no task name", () => {

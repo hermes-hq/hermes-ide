@@ -11,6 +11,7 @@
 // Kept free of React so every decision is unit-tested directly.
 
 import type { SessionWorktree, WorktreeCreateResult } from "../types/git";
+import { findBranchClash } from "../utils/branchClash";
 
 /** Prefix of the backend's "branch already checked out" error (git/worktree.rs). */
 export const BRANCH_IN_USE_PREFIX = "BRANCH_IN_USE:";
@@ -66,15 +67,23 @@ export function randomTaskSlug(random: () => number = Math.random): string {
 
 /**
  * The default branch for a new task: `hermes/<slug>`, made unique against
- * the branches that already exist (`-2`, `-3`, ...).
+ * the branches that already exist (`-2`, `-3`, ...), letter case included:
+ * next to `hermes/Fix` the default is never `hermes/fix` (on macOS and
+ * Windows that is the same branch).
  */
 export function defaultTaskBranch(slug: string, existing: Iterable<string>): string {
-  const taken = new Set(existing);
+  const names = [...existing];
+  // A folder that differs only in case is shared by every candidate; the
+  // branch step shows that clash, so it does not count here.
+  const taken = (name: string) => {
+    const clash = findBranchClash(name, names);
+    return clash !== null && clash.kind !== "folder";
+  };
   const base = `hermes/${slugify(slug) || "task"}`;
-  if (!taken.has(base)) return base;
+  if (!taken(base)) return base;
   for (let n = 2; ; n++) {
     const candidate = `${base}-${n}`;
-    if (!taken.has(candidate)) return candidate;
+    if (!taken(candidate)) return candidate;
   }
 }
 

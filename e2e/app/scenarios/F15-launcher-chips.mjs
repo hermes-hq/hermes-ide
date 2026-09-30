@@ -28,11 +28,14 @@
 //            and hold feature.md; the launch record has the edited check.
 //          - an existing branch, then the current checkout: the agent runs
 //            in a worktree of feature/inbox, then in the repository itself.
+//          - ⌘N pressed while a launch is still finishing: once the sheet
+//            has closed, a fresh launcher opens (the press used to be lost).
 //          - the Custom agent: its typed command is what runs.
 //
-// Negative control (must end in RESULT: FAIL):
+// Negative controls (must end in RESULT: FAIL):
 //   HERMES_E2E_LAUNCHER_FLAG=off   the taskLauncher flag stays off: ⌘N opens
 //                                  the old creator.
+//   a build of main before the fix fails step 10b (no launcher comes up).
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/F15-launcher-chips.mjs
@@ -46,6 +49,7 @@ import {
   completeClassicOnboarding,
   expandOptions,
   invoke,
+  launchThenPressNewTask,
   launcherFixtures,
   launcherState,
   newTerminals,
@@ -58,6 +62,7 @@ import {
   typeInto,
   waitForReturningLaunch,
   waitLaunchEnabled,
+  waitLauncherClosed,
 } from "../launcher-steps.mjs";
 
 const SCENARIO = "F15-launcher-chips";
@@ -254,6 +259,7 @@ try {
   let n1 = fx.records().length;
   await bridge.click(".task-launcher-launch");
   await newTerminals(bridge, before, 1, "the existing-branch terminal");
+  await waitLauncherClosed(bridge);
   const onExisting = (await fx.waitForRecords(n1 + 1)).at(-1);
   const wtInbox = fx.worktrees().find((w) => w.branch === "feature/inbox");
   assert(wtInbox && fx.samePath(onExisting.cwd, wtInbox.path), "the agent runs in a worktree of feature/inbox (no new branch)");
@@ -273,6 +279,37 @@ try {
   await newTerminals(bridge, before, 1, "the current-checkout terminal");
   const onCurrent = (await fx.waitForRecords(n1 + 1)).at(-1);
   assert(fx.samePath(onCurrent.cwd, fx.repo), "the agent runs in the repository's own checkout");
+  // The sheet closes itself once the launch is recorded; ⌘N on the closing
+  // sheet used to be lost (step 11 then found no launcher, on Linux CI).
+  await waitLauncherClosed(bridge);
+
+  log("step 10b: ⌘N pressed while a launch is still finishing opens a fresh launcher once it is done");
+  await openLauncher(bridge);
+  await typeInto(bridge, ".task-launcher-task", "Tidy the changelog");
+  await pickInMenu(bridge, "where", '[data-where="new-worktree"]');
+  await waitLaunchEnabled(bridge);
+  before = await bridge.terminalIds();
+  n1 = fx.records().length;
+  const pressed = await launchThenPressNewTask(bridge);
+  log(`  pressed ⌘N with the launch running: ${JSON.stringify(pressed)}`);
+  assert(pressed.sheetOpen, "⌘N came while the launching sheet was still open");
+  await newTerminals(bridge, before, 1, "the launched task's terminal");
+  await fx.waitForRecords(n1 + 1);
+  const fresh = await bridge
+    .waitFor("a fresh launcher", `
+      const l = e2e.first(".task-launcher-sheet .task-launcher");
+      const task = e2e.first(".task-launcher-task");
+      return l && l.getAttribute("data-ready") === "true" && task && task.value === "" ? { task: task.value } : false;
+    `, { timeoutMs: 30_000 })
+    .catch(async (err) => {
+      log(`  launcher now: ${JSON.stringify(await launcherState(bridge))}`);
+      throw err;
+    });
+  assert(!!fresh, "the ⌘N was not lost: a fresh, empty launcher is open, ready for the next task");
+  assert(fx.worktrees().some((w) => w.branch === "hermes/tidy-the-changelog"), "and the task launched before it");
+  await bridge.screenshot(join(evidenceDir, "05b-fresh-after-launch.png"));
+  await pressKey(bridge, ".task-launcher-task", "Escape");
+  await waitLauncherClosed(bridge);
 
   log("step 11: the Custom agent runs the command typed for it");
   await openLauncher(bridge);
