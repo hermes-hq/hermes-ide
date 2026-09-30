@@ -229,15 +229,15 @@ row, and the focus ring. Blue stays with the agent and with links.
 | `IconButton` | An action shown as an icon only | `label` is required: it is the accessible name and the tooltip. `pressed` for icon toggles. md 32 or sm 28. |
 | `CloseButton` | Closing any dialog, sheet or panel | Always a small icon button with one drawn ×. Replaces every "x", ×, ✕ and `.close-btn`. |
 | `Input`, `Textarea` | Free text | `code` for paths, branches and commands (code font, 12 px). `error` shows the message under the field and links it with `aria-describedby`; `invalid` alone marks the field. |
-| `Select` | Choosing a value whose options carry a status or version ("2.1.284", "not installed"), or anything longer than a handful of plain words | Combobox with `aria-activedescendant`; focus stays on the trigger. Enter, Space, ↑, ↓ or Alt+↓ open; ↑ ↓ Home End PgUp PgDn move without wrapping; type-ahead (500 ms, repeat a letter to cycle); Enter/Space or Tab commit; Esc reverts. Typing while closed changes the value, like a native select. Options have a check slot, a label and a right-hand detail; disabled options are skipped. |
+| `Select` | Choosing a value whose options carry a status or version ("2.1.284", "not installed"), or anything longer than a handful of plain words | Combobox with `aria-activedescendant`; focus stays on the trigger. Enter, Space, ↑, ↓ or Alt+↓ open; ↑ ↓ Home End PgUp PgDn move without wrapping; type-ahead (500 ms, repeat a letter to cycle); Enter/Space or Tab commit; Esc reverts. Typing while closed changes the value, like a native select. Options have a check slot, a label and a right-hand detail; disabled options are skipped. The trigger and each option carry `data-value`, the way automation reads a native select. |
 | `NativeSelect` | Short lists of plain text in Settings (shell, scrollback, font size, channel) | A real `<select>` with the trigger's look; the OS draws the list, like the right-click menus. |
 | `Menu` | A list of actions (not values) behind a button | `role=menu`, same keys as Select, focus returns to the trigger. Shortcut hints on the right, separators, destructive items in the danger ink (a highlighted destructive item turns its row red). |
-| `Chip` | A compact value: a model, a filter, a scope | Neutral by default; `selected` + `onToggle` makes it a toggle button (`aria-pressed`, brass tint); `onRemove` + `removeLabel` adds a trailing ×. sm 24 / md 28, fully round. |
-| `Segmented` | Picking one of two to five views of the same content ("By file / By turn") | `radiogroup` with one tab stop; arrows move and select, Home/End jump. The selected segment is a raised keycap in a recessed well. |
+| `Chip` | A compact value: a model, a filter, a scope | Neutral by default; `selected` + `onToggle` makes it a toggle button (`aria-pressed`, brass tint); `onRemove` + `removeLabel` adds a trailing ×; `expands` makes it open a panel of choices for its value (`aria-expanded`, a chevron, brass while open); `tone="danger"` marks a risky value; `buttonAttrs` puts a hook class, tooltip and `data-*` on its button. sm 24 / md 28, fully round. |
+| `Segmented` | Picking one of two to five views of the same content ("By file / By turn") | `radiogroup` with one tab stop; arrows move and select, Home/End jump. The selected segment is a raised keycap in a recessed well. An option’s `attrs` puts a hook class, tooltip and `data-*` on its segment. |
 | `Tabs` | Switching between separate views of one surface | `tablist` with automatic activation (arrows select). Horizontal: brass rail under the selected tab. `orientation="vertical"` for a navigation column (Settings): 32 px rows, current row filled with `--row-active-bg` plus a left rail. Pair panels with `TabPanel`. |
 | `Checkbox` | Picking items, and consent | 16 px box, brass when checked, `indeterminate` shows a bar (`aria-checked="mixed"`). The label makes the row ≥ 32 px tall. |
 | `Toggle` | An on/off setting that applies at once — every Settings boolean | `role=switch`, 32 × 18 track. |
-| `RadioGroup` / `Radio` | One of a few choices that need a description each | One tab stop; arrows move and select in every engine. |
+| `RadioGroup` / `Radio` | One of a few choices that need a description each | One tab stop; arrows move and select in every engine. An option’s `attrs` goes on its radio; `Checkbox` and `Radio` take `inputClassName` for a hook on the box itself. |
 | `Badge` | A short status word ("EXACT", "RETIRED") | 18 px, 10 px caps. Tones: neutral, success, warning, danger, info (the `-dim` fill with the tone's ink). |
 | `Counter` | A count on a tab, button or icon | 16 px, tabular digits, `max` shows "99+". Neutral by default; `attention` (brass) only when the count needs you. `label` gives screen readers the meaning. Nothing is smaller than 10 px. |
 
@@ -261,4 +261,8 @@ set per theme in `themes.css` ("Controls"): `--primary-bg`/`-hover`/
 to every line of `src/styles/ui/` and of new stylesheets, and to the added
 lines of older ones: no raw px, raw colours, hand-rolled shadows or easing,
 raw font weights or `outline: none`. The older lines are the baseline and
-migrate with their screens.
+migrate with their screens. A screen that has moved to the control set
+lists its stylesheet in `STRICT_FILES` (scripts/lint-css.mjs), which holds
+every line of it to the rules from then on: so far the task launcher, the
+three-step welcome with its agent doctor, and the New Session creator with
+its branch step.

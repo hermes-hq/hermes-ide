@@ -367,7 +367,7 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   `);
   await bridge.click(".session-creator-actions .session-creator-btn-primary");
 
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   const known = await bridge.clickWhenReady(`
     const item = e2e.all(".project-picker-item").find((el) => el.innerText.includes(${JSON.stringify(basename(repo))}));
     if (!item) return false;
@@ -375,7 +375,7 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
     return true;
   `);
   if (!known) {
-    await setInput(bridge, ".workspace-scan-input", repo);
+    await setInput(bridge, ".session-creator-scan-input", repo);
     await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   }
   await bridge.waitFor("the repo to be added and selected", `
@@ -403,10 +403,10 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.waitFor("the new-branch form", `return !!e2e.first(".branch-selector-field-input");`);
   await setInput(bridge, ".branch-selector-field-input", branch);
   await bridge.waitFor("Create & use to become enabled", `
-    const b = e2e.first(".branch-selector-body .session-creator-actions .session-creator-btn-primary");
+    const b = e2e.first(".branch-selector-body .session-creator-actions .branch-selector-create");
     return !!b && !b.disabled;
   `);
-  await bridge.click(".branch-selector-body .session-creator-actions .session-creator-btn-primary");
+  await bridge.click(".branch-selector-body .session-creator-actions .branch-selector-create");
   await bridge.waitFor(`the wizard to record the new branch "${branch}"`, `
     return e2e.all(".session-creator-branch-selected-label").some((el) => el.innerText.includes(${JSON.stringify(branch)}));
   `);

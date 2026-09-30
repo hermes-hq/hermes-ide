@@ -294,7 +294,8 @@ describe("SessionBranchSelector — New Branch tab (unchanged)", () => {
     );
 
     // Wait for tabs to render, then switch to the New Branch tab.
-    const newTab = await screen.findByRole("button", { name: /New Branch/i });
+    // The two views are a segmented control: one radio per view.
+    const newTab = await screen.findByRole("radio", { name: /New Branch/i });
     fireEvent.click(newTab);
 
     // The submit button must still exist — a click-on-form-field would be

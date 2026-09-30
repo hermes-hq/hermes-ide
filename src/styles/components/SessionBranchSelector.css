@@ -1,420 +1,136 @@
-/* ─── Session Branch Selector ─────────────────────────────────────── */
+/* ─── Session branch selector (the creator's branch step) ─────────────
+ * Layout only: the tabs, fields, select, buttons and badges are controls
+ * from src/components/ui (docs/design-system/06-components.md · Controls).
+ * What stays drawn here is the list of branches, whose rows commit on a
+ * single click.
+ * ──────────────────────────────────────────────────────────────────── */
 
 .branch-selector-body {
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(var(--space-1) * 2.5);
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
 
-.branch-selector-tabs {
-  display: flex;
-  gap: 2px;
-  background: var(--bg-2);
-  border-radius: var(--radius);
-  padding: 2px;
-}
+.branch-selector-bar { display: flex; align-items: center; gap: var(--space-2); }
+.branch-selector-fetch-link { margin-left: auto; }
 
-.branch-selector-tab {
-  flex: 1;
-  padding: 6px 10px;
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  color: var(--text-3);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.branch-selector-tab:hover {
-  color: var(--text-1);
-}
-
-.branch-selector-tab.active {
-  background: var(--bg-1);
-  color: var(--text-0);
-  font-weight: 600;
-}
-
-/* ─── Branch List ─────────────────────────────────────────────────── */
+/* ─── Branch list ──────────────────────────────────────────────────── */
 
 .branch-selector-list {
-  max-height: 220px;
+  max-height: calc(var(--space-1) * 55);
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-md);
 }
 
-.branch-selector-list::-webkit-scrollbar { width: 4px; }
-.branch-selector-list::-webkit-scrollbar-thumb { background: var(--bg-3); }
-
 .branch-selector-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 6px 12px;
+  min-height: var(--control-h-md);
+  padding: var(--space-1) var(--space-3);
   cursor: pointer;
-  transition: background 0.1s;
-  border-bottom: 1px solid var(--border);
-  font-family: var(--font-mono);
+  border-bottom: var(--control-border-width) solid var(--border);
+  font-family: var(--font-code);
   font-size: var(--text-sm);
 }
+.branch-selector-item:last-child { border-bottom: none; }
+.branch-selector-item:hover:not(.branch-selector-item-taken) { background: var(--quiet-hover-bg); }
 
-.branch-selector-item:last-child {
-  border-bottom: none;
+/* Keyboard highlight: the current row's brass rail. */
+.branch-selector-item.branch-selector-item-highlighted { background: var(--quiet-hover-bg); }
+.branch-selector-item.branch-selector-item-highlighted::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--rail-width);
+  background: var(--primary-bg);
 }
 
-.branch-selector-item:hover:not(.branch-selector-item-taken) {
-  background: var(--bg-hover);
-}
-
-.branch-selector-item.branch-selector-item-highlighted {
-  background: var(--bg-hover);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.branch-selector-item.branch-selector-item-taken {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+.branch-selector-item.branch-selector-item-taken { opacity: var(--disabled-opacity); cursor: not-allowed; }
 
 .branch-selector-item-name {
-  color: var(--text-0);
   flex: 1;
+  color: var(--text-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.branch-selector-item.branch-selector-item-remote .branch-selector-item-name { color: var(--text-2); }
 
-/* Hover-only commit hint.  Single-click on a row commits the selection;
- * the chevron telegraphs that the click is the action and prevents the
- * "I selected it but nothing happened" trap that bit users in the old
- * select-then-confirm flow. */
+/* Hover-only commit hint. A single click on a row commits the selection;
+ * the arrow says the click is the action. */
 .branch-selector-item-commit-hint {
-  font-size: var(--text-sm);
-  color: var(--text-3);
   flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-2);
   opacity: 0;
-  transform: translateX(-4px);
-  transition: opacity 0.12s ease, transform 0.12s ease, color 0.12s ease;
+  transform: translateX(calc(-1 * var(--space-1)));
+  transition:
+    opacity var(--dur-quick) var(--ease-out-soft),
+    transform var(--dur-quick) var(--ease-out-soft);
 }
-
 .branch-selector-item:hover:not(.branch-selector-item-taken) .branch-selector-item-commit-hint,
 .branch-selector-item.branch-selector-item-highlighted .branch-selector-item-commit-hint {
   opacity: 1;
   transform: translateX(0);
-  color: var(--accent);
+  color: var(--text-0);
 }
 
-/* Briefly flash the row when single-click commits, so the user gets a
- * visible acknowledgement before the parent collapses the picker and
- * auto-expands the next project. */
+/* A brief flash when a click commits, before the creator folds the picker. */
 @keyframes branch-selector-commit-flash {
-  0%   { background: var(--accent-dim); }
-  100% { background: transparent; }
+  from { background: var(--chip-selected-bg); }
+  to { background: transparent; }
 }
+.branch-selector-item.branch-selector-item-selected { animation: branch-selector-commit-flash 0.35s var(--ease-out-soft); }
 
-.branch-selector-item.branch-selector-item-selected {
-  animation: branch-selector-commit-flash 0.35s ease-out;
-}
+.branch-selector-remote-error { font-size: var(--text-xs); color: var(--warning-ink); }
 
-.branch-selector-item-current {
-  font-size: var(--text-xs);
-  color: var(--accent);
-  flex-shrink: 0;
-}
+/* ─── New branch form ──────────────────────────────────────────────── */
 
-.branch-selector-item.branch-selector-item-remote .branch-selector-item-name {
-  color: var(--text-2);
-}
-
-.branch-selector-item-taken-label {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.branch-selector-item-summary {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  flex-shrink: 0;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ─── New Branch Form ─────────────────────────────────────────────── */
-
-.branch-selector-new-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.branch-selector-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
+.branch-selector-new-form { display: flex; flex-direction: column; gap: var(--space-3); }
+.branch-selector-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .branch-selector-field-label {
   font-size: var(--text-sm);
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.branch-selector-field-input {
-  padding: 6px 10px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  color: var(--text-0);
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.branch-selector-field-input:focus {
-  border-color: var(--accent);
-}
-
-.branch-selector-field-input.invalid {
-  border-color: var(--red);
-}
-
-.branch-selector-field-select {
-  padding: 6px 10px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  color: var(--text-0);
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.branch-selector-field-select:focus {
-  border-color: var(--accent);
-}
-
-.branch-selector-validation-error {
-  font-size: var(--text-xs);
-  color: var(--red);
-  font-family: var(--font-mono);
-}
-
-/* ─── Skip Warning ────────────────────────────────────────────────── */
-
-.branch-selector-skip-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: 8px 12px;
-  background: var(--yellow-dim, rgba(255, 200, 50, 0.08));
-  border: 1px solid var(--yellow, #e8b931);
-  border-radius: var(--radius);
-  font-size: var(--text-sm);
   color: var(--text-2);
-  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
 }
 
-.branch-selector-skip-warning-icon {
-  color: var(--yellow, #e8b931);
-  flex-shrink: 0;
-  font-size: var(--text-base);
-}
-
-/* ─── Loading / Error ─────────────────────────────────────────────── */
+/* ─── Loading, error, empty ────────────────────────────────────────── */
 
 .branch-selector-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
+  padding: var(--space-5);
+  color: var(--text-2);
   font-size: var(--text-md);
 }
 
 .branch-selector-error {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: rgba(255, 80, 80, 0.08);
-  border: 1px solid var(--red);
-  border-radius: var(--radius);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--danger-dim);
+  border: var(--control-border-width) solid var(--danger-border);
+  border-radius: var(--radius-md);
   font-size: var(--text-sm);
-  color: var(--text-2);
-  font-family: var(--font-mono);
-}
-
-.branch-selector-error-retry {
-  align-self: flex-start;
-  padding: 4px 10px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.branch-selector-error-retry:hover {
-  background: var(--bg-hover);
-}
-
-/* ─── Group Headers ───────────────────────────────────────────────── */
-
-.branch-selector-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
-  user-select: none;
-}
-
-/* ─── Remote Branch Prefix ────────────────────────────────────────── */
-
-.branch-selector-remote-prefix {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  margin-right: 1px;
-}
-
-/* ─── Tracking Badge ──────────────────────────────────────────────── */
-
-.branch-selector-tracking-badge {
-  font-size: var(--text-xs);
-  color: var(--accent);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-/* ─── Refresh Button ──────────────────────────────────────────────── */
-
-.branch-selector-refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-
-.branch-selector-refresh-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
   color: var(--text-1);
 }
-
-.branch-selector-refresh-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-@keyframes branch-selector-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.branch-selector-refresh-spinning {
-  display: inline-block;
-  animation: branch-selector-spin 0.8s linear infinite;
-}
-
-.branch-selector-remote-error {
-  font-size: var(--text-xs);
-  color: var(--yellow);
-  font-weight: 400;
-  margin-left: 8px;
-}
-
-.branch-selector-item-remote-badge,
-.branch-selector-item-local-badge {
-  font-size: var(--text-xs);
-  padding: 1px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.branch-selector-item-remote-badge {
-  color: var(--blue);
-  background: color-mix(in srgb, var(--blue) 12%, transparent);
-}
-
-.branch-selector-item-local-badge {
-  color: var(--text-3);
-  background: color-mix(in srgb, var(--text-3) 12%, transparent);
-}
-
-.branch-selector-fetch-link {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  padding: 2px 6px;
-  margin-left: auto;
-}
-
-.branch-selector-fetch-link:hover:not(:disabled) {
-  color: var(--blue);
-}
-
-.branch-selector-fetch-link:disabled {
-  cursor: not-allowed;
-  color: var(--blue);
-}
-
-.branch-selector-fetch-spinner {
-  display: inline-block;
-  width: 11px;
-  height: 11px;
-  border: 2px solid var(--blue);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: branch-selector-spin 0.7s linear infinite;
-  vertical-align: middle;
-  margin-right: 4px;
-}
-
-/* ─── Empty state ─────────────────────────────────────────────────── */
+.branch-selector-error-retry { align-self: flex-start; }
 
 .branch-selector-empty {
-  padding: 16px;
+  padding: var(--space-4);
   text-align: center;
-  color: var(--text-3);
-  font-family: var(--font-mono);
+  color: var(--text-2);
   font-size: var(--text-sm);
 }

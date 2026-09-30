@@ -243,7 +243,8 @@ try {
   assert(!!st.fallback && st.fallback.some((f) => f.field === "where" && f.text.includes("release/gone")), "the warning names the missing base branch");
   assert(/in worktree hermes\/fix-the-release from main/.test(st.preview) && !st.preview.includes("release/gone"), "Hermes will run: from the current branch");
   await openChip(bridge, "where");
-  const baseValue = await bridge.eval(`return e2e.first(".task-launcher-menu .task-launcher-base")?.value ?? null;`);
+  // The control set's Select carries its value in data-value (a native select's .value).
+  const baseValue = await bridge.eval(`const el = e2e.first(".task-launcher-menu .task-launcher-base"); return el ? el.getAttribute("data-value") ?? el.value ?? null : null;`);
   assert(baseValue === "", `the base select shows the current branch and holds it (${JSON.stringify(baseValue)})`);
   await bridge.click('[data-chip="where"]');
   await bridge.waitFor("the where menu to close", `return !e2e.first(".task-launcher-menu");`);

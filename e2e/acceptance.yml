@@ -1219,6 +1219,26 @@ features:
       UI-9:
         text: "With real key presses, Tab in Settings moves focus onto a control, :focus-visible matches and the control draws the solid ring"
         scenarios: ["UI-focus-ring.mjs@linux,win32"]
+      # The launch surfaces (UI-A): the three-step welcome, the ⌘N task
+      # launcher and the New Session creator with its branch step, each in
+      # Frosted Dark and Frosted Light. The creator's tmux step needs an SSH
+      # server and is not driven (its rows are the folder list's Radio).
+      UI-10:
+        text: "Every button, field, select, checkbox and radio of the welcome, the task launcher and the New Session creator comes from the control set, and none is an OS-drawn select"
+        scenarios: [UI-launch-surfaces.mjs]
+      UI-11:
+        text: "On those surfaces controls are 28, 32 or 36 px tall (choice rows at least 32), none sticks out of its surface, and each surface has exactly one primary, brass button"
+        scenarios: [UI-launch-surfaces.mjs]
+      UI-12:
+        # Locally on the copied :focus-visible rules; with real key presses on
+        # the Linux and Windows runners.
+        text: "Every control of those surfaces draws the focus ring, and a real Tab from a field of each surface lands on a control that matches :focus-visible and draws it"
+        scenarios: [UI-launch-surfaces.mjs]
+      UI-13:
+        # Negative control: the same scenario on a build of the branch before
+        # this fix fails exactly these checks.
+        text: "On the creator's branch step, a name typed in the New branch form is what Continue uses (shown as the new branch on the confirm step), a name that cannot be created holds Continue back, and the field keeps the focus while its error shows; a plain shell's chosen folder stays chosen when picked again"
+        scenarios: [UI-launch-surfaces.mjs]
   CAP:
     name: "Models, effort and accounts for every agent (2.0 launch contract)"
     # The launcher's own chips (model, effort, account, presets row) are

@@ -90,4 +90,17 @@ describe("baseline: old lines are allowed, new lines and new files are strict", 
       "src/styles/ui/kit.css:2:color-no-hex",
     ]);
   });
+
+  it("holds the stylesheet of a screen moved to the control set to every line, even untouched", async () => {
+    // Old.css already had its violations at the base commit; as a migrated screen's sheet it is strict.
+    run("checkout", "-q", "--", ".");
+    run("clean", "-qfd");
+    const loose = await lintChangedCss({ cwd: repo, base: "main", configFile: CONFIG, strictFiles: [] });
+    expect(loose.problems).toEqual([]);
+    const strict = await lintChangedCss({ cwd: repo, base: "main", configFile: CONFIG, strictFiles: ["src/styles/components/Old.css"] });
+    expect(strict.problems.map((p) => `${p.file}:${p.line}:${p.rule}`).sort()).toEqual([
+      "src/styles/components/Old.css:2:unit-disallowed-list",
+      "src/styles/components/Old.css:3:color-no-hex",
+    ]);
+  });
 });

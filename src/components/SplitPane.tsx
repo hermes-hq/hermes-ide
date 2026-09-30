@@ -25,6 +25,7 @@ import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from
 import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { agentDisplayName } from "../catalog/agentCatalog";
+import { Button } from "./ui/Button";
 
 // The agent view (and everything it pulls in: markdown, syntax
 // highlighting, tool cards) loads on demand, the first time an
@@ -449,15 +450,11 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
               This cannot be undone.
             </div>
             <div className="split-pane-mode-confirm-actions">
-              <button
-                className="session-creator-btn-secondary"
-                onClick={() => setPendingModeConvert(null)}
-                disabled={converting}
-              >
+              <Button onClick={() => setPendingModeConvert(null)} disabled={converting}>
                 Cancel
-              </button>
-              <button
-                className="session-creator-btn-primary"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={async () => {
                   if (converting || !pendingModeConvert) return;
                   setConverting(true);
@@ -471,7 +468,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
                 disabled={converting}
               >
                 {converting ? "Converting..." : "Convert"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -96,8 +96,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     return e2e.click(e2e.must(cards[cards.length - 1], "plain shell card"));
   `);
   await clickPrimary("agent");
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`, { timeoutMs: 20_000 });
-  await setInput(bridge, ".workspace-scan-input", folder);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`, { timeoutMs: 20_000 });
+  await setInput(bridge, ".session-creator-scan-input", folder);
   await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   await bridge.waitFor("the folder to be selected", `
     return e2e.all(".project-picker-item.project-picker-item-attached").some((el) => el.innerText.includes("plain-folder"));

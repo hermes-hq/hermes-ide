@@ -41,12 +41,15 @@ import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api
 import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
 import { isGitRepo as checkIsGitRepo } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
-import { SessionBranchSelector } from "./SessionBranchSelector";
+import { SessionBranchSelector, type BranchDraft } from "./SessionBranchSelector";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { randomTaskSlug } from "../state/isolation";
 import { SESSION_COLORS } from "./SessionList";
 import { useI18n } from "../i18n/I18nProvider";
 import { rememberUserLabel } from "../attention/userLabels";
+import { Badge, Button, Checkbox, Chip, CloseButton, IconButton, Input, Radio } from "./ui";
+import { cx } from "./ui/Button";
+import { CloseGlyph } from "./ui/icons";
 
 // ─── SSH Connection History ──────────────────────────────────────────
 
@@ -226,6 +229,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // The selection the git check last answered for (see gitCheckPending).
   const [gitCheckedFor, setGitCheckedFor] = useState<readonly string[] | null>(null);
   const [branchSelections, setBranchSelections] = useState<Record<string, BranchSelection>>({});
+  // A name typed in the open "New branch" form; Continue commits it.
+  const [branchDraft, setBranchDraft] = useState<(BranchDraft & { projectId: string }) | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   // Honest isolation: one slug per task, so every project of this task
   // defaults to the same hermes/<slug> branch.
@@ -566,8 +571,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
 
   const toggleProject = (id: string) => {
     setSelectedProjectIds((prev) => {
+      // A shell's folder is a radio: picking it again (row, box or Space)
+      // keeps it; Skip is the way to have none.
+      if (isShellOnly) return prev.length === 1 && prev[0] === id ? prev : [id];
       if (prev.includes(id)) return prev.filter((r) => r !== id);
-      if (isShellOnly) return [id];
       return [...prev, id];
     });
   };
@@ -799,6 +806,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     goNext();
   };
 
+  const continueFromBranchStep = () => {
+    const draft = branchDraft;
+    if (draft?.ok) {
+      setBranchSelections((prev) => ({ ...prev, [draft.projectId]: { branch: draft.name, createNew: true } }));
+    }
+    goNext();
+  };
+
   const handleBranchSkipped = useCallback(() => {
     setBranchSelections({});
     goNext();
@@ -868,7 +883,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
         <div className="session-creator-header">
           <span className="session-creator-title">{t("session.new")}</span>
           <span className="session-creator-step">{t("session.step", { current: currentStepNumber, total: totalSteps })}</span>
-          <button className="close-btn settings-close" onClick={onClose} title={t("common.close")} aria-label={t("common.close")}>x</button>
+          <CloseButton className="session-creator-close" label={t("common.close")} onClick={onClose} />
         </div>
 
         {/* Step indicator */}
@@ -891,8 +906,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   <span className="session-creator-ssh-history-label">{t("session.saved")}</span>
                   <div className="session-creator-ssh-history-list">
                     {sshSavedHosts.map((h) => (
-                      <button
+                      <Button
                         key={h.id}
+                        size="sm"
                         className="session-creator-ssh-history-item"
                         onClick={() => {
                           setSshHost(h.host);
@@ -905,10 +921,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                         <span className="session-creator-ssh-history-host">
                           {h.label}
                         </span>
-                        <span className="session-creator-ssh-history-port" style={{ opacity: 0.6 }}>
+                        <span className="session-creator-ssh-history-port">
                           {h.user ? `${h.user}@` : ""}{h.host}{h.port !== 22 ? `:${h.port}` : ""}
                         </span>
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 </div>
@@ -918,8 +934,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   <span className="session-creator-ssh-history-label">{t("session.recent")}</span>
                   <div className="session-creator-ssh-history-list">
                     {sshHistory.map((h, i) => (
-                      <button
+                      <Button
                         key={`${h.host}-${h.user}-${h.port}-${i}`}
+                        size="sm"
                         className="session-creator-ssh-history-item"
                         onClick={() => {
                           setSshHost(h.host);
@@ -933,14 +950,15 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                         {h.port !== 22 && (
                           <span className="session-creator-ssh-history-port">:{h.port}</span>
                         )}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 </div>
               )}
-              <input
+              <Input
                 ref={searchRef}
-                className="command-palette-input"
+                code
+                aria-label={t("session.sshHostPlaceholder")}
                 placeholder={t("session.sshHostPlaceholder")}
                 value={sshHost}
                 onChange={(e) => setSshHost(e.target.value)}
@@ -948,64 +966,59 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 autoFocus
               />
               <div className="session-creator-ssh-row">
-                <input
-                  className="command-palette-input session-creator-ssh-user"
+                <Input
+                  className="session-creator-ssh-user"
+                  aria-label={t("session.sshUserPlaceholder")}
                   placeholder={t("session.sshUserPlaceholder")}
                   value={sshUser}
                   onChange={(e) => setSshUser(e.target.value)}
                   autoComplete="off"
                 />
-                <input
-                  className="command-palette-input session-creator-ssh-port"
+                <Input
+                  className="session-creator-ssh-port"
+                  aria-label={t("session.sshPortPlaceholder")}
                   placeholder={t("session.sshPortPlaceholder")}
                   value={sshPort}
                   onChange={(e) => setSshPort(e.target.value.replace(/\D/g, ""))}
                   autoComplete="off"
                 />
               </div>
-              <input
-                className="command-palette-input"
+              <Input
+                code
+                aria-label={t("session.sshIdentityFilePlaceholder")}
                 placeholder={t("session.sshIdentityFilePlaceholder")}
                 value={sshIdentityFile}
                 onChange={(e) => setSshIdentityFile(e.target.value)}
                 autoComplete="off"
               />
-              <input
-                className="command-palette-input"
+              <Input
+                code
+                aria-label={t("session.sshJumpHostPlaceholder")}
                 placeholder={t("session.sshJumpHostPlaceholder")}
                 value={sshJumpHost}
                 onChange={(e) => setSshJumpHost(e.target.value)}
                 autoComplete="off"
               />
               <span className="settings-hint-inline">{t("session.sshConfigHint")}</span>
-              <label className="session-creator-save-host-label">
-                <input
-                  type="checkbox"
-                  checked={saveAsHost}
-                  onChange={(e) => setSaveAsHost(e.target.checked)}
-                />
-                Save this host
+              <div className="session-creator-save-host">
+                <Checkbox className="session-creator-save-host-label" checked={saveAsHost} onChange={setSaveAsHost} label="Save this host" />
                 {saveAsHost && (
-                  <input
+                  <Input
                     className="session-creator-save-host-name"
+                    aria-label={t("session.sshLabelExample")}
                     placeholder={t("session.sshLabelExample")}
                     value={saveHostLabel}
                     onChange={(e) => setSaveHostLabel(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
                     autoComplete="off"
                   />
                 )}
-              </label>
+              </div>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>{t("common.back")}</button>
-              <button
-                className="session-creator-btn-primary"
-                onClick={goNext}
-                disabled={!sshHost.trim()}
-              >
+              <Button className="session-creator-btn-secondary" onClick={goBack}>{t("common.back")}</Button>
+              <Button variant="primary" className="session-creator-btn-primary" onClick={goNext} disabled={!sshHost.trim()}>
                 {t("common.next")}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -1015,10 +1028,11 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           <div className="session-creator-body">
             <div className="session-creator-section-title">{folderSectionTitle}</div>
             <div className="session-creator-subtitle">{folderSubtitle}</div>
-            <input
+            <Input
               ref={searchRef}
-              className="command-palette-input"
-                placeholder={t("session.filterFolders")}
+              className="session-creator-filter"
+              aria-label={t("session.filterFolders")}
+              placeholder={t("session.filterFolders")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               autoComplete="off"
@@ -1037,35 +1051,23 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   {t("session.noFoldersMatch", { query })}
                 </div>
               )}
-              {filtered.map((project, idx) => (
-                <div
-                  key={project.id}
-                  className={`project-picker-item ${selectedProjectIds.includes(project.id) ? "project-picker-item-attached" : ""} ${highlightedIndex === idx ? "session-creator-highlighted" : ""} ${"path_exists" in project && !project.path_exists ? "project-picker-item-missing" : ""}`}
-                  onClick={() => {
-                    if ("path_exists" in project && !project.path_exists) return;
-                    toggleProject(project.id);
-                  }}
-                >
-                  <span className="project-picker-check">
-                    {"path_exists" in project && !project.path_exists
-                      ? "(!)"
-                      : isShellOnly
-                        ? (selectedProjectIds.includes(project.id) ? "(*)" : "( )")
-                        : (selectedProjectIds.includes(project.id) ? "[x]" : "[ ]")}
-                  </span>
-                  <div className="project-picker-info">
-                    <div className="project-picker-name">
+              {filtered.map((project, idx) => {
+                const missing = "path_exists" in project && !project.path_exists;
+                const attached = selectedProjectIds.includes(project.id);
+                const info = (
+                  <span className="project-picker-info">
+                    <span className="project-picker-name">
                       {project.name}
                       {!isShellOnly && selectedProjectIds[0] === project.id && selectedProjectIds.length > 0 && (
-                        <span className="session-creator-cwd-badge">CWD</span>
+                        <Badge tone="info" className="session-creator-cwd-badge">CWD</Badge>
                       )}
-                    </div>
-                    <div className="project-picker-path">{shortPath(project.path)}</div>
-                    {"path_exists" in project && !project.path_exists && (
-                      <div className="project-picker-missing-label">{t("session.folderNotFound")}</div>
+                    </span>
+                    <span className="project-picker-path">{shortPath(project.path)}</span>
+                    {missing && (
+                      <span className="project-picker-missing-label">{t("session.folderNotFound")}</span>
                     )}
                     {(project.languages.length > 0 || project.frameworks.length > 0) && (
-                      <div className="project-picker-tags">
+                      <span className="project-picker-tags">
                         {project.languages.map((lang) => (
                           <span
                             key={lang}
@@ -1081,22 +1083,51 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                         {project.frameworks.map((fw) => (
                           <span key={fw} className="workspace-fw-tag">{fw}</span>
                         ))}
-                      </div>
+                      </span>
                     )}
-                  </div>
-                  <button
-                    className="session-creator-remove-btn"
-                    onClick={(e) => { e.stopPropagation(); removeProject(project.id); }}
-                    title="Remove folder"
+                  </span>
+                );
+                // The list is driven from the filter field (arrows, Space), so its
+                // boxes are not tab stops; a click anywhere on the row toggles it.
+                const pick = isShellOnly ? (
+                  <Radio className="session-creator-pick" tabIndex={-1} name="session-creator-folder" checked={attached} onChange={() => toggleProject(project.id)} label={info} />
+                ) : (
+                  <Checkbox className="session-creator-pick" tabIndex={-1} checked={attached} onChange={() => toggleProject(project.id)} label={info} />
+                );
+                return (
+                  <div
+                    key={project.id}
+                    className={cx("project-picker-item", attached && "project-picker-item-attached", highlightedIndex === idx && "session-creator-highlighted", missing && "project-picker-item-missing")}
+                    onClick={(e) => {
+                      // The box's own label already toggles it.
+                      if (missing || (e.target as HTMLElement).closest(".h-choice")) return;
+                      toggleProject(project.id);
+                    }}
                   >
-                    x
-                  </button>
-                </div>
-              ))}
+                    {missing ? (
+                      <>
+                        <span className="project-picker-check" aria-hidden="true">(!)</span>
+                        {info}
+                      </>
+                    ) : (
+                      pick
+                    )}
+                    <IconButton
+                      size="sm"
+                      className="session-creator-remove-btn"
+                      label={t("session.removeFolder")}
+                      icon={<CloseGlyph />}
+                      onClick={(e) => { e.stopPropagation(); removeProject(project.id); }}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <div className="project-picker-footer">
-              <input
-                className="workspace-scan-input"
+              <Input
+                code
+                className="session-creator-scan-input"
+                aria-label={t("session.pathOrBrowse")}
                 placeholder={t("session.pathOrBrowse")}
                 value={scanPath}
                 onChange={(e) => setScanPath(e.target.value)}
@@ -1108,20 +1139,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 autoCapitalize="off"
                 spellCheck={false}
               />
-              <button
-                className="workspace-scan-btn"
-                onClick={handleBrowse}
-                disabled={scanning}
-              >
-                {scanning ? "..." : t("common.browse")}
-              </button>
-              <button
-                className="workspace-scan-btn"
-                onClick={() => scanNewPath(scanPath)}
-                disabled={scanning || !scanPath.trim()}
-              >
+              <Button className="session-creator-scan-btn" onClick={handleBrowse} disabled={scanning} loading={scanning}>
+                {t("common.browse")}
+              </Button>
+              <Button className="session-creator-scan-btn" onClick={() => scanNewPath(scanPath)} disabled={scanning || !scanPath.trim()}>
                 {t("common.scan")}
-              </button>
+              </Button>
             </div>
             <div className="session-creator-hints">
               <span><kbd>&uarr;&darr;</kbd> {t("common.navigate")}</span>
@@ -1130,21 +1153,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>
+              <Button className="session-creator-btn-secondary" onClick={goBack}>
                 {t("common.back")}
-              </button>
-              <button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); goNext(); }}>
+              </Button>
+              <Button className="session-creator-btn-secondary" onClick={() => { setSelectedProjectIds([]); goNext(); }}>
                 {t("common.skip")}
-              </button>
-              <button
-                className="session-creator-btn-primary"
-                onClick={goNext}
-                disabled={gitCheckPending}
-              >
+              </Button>
+              <Button variant="primary" className="session-creator-btn-primary" onClick={goNext} disabled={gitCheckPending}>
                 {gitCheckPending ? t("common.checking") : isShellOnly
                   ? t("common.next")
                   : t("common.selectedCount", { count: selectedProjectIds.length })}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -1206,7 +1225,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                               [projectId]: { branch: name, createNew: isNew, fromRemote },
                             }));
                           }}
+                          onDraftChange={(draft) => {
+                            setBranchDraft((prev) => (draft ? { ...draft, projectId } : prev?.projectId === projectId ? null : prev));
+                          }}
                           onSkip={() => {
+                            // "Use current branch" wins over a name left in the form.
+                            setBranchDraft(null);
                             setBranchSelections((prev) => {
                               const next = { ...prev };
                               delete next[projectId];
@@ -1221,18 +1245,20 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </div>
             </div>
             <div className="session-creator-footer-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>
+              <Button className="session-creator-btn-secondary" onClick={goBack}>
                 {t("common.back")}
-              </button>
-              <button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
+              </Button>
+              <Button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
                 {t("session.continueWithoutIsolation")}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 className="session-creator-btn-primary"
-                onClick={goNext}
+                onClick={continueFromBranchStep}
+                disabled={!!branchDraft && !branchDraft.ok}
               >
                 {t("common.continue")}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -1251,44 +1277,53 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
             {!tmuxLoading && !tmuxError && tmuxAvailable && (
               <>
-              <div className="session-creator-list">
-                {tmuxSessions.map((ts) => (
-                  <div
-                    key={ts.name}
-                    className={`project-picker-item ${selectedTmuxSession === ts.name ? "project-picker-item-attached" : ""}`}
-                    onClick={() => { setSelectedTmuxSession(ts.name); setShowNewTmuxInput(false); }}
-                  >
-                    <span className="project-picker-check">
-                      {selectedTmuxSession === ts.name ? "[x]" : "[ ]"}
-                    </span>
-                    <div className="project-picker-info">
-                      <div className="project-picker-name">{ts.name}</div>
-                      <div className="project-picker-path">
-                        {ts.windows} window{ts.windows !== 1 ? "s" : ""}
-                        {ts.attached ? " (attached)" : ""}
-                      </div>
+              <div className="session-creator-list" role="radiogroup" aria-label={t("session.tmuxSessions")}>
+                {tmuxSessions.map((ts) => {
+                  const pickTmux = () => { setSelectedTmuxSession(ts.name); setShowNewTmuxInput(false); };
+                  return (
+                    <div
+                      key={ts.name}
+                      className={cx("project-picker-item", selectedTmuxSession === ts.name && "project-picker-item-attached")}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest(".h-choice")) return;
+                        pickTmux();
+                      }}
+                    >
+                      <Radio
+                        className="session-creator-pick"
+                        name="session-creator-tmux"
+                        checked={selectedTmuxSession === ts.name}
+                        onChange={pickTmux}
+                        label={
+                          <span className="project-picker-info">
+                            <span className="project-picker-name">{ts.name}</span>
+                            <span className="project-picker-path">
+                              {ts.windows} window{ts.windows !== 1 ? "s" : ""}
+                              {ts.attached ? " (attached)" : ""}
+                            </span>
+                          </span>
+                        }
+                      />
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {!showNewTmuxInput ? (
-                  <div
-                    className="project-picker-item"
+                  <Button
+                    variant="quiet"
+                    className="session-creator-tmux-new"
+                    title={t("session.newTmuxSessionHint")}
                     onClick={() => { setShowNewTmuxInput(true); setNewTmuxSessionName(""); }}
                   >
-                    <span className="project-picker-check" style={{ opacity: 0.5 }}>+</span>
-                    <div className="project-picker-info">
-                      <div className="project-picker-name">{t("session.newTmuxSession")}</div>
-                      <div className="project-picker-path">{t("session.newTmuxSessionHint")}</div>
-                    </div>
-                  </div>
+                    {t("session.newTmuxSession")}
+                  </Button>
                 ) : (
                   <div className="project-picker-item project-picker-item-attached">
-                    <span className="project-picker-check">[x]</span>
-                    <div className="project-picker-info" style={{ width: "100%" }}>
-                      <input
-                        className="command-palette-input"
+                    <span className="project-picker-info">
+                      <Input
+                        className="session-creator-tmux-name"
+                        aria-label={t("session.newTmuxSession")}
                         autoFocus
-                        placeholder="Session name..."
+                        placeholder={t("session.tmuxNamePlaceholder")}
                         value={newTmuxSessionName}
                         onChange={(e) => {
                           setNewTmuxSessionName(e.target.value);
@@ -1316,7 +1351,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                         autoCorrect="off"
                         spellCheck={false}
                       />
-                    </div>
+                    </span>
                   </div>
                 )}
               </div>
@@ -1326,16 +1361,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </>
             )}
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
-              </button>
-              <button
-                className="session-creator-btn-primary"
-                onClick={goNext}
-                disabled={tmuxLoading || !selectedTmuxSession}
-              >
-                {tmuxLoading ? "Discovering..." : "Next"}
-              </button>
+              <Button className="session-creator-btn-secondary" onClick={goBack}>
+                {t("common.back")}
+              </Button>
+              <Button variant="primary" className="session-creator-btn-primary" onClick={goNext} disabled={tmuxLoading || !selectedTmuxSession}>
+                {tmuxLoading ? t("common.checking") : t("common.next")}
+              </Button>
             </div>
           </div>
         )}
@@ -1351,14 +1382,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 return (
                   <button
                     key={p.id}
+                    type="button"
                     data-agent-id={p.id}
+                    aria-pressed={aiProvider === p.id}
                     className={`session-creator-provider-card ${aiProvider === p.id ? "selected" : ""} ${highlightedProviderIndex === providerIdx ? "selected" : ""} ${availabilityLoaded && !isAvailable ? "session-creator-provider-unavailable" : ""}`}
                     onClick={() => { chooseAiProvider(p.id); setHighlightedProviderIndex(providerIdx); if (p.id !== "claude") setSelectedChannels([]); }}
                   >
                     <span className="session-creator-provider-name">
                       {p.name}
                       {availabilityLoaded && !isAvailable && (
-                        <span className="session-creator-provider-status-badge">{t("session.notDetected")}</span>
+                        <Badge tone="warning" className="session-creator-provider-status-badge">{t("session.notDetected")}</Badge>
                       )}
                     </span>
                     <span className="session-creator-provider-desc">{p.description}</span>
@@ -1375,7 +1408,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               })}
               {customAgentEntry && (
                 <button
+                  type="button"
                   data-agent-id={customAgentEntry.id}
+                  aria-pressed={aiProvider === customAgentEntry.id}
                   className={`session-creator-provider-card ${aiProvider === customAgentEntry.id ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.indexOf(customAgentEntry.id) ? "selected" : ""}`}
                   onClick={() => {
                     chooseAiProvider(customAgentEntry.id);
@@ -1390,6 +1425,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </button>
               )}
               <button
+                type="button"
+                aria-pressed={aiProvider === null}
                 className={`session-creator-provider-card ${aiProvider === null ? "selected" : ""} ${highlightedProviderIndex === enabledProviders.length - 1 ? "selected" : ""}`}
                 onClick={() => { chooseAiProvider(null); setAutoApprove(false); setSelectedChannels([]); setHighlightedProviderIndex(enabledProviders.length - 1); }}
               >
@@ -1415,9 +1452,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <div className="session-creator-custom-agent">
                 <div className="session-creator-custom-suffix">
                   <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-name">{t("session.customAgentName")}</label>
-                  <input
+                  <Input
                     id="session-creator-custom-agent-name"
-                    type="text"
                     className="session-creator-custom-suffix-input"
                     value={customAgentName}
                     onChange={(e) => setCustomAgentName(e.target.value)}
@@ -1429,9 +1465,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </div>
                 <div className="session-creator-custom-suffix">
                   <label className="session-creator-custom-suffix-label" htmlFor="session-creator-custom-agent-command">{t("session.customAgentCommand")}</label>
-                  <input
+                  <Input
                     id="session-creator-custom-agent-command"
-                    type="text"
+                    code
                     className="session-creator-custom-suffix-input"
                     value={customAgentCommand}
                     onChange={(e) => setCustomAgentCommand(e.target.value)}
@@ -1448,29 +1484,33 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               </div>
             )}
             {hasAgentView(aiProvider) && (
-              <label className="session-creator-agent-view">
-                <input
-                  type="checkbox"
-                  checked={mode === "agent"}
-                  onChange={(e) => setMode(e.target.checked ? "agent" : "terminal")}
-                  onKeyDown={(e) => e.stopPropagation()}
-                />
-                <span className="session-creator-agent-view-text">
-                  <span className="session-creator-agent-view-label">{t("session.agentView")}</span>
-                  <span className="session-creator-agent-view-hint">{t("session.agentViewHint")}</span>
-                </span>
-              </label>
+              <Checkbox
+                className="session-creator-agent-view"
+                checked={mode === "agent"}
+                onChange={(on) => setMode(on ? "agent" : "terminal")}
+                onKeyDown={(e) => e.stopPropagation()}
+                label={<span className="session-creator-agent-view-label">{t("session.agentView")}</span>}
+                description={<span className="session-creator-agent-view-hint">{t("session.agentViewHint")}</span>}
+              />
             )}
             {aiProvider && aiProvider !== CUSTOM_AGENT_ID && mode === "terminal" && (
               <div className="session-creator-permission-mode">
                 <div className="session-creator-permission-mode-label">{t("session.approvalFlow")}</div>
-                <div className="session-creator-permission-mode-pills">
+                <div className="session-creator-permission-mode-pills" role="group" aria-label={t("session.approvalFlow")}>
                   {getAvailableModes(aiProvider).map((m) => (
-                    <button
+                    <Chip
                       key={m}
-                      type="button"
-                      className={`session-creator-permission-pill${permissionMode === m ? " session-creator-permission-pill-active" : ""}${m === "bypassPermissions" ? " session-creator-permission-pill-danger" : ""}`}
-                      onClick={() => {
+                      selected={permissionMode === m}
+                      tone={m === "bypassPermissions" ? "danger" : "neutral"}
+                      buttonAttrs={{
+                        className: cx(
+                          "session-creator-permission-pill",
+                          permissionMode === m && "session-creator-permission-pill-active",
+                          m === "bypassPermissions" && "session-creator-permission-pill-danger",
+                        ),
+                        "data-mode": m,
+                      }}
+                      onToggle={() => {
                         userPickedModeRef.current = true;
                         setPermissionMode(m);
                         setAutoApprove(m === "bypassPermissions");
@@ -1480,7 +1520,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       {safetyDefaultOn && m === safetyDefaultMode(aiProvider) && (
                         <span className="session-creator-permission-pill-default">{t("safety.hermesDefault")}</span>
                       )}
-                    </button>
+                    </Chip>
                   ))}
                 </div>
                 <div className="session-creator-permission-mode-info">
@@ -1498,9 +1538,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {aiProvider && mode === "terminal" && (
               <div className="session-creator-custom-suffix">
                 <div className="session-creator-custom-suffix-label">{t("session.prefixCommand")}</div>
-                <input
-                  type="text"
+                <Input
+                  code
                   className="session-creator-custom-suffix-input"
+                  aria-label={t("session.prefixCommand")}
                   value={customPrefix}
                   onChange={(e) => setCustomPrefix(e.target.value)}
                   onKeyDown={(e) => e.stopPropagation()}
@@ -1519,15 +1560,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     aria-label="Prefix examples"
                   >
                     {PREFIX_EXAMPLES[PLATFORM].map((ex) => (
-                      <button
+                      <Chip
                         key={ex.value}
-                        type="button"
-                        className="session-creator-prefix-chip"
-                        title={ex.hint}
-                        onClick={() => setCustomPrefix(ex.value)}
+                        selected={customPrefix.trim() === ex.value}
+                        buttonAttrs={{ className: "session-creator-prefix-chip", title: ex.hint }}
+                        onToggle={() => setCustomPrefix(ex.value)}
                       >
                         {ex.label}
-                      </button>
+                      </Chip>
                     ))}
                   </div>
                 )}
@@ -1536,9 +1576,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {aiProvider && mode === "terminal" && (
               <div className="session-creator-custom-suffix">
                 <div className="session-creator-custom-suffix-label">{t("session.customFlags")}</div>
-                <input
-                  type="text"
+                <Input
+                  code
                   className="session-creator-custom-suffix-input"
+                  aria-label={t("session.customFlags")}
                   value={customSuffix}
                   onChange={(e) => setCustomSuffix(e.target.value)}
                   onKeyDown={(e) => e.stopPropagation()}
@@ -1568,21 +1609,24 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </div>
                 <div className="session-creator-channels-list">
                   {CLAUDE_CHANNELS.map((ch) => (
-                    <label key={ch.id} className="session-creator-channel-item">
-                      <input
-                        type="checkbox"
-                        checked={selectedChannels.includes(ch.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedChannels((prev) => [...prev, ch.id]);
-                          } else {
-                            setSelectedChannels((prev) => prev.filter((c) => c !== ch.id));
-                          }
-                        }}
-                      />
-                      <span className="session-creator-channel-icon">{ch.icon}</span>
-                      <span className="session-creator-channel-name">{ch.label}</span>
-                    </label>
+                    <Checkbox
+                      key={ch.id}
+                      className="session-creator-channel-item"
+                      checked={selectedChannels.includes(ch.id)}
+                      onChange={(on) => {
+                        if (on) {
+                          setSelectedChannels((prev) => [...prev, ch.id]);
+                        } else {
+                          setSelectedChannels((prev) => prev.filter((c) => c !== ch.id));
+                        }
+                      }}
+                      label={
+                        <>
+                          <span className="session-creator-channel-icon" aria-hidden="true">{ch.icon}</span>{" "}
+                          <span className="session-creator-channel-name">{ch.label}</span>
+                        </>
+                      }
+                    />
                   ))}
                 </div>
               </div>
@@ -1593,16 +1637,16 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
-              <button
-                type="button"
+              <Button
+                variant="quiet"
                 className="session-creator-ssh-link"
                 onClick={() => { beforeSshRef.current = { mode, aiProvider }; setMode("ssh"); setStep("ssh"); }}
               >
                 {t("session.connectSsh")}
-              </button>
-              <button className="session-creator-btn-primary" onClick={goNext} disabled={customCommandMissing}>
+              </Button>
+              <Button variant="primary" className="session-creator-btn-primary" onClick={goNext} disabled={customCommandMissing}>
                 {t("common.next")}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -1678,9 +1722,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 </>
               )}
             </div>
-            <input
+            <Input
               ref={labelRef}
-              className="command-palette-input"
+              className="session-creator-name"
+              aria-label={t("session.namePlaceholder")}
               placeholder={t("session.namePlaceholder")}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
@@ -1692,8 +1737,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               autoCapitalize="off"
               spellCheck={false}
             />
-            <input
-              className="command-palette-input"
+            <Input
+              className="session-creator-description"
+              aria-label={t("session.descriptionPlaceholder")}
               placeholder={t("session.descriptionPlaceholder")}
               value={description}
               maxLength={120}
@@ -1710,38 +1756,44 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {/* Inline project assignment */}
             <div className="session-creator-project-picker">
               <span className="session-creator-project-picker-label">{t("session.project")}</span>
-              <div className="session-creator-project-chips">
-                <button
-                  className={`session-creator-project-chip ${selectedGroup === null ? "selected" : ""}`}
-                  onClick={() => setSelectedGroup(null)}
+              <div className="session-creator-project-chips" role="group" aria-label={t("session.project")}>
+                <Chip
+                  selected={selectedGroup === null}
+                  buttonAttrs={{ className: cx("session-creator-project-chip", selectedGroup === null && "selected") }}
+                  onToggle={() => setSelectedGroup(null)}
                 >
                   {t("common.none")}
-                </button>
+                </Chip>
                 {existingGroups.map((group) => (
-                  <button
+                  <Chip
                     key={group}
-                    className={`session-creator-project-chip ${selectedGroup === group ? "selected" : ""}`}
-                    onClick={() => { setSelectedGroup(group); if (groupColors[group]) setSelectedColor(groupColors[group]); }}
+                    selected={selectedGroup === group}
+                    buttonAttrs={{ className: cx("session-creator-project-chip", selectedGroup === group && "selected") }}
+                    onToggle={() => { setSelectedGroup(group); if (groupColors[group]) setSelectedColor(groupColors[group]); }}
                   >
                     {groupColors[group] && (
                       <span className="session-creator-project-chip-dot" style={{ background: groupColors[group] }} />
                     )}
-                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" width="11" height="11">
+                    <svg className="session-creator-project-chip-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M2 5C2 3.9 2.9 3 4 3H7L9 5H14C15.1 5 16 5.9 16 7V13C16 14.1 15.1 15 14 15H4C2.9 15 2 14.1 2 13V5Z" />
                     </svg>
                     {group}
-                  </button>
+                  </Chip>
                 ))}
                 {!showNewProjectInput ? (
-                  <button
-                    className="session-creator-project-chip session-creator-project-chip-new"
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    className="session-creator-project-chip-new"
                     onClick={() => { setShowNewProjectInput(true); setNewProjectName(""); }}
                   >
                     {t("session.newProject")}
-                  </button>
+                  </Button>
                 ) : (
-                  <input
+                  <Input
+                    size="sm"
                     className="session-creator-project-chip-input"
+                    aria-label={t("session.projectName")}
                     autoFocus
                     placeholder={t("session.projectName")}
                     value={newProjectName}
@@ -1784,20 +1836,26 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             {/* Color picker */}
             <div className="session-creator-color-picker">
               <span className="session-creator-color-picker-label">{t("session.color")}</span>
-              <div className="session-creator-color-swatches">
+              <div className="session-creator-color-swatches" role="group" aria-label={t("session.color")}>
                 <button
+                  type="button"
                   className={`session-creator-color-swatch session-creator-color-swatch-none ${selectedColor === "" ? "selected" : ""}`}
+                  aria-pressed={selectedColor === ""}
+                  aria-label={t("session.noColor")}
                   onClick={() => setSelectedColor("")}
-                  title="No color"
+                  title={t("session.noColor")}
                 >
-                  <svg viewBox="0 0 16 16" width="10" height="10" stroke="currentColor" strokeWidth="2" fill="none">
+                  <svg viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" fill="none" aria-hidden="true">
                     <line x1="2" y1="2" x2="14" y2="14" />
                   </svg>
                 </button>
                 {SESSION_COLORS.map((c) => (
                   <button
                     key={c}
+                    type="button"
                     className={`session-creator-color-swatch ${selectedColor === c ? "selected" : ""}`}
+                    aria-pressed={selectedColor === c}
+                    aria-label={c}
                     style={{ background: c }}
                     onClick={() => setSelectedColor(c)}
                     title={c}
@@ -1811,16 +1869,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <span><kbd>Esc</kbd> {t("session.closeHint")}</span>
             </div>
             <div className="session-creator-actions">
-              <button className="session-creator-btn-secondary" onClick={goBack}>
+              <Button className="session-creator-btn-secondary" onClick={goBack}>
                 {t("common.back")}
-              </button>
-              <button
-                className="session-creator-btn-primary"
-                onClick={handleConfirm}
-                disabled={creating}
-              >
+              </Button>
+              <Button variant="primary" className="session-creator-btn-primary" onClick={handleConfirm} disabled={creating}>
                 {creating ? t("common.creating") : t("session.createSession")}
-              </button>
+              </Button>
             </div>
           </div>
         )}

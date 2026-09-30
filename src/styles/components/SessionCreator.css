@@ -1,1066 +1,355 @@
-/* ─── Session Creator Modal ─────────────────────────────────────── */
+/* ─── Session creator (⌘⇧N) ───────────────────────────────────────────
+ * Layout only: every button, field, chip, select, segmented control,
+ * checkbox, radio, badge and close is a control from src/components/ui
+ * (docs/design-system/06-components.md · Controls). The class names the
+ * screen puts on them are hooks for tests and carry no look here. What
+ * stays drawn here is the modal, its rows, the agent cards and the colour
+ * swatches, which have no control of their own.
+ * ──────────────────────────────────────────────────────────────────── */
 
 .session-creator {
-  width: 480px;
+  width: calc(var(--space-1) * 120);
   max-height: 80vh;
   background: var(--bg-1);
-  border: 1px solid var(--border-light);
+  border: var(--control-border-width) solid var(--border-light);
   border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  font-family: var(--font-ui);
 }
 
-/* ─── Session Creator Resize Handles ───────────────────────────── */
-.session-creator-resize-handle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 2;
-  background: transparent;
-}
-
-.session-creator-resize-handle:hover {
-  background: var(--accent-dim);
-}
-
+/* ─── Resize handles ───────────────────────────────────────────────── */
+.session-creator-resize-handle,
 .session-creator-resize-handle-bottom {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 6px;
-  cursor: row-resize;
   z-index: 2;
   background: transparent;
 }
+.session-creator-resize-handle { top: 0; right: 0; width: var(--space-1-5); height: 100%; cursor: col-resize; }
+.session-creator-resize-handle-bottom { left: 0; right: 0; bottom: 0; height: var(--space-1-5); cursor: row-resize; }
+.session-creator-resize-handle:hover,
+.session-creator-resize-handle-bottom:hover { background: var(--quiet-hover-bg); }
 
-.session-creator-resize-handle-bottom:hover {
-  background: var(--accent-dim);
-}
-
+/* ─── Header and progress ──────────────────────────────────────────── */
 .session-creator-header {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
   gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-bottom: var(--control-border-width) solid var(--border);
 }
+.session-creator-title { font-weight: var(--weight-semibold); font-size: var(--text-lg); color: var(--text-0); }
+.session-creator-step { font-size: var(--text-base); color: var(--text-3); margin-left: auto; }
 
-.session-creator-title {
-  font-weight: 600;
-  font-size: var(--text-lg);
-  color: var(--text-0);
-}
-
-.session-creator-step {
-  font-size: var(--text-base);
-  color: var(--text-3);
-  margin-left: auto;
-  margin-right: 8px;
-}
-
-.session-creator-steps {
-  display: flex;
-  gap: 6px;
-  padding: 8px 16px;
-  justify-content: center;
-}
-
+.session-creator-steps { display: flex; gap: var(--space-1-5); padding: var(--space-2) var(--space-4); justify-content: center; }
 .session-creator-step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-full);
   background: var(--bg-3);
-  transition: background 0.15s;
+  transition: background-color var(--dur-quick) var(--ease-out-soft);
 }
+.session-creator-step-dot.active { background: var(--primary-bg); }
 
-.session-creator-step-dot.active {
-  background: var(--accent);
-}
-
+/* ─── Body ─────────────────────────────────────────────────────────── */
 .session-creator-body {
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(var(--space-1) * 2.5);
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
 
-.session-creator-section-title {
-  font-size: var(--text-md);
-  font-weight: 600;
+.session-creator-section-title,
+.session-creator-permission-mode-label,
+.session-creator-custom-suffix-label,
+.session-creator-project-picker-label,
+.session-creator-color-picker-label,
+.session-creator-channels-label,
+.session-creator-ssh-history-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   color: var(--text-2);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--tracking-widest);
 }
+.session-creator-section-title { font-size: var(--text-md); }
 
-.session-creator-subtitle {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  line-height: 1.4;
-  margin-top: -4px;
-}
-
-.session-creator-cwd-badge {
-  display: inline-block;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  padding: 1px 5px;
-  margin-left: 6px;
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-radius: 3px;
-  vertical-align: 1px;
-}
-
-.session-creator-list {
-  max-height: 240px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.session-creator-list::-webkit-scrollbar { width: 4px; }
-.session-creator-list::-webkit-scrollbar-thumb { background: var(--bg-3); }
-
-.session-creator-remove-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius);
-  opacity: 0.4;
-  transition: opacity 0.1s, color 0.1s, background 0.1s;
-}
-
-.session-creator-remove-btn:hover {
-  opacity: 1;
-  color: var(--red);
-  background: var(--bg-hover);
-}
-
-.session-creator-provider-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-2);
-}
-
-.session-creator-provider-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 10px 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  text-align: left;
-}
-
-.session-creator-provider-card:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-light);
-}
-
-.session-creator-provider-card.selected {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.session-creator-provider-card.disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.session-creator-provider-name {
-  font-weight: 600;
-  font-size: var(--text-lg);
-  color: var(--text-0);
-}
-
-.session-creator-provider-desc {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  margin-top: 2px;
-}
-
-.session-creator-provider-unavailable {
-  opacity: 0.6;
-  border-style: dashed;
-}
-
-.session-creator-provider-unavailable.selected {
-  opacity: 0.85;
-}
-
-.session-creator-provider-status-badge {
-  font-size: var(--text-xs);
-  color: var(--yellow);
-  font-weight: 500;
-  margin-left: 6px;
-}
-
-.session-creator-provider-install-link {
-  display: block;
-  color: var(--yellow);
-  cursor: pointer;
-  text-decoration: underline;
-  margin-top: 2px;
-  font-size: var(--text-xs);
-}
-
-.session-creator-provider-install-link:hover {
-  color: var(--text-0);
-}
-
-.session-creator-install-hint {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--yellow-dim);
-  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
-  border-radius: var(--radius);
-  font-size: var(--text-sm);
-  color: var(--text-1);
-  line-height: 1.5;
-}
-
-.session-creator-install-hint-title {
-  font-weight: 500;
-  color: var(--yellow);
-  font-size: var(--text-sm);
-}
-
-.session-creator-install-hint-cmd {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  background: var(--bg-2);
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  color: var(--text-0);
-  user-select: all;
-}
-
-.session-creator-install-hint-auth {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-}
-
-.session-creator-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.session-creator-summary-row {
-  display: flex;
-  gap: var(--space-2);
-  font-size: var(--text-md);
-}
-
-.session-creator-summary-label {
-  color: var(--text-3);
-  min-width: 80px;
-}
-
-.session-creator-summary-value {
-  color: var(--text-0);
-}
-
-.session-creator-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.session-creator-btn-primary {
-  padding: 6px 14px;
-  background: var(--accent);
-  color: var(--bg-0);
-  border: none;
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.session-creator-btn-primary:hover { opacity: 0.85; }
-.session-creator-btn-primary:disabled { opacity: 0.5; cursor: default; }
-
-.session-creator-btn-secondary {
-  padding: 6px 14px;
-  background: var(--bg-2);
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.session-creator-btn-secondary:hover { background: var(--bg-hover); }
-
-/* ─── Keyboard highlight for project list ────────────────── */
-
-.project-picker-item.session-creator-highlighted {
-  background: var(--bg-hover);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.project-picker-item.project-picker-item-attached.session-creator-highlighted {
-  background: var(--accent-dim);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-/* ─── Keyboard hint bar ─────────────────────────────────── */
+.session-creator-subtitle { font-size: var(--text-sm); color: var(--text-3); line-height: var(--leading-snug); margin-top: calc(-1 * var(--space-1)); }
 
 .session-creator-hints {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   font-size: var(--text-sm);
   color: var(--text-3);
-  padding-top: 4px;
+  padding-top: var(--space-1);
 }
+.session-creator-hints kbd { font-size: var(--text-xs); padding: 0 var(--space-1); }
+.session-creator-hints span { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 
-.session-creator-hints kbd {
-  font-size: var(--text-xs);
-  padding: 0 4px;
-  vertical-align: 1px;
-}
-
-.session-creator-hints span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-/* ─── Inline Project Picker (confirm step) ─────────────── */
-
-.session-creator-project-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.session-creator-project-picker-label {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-}
-
-.session-creator-project-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.session-creator-project-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 12px);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--text-2);
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-  white-space: nowrap;
-}
-
-.session-creator-project-chip:hover {
-  background: var(--bg-hover);
-  color: var(--text-0);
-  border-color: var(--border-light);
-}
-
-.session-creator-project-chip.selected {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
-.session-creator-project-chip svg {
-  flex-shrink: 0;
-  opacity: 0.7;
-}
-
-.session-creator-project-chip.selected svg {
-  opacity: 1;
-}
-
-.session-creator-project-chip-new {
-  border-style: dashed;
-  color: var(--text-3);
-}
-
-.session-creator-project-chip-new:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.session-creator-project-chip-input {
-  padding: 4px 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-pill, 12px);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--text-0);
-  outline: none;
-  width: 120px;
-}
-
-.session-creator-project-chip-input::placeholder {
-  color: var(--text-3);
-}
-
-/* Project chip color dot */
-.session-creator-project-chip-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* ─── Color Picker (confirm step) ──────────────────────── */
-
-.session-creator-color-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.session-creator-color-picker-label {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-}
-
-.session-creator-color-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.session-creator-color-swatch {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
-  transition: transform 0.1s, border-color 0.15s, opacity 0.15s;
-  padding: 0;
-}
-
-.session-creator-color-swatch:hover:not(.disabled) {
-  transform: scale(1.15);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.session-creator-color-swatch.selected {
-  border-color: var(--text-0);
-  transform: scale(1.15);
-}
-
-.session-creator-color-swatch-none {
-  background: var(--bg-2);
-  border: 1px dashed var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-3);
-}
-
-.session-creator-color-swatch-none.selected {
-  border-color: var(--accent);
-  border-style: solid;
-  color: var(--accent);
-}
-
-/* Permission Mode selector */
-
-.session-creator-permission-mode {
-  margin-top: var(--space-2);
-}
-
-.session-creator-permission-mode-label {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 6px;
-}
-
-.session-creator-permission-mode-pills {
-  display: flex;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.session-creator-permission-pill {
-  flex: 1;
-  padding: 6px 4px;
-  font-size: var(--text-sm);
-  font-family: var(--font-ui);
-  font-weight: 500;
-  color: var(--text-2);
-  background: var(--bg-2);
-  border: none;
-  border-right: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.session-creator-permission-pill:last-child {
-  border-right: none;
-}
-
-.session-creator-permission-pill:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
-}
-
-.session-creator-permission-pill-active {
-  background: var(--accent);
-  color: var(--bg-0);
-}
-
-.session-creator-permission-pill-active:hover {
-  background: var(--accent);
-  color: var(--bg-0);
-  filter: brightness(1.1);
-}
-
-.session-creator-permission-pill-danger.session-creator-permission-pill-active {
-  background: var(--error);
-}
-
-/* "Hermes default" marker on the pill of the agent's mapped safety default (F35). */
-.session-creator-permission-pill-default {
-  margin-left: 4px;
-  font-size: var(--text-2xs);
-  opacity: 0.8;
-}
-
-.session-creator-permission-mode-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  min-height: 20px;
-}
-
-.session-creator-permission-mode-desc {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  line-height: 1.4;
-}
-
-.session-creator-permission-mode-flag {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  background: var(--bg-3);
-  padding: 1px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-/* Custom suffix */
-
-.session-creator-custom-suffix {
-  margin-top: var(--space-2);
-}
-
-.session-creator-custom-suffix-label {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-}
-
-.session-creator-custom-suffix-input {
-  width: 100%;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  padding: 6px 10px;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.session-creator-custom-suffix-input:focus {
-  border-color: var(--accent);
-}
-
-.session-creator-custom-suffix-input::placeholder {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-}
-
-.session-creator-custom-suffix-hint {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  margin-top: 3px;
-  display: block;
-}
-
-.session-creator-custom-suffix-hint code {
-  font-family: var(--font-mono);
-  font-size: inherit;
-  color: var(--text-2);
-  background: var(--bg-2);
-  padding: 1px 4px;
-  border-radius: 3px;
-}
-
-/* Prefix example chips (click-to-insert) */
-
-.session-creator-prefix-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.session-creator-prefix-chip {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
-}
-
-.session-creator-prefix-chip:hover,
-.session-creator-prefix-chip:focus-visible {
-  border-color: var(--accent);
-  color: var(--text-0);
-  background: var(--bg-1);
-}
-
-/* Assembled-command preview */
-
-.session-creator-launch-preview {
-  margin-top: var(--space-2);
-  padding: 8px 10px;
-  background: var(--bg-2);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.session-creator-launch-preview-label {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  flex-shrink: 0;
-}
-
-.session-creator-launch-preview-cmd {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--text-0);
-  word-break: break-all;
-  white-space: pre-wrap;
-}
-
-.session-creator-summary-flag {
-  color: var(--text-3);
-  font-size: var(--text-xs);
-}
-
-/* ─── Connection Type Toggle ───────────────────────────── */
-
-.session-creator-connection-type {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.session-creator-type-btn {
-  flex: 1;
-  padding: 8px 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.session-creator-type-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-0);
-}
-
-.session-creator-type-active {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
-.session-creator-alpha-tag {
-  font-size: var(--text-xs);
-  padding: 1px 5px;
-  background: var(--accent);
-  color: var(--bg-0);
-  border-radius: 3px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-
-/* ─── SSH Fields ───────────────────────────────────────── */
-
-.session-creator-ssh-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.session-creator-ssh-row {
-  display: flex;
-  gap: 8px;
-}
-
-.session-creator-ssh-user {
-  flex: 1;
-}
-
-.session-creator-ssh-port {
-  width: 80px;
-  flex-shrink: 0;
-}
-
-.session-creator-save-host-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  color: var(--text-1);
-  cursor: pointer;
-  margin-top: 2px;
-}
-
-.session-creator-save-host-label input[type="checkbox"] {
-  margin: 0;
-}
-
-.session-creator-save-host-name {
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-0);
-  font-size: var(--text-sm);
-  padding: 3px 8px;
-  outline: none;
-  flex: 1;
-  min-width: 0;
-}
-
-.session-creator-save-host-name:focus {
-  border-color: var(--accent);
-}
-
-.session-creator-ssh-history {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.session-creator-ssh-history-label {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.session-creator-ssh-history-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.session-creator-ssh-history-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  font-size: var(--text-sm);
-  font-family: var(--font-mono);
-  color: var(--text-1);
-  cursor: pointer;
-  transition: background 0.1s, border-color 0.1s;
-}
-
-.session-creator-ssh-history-item:hover {
-  background: var(--bg-hover);
-  border-color: var(--accent);
-}
-
-.session-creator-ssh-history-host {
-  color: var(--text-0);
-}
-
-.session-creator-ssh-history-port {
-  color: var(--text-3);
-  font-size: 10px;
-}
-
-/* ─── Multi-Project Branch Selection ───────────────────── */
-
-.session-creator-branch-multi {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* Footer-level actions (outside scrollable body) */
+.session-creator-actions,
 .session-creator-footer-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: var(--space-2);
-  padding: 8px 16px 12px;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
+  border-top: var(--control-border-width) solid var(--border);
 }
+.session-creator-actions { padding-top: var(--space-2); }
+.session-creator-footer-actions { padding: var(--space-2) var(--space-4) var(--space-3); flex-shrink: 0; }
+/* "Connect over SSH" sits at the far left of the agent step's footer. */
+.session-creator-ssh-link { margin-right: auto; }
+
+/* ─── Folder and tmux lists ────────────────────────────────────────── */
+.session-creator-list {
+  max-height: calc(var(--space-1) * 60);
+  overflow-y: auto;
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.session-creator-list .project-picker-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-1) * 2.5);
+  cursor: pointer;
+}
+.session-creator-list .project-picker-item:hover { background: var(--quiet-hover-bg); }
+.session-creator-list .project-picker-item-attached { background: var(--row-active-bg); }
+.session-creator-list .project-picker-item-missing { cursor: not-allowed; opacity: var(--disabled-opacity); }
+/* Keyboard highlight: the current row's brass rail. */
+.session-creator-list .project-picker-item.session-creator-highlighted { background: var(--quiet-hover-bg); }
+.session-creator-list .project-picker-item.session-creator-highlighted::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--rail-width);
+  background: var(--primary-bg);
+}
+.session-creator-list .project-picker-item-attached.session-creator-highlighted { background: var(--row-active-bg); }
+
+.session-creator-pick { flex: 1; min-width: 0; }
+.session-creator-list .project-picker-info { display: flex; flex-direction: column; gap: var(--space-0-5); min-width: 0; }
+.session-creator-list .project-picker-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--text-0);
+}
+.session-creator-list .project-picker-path { font-family: var(--font-code); font-size: var(--text-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.session-creator-list .project-picker-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.session-creator-list .project-picker-missing-label { font-size: var(--text-sm); color: var(--danger-fg); }
+.session-creator-list .project-picker-check { flex-shrink: 0; font-family: var(--font-code); color: var(--danger-fg); line-height: var(--control-h-md); }
+.session-creator-remove-btn { flex-shrink: 0; margin-left: auto; }
+
+.session-creator-tmux-new { align-self: flex-start; margin: var(--space-1); }
+.session-creator-tmux-name { width: 100%; }
+
+.project-picker-footer .session-creator-scan-input { flex: 1; }
+
+/* ─── Agent step ───────────────────────────────────────────────────── */
+.session-creator-provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+
+/* A card per agent: a choice with a description, which no control has.
+ * The chosen card takes the brass fill and edge of a selected chip. */
+.session-creator-provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-0-5);
+  padding: calc(var(--space-1) * 2.5) var(--space-3);
+  background: var(--control-bg);
+  border: var(--control-border-width) solid var(--control-border);
+  border-radius: var(--radius-md);
+  color: var(--control-fg);
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-out-soft),
+    border-color var(--dur-quick) var(--ease-out-soft);
+}
+.session-creator-provider-card:hover { background: var(--control-bg-hover); }
+.session-creator-provider-card.selected { background: var(--chip-selected-bg); border-color: var(--chip-selected-border); }
+.session-creator-provider-unavailable { border-style: dashed; }
+.session-creator-provider-name { display: flex; align-items: center; gap: var(--space-1-5); font-weight: var(--weight-semibold); font-size: var(--text-md); color: var(--text-0); }
+.session-creator-provider-desc { font-size: var(--text-sm); color: var(--text-2); }
+.session-creator-provider-install-link { color: var(--link-fg); font-size: var(--text-xs); text-decoration: underline; cursor: pointer; }
+
+.session-creator-install-hint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: calc(var(--space-1) * 2.5) var(--space-3);
+  background: var(--yellow-dim);
+  border: var(--control-border-width) solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  line-height: var(--leading-normal);
+}
+.session-creator-install-hint-title { font-weight: var(--weight-medium); color: var(--warning-ink); }
+.session-creator-install-hint-cmd {
+  font-family: var(--font-code);
+  background: var(--bg-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  user-select: all;
+}
+.session-creator-install-hint-auth { font-size: var(--text-xs); color: var(--text-2); }
+
+.session-creator-agent-view-label { color: var(--text-0); font-weight: var(--weight-semibold); }
+
+.session-creator-permission-mode { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-1-5); }
+.session-creator-permission-mode-pills { display: flex; flex-wrap: wrap; gap: var(--space-1-5); }
+/* "Hermes default" marker on the pill of the agent's mapped safety default (F35). */
+.session-creator-permission-pill-default { margin-left: var(--space-1-5); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-widest); }
+.session-creator-permission-mode-info { display: flex; align-items: center; gap: var(--space-2); min-height: calc(var(--space-1) * 5); }
+.session-creator-permission-mode-desc { font-size: var(--text-xs); color: var(--text-2); line-height: var(--leading-snug); }
+.session-creator-permission-mode-flag {
+  flex-shrink: 0;
+  font-family: var(--font-code);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: var(--space-0-5) var(--space-1);
+  border-radius: var(--radius-xs);
+}
+
+.session-creator-custom-agent { display: flex; flex-direction: column; }
+.session-creator-custom-suffix { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-1); }
+.session-creator-custom-suffix-input { width: 100%; }
+.session-creator-custom-suffix-hint { display: block; font-size: var(--text-xs); color: var(--text-2); }
+.session-creator-custom-suffix-hint code {
+  font-family: var(--font-code);
+  color: var(--text-1);
+  background: var(--bg-2);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+}
+.session-creator-prefix-chips { display: flex; flex-wrap: wrap; gap: var(--space-1-5); margin-top: var(--space-1); }
+
+.session-creator-launch-preview {
+  margin-top: var(--space-2);
+  padding: var(--space-2) calc(var(--space-1) * 2.5);
+  background: var(--bg-2);
+  border: var(--control-border-width) dashed var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.session-creator-launch-preview-label { flex-shrink: 0; font-size: var(--text-xs); color: var(--text-2); text-transform: uppercase; letter-spacing: var(--tracking-widest); }
+.session-creator-launch-preview-cmd { font-family: var(--font-code); font-size: var(--text-sm); color: var(--text-0); word-break: break-all; white-space: pre-wrap; }
+
+.session-creator-channels { display: flex; flex-direction: column; gap: var(--space-1-5); }
+.session-creator-channels-desc { font-size: var(--text-xs); color: var(--text-2); line-height: var(--leading-snug); }
+.session-creator-channels-list { display: flex; flex-direction: column; }
+
+/* ─── SSH form ─────────────────────────────────────────────────────── */
+.session-creator-ssh-fields { display: flex; flex-direction: column; gap: var(--space-2); }
+.session-creator-ssh-row { display: flex; gap: var(--space-2); }
+.session-creator-ssh-user { flex: 1; }
+.session-creator-ssh-port { width: calc(var(--space-1) * 20); flex-shrink: 0; }
+.session-creator-save-host { display: flex; align-items: center; gap: var(--space-2); }
+.session-creator-save-host-name { flex: 1; }
+.session-creator-ssh-history { display: flex; flex-direction: column; gap: var(--space-1); }
+.session-creator-ssh-history-list { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.session-creator-ssh-history-item { font-family: var(--font-code); }
+.session-creator-ssh-history-port { color: var(--text-2); }
+
+/* ─── Branch step ──────────────────────────────────────────────────── */
+.session-creator-branch-multi { display: flex; flex-direction: column; gap: var(--space-2); }
 
 .session-creator-branch-project {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
-
 .session-creator-branch-project-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--space-2);
+  min-height: var(--control-h-md);
+  padding: var(--space-1) var(--space-3);
   background: var(--bg-2);
-  transition: background 0.1s;
 }
+.session-creator-branch-project.expanded > .session-creator-branch-project-header { border-bottom: var(--control-border-width) solid var(--border); }
+.session-creator-branch-project-header:hover { background: var(--quiet-hover-bg); }
+.session-creator-branch-project-chevron { flex-shrink: 0; font-size: var(--text-2xs); color: var(--text-2); }
+.session-creator-branch-project-name { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--text-0); }
+.session-creator-branch-nonGit { margin-left: auto; font-size: var(--text-sm); color: var(--text-2); font-style: italic; }
+.session-creator-branch-selected-label { margin-left: auto; font-family: var(--font-code); font-size: var(--text-sm); color: var(--chip-selected-fg); }
 
-.session-creator-branch-project.expanded > .session-creator-branch-project-header {
-  border-bottom: 1px solid var(--border);
-}
-
-.session-creator-branch-project-header:hover {
-  background: var(--bg-hover);
-}
-
-.session-creator-branch-project-chevron {
-  font-size: 10px;
-  color: var(--text-3);
-  flex-shrink: 0;
-  transition: color 0.15s;
-}
-
-.session-creator-branch-project-header:hover .session-creator-branch-project-chevron {
-  color: var(--text-1);
-}
-
-.session-creator-branch-project-name {
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--text-0);
-}
-
-.session-creator-branch-nonGit {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  font-style: italic;
-  margin-left: auto;
-}
-
-.session-creator-branch-selected-label {
-  font-size: var(--text-sm);
-  color: var(--accent);
-  margin-left: auto;
-  font-family: var(--font-mono);
-}
-
-/* ─── Channel Selector ────────────────────────────── */
-
-.session-creator-channels {
+/* ─── Confirm step ─────────────────────────────────────────────────── */
+.session-creator-summary {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1-5);
+  padding: calc(var(--space-1) * 2.5) var(--space-3);
+  background: var(--bg-2);
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+.session-creator-summary-row { display: flex; gap: var(--space-2); font-size: var(--text-md); }
+.session-creator-summary-label { color: var(--text-2); min-width: calc(var(--space-1) * 20); }
+.session-creator-summary-value { color: var(--text-0); }
+.session-creator-summary-flag { color: var(--text-2); font-size: var(--text-xs); }
+
+.session-creator-project-picker,
+.session-creator-color-picker { display: flex; flex-direction: column; gap: var(--space-1-5); }
+.session-creator-project-chips { display: flex; flex-wrap: wrap; gap: var(--space-1-5); align-items: center; }
+.session-creator-project-chip-input { width: calc(var(--space-1) * 36); }
+.session-creator-project-chip-dot {
+  display: inline-block;
+  width: var(--space-2);
+  height: var(--space-2);
+  margin-right: var(--space-1);
+  border-radius: var(--radius-full);
+  vertical-align: middle;
+}
+.session-creator-project-chip-icon {
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
+  margin-right: var(--space-1);
+  vertical-align: middle;
 }
 
-.session-creator-channels-label {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
+/* Colour swatches: a sample of each session colour, which no control draws. */
+.session-creator-color-swatches { display: flex; flex-wrap: wrap; gap: var(--space-1-5); align-items: center; }
+.session-creator-color-swatch {
+  width: calc(var(--space-1) * 5.5);
+  height: calc(var(--space-1) * 5.5);
+  padding: 0;
+  border: var(--rail-width) solid transparent;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: border-color var(--dur-quick) var(--ease-out-soft);
 }
-
-.session-creator-channels-desc {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  line-height: 1.4;
-  margin-bottom: 2px;
-}
-
-.session-creator-channels-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.session-creator-channel-item {
+.session-creator-color-swatch:hover { border-color: var(--field-border-hover); }
+.session-creator-color-swatch.selected { border-color: var(--text-0); }
+.session-creator-color-swatch-none {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  color: var(--text-1);
-}
-
-.session-creator-channel-item:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-light);
-}
-
-.session-creator-channel-item:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.session-creator-channel-item input[type="checkbox"] {
-  accent-color: var(--accent);
-  flex-shrink: 0;
-}
-
-.session-creator-channel-icon {
-  font-size: var(--text-lg);
-  flex-shrink: 0;
-}
-
-.session-creator-channel-name {
-  color: var(--text-0);
-  font-weight: 500;
-}
-
-
-/* Agent view option (agents that have one) and the SSH link on the agent step */
-.session-creator-agent-view {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 10px;
-  padding: 10px 12px;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-.session-creator-agent-view input {
-  margin-top: 2px;
-  accent-color: var(--accent);
-  flex-shrink: 0;
-}
-.session-creator-agent-view-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.session-creator-agent-view-label {
-  color: var(--text-0);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-.session-creator-agent-view-hint {
+  justify-content: center;
+  background: var(--control-bg);
+  border: var(--control-border-width) dashed var(--control-border);
   color: var(--text-2);
-  font-size: var(--text-xs);
-  line-height: 1.4;
 }
-.session-creator-ssh-link {
-  margin-right: auto;
-  padding: 0;
-  background: none;
-  border: none;
-  color: var(--accent);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.session-creator-ssh-link:hover {
-  text-decoration: underline;
-}
+.session-creator-color-swatch-none svg { width: calc(var(--space-1) * 2.5); height: calc(var(--space-1) * 2.5); }
+.session-creator-color-swatch-none.selected { border: var(--rail-width) solid var(--primary-bg); color: var(--text-0); }
 
-/* M9 + M11 overlay rules moved to
- * `src/styles/components/SessionCreatorOpeningOverlay.css` so the
- * bundle loads them even when SessionCreator hasn't mounted yet.
- * The earlier inline-here version was the cause of "no loader at all"
- * — the rules were in this file but the file only loaded with the
- * modal, i.e. always after the overlay. */
+/* The opening overlay's rules live in SessionCreatorOpeningOverlay.css so
+ * the bundle has them before this modal mounts. */

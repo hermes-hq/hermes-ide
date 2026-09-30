@@ -130,7 +130,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   assert(wizard.cards.includes("custom"), "the Custom agent is offered");
   assert(wizard.cards.includes("antigravity") && wizard.cards.includes("opencode"), "the agents new in 2.0 are offered");
   await bridge.screenshot(join(evidenceDir, "01-new-session-wizard.png"));
-  await bridge.click(".session-creator .settings-close");
+  await bridge.click(".session-creator .session-creator-close");
   await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
 
   await openCreator(bridge, assert);

@@ -271,7 +271,7 @@ try {
   `);
   await sleep(200);
   assert((await agentStep(bridge)).agentView === null, "Codex has no Agent view option");
-  await bridge.click(".session-creator-header .close-btn");
+  await bridge.click(".session-creator-header .session-creator-close");
   await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
 
   // Let the app's periodic auto-save write the workspace.

@@ -205,7 +205,7 @@ async function startTask(bridge, { label, pickBranch = null }) {
   await clickPrimary(bridge, "agent");
 
   // Folder step: the test repo (added by path the first time, then listed).
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   const listed = await bridge.eval(`
     const row = e2e.all(".project-picker-item").find((el) => el.innerText.includes("f09e-repo"));
     if (!row) return false;
@@ -213,7 +213,7 @@ async function startTask(bridge, { label, pickBranch = null }) {
     return true;
   `);
   if (!listed) {
-    await bridge.eval(setInput(".workspace-scan-input", repo));
+    await bridge.eval(setInput(".session-creator-scan-input", repo));
     await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   }
   await bridge.waitFor("the test repo to be selected", `
@@ -240,8 +240,8 @@ async function startTask(bridge, { label, pickBranch = null }) {
   await clickPrimary(bridge, "branch");
 
   // Confirm step: name the session, then create it.
-  await bridge.waitFor("the confirm step", `return !!e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');`);
-  await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
+  await bridge.waitFor("the confirm step", `return !!e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');`);
+  await bridge.eval(setInput('input.session-creator-name[placeholder="Session name (optional)"]', label));
   await clickPrimary(bridge, "confirm");
   return defaultChoice.trim();
 }

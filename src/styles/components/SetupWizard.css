@@ -1,4 +1,7 @@
-/* ─── First-launch setup: agents, repo, first task (F16) ─────────────── */
+/* ─── First-launch setup: agents, repo, first task (F16) ───────────────
+ * Layout only: the buttons, fields, radios and checkbox are controls from
+ * src/components/ui (docs/design-system/06-components.md · Controls).
+ * ──────────────────────────────────────────────────────────────────── */
 
 .setup-backdrop {
   position: fixed;
@@ -7,18 +10,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: color-mix(in srgb, var(--shadow-tint) 62%, transparent);
 }
 
 .setup-dialog {
-  width: min(94vw, 720px);
+  width: min(94vw, calc(var(--space-1) * 180));
   max-height: 88vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-1);
-  border: 1px solid var(--border-light);
+  border: var(--control-border-width) solid var(--border-light);
   border-radius: var(--radius-lg);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-4);
   overflow: hidden;
   color: var(--text-1);
   font-size: var(--text-sm);
@@ -29,9 +32,9 @@
   align-items: baseline;
   justify-content: space-between;
   padding: var(--space-3) var(--space-3) var(--space-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--control-border-width) solid var(--border);
 }
-.setup-title { font-size: var(--text-lg); font-weight: 600; color: var(--text-0); }
+.setup-title { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--text-0); }
 .setup-step { color: var(--text-3); font-size: var(--text-xs); }
 
 .setup-body {
@@ -42,53 +45,25 @@
   gap: var(--space-2);
 }
 
-.setup-intro { margin: 0; color: var(--text-1); line-height: 1.5; }
+.setup-intro { margin: 0; color: var(--text-1); line-height: var(--leading-normal); }
 
 .setup-section-label {
   color: var(--text-3);
   font-size: var(--text-xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
+  letter-spacing: var(--tracking-widest);
+  margin-bottom: var(--space-1);
 }
 
-.setup-recent { display: flex; flex-direction: column; gap: 4px; }
-
-.setup-repo {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  text-align: left;
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-  cursor: pointer;
-  color: var(--text-0);
-}
-.setup-repo:hover { background: var(--bg-hover); }
-.setup-repo.selected { border-color: var(--accent); background: var(--accent-dim); }
-.setup-repo-name { font-weight: 500; }
-.setup-repo-path { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-3); }
+.setup-recent { display: flex; flex-direction: column; }
+.setup-repo-path { font-family: var(--font-code); font-size: var(--text-xs); }
 
 .setup-repo-row { display: flex; gap: var(--space-2); }
-.setup-repo-input {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg-0);
-  color: var(--text-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 4px 8px;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-}
-.setup-repo-input:focus { border-color: var(--accent); }
+.setup-repo-input { flex: 1; }
 
 .setup-repo-state { font-size: var(--text-xs); }
-.setup-repo-state.ok { color: var(--green); }
-.setup-repo-state.bad { color: var(--yellow); }
+.setup-repo-state.ok { color: var(--success-ink); }
+.setup-repo-state.bad { color: var(--warning-ink); }
 
 .setup-footer {
   display: flex;
@@ -96,42 +71,27 @@
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--border);
+  border-top: var(--control-border-width) solid var(--border);
 }
-.setup-footer-note { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-xs); }
+.setup-footer-note { display: flex; flex-direction: column; gap: var(--space-0-5); font-size: var(--text-xs); }
 .setup-usage { color: var(--text-1); }
 .setup-muted { color: var(--text-3); }
 .setup-actions { display: flex; gap: var(--space-2); }
 
-.setup-btn {
-  background: var(--bg-2);
-  color: var(--text-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 5px 14px;
-  font-size: var(--text-sm);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.setup-btn:hover:not(:disabled) { background: var(--bg-hover); }
-.setup-btn:disabled { opacity: 0.45; cursor: default; }
-.setup-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--bg-0); font-weight: 600; }
-.setup-btn-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
-
 .setup-pill {
   position: fixed;
-  right: 16px;
-  bottom: 36px;
+  right: var(--space-4);
+  bottom: calc(var(--space-1) * 9);
   z-index: 1100;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  max-width: min(90vw, 480px);
-  padding: 8px 12px;
+  max-width: min(90vw, calc(var(--space-1) * 120));
+  padding: var(--space-2) var(--space-3);
   background: var(--bg-1);
-  border: 1px solid var(--accent);
+  border: var(--control-border-width) solid var(--primary-bg);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-3);
   color: var(--text-0);
   font-size: var(--text-sm);
 }
@@ -141,17 +101,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   margin-top: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--text-1);
 }
-.setup-policy input {
-  margin: 0;
-}
-.setup-policy-link {
-  color: var(--accent);
-}
+.setup-policy-link { color: var(--link-fg); }
 .setup-policy-hint {
   flex-basis: 100%;
   font-size: var(--text-xs);

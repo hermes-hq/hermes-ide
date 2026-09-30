@@ -107,8 +107,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     return e2e.click(e2e.must(cards[cards.length - 1], "plain shell card"));
   `);
   await clickPrimary("agent");
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`, { timeoutMs: 20_000 });
-  await setInput(bridge, ".workspace-scan-input", repo);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`, { timeoutMs: 20_000 });
+  await setInput(bridge, ".session-creator-scan-input", repo);
   await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   await bridge.waitFor("the test repo to be selected", `
     return e2e.all(".project-picker-item.project-picker-item-attached").some((el) => el.innerText.includes("f21c-repo"));
@@ -116,7 +116,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   await clickPrimary("folder");
   for (let i = 0; i < 6 && (await bridge.exists(".session-creator")); i++) {
     await bridge.eval(`
-      const el = e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');
+      const el = e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');
       if (!el) return false;
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
       el.focus();

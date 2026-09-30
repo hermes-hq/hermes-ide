@@ -42,6 +42,20 @@
   color: var(--chip-selected-fg);
 }
 
+/* A risky value: the danger ink and edge; selected (or open) it also takes
+ * the danger fill, the way a selected chip takes the brass one. */
+.h-chip--danger { border-color: var(--danger-border); color: var(--danger-fg); }
+.h-chip--danger.h-chip--selected { background: var(--danger-dim); border-color: var(--danger-fg); color: var(--danger-fg); }
+
+/* A long value is cut with an ellipsis rather than widening the row. */
+.h-chip { max-width: 100%; }
+.h-chip-button { min-width: 0; max-width: 100%; gap: var(--space-1); }
+.h-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A chip that opens its choices ends with a chevron. */
+.h-chip-chevron { display: inline-flex; flex-shrink: 0; margin-right: calc(-1 * var(--space-1)); color: currentColor; }
+.h-chip-chevron svg { width: var(--icon-size-sm); height: var(--icon-size-sm); }
+
 /* Removable: a trailing 16 px × */
 .h-chip-remove {
   display: inline-flex;

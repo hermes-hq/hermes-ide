@@ -338,7 +338,7 @@ async function createAgentSession(bridge, label, card = "Claude") {
   `);
   await clickPrimary(bridge, "agent");
   // Folder step: the fixture repo (added by path the first time, then listed).
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`, { timeoutMs: 20_000 });
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`, { timeoutMs: 20_000 });
   const listed = await bridge.eval(`
     const row = e2e.all(".project-picker-item").find((el) => el.innerText.includes("f21-repo"));
     if (!row) return false;
@@ -346,7 +346,7 @@ async function createAgentSession(bridge, label, card = "Claude") {
     return true;
   `);
   if (!listed) {
-    await bridge.eval(setInput(".workspace-scan-input", repo));
+    await bridge.eval(setInput(".session-creator-scan-input", repo));
     await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   }
   await bridge.waitFor("the fixture repo to be selected", `
@@ -375,7 +375,7 @@ async function createAgentSession(bridge, label, card = "Claude") {
     // Name the session when this step asks for one (checked and set in one
     // go: the step can move on between two calls).
     await bridge.eval(`
-      const el = e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');
+      const el = e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');
       if (!el) return false;
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
       el.focus();

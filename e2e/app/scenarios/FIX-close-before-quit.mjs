@@ -130,7 +130,7 @@ const has = (labels, label) => labels.some((t) => t.includes(label));
 
 /** The primary button of whatever wizard step is showing. */
 const PRIMARY = ".session-creator-actions .session-creator-btn-primary, .session-creator-footer-actions .session-creator-btn-primary";
-const NAME_INPUT = 'input.command-palette-input[placeholder="Session name (optional)"]';
+const NAME_INPUT = 'input.session-creator-name[placeholder="Session name (optional)"]';
 
 /** Create a plain shell session named `label` through the New Session wizard; returns its id. */
 async function createPlainSession(bridge, label) {

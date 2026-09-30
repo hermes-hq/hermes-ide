@@ -48,6 +48,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { chooseOption as chooseSelectOption } from "../launcher-steps.mjs";
 
 const SCENARIO = "F15-task-launcher";
 const startedAt = Date.now();
@@ -267,13 +268,8 @@ const typeInto = (bridge, selector, value) =>
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return el.value;
   `);
-const chooseOption = (bridge, selector, value) =>
-  bridge.eval(`
-    const el = e2e.must(e2e.first(${JSON.stringify(selector)}), ${JSON.stringify(selector)});
-    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    return el.value;
-  `);
+// The launcher's selects are the control set's Select: picked with the mouse (launcher-steps.mjs).
+const chooseOption = chooseSelectOption;
 const pressEnterInTask = (bridge) =>
   bridge.eval(`
     const ta = e2e.must(e2e.first(".task-launcher-task"), "task field");
@@ -498,13 +494,13 @@ try {
   await bridge.click(".task-launcher-advanced");
   await bridge.waitFor("the advanced creator", `return !!e2e.first(".session-creator") && !e2e.first(".task-launcher-sheet");`, { timeoutMs: 20_000 });
   assert(await bridge.exists(".session-creator-ssh-link"), "the advanced creator still offers SSH");
-  await bridge.click(".session-creator .settings-close");
+  await bridge.click(".session-creator .session-creator-close");
   await bridge.waitFor("the creator to close", `return !e2e.first(".session-creator");`, { timeoutMs: 10_000 });
   await pressAppShortcut(bridge, { action: "file.new-session-advanced", pcKey: "h" });
   await bridge.waitFor("the advanced creator from its own shortcut", `return !!e2e.first(".session-creator") && !e2e.first(".task-launcher-sheet");`, { timeoutMs: 20_000 });
   assert(await bridge.exists(".session-creator-ssh-link"), "⌘⇧N opens the creator with SSH");
   await bridge.screenshot(join(evidenceDir, "07-advanced.png"));
-  await bridge.click(".session-creator .settings-close");
+  await bridge.click(".session-creator .session-creator-close");
   await bridge.waitFor("the creator to close", `return !e2e.first(".session-creator");`, { timeoutMs: 10_000 });
 
   log("step 8: with no launch helper next to the app, the agent starts without the task and the person is told");

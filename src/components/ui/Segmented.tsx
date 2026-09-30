@@ -1,11 +1,14 @@
-import { useRef, type KeyboardEvent } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import "../../styles/ui/segmented.css";
+import type { ControlAttrs } from "./attrs";
 import { cx } from "./Button";
 
 export interface SegmentOption<V extends string = string> {
   value: V;
-  label: string;
+  label: ReactNode;
   disabled?: boolean;
+  /** Hook class, id, tooltip and data-* attributes for the segment's button. */
+  attrs?: ControlAttrs;
 }
 
 export interface SegmentedProps<V extends string = string> {
@@ -60,6 +63,7 @@ export function Segmented<V extends string = string>({ options, value, onChange,
     <div role="radiogroup" aria-label={label} className={cx("h-segmented", `h-segmented--${size}`, className)}>
       {options.map((o, i) => (
         <button
+          {...o.attrs}
           key={o.value}
           ref={(el) => {
             refs.current[i] = el;
@@ -69,7 +73,7 @@ export function Segmented<V extends string = string>({ options, value, onChange,
           aria-checked={o.value === value}
           tabIndex={i === tabStop ? 0 : -1}
           disabled={o.disabled}
-          className="h-segment"
+          className={cx("h-segment", o.attrs?.className)}
           onClick={() => select(i)}
           onKeyDown={(e) => onKeyDown(e, i)}
         >

@@ -190,7 +190,7 @@ describe("SessionCreator — terminal first", () => {
     await screen.findByText(/Select folders|Project context|Working directory/);
     fireEvent.click(screen.getAllByRole("button").find((b) => b.classList.contains("session-creator-btn-primary"))!);
     const create = await screen.findByRole("button", { name: /Create session/ });
-    const name = document.querySelector<HTMLInputElement>("input.command-palette-input")!;
+    const name = screen.getByRole("textbox", { name: "Session name (optional)" }) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "billing-fix" } });
     await act(async () => {
       fireEvent.click(create);

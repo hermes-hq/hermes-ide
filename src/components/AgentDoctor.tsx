@@ -5,6 +5,7 @@ import { customAgent, getAgent, installCommand } from "../catalog/agentCatalog";
 import { shortcutLabel } from "../utils/keymap";
 import type { DoctorRow } from "../api/doctor";
 import { ensureDoctor, useAgentDoctor } from "../launcher/doctorStore";
+import { Badge, Button } from "./ui";
 
 export interface AgentDoctorProps {
   /** Opens a terminal running the agent's CLI, where it signs in. */
@@ -51,81 +52,85 @@ export function AgentDoctor({ onSignIn, onOpenAdvanced }: AgentDoctorProps) {
         <span className="agent-doctor-status">
           {loading ? t("doctor.checking") : error ? t("doctor.failed", { error }) : ""}
         </span>
-        <button type="button" className="agent-doctor-recheck" onClick={refresh} disabled={loading}>
+        <Button size="sm" className="agent-doctor-recheck" onClick={refresh} disabled={loading}>
           {t("doctor.recheck")}
-        </button>
+        </Button>
       </div>
       {rows && (
-        <table className="agent-doctor-table">
-          <thead>
-            <tr>
-              <th>{t("doctor.col.agent")}</th>
-              <th>{t("doctor.col.installed")}</th>
-              <th>{t("doctor.col.version")}</th>
-              <th>{t("doctor.col.signedIn")}</th>
-              <th>{t("doctor.col.signals")}</th>
-              <th>{t("doctor.col.resume")}</th>
-              <th aria-hidden="true" />
-            </tr>
-          </thead>
-          <tbody>
-            {ordered.map((r) => (
-              <tr
-                key={r.id}
-                className={`agent-doctor-row${r.installed ? " installed" : " missing"}`}
-                data-agent-id={r.id}
-                data-installed={r.installed ? "true" : "false"}
-                data-signed-in={r.signed_in}
-              >
-                <td className="agent-doctor-name">
-                  {r.name}
-                  {r.retired && (
-                    <span className="agent-doctor-badge retired" title={r.retired_note ?? undefined}>
-                      {t("doctor.retired")}
-                    </span>
-                  )}
-                </td>
-                <td data-col="installed">{r.installed ? t("doctor.yes") : t("doctor.notInstalled")}</td>
-                <td data-col="version">
-                  {r.installed ? r.version ?? t("doctor.unknown") : "—"}
-                  {r.version_ok === false && r.min_version && (
-                    <span className="agent-doctor-warn">{t("doctor.minVersion", { version: r.min_version })}</span>
-                  )}
-                </td>
-                <td data-col="signed-in">{r.installed ? yesNo(r.signed_in) : "—"}</td>
-                <td data-col="signals">{t(`doctor.signals.${r.signals}`)}</td>
-                <td data-col="resume">{r.resume ? t("doctor.yes") : t("doctor.no")}</td>
-                <td className="agent-doctor-actions">
-                  {!r.installed && installCommand(getAgent(r.id)) && (
-                    <button type="button" className="agent-doctor-action agent-doctor-copy" onClick={() => copy(r.id)}>
-                      {copied === r.id ? t("launcher.copied") : t("doctor.copyInstall")}
-                    </button>
-                  )}
-                  {r.installed && r.signed_in === "no" && (
-                    <button type="button" className="agent-doctor-action agent-doctor-sign-in" onClick={() => onSignIn(r.id)}>
-                      {t("launcher.signIn")}
-                    </button>
-                  )}
-                </td>
+        <div className="agent-doctor-scroll">
+          <table className="agent-doctor-table">
+            <thead>
+              <tr>
+                <th>{t("doctor.col.agent")}</th>
+                <th>{t("doctor.col.installed")}</th>
+                <th>{t("doctor.col.version")}</th>
+                <th>{t("doctor.col.signedIn")}</th>
+                <th>{t("doctor.col.signals")}</th>
+                <th>{t("doctor.col.resume")}</th>
+                <th aria-hidden="true" />
               </tr>
-            ))}
-            {custom && (
-              <tr className="agent-doctor-row custom" data-agent-id={custom.id}>
-                <td className="agent-doctor-name">{t("doctor.custom")}</td>
-                <td colSpan={5} className="agent-doctor-muted">
-                  {t("doctor.customHint", { shortcut: shortcutLabel("file.new-session-advanced") })}
-                </td>
-                <td className="agent-doctor-actions">
-                  {onOpenAdvanced && (
-                    <button type="button" className="agent-doctor-action" onClick={onOpenAdvanced}>
-                      {t("doctor.customSetUp")}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {ordered.map((r) => (
+                <tr
+                  key={r.id}
+                  className={`agent-doctor-row${r.installed ? " installed" : " missing"}`}
+                  data-agent-id={r.id}
+                  data-installed={r.installed ? "true" : "false"}
+                  data-signed-in={r.signed_in}
+                >
+                  <td className="agent-doctor-name">
+                    {r.name}
+                    {r.retired && (
+                      <span className="agent-doctor-badge-wrap" title={r.retired_note ?? undefined}>
+                        <Badge tone="warning" className="agent-doctor-badge retired">
+                          {t("doctor.retired")}
+                        </Badge>
+                      </span>
+                    )}
+                  </td>
+                  <td data-col="installed">{r.installed ? t("doctor.yes") : t("doctor.notInstalled")}</td>
+                  <td data-col="version">
+                    {r.installed ? r.version ?? t("doctor.unknown") : "—"}
+                    {r.version_ok === false && r.min_version && (
+                      <span className="agent-doctor-warn">{t("doctor.minVersion", { version: r.min_version })}</span>
+                    )}
+                  </td>
+                  <td data-col="signed-in">{r.installed ? yesNo(r.signed_in) : "—"}</td>
+                  <td data-col="signals">{t(`doctor.signals.${r.signals}`)}</td>
+                  <td data-col="resume">{r.resume ? t("doctor.yes") : t("doctor.no")}</td>
+                  <td className="agent-doctor-actions">
+                    {!r.installed && installCommand(getAgent(r.id)) && (
+                      <Button size="sm" className="agent-doctor-action agent-doctor-copy" onClick={() => copy(r.id)}>
+                        {copied === r.id ? t("launcher.copied") : t("doctor.copyInstall")}
+                      </Button>
+                    )}
+                    {r.installed && r.signed_in === "no" && (
+                      <Button size="sm" className="agent-doctor-action agent-doctor-sign-in" onClick={() => onSignIn(r.id)}>
+                        {t("launcher.signIn")}
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {custom && (
+                <tr className="agent-doctor-row custom" data-agent-id={custom.id}>
+                  <td className="agent-doctor-name">{t("doctor.custom")}</td>
+                  <td colSpan={5} className="agent-doctor-muted">
+                    {t("doctor.customHint", { shortcut: shortcutLabel("file.new-session-advanced") })}
+                  </td>
+                  <td className="agent-doctor-actions">
+                    {onOpenAdvanced && (
+                      <Button size="sm" className="agent-doctor-action" onClick={onOpenAdvanced}>
+                        {t("doctor.customSetUp")}
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
       {noneInstalled && (
         <p className="agent-doctor-none">{t("doctor.noneFound", { shortcut: shortcutLabel("file.new-session-tab") })}</p>

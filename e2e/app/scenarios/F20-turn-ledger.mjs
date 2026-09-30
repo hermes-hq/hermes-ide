@@ -268,9 +268,9 @@ async function createSession(bridge, { label, custom = null }) {
   for (let i = 0; i < 8; i++) {
     if (!(await bridge.exists(".session-creator"))) break;
     const step = await bridge.eval(`
-      if (e2e.first(".workspace-scan-input")) return "folder";
+      if (e2e.first(".session-creator-scan-input")) return "folder";
       if (e2e.first(".session-creator-branch-multi")) return "branch";
-      if (e2e.first('input.command-palette-input[placeholder="Session name (optional)"]')) return "confirm";
+      if (e2e.first('input.session-creator-name[placeholder="Session name (optional)"]')) return "confirm";
       return e2e.first(".session-creator-step")?.innerText ?? "other";
     `);
     if (step === "folder") {
@@ -281,7 +281,7 @@ async function createSession(bridge, { label, custom = null }) {
         return true;
       `);
       if (!listed) {
-        await bridge.eval(setInput(".workspace-scan-input", repo));
+        await bridge.eval(setInput(".session-creator-scan-input", repo));
         await bridge.clickByName("Scan", { within: ".project-picker-footer" });
       }
       await bridge.waitFor("the test repo to be selected", `
@@ -307,7 +307,12 @@ async function createSession(bridge, { label, custom = null }) {
         continue;
       }
     } else if (step === "confirm") {
-      await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
+      await bridge.eval(setInput('input.session-creator-name[placeholder="Session name (optional)"]', label));
+      // Create is the last click: while the session is created the step stays
+      // on screen with Create disabled, and pressing it again would wait for
+      // a button that goes away with the wizard.
+      await clickPrimary(bridge, step);
+      break;
     }
     await clickPrimary(bridge, step);
     await sleep(300);

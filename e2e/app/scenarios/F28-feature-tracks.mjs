@@ -176,7 +176,7 @@ async function startPlainShellInRepo(bridge, label) {
   let usedCurrentBranch = false;
   for (let i = 0; i < 10 && (await bridge.exists(".session-creator")); i++) {
     await sleep(300);
-    if (await bridge.exists(".workspace-scan-input")) {
+    if (await bridge.exists(".session-creator-scan-input")) {
       const listed = await bridge.eval(`
         const row = e2e.all(".project-picker-item").find((el) => el.innerText.includes("f28-repo"));
         if (!row) return false;
@@ -184,7 +184,7 @@ async function startPlainShellInRepo(bridge, label) {
         return true;
       `);
       if (!listed) {
-        await bridge.eval(setInput(".workspace-scan-input", repo));
+        await bridge.eval(setInput(".session-creator-scan-input", repo));
         await bridge.clickByName("Scan", { within: ".project-picker-footer" });
       }
       await bridge.waitFor("the test repo to be selected", `
@@ -193,7 +193,7 @@ async function startPlainShellInRepo(bridge, label) {
     } else if (
       // Checked and set in one go: the step can move on between two calls.
       await bridge.eval(`
-        const el = e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');
+        const el = e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');
         if (!el) return false;
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
         el.focus();
