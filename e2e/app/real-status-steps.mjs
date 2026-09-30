@@ -25,12 +25,18 @@
 // (the cheapest model each agent lets a project choose). In CI, on Windows
 // or without the CLI it says SKIP; e2e/app/ci-plan.mjs lists the scenarios
 // as excluded.
+//
+// Before launching it waits for the agent doctor's answer, then for the
+// launcher to let the task go. With less free disk than the disk guard wants
+// for a new worktree (10 GB) the launcher refuses one; the task then runs in
+// the current checkout, as a person would do. Any other refusal fails at
+// once, naming it, with launcher-state.json and a screenshot.
 
 import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CI, createLogger, finishScenario, launchApp, outDir, sleep } from "./harness.mjs";
+import { IS_CI, createLogger, finishScenario, launchApp, outDir, skipScenario, sleep } from "./harness.mjs";
 import { openLauncher, pickInMenu, setRepo, typeInto } from "./launcher-steps.mjs";
 
 /** How long after its hook a state must be on the strip. */
@@ -161,6 +167,59 @@ function sampleProcesses(sessionId, into) {
   };
 }
 
+/**
+ * Whether the launcher lets the task go: { ok: true } once the launch button
+ * is enabled with no block row, or { ok: false, blocks, launch } once the
+ * same block rows have stood for 3 s (or after 30 s).
+ */
+async function launcherGate(bridge) {
+  const deadline = Date.now() + 30_000;
+  let last = null;
+  let since = Date.now();
+  for (;;) {
+    const now = await bridge.eval(`
+      const btn = e2e.first(".task-launcher-launch");
+      return {
+        blocks: e2e.all(".task-launcher-block").map((b) => ({ kind: b.dataset.kind ?? null, text: e2e.norm(b.innerText) })),
+        launch: btn ? { disabled: btn.disabled } : null,
+      };
+    `);
+    if (now.blocks.length === 0 && now.launch && !now.launch.disabled) return { ok: true };
+    const key = JSON.stringify(now.blocks);
+    if (key !== last) {
+      last = key;
+      since = Date.now();
+    }
+    if ((now.blocks.length > 0 && Date.now() - since >= 3_000) || Date.now() > deadline) return { ok: false, ...now };
+    await sleep(200);
+  }
+}
+
+/**
+ * What the launcher showed when it would not let the task go: every block
+ * row, the launch button, the notes, and the agent doctor's shared answer;
+ * written to launcher-state.json next to a screenshot.
+ */
+async function recordLauncherState(bridge, evidenceDir, log) {
+  try {
+    const state = await bridge.eval(`
+      const btn = e2e.first(".task-launcher-launch");
+      return {
+        blocks: e2e.all(".task-launcher-block").map((b) => ({ kind: b.dataset.kind ?? null, agent: b.dataset.agentId ?? null, text: e2e.norm(b.innerText) })),
+        notes: e2e.all(".task-launcher-note").map((n) => e2e.norm(n.innerText)),
+        launch: btn ? { disabled: btn.disabled, text: e2e.norm(btn.innerText) } : null,
+        task: e2e.first(".task-launcher-task")?.value ?? null,
+        doctor: window.__HERMES_E2E__.doctorState?.() ?? "no doctorState hook in this build",
+      };
+    `);
+    writeFileSync(join(evidenceDir, "launcher-state.json"), JSON.stringify(state, null, 2) + "\n");
+    log(`  launcher state: ${JSON.stringify({ blocks: state.blocks, notes: state.notes, launch: state.launch, doctorLoading: state.doctor?.loading, doctorError: state.doctor?.error })}`);
+    await bridge.screenshot(join(evidenceDir, "launcher-blocked.png"));
+  } catch (e) {
+    log(`  (could not record the launcher's state: ${e.message})`);
+  }
+}
+
 // ─── The scenario ────────────────────────────────────────────────────
 
 /**
@@ -194,8 +253,7 @@ export async function runRealStatus(cfg) {
   const binPath = which(cfg.bin);
   if (IS_CI || platform() === "win32" || !binPath) {
     log(`needs a real, signed-in ${cfg.bin} on PATH, macOS or Linux, and no CI (CI=${process.env.CI ?? ""}, ${cfg.bin}=${binPath || "none"})`);
-    log(`RESULT: SKIP (real ${cfg.bin} not available here, or CI)`);
-    process.exit(0);
+    skipScenario({ scenario: cfg.scenario, evidenceDir, reason: `real ${cfg.bin} not available here, or CI`, startedAt, log });
   }
   const version = spawnSync(binPath, ["--version"], { encoding: "utf8" }).stdout.trim().split("\n")[0];
 
@@ -276,7 +334,11 @@ export async function runRealStatus(cfg) {
   try {
     log(`scenario: ${cfg.scenario}   ${cfg.bin}: ${binPath} (${version})   repo: ${repo}`);
     log(`  corpus: ${corpus}`);
-    app = await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, tmp: "shared", flagDefaults: null });
+    // HERMES_E2E_FREE_SPACE_BYTES (test builds only) makes the disk guard see
+    // that much free space: 9000000000 replays a nearly full disk.
+    const freeSpace = process.env.HERMES_E2E_FREE_SPACE_BYTES;
+    if (freeSpace) log(`  the app is told the disk has ${freeSpace} bytes free`);
+    app = await launchApp({ runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, tmp: "shared", flagDefaults: null, env: freeSpace ? { HERMES_E2E_FREE_SPACE_BYTES: freeSpace } : {} });
     const { bridge } = app;
     await threeStepWelcome(bridge);
 
@@ -285,10 +347,31 @@ export async function runRealStatus(cfg) {
     await setRepo(bridge, repo);
     await typeInto(bridge, ".task-launcher-task", cfg.task);
     await pickInMenu(bridge, "agent", `[data-agent-id="${cfg.agentId}"]`);
-    await bridge.waitFor(`the agent doctor to clear ${cfg.agentId}`, `
-      const btn = e2e.first(".task-launcher-launch");
-      return e2e.all(".task-launcher-block").length === 0 && !!btn && !btn.disabled ? true : null;
-    `, { timeoutMs: 60_000 });
+    // The agent doctor (version and sign-in) answers within seconds; what
+    // else the launcher may refuse for is told apart, not blamed on it.
+    const doctorAskedAt = Date.now();
+    const doctorRow = await bridge.waitFor(`the agent doctor's answer for ${cfg.agentId}`, `
+      const d = window.__HERMES_E2E__.doctorState();
+      if (!d.rows || d.loading) return null;
+      return d.rows.find((r) => r.id === ${JSON.stringify(cfg.agentId)}) ?? { id: null };
+    `, { timeoutMs: 45_000 });
+    log(`  doctor after ${Date.now() - doctorAskedAt} ms: ${JSON.stringify({ installed: doctorRow.installed, version: doctorRow.version, signed_in: doctorRow.signed_in })}`);
+    assert(doctorRow.installed === true && doctorRow.signed_in !== "no", `the doctor finds ${cfg.bin} installed and not signed out`);
+    let gate = await launcherGate(bridge);
+    if (!gate.ok && gate.blocks.length > 0 && gate.blocks.every((b) => b.kind === "low-disk")) {
+      // Less free space than the disk guard wants for a new worktree (the
+      // machine running this is often nearly full): the launcher says so,
+      // and a person would run the task in the checkout itself. Where the
+      // agent runs does not change what its status is.
+      log(`  the launcher refuses a new worktree: ${gate.blocks[0].text}; running in the current checkout instead`);
+      mark("low-disk", { text: gate.blocks[0].text });
+      await pickInMenu(bridge, "where", '[data-where="current-checkout"]');
+      gate = await launcherGate(bridge);
+    }
+    if (!gate.ok) {
+      await recordLauncherState(bridge, evidenceDir, log);
+      throw new Error(`the launcher did not let the task go: ${gate.blocks.length ? gate.blocks.map((b) => `${b.kind}: ${b.text}`).join("; ") : `launch button ${JSON.stringify(gate.launch)}`}`);
+    }
     const idsBefore = await bridge.terminalIds();
     await bridge.eval(`
       const ta = e2e.must(e2e.first(".task-launcher-task"), "task field");

@@ -44,6 +44,7 @@ import { PLATFORM } from "../utils/platform";
 import { getE2ESessionBridge } from "./sessionBridge";
 import { agentLaunchOptions } from "../agent/capabilities/choice";
 import { createProject, getProjectsOrdered } from "../api/projects";
+import { getDoctorState } from "../launcher/doctorStore";
 
 /** A fake turn for the fake ledger: its number and what it changed. */
 interface FakeTurn {
@@ -141,6 +142,8 @@ const hooks = {
     platform: PLATFORM,
     flags: Object.fromEntries(FEATURE_FLAGS.map((f) => [f.id, { on: isFeatureFlagEnabled(f.id), override: getFeatureFlagOverride(f.id) ?? null }])),
   }),
+  /** The agent doctor's shared answer (rows, loading, error), as the launcher reads it. */
+  doctorState: () => getDoctorState(),
   /**
    * Make one part of the UI throw on its next render, once — to prove the
    * crash stays inside it. Targets: "pane:<sessionId>",
