@@ -11,7 +11,7 @@
 // can check the process from outside. It ends on SIGHUP or SIGTERM (as any
 // program does when its terminal goes away), on "q", or after 10 minutes.
 
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 
 const stateFile = process.argv[2];
 if (!stateFile) {
@@ -20,9 +20,14 @@ if (!stateFile) {
 }
 
 let tick = 0;
+// Written whole, then renamed over the old file: the scenario reads the file
+// at any moment, and a read in the middle of a plain rewrite saw half a JSON
+// document ("Unexpected end of JSON input").
 const save = () => {
   try {
-    writeFileSync(stateFile, JSON.stringify({ pid: process.pid, tick, startedAt: Date.now() }));
+    const tmp = `${stateFile}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ pid: process.pid, tick, startedAt: Date.now() }));
+    renameSync(tmp, stateFile);
   } catch {
     /* the folder may already be gone at the very end */
   }

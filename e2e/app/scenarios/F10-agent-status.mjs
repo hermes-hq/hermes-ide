@@ -510,8 +510,17 @@ try {
     probe.remove();
     return getComputedStyle(tag).color === quiet;
   `, { timeoutMs: 5_000 });
-  const guessed = await readRow(bridge, agentId);
-  assert(guessed.tag.guessed === "guessed" && guessed.tag.dimmed && guessed.tag.italic, `"${guessed.tag.word} · ${guessed.tag.guessed}", in the quiet ink and italics (opacity ${guessed.tag.opacity})`);
+  // The row's own read agrees within a moment (on the Windows runner a first
+  // read right after the wait above sometimes disagreed); every read that
+  // disagrees is logged, so a real regression still fails with the details.
+  const isDimmedGuess = (r) => !!r?.tag && r.tag.guessed === "guessed" && r.tag.dimmed && r.tag.italic;
+  let guessed = await readRow(bridge, agentId);
+  for (const until = Date.now() + 3_000; !isDimmedGuess(guessed) && Date.now() < until; ) {
+    log(`  (row read: ${JSON.stringify(guessed)})`);
+    await sleep(150);
+    guessed = await readRow(bridge, agentId);
+  }
+  assert(isDimmedGuess(guessed), `"${guessed?.tag?.word} · ${guessed?.tag?.guessed}", in the quiet ink and italics (opacity ${guessed?.tag?.opacity}; ${JSON.stringify(guessed?.tag)})`);
 
   log("C: a finished turn reads done until the session is chosen");
   await emitFromRust(bridge, agentId, { type: "turn_start", at: "now", source: "hook:fake", n: 1 });
