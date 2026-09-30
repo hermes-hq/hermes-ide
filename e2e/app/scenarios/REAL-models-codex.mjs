@@ -63,7 +63,7 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-const cli = requireRealCli("codex", log);
+const cli = requireRealCli("codex", log, { scenario: SCENARIO, evidenceDir });
 const guarded = guard([join(home, ".codex", "config.toml")], log);
 const repo = throwawayRepo("real-codex");
 const profileRoot = tempProfileRoot("real-codex");

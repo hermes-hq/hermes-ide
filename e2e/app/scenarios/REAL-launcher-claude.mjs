@@ -25,7 +25,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CI, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { IS_CI, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
 
 const SCENARIO = "REAL-launcher-claude";
 const startedAt = Date.now();
@@ -49,8 +49,7 @@ const which = (name) => {
 const claudeBin = which("claude");
 if (IS_CI || platform() === "win32" || !claudeBin) {
   log(`needs a real, signed-in claude on PATH, macOS or Linux, and no CI (CI=${process.env.CI ?? ""}, claude=${claudeBin || "none"})`);
-  log("RESULT: SKIP (real claude not available here, or CI)");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "real claude not available here, or CI", log });
 }
 
 const home = homedir();

@@ -30,7 +30,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { REPO_ROOT, launchApp, sleep } from "../harness.mjs";
+import { REPO_ROOT, launchApp, sleep, skipScenario } from "../harness.mjs";
 import { completeOnboarding, createAgentSession, createPlainTerminal, dismissWhatsNew, runScenario } from "../n11-steps.mjs";
 import { createClaudeTerminal, fakeClaudeOnPath, sessionRow, setFlagOverride } from "../perf-steps.mjs";
 
@@ -52,8 +52,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   onCleanup(fake.undo);
   if (!fake.usable) {
     log("this scenario needs the fake claude on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
-    log("RESULT: SKIP (Windows outside CI)");
-    process.exit(0);
+    skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
   }
 
   // The Agent view's fake bridge (e2e/app/fixtures/fake-claude-bridge.mjs).

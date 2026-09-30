@@ -21,7 +21,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
 
 const SCENARIO = "N09-terminal-first";
 const startedAt = Date.now();
@@ -38,11 +38,10 @@ function assert(condition, message) {
 
 // ─── Fake `claude` and a home folder that survives a relaunch ────────
 if (platform() === "win32") {
-  // Not a failure: nothing was tested. No result.json is written, so this
-  // run can never count as a pass either.
+  // Not a failure: nothing was tested. The skip result it writes never
+  // counts as a pass either.
   log("the fake claude is a POSIX shell script; this scenario runs on macOS and Linux only");
-  log("RESULT: SKIP");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "the fake claude is a POSIX shell script: macOS and Linux only", log });
 }
 const work = mkdtempSync(join(tmpdir(), "hermes-e2e-n09-"));
 const fakeBin = join(work, "bin");

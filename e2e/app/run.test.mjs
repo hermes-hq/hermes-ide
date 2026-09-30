@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { listScenarioFiles } from "./acceptance.mjs";
 import { CI_ELSEWHERE, CI_EXCLUDED, filesInShard, parseShard, shardOf, shardedScenarios } from "./ci-plan.mjs";
@@ -26,6 +27,11 @@ process.exit(1);
 `;
 // Exits 0 but never writes a result: must count as a failure.
 const SILENT = "process.exit(0);\n";
+// Cannot run here, and says so the way harness.mjs's skipScenario does.
+const SKIP = `import { skipScenario } from ${JSON.stringify(pathToFileURL(join(REPO_ROOT, "e2e", "app", "harness.mjs")).href)};
+skipScenario({ scenario: "real", reason: "real cli not available here, or CI" });
+process.exit(0);
+`;
 
 const dirs = [];
 afterEach(() => {
@@ -86,6 +92,31 @@ describe("run.mjs exit code and summary", { timeout: 60_000 }, () => {
     const { code, out } = run(r, ["quiet.mjs"]);
     expect(code).toBe(1);
     expect(out).toContain("FAILED: quiet (run 1/1, exit 0, result none)");
+  });
+
+  it("reports a scenario that says it cannot run here as skipped, not as a pass or a failure", () => {
+    const r = rig({ "a.mjs": PASS, "real.mjs": SKIP });
+    const { code, out, results } = run(r, ["a.mjs", "real.mjs"], { CI: "true" });
+    expect(code).toBe(0);
+    expect(out).toContain("=== real (1/1): SKIP (real cli not available here, or CI)");
+    expect(out).toContain("SKIPPED: real (real cli not available here, or CI)");
+    expect(out).toContain("failed: 0; skipped here: 1");
+    expect(out).not.toContain("FAILED:");
+    expect(out).toContain("RUN: PASS");
+    expect(results.map((x) => `${x.scenario}:${x.status}`)).toEqual(["a:pass", "real:skip"]);
+  });
+
+  it("a skip result with a non-zero exit is still a failure", () => {
+    const odd = `import { mkdirSync, writeFileSync } from "node:fs";
+const dir = process.env.HERMES_E2E_EVIDENCE;
+mkdirSync(dir, { recursive: true });
+writeFileSync(dir + "/result.json", JSON.stringify({ status: "skip", reason: "odd" }));
+process.exit(3);
+`;
+    const r = rig({ "odd.mjs": odd });
+    const { code, out } = run(r, ["odd.mjs"]);
+    expect(code).toBe(1);
+    expect(out).toContain("FAILED: odd (run 1/1, exit 3, result skip)");
   });
 
   it("stops at the first failure without --keep-going and says what did not run", () => {

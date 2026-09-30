@@ -289,7 +289,8 @@ export function evaluateLedger(ledger, { scenarioFiles, results = null, platform
         if (!results) continue;
         for (const platform of platforms) {
           if (!wanted.includes(platform)) continue;
-          const runs = byScenarioPlatform.get(`${scenario}@${platform}`) ?? [];
+          // A skip tested nothing: it is neither a pass nor a failure.
+          const runs = (byScenarioPlatform.get(`${scenario}@${platform}`) ?? []).filter((r) => r.status !== "skip");
           const passes = runs.filter((r) => r.status === "pass").length;
           const fails = runs.length - passes;
           const green = runs.length > 0 && fails === 0;

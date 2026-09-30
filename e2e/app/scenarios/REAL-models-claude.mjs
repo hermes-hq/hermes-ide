@@ -60,7 +60,7 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-const cli = requireRealCli("claude", log);
+const cli = requireRealCli("claude", log, { scenario: SCENARIO, evidenceDir });
 const guarded = guard([join(home, ".claude", "settings.json")], log);
 const repo = throwawayRepo("real-claude", { ".claude/settings.json": JSON.stringify({ model: "haiku" }, null, 2) + "\n" });
 const profileRoot = tempProfileRoot("real-claude");

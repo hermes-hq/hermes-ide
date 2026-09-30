@@ -110,6 +110,15 @@ describe("evaluateLedger", () => {
     expect(errors).toEqual(["F/F-1: s.mjs has no result on win32"]);
   });
 
+  it("never counts a skip as a pass: a platform that only skipped has no result", () => {
+    const results = [...greenEverywhere.filter((r) => r.platform !== "win32"), run("win32", "skip")];
+    const { errors, rows } = evaluateLedger(ledger("shipped"), { scenarioFiles: ["s.mjs"], results });
+    expect(errors).toEqual(["F/F-1: s.mjs has no result on win32"]);
+    expect(rows.find((r) => r.platform === "win32")).toMatchObject({ runs: 0, green: false });
+    // A skip next to a pass is not a failure either.
+    expect(evaluateLedger(ledger("shipped"), { scenarioFiles: ["s.mjs"], results: [...greenEverywhere, run("linux", "skip", 2)] }).errors).toEqual([]);
+  });
+
   it("fails a shipped feature when any run on a platform is red", () => {
     const results = [...greenEverywhere, run("linux", "fail", 2)];
     const { errors } = evaluateLedger(ledger("shipped"), { scenarioFiles: ["s.mjs"], results });

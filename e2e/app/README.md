@@ -27,7 +27,10 @@ scenario on every OS.
   folder, click, type real key events, read the terminal, screenshot, quit.
 - `scenarios/*.mjs` — one script per user journey. Each writes a log,
   screenshots and a `result.json` to its evidence folder and ends with
-  `RESULT: PASS` or `RESULT: FAIL`.
+  `RESULT: PASS` or `RESULT: FAIL`. One that cannot run where it is (a
+  platform, CI, a missing CLI) calls `skipScenario` in `harness.mjs`: its
+  `result.json` says `skip`, `run.mjs` reports it as skipped, and the
+  acceptance gate never counts it as a pass.
 - `run.mjs` — runs scenarios in fresh processes, N times each, and records
   every run in `results.json` for the acceptance gate.
 
