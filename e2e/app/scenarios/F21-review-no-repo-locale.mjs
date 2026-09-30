@@ -13,7 +13,8 @@
 // First the scenario asks this machine's git itself: under the German
 // locale it must answer in German, or the machine cannot show the problem
 // and the scenario fails saying so (CI generates the de_DE.UTF-8 locale on
-// Linux for this).
+// Linux for this). The ledger runs it on macOS and Linux only: the Windows
+// runner's git answers in English under any locale.
 //
 // Negative control (must end in RESULT: FAIL): HERMES_E2E_F21L_NEGATIVE=1
 // starts the app with HERMES_E2E_GIT_USER_LOCALE=1, which (in test builds
