@@ -112,7 +112,8 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
 
   log("step 6: a program that only mentions claude on its command line is not an agent");
   await bridge.typeInTerminal(looser.sessionId, `${fake.prefixFor("notes")} claude ${LOOSER_FLAG}\n`);
-  await bridge.waitForTerminal(looser.sessionId, new RegExp(`^FAKE-AGENT claude ${LOOSER_FLAG}\\s*$`), { timeoutMs: 30_000 });
+  // Anywhere on the line: a long prompt can wrap the typed command onto it.
+  await bridge.waitForTerminal(looser.sessionId, new RegExp(`FAKE-AGENT claude ${LOOSER_FLAG}\\s*$`), { timeoutMs: 30_000 });
   for (let i = 0; i < 4; i++) {
     const c = await readChips(bridge);
     assert(c && !c.looser && c.safety === "unknown", `no agent is read from "notes.mjs claude ${LOOSER_FLAG}" (poll ${i + 1}: ${JSON.stringify(c)})`);
