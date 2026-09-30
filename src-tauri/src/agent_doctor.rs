@@ -312,9 +312,23 @@ fn e2e_search_dirs() -> Option<Vec<PathBuf>> {
 
 /// Run a probe command with a deadline. Its output is only read here.
 pub fn run_probe(bin: &Path, args: &[String], path_env: &OsStr, timeout: Duration) -> Probe {
+    run_probe_with(bin, args, path_env, &[], OUTPUT_CAP, timeout)
+}
+
+/// `run_probe` with extra environment (an account's profile variable) and
+/// its own output cap (a model list can be long).
+pub fn run_probe_with(
+    bin: &Path,
+    args: &[String],
+    path_env: &OsStr,
+    env: &[(String, String)],
+    cap: usize,
+    timeout: Duration,
+) -> Probe {
     let mut cmd = Command::new(bin);
     cmd.args(args)
         .env("PATH", path_env)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .env("NO_COLOR", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -345,7 +359,7 @@ pub fn run_probe(bin: &Path, args: &[String], path_env: &OsStr, timeout: Duratio
         let tx = tx.clone();
         std::thread::spawn(move || {
             let mut buf = Vec::new();
-            let _ = stream.take(OUTPUT_CAP as u64).read_to_end(&mut buf);
+            let _ = stream.take(cap as u64).read_to_end(&mut buf);
             let _ = tx.send(buf);
         });
     }

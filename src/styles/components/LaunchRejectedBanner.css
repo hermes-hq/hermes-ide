@@ -1,0 +1,93 @@
+/* ─── Launch refused (2.0) ─────────────────────────────────────────── */
+/* Above a terminal session whose CLI refused the launch: the CLI's words,
+   "nothing ran", and the next step. */
+
+.launch-rejected {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  flex-shrink: 0;
+  margin: var(--space-1-5) var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: var(--control-border-width) solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-1));
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+
+.launch-rejected-title {
+  font-weight: var(--weight-semibold);
+}
+
+.launch-rejected-body {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.launch-rejected-vendor {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-1);
+  word-break: break-word;
+}
+
+.launch-rejected-actions,
+.launch-rejected-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.launch-rejected-action,
+.launch-rejected-start {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.launch-rejected-action.primary,
+.launch-rejected-start.primary {
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+
+.launch-rejected-action:disabled,
+.launch-rejected-start:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.launch-rejected-dismiss {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.launch-rejected-pick label {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+.launch-rejected-pick select {
+  font-size: var(--text-xs);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-0-5) var(--space-1);
+}
+
+.launch-rejected-error {
+  color: var(--danger, var(--warning));
+  font-size: var(--text-xs);
+}

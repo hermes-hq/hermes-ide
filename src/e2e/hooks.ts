@@ -38,6 +38,9 @@ import { getOccupancy, listQueuedTasks } from "../fleet/taskQueue";
 import { getAllLoads } from "../fleet/fleetLoad";
 import { FEATURE_FLAGS, getFeatureFlagOverride, getReleaseChannel, isFeatureFlagEnabled } from "../featureFlags";
 import { PLATFORM } from "../utils/platform";
+import { getE2ESessionBridge } from "./sessionBridge";
+import { agentLaunchOptions } from "../agent/capabilities/choice";
+import { createProject, getProjectsOrdered } from "../api/projects";
 
 /** A fake turn for the fake ledger: its number and what it changed. */
 interface FakeTurn {
@@ -74,6 +77,46 @@ function readLines(sessionId: string): string[] | null {
 }
 
 const hooks = {
+  /**
+   * 2.0 launch contract: start a terminal agent with a model, effort and
+   * account exactly as the launcher does (create_session with agentLaunch,
+   * through the helper), and show it. Returns the new session's id.
+   */
+  launchWithChoice: async (opts: {
+    agentId: string;
+    task?: string;
+    cwd?: string;
+    label?: string;
+    modelId?: string;
+    effort?: string | null;
+    accountId?: string;
+    purpose?: "agent" | "login";
+    /** Extra arguments after the agent's own (the launcher's extra args). */
+    suffix?: string;
+  }): Promise<string | null> => {
+    const bridge = getE2ESessionBridge();
+    if (!bridge) throw new Error("the session provider has not registered its e2e bridge");
+    const launch = agentLaunchOptions({ modelId: opts.modelId ?? "default", effort: opts.effort ?? null, accountId: opts.accountId ?? "default" });
+    // Like the launcher: the repository is a Hermes project of the session.
+    let projectIds: string[] | undefined;
+    if (opts.cwd) {
+      const known = (await getProjectsOrdered()).find((p) => p.path.replace(/[\\/]+$/, "") === opts.cwd!.replace(/[\\/]+$/, ""));
+      projectIds = [known ? known.id : (await createProject(opts.cwd, null)).id];
+    }
+    const session = await bridge.createSession({
+      aiProvider: opts.agentId,
+      mode: "terminal",
+      label: opts.label ?? opts.task ?? opts.agentId,
+      workingDirectory: opts.cwd,
+      projectIds,
+      initialPrompt: opts.task,
+      customSuffix: opts.suffix,
+      agentLaunch: { ...launch, purpose: opts.purpose ?? "agent" },
+    });
+    if (!session) return null;
+    bridge.show(session.id);
+    return session.id;
+  },
   /**
    * Every feature flag as the app resolved it at startup: on or off, and
    * the override when one is set; with the release channel and platform.

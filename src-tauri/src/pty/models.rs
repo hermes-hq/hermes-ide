@@ -306,6 +306,11 @@ pub struct Session {
     /// Delivered when the session phase transitions to NeedsInput.
     #[serde(skip)]
     pub pending_nudge: Option<PendingNudge>,
+    /// The model, effort and account the agent was started with (2.0 launch
+    /// contract), and the account's profile environment. Saved with the
+    /// session, so a restore resumes in the same profile.
+    #[serde(default)]
+    pub agent_launch: crate::agent_caps::SessionLaunch,
 }
 
 /// A context nudge that couldn't be delivered immediately (agent was busy).
@@ -361,6 +366,10 @@ pub struct SessionUpdate {
     /// N19: the session this one was handed off from.
     #[serde(default)]
     pub parent_session_id: Option<String>,
+    /// What the agent was launched with (model, effort, account); the model
+    /// chip shows it as "requested" until the agent reports its own.
+    #[serde(default)]
+    pub agent_launch: crate::agent_caps::SessionLaunch,
 }
 
 impl From<&Session> for SessionUpdate {
@@ -397,6 +406,7 @@ impl From<&Session> for SessionUpdate {
             hosted: s.hosted,
             reattached: false,
             parent_session_id: s.parent_session_id.clone(),
+            agent_launch: s.agent_launch.clone(),
         }
     }
 }

@@ -48,6 +48,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "worktree ports and setup report",
         apply: worktree_setup_columns,
     },
+    Migration {
+        version: 5,
+        name: "agent accounts, launch history and presets",
+        apply: create_launch_choice_tables,
+    },
 ];
 
 /// The schema version this build writes.
@@ -772,6 +777,68 @@ fn worktree_setup_columns(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+// ─── Step 5: agent accounts, launch history and presets ──────────────
+
+/// The 2.0 launch contract (`crate::agent_caps::store`): accounts Hermes
+/// added (a profile folder per account), every launch's choice per
+/// repository with a count (the usual combination), saved presets, the
+/// choice remembered per agent and account, and models an account refused.
+/// New tables only; nothing existing changes.
+fn create_launch_choice_tables(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS agent_accounts (
+            agent_id TEXT NOT NULL,
+            id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            profile_dir TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (agent_id, id)
+        );
+        CREATE TABLE IF NOT EXISTS launch_history (
+            repo TEXT NOT NULL,
+            combo_key TEXT NOT NULL,
+            choice_json TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            first_used_at INTEGER NOT NULL,
+            last_used_at INTEGER NOT NULL,
+            recent_uses TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (repo, combo_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_launch_history_last
+            ON launch_history(last_used_at);
+        CREATE TABLE IF NOT EXISTS launch_presets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            choice_json TEXT NOT NULL,
+            combo_key TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS launch_preset_prompts_dismissed (
+            combo_key TEXT PRIMARY KEY,
+            dismissed_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS launch_memory (
+            agent_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            choice_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (agent_id, account_id)
+        );
+        CREATE TABLE IF NOT EXISTS agent_model_rejections (
+            agent_id TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            message TEXT NOT NULL,
+            at INTEGER NOT NULL,
+            PRIMARY KEY (agent_id, account_id, model_id)
+        );
+        ",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -792,6 +859,16 @@ mod tests {
     ];
 
     const DB_FILE: &str = "hermes_idea_v3.db";
+
+    /// The tables step 5 adds (empty).
+    const STEP_5_TABLES: &[&str] = &[
+        "agent_accounts",
+        "agent_model_rejections",
+        "launch_history",
+        "launch_memory",
+        "launch_preset_prompts_dismissed",
+        "launch_presets",
+    ];
 
     fn load_fixture(dir: &Path, dump: &str) -> PathBuf {
         let path = dir.join(DB_FILE);
@@ -960,11 +1037,17 @@ mod tests {
                 !after.contains_key("execution_nodes"),
                 "{release}: execution_nodes is dropped"
             );
-            // Step 3 adds agent_turns (empty); nothing else comes or goes.
+            // Step 3 adds agent_turns and step 5 the launch-choice tables
+            // (empty); nothing else comes or goes.
             assert_eq!(after.get("agent_turns"), Some(&0), "{release}: agent_turns");
+            for t in STEP_5_TABLES {
+                assert_eq!(after.get(*t), Some(&0), "{release}: {t}");
+            }
             assert_eq!(
                 after.len(),
-                before.len() - usize::from(before.contains_key("execution_nodes")) + 1,
+                before.len() - usize::from(before.contains_key("execution_nodes"))
+                    + 1
+                    + STEP_5_TABLES.len(),
                 "{release}: no other table added or removed: {after:?}"
             );
             assert_eq!(
@@ -1308,6 +1391,9 @@ mod tests {
         let mut expected = before.clone();
         expected.remove("execution_nodes");
         expected.insert("agent_turns".to_string(), 0); // added, empty, by step 3
+        for t in STEP_5_TABLES {
+            expected.insert(t.to_string(), 0); // added, empty, by step 5
+        }
         assert_eq!(after, expected, "every other table and row is kept");
         let conn = Connection::open(&path).unwrap();
         let leftovers: i64 = conn
@@ -1408,7 +1494,7 @@ mod tests {
         .unwrap();
         let before = row_counts(&path);
 
-        let report = migrate(&conn, Some(&path), MIGRATIONS).unwrap();
+        let report = migrate(&conn, Some(&path), &MIGRATIONS[..4]).unwrap();
         assert_eq!((report.from, report.to), (3, 4));
         assert_eq!(row_counts(&path), before, "no row lost");
         assert!(has_column(&conn, "session_worktrees", "port_base").unwrap());
@@ -1480,5 +1566,43 @@ mod tests {
             .expect("sessions can share a worktree now");
         drop(db);
         assert_eq!(row_counts(&path)["session_worktrees"], 3);
+    }
+
+    #[test]
+    fn step_5_adds_the_launch_choice_tables_and_touches_nothing_else() {
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let conn = Connection::open(&path).unwrap();
+        migrate(&conn, None, &MIGRATIONS[..4]).unwrap();
+        let before = schema_of(&path);
+        let rows_before = row_counts(&path);
+
+        let report = migrate(&conn, Some(&path), &MIGRATIONS[..5]).unwrap();
+        assert_eq!((report.from, report.to), (4, 5));
+        let after = schema_of(&path);
+        let added: Vec<&String> = after
+            .0
+            .keys()
+            .filter(|t| !before.0.contains_key(*t))
+            .collect();
+        assert_eq!(
+            added,
+            [
+                "agent_accounts",
+                "agent_model_rejections",
+                "launch_history",
+                "launch_memory",
+                "launch_preset_prompts_dismissed",
+                "launch_presets"
+            ]
+        );
+        for (table, cols) in &before.0 {
+            assert_eq!(after.0.get(table), Some(cols), "{table} unchanged");
+        }
+        let mut rows_after = row_counts(&path);
+        for t in added {
+            assert_eq!(rows_after.remove(t), Some(0));
+        }
+        assert_eq!(rows_after, rows_before, "every existing row is kept");
     }
 }

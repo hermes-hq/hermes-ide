@@ -62,6 +62,7 @@
         }
       },
       "structured": { "protocol": "claude-agent-sdk" },
+      "capabilities": {"verified_on_real_install": true, "model": {"flag": ["--model", "{model}"], "id_style": "alias", "aliases": [{"id": "opus", "label": "Opus", "note": "latest Opus"}, {"id": "sonnet", "label": "Sonnet", "note": "latest Sonnet"}, {"id": "haiku", "label": "Haiku", "note": "fast, no effort levels"}, {"id": "opusplan", "label": "Opus plan", "note": "Opus plans, Sonnet codes"}], "list": {"source": "claude_model_cache"}, "typed": true}, "effort": {"flag": ["--effort", "{effort}"], "values": ["low", "medium", "high", "xhigh", "max"], "per_model": [{"match": "haiku", "values": []}, {"match": "^claude-3|^claude-(opus|sonnet)-4-[0-5]|^claude-(opus|sonnet)-4$", "values": []}, {"match": "4-6", "values": ["low", "medium", "high", "max"]}], "validated_by": "none"}, "accounts": {"probe": {"command": ["claude", "auth", "status", "--json"], "parser": "claude_auth_json"}, "profile_env": "CLAUDE_CONFIG_DIR", "profile_dir": ".claude-{slug}", "login": ["claude", "auth", "login"]}, "error_signatures": [{"pattern": "^(?:API Error: )?There's an issue with the selected model \\((.+?)\\)", "reason": "model", "suggestion": "retry-default"}, {"pattern": "^Not logged in \u00b7 Please run /login", "reason": "signed_out", "suggestion": "sign-in"}, {"pattern": "^Warning: Unknown --effort value '(.+?)'", "reason": "effort", "suggestion": "retry-default"}], "model_report": "hooks:model"},
       "install": {
         "command": "curl -fsSL https://claude.ai/install.sh | bash",
         "windows": "irm https://claude.ai/install.ps1 | iex",
@@ -127,6 +128,7 @@
         }
       },
       "structured": { "protocol": "codex-app-server", "args": ["app-server"] },
+      "capabilities": {"verified_on_real_install": true, "model": {"flag": ["-m", "{model}"], "id_style": "slug", "aliases": [], "list": {"command": ["codex", "debug", "models", "--bundled"], "parser": "codex_debug_models"}, "typed": false}, "effort": {"flag": ["-c", "model_reasoning_effort=\"{effort}\""], "values": ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"], "per_model": null, "validated_by": "server"}, "accounts": {"probe": {"command": ["codex", "login", "status"], "parser": "codex_login_status"}, "profile_env": "CODEX_HOME", "profile_dir": ".codex-{slug}", "login": ["codex", "login"]}, "error_signatures": [{"pattern": "^(?:ERROR: )?\\{\"type\":\"error\".*model is not supported when using Codex with a ChatGPT account", "reason": "model", "suggestion": "retry-default"}, {"pattern": "^(?:(?:ERROR: )?\\{\"type\":\"error\".*: )?The model `(.+?)` does not exist or you do not have access to it", "reason": "model", "suggestion": "retry-default"}, {"pattern": "^(?:ERROR: )?(?:\\{\"type\":\"error\".*)?\"?\\[ReasoningEffortParam\\] \\[reasoning\\.effort\\] \\[invalid_enum_value\\]", "reason": "effort", "suggestion": "retry-default"}, {"pattern": "^Not logged in$", "reason": "signed_out", "suggestion": "sign-in"}, {"pattern": "^(?:ERROR: |(?:ERROR: )?\\{\"type\":\"error\".*stream error: )?unexpected status 401 Unauthorized", "reason": "signed_out", "suggestion": "sign-in"}], "model_report": "rollout"},
       "install": {
         "command": "npm install -g @openai/codex",
         "url": "https://github.com/openai/codex"
@@ -177,6 +179,7 @@
           "note": "No launch flag accepts edits only, so the agent asks before every change."
         }
       },
+      "capabilities": {"verified_on_real_install": true, "model": {"flag": ["--model", "{model}"], "id_style": "slug", "aliases": [], "list": {"command": ["agy", "models"], "parser": "agy_models"}, "typed": false, "silent_fallback": true}, "effort": {"flag": ["--effort", "{effort}"], "values": ["low", "medium", "high", "max"], "per_model": null, "validated_by": "cli"}, "accounts": {"probe": {"command": ["agy", "models"], "parser": "agy_models"}, "profile_env": null, "profile_dir": null, "login": null, "note": "One account per computer user (Antigravity has no profiles)"}, "error_signatures": [{"pattern": "^error: invalid model selection .*model (\\S+) is not recognized", "reason": "model", "suggestion": "retry-default"}, {"pattern": "^error: invalid model selection .*invalid --effort \"(.+?)\" \\(valid: (.+?)\\)", "reason": "effort", "suggestion": "retry-default"}, {"pattern": "^Authentication required\\. Please visit the URL to log in", "reason": "signed_out", "suggestion": "sign-in"}], "model_report": "hooks:modelName"},
       "install": {
         "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         "windows": "irm https://antigravity.google/cli/install.ps1 | iex",
@@ -237,6 +240,7 @@
         }
       },
       "structured": { "protocol": "acp", "args": ["--acp"] },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["-m", "{model}"], "id_style": "slug", "aliases": [], "list": null, "typed": true}, "effort": null, "accounts": {"probe": null, "profile_env": "GEMINI_CLI_HOME", "profile_dir": ".gemini-cli-{slug}", "login": ["gemini"]}, "error_signatures": [{"pattern": "^Error authenticating: .*IneligibleTierError", "reason": "other", "suggestion": "switch-account"}, {"pattern": "^Please set an Auth method", "reason": "signed_out", "suggestion": "sign-in"}], "model_report": "none"},
       "install": {
         "command": "npm install -g @google/gemini-cli",
         "url": "https://github.com/google-gemini/gemini-cli"
@@ -295,6 +299,7 @@
         }
       },
       "structured": { "protocol": "acp", "args": ["--acp"] },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["--model", "{model}"], "id_style": "slug", "aliases": [], "list": null, "typed": true}, "effort": {"flag": ["--effort", "{effort}"], "values": ["low", "medium", "high", "xhigh", "max"], "per_model": null, "validated_by": "none"}, "accounts": {"probe": null, "profile_env": "COPILOT_HOME", "profile_dir": ".copilot-{slug}", "login": ["copilot"]}, "error_signatures": [{"pattern": "^(?:Error: )?No authentication information found", "reason": "signed_out", "suggestion": "sign-in"}, {"pattern": "^Error: Authentication failed", "reason": "signed_out", "suggestion": "sign-in"}], "model_report": "none"},
       "install": {
         "command": "npm install -g @github/copilot",
         "url": "https://github.com/github/copilot-cli"
@@ -348,6 +353,7 @@
         }
       },
       "structured": { "protocol": "acp", "args": ["acp"] },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["-m", "{model}"], "id_style": "provider/model", "aliases": [], "list": {"command": ["opencode", "models"], "parser": "lines"}, "typed": true}, "effort": null, "accounts": {"probe": {"command": ["opencode", "providers", "list"], "parser": "exit_code"}, "profile_env": "XDG_DATA_HOME", "profile_dir": ".opencode-{slug}", "login": ["opencode", "auth", "login"]}, "error_signatures": [{"pattern": "^(?:Error: )?Model not found: (\\S+)", "reason": "model", "suggestion": "retry-default"}], "model_report": "none"},
       "install": {
         "command": "npm install -g opencode-ai",
         "url": "https://opencode.ai/docs/"
@@ -391,6 +397,7 @@
           "note": "goose's own mode setting decides, and its default approves every tool."
         }
       },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["--model", "{model}"], "id_style": "slug", "aliases": [], "list": null, "typed": true}, "effort": {"flag": null, "env": "GOOSE_THINKING_EFFORT", "values": ["off", "low", "medium", "high", "max"], "per_model": null, "validated_by": "none"}, "accounts": {"probe": null, "profile_env": "GOOSE_PATH_ROOT", "profile_dir": ".goose-{slug}", "login": ["goose", "configure"]}, "error_signatures": [{"pattern": "^(?:Error: )?No provider configured", "reason": "signed_out", "suggestion": "sign-in"}], "model_report": "none"},
       "install": {
         "command": "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
         "url": "https://goose-docs.ai/docs/getting-started/installation"
@@ -431,6 +438,7 @@
           "note": "No documented approval policy to map yet."
         }
       },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["-m", "{model}"], "id_style": "slug", "aliases": [], "list": null, "typed": true}, "effort": null, "accounts": {"probe": {"command": ["hermes", "status"], "parser": "exit_code"}, "profile_env": "HERMES_HOME", "profile_dir": ".hermes-agent-{slug}", "login": ["hermes", "setup"]}, "error_signatures": [], "model_report": "none"},
       "install": {
         "command": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
         "windows": "iex (irm https://hermes-agent.nousresearch.com/install.ps1)",
@@ -474,6 +482,7 @@
           "note": "Aider edits the files added to the chat and asks before running commands or opening URLs."
         }
       },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["--model", "{model}"], "id_style": "alias", "aliases": [{"id": "sonnet", "label": "Sonnet"}, {"id": "opus", "label": "Opus"}, {"id": "haiku", "label": "Haiku"}], "list": null, "typed": true}, "effort": {"flag": ["--reasoning-effort", "{effort}"], "values": ["low", "medium", "high"], "per_model": null, "validated_by": "none"}, "accounts": {"probe": null, "profile_env": null, "profile_dir": null, "login": null, "note": "Aider uses the API keys in your environment; it has no sign-in"}, "error_signatures": [], "model_report": "none"},
       "install": {
         "command": "python -m pip install aider-install && aider-install",
         "ci": "python3 -m pip install aider-install && aider-install",
@@ -515,6 +524,7 @@
           "note": "Kiro asks before writing files and running commands."
         }
       },
+      "capabilities": {"verified_on_real_install": false, "model": {"flag": ["--model", "{model}"], "id_style": "slug", "aliases": [], "list": null, "typed": true}, "effort": {"flag": ["--effort", "{effort}"], "values": ["low", "medium", "high", "xhigh", "max"], "per_model": [{"match": "4[.-]6", "values": ["low", "medium", "high", "max"]}], "validated_by": "none"}, "accounts": {"probe": {"command": ["kiro-cli", "whoami", "--format", "json"], "parser": "exit_code"}, "profile_env": null, "profile_dir": null, "login": ["kiro-cli", "login"], "note": "Kiro CLI has one account per computer user"}, "error_signatures": [], "model_report": "none"},
       "install": {
         "command": "curl -fsSL https://cli.kiro.dev/install | bash",
         "url": "https://kiro.dev/docs/cli/"

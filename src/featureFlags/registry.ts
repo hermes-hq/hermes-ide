@@ -51,7 +51,7 @@ export const FEATURE_FLAGS = [
     id: "agentCatalog",
     label: "More agents and Custom agent",
     description:
-      "Shows the agents new in 2.0 (Antigravity CLI, OpenCode, goose, Hermes Agent) and the Custom agent card in the New Session agent step. Also, from the same catalog: new sessions start in each agent's mapping of Hermes's one safety default, a terminal pane shows the instruction files its agent loads (with Link CLAUDE.md to AGENTS.md) and a Looser than default chip, and MCP servers added in the Agent view go to the project's .mcp.json.",
+      "Shows the agents new in 2.0 (Antigravity CLI, OpenCode, goose, Hermes Agent) and the Custom agent card in the New Session agent step. Also, from the same catalog: new sessions start in each agent's mapping of Hermes's one safety default, a terminal pane shows the instruction files its agent loads (with Link CLAUDE.md to AGENTS.md) and a Looser than default chip, and MCP servers added in the Agent view go to the project's .mcp.json. Settings > Agents shows each installed agent's accounts (add one: a profile of its own, signed in with the agent's own sign-in), the models and effort levels it offers at launch, and the saved launch presets.",
   },
   {
     id: "honestIsolation",
@@ -63,7 +63,7 @@ export const FEATURE_FLAGS = [
     id: "launchHelper",
     label: "Launch helper (hi run), session status and zero-setup signals",
     description:
-      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess, and switch on each agent's own event reporting per launch (nothing written to your global config) with a status line above the session. Also Done-When checks: a repository's done_when commands run on their own when a turn ends, like its hooks do (Claude is sent back while they fail, at most 3 times and within 30 minutes of retrying), and a chip shows the result.",
+      "Start agents through the bundled helper instead of typing their command into the shell, resume their conversation after a restart, report an agent stuck at a startup prompt, show every session's status (needs approval, working, done, ...) as a glyph and a word, marked when it is only a guess, and switch on each agent's own event reporting per launch (nothing written to your global config) with a status line above the session. Also Done-When checks: a repository's done_when commands run on their own when a turn ends, like its hooks do (Claude is sent back while they fail, at most 3 times and within 30 minutes of retrying), and a chip shows the result. When an agent's own CLI refuses a launch (a model its account does not have, signed out), Hermes stops it at once and the session says why in the CLI's words, with Try again, Retry with default model, Pick another model or Sign in; a session launched with a chosen model shows that model, marked requested, until the agent reports its own.",
   },
   {
     id: "attentionInbox",

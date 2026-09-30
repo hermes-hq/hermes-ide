@@ -90,6 +90,23 @@ pub struct LaunchSpec {
     pub program: String,
     pub args: Vec<String>,
     pub fallback: Option<Fallback>,
+    /// Hermes may stop this launch: the agent's CLI refused it (a model it
+    /// does not know, no sign-in) within its first seconds.
+    pub stop: Option<StopSpec>,
+    /// Clear the screen before the agent starts: a relaunch after a refused
+    /// launch, so a terminal that repaints its screen cannot replay the
+    /// old refusal.
+    pub clear_screen: bool,
+}
+
+/// How Hermes asks `hi` to stop a launch the agent's CLI refused. Hermes
+/// matches the CLI's output against the catalog's error signatures and, on
+/// a match, writes `file` with the launch's nonce on the first line and the
+/// CLI's own words on the second. Only within `window_ms` of the start.
+#[derive(Debug, Clone)]
+pub struct StopSpec {
+    pub file: PathBuf,
+    pub window_ms: u64,
 }
 
 /// What to run instead when the main command finds no conversation to resume.
@@ -210,6 +227,16 @@ impl LaunchSpec {
                 })
             }
         };
+        let stop = v.get("stop").and_then(|st| {
+            let file = field_str(st, "file").filter(|f| !f.is_empty())?;
+            Some(StopSpec {
+                file: PathBuf::from(file),
+                window_ms: st
+                    .get("window_ms")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(90_000),
+            })
+        });
         Ok(LaunchSpec {
             session_id: field_str(&v, "session_id").unwrap_or_default(),
             agent: field_str(&v, "agent").unwrap_or_default(),
@@ -218,6 +245,11 @@ impl LaunchSpec {
             program,
             args: field_args(&v, "args")?,
             fallback,
+            stop,
+            clear_screen: v
+                .get("clear_screen")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(false),
         })
     }
 }
@@ -433,6 +465,170 @@ fn wait_for_evidence(file: &Path, nonce: Option<&str>, wait: Duration) -> bool {
     }
 }
 
+/// Whether Hermes asked to stop this launch: the stop file's first line is
+/// the launch's nonce. Returns the CLI's words Hermes matched (the second
+/// line, possibly empty).
+pub fn stop_requested(file: &Path, nonce: Option<&str>) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let mut lines = text.lines();
+    let first = lines.next()?.trim();
+    let ok = match nonce {
+        Some(n) => first == n,
+        None => !first.is_empty(),
+    };
+    if !ok {
+        return None;
+    }
+    let message: String = lines
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(600)
+        .collect();
+    Some(message)
+}
+
+/// Sequences that give the terminal back after a full-screen agent was
+/// stopped mid-draw: main screen (without moving the cursor), cursor shown, colours reset, mouse
+/// reporting, bracketed paste and the kitty keyboard protocol off, normal
+/// keypad.
+pub const TERMINAL_RESET: &str =
+    "\x1b[?1047l\x1b[?25h\x1b[0m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[<u\x1b>";
+
+/// An invisible marker (an OSC sequence terminals ignore) that says where
+/// this launch's output starts; Hermes matches the agent's refusal only after
+/// it. Mirror of `agent_caps::watch::launch_marker` in the app.
+pub fn launch_marker(nonce: &str) -> String {
+    format!("\x1b]777;hermes-launch;{nonce}\x07")
+}
+
+/// The lines `hi` prints after stopping a refused launch.
+pub fn stopped_text(agent: &str, vendor_message: &str) -> String {
+    let who = if agent.is_empty() { "the agent" } else { agent };
+    let mut out = String::from(TERMINAL_RESET);
+    out.push_str("\r\n");
+    if !vendor_message.trim().is_empty() {
+        out.push_str(vendor_message.trim());
+        out.push_str("\r\n");
+    }
+    out.push_str(&format!(
+        "hermes: {who} refused this launch; Hermes stopped it. Nothing more will run.\r\n"
+    ));
+    out
+}
+
+/// The agent's descendants (Unix, from `ps`), deepest first, so a CLI that
+/// is a wrapper around another process leaves nothing behind.
+#[cfg(unix)]
+fn descendants(root: u32) -> Vec<u32> {
+    let Ok(out) = Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output() else {
+        return Vec::new();
+    };
+    let pairs: Vec<(u32, u32)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+        })
+        .collect();
+    let mut found = Vec::new();
+    let mut frontier = vec![root];
+    while let Some(p) = frontier.pop() {
+        for (pid, ppid) in &pairs {
+            if *ppid == p && !found.contains(pid) {
+                found.push(*pid);
+                frontier.push(*pid);
+            }
+        }
+    }
+    found.reverse();
+    found
+}
+
+/// Stop the agent: SIGTERM to it and everything it started, then SIGKILL
+/// after two seconds (Unix); TerminateProcess (Windows).
+fn stop_child(child: &mut std::process::Child) -> std::io::Result<ExitStatus> {
+    #[cfg(unix)]
+    {
+        let pid = child.id();
+        let tree = descendants(pid);
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+            for p in &tree {
+                libc::kill(*p as i32, libc::SIGTERM);
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(status) = child.try_wait()? {
+                for p in &tree {
+                    unsafe {
+                        libc::kill(*p as i32, libc::SIGKILL);
+                    }
+                }
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                for p in &tree {
+                    unsafe {
+                        libc::kill(*p as i32, libc::SIGKILL);
+                    }
+                }
+                let _ = child.kill();
+                return child.wait();
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // A .cmd shim (an npm-installed CLI) runs the agent as its child:
+        // end the whole tree, then the shim itself.
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = child.kill();
+        child.wait()
+    }
+}
+
+/// The terminal's settings before the agent ran (Unix), restored after a
+/// stopped agent left it in raw mode.
+#[cfg(unix)]
+struct SavedTty(Option<libc::termios>);
+
+#[cfg(unix)]
+impl SavedTty {
+    fn save() -> Self {
+        unsafe {
+            let mut t: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(0, &mut t) == 0 {
+                SavedTty(Some(t))
+            } else {
+                SavedTty(None)
+            }
+        }
+    }
+    fn restore(&self) {
+        if let Some(t) = &self.0 {
+            unsafe {
+                libc::tcsetattr(0, libc::TCSANOW, t);
+            }
+        }
+    }
+}
+
+/// What `run_child` watches for besides the agent's exit.
+pub struct StopWatch<'a> {
+    pub file: &'a Path,
+    pub nonce: Option<&'a str>,
+    pub window: Duration,
+}
+
 /// Leave Ctrl-C to the agent: `hi` only reports how the agent ended.
 fn ignore_interrupts() {
     #[cfg(unix)]
@@ -503,7 +699,8 @@ fn run_child(
     env: &BTreeMap<String, String>,
     cwd: Option<&Path>,
     running_after: Option<(Duration, &dyn Fn())>,
-) -> std::io::Result<ExitStatus> {
+    stop: Option<&StopWatch<'_>>,
+) -> std::io::Result<(ExitStatus, Option<String>)> {
     let mut cmd = Command::new(resolved);
     cmd.args(args_for(resolved, args));
     cmd.envs(env);
@@ -522,21 +719,35 @@ fn run_child(
             });
         }
     }
+    #[cfg(unix)]
+    let tty = SavedTty::save();
     let mut child = cmd.spawn()?;
-    if let Some((after, on_running)) = running_after {
-        let started = Instant::now();
-        loop {
-            if let Some(status) = child.try_wait()? {
-                return Ok(status);
-            }
+    let started = Instant::now();
+    let mut running_after = running_after;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok((status, None));
+        }
+        if let Some((after, on_running)) = running_after {
             if started.elapsed() >= after {
                 on_running();
-                break;
+                running_after = None;
             }
-            std::thread::sleep(Duration::from_millis(20));
         }
+        let watching = stop.filter(|s| started.elapsed() < s.window);
+        if let Some(s) = watching {
+            if let Some(message) = stop_requested(s.file, s.nonce) {
+                let status = stop_child(&mut child)?;
+                #[cfg(unix)]
+                tty.restore();
+                return Ok((status, Some(message)));
+            }
+        }
+        if running_after.is_none() && watching.is_none() {
+            return Ok((child.wait()?, None));
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
-    child.wait()
 }
 
 fn now_unix() -> u64 {
@@ -664,9 +875,48 @@ fn cmd_run(arg: &str) -> i32 {
         eprintln!("hi: {error}");
         return reporter.exited(EXIT_NOT_FOUND, Some(&error));
     };
+    // Hermes reads the agent's refusal only from output after this marker:
+    // a terminal that repaints its screen (Windows' ConPTY) would otherwise
+    // replay an earlier launch's refusal into this one.
+    if spec.clear_screen {
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x1b[H\x1b[2J");
+        let _ = out.flush();
+    }
+    if spec.stop.is_some() {
+        if let Some(nonce) = reporter.nonce.as_deref() {
+            let mut out = std::io::stdout();
+            let _ = write!(out, "{}", launch_marker(nonce));
+            let _ = out.flush();
+        }
+    }
     let started = Instant::now();
-    let status = match run_child(&resolved, &spec.args, &spec.env, cwd.as_deref(), None) {
-        Ok(s) => s,
+    let stop_watch = spec.stop.as_ref().map(|st| StopWatch {
+        file: &st.file,
+        nonce: reporter.nonce.as_deref(),
+        window: Duration::from_millis(st.window_ms),
+    });
+    let status = match run_child(
+        &resolved,
+        &spec.args,
+        &spec.env,
+        cwd.as_deref(),
+        None,
+        stop_watch.as_ref(),
+    ) {
+        Ok((_, Some(vendor_message))) => {
+            // The CLI refused the launch (Hermes saw its words): the agent is
+            // stopped, the terminal is given back, and nothing is retried.
+            let mut out = std::io::stdout();
+            let _ = write!(out, "{}", stopped_text(&spec.agent, &vendor_message));
+            let _ = out.flush();
+            reporter.report(
+                "hermes.launch_stopped",
+                serde_json::json!({ "elapsed_ms": started.elapsed().as_millis() as u64 }),
+            );
+            return reporter.exited(1, Some("the agent refused the launch; Hermes stopped it"));
+        }
+        Ok((s, None)) => s,
         Err(e) => {
             let error = format!("cannot start {}: {e}", resolved.display());
             eprintln!("hi: {error}");
@@ -737,8 +987,9 @@ fn cmd_run(arg: &str) -> i32 {
         &spec.env,
         cwd.as_deref(),
         Some((after, &running)),
+        None,
     ) {
-        Ok(s) => reporter.exited(Ended::of(s).code(), None),
+        Ok((s, _)) => reporter.exited(Ended::of(s).code(), None),
         Err(e) => {
             let error = format!("cannot start {}: {e}", resolved.display());
             eprintln!("hi: {error}");
@@ -911,6 +1162,19 @@ pub fn signal_line(
                 }
                 _ => {}
             }
+        }
+        // The model the agent reports (a hook's `model` / Antigravity's
+        // `modelName`, or the status line's `model.id`), for the model chip.
+        if let Some(model) = map
+            .get("model")
+            .and_then(|m| m.as_str().or_else(|| m.get("id").and_then(|i| i.as_str())))
+            .or_else(|| map.get("modelName").and_then(|m| m.as_str()))
+            .filter(|m| !m.trim().is_empty())
+        {
+            kept.insert(
+                "model".to_string(),
+                serde_json::Value::String(truncate_chars(model.trim(), 200)),
+            );
         }
         if let Some(rl) = map.get("rate_limits").and_then(kept_rate_limits) {
             kept.insert("rate_limits".to_string(), rl);
@@ -1679,7 +1943,9 @@ mod tests {
         );
         assert_eq!(line["event"], "StatusLine");
         let kept = line["payload"].as_object().unwrap();
-        assert!(kept.get("model").is_none() && kept.get("workspace").is_none());
+        // The model the agent runs is kept as its id (the session's model chip).
+        assert_eq!(kept.get("model"), Some(&serde_json::json!("fake-model")));
+        assert!(kept.get("workspace").is_none());
         assert_eq!(
             kept["rate_limits"],
             serde_json::json!({
@@ -1696,6 +1962,38 @@ mod tests {
             Some(&serde_json::json!({ "rate_limits": {} })),
         );
         assert!(none["payload"].get("rate_limits").is_none());
+    }
+
+    #[test]
+    fn the_reported_model_is_kept_from_a_hook_or_antigravitys_model_name() {
+        let hook = signal_line(
+            None,
+            "claude",
+            "s",
+            Some("n"),
+            Some(
+                &serde_json::json!({ "hook_event_name": "SessionStart", "model": "claude-haiku-4-5-20251001" }),
+            ),
+        );
+        assert_eq!(hook["payload"]["model"], "claude-haiku-4-5-20251001");
+        let agy = signal_line(
+            None,
+            "antigravity",
+            "s",
+            Some("n"),
+            Some(
+                &serde_json::json!({ "hook_event_name": "Stop", "modelName": "gemini-3.6-flash-medium" }),
+            ),
+        );
+        assert_eq!(agy["payload"]["model"], "gemini-3.6-flash-medium");
+        let none = signal_line(
+            None,
+            "codex",
+            "s",
+            Some("n"),
+            Some(&serde_json::json!({ "type": "agent-turn-complete", "model": "  " })),
+        );
+        assert!(none["payload"].get("model").is_none());
     }
 
     #[test]
@@ -1744,5 +2042,122 @@ mod tests {
         assert!(line.get("nonce").is_none());
         let empty = signal_line(Some("Stop"), "x", "s", Some(""), None);
         assert!(empty.get("nonce").is_none());
+    }
+
+    #[test]
+    fn parses_the_stop_block_and_ignores_a_missing_one() {
+        let text = r#"{"v":1,"session_id":"s","agent":"claude","cwd":null,"env":{},"program":"claude","args":[],
+            "stop":{"file":"/tmp/x/launch-stop","window_ms":1234}}"#;
+        let spec = LaunchSpec::parse(text).unwrap();
+        let stop = spec.stop.unwrap();
+        assert_eq!(
+            (stop.file, stop.window_ms),
+            (PathBuf::from("/tmp/x/launch-stop"), 1234)
+        );
+        let plain = r#"{"v":1,"program":"claude"}"#;
+        assert!(LaunchSpec::parse(plain).unwrap().stop.is_none());
+        assert!(!LaunchSpec::parse(plain).unwrap().clear_screen);
+        let again = r#"{"v":1,"program":"claude","clear_screen":true}"#;
+        assert!(LaunchSpec::parse(again).unwrap().clear_screen);
+    }
+
+    #[test]
+    fn a_stop_counts_only_with_this_launchs_nonce() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("launch-stop");
+        assert_eq!(stop_requested(&file, Some("n1")), None);
+        std::fs::write(&file, "n0\nold words\n").unwrap();
+        assert_eq!(stop_requested(&file, Some("n1")), None);
+        std::fs::write(
+            &file,
+            "n1\nThere's an issue with the selected model (x).\u{1b}[0m\n",
+        )
+        .unwrap();
+        assert_eq!(
+            stop_requested(&file, Some("n1")).as_deref(),
+            Some("There's an issue with the selected model (x).[0m")
+        );
+        std::fs::write(&file, "n1\n").unwrap();
+        assert_eq!(stop_requested(&file, Some("n1")).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn the_stopped_text_gives_the_terminal_back_and_repeats_the_words() {
+        let t = stopped_text("claude", "Not logged in · Please run /login");
+        assert!(t.starts_with(TERMINAL_RESET));
+        assert!(t.contains("\r\nNot logged in · Please run /login\r\n"));
+        assert!(t.ends_with(
+            "hermes: claude refused this launch; Hermes stopped it. Nothing more will run.\r\n"
+        ));
+        assert!(!stopped_text("", "").contains("\r\n\r\n"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_ends_a_running_agent_and_its_children_within_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("launch-stop");
+        let sh = PathBuf::from("/bin/sh");
+        // A wrapper that starts a child of its own, like an npm-installed CLI.
+        let args = vec!["-c".to_string(), "sleep 30 & wait".to_string()];
+        let watch = StopWatch {
+            file: &file,
+            nonce: Some("n1"),
+            window: Duration::from_secs(20),
+        };
+        let writer = {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                std::fs::write(&file, "n1\nrefused\n").unwrap();
+            })
+        };
+        let t0 = Instant::now();
+        let (status, message) =
+            run_child(&sh, &args, &BTreeMap::new(), None, None, Some(&watch)).unwrap();
+        writer.join().unwrap();
+        assert_eq!(message.as_deref(), Some("refused"));
+        assert!(!status.success());
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "stopped at once, not after the sleep"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_stop_after_the_window_and_none_without_a_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("launch-stop");
+        std::fs::write(&file, "n1\nlate\n").unwrap();
+        let sh = PathBuf::from("/bin/sh");
+        let args = vec!["-c".to_string(), "sleep 0.4".to_string()];
+        let watch = StopWatch {
+            file: &file,
+            nonce: Some("n1"),
+            window: Duration::from_millis(0),
+        };
+        let (status, message) =
+            run_child(&sh, &args, &BTreeMap::new(), None, None, Some(&watch)).unwrap();
+        assert!(
+            status.success() && message.is_none(),
+            "a stop outside the window is ignored"
+        );
+        let other = StopWatch {
+            file: &file,
+            nonce: Some("n2"),
+            window: Duration::from_secs(5),
+        };
+        let (status, message) =
+            run_child(&sh, &args, &BTreeMap::new(), None, None, Some(&other)).unwrap();
+        assert!(
+            status.success() && message.is_none(),
+            "another launch's stop is ignored"
+        );
+    }
+
+    #[test]
+    fn the_launch_marker_is_an_osc_the_app_knows() {
+        assert_eq!(launch_marker("n0"), "\x1b]777;hermes-launch;n0\x07");
     }
 }

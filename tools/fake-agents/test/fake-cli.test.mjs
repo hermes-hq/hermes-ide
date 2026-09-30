@@ -478,7 +478,8 @@ describe("fake vendor CLI: agent doctor probes", () => {
 		writeFileSync(join(dir, "auth-codex"), "out\n");
 		const out = await run(["login", "status"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_AGENT: "codex" } });
 		expect(out.code).toBe(1);
-		expect(out.stdout).toContain("Not signed in");
+		// Codex's own words (capability matrix).
+		expect(out.stdout).toBe("Not logged in\n");
 		const env = await run(["providers", "list"], { env: { HERMES_FAKE_AUTH: "out", HERMES_FAKE_AGENT: "opencode" } });
 		expect(env.code).toBe(1);
 	});
@@ -613,5 +614,100 @@ describe("fake-cli transcript (F14 context gauge)", () => {
 		const res = await run(["--session-id", "t-v"], { keys: "cq", afterMs: 800 });
 		expect(res.code).toBe(0);
 		expect(res.stdout).toContain("no transcript folder");
+	});
+});
+
+describe("fake vendor CLI: models, effort and accounts (2.0 launch contract)", () => {
+	it("answers the capability probes in the real CLIs' shapes", async () => {
+		const dir = tmp();
+		const claude = await run(["auth", "status", "--json"], { env: { HERMES_FAKE_DIR: dir } });
+		expect(claude.code).toBe(0);
+		expect(JSON.parse(claude.stdout)).toMatchObject({ loggedIn: true, subscriptionType: "max" });
+		const models = await run(["debug", "models", "--bundled"], { env: { HERMES_FAKE_AGENT: "codex" } });
+		expect(JSON.parse(models.stdout).models.map((m) => m.slug)).toEqual(["gpt-fake-terra", "gpt-fake-luna", "gpt-fake-old", "gpt-fake-hidden"]);
+		const agy = await run(["models"], { env: { HERMES_FAKE_AGENT: "antigravity" } });
+		expect(agy.stdout.split("\n")[1]).toBe("gemini-fake-flash-low\tGemini Fake Flash (Low)");
+		const codexIn = await run(["login", "status"], { env: { HERMES_FAKE_AGENT: "codex" } });
+		expect(codexIn.stdout).toBe("Logged in using ChatGPT\n");
+	});
+
+	it("a profile folder is signed out until its sign-in runs, and the sign-in is recorded", async () => {
+		const dir = tmp();
+		const profile = join(tmp(), ".claude-work");
+		const env = { HERMES_FAKE_DIR: dir, CLAUDE_CONFIG_DIR: profile };
+		const before = await run(["auth", "status", "--json"], { env });
+		expect(before.code).toBe(1);
+		expect(JSON.parse(before.stdout).loggedIn).toBe(false);
+		const login = await run(["auth", "login"], { env });
+		expect(login.code).toBe(0);
+		expect(readFileSync(join(profile, ".fake-auth"), "utf8").trim()).toBe("in");
+		const logins = readdirSync(dir).filter((f) => f.startsWith("login-")).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+		expect(logins).toMatchObject([{ agent: "claude", profileEnv: "CLAUDE_CONFIG_DIR", profileDir: profile }]);
+		const after = await run(["auth", "status", "--json"], { env });
+		expect(after.code).toBe(0);
+	});
+
+	it("takes the model and effort flags and reports the model in its SessionStart hook", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir);
+		const res = await run(["--session-id", "m-1", "--settings", file, "--model", "opus", "--effort", "high", "hello"], { env: { HERMES_FAKE_DIR: dir }, keys: "q" });
+		expect(res.code).toBe(0);
+		const rec = records(dir)[0];
+		expect([rec.model, rec.effort, rec.prompt]).toEqual(["opus", "high", "hello"]);
+		expect(readFileSync(marks, "utf8")).toContain('"model":"opus"');
+		const codex = await run(["-m", "gpt-fake-luna", "-c", 'model_reasoning_effort="medium"'], { env: { HERMES_FAKE_DIR: tmp(), HERMES_FAKE_AGENT: "codex" }, keys: "q" });
+		expect(codex.code).toBe(0);
+	});
+
+	it("refuses a listed model with the vendor's own words and runs nothing", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir);
+		const res = await run(["--session-id", "r-1", "--settings", file, "--model", "not-a-model", "do it"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_REJECT_MODELS: "not-a-model" }, keys: "q", afterMs: 500 });
+		expect(res.stdout).toContain("There's an issue with the selected model (not-a-model). It may not exist or you may not have access to it.");
+		expect(res.code).toBe(1);
+		expect(existsSync(marks)).toBe(false);
+		const rec = records(dir)[0];
+		expect(rec.turns).toEqual([]);
+		expect(rec.events.map((e) => e.ev)).toContain("refused");
+		const agy = await run(["--model", "nope"], { env: { HERMES_FAKE_DIR: tmp(), HERMES_FAKE_AGENT: "antigravity", HERMES_FAKE_REJECT_MODELS: "*" } });
+		expect(agy.code).toBe(1);
+		expect(agy.stdout).toContain('error: invalid model selection (--model "nope" --effort ""): model nope is not recognized');
+	});
+
+	it("a resumed conversation replays its history and is refused only at its first message", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["UserPromptSubmit"]);
+		const task = "Users report this error after SSO today: Not logged in · Please run /login appears";
+		const first = await run(["--session-id", "h-1", "--settings", file, task], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "wrap-prompt quote-errors" }, keys: "q" });
+		expect(first.code).toBe(0);
+		// Wrapped at 40 columns: a row starts with the CLI's own words.
+		expect(first.stdout).toContain("\r\nNot logged in · Please run /login\r\n");
+		expect(first.stdout).toContain("\u23fa Not logged in · Please run /login\r\n");
+		const signedOut = { HERMES_FAKE_DIR: dir, HERMES_FAKE_MODE: "refuse-signed-out", HERMES_FAKE_AUTH: "out" };
+		// Nothing typed: replayed, ready, not refused.
+		const idle = await run(["--resume", "h-1", "--settings", file], { env: signedOut, keys: "\x03" });
+		expect(idle.stdout).toContain("fake-cli: earlier in this conversation:");
+		expect(idle.stdout).toContain("fake-cli: ready");
+		expect(idle.stdout.split("fake-cli: ready")[1]).not.toContain("Please run /login");
+		// The first message: refused, and the refusal joins the history.
+		const sent = await run(["--resume", "h-1", "--settings", file], { env: signedOut, keys: "hi\rq", afterMs: 500 });
+		expect(sent.stdout.split("fake-cli: ready")[1]).toContain("Not logged in · Please run /login");
+		const again = await run(["--resume", "h-1", "--settings", file], { env: { HERMES_FAKE_DIR: dir }, keys: "q" });
+		expect(again.code).toBe(0);
+		expect(again.stdout.split("fake-cli: ready")[0].match(/Not logged in · Please run \/login/g).length).toBe(3);
+		// A refused resume ran its SessionStart hooks, and its
+		// UserPromptSubmit hooks with the first message only (like Claude
+		// Code 2.1 signed out); nothing else.
+		const ran = readFileSync(marks, "utf8").split("\n").filter(Boolean).map((l) => l.split(" ")[0]);
+		expect(ran.filter((e) => e === "SessionStart").length).toBe(4);
+		const prompts = readFileSync(marks, "utf8").split("\n").filter((l) => l.startsWith("UserPromptSubmit "));
+		expect(prompts.length).toBe(1);
+		expect(JSON.parse(prompts[0].slice("UserPromptSubmit ".length)).prompt).toBe("hi");
+	}, 30_000);
+
+	it("an empty profile refuses the launch as signed out", async () => {
+		const res = await run(["--session-id", "s-1"], { env: { HERMES_FAKE_DIR: tmp(), CLAUDE_CONFIG_DIR: join(tmp(), ".claude-new") }, keys: "q" });
+		expect(res.stdout).toContain("Not logged in · Please run /login");
+		expect(res.code).toBe(1);
 	});
 });

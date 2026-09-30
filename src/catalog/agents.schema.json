@@ -280,14 +280,22 @@
                 "exit_codes": {
                   "description": "Exit codes the vendor uses for it. Empty or absent: any code except an interrupt.",
                   "type": "array",
-                  "items": { "type": "integer", "minimum": 1, "maximum": 128 },
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 128
+                  },
                   "uniqueItems": true
                 },
                 "output": {
                   "description": "Text the vendor prints for it (to the terminal, either stream); matched ignoring case, spaces and colours. One must appear.",
                   "type": "array",
                   "minItems": 1,
-                  "items": { "type": "string", "minLength": 8, "maxLength": 200 },
+                  "items": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  },
                   "uniqueItems": true
                 }
               }
@@ -634,6 +642,9 @@
               ]
             }
           }
+        },
+        "capabilities": {
+          "$ref": "#/definitions/capabilities"
         }
       },
       "allOf": [
@@ -781,6 +792,372 @@
         "note": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "capabilities": {
+      "description": "What a person can choose at launch (2.0 launch contract; see src/agent/capabilities and src-tauri/src/agent_caps). Read by the backend; facts from the verified capability matrix.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_on_real_install",
+        "model",
+        "effort",
+        "accounts",
+        "error_signatures",
+        "model_report"
+      ],
+      "properties": {
+        "verified_on_real_install": {
+          "description": "True only for agents proven with a real CLI in this release.",
+          "type": "boolean"
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "flag",
+            "id_style",
+            "aliases",
+            "list",
+            "typed"
+          ],
+          "properties": {
+            "flag": {
+              "description": "Arguments that pick the model; {model} is filled in. Omitted for the default model.",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "#/definitions/execToken"
+                  }
+                }
+              ]
+            },
+            "id_style": {
+              "enum": [
+                "alias",
+                "slug",
+                "display",
+                "provider/model"
+              ]
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._:/\\[\\]-]+$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "list": {
+              "description": "Where the model list comes from: a read-only command and its parser, a local cache, or null (aliases / type a name).",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "command",
+                    "parser"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": [
+                        {
+                          "$ref": "#/definitions/binary"
+                        }
+                      ],
+                      "additionalItems": {
+                        "$ref": "#/definitions/execToken"
+                      }
+                    },
+                    "parser": {
+                      "enum": [
+                        "codex_debug_models",
+                        "agy_models",
+                        "lines"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "source"
+                  ],
+                  "properties": {
+                    "source": {
+                      "enum": [
+                        "claude_model_cache"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "typed": {
+              "description": "A model name that is not listed may be typed.",
+              "type": "boolean"
+            },
+            "silent_fallback": {
+              "description": "The CLI runs another model without a word when given one it does not know (Antigravity 1.2 in its interactive mode), so Hermes never launches a model its list does not have.",
+              "type": "boolean"
+            }
+          }
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "flag",
+                "values",
+                "per_model",
+                "validated_by"
+              ],
+              "properties": {
+                "flag": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "$ref": "#/definitions/execToken"
+                      }
+                    }
+                  ]
+                },
+                "env": {
+                  "description": "An environment variable that sets the effort (when there is no flag).",
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]*$"
+                },
+                "values": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z]+$"
+                  }
+                },
+                "per_model": {
+                  "description": "First match wins (a regular expression on the model id); unmatched models take every value.",
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "match",
+                          "values"
+                        ],
+                        "properties": {
+                          "match": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[a-z]+$"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "validated_by": {
+                  "enum": [
+                    "cli",
+                    "server",
+                    "none"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "accounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "probe",
+            "profile_env",
+            "profile_dir",
+            "login"
+          ],
+          "properties": {
+            "probe": {
+              "description": "A read-only command that tells whether the CLI is signed in.",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "command",
+                    "parser"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": [
+                        {
+                          "$ref": "#/definitions/binary"
+                        }
+                      ],
+                      "additionalItems": {
+                        "$ref": "#/definitions/execToken"
+                      }
+                    },
+                    "parser": {
+                      "enum": [
+                        "claude_auth_json",
+                        "codex_login_status",
+                        "agy_models",
+                        "exit_code"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "profile_env": {
+              "description": "The environment variable that points the CLI at another profile folder, or null (one account per computer user).",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]*$"
+                }
+              ]
+            },
+            "profile_dir": {
+              "description": "The profile folder Hermes creates under the home folder on Add account ({slug} = the account's name).",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\.[a-z0-9-]+\\{slug\\}$"
+                }
+              ]
+            },
+            "login": {
+              "description": "The CLI's own sign-in command, run in a terminal with the profile's environment.",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": [
+                    {
+                      "$ref": "#/definitions/binary"
+                    }
+                  ],
+                  "additionalItems": {
+                    "$ref": "#/definitions/execToken"
+                  }
+                }
+              ]
+            },
+            "note": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "error_signatures": {
+          "description": "How the CLI says it refused a launch (regular expressions on its output lines; ^ = the start of a line).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pattern",
+              "reason",
+              "suggestion"
+            ],
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "enum": [
+                  "model",
+                  "effort",
+                  "signed_out",
+                  "other"
+                ]
+              },
+              "suggestion": {
+                "enum": [
+                  "retry-default",
+                  "switch-account",
+                  "sign-in"
+                ]
+              }
+            }
+          }
+        },
+        "model_report": {
+          "description": "Where the agent reports the model it runs (for the session's model chip).",
+          "enum": [
+            "stream_init",
+            "hooks:model",
+            "hooks:modelName",
+            "rollout",
+            "history_md",
+            "none"
+          ]
         }
       }
     }

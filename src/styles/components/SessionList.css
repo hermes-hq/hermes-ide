@@ -459,6 +459,13 @@
   min-width: 0;
 }
 
+/* 2.0: the model asked for at launch, until the agent reports its own. */
+.session-model-chip-requested {
+  background: transparent;
+  border: var(--control-border-width) dashed var(--border);
+  color: var(--text-3);
+}
+
 .session-ssh-tag {
   font-size: var(--text-2xs);
   background: var(--info-dim, rgba(57, 197, 207, 0.15));

@@ -1,0 +1,171 @@
+/* ─── Settings > Agents (2.0) ──────────────────────────────────────── */
+/* One card per installed agent: accounts, what can be chosen at launch, and
+   how exactly Hermes knows what it is doing. Then the saved presets. */
+
+.agents-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.agents-settings-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.agents-settings-bar .settings-hint {
+  flex: 1;
+  margin: 0;
+}
+
+.agents-settings-refresh,
+.agents-settings-add-confirm {
+  padding: var(--space-0-5) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agents-settings-card {
+  display: grid;
+  /* Four columns in a wide panel, two in the default Settings width. */
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-7) * 4), 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius);
+  border: var(--control-border-width) solid var(--border);
+  background: var(--bg-1);
+  align-items: start;
+}
+
+.agents-settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.agents-settings-agent {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.agents-settings-heading {
+  font-size: var(--text-2xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.agents-settings-muted {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.agents-settings-verified.ok,
+.agents-settings-status.ok {
+  color: var(--success);
+}
+
+.agents-settings-verified.no,
+.agents-settings-status.no {
+  color: var(--warning);
+}
+
+.agents-settings-account {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  align-items: baseline;
+}
+
+.agents-settings-account[data-signed-in="signed-out"] {
+  color: var(--text-2);
+}
+
+.agents-settings-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agents-settings-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  align-items: center;
+}
+
+.agents-settings-add-name,
+.agents-settings-preset-name-input {
+  font-size: var(--text-xs);
+  padding: var(--space-0-5) var(--space-1-5);
+  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* The name on its own line, the buttons under it: the column stays narrow. */
+.agents-settings-add-name {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.agents-settings-preset-name-input {
+  min-width: calc(var(--space-8) * 2);
+}
+
+.agents-settings-error {
+  color: var(--danger, var(--warning));
+  font-size: var(--text-xs);
+}
+
+.agents-settings-presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+.agents-settings-preset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1-5) var(--space-3);
+  border-radius: var(--radius);
+  border: var(--control-border-width) solid var(--border);
+  background: var(--bg-1);
+  font-size: var(--text-xs);
+}
+
+.agents-settings-preset-name {
+  font-weight: var(--weight-semibold);
+  color: var(--text-1);
+}
+
+.agents-settings-preset-issues {
+  color: var(--warning);
+}
+
+.agents-settings-preset-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-3);
+}
+

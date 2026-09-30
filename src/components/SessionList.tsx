@@ -79,7 +79,11 @@ export function SessionIdentityChips({ session }: { session: SessionData }) {
   const { t } = useI18n();
   const { identity } = useSessionEvents(session.id);
   if (session.mode !== "terminal") return null;
-  if (!identity.model && !identity.permissionMode) return null;
+  // 2.0: until the agent reports the model it runs, the model it was
+  // launched with, marked "requested" (a CLI can still pick another).
+  const launch = session.agent_launch && !session.agent_launch.login ? session.agent_launch : null;
+  const requested = !identity.model && launch?.modelId ? (launch.effort ? `${launch.modelId} · ${launch.effort}` : launch.modelId) : null;
+  if (!identity.model && !requested && !identity.permissionMode) return null;
   // Its own row, not squeezed into the meta row next to the phase tag and
   // age: a real model id ("vendor-model-4-5-20250929") needs the row's
   // full width to stay readable at the default sidebar width.
@@ -89,9 +93,20 @@ export function SessionIdentityChips({ session }: { session: SessionData }) {
         <span
           className="session-model-chip"
           data-testid="session-model-chip"
+          data-source="reported"
           title={t("sessions.modelChipLabel", { model: identity.model })}
         >
           {identity.model}
+        </span>
+      )}
+      {requested && (
+        <span
+          className="session-model-chip session-model-chip-requested"
+          data-testid="session-model-chip"
+          data-source="requested"
+          title={t("sessions.modelRequestedTitle", { model: requested })}
+        >
+          {t("sessions.modelRequested", { model: requested })}
         </span>
       )}
       {identity.permissionMode && (

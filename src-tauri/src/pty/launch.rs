@@ -123,6 +123,15 @@ pub struct LaunchInput<'a> {
     /// exposes a local event stream (OpenCode). Unused by the others.
     pub stream_port: u16,
     pub stream_secret: &'a str,
+    /// 2.0 launch contract: the model (None: the default, no flag), the
+    /// effort, the account's profile variable, and whether this launch runs
+    /// the CLI's sign-in instead of the agent (Add account).
+    pub model_id: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub profile_env: Option<(&'a str, &'a str)>,
+    pub login: bool,
+    /// Clear the screen before the agent starts (a relaunch after a refusal).
+    pub clear_screen: bool,
 }
 
 /// The launch file `hi run` reads. Field names are the wire format.
@@ -137,7 +146,27 @@ pub struct LaunchSpec {
     pub args: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<FallbackSpec>,
+    /// Where Hermes asks `hi` to stop a launch the CLI refused (the agent's
+    /// catalog `error_signatures` matched its output), and for how long.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<StopSpec>,
+    /// Clear the screen before the agent starts (a relaunch after a
+    /// refusal; see `SessionLaunch::relaunch`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clear_screen: bool,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StopSpec {
+    pub file: String,
+    pub window_ms: u64,
+}
+
+/// The file Hermes writes to stop a refused launch (`hi` polls it).
+pub const STOP_FILE: &str = "launch-stop";
+/// How long after the start a refusal stops the launch. Codex retries a
+/// refused request for about a minute before it gives up.
+pub const REJECT_WINDOW: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct FallbackSpec {
@@ -193,6 +222,10 @@ pub struct LaunchPlan {
     /// True when the agent's stop runs the Done-When checks itself (F27),
     /// so Hermes does not run them again at its turn end.
     pub check_hook: bool,
+    /// The first prompt as it goes to the CLI (on the fresh command, and on
+    /// a resume's fresh fallback), for the refusal watch: its echo is never
+    /// a refusal.
+    pub first_prompt: Option<String>,
 }
 
 fn split_words(fragment: &str) -> Vec<String> {
@@ -747,14 +780,22 @@ pub(crate) fn ssh_signal_args(s: &Session) -> Option<(String, String)> {
 /// recipe (the caller then falls back to the typed vendor line).
 pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     let agent = recipe_for(input.provider)?;
+    if input.login {
+        return plan_login(agent, input);
+    }
     let terminal = &agent.terminal;
     let prefix = split_words(input.custom_prefix);
     let suffix = split_words(input.custom_suffix);
-    let permission: Vec<String> = terminal
+    let mut permission: Vec<String> = terminal
         .permission_flags
         .get(input.permission_mode)
         .cloned()
         .unwrap_or_default();
+    // The model and effort the person chose travel with the permission
+    // flags, on the fresh command and on a resume alike.
+    let (choice_args, choice_env) =
+        crate::agent_caps::choice::model_effort_args(agent, input.model_id, input.effort);
+    permission.extend(choice_args);
 
     // The command head: an optional wrapper (caffeinate, nice, wsl) then the
     // agent program and its fixed arguments.
@@ -775,6 +816,12 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     );
     env.insert("HERMES_AGENT".to_string(), agent.id.clone());
     env.insert("HERMES_SIGNAL_NONCE".to_string(), input.nonce.to_string());
+    for (k, v) in choice_env {
+        env.insert(k, v);
+    }
+    if let Some((name, value)) = input.profile_env {
+        env.insert(name.to_string(), value.to_string());
+    }
     env.insert(
         "HERMES_SIGNAL_FILE".to_string(),
         input
@@ -819,11 +866,9 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         (Some(seed), Some(task)) => Some(format!("{seed}\n\n{task}")),
         (seed, task) => seed.or(task).map(str::to_string),
     };
-    let prompt_args: Vec<String> = match (
-        &terminal.initial_prompt,
-        first_prompt(task_text.as_deref(), input.context_path),
-    ) {
-        (Some(template), Some(prompt)) => fill(template, &[("prompt", &prompt)]),
+    let prompt = first_prompt(task_text.as_deref(), input.context_path);
+    let prompt_args: Vec<String> = match (&terminal.initial_prompt, &prompt) {
+        (Some(template), Some(prompt)) => fill(template, &[("prompt", prompt)]),
         _ => Vec::new(),
     };
     let context_in_args = !prompt_args.is_empty() && input.context_path.is_some();
@@ -900,6 +945,8 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             program,
             args,
             fallback,
+            stop: stop_spec(agent, input.session_dir, resumes),
+            clear_screen: input.clear_screen,
         },
         files: signals.files,
         vendor_session_id,
@@ -915,6 +962,79 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         stream: signals.stream,
         confidence: agent.terminal.signals.confidence.clone(),
         check_hook: signals.check_hook,
+        first_prompt: prompt.filter(|_| terminal.initial_prompt.is_some()),
+    })
+}
+
+/// The stop request `hi` watches for, for an agent whose catalog says how
+/// its CLI refuses a launch. A resumed CLI asks its model nothing before the
+/// person's first message, so a resume is watched until then
+/// (`crate::agent_caps::watch::RESUME_WAIT`).
+fn stop_spec(agent: &Agent, session_dir: &Path, resumes: bool) -> Option<StopSpec> {
+    let has_signatures = agent
+        .capabilities
+        .as_ref()
+        .is_some_and(|c| !c.error_signatures.is_empty());
+    let window = if resumes {
+        crate::agent_caps::watch::RESUME_WAIT
+    } else {
+        REJECT_WINDOW
+    };
+    has_signatures.then(|| StopSpec {
+        file: session_dir.join(STOP_FILE).to_string_lossy().to_string(),
+        window_ms: window.as_millis() as u64,
+    })
+}
+
+/// Add account: the CLI's own sign-in command in the account's profile,
+/// started through `hi` like any launch (no hooks, no first prompt).
+fn plan_login(agent: &Agent, input: &LaunchInput<'_>) -> Option<LaunchPlan> {
+    let login = agent.capabilities.as_ref()?.accounts.login.as_ref()?;
+    let (program, args) = login.split_first()?;
+    let mut env = BTreeMap::new();
+    env.insert(
+        "HERMES_SESSION_ID".to_string(),
+        input.session_id.to_string(),
+    );
+    env.insert("HERMES_AGENT".to_string(), agent.id.clone());
+    env.insert("HERMES_SIGNAL_NONCE".to_string(), input.nonce.to_string());
+    env.insert(
+        "HERMES_SIGNAL_FILE".to_string(),
+        input
+            .session_dir
+            .join(SIGNALS_FILE)
+            .to_string_lossy()
+            .to_string(),
+    );
+    if let Some((name, value)) = input.profile_env {
+        env.insert(name.to_string(), value.to_string());
+    }
+    Some(LaunchPlan {
+        spec: LaunchSpec {
+            v: SPEC_VERSION,
+            session_id: input.session_id.to_string(),
+            agent: agent.id.clone(),
+            cwd: input.cwd.to_string(),
+            env,
+            program: program.clone(),
+            args: args.to_vec(),
+            fallback: None,
+            stop: None,
+            clear_screen: false,
+        },
+        files: Vec::new(),
+        vendor_session_id: None,
+        resumes: false,
+        expects_start_signal: false,
+        context_in_args: false,
+        seed_in_args: false,
+        nonce: input.nonce.to_string(),
+        not_found_output: Vec::new(),
+        git_excludes: Vec::new(),
+        stream: None,
+        confidence: "guessed".to_string(),
+        check_hook: false,
+        first_prompt: None,
     })
 }
 
@@ -1117,6 +1237,7 @@ fn clear_dir_except(dir: &Path, keep: &[String]) {
 }
 
 pub fn remove_session_files<R: tauri::Runtime>(app: &AppHandle<R>, session_id: &str) {
+    crate::agent_caps::watch::end(session_id);
     if let Ok(dir) = launch_dir(app) {
         let session_dir = dir.join(session_id);
         if session_dir.is_dir() {
@@ -1250,6 +1371,15 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
         nonce: &nonce,
         stream_port: free_loopback_port(),
         stream_secret: &stream_secret,
+        model_id: s.agent_launch.model_id.as_deref(),
+        effort: s.agent_launch.effort.as_deref(),
+        profile_env: s
+            .agent_launch
+            .profile_env
+            .as_ref()
+            .map(|p| (p.name.as_str(), p.value.as_str())),
+        login: s.agent_launch.login,
+        clear_screen: s.agent_launch.relaunch,
     }) else {
         return HelperLaunch::TypeCommand;
     };
@@ -1276,6 +1406,29 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
     } else {
         start_output_watch(&s.id, &plan.not_found_output, evidence, &plan.nonce);
     }
+    // A refusal by the CLI (unknown model, signed out) within the first
+    // seconds stops the launch (`crate::agent_caps::watch`).
+    s.agent_launch.resumed = plan.resumes;
+    match &plan.spec.stop {
+        Some(stop) => {
+            let _ = std::fs::remove_file(&stop.file);
+            crate::agent_caps::watch::start(
+                &s.id,
+                &plan.spec.agent,
+                crate::agent_caps::watch::WatchStart {
+                    stop_file: PathBuf::from(&stop.file),
+                    nonce: plan.nonce.clone(),
+                    window: REJECT_WINDOW,
+                    launch: s.agent_launch.clone(),
+                    // What Hermes hands the CLI as words: its echo is
+                    // never a refusal.
+                    given: plan.first_prompt.iter().cloned().collect(),
+                    resumes: plan.resumes,
+                },
+            );
+        }
+        None => crate::agent_caps::watch::end(&s.id),
+    }
     if s.seed_prompt.is_some() && !plan.seed_in_args {
         log::warn!(
             "[LAUNCH] {}: {} takes no first prompt, so the handoff task was not passed (it is never typed)",
@@ -1286,6 +1439,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
     // The seed is for this session's first start only; it now lives in the
     // launch file.
     s.seed_prompt = None;
+    s.agent_launch.relaunch = false;
     s.vendor_session_id = plan.vendor_session_id.clone();
     s.signal_nonce = Some(plan.nonce.clone());
     s.agent_startup = Some(AgentStartup {
@@ -1854,6 +2008,105 @@ impl PromptGuess {
 /// nonce-verified line also becomes the SessionEvents it means (F11), on
 /// the one channel the frontend store reads; sub-agent hooks move a
 /// counter that is reported as a `subagents` event.
+/// What the agent reported about itself during one launch (the identity
+/// events of the contract are sent complete).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Identity {
+    vendor_session_id: Option<String>,
+    model: Option<String>,
+    permission_mode: Option<String>,
+}
+
+impl Identity {
+    /// Fold an identity event into what is known and return it complete;
+    /// any other event passes through. `named_model` is set when the event
+    /// carried the model.
+    pub fn merge(
+        &mut self,
+        event: crate::contract::SessionEvent,
+        named_model: &mut bool,
+    ) -> crate::contract::SessionEvent {
+        use crate::contract::SessionEvent;
+        match event {
+            SessionEvent::Identity {
+                at,
+                source,
+                tags,
+                vendor_session_id,
+                model,
+                permission_mode,
+            } => {
+                if vendor_session_id.is_some() {
+                    self.vendor_session_id = vendor_session_id;
+                }
+                if model.is_some() {
+                    *named_model = true;
+                    self.model = model;
+                }
+                if permission_mode.is_some() {
+                    self.permission_mode = permission_mode;
+                }
+                SessionEvent::Identity {
+                    at,
+                    source,
+                    tags,
+                    vendor_session_id: self.vendor_session_id.clone(),
+                    model: self.model.clone(),
+                    permission_mode: self.permission_mode.clone(),
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// A record that names a model other than the one known (the agent
+    /// switched with /model): the identity with the new model.
+    pub fn model_report(
+        &mut self,
+        record: &crate::contract::signal::SignalRecord,
+        source: &str,
+    ) -> Option<crate::contract::SessionEvent> {
+        let model = crate::contract::signal::reported_model(&record.payload)?;
+        self.with_model(model, record.ts.saturating_mul(1000), source)
+    }
+
+    /// The identity with `model`, when it is news.
+    pub fn with_model(
+        &mut self,
+        model: String,
+        at: i64,
+        source: &str,
+    ) -> Option<crate::contract::SessionEvent> {
+        if self.model.as_deref() == Some(model.as_str()) {
+            return None;
+        }
+        self.model = Some(model);
+        Some(crate::contract::SessionEvent::Identity {
+            at,
+            source: Some(source.to_string()),
+            tags: None,
+            vendor_session_id: self.vendor_session_id.clone(),
+            model: self.model.clone(),
+            permission_mode: self.permission_mode.clone(),
+        })
+    }
+}
+
+/// A finished turn: the launch was taken, so a refusal can no longer come.
+/// A hook that says a tool ran (`PostToolUse`, with or without its tool).
+fn ran_a_tool(event: &str) -> bool {
+    event == "PostToolUse" || event.starts_with("PostToolUse:")
+}
+
+fn ends_launch_watch(event: &crate::contract::SessionEvent) -> bool {
+    use crate::contract::{AgentStatusKind, SessionEvent};
+    match event {
+        SessionEvent::TurnEnd { .. } => true,
+        SessionEvent::Status { status, .. } => status.kind == AgentStatusKind::DoneUnread,
+        _ => false,
+    }
+}
+
 pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, watch: SignalWatch) {
     let SignalWatch {
         session_dir,
@@ -1884,6 +2137,13 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         let mut subagents: i32 = 0;
         // N19: usage limits the agent reports, as contract session events.
         let mut limits = crate::limits::LimitTracker::new();
+        // What the agent said about itself so far: every identity sent is
+        // complete, so a later report of the model alone (a status line, an
+        // Antigravity hook) never hides the conversation id or the mode.
+        let mut identity = Identity::default();
+        let reports_in_rollout = crate::agent_catalog::agent(&agent)
+            .and_then(|a| a.capabilities.as_ref())
+            .is_some_and(|c| c.model_report == "rollout");
         loop {
             std::thread::sleep(SPOOL_POLL);
             let lines = reader.poll();
@@ -1900,12 +2160,58 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 // told as a `limit` event and a `limited` status; its plain
                 // meaning (an error for the rate-limited stop, an attention
                 // for a quota notice) is not sent as well.
+                if record.nonce == nonce
+                    && crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&record.event.as_str())
+                {
+                    // The CLI sent the person's message: a resume's replay
+                    // is over, and its answer may already be a refusal.
+                    if let Some(found) = crate::agent_caps::watch::message_sent(&session_id) {
+                        crate::agent_caps::commands::on_rejected(&app, &session_id, found);
+                    }
+                }
+                if record.nonce == nonce && ran_a_tool(&record.event) {
+                    // The model answered with a tool call: the CLI took the
+                    // launch, and what the tool prints is not its error.
+                    crate::agent_caps::watch::end(&session_id);
+                }
                 let limit_events = limits.observe(&record, &nonce);
                 let is_limit = record.nonce == nonce
                     && crate::limits::classify(&record) == crate::limits::LimitSignal::Limited;
                 if !is_limit {
+                    let mut named_model = false;
                     for event in map_signal_record(&record, &nonce, confidence, &source) {
+                        let event = identity.merge(event, &mut named_model);
+                        if ends_launch_watch(&event) {
+                            // A finished turn: the CLI took the launch.
+                            crate::agent_caps::watch::end(&session_id);
+                        }
                         crate::contract::emit_session_event(&app, &session_id, event);
+                    }
+                    if record.nonce == nonce && !named_model {
+                        if let Some(event) = identity.model_report(&record, &source) {
+                            crate::contract::emit_session_event(&app, &session_id, event);
+                        }
+                    }
+                    // An agent that reports its model in a rollout file
+                    // (Codex): read it when a turn completes.
+                    if record.nonce == nonce
+                        && reports_in_rollout
+                        && record.event == "agent-turn-complete"
+                    {
+                        let profile = session
+                            .lock()
+                            .ok()
+                            .and_then(|s| s.agent_launch.profile_env.clone());
+                        let model = crate::contract::signal::vendor_session_id(&record.payload)
+                            .zip(crate::agent_caps::report::codex_home(profile.as_ref()))
+                            .and_then(|(tid, home)| {
+                                crate::agent_caps::report::codex_rollout_model(&home, &tid)
+                            });
+                        if let Some(event) = model.and_then(|m| {
+                            identity.with_model(m, record.ts.saturating_mul(1000), &source)
+                        }) {
+                            crate::contract::emit_session_event(&app, &session_id, event);
+                        }
                     }
                 }
                 for event in limit_events {
@@ -1940,6 +2246,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     if let Some(event) = parse_spool_line(line, &nonce) {
                         if matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             guess.new_attempt(Instant::now());
+                            // The fresh start replays nothing.
+                            crate::agent_caps::watch::fresh_start(&session_id);
                         }
                         if !matches!(event, SpoolEvent::Other) {
                             // Started, gone or replaced: the resume's own
@@ -1948,6 +2256,14 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                         }
                         if let SpoolEvent::Check(report) = &event {
                             checks.push(report.clone());
+                        }
+                        if let SpoolEvent::Exited { .. } = &event {
+                            crate::agent_caps::watch::end_soon(&session_id);
+                            // A sign-in (Add account) ended: the account's
+                            // state is asked again next time.
+                            if s.agent_launch.login {
+                                crate::agent_caps::discover::invalidate(&agent);
+                            }
                         }
                         if let SpoolEvent::Exited { exit_code, error } = &event {
                             log::info!(
@@ -2130,7 +2446,180 @@ mod tests {
             nonce: "n0nce",
             stream_port: 4321,
             stream_secret: "s3cret",
+            model_id: None,
+            effort: None,
+            profile_env: None,
+            login: false,
+            clear_screen: false,
         }
+    }
+
+    #[test]
+    fn identities_are_sent_complete_and_a_model_change_is_reported_once() {
+        use crate::contract::signal::parse_signal_line;
+        use crate::contract::SessionEvent;
+        let mut id = Identity::default();
+        let mut named = false;
+        let first = id.merge(
+            SessionEvent::Identity {
+                at: 1,
+                source: None,
+                tags: None,
+                vendor_session_id: Some("vs".into()),
+                model: None,
+                permission_mode: Some("plan".into()),
+            },
+            &mut named,
+        );
+        assert!(!named);
+        assert!(
+            matches!(first, SessionEvent::Identity { ref vendor_session_id, .. } if vendor_session_id.as_deref() == Some("vs"))
+        );
+        let line = r#"{"v":1,"ts":5,"session":"s","agent":"claude","nonce":"n","event":"StatusLine","payload":{"model":"fake-model-2"}}"#;
+        let record = parse_signal_line(line).unwrap();
+        let ev = id.model_report(&record, "hook:claude").unwrap();
+        match ev {
+            SessionEvent::Identity {
+                vendor_session_id,
+                model,
+                permission_mode,
+                at,
+                ..
+            } => {
+                assert_eq!(
+                    (
+                        vendor_session_id.as_deref(),
+                        model.as_deref(),
+                        permission_mode.as_deref(),
+                        at
+                    ),
+                    (Some("vs"), Some("fake-model-2"), Some("plan"), 5000)
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            id.model_report(&record, "hook:claude").is_none(),
+            "the same model is not reported again"
+        );
+        let status = SessionEvent::Status {
+            at: 1,
+            source: None,
+            tags: None,
+            status: crate::contract::AgentStatus {
+                kind: crate::contract::AgentStatusKind::DoneUnread,
+                confidence: crate::contract::Confidence::Exact,
+                detail: String::new(),
+            },
+        };
+        assert!(ends_launch_watch(&status));
+        assert!(!ends_launch_watch(&first));
+        assert!(ran_a_tool("PostToolUse") && ran_a_tool("PostToolUse:Bash"));
+        assert!(!ran_a_tool("PreToolUse") && !ran_a_tool("UserPromptSubmit"));
+    }
+
+    #[test]
+    fn a_chosen_model_effort_and_account_travel_on_the_launch() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let mut i = input("claude", None, hi, dir);
+        i.model_id = Some("opus");
+        i.effort = Some("high");
+        i.profile_env = Some(("CLAUDE_CONFIG_DIR", "/profiles/.claude-work"));
+        let plan = plan_launch(&i).unwrap();
+        let args = &plan.spec.args;
+        let at = args.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(&args[at..at + 4], ["--model", "opus", "--effort", "high"]);
+        assert!(
+            at < args.iter().position(|a| a == "--settings").unwrap(),
+            "before Hermes's own flags"
+        );
+        assert_eq!(
+            plan.spec.env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/profiles/.claude-work")
+        );
+        let stop = plan.spec.stop.as_ref().unwrap();
+        assert_eq!(stop.file, dir.join(STOP_FILE).to_string_lossy());
+        assert_eq!(stop.window_ms, 90_000);
+        assert!(
+            !plan.spec.clear_screen
+                && !serde_json::to_string(&plan.spec)
+                    .unwrap()
+                    .contains("clear_screen")
+        );
+        i.clear_screen = true;
+        let again = plan_launch(&i).unwrap();
+        assert!(
+            serde_json::to_value(&again.spec).unwrap()["clear_screen"] == true,
+            "a relaunch clears the screen first"
+        );
+
+        // A resume keeps the profile (the conversation lives there) and the model.
+        let mut r = input("claude", Some("abc"), hi, dir);
+        r.model_id = Some("opus");
+        r.profile_env = Some(("CLAUDE_CONFIG_DIR", "/profiles/.claude-work"));
+        let plan = plan_launch(&r).unwrap();
+        assert!(plan.spec.args.windows(2).any(|w| w == ["--model", "opus"]));
+        assert_eq!(
+            plan.spec.env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/profiles/.claude-work")
+        );
+
+        // The default model adds no flag.
+        let plan = plan_launch(&input("claude", None, hi, dir)).unwrap();
+        assert!(!plan
+            .spec
+            .args
+            .iter()
+            .any(|a| a == "--model" || a == "--effort"));
+
+        // Codex takes -m and -c model_reasoning_effort="…".
+        let mut c = input("codex", None, hi, dir);
+        c.model_id = Some("gpt-5.6-luna");
+        c.effort = Some("medium");
+        let plan = plan_launch(&c).unwrap();
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w == ["-m", "gpt-5.6-luna"]));
+        assert!(plan
+            .spec
+            .args
+            .windows(2)
+            .any(|w| w == ["-c", "model_reasoning_effort=\"medium\""]));
+    }
+
+    #[test]
+    fn a_login_launch_runs_the_clis_sign_in_in_the_profile_and_nothing_else() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-9");
+        let mut i = input("claude", None, hi, dir);
+        i.login = true;
+        i.profile_env = Some(("CLAUDE_CONFIG_DIR", "/profiles/.claude-work"));
+        i.task = Some("ignored");
+        let plan = plan_launch(&i).unwrap();
+        assert_eq!(
+            (plan.spec.program.as_str(), plan.spec.args.clone()),
+            ("claude", vec!["auth".to_string(), "login".to_string()])
+        );
+        assert_eq!(
+            plan.spec.env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/profiles/.claude-work")
+        );
+        assert!(plan.files.is_empty() && plan.spec.stop.is_none() && plan.spec.fallback.is_none());
+        let mut c = input("codex", None, hi, dir);
+        c.login = true;
+        assert_eq!(
+            plan_launch(&c).unwrap().spec.args,
+            vec!["login".to_string()]
+        );
+        let mut a = input("antigravity", None, hi, dir);
+        a.login = true;
+        assert!(
+            plan_launch(&a).is_none(),
+            "an agent without a sign-in command has no login launch"
+        );
     }
 
     #[test]
@@ -2589,6 +3078,12 @@ mod tests {
             fb.vendor_session_id.as_deref(),
             Some("11111111-2222-4333-8444-555555555555")
         );
+        // A resumed CLI refuses only at the person's first message, which
+        // can come much later than a fresh start's first seconds.
+        assert_eq!(
+            plan.spec.stop.as_ref().unwrap().window_ms,
+            crate::agent_caps::watch::RESUME_WAIT.as_millis() as u64
+        );
         assert!(fb.message.contains("starting a new one"));
         // Only Claude's own "not found" (exit 1 and its message, which
         // Hermes watches the terminal for) replaces the conversation.
@@ -2774,6 +3269,12 @@ mod tests {
         assert!(prompt.starts_with(task), "{prompt}");
         assert!(prompt.ends_with("for project context about the attached workspaces."));
         assert!(both.context_in_args);
+        // The refusal watch knows the exact words the CLI was given.
+        assert_eq!(both.first_prompt.as_deref(), Some(prompt.as_str()));
+        assert!(
+            plan_launch(&goose).unwrap().first_prompt.is_none(),
+            "goose takes no first prompt"
+        );
         // A blank task is no task.
         let mut blank = input("claude", None, hi, dir);
         blank.task = Some("  \n ");
@@ -3515,6 +4016,7 @@ mod tests {
             has_initial_context: false,
             last_nudged_version: 0,
             pending_nudge: None,
+            agent_launch: Default::default(),
             ssh_info: None,
             mode: SessionMode::Terminal,
             vendor_session_id: None,

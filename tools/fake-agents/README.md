@@ -126,6 +126,29 @@ this file first on the app's PATH and reads those records;
 and a `codex` shim. Tests:
 `tools/fake-agents/test/fake-cli.test.mjs`.
 
+### Models, effort and accounts (2.0 launch contract)
+
+The fake takes the model and effort flags of the agent it stands in for
+(`--model`/`-m`, `--effort`, `-c model_reasoning_effort="…"`), records them
+(`model`, `effort` in the launch record) and reports the model in its
+`SessionStart` hook and status line. It answers the capability probes in the
+real CLIs' shapes (capability matrix): `auth status --json` (Claude),
+`login status` and `debug models --bundled` (Codex), `models` (Antigravity).
+
+| Setting | Effect |
+|---|---|
+| a profile variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) | sign-in state is `<profile>/.fake-auth` (`in`; missing = signed out, like an empty profile); a launch in a signed-out profile is refused |
+| `auth login` / `login` | signs that profile in and writes `<HERMES_FAKE_DIR>/login-<n>.json` |
+| `HERMES_FAKE_REJECT_MODELS` or `<HERMES_FAKE_DIR>/reject-models-<agent>` | comma-separated models (`*` = any) refused with the vendor's own words: Claude's "There's an issue with the selected model (…)" then an idle TUI, Codex's 404 inside its minute of `Reconnecting... n/5`, Antigravity's "error: invalid model selection …" and exit 1. No hook or turn runs. |
+| mode word `refuse-signed-out` | refuse a signed-out default profile too |
+| a resume (`--resume <id>`) that is refused | replays the conversation, shows ready, and refuses only at the first message (Enter), as the real TUIs do |
+| `<HERMES_FAKE_DIR>/history/<id>.txt` | what a conversation showed (its prompt, `quote-errors` answers, typed prompts, a refusal); replayed on resume |
+| mode word `wrap-prompt` | the first prompt is drawn in rows of at most 40 characters |
+| mode word `quote-errors` | once ready, the agent answers with its reply mark (`⏺` Claude, `•` Codex) quoting its CLI's refusal words |
+| `HERMES_FAKE_PLAN` | the plan `auth status --json` reports (default `max`) |
+
+`e2e/app/scenarios/CAP-launch-choice.mjs`, `CAP-agents-settings.mjs` and `CAP-refusal-safety.mjs` use these.
+
 ## Replaying a cassette
 
 ```sh

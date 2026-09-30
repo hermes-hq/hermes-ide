@@ -1,3 +1,5 @@
+import type { AgentLaunchOptions } from "../agent/capabilities/types";
+
 // ─── Session Types (mirror Rust structs) ─────────────────────────────
 
 export interface AgentInfo {
@@ -147,6 +149,21 @@ export interface SessionData {
   reattached?: boolean;
   /** N19: the session this one continues or duplicates (a handoff). */
   parent_session_id?: string | null;
+  /** 2.0 launch contract: what the agent was started with (the model chip
+   *  shows the model as "requested" until the agent reports its own). */
+  agent_launch?: SessionAgentLaunch | null;
+}
+
+/** What a terminal agent was launched with (camelCase, as the backend sends it). */
+export interface SessionAgentLaunch {
+  /** null: the default model (no flag). */
+  modelId?: string | null;
+  effort?: string | null;
+  /** null: the default profile. */
+  accountId?: string | null;
+  profileEnv?: { name: string; value: string } | null;
+  /** The session runs the CLI's sign-in (Add account), not the agent. */
+  login?: boolean;
 }
 
 export type AgentStartupState = "launching" | "started" | "waiting_at_startup_prompt" | "ended";
@@ -218,6 +235,9 @@ export interface CreateSessionOpts {
   seedPrompt?: string;
   /** N19 handoff: the session this one continues or duplicates. */
   parentSessionId?: string;
+  /** 2.0 launch contract (src/agent/capabilities): the model, effort and
+   *  account to start the agent with (helper launch only). */
+  agentLaunch?: AgentLaunchOptions;
 }
 
 // ─── Workspace Restore ──────────────────────────────────────────────
@@ -266,6 +286,9 @@ export interface SavedSessionInfo {
   /** N19: the session this one was handed off from, so it is shown under
    *  that session again after a restart. */
   parent_session_id?: string;
+  /** 2.0: the model, effort and account the terminal agent was started with,
+   *  so a restore resumes it in the same profile with the same choice. */
+  agent_launch?: { modelId?: string | null; effort?: string | null; accountId?: string | null };
 }
 
 export interface SavedWorkspace {
@@ -343,6 +366,18 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     }
     if (si.parent_session_id !== undefined && (typeof si.parent_session_id !== "string" || !si.parent_session_id)) {
       delete si.parent_session_id;
+    }
+    // The launch choice: an object of optional strings, else dropped.
+    if (si.agent_launch !== undefined) {
+      const l = si.agent_launch as unknown;
+      const okField = (v: unknown) => v === undefined || v === null || typeof v === "string";
+      if (!l || typeof l !== "object" || Array.isArray(l)) {
+        delete si.agent_launch;
+      } else {
+        const o = l as Record<string, unknown>;
+        if (!okField(o.modelId) || !okField(o.effort) || !okField(o.accountId)) delete si.agent_launch;
+        else si.agent_launch = { modelId: (o.modelId as string | null | undefined) ?? null, effort: (o.effort as string | null | undefined) ?? null, accountId: (o.accountId as string | null | undefined) ?? null };
+      }
     }
   }
 

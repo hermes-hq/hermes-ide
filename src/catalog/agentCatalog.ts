@@ -87,6 +87,38 @@ export interface AgentEntry {
 	auth: { check: AgentArgs | null; hint: string } | null;
 	evidence: { level: "help" | "docs" | "none"; version?: string };
 	setup?: AgentSetup;
+	/** What a person can choose at launch (2.0 launch contract). Read by the backend (src-tauri/src/agent_caps). */
+	capabilities?: AgentCapabilitiesSpec;
+}
+
+/** The catalog's `capabilities` block: facts from the verified capability matrix. */
+export interface AgentCapabilitiesSpec {
+	verified_on_real_install: boolean;
+	model: {
+		flag: AgentArgs | null;
+		id_style: "alias" | "slug" | "display" | "provider/model";
+		aliases: readonly { id: string; label: string; note?: string }[];
+		list: { command: AgentArgs; parser: "codex_debug_models" | "agy_models" | "lines" } | { source: "claude_model_cache" } | null;
+		typed: boolean;
+		/** The CLI runs another model without a word when given one it does not know. */
+		silent_fallback?: boolean;
+	};
+	effort: {
+		flag: AgentArgs | null;
+		env?: string;
+		values: readonly string[];
+		per_model: readonly { match: string; values: readonly string[] }[] | null;
+		validated_by: "cli" | "server" | "none";
+	} | null;
+	accounts: {
+		probe: { command: AgentArgs; parser: "claude_auth_json" | "codex_login_status" | "agy_models" | "exit_code" } | null;
+		profile_env: string | null;
+		profile_dir: string | null;
+		login: AgentArgs | null;
+		note?: string;
+	};
+	error_signatures: readonly { pattern: string; reason: "model" | "effort" | "signed_out" | "other"; suggestion: "retry-default" | "switch-account" | "sign-in" }[];
+	model_report: "stream_init" | "hooks:model" | "hooks:modelName" | "rollout" | "history_md" | "none";
 }
 
 export interface AgentCatalog {

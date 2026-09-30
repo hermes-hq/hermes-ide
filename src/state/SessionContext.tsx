@@ -99,6 +99,7 @@ import {
   type AgentAttachment,
 } from "../utils/submitToAgent";
 import { sendAgentEnvelopeWithRevive } from "../utils/sendAgentEnvelope";
+import { setE2ESessionBridge } from "../e2e/sessionBridge";
 
 // ─── Mode-conversion worktree-preservation helper ────────────────────
 
@@ -1667,6 +1668,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 launchHelperRequired: isFeatureFlagEnabled("launchHelper"),
                 featureTracks: isFeatureFlagEnabled("featureTracks"),
                 vendorSessionId: saved.vendor_session_id ?? null,
+                // 2.0: resume in the same profile with the same model and effort.
+                agentLaunch: saved.agent_launch ? { ...saved.agent_launch, purpose: "agent" } : null,
                 // Session host (sessionHost flag): reattach to the program
                 // the host kept running under this id, if it still has it.
                 sessionHost: isFeatureFlagEnabled("sessionHost"),
@@ -1970,13 +1973,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         mode,
         // A launcher task travels as an argument, which only the helper can
         // pass without any shell quoting.
-        launchHelper: isFeatureFlagEnabled("launchHelper") || (mode === "terminal" && !!opts?.initialPrompt?.trim()),
+        launchHelper: isFeatureFlagEnabled("launchHelper") || (mode === "terminal" && (!!opts?.initialPrompt?.trim() || !!opts?.agentLaunch)),
         launchHelperRequired: isFeatureFlagEnabled("launchHelper"),
         featureTracks: isFeatureFlagEnabled("featureTracks"),
         sessionHost: isFeatureFlagEnabled("sessionHost"),
         initialPrompt: mode === "terminal" ? opts?.initialPrompt?.trim() || null : null,
         seedPrompt: opts?.seedPrompt || null,
         parentSessionId: opts?.parentSessionId || null,
+        // 2.0: the model, effort and account (and "login" for Add account)
+        // travel in the launch file, so only the helper can carry them.
+        agentLaunch: mode === "terminal" ? opts?.agentLaunch ?? null : null,
       });
 
       // Agent mode: the backend `create_session` skipped PTY spawn for us.
@@ -2302,6 +2308,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             ...(claudeUuid ? { claude_session_uuid: claudeUuid } : {}),
             ...(s.vendor_session_id ? { vendor_session_id: s.vendor_session_id } : {}),
             ...(s.parent_session_id ? { parent_session_id: s.parent_session_id } : {}),
+            // 2.0: a terminal agent's model, effort and account (not a sign-in session).
+            ...(s.agent_launch && !s.agent_launch.login && (s.agent_launch.modelId || s.agent_launch.effort || s.agent_launch.accountId)
+              ? { agent_launch: { modelId: s.agent_launch.modelId ?? null, effort: s.agent_launch.effort ?? null, accountId: s.agent_launch.accountId ?? null } }
+              : {}),
             ...(agentModel ? { agent_model: agentModel } : {}),
             ...(agentPerm ? { agent_permission_mode: agentPerm } : {}),
             ...(agentEffort ? { agent_effort: agentEffort } : {}),
@@ -2832,6 +2842,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   });
   // Every quit the backend can hold waits for this write first.
   useWorkspaceFlushOnQuit(saveWorkspace);
+  // Test builds only: a scenario starts a terminal agent with a launch choice.
+  useEffect(() => {
+    if (import.meta.env.VITE_HERMES_E2E !== "1") return;
+    setE2ESessionBridge({
+      createSession: (opts) => createSession(opts),
+      show: (id) => {
+        const layout = stateRef.current.layout;
+        if (!layout.root) dispatch({ type: "INIT_PANE", sessionId: id });
+        else if (layout.focusedPaneId) dispatch({ type: "SET_PANE_SESSION", paneId: layout.focusedPaneId, sessionId: id });
+      },
+    });
+    return () => setE2ESessionBridge(null);
+  }, [createSession]);
 
   return (
     <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}) }}>

@@ -7,6 +7,10 @@ import { ProviderActionsBar } from "./ProviderActionsBar";
 import { AgentSetupChips } from "./AgentSetupChips";
 import { TerminalPane } from "./TerminalPane";
 import { SessionStatusStrip } from "./SessionStatusStrip";
+import { useSessionEvents } from "../agent/contract/sessionEventStore";
+import type { SessionData } from "../types/session";
+import { splitAfterCreateActions } from "../state/splitAfterCreate";
+import { getAgent } from "../catalog/agentCatalog";
 import { useStatusStripEnabled } from "../statusStrip/preference";
 import { TurnBar } from "./TurnBar";
 import { isFeatureFlagEnabled } from "../featureFlags";
@@ -25,6 +29,19 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 // highlighting, tool cards) loads on demand, the first time an
 // Agent-mode session is shown.
 const AgentSessionView = lazyView("AgentSessionView", () => import("../agent/AgentSessionView").then((m) => m.AgentSessionView));
+// 2.0: the refused-launch banner loads only when a launch was refused.
+const LaunchRejectedBanner = lazyView("LaunchRejectedBanner", () => import("./LaunchRejectedBanner").then((m) => m.LaunchRejectedBanner));
+
+/** Mounts the refused-launch banner (and loads its code) only for a session whose launch was refused. */
+function LaunchRejectedSlot({ session, onSignIn }: { session: SessionData; onSignIn: (agentId: string, accountId: string | null) => void }) {
+  const { rejection } = useSessionEvents(session.id);
+  if (!rejection) return null;
+  return (
+    <Suspense fallback={null}>
+      <LaunchRejectedBanner session={session} onSignIn={onSignIn} />
+    </Suspense>
+  );
+}
 
 // Use text/plain with a prefix so it works in all WebViews
 const DRAG_PREFIX = "hermes-session:";
@@ -91,7 +108,7 @@ function hasImageFiles(paths: string[]): boolean {
 }
 
 export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
-  const { state, dispatch, convertSessionMode } = useSession();
+  const { state, dispatch, convertSessionMode, createSession } = useSession();
   const session = state.sessions[sessionId];
   const isFocused = state.layout.focusedPaneId === paneId;
   const paneRef = useRef<HTMLDivElement>(null);
@@ -365,6 +382,23 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}
             {session.mode !== "agent" && session.ai_provider && statusStripOn && isFeatureFlagEnabled("launchHelper") && (
               <SessionStatusStrip sessionId={sessionId} phase={session.phase} />
+            )}
+            {/* 2.0: the CLI refused the launch; Hermes stopped it and says why. */}
+            {session.mode !== "agent" && session.ai_provider && (
+              <LaunchRejectedSlot
+                session={session}
+                onSignIn={(agentId, accountId) => {
+                  void createSession({
+                    aiProvider: agentId,
+                    mode: "terminal",
+                    label: translate("agentError.signInSessionLabel", { agent: getAgent(agentId)?.name ?? agentId }),
+                    agentLaunch: { accountId, purpose: "login" },
+                  }).then((created) => {
+                    if (!created) return;
+                    for (const action of splitAfterCreateActions({ paneId, sessionId }, { paneId, direction: "horizontal" }, created.id)) dispatch(action);
+                  });
+                }}
+              />
             )}
             {session.mode === "agent" ? (
               <Suspense fallback={<div className="split-pane-loading" aria-busy="true" />}>

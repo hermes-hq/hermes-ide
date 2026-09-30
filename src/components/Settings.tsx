@@ -44,6 +44,7 @@ import {
 } from "../featureFlags";
 import { AwayNotifySetting } from "./AwayNotifySetting";
 import { FleetSettingsTab } from "../fleet/FleetSettingsTab";
+import { AgentsSettings } from "./AgentsSettings";
 
 // The plugin manager loads when its tab is first opened.
 const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
@@ -81,11 +82,13 @@ interface SettingsProps {
   pluginRefreshTrigger?: number;
   /** Agents tab (flag taskLauncher): open a terminal running an agent's CLI to sign in. */
   onSignInAgent?: (agentId: string) => void;
+  /** 2.0: sign an agent account in (its CLI's own sign-in, in that account's profile). */
+  onSignInAccount?: (agentId: string, accountId: string) => void;
   /** Agents tab: open the full creator, where a Custom agent is set up. */
   onOpenAdvancedCreator?: () => void;
 }
 
-export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, onConfirmPluginUpdateAll, pluginRefreshTrigger, onSignInAgent, onOpenAdvancedCreator }: SettingsProps) {
+export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUpdate, onConfirmPluginUpdateAll, pluginRefreshTrigger, onSignInAgent, onSignInAccount, onOpenAdvancedCreator }: SettingsProps) {
   const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsMap>({});
   const [shells, setShells] = useState<{ name: string; path: string }[]>([]);
@@ -258,7 +261,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     // 2.0 fleet controls: spend caps and the running-agents cap.
     ...(isFeatureFlagEnabled("fleetControls") ? [{ id: "limits", label: t("settings.limits") }] : []),
     // The agent doctor (F16), the same one the welcome screens show.
-    ...(isFeatureFlagEnabled("taskLauncher") ? [{ id: "agents", label: t("settings.agents") }] : []),
+    // 2.0 (agentCatalog): accounts, models and presets per agent.
+    ...(isFeatureFlagEnabled("taskLauncher") || isFeatureFlagEnabled("agentCatalog") ? [{ id: "agents", label: t("settings.agents") }] : []),
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
     { id: "privacy", label: t("settings.privacy") },
@@ -903,6 +907,16 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               </>
             )}
 
+            {activeTab === "agents" && isFeatureFlagEnabled("agentCatalog") && (
+              <div className="settings-section settings-agents-capabilities">
+                <AgentsSettings
+                  onSignInAccount={(agentId, accountId) => {
+                    onSignInAccount?.(agentId, accountId);
+                    onClose();
+                  }}
+                />
+              </div>
+            )}
             {activeTab === "agents" && isFeatureFlagEnabled("taskLauncher") && (
               <div className="settings-section settings-agents-doctor">
                 <p className="settings-hint">{t("settings.agentsDoctorHint")}</p>

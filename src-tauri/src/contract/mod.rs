@@ -230,6 +230,40 @@ pub enum SessionEvent {
         trigger: Option<String>,
         pre_tokens: Option<u32>,
     },
+    /// CAP (an addition to C0): the agent's CLI refused the launch within
+    /// its first seconds (the catalog's `error_signatures` matched its
+    /// output). Hermes stopped the launch; `vendor_message` is the CLI's own
+    /// line, `suggestion` the action the session offers first.
+    #[serde(rename_all = "camelCase")]
+    LaunchRejected {
+        at: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<Vec<String>>,
+        reason: RejectReason,
+        vendor_message: String,
+        suggestion: RejectSuggestion,
+    },
+}
+
+/// Why a launch was refused ([`SessionEvent::LaunchRejected`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RejectReason {
+    Model,
+    Effort,
+    SignedOut,
+    Other,
+}
+
+/// What the session offers first after a refused launch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RejectSuggestion {
+    RetryDefault,
+    SwitchAccount,
+    SignIn,
 }
 
 /// Whether a [`SessionEvent::Limit`] starts or ends a limit.
@@ -319,7 +353,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 20);
+        assert_eq!(events.len(), 22);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =
@@ -327,7 +361,7 @@ mod tests {
             assert_eq!(serde_json::to_value(&event).unwrap(), raw);
             seen.insert(raw["type"].as_str().unwrap().to_string());
         }
-        assert_eq!(seen.len(), 13, "every variant appears: {seen:?}");
+        assert_eq!(seen.len(), 14, "every variant appears: {seen:?}");
     }
 
     #[test]

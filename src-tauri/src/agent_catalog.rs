@@ -45,6 +45,112 @@ pub struct Agent {
     /// How to ask the CLI whether it is signed in (the agent doctor).
     #[serde(default)]
     pub auth: Option<Auth>,
+    /// What a person can choose at launch: model, effort, accounts, and how
+    /// the CLI says it refused a launch (`crate::agent_caps`). Absent for the
+    /// Custom agent.
+    #[serde(default)]
+    pub capabilities: Option<Capabilities>,
+}
+
+/// The catalog's `capabilities` block (2.0 launch contract). Facts from the
+/// verified capability matrix; see `src/catalog/agents.schema.json`.
+#[derive(Debug, Deserialize)]
+pub struct Capabilities {
+    /// True only for agents proven with a real CLI in this release.
+    pub verified_on_real_install: bool,
+    pub model: ModelCaps,
+    pub effort: Option<EffortCaps>,
+    pub accounts: AccountCaps,
+    #[serde(default)]
+    pub error_signatures: Vec<ErrorSignature>,
+    /// Where the agent reports the model it runs.
+    pub model_report: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelCaps {
+    /// Arguments that pick the model (`{model}` filled in); None: no flag.
+    pub flag: Option<Vec<String>>,
+    /// `alias`, `slug`, `display` or `provider/model`.
+    pub id_style: String,
+    #[serde(default)]
+    pub aliases: Vec<ModelAlias>,
+    pub list: Option<ModelList>,
+    /// A model that is not listed may be typed.
+    pub typed: bool,
+    /// The CLI runs another model without a word when given one it does
+    /// not know, so a model its list does not have is never launched.
+    #[serde(default)]
+    pub silent_fallback: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ModelAlias {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// A read-only command and its parser, or a local cache the CLI keeps.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ModelList {
+    Command {
+        command: Vec<String>,
+        parser: String,
+    },
+    Cache {
+        source: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EffortCaps {
+    pub flag: Option<Vec<String>>,
+    /// An environment variable that sets the effort, for a CLI without a flag.
+    #[serde(default)]
+    pub env: Option<String>,
+    pub values: Vec<String>,
+    /// First match wins (a regular expression on the model id).
+    pub per_model: Option<Vec<EffortPerModel>>,
+    /// `cli`, `server` or `none`.
+    pub validated_by: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EffortPerModel {
+    #[serde(rename = "match")]
+    pub pattern: String,
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountCaps {
+    pub probe: Option<AccountProbe>,
+    pub profile_env: Option<String>,
+    /// `.claude-{slug}`: the folder under the home folder Hermes creates on
+    /// Add account.
+    pub profile_dir: Option<String>,
+    pub login: Option<Vec<String>>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountProbe {
+    pub command: Vec<String>,
+    /// `claude_auth_json`, `codex_login_status`, `agy_models` or `exit_code`.
+    pub parser: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ErrorSignature {
+    pub pattern: String,
+    /// `model`, `effort`, `signed_out` or `other`.
+    pub reason: String,
+    /// `retry-default`, `switch-account` or `sign-in`.
+    pub suggestion: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +218,18 @@ pub struct Terminal {
     /// Oldest version Hermes supports, or null.
     #[serde(default)]
     pub min_version: Option<String>,
+    /// Modes offered only with the agentCatalog flag on.
+    #[serde(default)]
+    pub beta_permission_modes: Vec<String>,
+    /// Hermes's one safety default mapped to this agent (F35).
+    #[serde(default)]
+    pub safety: Option<Safety>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Safety {
+    /// The permission mode closest to the default.
+    pub default_mode: String,
 }
 
 #[derive(Debug, Deserialize)]

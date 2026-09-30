@@ -697,7 +697,10 @@ features:
     # hooks) is a separate track and not on main yet, so the scenario plays
     # its part through the same e2e injector F11 will use in production;
     # what's proven here is the chip's side of the contract, not the
-    # watcher.
+    # watcher. Superseded in part by the 2.0 launch contract (2026-09-29,
+    # CAP-1): a session launched with a chosen model shows that choice,
+    # labelled "requested", until the agent reports one; with no chosen
+    # model and nothing reported there is still no chip (F08-1).
     status: partial
     criteria:
       F08-1:
@@ -1128,3 +1131,61 @@ features:
       UI-9:
         text: "With real key presses, Tab in Settings moves focus onto a control, :focus-visible matches and the control draws the solid ring"
         scenarios: ["UI-focus-ring.mjs@linux,win32"]
+  CAP:
+    name: "Models, effort and accounts for every agent (2.0 launch contract)"
+    # The launcher's own chips (model, effort, account, presets row) are
+    # track LAUNCH's; these prove the backend, the session and Settings with
+    # fake CLIs that answer like the real ones. Negative control of both
+    # scenarios: HERMES_E2E_CAP_NEGATIVE=1 (the fakes); of CAP-launch-choice
+    # also HERMES_E2E_CAP_NEGATIVE=product (the app's refusal watch off); of
+    # CAP-refusal-safety HERMES_E2E_CAP_SAFETY_NEGATIVE=echo|replay|fresh|trust
+    # (the app's filters off, a relaunch that starts fresh, or a resume's
+    # replay ended by any Enter instead of the prompt hook).
+    # CAP-1's "else the choice labelled requested" chip supersedes F08's "no
+    # chip when the agent reports no model" (the 2026-09-29 launch contract).
+    status: partial
+    criteria:
+      CAP-1:
+        text: "A terminal agent starts with the chosen model and effort; the session's model chip shows the model the agent reports, else the choice labelled requested"
+        scenarios: [CAP-launch-choice.mjs]
+      CAP-2:
+        text: "A model the CLI refuses stops the launch within seconds and nothing runs; the session shows the CLI's own words with Retry with default model and Pick another model; Codex's minute of reconnecting is cut short and the model is marked refused by the account"
+        scenarios: [CAP-launch-choice.mjs]
+      CAP-3:
+        text: "A launch in a signed-out account is refused; Sign in runs the CLI's own sign-in in that account's profile, and Try again runs the agent there"
+        scenarios: [CAP-launch-choice.mjs]
+      CAP-4:
+        text: "Settings > Agents shows each installed agent's accounts (plan, never an e-mail), what can be chosen at launch, exact status and the Verified on a real install badge"
+        scenarios: [CAP-agents-settings.mjs]
+      CAP-5:
+        text: "Add account creates a profile folder only then, and opens a terminal running the CLI's sign-in in it; the account then reads as signed in"
+        scenarios: [CAP-agents-settings.mjs]
+      CAP-6:
+        text: "Presets are listed, renamed and deleted in Settings > Agents; a preset whose model is gone launches the default model and says so"
+        scenarios: [CAP-agents-settings.mjs]
+      CAP-7:
+        text: "The usual combination of a repository is its most frequent recent launch (tie: the most recent), else the global usual, else the catalog default; stored choices are checked on read; Save as preset? comes once after three identical launches"
+        scenarios: [CAP-agents-settings.mjs]
+      CAP-8:
+        text: "Only the CLI's own refusal stops a launch: a task, the person's typing, an agent's answer or a resumed conversation's replay that shows a refusal's words stops nothing, also when the replay follows an Enter that answered the CLI's trust prompt"
+        scenarios: [CAP-refusal-safety.mjs]
+      CAP-9:
+        text: "A refused resume (for example, signed out since the last run) is refused at its first message, and Try again resumes the same conversation"
+        scenarios: [CAP-refusal-safety.mjs]
+  REAL-CAP:
+    name: "Models, effort and accounts with the real Claude Code, Codex and Antigravity"
+    # Local only: needs the signed-in CLIs and costs a few tiny turns, so the
+    # scenarios say SKIP in CI (e2e/app/ci-plan.mjs excludes them) and this
+    # entry asks for no result. They passed on the maintainer's Mac on
+    # 2026-09-29 (claude 2.1.284, codex 0.145.0, agy 1.2.13).
+    status: planned
+    criteria:
+      REAL-CAP-1:
+        text: "Default model and one explicit model + effort launch run a tiny turn; the account probe says signed in; the person's config is byte-identical afterwards"
+        scenarios: ["REAL-models-claude.mjs@darwin,linux", "REAL-models-codex.mjs@darwin,linux", "REAL-models-agy.mjs@darwin,linux"]
+      REAL-CAP-2:
+        text: "A deliberately invalid model is refused and nothing runs (Claude and Codex: the CLI's own words in the banner; Antigravity, which falls back silently, is refused by Hermes before launch)"
+        scenarios: ["REAL-models-claude.mjs@darwin,linux", "REAL-models-codex.mjs@darwin,linux", "REAL-models-agy.mjs@darwin,linux"]
+      REAL-CAP-3:
+        text: "A second Claude account in a temporary profile folder the test creates reads as signed out"
+        scenarios: ["REAL-models-claude.mjs@darwin,linux"]
