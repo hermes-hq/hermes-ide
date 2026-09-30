@@ -2,7 +2,7 @@ import "../styles/components/TurnBar.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { translate } from "../i18n/registry";
-import { Button, CloseButton } from "./ui";
+import { Button, CloseButton } from "./ui/Button";
 import { getTurnDiff, listTurns, type Turn, type TurnChecks } from "../agent/contract/turns";
 import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import { withTurnChecks } from "../agent/turns/turnChecks";

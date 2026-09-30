@@ -1,7 +1,12 @@
 import "../styles/components/Settings.css";
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { createPortal } from "react-dom";
-import { Button, Chip, CloseButton, IconButton, Input, NativeSelect, TabPanel, Tabs, Toggle } from "./ui";
+import { Button, CloseButton, IconButton } from "./ui/Button";
+import { Chip } from "./ui/Chip";
+import { Toggle } from "./ui/Choice";
+import { Input } from "./ui/Input";
+import { NativeSelect } from "./ui/Select";
+import { TabPanel, Tabs } from "./ui/Tabs";
 import { lazyView } from "../utils/lazyView";
 import { useResizablePanel } from "../hooks/useResizablePanel";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";

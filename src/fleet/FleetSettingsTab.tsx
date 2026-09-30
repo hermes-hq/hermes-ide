@@ -5,7 +5,7 @@
 import "../styles/components/Fleet.css";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
-import { Input } from "../components/ui";
+import { Input } from "../components/ui/Input";
 import { parseCapValue, setFleetCap, useFleetCaps, type FleetCapField } from "./fleetSettings";
 
 interface FieldSpec {

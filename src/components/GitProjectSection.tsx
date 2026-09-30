@@ -14,7 +14,8 @@ import { GitLogView } from "./GitLogView";
 import { GitMergeBanner } from "./GitMergeBanner";
 import { GitConflictViewer } from "./GitConflictViewer";
 import type { GitToast } from "./GitPanel";
-import { Button, Textarea } from "./ui";
+import { Button } from "./ui/Button";
+import { Textarea } from "./ui/Input";
 
 /**
  * A "+ all" / "− all" button of a file group: the control set's small quiet

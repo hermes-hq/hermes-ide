@@ -25,7 +25,9 @@ import {
   type UndoOutcome,
 } from "./api";
 import { loadLandTurns, type LandTurn } from "./turnSource";
-import { Button, Checkbox, CloseButton, Radio, Textarea } from "../components/ui";
+import { Button, CloseButton } from "../components/ui/Button";
+import { Checkbox, Radio } from "../components/ui/Choice";
+import { Textarea } from "../components/ui/Input";
 import {
   baseBranchNote,
   ciLogRequest,

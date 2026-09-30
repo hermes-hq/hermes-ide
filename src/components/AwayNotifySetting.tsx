@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { AWAY_NOTIFY_URL_KEY } from "../api/attention";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
 import { useI18n } from "../i18n/I18nProvider";
-import { Input } from "./ui";
+import { Input } from "./ui/Input";
 
 // An example address, not a sentence: the same in every language.
 const EXAMPLE_ADDRESS = "https://ntfy.sh/my-topic";

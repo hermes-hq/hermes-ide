@@ -64,7 +64,13 @@ import { GitProjectSection } from "./GitProjectSection";
 import type { GitToast } from "./GitPanel";
 import { useGitStatus } from "../hooks/useGitStatus";
 import { draftMessage, draftSubject, type DraftInput } from "../land/draft";
-import { Button, Checkbox, CloseButton, IconButton, Segmented, TabPanel, Tabs, Textarea } from "./ui";
+import { Button, CloseButton, IconButton } from "./ui/Button";
+import { Checkbox } from "./ui/Choice";
+import { Textarea } from "./ui/Input";
+import { Segmented } from "./ui/Segmented";
+import { TabPanel, Tabs } from "./ui/Tabs";
+// The kit's visually hidden text (the viewed box's label).
+import "../styles/ui/badge.css";
 import "../styles/components/ReviewDesk.css";
 
 // A key name, shown as printed on the keyboard in every language.
