@@ -351,13 +351,20 @@ try {
   assert(s.count === "Step 3 of 3", `screen 3 of 3 is "${s.title}"`);
   const TASK = "Add a contributing guide";
   await typeInto(bridge, ".task-launcher-task", TASK);
-  await bridge.eval(`
-    const sel = e2e.must(e2e.first(".task-launcher-agent"), "agent picker");
-    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(sel, "claude");
-    sel.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  `);
+  // The agent chip: Claude Code.
+  await bridge.waitFor("the agent menu", `
+    if (e2e.first('.task-launcher-menu[data-menu="agent"]')) return true;
+    const chip = e2e.first('[data-chip="agent"]');
+    return chip ? (e2e.click(chip), false) : false;
+  `, { timeoutMs: 30_000 });
+  await bridge.waitFor("Claude Code in the agent menu", `const b = e2e.first('.task-launcher-menu [data-agent-id="claude"]'); return b ? e2e.click(b) : false;`);
   await bridge.waitFor("Launch to be ready", `const b = e2e.first(".task-launcher-launch"); return !!b && !b.disabled;`, { timeoutMs: 30_000 });
+  // The project chip's menu shows the repository's path.
+  await bridge.waitFor("the project menu", `
+    if (e2e.first('.task-launcher-menu[data-menu="project"]')) return true;
+    const chip = e2e.first('[data-chip="project"]');
+    return chip ? (e2e.click(chip), false) : false;
+  `);
   const repoShown = await bridge.eval(`return e2e.first(".task-launcher-repo").value;`);
   assert(samePath(repoShown, repo), "the first task runs in the repository picked on screen 2");
   await bridge.screenshot(join(evidenceDir, "03-first-task.png"));

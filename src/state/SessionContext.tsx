@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, ReactNode } from "react";
+import { markStartupSession } from "../attention/startupSessions";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentEvent } from "../agent/types";
 import { isInitEvent, isStateChangedEvent } from "../agent/types";
@@ -1572,6 +1573,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const live = arr.filter((session) => session.phase !== "destroyed");
 
         // If there are live sessions (hot reload / dev), use them as-is
+        for (const session of live) markStartupSession(session.id);
         if (live.length > 0) {
           dispatch({ type: "SET_ACTIVE", id: live[0].id });
           markWorkspaceLoaded();
@@ -1675,6 +1677,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sessionHost: isFeatureFlagEnabled("sessionHost"),
                 parentSessionId: saved.parent_session_id ? (oldToNew.get(saved.parent_session_id) ?? saved.parent_session_id) : null,
               });
+              // Restored at startup: an agent of it already waiting opens the morning view.
+              markStartupSession(newSession.id);
 
               // Agent-mode restore: spawn the Claude subprocess that the
               // backend `create_session` deliberately skipped.  Honor the

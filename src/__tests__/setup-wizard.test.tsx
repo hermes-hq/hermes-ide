@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import type { DoctorRow } from "../api/doctor";
+import type { FakeCapabilityCommands } from "./fakes/capabilityCommands";
 
 const h = vi.hoisted(() => ({
   doctor: [] as DoctorRow[],
@@ -24,6 +25,7 @@ const h = vi.hoisted(() => ({
   settings: new Map<string, string>(),
   projects: [] as { id: string; name: string; path: string; path_exists: boolean }[],
   flags: { taskLauncher: true } as Record<string, boolean>,
+  cap: null as unknown as FakeCapabilityCommands,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -38,6 +40,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       return { git_root: isRepo ? path : null, branch_exists: false, local_branches: [], worktree_toml: null };
     }
     if (cmd === "git_disk_status") return { free_bytes: 100 * 1024 ** 3, required_bytes: 10 * 1024 ** 3, below_threshold: false };
+    // The launcher's capability commands (in-memory, the backend's rules).
+    const answer = h.cap.handle(cmd, args ?? {});
+    if (answer) return answer.value;
     throw new Error(`unexpected ${cmd}`);
   }),
 }));
@@ -64,6 +69,7 @@ import { AgentDoctor } from "../components/AgentDoctor";
 import { OnboardingGate } from "../components/OnboardingGate";
 import { I18nProvider } from "../i18n/I18nProvider";
 import { __resetDoctorForTest } from "../launcher/doctorStore";
+import { fakeCapabilityCommands } from "./fakes/capabilityCommands";
 
 function row(id: string, name: string, over: Partial<DoctorRow> = {}): DoctorRow {
   return { id, name, installed: true, version: "1.2.3", min_version: null, version_ok: null, signed_in: "yes", signals: "exact", resume: true, retired: false, retired_note: null, beta: false, ...over };
@@ -75,6 +81,7 @@ beforeEach(() => {
   h.settings = new Map();
   h.projects = [];
   h.flags = { taskLauncher: true };
+  h.cap = fakeCapabilityCommands(() => h.doctor);
   __resetDoctorForTest();
 });
 afterEach(() => cleanup());

@@ -499,7 +499,8 @@ features:
     status: partial
     criteria:
       F11-1:
-        text: "A Claude session waiting for permission shows \"needs approval\" with source \"hook, exact\" within one second"
+        # The source (hook) is the strip's data-source.
+        text: "A Claude session waiting for permission shows \"needs approval\" with source \"exact · reported by Claude Code\" within one second"
         scenarios: [F11-zero-setup-signals.mjs]
       F11-2:
         text: "Your own ~/.claude/settings.json is byte-identical before and after a session"
@@ -513,6 +514,9 @@ features:
       F11-5:
         text: "An agent with no signals shows \"guessed\", dimmed"
         scenarios: [F11-zero-setup-signals.mjs]
+      F11-6:
+        text: "The status strip says where its status comes from: \"exact · reported by <agent>\" when the agent reported it, \"guessed\" otherwise"
+        scenarios: [F11-zero-setup-signals.mjs, F12-morning-view.mjs]
   C0:
     name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
     # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).
@@ -670,6 +674,14 @@ features:
         # systemd-inhibit --list (Linux), powercfg /requests (Windows).
         text: "Sleep is prevented while any session is working and released when all are idle (macOS, Windows, Linux)"
         scenarios: [F12-attention-inbox.mjs]
+      F12-6:
+        # The morning view: agents Hermes restores that ask at once. The
+        # fake agent's "ask-at-start" mode asks through its own hook.
+        text: "Agents already blocked when Hermes starts open the inbox by itself, oldest first, each with its place (n of N) and whether its status is exact; a session started later never opens it"
+        scenarios: [F12-morning-view.mjs]
+      F12-7:
+        text: "⌘I says where in the line the agent it jumped to is (\"2 of 3 waiting\")"
+        scenarios: [F12-morning-view.mjs]
   N16:
     name: "Notifications when you are away"
     # Behind the attentionInbox flag; partial for the same reason as F12
@@ -1000,6 +1012,28 @@ features:
       F15-4:
         text: "An existing branch, a folder that is not a git repository and low disk each block Launch with their own row"
         scenarios: [F15-task-launcher.mjs]
+      F15-5:
+        # Launcher v2 (the approved 2.0 mock). Model and effort flags come
+        # from the capability backend when the build has it; the scenarios
+        # prove the arguments the fake agent was started with.
+        text: "Every chip reaches the agent it starts: agent and account (the Custom agent listed), project, where (a new worktree from a chosen base, an existing branch, the current checkout), the agent's real approval modes (Skip all in red with its note), model, and effort (off for a model without levels)"
+        scenarios: [F15-launcher-chips.mjs]
+      F15-6:
+        text: "+ options reach the agent: extra args, the prefix from Settings (shown), channels, edited checks, Track as a feature instead of a size, and Also on with its own agent, approval, model and effort; \"Hermes will run\" shows the command lines"
+        scenarios: [F15-launcher-chips.mjs]
+      F15-7:
+        text: "Launch & next keeps the sheet with the same choice; a click outside keeps the draft; Recent comes from the launches; projects are listed most used first; with the running-agents cap reached a task waits and starts when a slot frees"
+        scenarios: [F15-launcher-flow.mjs]
+      F15-8:
+        # F15-launcher-tab presses real keys (Tab, Return, Escape) and so runs
+        # only where CI can: Linux (Xvfb) and Windows runners.
+        text: "Keyboard only, from a cold start with no session: four tasks launched in under 60 seconds; with real key presses, Tab from the task field reaches the chips and Shift+Tab comes back"
+        scenarios:
+          - F15-launcher-keyboard.mjs
+          - F15-launcher-tab.mjs@linux,win32
+      F15-9:
+        text: "The launcher opens pre-set to the usual full combination; after 3 identical launches it asks once to save a preset, and never again for that combination, even when the question was left unanswered; the preset chip and ⌘1–⌘4 apply presets and keep the task; a preset with unavailable parts (a model, effort or mode the agent lacks, a base branch the repository lacks) warns and launches the fallback, never the stale choice; Settings > Agents lists the presets (stale ones marked) and renames and deletes them"
+        scenarios: [F15-launcher-presets.mjs]
   F16:
     name: "Three-step onboarding and agent doctor"
     # partial: the doctor's sign-in check is exactly what the catalog says
@@ -1085,6 +1119,10 @@ features:
       REAL-3:
         text: "None of a parent Claude Code session's environment markers reach the agent; it saves its transcript; ~/.claude/settings.json is byte-identical afterwards"
         scenarios: ["REAL-claude-launch.mjs@darwin,linux"]
+      REAL-4:
+        # e2e/app/scenarios/REAL-launcher-claude.mjs, local only like the others.
+        text: "From ⌘N with a model and an effort chosen on the chips, claude runs as hi run -> claude with exactly one --model and one --effort of those values and the task as its first prompt"
+        scenarios: ["REAL-launcher-claude.mjs@darwin,linux"]
   UI:
     name: "One consistent control set (UI kit foundation)"
     # Foundation only: tokens, the base.css reset, the components in

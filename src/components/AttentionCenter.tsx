@@ -10,7 +10,12 @@
 //              oldest first. ↑↓ select, Space peeks at the request detail
 //              (read-only), Enter jumps to the pane, M mutes the session
 //              for an hour, Esc closes.
-//   ⌘I         jumps to the session waiting longest; repeat to cycle.
+//   ⌘I         jumps to the session waiting longest; repeat to cycle. A
+//              short note says where in the line it is ("2 of 3").
+//   morning    agents already blocked when Hermes starts: the inbox opens
+//              by itself, once, as the morning view (how many wait on you,
+//              oldest first, each with its place in the line and whether
+//              its status is exact or guessed, and "Start today's tasks").
 //   notify     one OS notification per session (never for the session you
 //              look at in a focused window); a Blocked on you item also
 //              sends one away message when an address is configured.
@@ -27,16 +32,17 @@ import { setAttentionBadge, setKeepAwake, sendAwayNotification } from "../api/at
 import { attentionDebug, pushCapped } from "../attention/debug";
 import { agentLabel, awayPayload, itemState, notificationText, stateKey } from "../attention/describe";
 import { forgetUserLabel } from "../attention/userLabels";
-import { blockedCount, groupInbox, inboxKindForStatus, inboxRows, isMuted, nextBlockedSession } from "../attention/model";
+import { blockedCount, blockedSessionOrder, groupInbox, inboxKindForStatus, inboxRows, isMuted, nextBlockedSession } from "../attention/model";
 import { muteSession, unmuteSession, useMutes, getMutes } from "../attention/mutes";
 import { createNotifier, type Notifier } from "../attention/notifier";
 import { startStatusBridge, trustedStatus, type StatusBridge } from "../attention/statusBridge";
 import { isWindowFocused, subscribeWindowFocus } from "../attention/windowFocus";
+import { isStartupSession } from "../attention/startupSessions";
 import { useI18n } from "../i18n/I18nProvider";
 import type { SessionData } from "../types/session";
 import { claimPcAppChords } from "../utils/keymap";
 import { notifyAttention } from "../utils/notifications";
-import { PLATFORM } from "../utils/platform";
+import { fmt, PLATFORM } from "../utils/platform";
 import { matchAppShortcut } from "../utils/shortcuts";
 
 interface AttentionCenterProps {
@@ -46,7 +52,16 @@ interface AttentionCenterProps {
   onJump: (sessionId: string) => void;
   /** Told when the inbox opens or closes, so the app leaves its keyboard alone. */
   onOpenChange?: (open: boolean) => void;
+  /** Morning view: "Start today's tasks" (the task launcher). */
+  onStartTasks?: () => void;
+  /** Morning view: false while something else has the screen (a dialog, the launcher). */
+  canOpenOnStart?: () => boolean;
 }
+
+/** How long after Hermes starts an agent that is blocked opens the morning view. */
+export const MORNING_WINDOW_MS = 45_000;
+/** How long the "2 of 3" note stays after ⌘I. */
+const POSITION_NOTE_MS = 3_000;
 
 /** Windows/Linux chords of the two attention shortcuts (see app-shortcuts.json). */
 const PC_CHORDS = ["{ctrl}{shift}I", "{ctrl}{shift}A"];
@@ -62,7 +77,7 @@ function optionId(item: InboxItem): string {
   return `attention-option-${item.id}`;
 }
 
-export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChange }: AttentionCenterProps) {
+export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChange, onStartTasks, canOpenOnStart }: AttentionCenterProps) {
   const { t } = useI18n();
   const items = useInboxItems();
   const mutes = useMutes();
@@ -71,6 +86,8 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [peek, setPeek] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [morning, setMorning] = useState(false);
+  const [position, setPosition] = useState<{ n: number; total: number; at: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<Element | null>(null);
@@ -251,9 +268,10 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     latest.current.onJump(sessionId);
   }, []);
 
-  const openInbox = useCallback(() => {
+  const openInbox = useCallback((asMorning = false) => {
     returnFocusRef.current = document.activeElement;
     setOpen(true);
+    setMorning(asMorning);
     setPeek(false);
     const g = groupInbox(items);
     setSelectedId(inboxRows(items)[0]?.id ?? null);
@@ -262,6 +280,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
 
   const closeInbox = useCallback((restoreFocus: boolean) => {
     setOpen(false);
+    setMorning(false);
     setPeek(false);
     const back = returnFocusRef.current;
     returnFocusRef.current = null;
@@ -276,7 +295,41 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     }
     if (open) closeInbox(false);
     jump(target);
+    const order = blockedSessionOrder(items, getMutes(), Date.now());
+    const n = order.indexOf(target) + 1;
+    if (n > 0) {
+      setPosition({ n, total: order.length, at: Date.now() });
+      announce(t("attention.position", { n, total: order.length }));
+    }
   }, [items, open, closeInbox, jump, announce, t]);
+
+  // The "2 of 3" note goes after a moment.
+  useEffect(() => {
+    if (!position) return;
+    const timer = setTimeout(() => setPosition(null), POSITION_NOTE_MS);
+    return () => clearTimeout(timer);
+  }, [position]);
+
+  // Morning view: agents already blocked when Hermes starts open the inbox,
+  // once, within the first moments (restored agents report as they start).
+  const startedAt = useRef(Date.now());
+  const morningDone = useRef(false);
+  const canOpenOnStartRef = useRef(canOpenOnStart);
+  canOpenOnStartRef.current = canOpenOnStart;
+  useEffect(() => {
+    if (morningDone.current) return;
+    if (Date.now() - startedAt.current > MORNING_WINDOW_MS) {
+      morningDone.current = true;
+      return;
+    }
+    if (open) return;
+    // Only agents Hermes found waiting (restored or reattached at startup).
+    const waiting = groupInbox(items).blocked.some((i) => isStartupSession(i.sessionId) && !isMuted(getMutes(), i.sessionId, Date.now()));
+    if (!waiting) return;
+    if (canOpenOnStartRef.current && !canOpenOnStartRef.current()) return;
+    morningDone.current = true;
+    openInbox(true);
+  }, [items, open, openInbox]);
 
   // ⌘I / ⌘⇧I (Ctrl+Shift+I / Ctrl+Shift+A on Windows and Linux).
   useEffect(() => {
@@ -292,7 +345,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
         e.preventDefault();
         e.stopPropagation();
         if (open) closeInbox(true);
-        else openInbox();
+        else openInbox(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -443,8 +496,15 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     return t("attention.ageHours", { n: Math.floor(minutes / 60) });
   };
 
+  const blockedOrder = blockedSessionOrder(items, mutes, now);
+  const confidenceOf = (item: InboxItem): string => {
+    if (!item.sessionId) return "exact";
+    return trustedStatus(getSessionEventSnapshot(item.sessionId))?.confidence ?? "guessed";
+  };
+
   const renderOption = (item: InboxItem) => {
     const { task, agent, state } = describeRow(item);
+    const place = item.sessionId ? blockedOrder.indexOf(item.sessionId) + 1 : 0;
     const muted = isMuted(mutes, item.sessionId, now);
     const isSelected = selected?.id === item.id;
     return (
@@ -473,6 +533,14 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
           {item.detail && <span className="attention-option-detail">{item.detail}</span>}
         </span>
         <span className="attention-option-meta">
+          {morning && place > 0 && item.kind !== "ready" && (
+            <span className="attention-option-place">{t("attention.position", { n: place, total: blockedOrder.length })}</span>
+          )}
+          {morning && item.sessionId && (
+            <span className="attention-option-confidence" data-confidence={confidenceOf(item)}>
+              {t(`status.confidence.${confidenceOf(item)}`)}
+            </span>
+          )}
           {muted ? <span className="attention-option-muted-tag">{t("attention.muted")}</span> : null}
           <span className="attention-option-age">{age(item.createdAt)}</span>
         </span>
@@ -493,7 +561,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
         aria-label={t("attention.badgeLabel", { count })}
         title={t("attention.badgeLabel", { count })}
         data-count={count}
-        onClick={() => (open ? closeInbox(true) : openInbox())}
+        onClick={() => (open ? closeInbox(true) : openInbox(false))}
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path
@@ -509,10 +577,24 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
       <div className="attention-live" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </div>
+      {position && (
+        <div className="attention-position" data-n={position.n} data-total={position.total} aria-hidden="true">
+          {t("attention.position", { n: position.n, total: position.total })}
+        </div>
+      )}
       {open && (
-        <div className="attention-inbox" role="dialog" aria-label={t("attention.title")}>
+        <div className={`attention-inbox${morning ? " attention-inbox-morning" : ""}`} role="dialog" aria-label={t("attention.title")} data-morning={morning ? "true" : "false"}>
           <div className="attention-inbox-header">
-            <span className="attention-inbox-title">{t("attention.title")}</span>
+            {morning && groups.blocked.length > 0 ? (
+              <>
+                <span className="attention-inbox-title attention-morning-title">
+                  {t(groups.blocked.length === 1 ? "attention.morningTitleOne" : "attention.morningTitle", { count: groups.blocked.length })}
+                </span>
+                <span className="attention-morning-why">{t("attention.morningWhy")}</span>
+              </>
+            ) : (
+              <span className="attention-inbox-title">{t("attention.title")}</span>
+            )}
           </div>
           <div
             ref={listRef}
@@ -561,8 +643,23 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
               <p className="attention-peek-hint">{t("attention.peekAnswerHint")}</p>
             </div>
           )}
+          {morning && onStartTasks && (
+            <div className="attention-morning-actions">
+              <span className="attention-morning-answer">{t("attention.morningAnswerHint")}</span>
+              <button
+                type="button"
+                className="attention-morning-start"
+                onClick={() => {
+                  closeInbox(false);
+                  onStartTasks();
+                }}
+              >
+                {t("attention.morningStart", { shortcut: fmt("{mod}N") })}
+              </button>
+            </div>
+          )}
           <div className="attention-inbox-footer" aria-hidden="true">
-            {t("attention.hint")}
+            {morning ? t("attention.morningHint", { shortcut: fmt("{mod}I") }) : t("attention.hint")}
           </div>
         </div>
       )}

@@ -30,6 +30,11 @@ export interface LaunchTaskDeps {
   /** The project id for a repository's main checkout, creating the project if needed. */
   projectFor(repoRoot: string): Promise<string>;
   createSession(opts: CreateSessionOpts): Promise<SessionData | null>;
+  /**
+   * With a running-agents cap and no free slot, the session waits in the
+   * task queue instead of starting (N22). True when it was queued.
+   */
+  queue?(opts: CreateSessionOpts, label: string): boolean;
   /** Show a new session: the first in the focused pane, a second one split beside the first. */
   place(sessionId: string, index: number, firstSessionId: string | null): void;
   worktreePath(sessionId: string, projectId: string): Promise<string | null>;
@@ -43,6 +48,8 @@ export interface LaunchTaskDeps {
 export interface LaunchTaskResult {
   ok: boolean;
   sessionIds: string[];
+  /** Sessions waiting in the task queue for a free slot. */
+  queued: number;
   /** Agents that got the task on the clipboard instead of on their launch line. */
   copiedFor: string[];
   featureFiles: string[];
@@ -56,7 +63,7 @@ export function normalizeRepoPath(path: string, windows = false): string {
 }
 
 export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): Promise<LaunchTaskResult> {
-  const result: LaunchTaskResult = { ok: false, sessionIds: [], copiedFor: [], featureFiles: [] };
+  const result: LaunchTaskResult = { ok: false, sessionIds: [], queued: 0, copiedFor: [], featureFiles: [] };
   const task = req.task.trim();
   if (!task || req.agents.length === 0) return result;
 
@@ -65,15 +72,32 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   const records: TaskLaunchRecord[] = [];
 
   for (const [i, agent] of req.agents.entries()) {
-    const session = await deps.createSession({
+    const custom = getAgent(agent.id)?.custom === true;
+    const opts: CreateSessionOpts = {
       label,
       aiProvider: agent.id,
       mode: agent.mode,
       projectIds: [projectId],
       workingDirectory: req.repoRoot,
-      branchSelections: { [projectId]: { branch: agent.branch, createNew: true } },
+      // A new worktree on a new branch, a worktree of an existing branch, or
+      // (no selection) the repository's own checkout.
+      branchSelections: agent.worktree
+        ? { [projectId]: { branch: agent.branch, createNew: agent.createBranch, ...(agent.createBranch && agent.baseBranch ? { baseBranch: agent.baseBranch } : {}) } }
+        : undefined,
       initialPrompt: task,
-    });
+      permissionMode: agent.launch.permissionMode,
+      customPrefix: agent.launch.customPrefix || undefined,
+      customSuffix: agent.launch.customSuffix || undefined,
+      channels: agent.launch.channels.length > 0 ? agent.launch.channels : undefined,
+      agentName: custom ? taskLabel(agent.launch.agentCommand ?? "", 24) || undefined : undefined,
+      agentCommand: custom ? agent.launch.agentCommand : undefined,
+      agentLaunch: agent.launch.agentLaunch,
+    };
+    if (deps.queue?.(opts, label)) {
+      result.queued++;
+      continue;
+    }
+    const session = await deps.createSession(opts);
     if (!session) {
       // The first agent failing is a failed launch; a second one failing
       // leaves the first running.
@@ -96,7 +120,7 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
     });
     if (agent.mode === "terminal" && !agentTakesFirstPrompt(agent.id)) result.copiedFor.push(agent.id);
   }
-  result.ok = result.sessionIds.length > 0;
+  result.ok = result.sessionIds.length > 0 || result.queued > 0;
 
   if (records.length === 2) {
     records[0].pairedWith = records[1].sessionId;

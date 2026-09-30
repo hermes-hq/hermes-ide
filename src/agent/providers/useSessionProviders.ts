@@ -11,20 +11,51 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { clearSessionEvents, dispatchSessionEvent } from "../contract/sessionEventStore";
+import { clearSessionEvents, dispatchSessionEvent, getSessionEventSnapshot } from "../contract/sessionEventStore";
 import { getOrCreateAgentSessionStore } from "../agentSessionStore";
 import { forgetSessionStatus, markSessionSeen, setViewedSession } from "../status/attentionStore";
 import { forgetUserInput } from "../status/userInput";
 import type { SessionData } from "../../types/session";
 import { ProviderRegistry } from "./types";
-import { terminalObservationOf, terminalProvider } from "./terminalProvider";
+import { HELPER_SOURCE, TERMINAL_SOURCE, terminalObservationOf, terminalProvider } from "./terminalProvider";
 import { agentViewObservationOf, agentViewProvider } from "./agentViewProvider";
 
 const sink = (sessionId: string, event: Parameters<typeof dispatchSessionEvent>[1]) => {
   dispatchSessionEvent(sessionId, event);
 };
 
-export const terminalRegistry = new ProviderRegistry(terminalProvider, sink);
+type StoredEvent = Parameters<typeof dispatchSessionEvent>[1];
+
+/**
+ * The launch helper's "started" (idle) says the agent is up. It reaches the
+ * app with the session update, after the agent's own hook events of the same
+ * moment: an agent that asks for a permission as soon as it starts (or
+ * resumes) has already said so. Its own report since the launch began is
+ * newer knowledge than "started", so the helper's idle is not stored then.
+ *
+ * A report that the previous run ended (an exit, an "exited" status, a
+ * refused launch) is not: the agent was started again (a relaunch such as
+ * "Retry with default"), so the helper's "started" is the news.
+ */
+export function helperStartedIsStale(events: readonly StoredEvent[], next: StoredEvent): boolean {
+  if (next.type !== "status" || next.source !== HELPER_SOURCE || next.status.kind !== "idle") return false;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "launch_rejected" || e.type === "exit") return false;
+    if (e.type !== "status") continue;
+    if (e.source === TERMINAL_SOURCE) continue;
+    if (e.source === HELPER_SOURCE || e.status.kind === "exited") return false;
+    return true;
+  }
+  return false;
+}
+
+const terminalSink = (sessionId: string, event: StoredEvent) => {
+  if (helperStartedIsStale(getSessionEventSnapshot(sessionId).events, event)) return;
+  dispatchSessionEvent(sessionId, event);
+};
+
+export const terminalRegistry = new ProviderRegistry(terminalProvider, terminalSink);
 export const agentViewRegistry = new ProviderRegistry(agentViewProvider, sink);
 
 /**

@@ -187,25 +187,24 @@ const typeInto = (bridge, selector, value) =>
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return el.value;
   `);
-const chooseOption = (bridge, selector, value) =>
-  bridge.eval(`
-    const el = e2e.must(e2e.first(${JSON.stringify(selector)}), ${JSON.stringify(selector)});
-    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    return el.value;
-  `);
 const launcherState = (bridge) =>
   bridge.eval(`
     return {
-      repo: e2e.first(".task-launcher-repo")?.value ?? null,
-      branch: e2e.first(".task-launcher-branch")?.value ?? null,
-      agent: e2e.first(".task-launcher-agent")?.value ?? null,
-      agentText: [...document.querySelectorAll(".task-launcher-agent option")].find((o) => o.selected)?.textContent ?? "",
+      agentText: e2e.norm(e2e.first('[data-chip="agent"]')?.innerText ?? ""),
       terminal: e2e.first('.task-launcher-view [data-mode="terminal"]')?.getAttribute("aria-checked") === "true",
       blocks: e2e.all(".task-launcher-block").map((b) => ({ kind: b.getAttribute("data-kind"), text: e2e.norm(b.innerText) })),
       launchDisabled: !!e2e.first(".task-launcher-launch")?.disabled,
     };
   `);
+/** A chip's menu, then an item in it (the launcher's own UI). */
+async function pickInMenu(bridge, chip, item) {
+  await bridge.waitFor(`the ${chip} menu`, `
+    if (e2e.first('.task-launcher-menu[data-menu="${chip}"]')) return true;
+    const c = e2e.first('[data-chip="${chip}"]');
+    return c && !c.disabled ? (e2e.click(c), false) : false;
+  `);
+  if (item) await bridge.waitFor(`${item} in the ${chip} menu`, `const el = e2e.first('.task-launcher-menu ${item}'); return el && !el.disabled ? e2e.click(el) : false;`);
+}
 const pressEnterInTask = (bridge) =>
   bridge.eval(`
     const ta = e2e.must(e2e.first(".task-launcher-task"), "task field");
@@ -312,9 +311,12 @@ try {
 
   log("step 1: ⌘N opens the task launcher; the repository, the task, Claude in a terminal");
   await openLauncher(bridge);
+  await bridge.waitFor("the launcher's starting choice", `return e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+  await pickInMenu(bridge, "project");
   await typeInto(bridge, ".task-launcher-repo", repo);
   await typeInto(bridge, ".task-launcher-task", TASK);
-  await chooseOption(bridge, ".task-launcher-agent", "claude");
+  await pickInMenu(bridge, "agent", '[data-agent-id="claude"]');
+  await bridge.eval(`if (!e2e.first(".task-launcher-options")) e2e.click(e2e.first(".task-launcher-expand")); return true;`);
   await bridge.waitFor("the agent doctor to clear claude", `
     const blocks = e2e.all(".task-launcher-block").length;
     const btn = e2e.first(".task-launcher-launch");
@@ -322,7 +324,7 @@ try {
   `, { timeoutMs: 60_000 });
   const st = await launcherState(bridge);
   log(`  launcher: ${JSON.stringify(st)}`);
-  assert(st.agent === "claude" && st.terminal, `Claude in a terminal (${st.agentText.trim()})`);
+  assert(/^Claude Code/.test(st.agentText) && st.terminal, `Claude in a terminal (${st.agentText})`);
   await bridge.screenshot(join(evidenceDir, "02-launcher.png"));
 
   log("step 2: Enter starts the agent through the helper, with the task as its first prompt");

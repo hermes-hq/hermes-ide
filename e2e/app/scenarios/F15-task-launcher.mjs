@@ -9,8 +9,9 @@
 //          it over.
 //   run 2  - ⌘N (the File menu's New Session; on Windows and Linux the
 //            Ctrl+Shift+N key) opens the launcher, not the old creator.
-//          - the repository is typed in; its .hermes/worktree.toml gives the
-//            done-when line; the task names the branch hermes/<slug>.
+//          - the repository is typed in (project chip); its
+//            .hermes/worktree.toml gives the checks; the task names the
+//            branch hermes/<slug>.
 //          - Enter: a terminal session starts on a NEW worktree of that
 //            branch, the fake claude gets the task as its first prompt (its
 //            last argument, and it prints it), and the launch is recorded.
@@ -19,9 +20,10 @@
 //            row; Enter does nothing; Sign in opens a terminal running the
 //            CLI.
 //          - a task whose branch exists: the row blocks until the suggested
-//            free branch is used; then the same task also runs on codex,
-//            Full track: two sessions side by side, each on its own branch,
-//            each with the task, each worktree with its feature.md.
+//            free branch is used; then the same task also runs on codex
+//            ("Also on"), tracked as a feature: two sessions side by side,
+//            each on its own branch, each with the task, each worktree with
+//            its feature.md.
 //          - a folder that is not a git repository blocks Launch.
 //          - ⌘⇧N (Ctrl+Shift+H) opens the advanced creator, which still
 //            offers SSH; so does the launcher's Advanced link.
@@ -252,6 +254,7 @@ const openLauncher = async (bridge) => {
     if (e2e.first(".session-creator")) throw new Error("the old New Session creator opened instead of the task launcher");
     return !!e2e.first(".task-launcher-sheet .task-launcher");
   `, { timeoutMs: 20_000 });
+  if (FLAG_ON) await launcherReady(bridge);
 };
 
 /** Type into a React-controlled field the way typing does. */
@@ -281,14 +284,44 @@ const pressEnterInTask = (bridge) =>
 const launcherState = (bridge) =>
   bridge.eval(`
     return {
-      repo: e2e.first(".task-launcher-repo")?.value ?? null,
+      repo: e2e.first('[data-chip="project"]')?.innerText ?? null,
       branch: e2e.first(".task-launcher-branch")?.value ?? null,
-      doneWhen: e2e.all(".task-launcher-done-when code").map((c) => c.innerText),
+      doneWhen: e2e.all(".task-launcher-check-input").map((c) => c.value),
       blocks: e2e.all(".task-launcher-block").map((b) => ({ kind: b.getAttribute("data-kind"), text: e2e.norm(b.innerText) })),
       launchDisabled: !!e2e.first(".task-launcher-launch")?.disabled,
-      agent: e2e.first(".task-launcher-agent")?.value ?? null,
+      agent: e2e.norm(e2e.first('[data-chip="agent"]')?.innerText ?? ""),
     };
   `);
+/** The sheet has settled on its starting choice (the usual one or the defaults). */
+const launcherReady = (bridge) => bridge.waitFor("the launcher's starting choice", `return e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+/** Opens a chip's menu (when closed). */
+async function openChip(bridge, name) {
+  await bridge.clickWhenReady(`
+    const chip = e2e.first('[data-chip="${name}"]');
+    if (!chip) return false;
+    if (e2e.first('.task-launcher-menu[data-menu="${name}"]')) return true;
+    return e2e.click(chip);
+  `);
+  await bridge.waitFor(`the ${name} menu`, `return !!e2e.first('.task-launcher-menu[data-menu="${name}"]');`);
+}
+/** The project chip: type a path into its menu. */
+async function setRepo(bridge, path) {
+  await openChip(bridge, "project");
+  await typeInto(bridge, ".task-launcher-repo", path);
+}
+/** The agent chip: pick an agent. */
+async function pickAgent(bridge, id) {
+  await openChip(bridge, "agent");
+  await bridge.click(`.task-launcher-menu [data-agent-id="${id}"]`);
+}
+/** + options open (branch, checks, feature, also on). */
+async function expandOptions(bridge) {
+  await bridge.clickWhenReady(`
+    if (e2e.first(".task-launcher-options")) return true;
+    return e2e.click(e2e.must(e2e.first(".task-launcher-expand"), "+ options"));
+  `);
+  await bridge.waitFor("the options", `return !!e2e.first(".task-launcher-options");`);
+}
 
 async function newTerminals(bridge, before, count, what) {
   return bridge.waitFor(what, `
@@ -337,16 +370,18 @@ try {
   await openLauncher(bridge);
   await bridge.screenshot(join(evidenceDir, "01-launcher.png"));
 
-  log("step 2: the repository, the done-when line and the branch from the task");
-  await typeInto(bridge, ".task-launcher-repo", repo);
+  log("step 2: the repository, the checks and the branch from the task");
+  await setRepo(bridge, repo);
   const TASK = "Fix the flaky login test";
   await typeInto(bridge, ".task-launcher-task", TASK);
-  await bridge.waitFor("the done-when line from .hermes/worktree.toml", `return e2e.all(".task-launcher-done-when code").length === 1;`, { timeoutMs: 20_000 });
-  await chooseOption(bridge, ".task-launcher-agent", "claude");
+  await openChip(bridge, "agent");
   await bridge.waitFor("the doctor's answer for claude", `
-    const opt = [...document.querySelectorAll(".task-launcher-agent option")].find((o) => o.value === "claude");
+    const opt = e2e.first('.task-launcher-menu [data-agent-id="claude"]');
     return !!opt && /2\\.1\\.300/.test(opt.textContent);
   `, { timeoutMs: 30_000 });
+  await bridge.click('.task-launcher-menu [data-agent-id="claude"]');
+  await expandOptions(bridge);
+  await bridge.waitFor("the checks from .hermes/worktree.toml", `return e2e.all(".task-launcher-check-input").length === 1;`, { timeoutMs: 20_000 });
   let st = await launcherState(bridge);
   log(`  launcher: ${JSON.stringify(st)}`);
   assert(st.branch === "hermes/fix-the-flaky-login-test", `the branch is hermes/<slug> (${st.branch})`);
@@ -384,7 +419,7 @@ try {
   await bridge.waitFor("the signed-out row", `return e2e.all('.task-launcher-block[data-kind="signed-out"]').length === 1;`, { timeoutMs: 30_000 });
   st = await launcherState(bridge);
   log(`  launcher: ${JSON.stringify(st)}`);
-  assert(samePath(st.repo, repo), "it opens on the repository of the active session");
+  assert(/f15-repo/.test(st.repo), `it opens on the repository of the active session (${st.repo})`);
   assert(st.launchDisabled, "Launch is disabled");
   assert(/signed out/.test(st.blocks[0].text), `the row says so: "${st.blocks[0].text}"`);
   const countBefore = records().length;
@@ -410,16 +445,17 @@ try {
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Existing task");
   await bridge.waitFor("the branch-exists row", `return e2e.all('.task-launcher-block[data-kind="branch-exists"]').length === 1;`, { timeoutMs: 20_000 });
+  await expandOptions(bridge);
   st = await launcherState(bridge);
   assert(st.branch === "hermes/existing-task" && st.launchDisabled, "hermes/existing-task exists, so Launch is disabled");
   await bridge.click(".task-launcher-use-branch");
+  await bridge.click(".task-launcher-also-toggle");
+  await bridge.waitFor("the second agent picker", `return !!e2e.first(".task-launcher-also-agent");`);
+  await chooseOption(bridge, ".task-launcher-also-agent", "codex");
   await bridge.clickWhenReady(`
-    const box = e2e.must(e2e.first(".task-launcher-second input[type=checkbox]"), "second agent box");
-    return e2e.click(box);
+    const box = e2e.must(e2e.first(".task-launcher-feature-box"), "Track as a feature");
+    return box.checked ? true : e2e.click(box);
   `);
-  await bridge.waitFor("the second agent picker", `return !!e2e.first(".task-launcher-second-agent");`);
-  await chooseOption(bridge, ".task-launcher-second-agent", "codex");
-  await bridge.click('.task-launcher-track [data-track="Full"]');
   await bridge.waitFor("the doctor to clear claude", `return !e2e.first('.task-launcher-block[data-kind="signed-out"]');`, { timeoutMs: 30_000 });
   st = await launcherState(bridge);
   log(`  launcher: ${JSON.stringify(st)}`);
@@ -451,7 +487,7 @@ try {
 
   log("step 6: a folder that is not a git repository blocks Launch");
   await openLauncher(bridge);
-  await typeInto(bridge, ".task-launcher-repo", plain);
+  await setRepo(bridge, plain);
   await typeInto(bridge, ".task-launcher-task", "Anything");
   await bridge.waitFor("the not-a-repository row", `return e2e.all('.task-launcher-block[data-kind="not-git"]').length === 1;`, { timeoutMs: 20_000 });
   st = await launcherState(bridge);
@@ -477,9 +513,18 @@ try {
   renameSync(hiPath, hiAside);
   try {
     await openLauncher(bridge);
-    await typeInto(bridge, ".task-launcher-repo", repo);
+    await setRepo(bridge, repo);
     await typeInto(bridge, ".task-launcher-task", "Helper missing task");
-    await chooseOption(bridge, ".task-launcher-agent", "claude");
+    // The usual combination is now the last one (a second agent, a feature): one agent here.
+    await pickAgent(bridge, "claude");
+    await expandOptions(bridge);
+    await bridge.clickWhenReady(`
+      const also = e2e.first(".task-launcher-also-toggle");
+      if (also && also.getAttribute("aria-pressed") === "true") e2e.click(also);
+      const box = e2e.first(".task-launcher-feature-box");
+      if (box && box.checked) e2e.click(box);
+      return e2e.first(".task-launcher-also-toggle")?.getAttribute("aria-pressed") === "false";
+    `);
     await bridge.waitFor("Launch to be enabled", `return !e2e.first(".task-launcher-launch")?.disabled;`, { timeoutMs: 30_000 });
     before = await bridge.terminalIds();
     const recsBeforeFallback = records().length;
@@ -506,7 +551,7 @@ try {
   app = await launch(3, { env: { HERMES_E2E_FREE_SPACE_BYTES: String(2e9) } });
   await waitForReturningLaunch(app.bridge);
   await openLauncher(app.bridge);
-  await typeInto(app.bridge, ".task-launcher-repo", repo);
+  await setRepo(app.bridge, repo);
   await typeInto(app.bridge, ".task-launcher-task", "Low disk task");
   await app.bridge.waitFor("the low-disk row", `return e2e.all('.task-launcher-block[data-kind="low-disk"]').length === 1;`, { timeoutMs: 20_000 });
   st = await launcherState(app.bridge);

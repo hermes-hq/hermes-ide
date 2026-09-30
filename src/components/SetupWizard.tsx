@@ -13,14 +13,14 @@ import { getAgent } from "../catalog/agentCatalog";
 import { refreshDoctor, useAgentDoctor } from "../launcher/doctorStore";
 import { ONBOARDING_COMPLETED_SETTING } from "./startupDialogSettings";
 import { AgentDoctor } from "./AgentDoctor";
-import { TaskLauncher, type TaskLaunchRequest } from "./TaskLauncher";
+import { TaskLauncher, type TaskLaunchRequest, type TaskLaunchResult } from "./TaskLauncher";
 
 export type SetupStep = "agents" | "repo" | "task";
 export const SETUP_STEPS: readonly SetupStep[] = ["agents", "repo", "task"];
 
 export interface SetupWizardProps {
   /** Starts the first task (the same path as ⌘N). */
-  onLaunch: (req: TaskLaunchRequest) => Promise<boolean>;
+  onLaunch: (req: TaskLaunchRequest) => Promise<TaskLaunchResult>;
   /** Opens a terminal running the agent's CLI, where it signs in. */
   onSignIn: (agentId: string) => void;
   /** Opens a plain shell. */

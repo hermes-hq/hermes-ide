@@ -89,6 +89,10 @@
 //                 Code 2.1.283 does
 //   server-error  the same, but the turn ends on `error: "server_error"` —
 //                 not a limit (the negative control for the limit checks)
+//   ask-at-start  once ready, ask permission for a command at once (the
+//                 `PermissionRequest` hooks) and wait for y/n — an agent that
+//                 is blocked on the person as soon as it starts or resumes
+//                 (the morning view)
 //
 // In any mode but `prompts`, the key `r` stands for "the limit reset and the
 // agent goes on": the `Notification` hooks with `quota_auto_resume_fired`;
@@ -163,6 +167,8 @@ const KEPT_ENV = [
 	"HERMES_TERMINAL",
 	"TERM_PROGRAM",
 	"SHELL",
+	// Set by a launch prefix in a test (`env HERMES_PREFIX_PROOF=... claude`).
+	"HERMES_PREFIX_PROOF",
 ];
 
 function parseArgs(argv) {
@@ -906,6 +912,27 @@ async function main() {
 		out(`\r\n${reply.map((l) => `${l}\r\n`).join("")}`);
 		remember(reply);
 		note("quoted-errors");
+	}
+	if (has("ask-at-start")) {
+		out("\r\nfake-cli: asking permission for Bash: npm install  [y/n]\r\n");
+		await runHooks("PermissionRequest", { tool_name: "Bash", tool_input: { command: "npm install" } });
+		for (;;) {
+			const answer = await nextKey();
+			if (answer === null || answer === "\x03") {
+				await quit("interrupted-at-permission");
+				return;
+			}
+			if (answer === "y" || answer === "Y") {
+				out("fake-cli: allowed\r\n");
+				await runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "npm install" }, tool_response: {} });
+				break;
+			}
+			if (answer === "n" || answer === "N") {
+				out("fake-cli: denied\r\n");
+				await runHooks("PermissionDenied", { tool_name: "Bash" });
+				break;
+			}
+		}
 	}
 	if (mode === "rate-limit") await workThenFail("rate_limit");
 	else if (mode === "server-error") await workThenFail("server_error");

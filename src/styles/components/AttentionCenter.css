@@ -258,3 +258,66 @@
     transition: none;
   }
 }
+
+/* ⌘I: where in the line of waiting agents this one is ("2 of 3"). */
+.attention-position {
+  position: fixed;
+  top: calc(var(--space-1) * 11);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-1-5) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  border: var(--control-border-width) solid var(--border);
+  box-shadow: var(--shadow-3);
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  z-index: 1200;
+  pointer-events: none;
+}
+
+/* Morning view: the inbox opened by itself at startup, larger and centred. */
+.attention-inbox-morning {
+  position: fixed;
+  top: 10vh;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: min(calc(var(--space-1) * 190), calc(100vw - var(--space-6)));
+  max-height: 76vh;
+  z-index: 1100;
+}
+.attention-inbox-morning .attention-inbox-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  padding: var(--space-3);
+}
+.attention-morning-title { font-size: var(--text-lg); }
+.attention-morning-why { color: var(--text-2); font-size: var(--text-xs); font-weight: var(--weight-regular); }
+.attention-option-place,
+.attention-option-confidence {
+  font-size: var(--text-2xs);
+  color: var(--text-2);
+  margin-right: var(--space-1-5);
+}
+.attention-option-confidence[data-confidence="guessed"] { opacity: 0.7; font-style: italic; }
+.attention-morning-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--control-border-width) solid var(--border);
+}
+.attention-morning-answer { color: var(--text-2); font-size: var(--text-xs); }
+.attention-morning-start {
+  padding: var(--space-1-5) var(--space-3);
+  border-radius: var(--radius);
+  border: var(--control-border-width) solid var(--accent);
+  background: transparent;
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.attention-morning-start:hover { background: var(--accent-dim); }

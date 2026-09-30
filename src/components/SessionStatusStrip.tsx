@@ -85,15 +85,34 @@ export function stripStatus(snapshot: SessionEventSnapshot, phase: string, input
 interface SessionStatusStripProps {
   sessionId: string;
   phase: string;
+  /** The agent's name, for "exact · reported by Claude Code". */
+  agentName?: string | null;
 }
 
-export function SessionStatusStrip({ sessionId, phase }: SessionStatusStripProps) {
+/**
+ * How the strip says where its status comes from: "exact · reported by
+ * <agent>" when the agent reported it itself, "signal · notification" for
+ * a notification printed in the terminal, "guessed" when Hermes read it off
+ * the screen.
+ */
+export function sourceLabel(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  confidence: Confidence,
+  source: StatusSource,
+  agentName: string | null | undefined,
+): string {
+  if (confidence === "guessed" || source === "guessed") return t("status.source.guessed");
+  if (confidence === "exact") return agentName ? t("status.reportedBy", { agent: agentName }) : t("status.confidence.exact");
+  return `${t(`status.confidence.${confidence}`)} · ${t(`status.source.${source}`)}`;
+}
+
+export function SessionStatusStrip({ sessionId, phase, agentName }: SessionStatusStripProps) {
   const { t } = useI18n();
   const snapshot = useSessionEvents(sessionId);
   const { status, source } = stripStatus(snapshot, phase, userInputTimes(sessionId));
   const confidence: Confidence = status.confidence;
   const guessed = confidence === "guessed";
-  const sourceText = guessed ? t("status.source.guessed") : `${t(`status.source.${source}`)}, ${t(`status.confidence.${confidence}`)}`;
+  const sourceText = sourceLabel(t, confidence, source, agentName);
   const openInbox = () => {
     window.dispatchEvent(new CustomEvent("hermes:open-inbox", { detail: { sessionId } }));
   };

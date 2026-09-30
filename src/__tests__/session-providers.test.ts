@@ -32,6 +32,7 @@ import { terminalObservationOf, terminalProvider, type TerminalObservation } fro
 import { agentViewObservationOf, agentViewProvider, approvalDetail, type AgentViewObservation } from "../agent/providers/agentViewProvider";
 import { ProviderRegistry } from "../agent/providers/types";
 import { syncTerminalSessions, terminalRegistry } from "../agent/providers/useSessionProviders";
+import { trustedStatus } from "../attention/statusBridge";
 import type { SessionData } from "../types/session";
 
 afterEach(() => {
@@ -144,6 +145,48 @@ describe("TerminalProvider", () => {
     expect(getSessionStatus("h")).toMatchObject({ kind: "working", confidence: "guessed" });
     at({ phase: "idle", agent_startup: { state: "ended", since: "", confidence: "exact", detail: "the agent exited with status 2" } }, 6);
     expect(getSessionStatus("h")).toMatchObject({ kind: "exited", confidence: "exact" });
+  });
+
+  it("an agent that asks as soon as it (re)starts keeps its question: the helper's later 'started' does not turn it idle", () => {
+    const known = new Set<string>();
+    const launching = { state: "launching" as const, since: "", confidence: "exact" };
+    const started = { state: "started" as const, since: "", confidence: "exact" };
+    syncTerminalSessions([session({ id: "r", phase: "busy", ai_provider: "claude", agent_startup: launching })], known, 1);
+    // The agent's own hooks arrive first (SessionStart, then its question)…
+    dispatchSessionEvent("r", { type: "status", at: 2, source: "hook:claude", status: { kind: "idle", confidence: "exact", detail: "" } });
+    dispatchSessionEvent("r", { type: "status", at: 2, source: "hook:claude", status: { kind: "needs_approval", confidence: "exact", detail: "Bash" } });
+    // …then the session update that says the helper saw it start.
+    syncTerminalSessions([session({ id: "r", phase: "busy", ai_provider: "claude", agent_startup: started })], known, 3);
+    // What the inbox and the strip read: the last status that is not the terminal's own guess.
+    const reported = getSessionEventSnapshot("r").events.filter((e) => e.type === "status" && e.source !== "pty").at(-1);
+    expect(reported).toMatchObject({ source: "hook:claude", status: { kind: "needs_approval", confidence: "exact" } });
+    expect(trustedStatus(getSessionEventSnapshot("r"))).toMatchObject({ kind: "needs_approval", confidence: "exact" });
+
+    // An agent that reported nothing still becomes idle when the helper says it started.
+    syncTerminalSessions([session({ id: "q", phase: "busy", ai_provider: "claude", agent_startup: launching })], known, 4);
+    syncTerminalSessions([session({ id: "q", phase: "idle", ai_provider: "claude", agent_startup: started })], known, 5);
+    expect(getSessionEventSnapshot("q").events.some((e) => e.type === "status" && e.source === "hi" && e.status.kind === "idle")).toBe(true);
+  });
+
+  it("a relaunch after the previous run ended or was refused: the helper's 'started' is the news again", () => {
+    const known = new Set<string>();
+    const started = (detail: string) => ({ state: "started" as const, since: "", confidence: "exact", detail });
+    const hiIdle = () => getSessionEventSnapshot("t").events.filter((e) => e.type === "status" && e.source === "hi" && e.status.kind === "idle").length;
+    syncTerminalSessions([session({ id: "t", phase: "idle", ai_provider: "claude", agent_startup: started("run 1") })], known, 1);
+    expect(hiIdle()).toBe(1);
+    // The CLI refused the model: its hook said it ended, the launch was refused…
+    dispatchSessionEvent("t", { type: "status", at: 2, source: "hook:claude", status: { kind: "working", confidence: "exact", detail: "" } });
+    dispatchSessionEvent("t", { type: "status", at: 3, source: "hook:claude", status: { kind: "exited", confidence: "exact", detail: "" } });
+    // …and "Retry with default" started it again.
+    syncTerminalSessions([session({ id: "t", phase: "idle", ai_provider: "claude", agent_startup: started("run 2") })], known, 4);
+    expect(hiIdle()).toBe(2);
+    expect(trustedStatus(getSessionEventSnapshot("t"))).toMatchObject({ kind: "idle" });
+
+    const rejected = parseSessionEvent({ type: "launch_rejected", at: 5, source: "hermes", reason: "model", vendorMessage: "unknown model", suggestion: "retry-default" });
+    if (rejected) dispatchSessionEvent("t", rejected);
+    syncTerminalSessions([session({ id: "t", phase: "idle", ai_provider: "claude", agent_startup: started("run 3") })], known, 6);
+    expect(hiIdle()).toBe(rejected ? 3 : 2);
+    expect(rejected).not.toBeNull();
   });
 
   it("syncTerminalSessions observes terminal sessions, skips Agent-view ones, forgets closed ones", () => {

@@ -16,6 +16,7 @@ import { invalidateContext } from "./intelligence/contextAnalyzer";
 import { THEMES, FONT_FAMILIES } from "./themes";
 import { clearGhostOverlay } from "./ghostText";
 import { isFeatureFlagEnabled } from "../featureFlags";
+import { dialogHoldsKeyboard } from "./focusGuard";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -555,7 +556,7 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
         resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
           .catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
       } catch { /* terminal may not be ready */ }
-      if (autoFocus) entry.terminal.focus();
+      if (autoFocus && !dialogHoldsKeyboard(entry.container)) entry.terminal.focus();
     });
   });
 }
@@ -563,6 +564,7 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
 export function focusTerminal(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (!entry || !entry.attached || !entry.opened) return;
+  if (dialogHoldsKeyboard(entry.container)) return;
   entry.terminal.focus();
   // WKWebView workaround: xterm.focus() may silently fail after a native dialog
   // steals focus. Directly find and focus the hidden textarea as a fallback.
