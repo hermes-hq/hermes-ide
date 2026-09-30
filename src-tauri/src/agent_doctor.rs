@@ -743,7 +743,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sub = dir.path().join("sub");
         std::fs::create_dir_all(&sub).unwrap();
-        let tool = sub.join("tool");
+        // "tool" is looked up as tool.exe (and the other PATHEXT names) on Windows.
+        let tool = sub.join(if cfg!(windows) { "tool.exe" } else { "tool" });
         std::fs::write(&tool, "#!/bin/sh\n").unwrap();
         #[cfg(unix)]
         {
