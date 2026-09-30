@@ -262,3 +262,14 @@ to every line of `src/styles/ui/` and of new stylesheets, and to the added
 lines of older ones: no raw px, raw colours, hand-rolled shadows or easing,
 raw font weights or `outline: none`. The older lines are the baseline and
 migrate with their screens.
+
+`node scripts/check-controls.mjs` (CI: Frontend job) fails when a file gains
+a `<button>`, `<select>` or `<input type="checkbox">` of its own outside
+`src/components/ui/`, a stylesheet rule aimed at those elements
+(`.dialog button {…}`), or a class that restyles a control-set component
+(height, padding, colours, border, font; layout such as margin, flex or
+width is fine). The terminal and the code editor keep their own controls
+(its `ALLOWLIST`). Screens not yet moved are counted per file in
+`scripts/check-controls-baseline.json`; a count may only go down, and
+`--update` writes the lower numbers once a screen has moved. `--list` shows
+every finding.

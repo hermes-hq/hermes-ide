@@ -30,7 +30,6 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import postcss from "postcss";
 import ts from "typescript";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -194,27 +193,97 @@ const CONTROL_ELEMENT = /^(button|select)(?![\w-])|^input(?![\w-])[^\s]*\[type=[
  * class, whether a rule with that class in its subject changes a look
  * property.
  */
-export function scanCss(source, file = "x.css") {
+export function scanCss(source) {
   const elementRules = [];
   const lookClasses = new Map(); // class -> first line
-  const root = postcss.parse(source, { from: file });
-  root.walkRules((rule) => {
-    if (rule.parent?.type === "atrule" && /keyframes$/i.test(rule.parent.name)) return;
-    const look = rule.nodes.filter((d) => d.type === "decl" && LOOK_PROPERTIES.test(d.prop.toLowerCase()));
+  for (const rule of cssRules(source)) {
+    if (rule.inKeyframes) continue;
+    const look = rule.props.filter((p) => LOOK_PROPERTIES.test(p));
     for (const sel of rule.selectors) {
       const subject = subjectOf(sel);
       // What a :not(…) names is exactly what the rule does not style.
       const positive = subject.replace(/:not\([^)]*\)/g, "");
       const classes = [...positive.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((m) => m[1]);
-      if (CONTROL_ELEMENT.test(positive) && rule.nodes.some((d) => d.type === "decl")) {
-        elementRules.push({ line: rule.source?.start?.line ?? 0, selector: sel.trim(), classes });
+      if (CONTROL_ELEMENT.test(positive) && rule.props.length) {
+        elementRules.push({ line: rule.line, selector: sel, classes });
       }
       if (look.length) {
-        for (const c of classes) if (!lookClasses.has(c)) lookClasses.set(c, rule.source?.start?.line ?? 0);
+        for (const c of classes) if (!lookClasses.has(c)) lookClasses.set(c, rule.line);
       }
     }
-  });
+  }
   return { elementRules, lookClasses };
+}
+
+/** Split on commas that are not inside (…) or […]. */
+function splitTopLevel(text) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * The style rules of a stylesheet, enough for this check: each rule's
+ * selectors, the properties it declares, its line, and whether it sits in
+ * @keyframes. Comments and strings are skipped; at-rules nest.
+ */
+export function cssRules(source) {
+  // Blank out comments, keeping line breaks so line numbers hold.
+  const text = source.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
+  const rules = [];
+  const stack = [];
+  let line = 1;
+  let preludeStart = 0;
+  let preludeLine = 1;
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\n") line++;
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "{") {
+      const prelude = text.slice(preludeStart, i).trim();
+      if (prelude.startsWith("@")) stack.push({ kind: "at", name: prelude.slice(1).split(/[\s(]/)[0].toLowerCase() });
+      else stack.push({ kind: "rule", selectors: splitTopLevel(prelude.replace(/\s+/g, " ")), line: preludeLine, bodyStart: i + 1 });
+      preludeStart = i + 1;
+      preludeLine = line;
+    } else if (ch === "}") {
+      const frame = stack.pop();
+      if (frame?.kind === "rule") {
+        const body = text.slice(frame.bodyStart, i).replace(/\{[^{}]*\}/g, "");
+        const props = body
+          .split(";")
+          .map((d) => d.split(":")[0].trim().toLowerCase())
+          .filter((p) => /^-?[a-z][a-z-]*$/.test(p));
+        rules.push({ selectors: frame.selectors, props, line: frame.line, inKeyframes: stack.some((f) => f.kind === "at" && /keyframes$/.test(f.name)) });
+      }
+      preludeStart = i + 1;
+      preludeLine = line;
+    } else if (ch === ";") {
+      preludeStart = i + 1;
+      preludeLine = line;
+    } else if (/\S/.test(ch) && text.slice(preludeStart, i).trim() === "") {
+      preludeLine = line;
+    }
+  }
+  return rules;
 }
 
 /** All findings in the repo (or in `root`), allowed ones marked. */
@@ -224,7 +293,7 @@ export function findControls({ root = ROOT } = {}) {
   const cssLook = new Map(); // class -> [{file, line}]
   for (const full of walk(src, [".css"])) {
     const file = toPosix(relative(root, full));
-    const { elementRules, lookClasses } = scanCss(readFileSync(full, "utf8"), file);
+    const { elementRules, lookClasses } = scanCss(readFileSync(full, "utf8"));
     for (const r of elementRules) {
       findings.push({ kind: "element-rule", file, line: r.line, what: r.selector, allowed: isAllowed(file, r.classes) });
     }

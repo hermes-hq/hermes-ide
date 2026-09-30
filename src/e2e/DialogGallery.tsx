@@ -27,6 +27,7 @@ import { ContainedErrorBoundary } from "../components/ContainedErrorBoundary";
 import { Button } from "../components/ui";
 import { WHATS_NEW_PREVIEW_STORAGE_KEY } from "../components/startupDialogSettings";
 import { changelog } from "../data/changelog";
+import { translate } from "../i18n/registry";
 
 export const GALLERY_DIALOGS = [
 	"quit-with-agents",
@@ -69,6 +70,7 @@ function Crash(): ReactNode {
 }
 
 const noop = () => {};
+const CRASHED_PANE = "demo";
 const noopAsync = async () => {};
 
 function render(name: GalleryDialog, close: () => void, firstSession: ReturnType<typeof useSession>["state"]["sessions"][string] | undefined) {
@@ -189,7 +191,7 @@ function render(name: GalleryDialog, close: () => void, firstSession: ReturnType
 		case "pane-crash":
 			return (
 				<Stage width="min(720px, 92vw)" height="60vh">
-					<ContainedErrorBoundary scope="pane" label="demo" actions={<Button onClick={close}>Close pane</Button>}>
+					<ContainedErrorBoundary scope="pane" label={CRASHED_PANE} actions={<Button onClick={close}>{translate("crash.closePane")}</Button>}>
 						<Crash />
 					</ContainedErrorBoundary>
 				</Stage>

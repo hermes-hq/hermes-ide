@@ -1208,6 +1208,15 @@ features:
       UI-9:
         text: "With real key presses, Tab in Settings moves focus onto a control, :focus-visible matches and the control draws the solid ring"
         scenarios: ["UI-focus-ring.mjs@linux,win32"]
+      # UI-D (dialog long tail). The close, project picker, update, toast
+      # and Settings > Plugins dialogs are opened by their real triggers;
+      # the rest through the test build's dialog gallery (the app's own
+      # components with synthetic data, src/e2e/DialogGallery.tsx). That no
+      # file gains a bespoke button, select or checkbox is enforced by
+      # scripts/check-controls.mjs in the Frontend job, not by a scenario.
+      UI-10:
+        text: "Close, quit, update and plugin update, what's new, handoff, branch in use, uncommitted changes, permission request, project and workspace pickers, toasts and Settings > Plugins (tabs, counters, the old-API badge, a plugin's settings, the uninstall confirm) use only control-set buttons, fields, checkboxes and badges at their sizes, with at most one primary (right-most) and the solid focus ring, and meet the contrast rules in Frosted Dark and Frosted Light"
+        scenarios: [UI-dialogs.mjs]
   CAP:
     name: "Models, effort and accounts for every agent (2.0 launch contract)"
     # The launcher's own chips (model, effort, account, presets row) are
