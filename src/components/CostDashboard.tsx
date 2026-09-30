@@ -3,6 +3,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { CostDailyEntry, ProjectCostEntry } from "../types";
 import { getCostHistory, getCostByProject } from "../api/costs";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
+import { CloseButton, Segmented } from "./ui";
+import { translate } from "../i18n/registry";
 
 interface CostDashboardProps {
   onClose: () => void;
@@ -87,18 +89,15 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
       <div className="cost-dashboard" onClick={(e) => e.stopPropagation()}>
         <div className="cost-dashboard-header">
           <h2 className="cost-dashboard-title">Cost Dashboard</h2>
-          <div className="cost-dashboard-tabs">
-            {[7, 14, 30].map((d) => (
-              <button
-                key={d}
-                className={`cost-tab ${days === d ? "cost-tab-active" : ""}`}
-                onClick={() => setDays(d)}
-              >
-                {d}d
-              </button>
-            ))}
-          </div>
-          <button className="close-btn cost-dashboard-close" onClick={onClose} aria-label="Close">&times;</button>
+          <Segmented
+            size="sm"
+            className="cost-dashboard-tabs"
+            label="Period"
+            value={String(days)}
+            onChange={(v) => setDays(Number(v))}
+            options={[7, 14, 30].map((d) => ({ value: String(d), label: `${d}d` }))}
+          />
+          <CloseButton className="cost-dashboard-close" onClick={onClose} label={translate("common.close")} />
         </div>
 
         {loading ? (

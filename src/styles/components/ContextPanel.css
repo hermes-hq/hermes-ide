@@ -434,22 +434,6 @@
   gap: var(--space-1);
   margin-bottom: 4px;
 }
-.ctx-pin-scope-select {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-1);
-  font-size: var(--text-sm);
-  padding: 2px 4px;
-}
-.ctx-pin-select {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-1);
-  font-size: var(--text-base);
-  padding: 2px 4px;
-}
 .ctx-pin-file-row {
   display: flex;
   gap: var(--space-1);

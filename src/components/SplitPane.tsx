@@ -376,9 +376,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             scope="pane"
             label={session.label}
             actions={
-              <button type="button" onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
+              <Button onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
                 {translate("crash.closePane")}
-              </button>
+              </Button>
             }
           >
             {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}

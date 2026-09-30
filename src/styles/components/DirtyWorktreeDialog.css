@@ -52,23 +52,6 @@
   flex: 1;
 }
 
-.dirty-wt-close {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  padding: 0 4px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.dirty-wt-close:hover {
-  color: var(--text-0);
-}
-
-/* ─── Body ───────────────────────────────────────────────────────── */
-
 .dirty-wt-body {
   padding: var(--space-3);
   overflow-y: auto;
@@ -217,6 +200,7 @@
 
 .dirty-wt-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   justify-content: flex-end;
   padding: var(--space-2) var(--space-3);
@@ -224,55 +208,13 @@
   flex-shrink: 0;
 }
 
-.dirty-wt-btn {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  color: var(--text-1);
-  padding: 8px 16px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  font-family: var(--font-ui);
-  transition: background 0.1s, border-color 0.1s;
+.dirty-wt-actions--rows {
+  flex-direction: column;
+  align-items: stretch;
 }
 
-.dirty-wt-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-3);
-}
-
-.dirty-wt-btn--stash {
-  background: var(--accent-dim, var(--bg-3));
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.dirty-wt-btn--stash:hover {
-  background: var(--accent);
-  color: var(--bg-0);
-}
-
-/* Archive (keep branch): a safe, secondary choice next to the commit button. */
-.dirty-wt-btn--archive {
-  border-color: var(--accent);
-  color: var(--text-1);
-}
-
-.dirty-wt-btn--archive:hover {
-  background: var(--accent-dim, var(--bg-hover));
-  border-color: var(--accent);
-}
-
-.dirty-wt-btn--close-anyway {
-  /* Solid red destructive button — high contrast white text so the
-   * label is always readable.  Pre-1.1.15 used red-on-red-dim which
-   * was barely legible on dark themes and invisible on light themes
-   * where --red-dim has different alpha behaviour. */
-  background: var(--red);
-  border-color: var(--red);
-  color: #ffffff;
-}
-
-.dirty-wt-btn--close-anyway:hover {
-  filter: brightness(1.1);
+.dirty-wt-actions-row {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
 }

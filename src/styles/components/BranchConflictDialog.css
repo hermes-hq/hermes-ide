@@ -48,20 +48,6 @@
   flex: 1;
 }
 
-.branch-conflict-close {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  padding: 0 4px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-.branch-conflict-close:hover {
-  color: var(--text-0);
-}
-
 .branch-conflict-body {
   padding: var(--space-3);
 }
@@ -106,52 +92,24 @@
   gap: var(--space-2);
 }
 
-.branch-conflict-btn-switch {
-  background: var(--bg-2);
-  text-align: left;
-}
-.branch-conflict-btn-switch:hover:not(:disabled) {
-  background: var(--bg-active);
-  color: var(--green);
-  border-color: var(--green);
-}
-
-.branch-conflict-btn-create {
-  background: var(--bg-2);
-  text-align: left;
-}
-.branch-conflict-btn-create:hover:not(:disabled) {
-  background: var(--bg-active);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.branch-conflict-btn-cancel {
-  background: none;
-  color: var(--text-3);
-  border-color: var(--border);
-}
-.branch-conflict-btn-cancel:hover:not(:disabled) {
-  color: var(--text-1);
-}
-
 .branch-conflict-create-row {
   display: flex;
-  gap: var(--space-1);
+  align-items: flex-start;
+  gap: var(--space-2);
 }
 
-.branch-conflict-create-input {
+.branch-conflict-create-row > :first-child {
   flex: 1;
-  background: var(--bg-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  padding: var(--space-1) var(--space-2);
-  outline: none;
-  box-sizing: border-box;
+  min-width: 0;
 }
-.branch-conflict-create-input:focus {
-  border-color: var(--accent);
+
+.branch-conflict-error {
+  color: var(--danger-fg);
+  font-size: var(--text-sm);
+}
+
+.branch-conflict-other-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }

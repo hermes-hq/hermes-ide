@@ -150,35 +150,3 @@
   justify-content: flex-end;
   gap: 8px;
 }
-
-.puc-btn {
-  padding: 7px 20px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--text-base);
-  font-family: var(--font-ui);
-  font-weight: 500;
-  transition: background 0.1s, color 0.1s;
-}
-
-.puc-btn-cancel {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-2);
-}
-
-.puc-btn-cancel:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
-}
-
-.puc-btn-confirm {
-  background: var(--green-dim);
-  border: 1px solid var(--green);
-  color: var(--green);
-}
-
-.puc-btn-confirm:hover {
-  background: var(--green);
-  color: var(--bg-0);
-}

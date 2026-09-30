@@ -102,26 +102,12 @@
   margin-top: 4px;
 }
 
-.project-picker-delete {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-ui);
-  opacity: 0.4;
-  transition: background 0.1s, color 0.1s, opacity 0.1s;
-  flex-shrink: 0;
+.project-picker-item .project-picker-delete {
   align-self: flex-start;
-  margin-top: 2px;
+  opacity: 0.6;
 }
-.project-picker-item:hover .project-picker-delete { opacity: 1; }
-.project-picker-delete:hover {
-  color: var(--red);
-  background: var(--red-dim);
-}
+.project-picker-item:hover .project-picker-delete,
+.project-picker-item .project-picker-delete:focus-visible { opacity: 1; }
 
 .project-picker-footer {
   display: flex;
@@ -131,22 +117,16 @@
   align-items: center;
 }
 
+.project-picker-filter {
+  margin: 0 var(--space-4) var(--space-2);
+}
+
+.project-picker-footer .project-picker-scan-input {
+  flex: 1;
+}
+
 .project-picker-done {
   margin-left: auto;
-  padding: 7px 28px;
-  border: none;
-  border-radius: var(--radius);
-  background: var(--accent);
-  color: var(--bg-0);
-  font-size: var(--text-lg);
-  font-weight: 600;
-  font-family: var(--font-ui);
-  cursor: pointer;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
-}
-.project-picker-done:hover {
-  opacity: 0.85;
 }
 
 /* ─── Project Scan Badge (WorkspacePanel) ────────────────── */
@@ -190,27 +170,6 @@
   display: flex;
   gap: var(--space-1);
   margin-top: 6px;
-}
-
-.project-action-btn {
-  font-size: var(--text-sm);
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-3);
-  color: var(--text-2);
-  cursor: pointer;
-  font-family: var(--font-ui);
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-.project-action-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-0);
-}
-.project-action-delete:hover {
-  background: var(--red-dim);
-  color: var(--red);
-  border-color: var(--red);
 }
 
 /* ─── Missing Folder Indicator ───────────────────────────── */

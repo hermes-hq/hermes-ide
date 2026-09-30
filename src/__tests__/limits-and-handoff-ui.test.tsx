@@ -179,17 +179,13 @@ describe("HandoffDialog", () => {
     wrap(<HandoffDialog session={session} initialKind="continue" onClose={onClose} />);
 
     // The first ready agent is picked once the list is known.
-    await waitFor(() =>
-      expect(document.querySelector('.handoff-agent[data-agent-id="codex"]')?.getAttribute("aria-selected")).toBe("true"),
-    );
-    const agents = [...document.querySelectorAll<HTMLButtonElement>(".handoff-agent")];
-    expect(agents.some((a) => a.dataset.agentId === "claude")).toBe(false);
-    const codex = agents.find((a) => a.dataset.agentId === "codex")!;
-    expect(codex.disabled).toBe(false);
-    expect(codex.getAttribute("aria-selected")).toBe("true");
-    const gemini = agents.find((a) => a.dataset.agentId === "gemini")!;
-    expect(gemini.disabled).toBe(true);
-    expect(gemini.textContent).toContain("not installed");
+    const agent = (id: string) => document.querySelector<HTMLInputElement>(`.handoff-agents input[value="${id}"]`);
+    await waitFor(() => expect(agent("codex")?.checked).toBe(true));
+    const agents = [...document.querySelectorAll<HTMLInputElement>(".handoff-agents input")];
+    expect(agents.some((a) => a.value === "claude")).toBe(false);
+    expect(agent("codex")!.disabled).toBe(false);
+    expect(agent("gemini")!.disabled).toBe(true);
+    expect(agent("gemini")!.closest("label")!.textContent).toContain("not installed");
 
     await waitFor(() => expect(document.querySelector(".handoff-file")).not.toBeNull());
     const seed = document.querySelector(".handoff-seed-text")!.textContent!;
@@ -202,7 +198,7 @@ describe("HandoffDialog", () => {
     fireEvent.change(document.querySelector(".handoff-task")!, { target: { value: "Finish the redirect" } });
     expect(document.querySelector(".handoff-seed-text")!.textContent).toContain("Task:\nFinish the redirect\n");
 
-    fireEvent.click(screen.getByText("Start"));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(gitCalls).toEqual([expect.stringMatching(/^attach .+ p1 hermes\/fix-login$/)]);
     const opts = createSession.mock.calls[0][0];
@@ -216,11 +212,11 @@ describe("HandoffDialog", () => {
     createSession.mockImplementation(async () => null);
     const onClose = vi.fn();
     wrap(<HandoffDialog session={session} initialKind="duplicate" onClose={onClose} />);
-    await waitFor(() => expect(document.querySelector('.handoff-agent[data-agent-id="codex"]')).not.toBeNull());
-    await waitFor(() => expect((screen.getByText("Start") as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(document.querySelector('.handoff-agents input[value="codex"]')).not.toBeNull());
+    await waitFor(() => expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false));
     expect(document.querySelector(".handoff-files")).toBeNull();
     expect(document.querySelector(".handoff-seed-text")!.textContent).toContain("work independently");
-    fireEvent.click(screen.getByText("Start"));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(document.querySelector(".handoff-error")).not.toBeNull());
     expect(gitCalls[0]).toMatch(/^create .+ p1 hermes\/fix-login--codex$/);
     expect(onClose).not.toHaveBeenCalled();

@@ -117,63 +117,8 @@
   letter-spacing: 0.12em;
 }
 
-.workbench-close {
-  background: transparent;
-  border: 0;
-  color: var(--text-3);
-  cursor: pointer;
-  padding: 2px 6px;
-  font-size: 14px;
-  line-height: 1;
-}
-.workbench-close:hover {
-  color: var(--text-1);
-  background: var(--bg-2);
-}
-
-.workbench-tabs {
-  display: flex;
-  gap: 0;
-  margin: 0 -14px -1px;
-  padding: 0 14px;
-}
-
-.workbench-tab {
-  padding: 8px 12px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--text-3);
-  cursor: pointer;
-  border: 0;
-  background: transparent;
-  border-bottom: 2px solid transparent;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.workbench-tab:hover {
-  color: var(--text-1);
-}
-
-.workbench-tab[aria-selected="true"] {
-  color: var(--brass-bright, #e8c485);
-  border-bottom-color: var(--brass, #d4a86a);
-}
-
-.workbench-tab[aria-selected="true"] .workbench-tab-count {
-  background: var(--brass-dim, rgba(212, 168, 106, 0.18));
-  color: var(--brass-bright, #e8c485);
-}
-
-.workbench-tab-count {
-  font-size: 9px;
-  color: var(--text-3);
-  padding: 0 4px;
-  background: var(--bg-2);
-  border-radius: 6px;
+.workbench-head .workbench-tabs {
+  margin-bottom: calc(-1 * var(--control-border-width));
 }
 
 /* ─── Active tab body ─────────────────────────────────────────── */

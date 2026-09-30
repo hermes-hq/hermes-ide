@@ -19,6 +19,7 @@ export const CI_ELSEWHERE = {
   "F15-launcher-tab.mjs": "keys",
   "UI-focus-ring.mjs": "keys",
   "UI-launch-surfaces.mjs": "keys",
+  "UI-dialogs.mjs": "keys",
   "N17-fast-worktrees.mjs": "cow",
   "N17-real-deps.mjs": "cow",
 };

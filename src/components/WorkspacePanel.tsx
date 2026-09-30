@@ -1,10 +1,10 @@
 import "../styles/components/WorkspacePanel.css";
+import { Button, CloseButton, Input } from "./ui";
 import { useState, useEffect, useCallback } from "react";
 import { Project } from "../hooks/useSessionProjects";
 import { getProjects, createProject, deleteProject as apiDeleteProject, scanProject, scanDirectory as apiScanDirectory } from "../api/projects";
 import { LANG_COLORS } from "../utils/langColors";
 import { useI18n } from "../i18n/I18nProvider";
-import { CloseButton } from "./ui/Button";
 
 interface WorkspacePanelProps {
   onClose: () => void;
@@ -89,25 +89,27 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
         </div>
 
         <div className="workspace-scan-row">
-          <input
-            className="workspace-scan-input"
+          <Input
+            code
+            className="workspace-panel-scan-input"
+            aria-label={t("workspace.pathPlaceholder")}
             placeholder={t("workspace.pathPlaceholder")}
             value={scanPath}
             onChange={(e) => setScanPath(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") scanDirectory(); }}
           />
-          <button className="workspace-scan-btn" onClick={scanDirectory} disabled={scanning}>
+          <Button variant="primary" className="workspace-panel-scan" onClick={scanDirectory} disabled={scanning}>
             {scanning ? "..." : t("common.scan")}
-          </button>
+          </Button>
         </div>
 
         <div className="workspace-body">
           {projects.length === 0 && !scanning && (
             <div className="workspace-empty">
               <p>{t("workspace.noProjects")}</p>
-              <button className="workspace-scan-home-btn" onClick={scanHome}>
+              <Button className="workspace-scan-home-btn" onClick={scanHome}>
                 {t("workspace.scanHome")}
-              </button>
+              </Button>
             </div>
           )}
           {scanning && (
@@ -151,36 +153,42 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
                 )}
                 <div className="workspace-project-path mono">{projectShortPath(project.path)}</div>
                 <div className="project-actions">
-                  <button
-                    className="project-action-btn"
+                  <Button
+                    size="sm"
+                    className="project-action-scan"
                     onClick={() => triggerScan(project.id)}
                     title={t("workspace.triggerDeepScan")}
                   >
                     {t("common.scan")}
-                  </button>
+                  </Button>
                   {confirmDeleteId === project.id ? (
                     <>
-                      <button
-                        className="project-action-btn project-action-delete"
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        className="project-action-delete"
                         onClick={() => { deleteProjectById(project.id); setConfirmDeleteId(null); }}
                       >
                         {t("common.confirmQuestion")}
-                      </button>
-                      <button
-                        className="project-action-btn"
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="project-action-cancel"
                         onClick={() => setConfirmDeleteId(null)}
                       >
                         {t("common.cancel")}
-                      </button>
+                      </Button>
                     </>
                   ) : (
-                    <button
-                      className="project-action-btn project-action-delete"
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      className="project-action-delete"
                       onClick={() => setConfirmDeleteId(project.id)}
                       title={t("workspace.deleteProject")}
                     >
                       {t("common.delete")}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>

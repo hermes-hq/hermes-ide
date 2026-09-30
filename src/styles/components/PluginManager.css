@@ -15,121 +15,27 @@
   flex-shrink: 0;
 }
 
-.pm-search-icon {
-  position: absolute;
-  left: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-3);
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-}
-
-.pm-search-input {
+.pm-search .pm-search-input {
   width: 100%;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  padding: 7px 10px 7px 28px;
-  outline: none;
-  box-sizing: border-box;
-}
-.pm-search-input:focus {
-  border-color: var(--accent);
-}
-.pm-search-input::placeholder {
-  color: var(--text-3);
 }
 
 /* ─── Tab Bar ────────────────────────────────────────────── */
 
 .pm-tabs {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
+  align-items: center;
+  gap: var(--space-1);
   margin-bottom: var(--space-2);
   flex-shrink: 0;
 }
 
-.pm-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
-  white-space: nowrap;
-}
-.pm-tab:hover {
-  color: var(--text-0);
-}
-.pm-tab-active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  font-weight: 500;
+.pm-tabs-spacer {
+  flex: 1;
 }
 
-.pm-tab-badge {
+.pm-tab-counters {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent-dim);
-  color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  min-width: 16px;
-  height: 16px;
-  border-radius: var(--radius-pill);
-  padding: 0 4px;
-  margin-left: 5px;
-  line-height: 1;
-}
-
-.pm-tab-badge-update {
-  background: var(--green-dim);
-  color: var(--green);
-}
-
-/* ─── Update All Button ─────────────────────────────────── */
-
-.pm-btn-update-all {
-  margin-left: auto;
-  font-size: var(--text-sm);
-  padding: 4px 12px;
-}
-.pm-btn-update-all + .pm-check-updates {
-  margin-left: 4px;
-}
-
-/* ─── Check for Updates Button ──────────────────────────── */
-
-.pm-check-updates {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  transition: color 0.12s, background 0.12s;
-}
-.pm-check-updates:hover {
-  color: var(--accent);
-  background: var(--bg-2);
-}
-.pm-check-updates:disabled {
-  cursor: default;
-  opacity: 0.6;
+  gap: var(--space-1);
 }
 
 /* ─── Category Chips ─────────────────────────────────────── */
@@ -141,31 +47,6 @@
   margin-bottom: var(--space-2);
   flex-shrink: 0;
 }
-
-.pm-chip {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--text-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-  white-space: nowrap;
-}
-.pm-chip:hover {
-  background: var(--bg-hover);
-  color: var(--text-0);
-  border-color: var(--border-light);
-}
-.pm-chip-active {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* ─── Scrollable List ────────────────────────────────────── */
 
 .pm-list {
   flex: 1;
@@ -270,32 +151,6 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-}
-
-.pm-badge {
-  font-size: var(--text-xs);
-  padding: 1px 5px;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  line-height: 1.4;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.pm-badge-disabled {
-  background: var(--bg-active);
-  color: var(--text-3);
-}
-.pm-badge-update {
-  background: var(--green-dim);
-  color: var(--green);
-}
-.pm-badge-incompatible {
-  background: var(--yellow-dim);
-  color: var(--yellow);
-}
-.pm-badge-deprecated {
-  background: var(--yellow-dim);
-  color: var(--yellow);
 }
 
 /* Plugin API notices in the detail view (old API, API not available) */
@@ -439,71 +294,6 @@
   margin-top: 2px;
 }
 
-/* ─── Buttons ────────────────────────────────────────────── */
-
-.pm-btn {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  padding: 4px 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-.pm-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-0);
-  border-color: var(--border-light);
-}
-.pm-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.pm-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.pm-btn-primary:hover {
-  background: var(--accent);
-  filter: brightness(1.15);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.pm-btn-danger {
-  color: var(--red);
-  border-color: transparent;
-}
-.pm-btn-danger:hover {
-  background: var(--red-dim);
-  color: var(--red);
-  border-color: var(--red);
-}
-
-.pm-btn-update {
-  background: var(--green-dim);
-  border-color: var(--green);
-  color: var(--green);
-}
-.pm-btn-update:hover {
-  background: var(--green);
-  color: #fff;
-}
-
-/* Small inline button for compact rows */
-.pm-btn-sm {
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  font-weight: 600;
-}
-
 /* ─── Progress ───────────────────────────────────────────── */
 
 .pm-progress {
@@ -579,21 +369,6 @@
   gap: 6px;
   line-height: 1.4;
 }
-.pm-error-dismiss {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--red);
-  cursor: pointer;
-  font-size: var(--text-md);
-  padding: 0;
-  opacity: 0.6;
-  line-height: 1;
-}
-.pm-error-dismiss:hover {
-  opacity: 1;
-}
-
 /* ─── Compatibility Warning ──────────────────────────────── */
 
 .pm-compat-warning {
@@ -703,9 +478,12 @@
 
 /* ─── Plugin Settings Form ──────────────────────────────── */
 
+/* The fields sit on the panel colour, not the expanded row's, so their
+ * edges keep 3:1 against what is behind them. */
 .ps-form {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  background: var(--bg-1);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -747,71 +525,11 @@
   margin-top: 2px;
 }
 
-.ps-input {
+.ps-control .ps-input {
   width: 100%;
   max-width: 240px;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-base);
-  padding: 5px 8px;
-  outline: none;
-  box-sizing: border-box;
-}
-.ps-input:focus {
-  border-color: var(--accent);
 }
 
-.ps-input-number {
+.ps-control .ps-input-number {
   max-width: 100px;
-}
-
-.ps-select {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-0);
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  padding: 5px 8px;
-  outline: none;
-  cursor: pointer;
-  min-width: 120px;
-}
-.ps-select:focus {
-  border-color: var(--accent);
-}
-
-/* Toggle switch */
-.ps-toggle {
-  position: relative;
-  width: 32px;
-  height: 18px;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.15s, border-color 0.15s;
-}
-.ps-toggle-on {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.ps-toggle-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  background: var(--text-0);
-  border-radius: 50%;
-  transition: transform 0.15s;
-}
-.ps-toggle-on .ps-toggle-knob {
-  transform: translateX(14px);
-  background: #fff;
 }

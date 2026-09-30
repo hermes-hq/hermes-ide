@@ -101,36 +101,6 @@
 	margin-left: 4px;
 }
 
-.toast-action-btn {
-	background: none;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
-	color: var(--text-2);
-	font-family: var(--font-ui);
-	font-size: var(--text-xs);
-	padding: 2px 8px;
-	cursor: pointer;
-	white-space: nowrap;
-	transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-
-.toast-action-btn:hover {
-	background: var(--bg-hover);
-	color: var(--text-0);
-	border-color: var(--border-light);
-}
-
-.toast-action-primary {
-	background: var(--accent-dim);
-	border-color: var(--accent);
-	color: var(--accent);
-}
-
-.toast-action-primary:hover {
-	background: var(--accent);
-	color: var(--bg-0);
-}
-
 /* ─── Close Button ─────────────────────────────────────────── */
 
 /* The one Close (the control set's small icon button). */

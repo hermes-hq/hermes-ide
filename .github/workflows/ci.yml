@@ -109,6 +109,8 @@ jobs:
               - '.stylelintrc.json'
               - 'scripts/lint-css*.mjs'
               - 'scripts/contrast-audit*.mjs'
+              - 'scripts/check-controls*.mjs'
+              - 'scripts/check-controls-baseline.json'
             rust:
               - 'src-tauri/**'
               - 'rust-toolchain.toml'
@@ -207,6 +209,12 @@ jobs:
       # new raw px, raw colours, hand-rolled shadows or outline:none.
       - name: Stylesheet lint (new and changed lines)
         run: node scripts/lint-css.mjs --base HEAD^1
+      # Buttons, selects and checkboxes come from the control set
+      # (src/components/ui); a file may not gain a bespoke one. The terminal
+      # and the editor are allowed; the rest of today's are the baseline in
+      # scripts/check-controls-baseline.json, which may only shrink.
+      - name: Controls come from the control set
+        run: node scripts/check-controls.mjs
       # Every theme's control colours meet the contrast rules (also run by
       # the unit tests; this prints the failing pairs by name).
       - name: Theme contrast

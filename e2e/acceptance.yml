@@ -1263,6 +1263,23 @@ features:
       UI-18:
         text: "A sidebar row's model and permission-mode tags are 18 px tags that share one line, and a guessed status is set in italics as well as the quietest ink, so it still reads as a guess on the current or hovered row"
         scenarios: [UI-chrome.mjs, F10-agent-status.mjs]
+      # UI-19..20: the dialog long tail (track UI-D). The close, project
+      # picker, update, toast and Settings > Plugins dialogs are opened by
+      # their real triggers; the rest through the test build's dialog gallery
+      # (the app's own components with synthetic data,
+      # src/e2e/DialogGallery.tsx). That no file gains a bespoke button,
+      # select or checkbox is enforced by scripts/check-controls.mjs in the
+      # Frontend job, not by a scenario. The file preview and the Worktrees
+      # view are opened for real too (a typed character, a synthetic orphaned
+      # folder). The ring is measured on the copied :focus-visible rules
+      # everywhere; UI-20 presses Tab for real on the Linux and Windows CI
+      # runners (macOS runs no OS input).
+      UI-19:
+        text: "Close, quit, update and plugin update, what's new, handoff, branch in use, uncommitted changes, permission request, project and workspace pickers, toasts, Settings > Plugins (tabs, counters, the old-API badge, a plugin's settings, the uninstall confirm), the file preview and its unsaved-changes confirm, the Worktrees view and its delete confirm, and the Kill Process Tree confirm use only control-set buttons, fields, checkboxes and badges at their sizes, with at most one primary (right-most on one line) and the solid focus ring, and meet the contrast rules in Frosted Dark and Frosted Light"
+        scenarios: [UI-dialogs.mjs]
+      UI-20:
+        text: "With real key presses, Tab moves keyboard focus through the close-session dialog's checkbox and buttons, :focus-visible matches and each draws the solid 2 px ring"
+        scenarios: ["UI-dialogs.mjs@linux,win32"]
   UI-C:
     name: "Review Desk, Land and turn sheets, Settings and the composer pickers on the control set"
     # Wave 2.0-UI1, track UI-C. Not behind a flag: the same controls and

@@ -18,6 +18,7 @@ import { isFeatureFlagEnabled } from "../featureFlags";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { spendOf, spendText } from "../fleet/spend";
 import { CloseButton } from "./ui/Button";
+import { NativeSelect } from "./ui/Select";
 
 interface ContextPanelProps {
   session: SessionData;
@@ -698,16 +699,16 @@ export function ContextPanel({ session }: ContextPanelProps) {
             {showPinAdd && (
               <div className="ctx-memory-add-form">
                 <div className="ctx-pin-form-row">
-                  <select className="ctx-pin-select" value={pinKind} onChange={(e) => setPinKind(e.target.value)}>
+                  <NativeSelect size="sm" className="ctx-pin-select" aria-label="Pin kind" value={pinKind} onChange={(e) => setPinKind(e.target.value)}>
                     <option value="file">File</option>
                     <option value="directory">Directory</option>
                     <option value="memory">Memory</option>
                     <option value="text">Text</option>
-                  </select>
-                  <select className="ctx-pin-scope-select" value={pinScope} onChange={(e) => setPinScope(e.target.value as "project" | "session")}>
+                  </NativeSelect>
+                  <NativeSelect size="sm" className="ctx-pin-scope-select" aria-label="Pin scope" value={pinScope} onChange={(e) => setPinScope(e.target.value as "project" | "session")}>
                     <option value="project">Project</option>
                     <option value="session">Session only</option>
-                  </select>
+                  </NativeSelect>
                 </div>
                 {pinKind === "file" ? (
                   <div className="ctx-pin-file-row">
@@ -825,10 +826,10 @@ export function ContextPanel({ session }: ContextPanelProps) {
                   <input className="ctx-memory-input" placeholder="Key (e.g. db_host)" value={memoryKeyInput} onChange={(e) => setMemoryKeyInput(e.target.value)} />
                   <input className="ctx-memory-input" placeholder="Value" value={memoryValueInput} onChange={(e) => setMemoryValueInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addMemoryFact(); }} />
                   <div className="ctx-memory-add-actions">
-                    <select className="ctx-pin-scope-select" value={memoryScopeInput} onChange={(e) => setMemoryScopeInput(e.target.value as "project" | "global")}>
+                    <NativeSelect size="sm" className="ctx-pin-scope-select" aria-label="Memory scope" value={memoryScopeInput} onChange={(e) => setMemoryScopeInput(e.target.value as "project" | "global")}>
                       <option value="project">Project</option>
                       <option value="global">Global</option>
-                    </select>
+                    </NativeSelect>
                     <button className="ctx-memory-save-btn" onClick={addMemoryFact}>Save</button>
                     <button className="ctx-memory-cancel-btn" onClick={() => setShowMemoryAdd(false)}>Cancel</button>
                   </div>

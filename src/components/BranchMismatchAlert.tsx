@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import "../styles/components/BranchMismatchAlert.css";
+import { CloseButton } from "./ui";
 
 export interface BranchMismatchAlertProps {
 	branch: string;
@@ -38,7 +39,7 @@ export function BranchMismatchAlert({ branch, sessionLabel, onDismiss }: BranchM
 					<strong className="branch-mismatch-session-name">{sessionLabel}</strong>
 				</div>
 			</div>
-			<button className="branch-mismatch-close" onClick={onDismiss} aria-label="Dismiss">&times;</button>
+			<CloseButton className="branch-mismatch-close" onClick={onDismiss} label="Dismiss" />
 		</div>
 	);
 }

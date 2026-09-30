@@ -68,24 +68,8 @@
 	font-weight: 600;
 }
 
-.branch-mismatch-close {
-	background: none;
-	border: none;
-	color: var(--text-3);
-	cursor: pointer;
-	font-size: var(--text-lg);
-	padding: 0 2px;
-	line-height: 1;
-	flex-shrink: 0;
-	transition: color 0.1s;
-}
-
 .branch-mismatch-session-name {
 	text-decoration: underline;
 	text-underline-offset: 2px;
 	cursor: default;
-}
-
-.branch-mismatch-close:hover {
-	color: var(--text-0);
 }

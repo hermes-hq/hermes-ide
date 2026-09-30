@@ -97,19 +97,13 @@
   font-size: var(--text-lg);
 }
 
-.workspace-scan-home-btn {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  color: var(--text-1);
-  padding: 8px 16px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  font-family: var(--font-ui);
-  margin-top: 12px;
-  transition: background 0.1s, border-color 0.1s;
+.workspace-scan-row .workspace-panel-scan-input {
+  flex: 1;
 }
-.workspace-scan-home-btn:hover { background: var(--bg-hover); border-color: var(--text-3); }
+
+.workspace-empty .workspace-scan-home-btn {
+  margin-top: var(--space-3);
+}
 
 .workspace-scanning {
   display: flex;

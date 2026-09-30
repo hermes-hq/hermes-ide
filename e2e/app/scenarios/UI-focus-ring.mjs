@@ -275,7 +275,8 @@ try {
   log("step 5: a focused button keeps its own shadow (the ring does not reset box-shadow)");
   const shadows = await bridge.eval(`
     const out = [];
-    for (const cls of ["session-composer-send-btn", "whatsnew-btn-primary"]) {
+    // (The what's-new primary was the second case; it is a control-set Button now, with no shadow of its own.)
+    for (const cls of ["session-composer-send-btn"]) {
       if (!window.__uiFocus.hasRuleFor("." + cls)) { out.push({ cls, missing: true }); continue; }
       const b = document.createElement("button");
       b.type = "button";

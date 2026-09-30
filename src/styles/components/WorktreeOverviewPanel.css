@@ -19,38 +19,8 @@
   flex-shrink: 0;
 }
 
-.worktree-overview-search-input {
+.worktree-overview-search .worktree-overview-search-input {
   flex: 1;
-  background: var(--bg-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
-  outline: none;
-  box-sizing: border-box;
-}
-.worktree-overview-search-input:focus {
-  border-color: var(--accent);
-}
-.worktree-overview-search-input::placeholder {
-  color: var(--text-3);
-}
-
-.worktree-overview-refresh {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: var(--text-md);
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-}
-.worktree-overview-refresh:hover {
-  color: var(--text-0);
-  background: var(--bg-hover);
 }
 
 /* ─── Scrollable Content ──────────────────────────────────────────── */
@@ -204,20 +174,6 @@
   flex-shrink: 0;
 }
 
-.worktree-overview-disk-btn {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 0 2px;
-  flex-shrink: 0;
-}
-.worktree-overview-disk-btn:hover {
-  color: var(--text-1);
-}
-
 .worktree-overview-disk-size {
   font-size: 10px;
   color: var(--text-3);
@@ -274,12 +230,6 @@
   font-style: italic;
 }
 
-.worktree-overview-orphan-checkbox {
-  flex-shrink: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
 /* ─── Actions (hover-visible) ─────────────────────────────────────── */
 
 .worktree-overview-actions {
@@ -288,32 +238,6 @@
   opacity: 0;
   transition: opacity 0.1s;
   flex-shrink: 0;
-}
-
-.worktree-overview-action-btn {
-  background: none;
-  border: 1px solid var(--border-light);
-  color: var(--text-2);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 0 5px;
-  height: 20px;
-  border-radius: var(--radius-sm);
-  line-height: 1;
-  white-space: nowrap;
-}
-.worktree-overview-action-btn:hover {
-  background: var(--bg-active);
-  color: var(--text-0);
-}
-.worktree-overview-action-btn-open:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.worktree-overview-action-btn-remove:hover {
-  color: var(--red);
-  border-color: var(--red);
 }
 
 /* ─── Footer ──────────────────────────────────────────────────────── */
@@ -337,27 +261,6 @@
 
 /* ─── Cleanup Button ──────────────────────────────────────────────── */
 
-.worktree-overview-cleanup-btn {
-  background: var(--yellow-dim);
-  border: 1px solid var(--yellow);
-  border-radius: var(--radius);
-  color: var(--yellow);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: var(--space-1) var(--space-2);
-  cursor: pointer;
-  text-align: center;
-  font-weight: 600;
-}
-.worktree-overview-cleanup-btn:hover:not(:disabled) {
-  background: var(--yellow);
-  color: var(--bg-0);
-}
-.worktree-overview-cleanup-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 /* ─── Confirm Dialog (inline) ─────────────────────────────────────── */
 
 .worktree-overview-confirm {
@@ -376,39 +279,6 @@
   flex: 1;
   color: var(--yellow);
   font-weight: 600;
-}
-
-.worktree-overview-confirm-yes,
-.worktree-overview-confirm-no {
-  background: none;
-  border: 1px solid var(--border-light);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 0 6px;
-  border-radius: var(--radius-sm);
-  line-height: 1.8;
-}
-.worktree-overview-confirm-yes {
-  color: var(--red);
-}
-.worktree-overview-confirm-destructive {
-  background: var(--red-dim);
-  border-color: var(--red);
-  color: var(--red);
-  font-weight: 600;
-}
-.worktree-overview-confirm-yes:hover,
-.worktree-overview-confirm-destructive:hover {
-  background: var(--red);
-  border-color: var(--red);
-  color: var(--bg-0);
-}
-.worktree-overview-confirm-no {
-  color: var(--text-2);
-}
-.worktree-overview-confirm-no:hover {
-  background: var(--bg-hover);
 }
 
 /* ─── Cleanup Results ─────────────────────────────────────────────── */

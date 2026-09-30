@@ -1,4 +1,7 @@
 import "../styles/components/ProjectPicker.css";
+import { Button, CloseButton, IconButton, Input } from "./ui";
+import { translate } from "../i18n/registry";
+import { CloseGlyph } from "./ui/icons";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useSessionProjects } from "../hooks/useSessionProjects";
@@ -136,14 +139,13 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
           <span className="project-picker-count">
             {attachedProjects.length} attached
           </span>
-          <button className="close-btn settings-close" onClick={handleClose} aria-label="Close">
-            &times;
-          </button>
+          <CloseButton className="project-picker-close" onClick={handleClose} label={translate("common.close")} />
         </div>
 
-        <input
+        <Input
           ref={inputRef}
-          className="command-palette-input"
+          className="project-picker-filter"
+          aria-label="Filter projects"
           placeholder="Filter projects..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -204,51 +206,55 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
                   ))}
                 </div>
               </div>
-              <button
+              <IconButton
+                size="sm"
                 className="project-picker-delete"
+                label={`Delete project ${project.name}`}
+                title="Delete project"
+                icon={<CloseGlyph />}
                 onClick={(e) => {
                   e.stopPropagation();
                   deleteProject(project.id).then(() => {
                     setAllProjects((prev) => prev.filter((r) => r.id !== project.id));
                   }).catch(console.error);
                 }}
-                title="Delete project"
-              >
-                x
-              </button>
+              />
             </div>
           ))}
         </div>
 
         <div className="project-picker-footer">
-          <input
-            className="workspace-scan-input"
+          <Input
+            code
+            className="project-picker-scan-input"
+            aria-label="Folder to scan"
             placeholder="Path or browse..."
             value={scanPath}
             onChange={(e) => setScanPath(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleScanNew(); }}
           />
-          <button
-            className="workspace-scan-btn"
+          <Button
+            className="project-picker-browse"
             onClick={handleBrowse}
             disabled={scanning}
             title="Browse for folder"
           >
             {scanning ? "..." : "Browse"}
-          </button>
-          <button
-            className="workspace-scan-btn"
+          </Button>
+          <Button
+            className="project-picker-scan"
             onClick={handleScanNew}
             disabled={scanning || !scanPath.trim()}
           >
             Scan
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
             className="project-picker-done"
             onClick={handleClose}
           >
             Done
-          </button>
+          </Button>
         </div>
       </div>
     </div>

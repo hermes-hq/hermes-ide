@@ -52,6 +52,7 @@ import { EmptyState } from "./components/EmptyState";
 import { CloseSessionDialog } from "./components/CloseSessionDialog";
 import { LandSheetHost } from "./land/LandSheetHost";
 import { QuitWithAgentsDialog, type WorkingSession } from "./components/QuitWithAgentsDialog";
+import { DialogGalleryHost } from "./e2e/DialogGalleryHost";
 import { sessionHostQuit } from "./api/sessions";
 import { FlowToast } from "./components/FlowToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
@@ -1846,6 +1847,7 @@ function AppContent() {
       )}
 
       <ToastContainer toasts={toastStore.toasts} onDismiss={toastStore.dismissToast} />
+      {import.meta.env.VITE_HERMES_E2E === "1" && <DialogGalleryHost />}
       <WorktreeRecipePanel />
 
     </div>

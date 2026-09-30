@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import "../styles/components/BranchConflictDialog.css";
+import { Button, CloseButton, Input } from "./ui";
 
 interface BranchConflictDialogProps {
   branchName: string;
@@ -73,7 +74,7 @@ export function BranchConflictDialog({
         <div className="branch-conflict-header">
           <span className="branch-conflict-icon">&#9888;</span>
           <span className="branch-conflict-title" id="branch-conflict-title">Branch In Use</span>
-          <button className="branch-conflict-close" onClick={onCancel} aria-label="Close">&times;</button>
+          <CloseButton className="branch-conflict-close" onClick={onCancel} label="Close" />
         </div>
 
         <div className="branch-conflict-body">
@@ -91,7 +92,8 @@ export function BranchConflictDialog({
 
           <div className="branch-conflict-actions">
             <div className="branch-conflict-create-row">
-              <input
+              <Input
+                code
                 className="branch-conflict-create-input"
                 aria-label="New branch name"
                 value={newBranchName}
@@ -103,28 +105,29 @@ export function BranchConflictDialog({
                   if (e.key === "Enter") handleCreate();
                 }}
                 placeholder="new-branch-name"
+                invalid={!!validationError}
+                aria-describedby={validationError ? "branch-conflict-error" : undefined}
                 autoFocus
               />
-              <button
-                className="git-btn branch-conflict-btn-create"
-                onClick={handleCreate}
-                style={{ flex: "none", padding: "4px 12px" }}
-              >
+              <Button variant="primary" className="branch-conflict-btn-create" onClick={handleCreate}>
                 Use new branch
-              </button>
+              </Button>
             </div>
 
             {validationError && (
-              <div className="git-error" style={{ margin: 0 }}>{validationError}</div>
+              <div id="branch-conflict-error" className="branch-conflict-error" role="alert">
+                {validationError}
+              </div>
             )}
 
-            <button className="git-btn branch-conflict-btn-switch" onClick={onReuse}>
-              Reuse its checkout
-            </button>
-
-            <button className="git-btn branch-conflict-btn-cancel" onClick={onCancel}>
-              Cancel
-            </button>
+            <div className="branch-conflict-other-row">
+              <Button variant="quiet" className="branch-conflict-btn-cancel" onClick={onCancel}>
+                Cancel
+              </Button>
+              <Button className="branch-conflict-btn-switch" onClick={onReuse}>
+                Reuse its checkout
+              </Button>
+            </div>
           </div>
         </div>
       </div>

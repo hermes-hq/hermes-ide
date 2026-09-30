@@ -12,7 +12,6 @@
   overflow: hidden;
 }
 
-
 .main-area {
   display: flex;
   flex: 1;
@@ -49,20 +48,6 @@
 
 .panel-error-boundary p {
   margin: 0;
-}
-
-.panel-error-boundary button {
-  background: var(--bg-2);
-  color: var(--text-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 12px;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.panel-error-boundary button:hover {
-  background: var(--bg-3);
 }
 
 /* ─── CRT Scanline Overlay ──────────────────────────────── */

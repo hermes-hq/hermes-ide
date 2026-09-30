@@ -14,6 +14,7 @@ import {
   validateAddMcpForm,
   type AddMcpForm,
 } from "../utils/mcpServers";
+import { Button } from "./ui";
 
 interface Props {
   existingNames: string[];
@@ -144,15 +145,15 @@ export function AddMcpDialog({ existingNames, onClose, projectDir }: Props) {
           </ul>
         )}
         <div className="add-mcp-actions">
-          <button type="button" className="add-mcp-link" onClick={onClose}>esc cancel</button>
-          <button
-            type="button"
-            className="add-mcp-link add-mcp-link-primary"
+          <Button variant="quiet" className="add-mcp-cancel" onClick={onClose}>esc cancel</Button>
+          <Button
+            variant="primary"
+            className="add-mcp-save"
             onClick={onSubmit}
             disabled={submitting}
           >
             ⏎ save & spawn →
-          </button>
+          </Button>
         </div>
       </div>
     </div>

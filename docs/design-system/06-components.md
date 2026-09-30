@@ -275,3 +275,17 @@ lists its stylesheet in `STRICT_FILES` (scripts/lint-css.mjs), which holds
 every line of it to the rules from then on: so far the task launcher, the
 three-step welcome with its agent doctor, and the New Session creator with
 its branch step.
+
+`node scripts/check-controls.mjs` (CI: Frontend job) fails when a file gains
+a `<button>`, `<select>` or `<input type="checkbox">` of its own outside
+`src/components/ui/`, a stylesheet rule aimed at those elements
+(`.dialog button {…}`), or a class that restyles a control-set component
+(height, padding, colours, border, font; layout such as margin, flex or
+width is fine), or a raw control whose classes no stylesheet names any more
+(deleting a migrated screen's CSS while another screen still draws raw
+controls with those classes leaves them as bare OS controls). The terminal
+and the code editor keep their own controls
+(its `ALLOWLIST`). Screens not yet moved are counted per file in
+`scripts/check-controls-baseline.json`; a count may only go down, and
+`--update` writes the lower numbers once a screen has moved. `--list` shows
+every finding.

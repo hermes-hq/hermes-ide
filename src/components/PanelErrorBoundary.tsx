@@ -1,4 +1,5 @@
 import { Component, ReactNode } from "react";
+import { Button } from "./ui";
 
 interface Props {
   children: ReactNode;
@@ -19,9 +20,9 @@ export class PanelErrorBoundary extends Component<Props, State> {
       return this.props.fallback || (
         <div className="panel-error-boundary">
           <p>{this.props.panelName || "Panel"} encountered an error</p>
-          <button onClick={() => this.setState({ hasError: false, error: undefined })}>
+          <Button onClick={() => this.setState({ hasError: false, error: undefined })}>
             Retry
-          </button>
+          </Button>
         </div>
       );
     }

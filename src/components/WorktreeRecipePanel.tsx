@@ -9,6 +9,7 @@ import {
   type RecipeRun,
 } from "../state/worktreeRecipes";
 import "../styles/components/WorktreeRecipePanel.css";
+import { Button } from "./ui";
 
 /**
  * The visible log of worktree recipes (F26): one card per new worktree
@@ -89,17 +90,17 @@ function RecipeCard({ run }: { run: RecipeRun }) {
           )}
           <p className="worktree-recipe-note">{t("worktreeRecipe.askRemember")}</p>
           <div className="worktree-recipe-actions">
-            <button type="button" className="worktree-recipe-btn" onClick={() => decideRecipe(run.runId, "skip")}>
+            <Button className="worktree-recipe-skip" onClick={() => decideRecipe(run.runId, "skip")}>
               {t("common.skip")}
-            </button>
-            <button
-              type="button"
-              className="worktree-recipe-btn worktree-recipe-btn-primary"
+            </Button>
+            <Button
+              variant="primary"
+              className="worktree-recipe-run"
               onClick={() => decideRecipe(run.runId, "run")}
               autoFocus
             >
               {t("worktreeRecipe.run")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -116,14 +117,14 @@ function RecipeCard({ run }: { run: RecipeRun }) {
             </p>
           )}
           {run.lines.length > 0 && finished && (
-            <button
-              type="button"
+            <Button
+              variant="link"
               className="worktree-recipe-toggle"
               aria-expanded={logOpen}
               onClick={() => setShowLog(!logOpen)}
             >
               {t(logOpen ? "worktreeRecipe.hideLog" : "worktreeRecipe.showLog")}
-            </button>
+            </Button>
           )}
           {run.lines.length > 0 && logOpen && (
             <pre className="worktree-recipe-log" ref={logRef} role="log" aria-label={t("worktreeRecipe.log")} tabIndex={0}>
@@ -142,14 +143,14 @@ function RecipeCard({ run }: { run: RecipeRun }) {
       {run.state !== "awaiting" && (
         <div className="worktree-recipe-actions">
           {run.state === "running" ? (
-            <button type="button" className="worktree-recipe-btn" onClick={() => void stopRecipeRun(run.runId)}>
+            <Button variant="danger" className="worktree-recipe-stop" onClick={() => void stopRecipeRun(run.runId)}>
               {t("worktreeRecipe.stop")}
-            </button>
+            </Button>
           ) : (
             finished && (
-              <button type="button" className="worktree-recipe-btn" onClick={() => dismissRecipeRun(run.runId)}>
+              <Button className="worktree-recipe-close" onClick={() => dismissRecipeRun(run.runId)}>
                 {t("common.close")}
-              </button>
+              </Button>
             )
           )}
         </div>

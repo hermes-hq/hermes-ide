@@ -5,6 +5,7 @@ import { SplitDivider } from "./SplitDivider";
 import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { useSession } from "../state/SessionContext";
 import { translate } from "../i18n/registry";
+import { Button } from "./ui";
 
 interface SplitLayoutProps {
   node: LayoutNode;
@@ -48,9 +49,9 @@ function ContainedPane({ paneId, sessionId }: { paneId: string; sessionId: strin
       scope="pane"
       label={state.sessions[sessionId]?.label}
       actions={
-        <button type="button" onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
+        <Button onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
           {translate("crash.closePane")}
-        </button>
+        </Button>
       }
     >
       <SplitPane paneId={paneId} sessionId={sessionId} />

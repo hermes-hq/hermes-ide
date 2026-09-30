@@ -66,17 +66,3 @@
   display: flex;
   gap: var(--space-2);
 }
-
-.contained-error-actions button {
-  background: var(--bg-2);
-  color: var(--text-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 12px;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.contained-error-actions button:hover {
-  background: var(--bg-3);
-}
