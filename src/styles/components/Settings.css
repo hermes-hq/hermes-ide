@@ -85,7 +85,10 @@
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-0);
+  /* A short window scrolls the list; the rows keep their 32 px. */
+  overflow-y: auto;
 }
+.settings-tabs .h-tab { flex-shrink: 0; }
 
 .settings-content {
   flex: 1;

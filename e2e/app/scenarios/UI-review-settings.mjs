@@ -474,6 +474,19 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     log(`  nav: ${JSON.stringify(nav)}`);
     check(nav.orientation === "vertical" && nav.count >= 8 && nav.tabStops === 1, `Settings nav is a vertical tab list with one tab stop (${nav.count} tabs)`);
     check(nav.heights.every((h) => Math.abs(h - 32) <= 0.5), `Settings tabs are 32 px rows (${[...new Set(nav.heights)].join(", ")})`);
+    // Settings at its smallest height (the resize handle's minimum, and what
+    // a short window gives): the rows keep 32 px and the list scrolls.
+    const short = await bridge.eval(`
+      const panel = e2e.must(document.querySelector(".settings-panel"), "the settings panel");
+      const was = panel.style.height;
+      panel.style.height = "360px";
+      const list = document.querySelector('.settings-tabs[role="tablist"]');
+      const heights = [...list.querySelectorAll('[role="tab"]')].map((t) => +t.getBoundingClientRect().height.toFixed(2));
+      const out = { heights: [...new Set(heights)], scrolls: list.scrollHeight > list.clientHeight };
+      panel.style.height = was;
+      return out;
+    `);
+    check(short.heights.every((h) => Math.abs(h - 32) <= 0.5), `in a 360 px tall Settings the tabs stay 32 px (${short.heights.join(", ")}; the list scrolls: ${short.scrolls})`);
     check(nav.fonts.length === 1 && nav.fonts[0] === "13px", `Settings tabs are 13 px (${nav.fonts.join(", ")})`);
     check(nav.railW === "2px" && !/rgba\(0, 0, 0, 0\)|transparent/.test(nav.railBg), `the current tab has a 2 px rail (${nav.railBg})`);
     await shot(`${theme}-01-settings-general.png`);
