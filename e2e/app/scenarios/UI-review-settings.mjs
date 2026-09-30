@@ -108,13 +108,17 @@ const EXPECT = [
   [".h-chip--sm", 24], [".h-chip--md", 28],
 ];
 window.__uirs = {
-  /** Every control of the set under root: its height against its size's. */
+  /**
+   * Every control of the set under root: its height against its size's.
+   * Layout heights (offsetHeight): a dialog's scale-in transform must not
+   * count, and a slow runner may still be running it.
+   */
   heights(root) {
     const out = [];
     for (const [sel, want] of EXPECT) {
       for (const el of root.querySelectorAll(sel)) {
         if (!shown(el)) continue;
-        const h = +el.getBoundingClientRect().height.toFixed(2);
+        const h = +el.offsetHeight;
         out.push({ sel, want, h, ok: Math.abs(h - want) <= 0.5, what: name(el) });
       }
     }
@@ -468,7 +472,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
       return {
         orientation: list.getAttribute("aria-orientation"),
         count: tabs.length,
-        heights: tabs.map((t) => +t.getBoundingClientRect().height.toFixed(2)),
+        heights: tabs.map((t) => +t.offsetHeight),
         fonts: [...new Set(tabs.map((t) => getComputedStyle(t).fontSize))],
         tabStops: tabs.filter((t) => t.tabIndex === 0).length,
         selectedBg: cs.backgroundColor,
@@ -487,7 +491,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
       const was = panel.style.height;
       panel.style.height = "360px";
       const list = document.querySelector('.settings-tabs[role="tablist"]');
-      const heights = [...list.querySelectorAll('[role="tab"]')].map((t) => +t.getBoundingClientRect().height.toFixed(2));
+      const heights = [...list.querySelectorAll('[role="tab"]')].map((t) => +t.offsetHeight);
       const out = { heights: [...new Set(heights)], scrolls: list.scrollHeight > list.clientHeight };
       panel.style.height = was;
       return out;
@@ -509,7 +513,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
           switches: [...panel.querySelectorAll('[role="switch"]')].map((s) => ({
             name: (s.getAttribute("aria-label") || (s.getAttribute("aria-labelledby") || "").split(" ").map((id) => document.getElementById(id)?.innerText ?? "").join(" ")).trim(),
             checked: s.getAttribute("aria-checked"),
-            h: +s.getBoundingClientRect().height.toFixed(2),
+            h: +s.offsetHeight,
           })),
           legacy: window.__uirs.legacy(panel),
         };
@@ -530,7 +534,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
         const b = e2e.must(document.querySelector("." + cls), cls);
         const bg = backdrop(b);
         const fg = over(rgb(getComputedStyle(b).color), bg);
-        out.push({ cls, kit: b.classList.contains("h-btn") && b.classList.contains("h-btn--secondary"), h: +b.getBoundingClientRect().height.toFixed(2), ratio: +ratio(fg, bg).toFixed(2), fg: hex(fg), bg: hex(bg) });
+        out.push({ cls, kit: b.classList.contains("h-btn") && b.classList.contains("h-btn--secondary"), h: +b.offsetHeight, ratio: +ratio(fg, bg).toFixed(2), fg: hex(fg), bg: hex(bg) });
       }
       return out;
     `);
@@ -716,7 +720,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
       check(!!(await waitMenu("type-ahead", `(s) => s.active === "Opus"`)), "typing o jumps to Opus");
       await shot(`${theme}-08-model-menu.png`);
       await measureAll(`${theme} model menu`, '[role="menu"]:not([hidden])', { sized: false });
-      const rows = await bridge.eval(`return e2e.all('[role="menu"]:not([hidden]) [role^="menuitem"]').map((r) => +r.getBoundingClientRect().height.toFixed(1));`);
+      const rows = await bridge.eval(`return e2e.all('[role="menu"]:not([hidden]) [role^="menuitem"]').map((r) => +r.offsetHeight);`);
       check(rows.length >= 6 && rows.every((h) => h >= 28), `menu rows are at least 28 px (${[...new Set(rows)].join(", ")})`);
       await keyMenu("Escape");
       const closed = await bridge.waitFor("Esc to close the menu", `
