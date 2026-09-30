@@ -1,7 +1,7 @@
 import "../styles/components/PortForwardsPanel.css";
 import { useState, useEffect, useCallback } from "react";
 import type { PortForward } from "../types/session";
-import { CloseButton } from "./ui";
+import { CloseButton } from "./ui/Button";
 import { useI18n } from "../i18n/I18nProvider";
 import { sshAddPortForward, sshRemovePortForward, sshListPortForwards } from "../api/sessions";
 

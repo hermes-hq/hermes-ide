@@ -4,7 +4,8 @@ import { useI18n } from "../i18n/I18nProvider";
 import { useDoneWhen } from "../doneWhen/store";
 import { agentOwnsTerminal, runChecksNow, sendFailuresBack } from "../doneWhen/controller";
 import { failedCommands, isPassed, type CheckRecord } from "../doneWhen/types";
-import { Button, Chip } from "./ui";
+import { Button } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 
 type ChipState = "running" | "passed" | "failed" | "retrying" | "check_failed" | "error";
 

@@ -32,7 +32,9 @@ import {
   type AgentSetupOverview,
   type SetupItem,
 } from "../api/agentSetup";
-import { Badge, Button, Chip } from "./ui";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 
 /** How often the processes under the shell are read. */
 export const ARGV_POLL_MS = 2_000;

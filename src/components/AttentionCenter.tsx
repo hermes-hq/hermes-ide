@@ -44,7 +44,9 @@ import { claimPcAppChords } from "../utils/keymap";
 import { notifyAttention } from "../utils/notifications";
 import { fmt, PLATFORM } from "../utils/platform";
 import { matchAppShortcut } from "../utils/shortcuts";
-import { Badge, Button, Counter, ListRow } from "./ui";
+import { Badge, Counter } from "./ui/Badge";
+import { Button } from "./ui/Button";
+import { ListRow } from "./ui/ListRow";
 
 interface AttentionCenterProps {
   sessions: Record<string, SessionData>;

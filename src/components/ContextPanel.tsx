@@ -17,7 +17,7 @@ import { useI18n } from "../i18n/I18nProvider";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { spendOf, spendText } from "../fleet/spend";
-import { CloseButton } from "./ui";
+import { CloseButton } from "./ui/Button";
 
 interface ContextPanelProps {
   session: SessionData;

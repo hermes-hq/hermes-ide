@@ -1,7 +1,7 @@
 import { type ReactNode, useRef, useState, useEffect } from "react";
 import { Blocks, Settings } from "lucide-react";
 import "../styles/components/ActivityBar.css";
-import { Counter } from "./ui";
+import { Counter } from "./ui/Badge";
 
 export interface ActivityBarTab {
   id: string;

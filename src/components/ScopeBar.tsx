@@ -10,7 +10,9 @@ import { useSessionModel } from "../agent/useSessionModel";
 import { CUSTOM_AGENT_ID, agentDisplayName } from "../catalog/agentCatalog";
 import { useContextMenu, menuItem, separator, subMenu } from "../hooks/useContextMenu";
 import { homeDir } from "@tauri-apps/api/path";
-import { Badge, Button, Chip, IconButton } from "./ui";
+import { Badge } from "./ui/Badge";
+import { Button, IconButton } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",

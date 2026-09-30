@@ -29,7 +29,10 @@ import { SessionLimitTag } from "./SessionLimitTag";
 import { HandoffDialog } from "./HandoffDialog";
 import { canHandOff, nestUnderParents, type HandoffKind } from "../limits/handoff";
 import { SessionContextGauge, SessionMemoryTag } from "./SessionFleetTags";
-import { Badge, Button, Chip, CloseButton, Counter, IconButton, ListRow } from "./ui";
+import { Badge, Counter } from "./ui/Badge";
+import { Button, CloseButton, IconButton } from "./ui/Button";
+import { Chip } from "./ui/Chip";
+import { ListRow } from "./ui/ListRow";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",

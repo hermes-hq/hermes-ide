@@ -1,6 +1,6 @@
 import "../styles/components/ToastContainer.css";
 import type { Toast } from "../hooks/useToastStore";
-import { CloseButton } from "./ui";
+import { CloseButton } from "./ui/Button";
 import { useI18n } from "../i18n/I18nProvider";
 
 const CheckIcon = () => (

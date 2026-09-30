@@ -25,7 +25,7 @@ import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from
 import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { agentDisplayName } from "../catalog/agentCatalog";
-import { CloseButton } from "./ui";
+import { CloseButton } from "./ui/Button";
 
 // The agent view (and everything it pulls in: markdown, syntax
 // highlighting, tool cards) loads on demand, the first time an

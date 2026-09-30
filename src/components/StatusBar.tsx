@@ -13,7 +13,7 @@ import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useReportedTotals } from "../fleet/useReportedTotals";
 import { spendText } from "../fleet/spend";
-import { IconButton } from "./ui";
+import { IconButton } from "./ui/Button";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.

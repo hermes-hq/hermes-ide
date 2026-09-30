@@ -5,7 +5,7 @@ import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt } from "../utils/platform";
 import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
-import { ListRow } from "./ui";
+import { ListRow } from "./ui/ListRow";
 
 interface CommandPaletteProps {
   onClose: () => void;

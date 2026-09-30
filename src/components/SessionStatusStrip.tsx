@@ -23,7 +23,7 @@ import { useSessionEvents, type SessionEventSnapshot } from "../agent/contract/s
 import type { AgentStatus, AgentStatusKind, Confidence } from "../agent/contract/status";
 import { useI18n } from "../i18n/I18nProvider";
 import { fmt } from "../utils/platform";
-import { Button } from "./ui";
+import { Button } from "./ui/Button";
 
 /** The attention inbox shortcut as this platform writes it (⌘I / Ctrl+I). */
 export const INBOX_SHORTCUT = fmt("{mod}I");
