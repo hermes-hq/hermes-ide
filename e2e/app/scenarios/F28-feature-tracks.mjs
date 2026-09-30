@@ -423,7 +423,9 @@ try {
   writeFileSync(planFile, readFileSync(planFile, "utf8") + "- [ ] add tests for empty queries\n");
   await sleep(700);
   await pressOnPanel(bridge, "r");
-  const got = (await agentLine(bridge, writerId, "got review")).line;
+  // Wait for the whole line: the terminal can show it in two pieces
+  // (Windows once read "got review .hermes/features/demo-se").
+  const got = (await agentLine(bridge, writerId, "got review \\S+ \\((diff|whole file)\\)")).line;
   assert(/got review \.hermes\/features\/demo-search\/review-1\.md \(diff\)/.test(got), `the writer agent received the review line and found a diff (${got.trim()})`);
   const reviewText = readFileSync(join(wt, ".hermes", "features", SLUG, "review-1.md"), "utf8");
   assert(reviewText.includes("+- [ ] add tests for empty queries"), "review-1.md holds the person's edit as a diff line");

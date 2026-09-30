@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use super::cow_clone::{self, CloneError, CloneMethod};
@@ -209,7 +208,7 @@ impl WorktreeSetup {
 
 /// Files git tracks in `worktree`, `/`-separated.
 fn tracked_files(worktree: &Path) -> Vec<String> {
-    let Ok(out) = Command::new("git")
+    let Ok(out) = crate::git::cli::git_command()
         .arg("-C")
         .arg(worktree)
         .args(["ls-files", "-z"])
@@ -231,7 +230,7 @@ fn tracked_files(worktree: &Path) -> Vec<String> {
 /// folder first, then its other worktrees in the order git lists them.
 pub fn candidate_checkouts(repo_root: &Path, exclude: &Path) -> Vec<PathBuf> {
     let mut out = vec![repo_root.to_path_buf()];
-    if let Ok(o) = Command::new("git")
+    if let Ok(o) = crate::git::cli::git_command()
         .arg("-C")
         .arg(repo_root)
         .args(["worktree", "list", "--porcelain"])
@@ -439,6 +438,7 @@ pub fn port_is_free(port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use tempfile::TempDir;
 
     fn s(v: &[&str]) -> Vec<String> {
@@ -816,12 +816,48 @@ mod tests {
 
     #[test]
     fn a_listening_port_is_not_free() {
-        let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-        assert!(port_is_free(port), "nothing listens on {port} any more");
-        let _server = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        // The server stays open for the whole check. (Closing a probe and
+        // binding its port again raced the other tests, which take ports
+        // from the same pool while they run in parallel.)
+        let server = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = server.local_addr().unwrap().port();
         assert!(!port_is_free(port), "a server on {port} makes it busy");
+        assert!(
+            !port_is_free(port),
+            "still busy on a second look while the server is open"
+        );
+        drop(server);
+    }
+
+    #[test]
+    fn a_port_nothing_listens_on_is_free() {
+        // The OS hands out a fresh port, which is closed again before the
+        // check. Another test running in parallel may take that same port
+        // in between, so a busy answer is retried on another fresh port;
+        // only a port_is_free that never says "free" fails every attempt.
+        let free = (0..10).any(|_| {
+            let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            port_is_free(port)
+        });
+        assert!(free, "ten ports nothing listens on all looked busy");
+    }
+
+    #[test]
+    fn a_port_only_listening_on_ipv6_loopback_is_not_free() {
+        // 127.0.0.1 can still be bound on that port; only the ::1 probe
+        // sees the server.
+        let Ok(server) = std::net::TcpListener::bind(("::1", 0)) else {
+            eprintln!("no IPv6 loopback on this machine: nothing to check");
+            return;
+        };
+        let port = server.local_addr().unwrap().port();
+        assert!(
+            !port_is_free(port),
+            "a server on [::1]:{port} makes it busy"
+        );
+        drop(server);
     }
 
     #[test]

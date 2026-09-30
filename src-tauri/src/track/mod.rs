@@ -658,4 +658,46 @@ mod tests {
         assert!(state.last.lock().unwrap().is_empty());
         assert!(state.watch("s3", "not/absolute").is_err());
     }
+
+    #[test]
+    fn a_track_file_is_read_and_located_only_once_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        ht::create(dir.path(), "demo", ht::Track::Light, "Demo", "").unwrap();
+        let wt = dir.path().to_string_lossy().to_string();
+        let on_disk = dir.path().join(".hermes/features/demo/feature.md");
+        let text = track_read_file(wt.clone(), "demo".into(), "feature.md".into()).unwrap();
+        assert!(!text.is_empty());
+        assert_eq!(text, std::fs::read_to_string(&on_disk).unwrap());
+        let path = track_file_path(wt.clone(), "demo".into(), "feature.md".into()).unwrap();
+        assert_eq!(PathBuf::from(path), on_disk);
+        let err = track_file_path(wt.clone(), "demo".into(), "research.md".into()).unwrap_err();
+        assert!(err.contains("does not exist yet"), "{err}");
+        assert!(track_read_file(wt, "demo".into(), "research.md".into()).is_err());
+    }
+
+    #[test]
+    fn a_track_error_reads_as_its_message() {
+        let e = ht::TrackError::NoFeature {
+            path: PathBuf::from("/tmp/demo/feature.md"),
+        };
+        let want = e.to_string();
+        assert!(!want.is_empty());
+        assert_eq!(track_err(e), want);
+    }
+
+    #[test]
+    fn times_are_wall_clock_milliseconds() {
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let now = now_ms();
+        assert!(now >= before && now - before < 60_000, "{now} vs {before}");
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f.txt");
+        std::fs::write(&file, "x").unwrap();
+        let m = mtime_ms(&file);
+        assert!((m - before).abs() < 60_000, "{m} vs {before}");
+        assert_eq!(mtime_ms(&dir.path().join("missing")), 0);
+    }
 }

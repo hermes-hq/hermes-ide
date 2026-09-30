@@ -304,7 +304,16 @@ async function clickPrimary(bridge, what) {
   `);
   log(r.clicked === null ? `  wizard ${what}: already closed` : `  wizard ${what}: clicked "${r.clicked}"`);
   await sleep(300);
+  return r.clicked;
 }
+/**
+ * "Create session" is the wizard's last press: the wizard then stays open,
+ * its button disabled ("Creating..."), until the session exists, and closes
+ * by itself. On a slow runner that takes seconds (the first session starts
+ * the session host), so the step walk must stop at this press instead of
+ * looking for another step in a wizard that is only busy.
+ */
+const isCreatePress = (clicked) => clicked === null || clicked === "Create session";
 
 /**
  * New Session wizard: an agent session (the fake, through `hi run`) in the
@@ -374,9 +383,9 @@ async function createAgentSession(bridge, label, card = "Claude") {
       el.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
     `);
-    await clickPrimary(bridge, `step ${i + 1}`);
+    if (isCreatePress(await clickPrimary(bridge, `step ${i + 1}`))) break;
   }
-  await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 20_000 });
+  await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 60_000 });
   const id = await bridge.waitFor(`the terminal of "${label}"`, `
     const ids = window.__HERMES_E2E__.terminalIds().filter((id) => !${JSON.stringify(before)}.includes(id));
     return ids.length === 1 ? ids[0] : null;

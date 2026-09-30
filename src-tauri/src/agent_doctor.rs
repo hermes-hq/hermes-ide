@@ -682,4 +682,135 @@ mod tests {
             .iter()
             .any(|r| r.id == "claude" && !r.beta && r.name == "Claude Code"));
     }
+
+    #[test]
+    fn signal_levels_are_named_as_the_catalog_names_them() {
+        assert_eq!(signals_label("exact"), "exact");
+        assert_eq!(signals_label("signal"), "signal");
+        assert_eq!(signals_label("guessed"), "none");
+        assert_eq!(signals_label(""), "none");
+        let copilot = diagnose(agent("copilot"), &|_| None, &|_, _, _| Probe::Failed);
+        assert_eq!(copilot.signals, "signal");
+    }
+
+    #[test]
+    fn an_agent_that_can_only_resume_its_latest_conversation_still_resumes() {
+        // Aider has "latest" and no resume by id.
+        let a = agent("aider");
+        assert!(a.terminal.resume.by_id.is_none() && a.terminal.resume.latest.is_some());
+        let row = diagnose(a, &|_| None, &|_, _, _| Probe::Failed);
+        assert!(row.resume);
+    }
+
+    #[test]
+    fn the_sign_in_check_reuses_the_binary_the_version_check_found() {
+        // A second lookup would answer differently: the check must use the
+        // path already found for the same binary.
+        let lookups = RefCell::new(0);
+        let probed = RefCell::new(Vec::<String>::new());
+        let row = diagnose(
+            agent("claude"),
+            &|name| {
+                *lookups.borrow_mut() += 1;
+                let n = *lookups.borrow();
+                Some(PathBuf::from(format!("/lookup-{n}/{name}")))
+            },
+            &|bin, args, _| {
+                probed.borrow_mut().push(bin.display().to_string());
+                if args.first().map(String::as_str) == Some("--version") {
+                    Probe::Exited {
+                        code: 0,
+                        output: "2.1.300".into(),
+                    }
+                } else {
+                    Probe::Exited {
+                        code: 0,
+                        output: String::new(),
+                    }
+                }
+            },
+        );
+        assert_eq!(row.signed_in, "yes");
+        assert_eq!(*lookups.borrow(), 1, "claude is looked up once");
+        assert_eq!(
+            *probed.borrow(),
+            vec!["/lookup-1/claude".to_string(), "/lookup-1/claude".into()]
+        );
+    }
+
+    #[test]
+    fn a_name_with_a_folder_in_it_is_never_looked_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        // "tool" is looked up as tool.exe (and the other PATHEXT names) on Windows.
+        let tool = sub.join(if cfg!(windows) { "tool.exe" } else { "tool" });
+        std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let dirs = vec![dir.path().to_path_buf()];
+        assert_eq!(find_in(&dirs, "sub/tool"), None);
+        assert_eq!(find_in(&dirs, ""), None);
+        assert_eq!(find_in(std::slice::from_ref(&sub), "tool"), Some(tool));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_without_an_execute_bit_is_not_a_command() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join("tool");
+        std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let dirs = vec![dir.path().to_path_buf()];
+        assert!(!is_executable(&tool));
+        assert_eq!(find_in(&dirs, "tool"), None);
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(is_executable(&tool));
+        assert_eq!(find_in(&dirs, "tool"), Some(tool));
+        assert!(!is_executable(dir.path()), "a folder is not a command");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_keeps_up_to_16_kb_of_output() {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let run = |bytes: usize| {
+            run_probe(
+                Path::new("/bin/sh"),
+                &[
+                    "-c".to_string(),
+                    format!("head -c {bytes} /dev/zero | tr '\\0' x"),
+                ],
+                &path,
+                Duration::from_secs(10),
+            )
+        };
+        match run(5000) {
+            Probe::Exited { code: 0, output } => assert_eq!(output.len(), 5000),
+            other => panic!("{other:?}"),
+        }
+        match run(20_000) {
+            Probe::Exited { output, .. } => assert_eq!(output.len(), OUTPUT_CAP),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_dirs_keep_every_path_folder_once() {
+        let dirs = search_dirs();
+        let mut seen = std::collections::HashSet::new();
+        for d in &dirs {
+            assert!(!d.as_os_str().is_empty(), "an empty folder is listed");
+            assert!(seen.insert(d.clone()), "{} is listed twice", d.display());
+        }
+        for d in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
+            if !d.as_os_str().is_empty() {
+                assert!(dirs.contains(&d), "{} from PATH is missing", d.display());
+            }
+        }
+    }
 }

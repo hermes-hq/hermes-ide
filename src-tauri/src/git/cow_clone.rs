@@ -757,6 +757,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_clone_error_reads_as_its_reason() {
+        assert_eq!(
+            CloneError::Unsupported("this disk cannot share blocks".into()).to_string(),
+            "this disk cannot share blocks"
+        );
+        assert_eq!(CloneError::Failed("denied".into()).to_string(), "denied");
+    }
+
+    #[test]
+    fn remove_any_removes_a_file_a_folder_or_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("staged.hermes-clone");
+        fs::write(&file, "x").unwrap();
+        remove_any(&file);
+        assert!(!file.exists(), "a file is removed");
+        let dir = tmp.path().join("staged-dir");
+        tree(&dir);
+        remove_any(&dir);
+        assert!(!dir.exists(), "a folder is removed with its content");
+        remove_any(&tmp.path().join("missing"));
+    }
+
     /// A clone, when the disk supports it, is a real independent copy with
     /// the same content; when it does not, nothing is left behind.
     #[test]

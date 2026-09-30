@@ -854,6 +854,17 @@ features:
       F21-8:
         text: "The Review Desk's Changes section stages one file, commits it with a drafted message, discards only after a confirm, pushes, pulls and switches the branch; log and stash stay in the Repository tab"
         scenarios: [F21-review-changes.mjs]
+      # F21-9: Hermes runs git in the C locale, so what it reads from git is
+      # English in any locale. The scenario first checks that this machine's
+      # git answers in German (CI generates the de_DE.UTF-8 locale on Linux).
+      # Not on Windows: the runner's Git for Windows answers in English under
+      # a German LANG/LC_ALL/LANGUAGE, so there is nothing to show there (the
+      # unit tests in git/cli.rs check the C locale on Windows too).
+      # Negative control (must end in RESULT: FAIL):
+      # HERMES_E2E_F21L_NEGATIVE=1 leaves the app's git in the user's locale.
+      F21-9:
+        text: "With a German system locale, the Review Desk on a folder that is not a git repository shows the plain \"No git repository\" state, not git's German error"
+        scenarios: ["F21-review-no-repo-locale.mjs@darwin,linux"]
   F22:
     name: "Land sheet with undo"
     # Behind the landSheet flag (off on stable until proven); the scenario

@@ -9,13 +9,12 @@
 
 use git2::{Oid, Repository, Tree};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::contract::turns::Diffstat;
 
 /// Run git in `dir`; stdout (trimmed) on success, stderr in the error.
 pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
+    let out = crate::git::cli::git_command()
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -593,6 +592,7 @@ pub fn unpush_branch(
 pub(crate) mod tests {
     use super::*;
     use std::fs;
+    use std::process::Command;
     use tempfile::TempDir;
 
     pub fn sh(dir: &Path, args: &[&str]) -> String {
@@ -876,5 +876,32 @@ pub(crate) mod tests {
         assert_eq!(current_branch(&wt).unwrap().0, "task");
         assert!(restore_worktree(&repo, &wt, "task").is_err());
         drop(t);
+    }
+
+    #[test]
+    fn a_branch_that_was_never_created_does_not_exist() {
+        let (_t, repo, _wt) = repo_with_task();
+        assert!(branch_exists(&repo, "main"));
+        assert!(branch_exists(&repo, "task"));
+        assert!(!branch_exists(&repo, "never-made"));
+    }
+
+    #[test]
+    fn the_base_is_the_project_folder_s_branch_unless_that_is_the_task_itself() {
+        let (_t, repo, _wt) = repo_with_task();
+        assert_eq!(resolve_base(&repo, "task").as_deref(), Some("main"));
+        // The project folder on another branch: that branch is the base.
+        sh(&repo, &["checkout", "-q", "-b", "develop"]);
+        assert_eq!(resolve_base(&repo, "task").as_deref(), Some("develop"));
+        // The project folder on the task branch itself: main, not the task.
+        assert_eq!(resolve_base(&repo, "develop").as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_task_on_main_itself_has_no_base() {
+        let (_t, repo, _wt) = repo_with_task();
+        // Checked out in the project folder and the only candidate: nothing
+        // to land on.
+        assert_eq!(resolve_base(&repo, "main"), None);
     }
 }

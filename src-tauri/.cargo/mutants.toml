@@ -1,0 +1,11 @@
+# cargo-mutants configuration (read automatically from here).
+#
+# exclude_re: waivers for mutants no test can kill. Each one needs a reason.
+
+exclude_re = [
+    # src/git/cli.rs: keep_user_locale_for_tests only reads its override in
+    # builds with the `e2e` feature; everywhere else it is `false` already,
+    # so turning it into `false` changes nothing. The real-app scenario
+    # F21-review-no-repo-locale covers the override (its negative control).
+    "replace keep_user_locale_for_tests -> bool with false",
+]

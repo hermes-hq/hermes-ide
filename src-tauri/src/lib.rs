@@ -332,7 +332,7 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                     if !known_paths.contains(&path_str) {
                         log::info!("Removing orphaned worktree directory: {}", path_str);
                         // Try git worktree prune first, then remove directory
-                        let _ = std::process::Command::new("git")
+                        let _ = crate::git::cli::git_command()
                             .arg("-C")
                             .arg(&proj.path)
                             .arg("worktree")
@@ -442,7 +442,7 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                     proj.path
                 );
                 // Prune git worktree metadata first
-                let _ = std::process::Command::new("git")
+                let _ = crate::git::cli::git_command()
                     .arg("-C")
                     .arg(&proj.path)
                     .arg("worktree")

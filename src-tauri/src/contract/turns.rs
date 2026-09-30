@@ -132,6 +132,16 @@ mod tests {
     }
 
     #[test]
+    fn a_session_id_starts_with_a_letter_or_digit() {
+        assert!(is_turn_ref_session_id("a_b-1"));
+        assert!(is_turn_ref_session_id("9"));
+        assert!(!is_turn_ref_session_id("_abc"), "may not start with _");
+        assert!(!is_turn_ref_session_id("-abc"), "may not start with -");
+        assert!(is_turn_ref_session_id(&"a".repeat(128)));
+        assert!(!is_turn_ref_session_id(&"a".repeat(129)));
+    }
+
+    #[test]
     fn parse_is_the_inverse_of_turn_ref() {
         assert_eq!(
             parse_turn_ref("refs/hermes/sess-1/turn/3"),

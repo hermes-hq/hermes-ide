@@ -1102,7 +1102,7 @@ pub fn add_git_excludes(cwd: &Path, patterns: &[String]) -> std::io::Result<()> 
     if patterns.is_empty() {
         return Ok(());
     }
-    let out = std::process::Command::new("git")
+    let out = crate::git::cli::git_command()
         .arg("-C")
         .arg(cwd)
         .args(["rev-parse", "--git-common-dir"])

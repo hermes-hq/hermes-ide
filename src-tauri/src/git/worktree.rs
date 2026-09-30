@@ -2,7 +2,6 @@ use git2::{BranchType, Repository};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -222,7 +221,7 @@ pub fn would_reuse_existing_worktree(
 /// Find an existing worktree that has the given branch checked out.
 /// Uses `git worktree list --porcelain` to find it.
 fn find_existing_worktree_for_branch(repo_path: &str, branch_name: &str) -> Option<String> {
-    let output = Command::new("git")
+    let output = crate::git::cli::git_command()
         .current_dir(repo_path)
         .args(["worktree", "list", "--porcelain"])
         .output()
@@ -535,7 +534,7 @@ pub fn create_worktree_from(
             }
 
             // Same commit — use the existing local branch directly
-            let mut cmd = Command::new("git");
+            let mut cmd = crate::git::cli::git_command();
             cmd.current_dir(repo_path);
             cmd.args(["worktree", "add", wt_path_str, &local_name]);
 
@@ -562,7 +561,7 @@ pub fn create_worktree_from(
 
         // No local branch exists — create one tracking the remote ref
         // `git worktree add -b <local_name> <path> <remote_ref>`
-        let mut cmd = Command::new("git");
+        let mut cmd = crate::git::cli::git_command();
         cmd.current_dir(repo_path);
         cmd.args([
             "worktree",
@@ -626,7 +625,7 @@ pub fn create_worktree_from(
     }
 
     // Build the `git worktree add` command
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::git::cli::git_command();
     cmd.current_dir(repo_path);
     cmd.args(["worktree", "add", wt_path_str, branch_name]);
 
@@ -711,7 +710,7 @@ pub fn remove_worktree(
     // ── REMOVAL ────────────────────────────────────────────────────
 
     // Step 1: git worktree remove --force <path>
-    let remove_output = Command::new("git")
+    let remove_output = crate::git::cli::git_command()
         .current_dir(repo_path)
         .args(["worktree", "remove", "--force", worktree_path])
         .output()
@@ -724,7 +723,7 @@ pub fn remove_worktree(
     }
 
     // Step 2: git worktree prune
-    let prune_output = Command::new("git")
+    let prune_output = crate::git::cli::git_command()
         .current_dir(repo_path)
         .args(["worktree", "prune"])
         .output()
@@ -934,7 +933,7 @@ pub fn cleanup_stale_worktrees(repo_path: &str) -> Result<u32, String> {
     // Count worktrees before pruning
     let before = list_worktrees(repo_path)?.len() as u32;
 
-    let output = Command::new("git")
+    let output = crate::git::cli::git_command()
         .current_dir(repo_path)
         .args(["worktree", "prune", "--verbose"])
         .output()
@@ -1070,7 +1069,7 @@ pub fn recreate_worktree(repo_path: &str, worktree_path: &str, branch: &str) -> 
     }
     // The old entry in .git/worktrees still points at the deleted folder;
     // `git worktree add` refuses the path until it is pruned.
-    let _ = Command::new("git")
+    let _ = crate::git::cli::git_command()
         .current_dir(repo_path)
         .args(["worktree", "prune"])
         .output();
@@ -1083,7 +1082,7 @@ pub fn recreate_worktree(repo_path: &str, worktree_path: &str, branch: &str) -> 
             )
         })?;
     }
-    let output = Command::new("git")
+    let output = crate::git::cli::git_command()
         .current_dir(repo_path)
         .args(["worktree", "add", worktree_path, branch])
         .output()

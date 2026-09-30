@@ -441,6 +441,26 @@ mod tests {
     const LINE: &str = r#"{"v":1,"ts":1790000000,"session":"s1","agent":"claude","nonce":"n-abc","event":"PermissionRequest","payload":{"tool_name":"Bash"}}"#;
 
     #[test]
+    fn a_tag_is_hermes_name_hash_number_and_nothing_else() {
+        for good in ["hermes-a#1", "hermes-review_2-b#123456789", "hermes-X9#0"] {
+            assert!(is_tag(good), "{good}");
+        }
+        for bad in [
+            "other-ab#1",
+            "hermes-#1",
+            "hermes-a b#1",
+            "hermes-a.b#1",
+            "hermes-a#",
+            "hermes-a#1234567890",
+            "hermes-a#1x",
+            "hermes-a",
+            "#1",
+        ] {
+            assert!(!is_tag(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn a_spool_line_parses_and_maps_to_an_exact_status() {
         let record = parse_signal_line(LINE).unwrap();
         assert_eq!(record.agent, "claude");

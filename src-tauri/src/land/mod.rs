@@ -1116,4 +1116,180 @@ mod tests {
         assert_eq!(tail("abcdef", 3), "def");
         assert_eq!(tail("é-ab", 3), "-ab");
     }
+
+    #[test]
+    fn a_tail_that_would_start_inside_a_character_starts_after_it() {
+        // "xé" is x + a two-byte é: keeping 1 byte would start inside é.
+        assert_eq!(tail("xé", 1), "");
+        assert_eq!(tail("xé", 2), "é");
+        assert_eq!(tail("xé", 3), "xé");
+    }
+
+    #[test]
+    fn short_keeps_the_first_eight_characters_of_a_commit() {
+        assert_eq!(short("0123456789abcdef"), "01234567");
+        assert_eq!(short("abc"), "abc");
+    }
+
+    #[test]
+    fn editor_and_os_litter_is_noise_and_code_is_not() {
+        assert!(noise(".DS_Store"));
+        assert!(noise("sub/dir/Thumbs.db"));
+        assert!(!noise("src/main.rs"));
+    }
+
+    #[test]
+    fn read_capped_reads_small_files_only() {
+        let dir = TempDir::new().unwrap();
+        let small = dir.path().join("small.md");
+        fs::write(&small, "hello\n").unwrap();
+        assert_eq!(read_capped(&small).as_deref(), Some("hello\n"));
+        let at_cap = dir.path().join("at-cap.md");
+        fs::write(&at_cap, "x".repeat(MAX_REPO_FILE_BYTES as usize)).unwrap();
+        assert_eq!(
+            read_capped(&at_cap).map(|s| s.len()),
+            Some(MAX_REPO_FILE_BYTES as usize),
+            "a file of exactly the cap is read"
+        );
+        let big = dir.path().join("big.md");
+        fs::write(&big, "x".repeat(MAX_REPO_FILE_BYTES as usize + 1)).unwrap();
+        assert_eq!(read_capped(&big), None, "past the cap is not read");
+        assert_eq!(read_capped(dir.path()), None, "a folder is not read");
+        assert_eq!(read_capped(&dir.path().join("missing.md")), None);
+    }
+
+    #[test]
+    fn feature_files_are_listed_by_folder() {
+        let dir = TempDir::new().unwrap();
+        assert!(feature_files(dir.path()).is_empty(), "no features folder");
+        let features = dir.path().join(".hermes").join("features");
+        for (folder, text) in [("b-second", "# B\n"), ("a-first", "# A\n")] {
+            fs::create_dir_all(features.join(folder)).unwrap();
+            fs::write(features.join(folder).join("feature.md"), text).unwrap();
+        }
+        // A folder without a feature.md is skipped.
+        fs::create_dir_all(features.join("c-empty")).unwrap();
+        let files = feature_files(dir.path());
+        let got: Vec<(&str, &str)> = files
+            .iter()
+            .map(|f| (f.folder.as_str(), f.text.as_str()))
+            .collect();
+        assert_eq!(got, vec![("a-first", "# A\n"), ("b-second", "# B\n")]);
+    }
+
+    #[test]
+    fn merging_a_branch_the_base_already_has_is_refused_without_a_record() {
+        let (_t, repo, wt) = repo_with_task();
+        let data = TempDir::new().unwrap();
+        // The task branch is where main is, and nothing is uncommitted.
+        let err = execute(
+            data.path(),
+            "s1",
+            "p1",
+            &target_for(&repo, &wt),
+            &req(LandMode::Merge, "Nothing"),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("already has everything"), "{err}");
+        assert_eq!(record::next_n(data.path(), "s1"), 1, "no record");
+    }
+
+    /// A bare remote named origin for the fixture repository.
+    #[cfg(unix)]
+    fn with_origin(t: &TempDir, repo: &Path) {
+        let bare = t.path().join("remote.git");
+        sh(t.path(), &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        sh(repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_with_nothing_on_the_branch_is_refused() {
+        let (t, repo, wt) = repo_with_task();
+        with_origin(&t, &repo);
+        let data = TempDir::new().unwrap();
+        let (gh_cmd, log) = fake_gh(t.path());
+        let err = execute(
+            data.path(),
+            "s1",
+            "p1",
+            &target_for(&repo, &wt),
+            &req(LandMode::Pr, "Nothing"),
+            Some(gh_cmd),
+        )
+        .unwrap_err();
+        assert!(err.contains("nothing on this branch"), "{err}");
+        assert!(!log.exists(), "gh was never asked");
+        assert_eq!(record::next_n(data.path(), "s1"), 1, "no record");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_for_committed_work_keeps_its_commit_and_its_own_title() {
+        let (t, repo, wt) = repo_with_task();
+        with_origin(&t, &repo);
+        let data = TempDir::new().unwrap();
+        let (gh_cmd, log) = fake_gh(t.path());
+        // The agent committed its work; nothing is left uncommitted.
+        fs::write(wt.join("b.txt"), "task\n").unwrap();
+        sh(&wt, &["add", "b.txt"]);
+        sh(&wt, &["commit", "-q", "-m", "agent commit"]);
+        let head = sh(&wt, &["rev-parse", "HEAD"]);
+        let mut r = req(LandMode::Pr, "Subject from the message");
+        r.pr_title = Some("Custom title".into());
+        let out = execute(
+            data.path(),
+            "s1",
+            "p1",
+            &target_for(&repo, &wt),
+            &r,
+            Some(gh_cmd),
+        )
+        .unwrap();
+        assert_eq!(out.status, LandStatus::Landed, "{:?}", out.error);
+        let rec = out.record.unwrap();
+        assert_eq!(
+            rec.branch_after.as_deref(),
+            Some(head.as_str()),
+            "no new commit"
+        );
+        assert_eq!(sh(&wt, &["rev-parse", "HEAD"]), head);
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(
+            logged.contains("--title Custom title --body-file -"),
+            "{logged}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_blank_pull_request_title_falls_back_to_the_message_subject() {
+        let (t, repo, wt) = repo_with_task();
+        with_origin(&t, &repo);
+        let data = TempDir::new().unwrap();
+        let (gh_cmd, log) = fake_gh(t.path());
+        fs::write(wt.join("b.txt"), "task\n").unwrap();
+        let mut r = req(LandMode::Pr, "Subject line\n\nbody");
+        r.pr_title = Some("   ".into());
+        let out = execute(
+            data.path(),
+            "s1",
+            "p1",
+            &target_for(&repo, &wt),
+            &r,
+            Some(gh_cmd),
+        )
+        .unwrap();
+        assert_eq!(out.status, LandStatus::Landed, "{:?}", out.error);
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(
+            logged.contains("--title Subject line --body-file -"),
+            "{logged}"
+        );
+        assert!(
+            logged.contains("body"),
+            "the rest of the message is the body"
+        );
+    }
 }
