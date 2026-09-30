@@ -316,6 +316,25 @@ mod tests {
     }
 
     #[test]
+    fn a_marker_needs_a_nonce_and_an_event_of_plain_characters() {
+        assert_eq!(parse_marker("v1:n0nce:Stop"), Some(("n0nce", "Stop")));
+        for event in ["turn_end", "turn.end", "turn-end", "a1_b.c-d"] {
+            assert_eq!(
+                parse_marker(&format!("v1:n:{event}")),
+                Some(("n", event)),
+                "{event}"
+            );
+        }
+        assert_eq!(parse_marker("v1::Stop"), None, "no nonce");
+        assert_eq!(parse_marker("v1:n:"), None, "no event");
+        assert_eq!(parse_marker("v1::"), None);
+        assert_eq!(parse_marker("v1:n:Bad Event"), None);
+        assert_eq!(parse_marker("v1:n:semi;colon"), None);
+        assert_eq!(parse_marker("v2:n:Stop"), None);
+        assert_eq!(parse_marker("v1:nocolon"), None);
+    }
+
+    #[test]
     fn the_in_band_marker_is_exact_only_with_this_launches_nonce() {
         let good = n(777, MARKER_TITLE, "v1:n0nce:PermissionRequest");
         let events = notification_events(&good, "claude", Some("n0nce"), 7_000);

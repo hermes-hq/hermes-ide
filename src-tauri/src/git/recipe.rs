@@ -1341,6 +1341,62 @@ mod tests {
         assert_eq!(from_wt.hash, recipe_hash(b"setup = [\"b\"]\n"));
     }
 
+    #[test]
+    fn a_recipe_of_exactly_64_kb_is_read_and_one_byte_more_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        let (wt, root) = (tmp.path().join("wt"), tmp.path().join("root"));
+        fs::create_dir_all(wt.join(".hermes")).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        let file = wt.join(".hermes/worktree.toml");
+        let at_cap = "#".repeat(MAX_RECIPE_BYTES as usize);
+        fs::write(&file, &at_cap).unwrap();
+        assert_eq!(read_recipe(&wt, &root).unwrap().unwrap().text, at_cap);
+        fs::write(&file, "#".repeat(MAX_RECIPE_BYTES as usize + 1)).unwrap();
+        let err = read_recipe(&wt, &root).unwrap_err();
+        assert!(err.contains("larger than 64 KB"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_recipe_that_cannot_be_looked_at_is_an_error_not_a_missing_file() {
+        // `.hermes` is a file, so the recipe path cannot even be looked up:
+        // that is reported, not treated as "no recipe here".
+        let tmp = TempDir::new().unwrap();
+        let (wt, root) = (tmp.path().join("wt"), tmp.path().join("root"));
+        fs::create_dir_all(&wt).unwrap();
+        fs::create_dir_all(root.join(".hermes")).unwrap();
+        fs::write(wt.join(".hermes"), "not a folder").unwrap();
+        fs::write(root.join(".hermes/worktree.toml"), "setup = []\n").unwrap();
+        let err = read_recipe(&wt, &root).unwrap_err();
+        assert!(err.contains("can't be read"), "{err}");
+    }
+
+    #[test]
+    fn a_recipe_is_trusted_per_project_and_per_exact_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db = crate::db::Database::new(tmp.path()).unwrap();
+        assert!(trust_map(&db).is_empty());
+        assert!(!is_trusted(&db, "p1", "h1"));
+        remember_trust(&db, "p1", "h1").unwrap();
+        assert!(is_trusted(&db, "p1", "h1"));
+        assert!(
+            !is_trusted(&db, "p1", "h2"),
+            "a changed file is not trusted"
+        );
+        assert!(
+            !is_trusted(&db, "p2", "h1"),
+            "another project is not trusted"
+        );
+        remember_trust(&db, "p2", "h2").unwrap();
+        remember_trust(&db, "p1", "h3").unwrap();
+        let want: BTreeMap<String, String> = [("p1", "h3"), ("p2", "h2")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        assert_eq!(trust_map(&db), want);
+        assert!(!is_trusted(&db, "p1", "h1"), "the newer file replaced it");
+    }
+
     fn node_cmd(script: &str) -> String {
         // `node -e` runs the same on sh and cmd; single quotes inside.
         format!("node -e \"{}\"", script)

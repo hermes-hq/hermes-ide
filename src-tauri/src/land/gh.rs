@@ -414,4 +414,99 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn a_job_part_that_is_not_a_number_is_left_out() {
+        assert_eq!(
+            run_and_job("https://github.com/o/r/actions/runs/123/job/abc"),
+            Some(("123".into(), None))
+        );
+        assert_eq!(
+            run_and_job("https://github.com/o/r/actions/runs/123/job/"),
+            Some(("123".into(), None))
+        );
+        assert_eq!(
+            run_and_job("https://github.com/o/r/actions/runs/123/attempts/2"),
+            Some(("123".into(), None))
+        );
+    }
+
+    /// A stand-in gh: a shell script that logs its arguments and runs `body`.
+    #[cfg(unix)]
+    fn script_gh(dir: &Path, body: &str) -> (GhCommand, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let log = dir.join("gh.log");
+        let script = dir.join("gh");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"ARGS $*\" >> '{}'\n{body}\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        (
+            GhCommand {
+                program: script,
+                prefix: vec![],
+            },
+            log,
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_pull_request_says_what_gh_said() {
+        let dir = TempDir::new().unwrap();
+        let (gh, _) = script_gh(
+            dir.path(),
+            "echo 'noise on stdout'\necho '  ' >&2\necho 'a pull request already exists' >&2\nexit 1",
+        );
+        let err = create_pr(&gh, dir.path(), "main", "task", "Title", "Body").unwrap_err();
+        assert_eq!(
+            err,
+            "gh could not open the pull request: a pull request already exists"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checks_come_back_from_gh_json_even_when_gh_exits_non_zero() {
+        let dir = TempDir::new().unwrap();
+        let (gh, log) = script_gh(
+            dir.path(),
+            "echo '[{\"name\":\"test\",\"state\":\"FAILURE\",\"bucket\":\"fail\",\"link\":\"L\",\"workflow\":\"CI\"}]'\nexit 8",
+        );
+        let checks = pr_checks(&gh, dir.path(), "https://github.test/o/r/pull/7").unwrap();
+        assert_eq!(checks.len(), 1);
+        assert_eq!(
+            (checks[0].name.as_str(), checks[0].bucket.as_str()),
+            ("test", "fail")
+        );
+        assert!(fs::read_to_string(log)
+            .unwrap()
+            .contains("pr checks https://github.test/o/r/pull/7 --json"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_failed_log_of_one_job_is_what_gh_prints() {
+        let dir = TempDir::new().unwrap();
+        let (gh, log) = script_gh(dir.path(), "printf 'step 3 failed\\nerror: boom\\n'");
+        let text = failed_log(
+            &gh,
+            dir.path(),
+            "https://github.com/o/r/actions/runs/123/job/456",
+        )
+        .unwrap();
+        assert_eq!(text, "step 3 failed\nerror: boom\n");
+        assert!(fs::read_to_string(log)
+            .unwrap()
+            .contains("run view 123 --log-failed --job 456"));
+        // gh failing is an error that says why.
+        let (gh, _) = script_gh(dir.path(), "echo 'HTTP 404' >&2\nexit 1");
+        let err = failed_log(&gh, dir.path(), "https://github.com/o/r/actions/runs/1").unwrap_err();
+        assert_eq!(err, "gh could not fetch the log: HTTP 404");
+    }
 }

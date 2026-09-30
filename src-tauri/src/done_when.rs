@@ -698,6 +698,85 @@ mod tests {
     }
 
     #[test]
+    fn a_long_failure_is_cut_to_120_characters() {
+        let with_error = |text: String| {
+            let mut e = run("error", "turn_end");
+            e.commands.clear();
+            e.error = Some(text);
+            e
+        };
+        let exactly = "é".repeat(120);
+        assert_eq!(failure_detail(&with_error(exactly.clone())), exactly);
+        let longer = "é".repeat(121);
+        let cut = failure_detail(&with_error(longer));
+        assert_eq!(cut, format!("{}…", "é".repeat(119)));
+        assert_eq!(cut.chars().count(), 120);
+    }
+
+    #[test]
+    fn only_a_stop_hook_that_gave_up_counts_as_a_failed_turn() {
+        let mut sc = SessionChecks {
+            hook: true,
+            ..Default::default()
+        };
+        // Attempts the hook is still retrying do not count.
+        let mut attempt = run("failed", "stop_hook");
+        attempt.gave_up = false;
+        let (rec, _) = fold_run(&mut sc, "s", attempt, None);
+        assert_eq!(rec.failed_turns, 0);
+        // Giving up counts once.
+        let mut gave_up = run("failed", "stop_hook");
+        gave_up.gave_up = true;
+        let (rec, _) = fold_run(&mut sc, "s", gave_up.clone(), None);
+        assert_eq!(rec.failed_turns, 1);
+        let (rec, _) = fold_run(&mut sc, "s", gave_up, None);
+        assert_eq!(rec.failed_turns, 2);
+        // A turn end that failed counts through its own rule, not this one.
+        let mut sc = SessionChecks::default();
+        let mut turn = run("failed", "turn_end");
+        turn.gave_up = true;
+        let (rec, _) = fold_run(&mut sc, "s", turn, Some(1));
+        assert_eq!(rec.failed_turns, 1);
+    }
+
+    #[test]
+    fn forgetting_a_session_drops_its_checks() {
+        let state = DoneWhenState::default();
+        state.with("s1", |sc| {
+            sc.hook = true;
+            sc.failed_turns = 2;
+        });
+        state.with("s2", |sc| sc.hook = true);
+        state.forget("s1");
+        assert!(!state.with("s1", |sc| sc.hook));
+        assert_eq!(state.with("s1", |sc| sc.failed_turns), 0);
+        assert!(state.with("s2", |sc| sc.hook), "other sessions are kept");
+    }
+
+    #[test]
+    fn now_is_the_wall_clock_in_milliseconds() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let now = now_ms();
+        assert!(now >= before && now - before < 60_000, "{now} vs {before}");
+    }
+
+    #[test]
+    fn the_check_path_keeps_every_folder_of_the_app_path() {
+        let path = check_path_var();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        for dir in std::env::split_paths(&crate::agent::enriched_path_var()) {
+            if dir.as_os_str().is_empty() {
+                continue;
+            }
+            assert!(dirs.contains(&dir), "{} is missing", dir.display());
+        }
+        assert!(!dirs.is_empty());
+    }
+
+    #[test]
     fn the_login_path_comes_first_and_every_folder_once() {
         let sep = if cfg!(windows) { ";" } else { ":" };
         let login =

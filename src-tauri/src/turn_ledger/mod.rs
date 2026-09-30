@@ -1054,6 +1054,16 @@ mod tests {
     }
 
     #[test]
+    fn now_is_the_wall_clock_in_milliseconds() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let now = now_ms();
+        assert!(now >= before && now - before < 60_000, "{now} vs {before}");
+    }
+
+    #[test]
     fn a_turn_is_snapshotted_into_a_hidden_ref_and_a_row_without_touching_the_user_state() {
         let t = TestRepo::new();
         let (_d, db) = open_db();
