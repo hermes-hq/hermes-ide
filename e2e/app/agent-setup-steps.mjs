@@ -19,6 +19,21 @@ import { completeOnboarding, dismissWhatsNew, openWizard } from "./n11-steps.mjs
 
 export const onWindows = platform() === "win32";
 
+/**
+ * The fake agent's banner, wherever it starts on a terminal line. A long
+ * prompt (a CI runner's long host name) wraps the launch line, and the
+ * terminal then reads the prompt, the typed command and the banner as one
+ * logical line, so the banner does not start a line (it can even follow the
+ * last character of the command directly). Nothing Hermes types contains it.
+ */
+export const FAKE_AGENT_BANNER = /FAKE-AGENT /;
+
+/** The banner from "FAKE-AGENT " to the end of `line`, or null when the line has none. */
+export function bannerIn(line) {
+  const i = line.indexOf("FAKE-AGENT ");
+  return i < 0 ? null : line.slice(i).trim();
+}
+
 const FAKE_AGENT_SOURCE = `const args = process.argv.slice(2);
 process.stdout.write("FAKE-AGENT " + args.join(" ") + "\\r\\n");
 process.stdin.setEncoding("utf8");
@@ -185,8 +200,8 @@ export async function startAgentSession(bridge, log, { agent, prefix, suffix = "
     const ids = window.__HERMES_E2E__.terminalIds().filter((id) => !${JSON.stringify(before)}.includes(id));
     return ids.length === 1 ? ids[0] : null;
   `, { timeoutMs: 20_000 });
-  const banner = await bridge.waitForTerminal(sessionId, /^FAKE-AGENT /, { timeoutMs: 60_000 });
-  const line = banner.lines.map((l) => l.trim()).find((l) => l.startsWith("FAKE-AGENT "));
+  const banner = await bridge.waitForTerminal(sessionId, FAKE_AGENT_BANNER, { timeoutMs: 60_000 });
+  const line = banner.lines.map(bannerIn).find(Boolean);
   log(`  session ${sessionId}: ${line}`);
   return { sessionId, wizard: { ...shown, preview }, bannerLine: line };
 }
