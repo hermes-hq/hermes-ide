@@ -287,7 +287,7 @@ pub fn ensure_branch(root: &Path, slug: &str) -> Option<String> {
     if current_branch(root).as_deref() == Some(want.as_str()) {
         return Some(format!("On branch {want}"));
     }
-    let out = std::process::Command::new("git")
+    let out = crate::git_command()
         .arg("-C")
         .arg(root)
         .args(["switch", "-c", &want])

@@ -8,7 +8,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::feature::{FeatureDir, TrackError};
 use crate::ARCHIVE_REF_PREFIX;
@@ -24,7 +23,7 @@ pub struct LandOutcome {
 }
 
 fn git(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<String, TrackError> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::git_command();
     cmd.arg("-C").arg(root).args(args);
     for (k, v) in envs {
         cmd.env(k, v);

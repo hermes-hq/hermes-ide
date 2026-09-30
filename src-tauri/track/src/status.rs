@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::feature::{check, current_branch, list_features, FeatureDir, TrackError};
 use crate::phases::{Gate, Phase};
@@ -81,7 +80,7 @@ pub fn feature_status(root: &Path, slug: &str) -> FeatureStatus {
 /// Every worktree of the repository `root` belongs to (itself included);
 /// just `root` when it is not a git repository.
 pub fn worktrees(root: &Path) -> Vec<PathBuf> {
-    let out = Command::new("git")
+    let out = crate::git_command()
         .arg("-C")
         .arg(root)
         .args(["worktree", "list", "--porcelain"])

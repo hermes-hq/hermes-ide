@@ -35,6 +35,18 @@ pub use questions::{parse_questions, Question};
 /// — see the Hermes side.)
 pub const AGENT_ENV: &str = "HERMES_AGENT";
 
+/// A `git` command whose messages are in English whatever the user's locale
+/// (`LC_ALL` and `LANG` set to `C`, `LANGUAGE` removed): what this crate
+/// reports from git reads the same for everyone, and so does what the app
+/// matches in it. File names, commit messages and diffs are unaffected.
+pub fn git_command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    cmd.env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env_remove("LANGUAGE");
+    cmd
+}
+
 /// Where the feature folders live, relative to the worktree root.
 pub const FEATURES_DIR: &str = ".hermes/features";
 /// Where the per-repository phase prompts live.
@@ -43,3 +55,30 @@ pub const PHASES_DIR: &str = ".hermes/phases";
 pub const CLAUDE_COMMAND_FILE: &str = ".claude/commands/hermes-phase.md";
 /// Where `hi land` keeps the track files of a landed feature.
 pub const ARCHIVE_REF_PREFIX: &str = "refs/hermes/archive/";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_command_runs_git_in_the_c_locale() {
+        let dir = tempfile::tempdir().unwrap();
+        // A shell alias prints the environment git itself runs with.
+        let out = git_command()
+            .arg("-C")
+            .arg(dir.path())
+            .args(["-c", "alias.hermes-env=!env", "hermes-env"])
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let env = String::from_utf8_lossy(&out.stdout);
+        let has = |line: &str| env.lines().any(|l| l.trim_end_matches('\r') == line);
+        assert!(has("LC_ALL=C"), "{env}");
+        assert!(has("LANG=C"), "{env}");
+        assert!(!env.lines().any(|l| l.starts_with("LANGUAGE=")), "{env}");
+    }
+}
