@@ -13,7 +13,8 @@
 //            than a warm-cache install, see DEADLINE_MS), cloned copy-on-write from the project
 //            folder (clonefile on macOS, reflink on Linux, block cloning on
 //            Windows). The disk barely notices (the blob is shared, not
-//            copied: free space on macOS/Linux, the blob's clusters on
+//            copied: the bytes the worktree holds of its own on
+//            macOS/Linux, see cow-usage.mjs; the blob's clusters on
 //            Windows), and the clone is independent: overwriting it leaves
 //            the project folder alone. The Git panel says so and shows the ports.
 //          - A's terminal runs the demo dev server: it finds its dependency
@@ -61,13 +62,13 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  statfsSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { ownDiskUsage } from "../cow-usage.mjs";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
 const NEGATIVE = process.env.HERMES_E2E_N17_NEGATIVE === "1";
@@ -270,27 +271,6 @@ function extentsOf(file) {
     .split(/\r?\n/)
     .filter((line) => /LCN/i.test(line))
     .map((line) => line.trim().replace(/\s+/g, " "));
-}
-
-function freeBytes(dir) {
-  const s = statfsSync(dir);
-  return Number(s.bavail) * Number(s.bsize);
-}
-
-/**
- * Free space once the file system has caught up: some (ReFS) account for
- * written or released blocks a moment later. Waits for two readings a
- * second apart within 1 MB of each other (at most 30 s).
- */
-async function settledFreeBytes(dir) {
-  let last = freeBytes(dir);
-  for (let i = 0; i < 30; i++) {
-    await sleep(1_000);
-    const now = freeBytes(dir);
-    if (Math.abs(now - last) < 1_000_000) return now;
-    last = now;
-  }
-  return last;
 }
 
 // ─── UI helpers ──────────────────────────────────────────────────────
@@ -575,10 +555,8 @@ try {
   await waitForReturningLaunch(app.bridge);
 
   log('step 3: session A on the new branch "n17-a"');
-  const freeBefore = await settledFreeBytes(cowRoot);
   const a = await createSessionOnNewBranch(app.bridge, "n17-a", "01");
   const wtA = await worktreeOf(app.bridge, "n17-a");
-  const freeAfter = await settledFreeBytes(cowRoot);
   log(`  worktree: ${wtA.path}`);
   log(`  Create to shell: ${a.tookMs} ms; setup: ${JSON.stringify(wtA.setup)}`);
   assert(existsSync(join(wtA.path, "serve.cjs")), "the worktree is checked out");
@@ -595,8 +573,10 @@ try {
       `${(installMs / a.tookMs).toFixed(1)}x faster than a warm-cache install (${installMs} ms; at least ${MIN_SPEEDUP}x)`,
     );
   }
-  const used = freeBefore - freeAfter;
-  log(`  free space before/after: ${freeBefore} / ${freeAfter} (used ${used} bytes)`);
+  // What the worktree holds of its own: the bytes of its files no other file
+  // shares (not the disk's free space, which any other writer moves).
+  const own = onWindows ? null : ownDiskUsage(wtA.path);
+  if (own) log(`  worktree A: ${own.files} files, ${own.bytes} bytes, ${own.privateBytes} of them its own`);
   if (!REAL_DEPS) {
     const blob = join("node_modules", "n17-blob", "blob.bin");
     if (onWindows) {
@@ -607,9 +587,12 @@ try {
       log(`  blob extents: clone ${JSON.stringify(mine)}; source ${JSON.stringify(source)}`);
       assert(mine.length > 0 && JSON.stringify(mine) === JSON.stringify(source), `the ${BLOB_BYTES / 2 ** 20} MB blob was shared, not copied (same clusters as the source)`);
     } else {
-      // A copy would use the blob plus the filler (over 290 MB); a clone
-      // only metadata. The margin leaves room for other writers on the disk.
-      assert(used < BLOB_BYTES * 0.75, `the ${BLOB_BYTES / 2 ** 20} MB blob was shared, not copied (${(used / 2 ** 20).toFixed(1)} MB used)`);
+      // A copy would hold the blob plus the filler (over 290 MB) of its
+      // own; a clone next to nothing. The same limit as when this was
+      // measured as free space.
+      const used = own.privateBytes;
+      assert(own.bytes > BLOB_BYTES, `the worktree has the blob and the filler (${(own.bytes / 2 ** 20).toFixed(1)} MB in ${own.files} files)`);
+      assert(used < BLOB_BYTES * 0.75, `the ${BLOB_BYTES / 2 ** 20} MB blob was shared, not copied (${(used / 2 ** 20).toFixed(1)} MB of the worktree's own)`);
     }
     assert(statSync(join(wtA.path, blob)).size === BLOB_BYTES, "the clone has the whole blob");
     const dep = join("node_modules", "n17-demo-dep", "index.js");
