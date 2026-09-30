@@ -827,6 +827,29 @@ fn e2e_slow_spawn() {
     }
 }
 
+/// Ends a session's opening (see `PtyManager::opening`) on every early
+/// return of `create_session`, so a failed spawn leaves nothing behind.
+/// `create_session` ends it itself, with the manager held, once the terminal
+/// is registered or refused, and disarms this.
+struct OpeningGuard<'a> {
+    manager: &'a StdMutex<crate::pty::PtyManager>,
+    session_id: String,
+    armed: bool,
+}
+
+impl Drop for OpeningGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let mut mgr = self.manager.lock().unwrap_or_else(|e| e.into_inner());
+            mgr.finish_opening(&self.session_id);
+        }
+    }
+}
+
+/// The error `create_session` returns when the session was closed while
+/// it was being opened.
+const CLOSED_WHILE_OPENING: &str = "The session was closed while it was being opened";
+
 // Tauri command handler — params come from frontend invocation. Off the main
 // thread: starting the session host can take seconds, and on the main thread
 // that would freeze the window.
@@ -983,10 +1006,19 @@ pub fn create_session(
     // Quit included (the webview stopped answering; N20 on the macOS CI
     // runner). It is taken for the counter here, and again once the terminal
     // exists, before its reader starts, until the session is registered.
+    // Meanwhile the session is marked as being opened: a close that arrives
+    // then is remembered, and the new terminal is killed instead of
+    // registered (a closed session must never come back).
     let counter = {
         let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
         mgr.session_counter += 1;
+        mgr.begin_opening(&session_id);
         mgr.session_counter
+    };
+    let mut opening_guard = OpeningGuard {
+        manager: &state.pty_manager,
+        session_id: session_id.clone(),
+        armed: true,
     };
 
     let session_label = label.unwrap_or_else(|| format!("Session {}", counter));
@@ -1117,6 +1149,18 @@ pub fn create_session(
                     }
                 }
             }
+        }
+
+        // Closed already: nothing is announced or written for it.
+        let closed = {
+            let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+            opening_guard.armed = false;
+            mgr.finish_opening(&session_id)
+                .map(|o| o.closed)
+                .unwrap_or(false)
+        };
+        if closed {
+            return Err(CLOSED_WHILE_OPENING.to_string());
         }
 
         let result = SessionUpdate::from(&s);
@@ -1362,6 +1406,27 @@ pub fn create_session(
     // The terminal exists: from its first output on, anything that looks the
     // session up waits until it is registered below (as it always did).
     let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+    opening_guard.armed = false;
+    let opened = mgr.finish_opening(&session_id).unwrap_or_default();
+    if opened.closed {
+        // Closed while it was being opened (close_session found nothing to
+        // stop and has cleaned up already): stop this terminal, and register
+        // or write nothing, or the closed session would be live again.
+        drop(mgr);
+        log::info!(
+            "[create_session] {} was closed while it was being opened; stopping its terminal",
+            session_id
+        );
+        transport.kill().ok();
+        crate::pty::shell_integration::cleanup(&shell_integration);
+        if let Ok(mut s) = session_arc.lock() {
+            s.phase = SessionPhase::Destroyed;
+        }
+        thread::spawn(move || {
+            transport.wait();
+        });
+        return Err(CLOSED_WHILE_OPENING.to_string());
+    }
     if let Ok(mut s) = session_arc.lock() {
         s.hosted = transport.hosted();
         if reattached {
@@ -1863,6 +1928,20 @@ pub fn create_session(
         shell_integration,
         hermes_suggestions: disable_native_suggestions,
     };
+    // Typing and a resize that arrived while it was being opened.
+    if let Some((rows, cols)) = opened.size {
+        pty_session.transport.resize(rows, cols).ok();
+    }
+    if !opened.input.is_empty() {
+        if let Ok(mut w) = pty_session.writer.lock() {
+            if w.write_all(&opened.input).and_then(|_| w.flush()).is_err() {
+                log::warn!(
+                    "[create_session] {}: could not write the input typed while it was opening",
+                    session_id
+                );
+            }
+        }
+    }
     mgr.sessions.insert(session_id.clone(), pty_session);
 
     // Save to DB
@@ -1966,15 +2045,20 @@ pub fn write_to_session(
     data: String,
 ) -> Result<(), String> {
     let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let session = mgr
-        .sessions
-        .get_mut(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
 
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&data)
         .map_err(|e| format!("Invalid base64 input: {}", e))?;
+
+    // Still being opened: kept, and written once it is.
+    if !mgr.sessions.contains_key(&session_id) && mgr.queue_opening_input(&session_id, &bytes) {
+        return Ok(());
+    }
+    let session = mgr
+        .sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
 
     if let Ok(mut a) = session.analyzer.lock() {
         a.mark_input_sent();
@@ -2326,7 +2410,12 @@ pub fn resize_session(
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
-    let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+    // Still being opened: applied once it is.
+    if !mgr.sessions.contains_key(&session_id) && mgr.queue_opening_resize(&session_id, rows, cols)
+    {
+        return Ok(());
+    }
     let session = mgr
         .sessions
         .get(&session_id)
@@ -2747,6 +2836,14 @@ pub fn close_session(
     // before touching the DB / filesystem.  Agent sessions never insert
     // into `mgr.sessions` — for them this branch is a no-op and the
     // mode-agnostic cleanup below runs unconditionally.
+    // Still being opened: create_session stops the new terminal and
+    // registers nothing once its spawn returns (the cleanup below runs now).
+    if mgr.close_opening(&session_id) {
+        log::info!(
+            "close_session: '{}' is still being opened; it will not be registered",
+            session_id
+        );
+    }
     if let Some(mut pty_session) = mgr.sessions.remove(&session_id) {
         // Kill the child shell process FIRST — it may still be using ZDOTDIR
         // temp files. Don't block on wait() since the process may be hung.

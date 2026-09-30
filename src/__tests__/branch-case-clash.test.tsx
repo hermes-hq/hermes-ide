@@ -27,7 +27,8 @@ vi.mock("../api/git", () => ({
 
 import { gitListBranchesForProject, listWorktrees, checkBranchAvailable } from "../api/git";
 import { SessionBranchSelector, type BranchDraft } from "../components/SessionBranchSelector";
-import { findBranchClash } from "../utils/branchClash";
+import { findBranchClash, gitErrorMessage, parseBranchClashError } from "../utils/branchClash";
+import { BranchConflictDialog, suggestNewBranchName } from "../components/BranchConflictDialog";
 import { I18nProvider } from "../i18n/I18nProvider";
 import type { GitBranch, WorktreeInfo } from "../types/git";
 
@@ -138,5 +139,84 @@ describe("New branch form: a case-only variant of an existing branch", () => {
     fireEvent.change(field, { target: { value: "DEVELOP" } });
     expect(await screen.findByText(/Branch develop already exists/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Use the existing/ })).toBeNull();
+  });
+});
+
+describe("the backend's BRANCH_NAME_CLASH error", () => {
+  it("is read back into the name and the clash, and said in words", () => {
+    const raw = 'BRANCH_NAME_CLASH:{"name":"Develop","existing":"develop","kind":"case"}';
+    expect(parseBranchClashError(raw)).toEqual({ name: "Develop", clash: { kind: "case", existing: "develop" } });
+    expect(parseBranchClashError(new Error(raw))).toEqual({ name: "Develop", clash: { kind: "case", existing: "develop" } });
+    expect(gitErrorMessage(raw)).toMatch(/^Branch develop already exists: .*letter case/);
+    expect(gitErrorMessage('BRANCH_NAME_CLASH:{"name":"develop","existing":"develop","kind":"same"}')).toBe("A branch named develop already exists");
+    expect(gitErrorMessage('BRANCH_NAME_CLASH:{"name":"Feature/x","existing":"feature/inbox","kind":"folder"}')).toMatch(/^Clashes with the existing branch feature\/inbox/);
+  });
+
+  it("any other error is left as it is", () => {
+    expect(parseBranchClashError("git worktree add failed: boom")).toBeNull();
+    expect(parseBranchClashError("BRANCH_NAME_CLASH:not json")).toBeNull();
+    expect(gitErrorMessage(new Error("disk full"))).toBe("disk full");
+    expect(gitErrorMessage("BRANCH_NAME_CLASH:not json")).toBe("BRANCH_NAME_CLASH:not json");
+  });
+});
+
+describe("Branch In Use choice: the new name is checked against every local branch", () => {
+  const local = ["main", "develop", "feature/inbox", "main-2"];
+  function renderDialog() {
+    const onCreateNewBranch = vi.fn();
+    const onUseExisting = vi.fn();
+    render(
+      <BranchConflictDialog
+        branchName="main"
+        heldBy="the project folder"
+        path="/tmp/hermes-test/repo"
+        localBranches={local}
+        onReuse={vi.fn()}
+        onCreateNewBranch={onCreateNewBranch}
+        onUseExisting={onUseExisting}
+        onCancel={vi.fn()}
+      />,
+    );
+    const field = screen.getByRole("textbox", { name: "New branch name" }) as HTMLInputElement;
+    return { field, onCreateNewBranch, onUseExisting };
+  }
+
+  it("offers a name no branch has (main-2 exists, so main-3)", () => {
+    const { field } = renderDialog();
+    expect(field.value).toBe("main-3");
+    expect(suggestNewBranchName("main", ["main"])).toBe("main-2");
+    expect(suggestNewBranchName("main", ["main", "Main-2"])).toBe("main-3");
+  });
+
+  it("an existing, free branch typed as the new name is refused, and offered on purpose", () => {
+    const { field, onCreateNewBranch, onUseExisting } = renderDialog();
+    fireEvent.change(field, { target: { value: "develop" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("A branch named develop already exists");
+    fireEvent.click(screen.getByRole("button", { name: "Use new branch" }));
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(onCreateNewBranch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Use the existing develop" }));
+    expect(onUseExisting).toHaveBeenCalledWith("develop");
+  });
+
+  it("letter case alone does not make it new; a folder in another case has nothing to offer", () => {
+    const { field, onCreateNewBranch, onUseExisting } = renderDialog();
+    fireEvent.change(field, { target: { value: "DEVELOP" } });
+    expect(screen.getByRole("alert")).toHaveTextContent(/Branch develop already exists/);
+    fireEvent.click(screen.getByRole("button", { name: "Use the existing develop" }));
+    expect(onUseExisting).toHaveBeenCalledWith("develop");
+    fireEvent.change(field, { target: { value: "Feature/new" } });
+    expect(screen.getByRole("alert")).toHaveTextContent(/feature\/inbox/);
+    expect(screen.queryByRole("button", { name: /Use the existing/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use new branch" }));
+    expect(onCreateNewBranch).not.toHaveBeenCalled();
+  });
+
+  it("a free name is created as before", () => {
+    const { field, onCreateNewBranch } = renderDialog();
+    fireEvent.change(field, { target: { value: "fix/login" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use new branch" }));
+    expect(onCreateNewBranch).toHaveBeenCalledWith("fix/login");
   });
 });

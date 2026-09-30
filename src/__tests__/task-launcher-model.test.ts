@@ -15,6 +15,7 @@ import {
   formatBytes,
   isUsableBranchName,
   nextFreeBranch,
+  freeBranchFor,
   parseTaskLaunches,
   pickDefaultAgent,
   secondAgentBranch,
@@ -24,6 +25,7 @@ import {
   type LaunchCheckInput,
   type TaskLaunchRecord,
 } from "../launcher/taskLauncher";
+import { findBranchClash } from "../utils/branchClash";
 import { parseFeatureFrontMatter } from "../agent/contract/featureFrontMatter";
 import type { DoctorRow } from "../api/doctor";
 
@@ -148,10 +150,24 @@ describe("blocking rows", () => {
       { kind: "branch-exists", branch: "hermes/Fix-Login", suggestion: "hermes/Fix-Login-3", existing: "hermes/fix-login", clash: "case" },
     ]);
     // A folder that differs only in case is the same folder there.
-    expect(blockingRows(check({ agents: [{ id: "claude", branch: "Feature/new" }], branches: ["feature/inbox"] }))).toMatchObject([
-      { kind: "branch-exists", branch: "Feature/new", existing: "feature/inbox", clash: "folder" },
+    // Its suggestion spells the folder as the existing branch does: a -2
+    // suffix would still be in the Feature/ folder.
+    expect(blockingRows(check({ agents: [{ id: "claude", branch: "Feature/new" }], branches: ["feature/inbox"] }))).toEqual([
+      { kind: "branch-exists", branch: "Feature/new", suggestion: "feature/new", existing: "feature/inbox", clash: "folder" },
     ]);
     expect(blockingRows(check({ agents: [{ id: "claude", branch: "feature/new" }], branches: ["feature/inbox", "Develop"] }))).toEqual([]);
+  });
+
+  it("the branch offered instead is always free, folders included", () => {
+    const branches = ["feature/inbox", "feature/new", "team/a/x"];
+    expect(freeBranchFor("Feature/new", branches)).toBe("feature/new-2");
+    expect(freeBranchFor("Feature/Other", branches)).toBe("feature/Other");
+    expect(freeBranchFor("TEAM/A/z", branches)).toBe("team/a/z");
+    for (const typed of ["Feature/new", "Feature/Other", "TEAM/A/z", "team/b/q", "feature/INBOX"]) {
+      const offered = freeBranchFor(typed, branches);
+      expect(offered).not.toBeNull();
+      expect(findBranchClash(offered!, branches)).toBeNull();
+    }
   });
 
   it("a folder that is not a repository blocks, and no branch is judged there", () => {

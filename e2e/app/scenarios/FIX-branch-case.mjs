@@ -18,7 +18,17 @@
 //      "Develop" as a new branch, and "Develop" as an existing one, are
 //      refused; no branch, no worktree, develop does not move;
 //   4. choosing the existing develop on purpose works: the session's worktree
-//      is on develop (exactly), and only then does a commit there move it.
+//      is on develop (exactly), and only then does a commit there move it;
+//   5. the Git panel's New Branch refuses "Develop" too, in words (never the
+//      backend's raw error), and makes no branch;
+//   6. a NEW branch asked under the exact name of an existing one is never
+//      handed that branch: "feature/inbox" (free) as new is refused by the
+//      backend, "main" (the project folder has it) as new is BRANCH_IN_USE;
+//   7. the Branch In Use choice (a session asking for main) checks the new
+//      name against every local branch: "feature/inbox" and "Feature/Inbox"
+//      are refused, naming feature/inbox, "Use new branch" does nothing, and
+//      "Use the existing feature/inbox" gives the session a worktree on
+//      feature/inbox, chosen on purpose.
 //
 // Negative control (must end in RESULT: FAIL): a build of main before the fix
 // (the form accepts "Develop" as new, and the backend checks develop out).
@@ -32,6 +42,7 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, outDir, sleep } from "../harness.mjs";
 import { completeTaskWelcome, expandOptions, launcherFixtures, openLauncher, typeInto } from "../launcher-steps.mjs";
+import { menuAction } from "../fleet-steps.mjs";
 
 const SCENARIO = "FIX-branch-case";
 const startedAt = Date.now();
@@ -153,7 +164,7 @@ try {
       } catch (e) { return { ok: false, error: String(e) }; }
     `);
     log(`  git_create_worktree(Develop, createBranch: ${createBranch}) → ${JSON.stringify(r)}`);
-    check(!r.ok && /BRANCH_NAME_CLASH/.test(r.error ?? "") && /'develop'/.test(r.error ?? ""), `createBranch ${createBranch}: refused, naming develop`);
+    check(!r.ok && /BRANCH_NAME_CLASH/.test(r.error ?? "") && /"existing":"develop"/.test(r.error ?? ""), `createBranch ${createBranch}: refused, naming develop`);
   }
   check(JSON.stringify(branches()) === JSON.stringify(branchesBefore), `no branch was made (${branches().join(", ")})`);
   check(!fx.worktrees().some((w) => /develop/i.test(w.branch ?? "")), "no worktree is on develop or Develop");
@@ -192,6 +203,112 @@ try {
   }
   check(!branches().includes("Develop"), `git never got a branch Develop (${branches().join(", ")})`);
   await bridge.screenshot(join(evidenceDir, "03-session.png"));
+
+  log("step 5: the Git panel's New Branch refuses Develop, in words");
+  {
+    await menuAction(bridge, "view.git-panel");
+    const SECTION = ".review-changes .git-project-section";
+    const opened = await bridge.waitFor("the session's Git section", `return !!e2e.first(${JSON.stringify(SECTION + " .git-project-branch-clickable")});`, { timeoutMs: 20_000 }).catch(() => false);
+    check(!!opened, "the Git section with the branch name is shown");
+    if (opened) {
+      await bridge.click(`${SECTION} .git-project-branch-clickable`);
+      await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(".git-branch-selector .git-branch-new-btn"), "+ New Branch"));`, { timeoutMs: 10_000 });
+      await typeInto(bridge, ".git-branch-create-input", "Develop");
+      await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(".git-branch-create-input-row .git-btn"), "Create"));`);
+      const error = await bridge.waitFor("the New Branch error", `const t = e2e.norm(e2e.first(".git-branch-selector .git-error")?.innerText || ""); return t || false;`, { timeoutMs: 10_000 }).catch(() => null);
+      log(`  Git panel error: ${JSON.stringify(error)}`);
+      check(!!error && /develop/.test(error) && /already exists/.test(error), "the Git panel says Develop is the existing branch develop");
+      check(!!error && !/BRANCH_NAME_CLASH|\{/.test(error), "in words, not the backend's raw error");
+      await bridge.screenshot(join(evidenceDir, "04-git-panel.png"));
+      await bridge.eval(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return true;`);
+    }
+    check(!branches().includes("Develop"), `the Git panel made no branch Develop (${branches().join(", ")})`);
+  }
+
+  log("step 6: a NEW branch under the exact name of an existing one is never handed that branch");
+  {
+    const inboxBefore = fx.git("rev-parse", "feature/inbox");
+    const worktreesBefore = fx.worktrees().length;
+    for (const [name, want] of [["feature/inbox", "clash"], ["main", "in-use"]]) {
+      const r = await bridge.eval(`
+        try {
+          const out = await window.__TAURI_INTERNALS__.invoke("git_create_worktree", { sessionId: "fixcase-exact-${name.replace(/\W/g, "-")}", projectId: ${JSON.stringify(project.id)}, branchName: ${JSON.stringify(name)}, createBranch: true, fromRemote: null });
+          return { ok: true, out };
+        } catch (e) { return { ok: false, error: String(e) }; }
+      `);
+      log(`  git_create_worktree(${name}, createBranch: true) → ${JSON.stringify(r)}`);
+      if (want === "clash") {
+        check(!r.ok && /^BRANCH_NAME_CLASH:/.test(r.error ?? "") && r.error.includes('"existing":"feature/inbox"') && r.error.includes('"kind":"same"'), `${name} (free) as a new branch: refused as an existing branch`);
+      } else {
+        check(!r.ok && /^BRANCH_IN_USE:/.test(r.error ?? "") && r.error.includes('"branch":"main"'), `${name} (the project folder has it) as a new branch: BRANCH_IN_USE, so the person chooses`);
+      }
+    }
+    check(fx.worktrees().length === worktreesBefore && !fx.worktrees().some((w) => w.branch === "feature/inbox"), "no worktree was made (none on feature/inbox)");
+    check(fx.git("rev-parse", "feature/inbox") === inboxBefore, "feature/inbox has not moved");
+  }
+
+  log("step 7: the Branch In Use choice checks the new name against every local branch");
+  {
+    const before = await bridge.terminalIds();
+    // A new session asking for main, which the project folder has checked out.
+    await openLauncher(bridge);
+    await bridge.click(".task-launcher-advanced");
+    await bridge.waitFor("the New Session creator", `return !e2e.first(".task-launcher-sheet") && e2e.all(".session-creator-provider-card").length > 0;`, { timeoutMs: 20_000 });
+    await bridge.click('.session-creator-provider-card[data-agent-id="claude"]');
+    await bridge.eval(`const box = e2e.first(".session-creator-agent-view input[type=checkbox]"); if (box && box.checked) e2e.click(box); return true;`);
+    await bridge.click(".session-creator-actions .session-creator-btn-primary");
+    await bridge.waitFor("the folder step", `return e2e.all(".session-creator-list .project-picker-item").length > 0;`, { timeoutMs: 20_000 });
+    await bridge.clickWhenReady(`const r = e2e.all(".session-creator-list .project-picker-item").find((x) => x.innerText.includes("launcher-repo")); e2e.must(r, "the repository row"); return r.classList.contains("project-picker-item-attached") ? true : e2e.click(r);`);
+    await bridge.waitFor("the repository picked", `return e2e.all(".session-creator-list .project-picker-item-attached").length === 1;`);
+    await bridge.click(".session-creator-actions .session-creator-btn-primary");
+    await bridge.waitFor("the branch step", `return !!e2e.first(".session-creator-branch-multi");`, { timeoutMs: 30_000 });
+    await bridge.waitFor("a default branch", `return !!e2e.first(".session-creator-branch-selected-label");`, { timeoutMs: 20_000 });
+    await sleep(300);
+    await bridge.clickWhenReady(`return e2e.first(".branch-selector-body") ? true : e2e.click(e2e.must(e2e.first(".session-creator-branch-project-header"), "the project header"));`);
+    await bridge.waitFor("the branch picker", `return !!e2e.first(".branch-selector-tabs");`, { timeoutMs: 20_000 });
+    await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".branch-selector-tabs [role=radio]")[0], "Existing branch"));`);
+    await bridge.clickWhenReady(`
+      const row = e2e.all(".branch-selector-item").find((el) => e2e.norm(el.querySelector(".branch-selector-item-name")?.innerText) === "main");
+      return e2e.click(e2e.must(row, "branch row main"));
+    `, { timeoutMs: 10_000 });
+    await bridge.waitFor("main chosen", `return /^main$/.test(e2e.norm(e2e.first(".session-creator-branch-selected-label")?.innerText || ""));`, { timeoutMs: 10_000 });
+    await bridge.click(".session-creator-footer-actions .session-creator-btn-primary");
+    await bridge.waitFor("the confirm step", `return !!e2e.first(".session-creator-name");`, { timeoutMs: 20_000 });
+    await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(".session-creator-footer-actions .session-creator-btn-primary, .session-creator-actions .session-creator-btn-primary"), "Create session"));`);
+    await bridge.waitFor("the Branch In Use choice", `return !!e2e.first('.branch-conflict-modal[role="dialog"]');`, { timeoutMs: 30_000 });
+    const DIALOG = `
+      return {
+        error: e2e.norm(e2e.first(".branch-conflict-error")?.innerText || ""),
+        useExisting: e2e.first(".branch-conflict-use-existing")?.getAttribute("data-branch") ?? null,
+        open: !!e2e.first(".branch-conflict-modal"),
+      };`;
+    const suggested = await bridge.eval(`return e2e.first(".branch-conflict-create-input").value;`);
+    log(`  suggested new name: ${suggested}`);
+    for (const typed of ["feature/inbox", "Feature/Inbox"]) {
+      await typeInto(bridge, ".branch-conflict-create-input", typed);
+      await sleep(300);
+      await bridge.click(".branch-conflict-btn-create");
+      await sleep(600);
+      const d = await bridge.eval(DIALOG);
+      log(`  "${typed}" → ${JSON.stringify(d)}`);
+      check(d.open && d.error.includes("feature/inbox") && /already exists/.test(d.error), `"${typed}": refused, naming feature/inbox; "Use new branch" did nothing`);
+      check(d.useExisting === "feature/inbox", `"${typed}": "Use the existing feature/inbox" is offered`);
+    }
+    check(!fx.worktrees().some((w) => /feature\/inbox/i.test(w.branch ?? "")), "no worktree on feature/inbox yet");
+    await bridge.screenshot(join(evidenceDir, "05-branch-in-use.png"));
+    await bridge.click(".branch-conflict-use-existing");
+    let onInbox = null;
+    for (let i = 0; i < 100 && !onInbox; i++) {
+      onInbox = fx.worktrees().find((w) => w.branch === "feature/inbox") ?? null;
+      if (!onInbox) await sleep(200);
+    }
+    const after = await bridge.waitFor("the new session's terminal", `const ids = window.__HERMES_E2E__.terminalIds().filter((i) => !${JSON.stringify(before)}.includes(i)); return ids.length === 1 ? ids[0] : null;`, { timeoutMs: 30_000 }).catch(() => null);
+    log(`  worktrees: ${JSON.stringify(fx.worktrees())}`);
+    check(!!onInbox && !!after, "choosing it gives the new session a worktree on feature/inbox, exactly");
+    check(!fx.worktrees().some((w) => w.branch && w.branch !== "feature/inbox" && /^feature\/inbox$/i.test(w.branch)), "no worktree on a case variant of feature/inbox");
+  }
+  check(JSON.stringify(branches()) === JSON.stringify(branchesBefore), `in the end git has exactly the branches it started with (${branches().join(", ")})`);
+  await bridge.screenshot(join(evidenceDir, "06-end.png"));
   if (problems.length) throw new Error(`${problems.length} check(s) failed:\n  - ${problems.join("\n  - ")}`);
   log("all checks passed");
 } catch (err) {

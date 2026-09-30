@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "../styles/components/BranchConflictDialog.css";
 import { Button, CloseButton, Input } from "./ui";
+import { branchClashMessage, findBranchClash } from "../utils/branchClash";
+import { translate } from "../i18n/registry";
 
 interface BranchConflictDialogProps {
   branchName: string;
@@ -8,10 +10,27 @@ interface BranchConflictDialogProps {
   heldBy: string;
   /** Folder where it is checked out. */
   path: string;
+  /**
+   * The repository's local branches. A new name that is one of them (letter
+   * case included) is refused, and that branch is offered on purpose.
+   */
+  localBranches?: readonly string[];
   onReuse: () => void;
   onCreateNewBranch: (newBranchName: string) => void;
+  /** Use this existing branch instead (the name typed was one). */
+  onUseExisting?: (branchName: string) => void;
   onCancel: () => void;
 }
+
+/** The name offered for the new branch: `<branch>-2`, or the next one no branch has. */
+export function suggestNewBranchName(inUse: string, localBranches: readonly string[]): string {
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${inUse}-${n}`;
+    if (!findBranchClash(candidate, localBranches)) return candidate;
+  }
+  return `${inUse}-2`;
+}
+
 
 /** Validation for the "use another branch" name. Null when the name is usable. */
 export function validateNewBranchName(name: string, inUse: string): string | null {
@@ -38,12 +57,28 @@ export function BranchConflictDialog({
   branchName,
   heldBy,
   path,
+  localBranches,
   onReuse,
   onCreateNewBranch,
+  onUseExisting,
   onCancel,
 }: BranchConflictDialogProps) {
-  const [newBranchName, setNewBranchName] = useState(`${branchName}-2`);
+  const [newBranchName, setNewBranchName] = useState(() => suggestNewBranchName(branchName, localBranches ?? []));
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // A "new" name that is an existing branch (on macOS and Windows also when
+  // only the letter case differs) would hand back that branch, and this
+  // session's commits would move it: refused, and offered on purpose.
+  const clash = useMemo(() => {
+    const trimmed = newBranchName.trim();
+    if (!trimmed || !localBranches?.length) return null;
+    // The branch in use itself: the rule below says so, and Reuse is there.
+    if (trimmed.toLowerCase() === branchName.toLowerCase()) return null;
+    return findBranchClash(trimmed, localBranches);
+  }, [newBranchName, localBranches, branchName]);
+  const clashError = clash ? branchClashMessage(clash) : null;
+  const existingToUse = clash && clash.kind !== "folder" && onUseExisting ? clash.existing : null;
+  const shownError = validationError ?? clashError;
 
   // Escape = Cancel
   useEffect(() => {
@@ -60,8 +95,8 @@ export function BranchConflictDialog({
   const handleCreate = useCallback(() => {
     const error = validateNewBranchName(newBranchName, branchName);
     setValidationError(error);
-    if (!error) onCreateNewBranch(newBranchName.trim());
-  }, [newBranchName, branchName, onCreateNewBranch]);
+    if (!error && !clash) onCreateNewBranch(newBranchName.trim());
+  }, [newBranchName, branchName, clash, onCreateNewBranch]);
 
   return (
     <div className="branch-conflict-overlay">
@@ -106,8 +141,8 @@ export function BranchConflictDialog({
                   if (e.key === "Enter") handleCreate();
                 }}
                 placeholder="new-branch-name"
-                invalid={!!validationError}
-                aria-describedby={validationError ? "branch-conflict-error" : undefined}
+                invalid={!!shownError}
+                aria-describedby={shownError ? "branch-conflict-error" : undefined}
                 autoFocus
               />
               <Button variant="primary" className="branch-conflict-btn-create" onClick={handleCreate}>
@@ -115,10 +150,21 @@ export function BranchConflictDialog({
               </Button>
             </div>
 
-            {validationError && (
+            {shownError && (
               <div id="branch-conflict-error" className="branch-conflict-error" role="alert">
-                {validationError}
+                {shownError}
               </div>
+            )}
+            {existingToUse && (
+              <Button
+                variant="link"
+                size="sm"
+                className="branch-conflict-use-existing"
+                data-branch={existingToUse}
+                onClick={() => onUseExisting?.(existingToUse)}
+              >
+                {translate("branch.useExisting", { branch: existingToUse })}
+              </Button>
             )}
 
             <div className="branch-conflict-other-row">

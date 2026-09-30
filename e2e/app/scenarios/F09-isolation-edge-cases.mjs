@@ -343,7 +343,9 @@ async function reuseCheckoutOf(bridge, { label, branch, holder, viaNewName = fal
     await startTask(bridge, { label, pickBranch: "main" });
     await bridge.waitFor("the Branch In Use choice", `return !!e2e.first(".branch-conflict-modal");`, { timeoutMs: 20_000 });
     await bridge.eval(setInput(".branch-conflict-create-input", branch));
-    await bridge.clickByName("Use new branch", { within: ".branch-conflict-actions" });
+    // An existing branch is never taken as a new one: the choice offers it as
+    // itself, and asking for it brings the choice for whoever holds it.
+    await bridge.clickWhenReady(`const b = e2e.first(".branch-conflict-use-existing"); return b && b.getAttribute("data-branch") === ${JSON.stringify(branch)} ? e2e.click(b) : false;`, { timeoutMs: 10_000 });
     await bridge.waitFor(`a Branch In Use choice for ${branch}`, `
       const m = e2e.first(".branch-conflict-modal");
       return !!m && m.innerText.includes(${JSON.stringify(branch)});
