@@ -373,6 +373,12 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const openSettings = async () => {
     if (!(await bridge.exists(".settings-panel"))) await bridge.clickByName("Settings");
     await bridge.waitFor("the Settings dialog", `return !!e2e.first('[role="dialog"] .settings-title');`);
+    // The panel scales in (98% → 100%); sizes are read once that is over, or
+    // a slow runner measures 32 px rows as 31.36.
+    await bridge.waitFor("the Settings panel to finish opening", `
+      const p = document.querySelector(".settings-panel");
+      return !!p && p.getAnimations({ subtree: true }).every((a) => a.playState !== "running");
+    `);
   };
   const closeSettings = async () => {
     await bridge.click(".settings-close");
