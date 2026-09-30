@@ -309,7 +309,7 @@ try {
   assert(!cards.some((c) => c.id === "custom"), "no Custom agent card with the flag switched off");
   assert(!cards.some((c) => c.id === "opencode" || c.id === "antigravity"), "none of the agents new in 2.0 with the flag switched off");
   await app.bridge.screenshot(join(evidenceDir, "04-flag-off-agent-step.png"));
-  await app.bridge.click(".session-creator .settings-close");
+  await app.bridge.click(".session-creator .session-creator-close");
   await app.bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
 } catch (e) {
   failed = true;

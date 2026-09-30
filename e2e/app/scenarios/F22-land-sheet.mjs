@@ -199,7 +199,7 @@ async function startTask(bridge, label) {
     return e2e.click(e2e.must(cards[cards.length - 1], "plain shell card"));
   `);
   await clickPrimary(bridge);
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   const listed = await bridge.eval(`
     const row = e2e.all(".project-picker-item").find((el) => el.innerText.includes("f22-repo"));
     if (!row) return false;
@@ -207,7 +207,7 @@ async function startTask(bridge, label) {
     return true;
   `);
   if (!listed) {
-    await bridge.eval(setInput(".workspace-scan-input", repo));
+    await bridge.eval(setInput(".session-creator-scan-input", repo));
     await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   }
   await bridge.waitFor("the test repo to be selected", `
@@ -217,8 +217,8 @@ async function startTask(bridge, label) {
   await bridge.waitFor("the branch step", `return !!e2e.first(".session-creator-branch-multi");`, { timeoutMs: 20_000 });
   await bridge.waitFor("a default branch to be chosen", `return !!e2e.first(".session-creator-branch-selected-label");`);
   await clickPrimary(bridge);
-  await bridge.waitFor("the confirm step", `return !!e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');`);
-  await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
+  await bridge.waitFor("the confirm step", `return !!e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');`);
+  await bridge.eval(setInput('input.session-creator-name[placeholder="Session name (optional)"]', label));
   await clickPrimary(bridge);
   await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   const id = await bridge.waitFor(`the terminal of "${label}"`, `

@@ -209,6 +209,8 @@ export function Select<V extends string = string>({
           className,
         )}
         data-open={open || undefined}
+        // The current value, the way automation reads a native select's value.
+        data-value={value ?? ""}
         onClick={() => (open ? close() : openAt(selectedIndex >= 0 ? selectedIndex : firstEnabled(items)))}
         onKeyDown={onKeyDown}
         onBlur={(e) => {
@@ -242,6 +244,7 @@ export function Select<V extends string = string>({
               aria-selected={o.value === value}
               aria-disabled={o.disabled || undefined}
               data-highlighted={i === active || undefined}
+              data-value={o.value}
               className="h-option"
               // Keep focus on the trigger.
               onMouseDown={(e) => e.preventDefault()}

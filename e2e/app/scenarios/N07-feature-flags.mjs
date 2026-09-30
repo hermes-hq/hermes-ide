@@ -134,7 +134,7 @@ async function openAgentStep(bridge) {
 }
 
 async function closeWizard(bridge) {
-  await bridge.click(".session-creator .settings-close");
+  await bridge.click(".session-creator .session-creator-close");
   await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`);
 }
 

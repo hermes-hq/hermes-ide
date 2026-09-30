@@ -220,7 +220,8 @@ const policy = (bridge) =>
     const link = e2e.first(".setup-policy-link");
     const cont = e2e.first(".setup-continue");
     return {
-      label: e2e.norm(document.querySelector('label[for="setup-policy-accept"]')?.innerText),
+      // The box's label: a <label for> or, for the control set's Checkbox, the label around it.
+      label: e2e.norm((document.querySelector('label[for="setup-policy-accept"]') || box.closest("label"))?.innerText),
       checked: box.checked,
       href: link?.getAttribute("href") ?? null,
       continueDisabled: !!cont?.disabled,

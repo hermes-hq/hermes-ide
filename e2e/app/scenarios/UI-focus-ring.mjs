@@ -151,7 +151,8 @@ async function probe(bridge, where, rootSelector, { min = 1 } = {}) {
 const BUILT = [
   { cls: "model-picker-item", html: '<button type="button" class="model-picker-item">Sonnet</button>' },
   { cls: "effort-picker-item", html: '<button type="button" class="effort-picker-item">high</button>' },
-  { cls: "session-creator-prefix-chip", html: '<button type="button" class="session-creator-prefix-chip">nice</button>' },
+  // The New Session prefix chips are the control set's chips now.
+  { cls: "h-chip-button", html: '<span class="h-chip h-chip--md h-chip--interactive"><button type="button" class="h-chip-button session-creator-prefix-chip">nice</button></span>' },
   { cls: "workbench-notes-textarea", html: '<textarea class="workbench-notes-textarea" aria-label="Notes"></textarea>' },
   { cls: "prompt-composer-field", html: '<div class="prompt-composer-field"><textarea aria-label="Prompt"></textarea></div>' },
   { cls: "role-selector-create-field", html: '<div class="role-selector-create-field"><input aria-label="Role name"><textarea aria-label="Role prompt"></textarea></div>' },

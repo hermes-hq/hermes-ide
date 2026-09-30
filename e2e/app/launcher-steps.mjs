@@ -256,11 +256,26 @@ export const typeInto = (bridge, selector, value) =>
     return el.value;
   `);
 
-/** Chooses an option of a select (once the option is there), as picking it does. */
+/**
+ * Chooses an option of a select (once the option is there), as picking it
+ * does. The control set's Select (a combobox) is opened with a click and the
+ * option clicked in its list, the way the mouse does; a native select gets
+ * its value and a change event.
+ */
 export const chooseOption = (bridge, selector, value) =>
   bridge.waitFor(`the option ${value} of ${selector}`, `
     const el = e2e.first(${JSON.stringify(selector)});
-    if (!el || ![...el.options].some((o) => o.value === ${JSON.stringify(value)})) return false;
+    if (!el) return false;
+    if (el.getAttribute("role") === "combobox") {
+      if (el.getAttribute("data-value") === ${JSON.stringify(value)} && el.getAttribute("aria-expanded") !== "true") return true;
+      if (el.getAttribute("aria-expanded") !== "true") { e2e.click(el); return false; }
+      const list = document.getElementById(el.getAttribute("aria-controls"));
+      const opt = list && [...list.querySelectorAll('[role="option"]')].find((o) => o.getAttribute("data-value") === ${JSON.stringify(value)});
+      if (!opt || opt.getAttribute("aria-disabled") === "true") return false;
+      e2e.click(opt);
+      return false;
+    }
+    if (![...el.options].some((o) => o.value === ${JSON.stringify(value)})) return false;
     Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return el.value === ${JSON.stringify(value)};

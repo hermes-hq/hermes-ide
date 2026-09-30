@@ -253,7 +253,7 @@ async function startClaudeTask(bridge, label) {
     return true;
   `);
   await clickPrimary(bridge, "agent");
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   const listed = await bridge.eval(`
     const row = e2e.all(".project-picker-item").find((el) => el.innerText.includes("n19-repo"));
     if (!row) return false;
@@ -261,7 +261,7 @@ async function startClaudeTask(bridge, label) {
     return true;
   `);
   if (!listed) {
-    await bridge.eval(setInput(".workspace-scan-input", repo));
+    await bridge.eval(setInput(".session-creator-scan-input", repo));
     await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   }
   await bridge.waitFor("the test repo to be selected", `
@@ -273,8 +273,8 @@ async function startClaudeTask(bridge, label) {
   // then its own "Create & Use Branch" is the first primary button.
   await bridge.waitFor("a default branch", `return !!e2e.first(".session-creator-branch-selected-label") && !e2e.first(".session-creator-branch-project.expanded");`);
   await clickPrimary(bridge, "branch");
-  await bridge.waitFor("the confirm step", `return !!e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');`);
-  await bridge.eval(setInput('input.command-palette-input[placeholder="Session name (optional)"]', label));
+  await bridge.waitFor("the confirm step", `return !!e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');`);
+  await bridge.eval(setInput('input.session-creator-name[placeholder="Session name (optional)"]', label));
   await clickPrimary(bridge, "confirm");
   await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   return bridge.waitFor(`the terminal of "${label}"`, `

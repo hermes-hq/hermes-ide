@@ -14,6 +14,7 @@ import { refreshDoctor, useAgentDoctor } from "../launcher/doctorStore";
 import { ONBOARDING_COMPLETED_SETTING } from "./startupDialogSettings";
 import { AgentDoctor } from "./AgentDoctor";
 import { TaskLauncher, type TaskLaunchRequest, type TaskLaunchResult } from "./TaskLauncher";
+import { Button, Checkbox, Input, RadioGroup } from "./ui";
 
 export type SetupStep = "agents" | "repo" | "task";
 export const SETUP_STEPS: readonly SetupStep[] = ["agents", "repo", "task"];
@@ -124,16 +125,16 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
     return (
       <div className="setup-pill" role="status">
         <span>{t("onboarding.signInNote", { agent: getAgent(signingIn)?.name ?? signingIn })}</span>
-        <button
-          type="button"
-          className="setup-btn setup-btn-primary setup-resume"
+        <Button
+          variant="primary"
+          className="setup-resume"
           onClick={() => {
             setSigningIn(null);
             void refreshDoctor();
           }}
         >
           {t("onboarding.resume")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -154,14 +155,11 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
               <p className="setup-intro">{t("doctor.intro")}</p>
               <AgentDoctor onSignIn={signIn} />
               <div className="setup-policy">
-                <input
+                <Checkbox
                   id="setup-policy-accept"
-                  type="checkbox"
                   checked={policyAccepted}
-                  onChange={(e) => setPolicyAccepted(e.target.checked)}
-                />
-                <label htmlFor="setup-policy-accept">
-                  {withNodes(t("onboarding.policyAccept"), {
+                  onChange={setPolicyAccepted}
+                  label={withNodes(t("onboarding.policyAccept"), {
                     policy: (
                       <a
                         href={PRIVACY_POLICY_URL}
@@ -176,7 +174,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
                       </a>
                     ),
                   })}
-                </label>
+                />
                 {!policyAccepted && (
                   <span id="setup-policy-hint" className="setup-policy-hint">
                     {t("onboarding.policyRequired")}
@@ -190,41 +188,40 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
             <>
               <p className="setup-intro">{t("onboarding.repo.intro")}</p>
               {projects.length > 0 && (
-                <div className="setup-recent" role="radiogroup" aria-label={t("onboarding.repo.recent")}>
-                  <div className="setup-section-label">{t("onboarding.repo.recent")}</div>
-                  {projects.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={repo === p.path}
-                      className={`setup-repo${repo === p.path ? " selected" : ""}`}
-                      onClick={() => setRepo(p.path)}
-                    >
-                      <span className="setup-repo-name">{p.name}</span>
-                      <span className="setup-repo-path">{p.path}</span>
-                    </button>
-                  ))}
+                <div className="setup-recent">
+                  <div className="setup-section-label" aria-hidden="true">{t("onboarding.repo.recent")}</div>
+                  <RadioGroup
+                    label={t("onboarding.repo.recent")}
+                    value={projects.some((p) => p.path === repo) ? repo : null}
+                    onChange={setRepo}
+                    options={projects.map((p) => ({
+                      value: p.path,
+                      label: p.name,
+                      description: <span className="setup-repo-path">{p.path}</span>,
+                      attrs: { className: "setup-repo" },
+                    }))}
+                  />
                 </div>
               )}
               <div className="setup-repo-row">
-                <input
+                <Input
+                  code
                   className="setup-repo-input"
+                  aria-label={t("launcher.repoPlaceholder")}
                   value={repo}
                   spellCheck={false}
                   placeholder={t("launcher.repoPlaceholder")}
                   onChange={(e) => setRepo(e.target.value)}
                 />
-                <button
-                  type="button"
-                  className="setup-btn"
+                <Button
+                  className="setup-choose"
                   onClick={async () => {
                     const picked = await open({ directory: true, multiple: false });
                     if (typeof picked === "string" && picked) setRepo(picked);
                   }}
                 >
                   {t("onboarding.repo.choose")}
-                </button>
+                </Button>
               </div>
               {repoChecked && (
                 <div className={`setup-repo-state${repoRoot ? " ok" : " bad"}`} data-git={repoRoot ? "true" : "false"}>
@@ -249,51 +246,46 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
           </div>
           <div className="setup-actions">
             {idx > 0 && (
-              <button type="button" className="setup-btn setup-back" onClick={() => setStep(SETUP_STEPS[idx - 1])}>
+              <Button variant="quiet" className="setup-back" onClick={() => setStep(SETUP_STEPS[idx - 1])}>
                 {t("onboarding.back")}
-              </button>
+              </Button>
             )}
             {step === "agents" && (
-              <button
-                type="button"
-                className="setup-btn setup-btn-primary setup-continue"
+              <Button
+                variant="primary"
+                className="setup-continue"
                 disabled={!policyAccepted}
                 aria-describedby={policyAccepted ? undefined : "setup-policy-hint"}
                 onClick={() => setStep("repo")}
               >
                 {t("onboarding.continue")}
-              </button>
+              </Button>
             )}
             {step === "repo" && (
               <>
-                <button type="button" className="setup-btn setup-skip" onClick={() => setStep("task")}>
+                <Button className="setup-skip" onClick={() => setStep("task")}>
                   {t("onboarding.skip")}
-                </button>
-                <button
-                  type="button"
-                  className="setup-btn setup-btn-primary setup-continue"
-                  disabled={!repoRoot}
-                  onClick={() => setStep("task")}
-                >
+                </Button>
+                <Button variant="primary" className="setup-continue" disabled={!repoRoot} onClick={() => setStep("task")}>
                   {t("onboarding.continue")}
-                </button>
+                </Button>
               </>
             )}
             {step === "task" && (
               <>
-                <button
-                  type="button"
-                  className="setup-btn setup-open-shell"
+                <Button
+                  className="setup-open-shell"
                   onClick={async () => {
                     await finish();
                     onOpenShell();
                   }}
                 >
                   {t("onboarding.openShell")}
-                </button>
-                <button type="button" className="setup-btn setup-finish" onClick={() => void finish()}>
+                </Button>
+                {/* The step's own Finish is its one primary (the launcher's Launch is secondary here). */}
+                <Button variant="primary" className="setup-finish" onClick={() => void finish()}>
                   {t("onboarding.finish")}
-                </button>
+                </Button>
               </>
             )}
           </div>

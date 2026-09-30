@@ -167,9 +167,9 @@ try {
   }
   await bridge.waitFor("the Agent view to be chosen", `return ${agentViewBox}?.checked === true;`);
   await bridge.click(".session-creator-actions .session-creator-btn-primary");
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   await bridge.eval(`
-    const input = e2e.must(e2e.first(".workspace-scan-input"), "folder path input");
+    const input = e2e.must(e2e.first(".session-creator-scan-input"), "folder path input");
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     input.focus();
     setter.call(input, ${JSON.stringify(projectDir)});
@@ -177,7 +177,7 @@ try {
     return true;
   `);
   await bridge.clickWhenReady(`
-    const scan = e2e.all(".workspace-scan-btn").find((b) => !b.disabled && /scan/i.test(e2e.nameOf(b)));
+    const scan = e2e.all(".session-creator-scan-btn").find((b) => !b.disabled && /scan/i.test(e2e.nameOf(b)));
     return e2e.click(e2e.must(scan, "the Scan button"));
   `);
   await bridge.waitFor("the project folder to be attached", `

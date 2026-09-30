@@ -238,7 +238,7 @@ async function createShellSession(bridge) {
   `);
   for (let i = 0; i < 10; i++) {
     if (!(await bridge.exists(".session-creator"))) break;
-    if (await bridge.exists(".workspace-scan-input")) {
+    if (await bridge.exists(".session-creator-scan-input")) {
       const listed = await bridge.eval(`
         const row = e2e.all(".project-picker-item").find((el) => el.innerText.includes("f27b-repo"));
         if (!row) return false;
@@ -246,7 +246,7 @@ async function createShellSession(bridge) {
         return true;
       `);
       if (!listed) {
-        await bridge.eval(setInput(".workspace-scan-input", repo));
+        await bridge.eval(setInput(".session-creator-scan-input", repo));
         await bridge.clickByName("Scan", { within: ".project-picker-footer" });
       }
       await bridge.waitFor("the test repo to be selected", `

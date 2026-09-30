@@ -1,7 +1,11 @@
 import "../styles/components/TaskLauncher.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n/I18nProvider";
+import { Button, Checkbox, Chip, CloseButton, IconButton, Input, Segmented, Select, Textarea, type SelectOption } from "./ui";
+import type { ControlAttrs } from "./ui/attrs";
+import { cx } from "./ui/Button";
+import { CloseGlyph } from "./ui/icons";
 import { customAgent, getAgent, installCommand, listAgents } from "../catalog/agentCatalog";
 import { getSetting, setSetting } from "../api/settings";
 import { getDiskStatus } from "../api/git";
@@ -105,6 +109,7 @@ export interface TaskLauncherProps {
 const PROBE_DELAY_MS = 200;
 const RECENT_COUNT = 3;
 type Menu = null | "agent" | "project" | "where" | "approval" | "model" | "effort";
+type WhereKind = LaunchChoice["where"]["kind"];
 /** A part of a stored choice that is not available now; "where": a base branch this repository does not have. */
 type LauncherIssue = Omit<ChoiceIssue, "field" | "code"> & { field: ChoiceIssue["field"] | "where"; code: ChoiceIssue["code"] | "baseBranchMissing" };
 
@@ -122,13 +127,18 @@ function baseName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-/** Arrow keys move the focus between the buttons of an open menu. */
+/**
+ * Arrow keys move the focus between the buttons of an open menu. A control
+ * that takes the arrow keys itself (a field, a Select, a segmented control)
+ * keeps them, and only its tab stop is a stop here.
+ */
 function onMenuKeys(e: React.KeyboardEvent<HTMLElement>) {
+  if (e.defaultPrevented) return;
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "Home" && e.key !== "End") return;
-  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input, select"));
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input, [role='combobox']")).filter((el) => el.tabIndex >= 0);
   if (items.length === 0) return;
   const target = e.target as HTMLElement;
-  if (target.tagName === "INPUT" || target.tagName === "SELECT") return;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.getAttribute("role") === "combobox") return;
   const i = items.indexOf(target);
   let next = i;
   if (e.key === "Home") next = 0;
@@ -689,7 +699,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     requestAnimationFrame(() => {
       const root = menuRef.current;
       if (!root) return;
-      const target = root.querySelector<HTMLElement>("[aria-pressed='true'], [aria-checked='true']") ?? root.querySelector<HTMLElement>("button:not([disabled]), input");
+      const target =
+        root.querySelector<HTMLElement>("[aria-pressed='true'], [aria-checked='true']") ??
+        root.querySelector<HTMLElement>("button:not([disabled]):not([tabindex='-1']), input, [role='combobox']");
       target?.focus();
     });
   }, [menu]);
@@ -702,7 +714,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   const onSheetKey = (e: React.KeyboardEvent) => {
     const mod = PLATFORM === "mac" ? e.metaKey : e.ctrlKey;
     const target = e.target as HTMLElement;
-    const inField = target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.tagName === "SELECT";
+    const inField = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
     if (e.key === "Escape") {
       e.stopPropagation();
       e.preventDefault();
@@ -814,9 +826,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           <div className="task-launcher-block" data-kind={row.kind} data-agent-id={row.agentId} key={key}>
             <span>{t("launcher.block.notInstalled", { agent: agentName(row.agentId) })}</span>
             {installCommand(getAgent(row.agentId)) && (
-              <button type="button" className="task-launcher-link" onClick={() => copyInstall(row.agentId)}>
+              <Button variant="link" className="task-launcher-link" onClick={() => copyInstall(row.agentId)}>
                 {copied === row.agentId ? t("launcher.copied") : t("launcher.copyInstall")}
-              </button>
+              </Button>
             )}
           </div>
         );
@@ -824,12 +836,12 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         return (
           <div className="task-launcher-block" data-kind={row.kind} data-agent-id={row.agentId} key={key}>
             <span>{t("launcher.block.signedOut", { agent: agentName(row.agentId) })}</span>
-            <button type="button" className="task-launcher-link task-launcher-sign-in" onClick={() => onSignIn(row.agentId)}>
+            <Button variant="link" className="task-launcher-link task-launcher-sign-in" onClick={() => onSignIn(row.agentId)}>
               {t("launcher.signIn")}
-            </button>
-            <button type="button" className="task-launcher-link" onClick={doctor.refresh} disabled={doctor.loading}>
+            </Button>
+            <Button variant="link" className="task-launcher-link" onClick={doctor.refresh} disabled={doctor.loading}>
               {t("doctor.recheck")}
-            </button>
+            </Button>
           </div>
         );
       case "no-repo":
@@ -849,8 +861,8 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           <div className="task-launcher-block" data-kind={row.kind} key={key}>
             <span>{t("launcher.block.branchExists", { branch: row.branch })}</span>
             {row.branch === branch.trim() && (
-              <button
-                type="button"
+              <Button
+                variant="link"
                 className="task-launcher-link task-launcher-use-branch"
                 onClick={() => {
                   setBranch(row.suggestion);
@@ -858,7 +870,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
                 }}
               >
                 {t("launcher.useBranch", { branch: row.suggestion })}
-              </button>
+              </Button>
             )}
           </div>
         );
@@ -877,7 +889,37 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     }
   };
 
-  const chipClass = (m: Exclude<Menu, null>, extra = "") => `task-launcher-chip${menu === m ? " open" : ""}${extra ? ` ${extra}` : ""}`;
+  /** A chip of the row under the task: it opens its menu below the row. */
+  const menuChip = (m: Exclude<Menu, null>, label: ReactNode, opts: { danger?: boolean; off?: boolean } = {}) => (
+    <Chip
+      expands
+      selected={menu === m}
+      onToggle={() => openMenu(m)}
+      disabled={opts.off}
+      tone={opts.danger ? "danger" : "neutral"}
+      buttonRef={(el) => {
+        chipRefs.current[m] = el;
+      }}
+      buttonAttrs={{ className: cx("task-launcher-chip", menu === m && "open", opts.danger && "danger", opts.off && "off"), "data-chip": m }}
+    >
+      {label}
+    </Chip>
+  );
+  /** One value in a chip's menu: pressed when it is the current one. */
+  const optionChip = (key: string, selected: boolean, onPick: () => void, label: ReactNode, attrs: ControlAttrs, opts: { note?: ReactNode; danger?: boolean; disabled?: boolean } = {}) => (
+    <Chip
+      key={key}
+      selected={selected}
+      onToggle={onPick}
+      disabled={opts.disabled}
+      tone={opts.danger ? "danger" : "neutral"}
+      buttonAttrs={{ ...attrs, className: cx("task-launcher-option", selected && "selected", opts.danger && "danger") }}
+    >
+      {label}
+      {opts.note ? <span className="task-launcher-option-note">{opts.note}</span> : null}
+    </Chip>
+  );
+
   const selectedMode = agentCaps?.approvalModes.find((m) => m.id === choice?.approvalModeId);
   const danger = !!selectedMode?.danger;
   const efforts = choice ? effortsFor(agentCaps, choice.modelId) : [];
@@ -889,87 +931,74 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         ? t("launcher.whereChipExisting", { branch: where.branch || "—" })
         : t("launcher.whereChipCurrent", { branch: currentBranch || "HEAD" });
 
-  const setWhere = (kind: "new-worktree" | "existing-branch" | "current-checkout") => {
+  const setWhere = (kind: WhereKind) => {
     if (kind === "new-worktree") update({ where: { kind, baseBranch: where.kind === "new-worktree" ? where.baseBranch : "", branch: "" } });
     else if (kind === "existing-branch") update({ where: { kind, branch: where.kind === "existing-branch" ? where.branch : localBranches.find((b) => b !== currentBranch) ?? localBranches[0] ?? "" } });
     else update({ where: { kind } });
   };
 
+  const baseOptions: SelectOption[] = [
+    { value: "", label: t("launcher.baseCurrent", { branch: currentBranch || "HEAD" }) },
+    ...localBranches.filter((b) => b !== currentBranch).map((b) => ({ value: b, label: b })),
+  ];
   const whereBlock = (
-    <div className="task-launcher-where" role="radiogroup" aria-label={t("launcher.whereLabel")}>
-      <div className="task-launcher-where-row">
-        <button type="button" role="radio" aria-checked={where.kind === "new-worktree"} data-where="new-worktree" className={`task-launcher-option${where.kind === "new-worktree" ? " selected" : ""}`} onClick={() => setWhere("new-worktree")}>
-          {t("launcher.whereWorktree")}
-        </button>
-        {where.kind === "new-worktree" && (
-          <>
-            <label className="task-launcher-inline-label" htmlFor="task-launcher-branch">{t("launcher.branchLabel")}</label>
-            <input
-              id="task-launcher-branch"
-              className="task-launcher-branch"
-              value={branch}
-              spellCheck={false}
-              onChange={(e) => {
-                setBranch(e.target.value);
-                setBranchEdited(true);
-              }}
-            />
-            <label className="task-launcher-inline-label" htmlFor="task-launcher-base">{t("launcher.baseLabel")}</label>
-            <select
-              id="task-launcher-base"
-              className="task-launcher-base"
-              value={where.baseBranch}
-              onChange={(e) => update({ where: { kind: "new-worktree", baseBranch: e.target.value, branch: "" } })}
-            >
-              <option value="">{t("launcher.baseCurrent", { branch: currentBranch || "HEAD" })}</option>
-              {localBranches.filter((b) => b !== currentBranch).map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-          </>
-        )}
-      </div>
-      <div className="task-launcher-where-row">
-        <button type="button" role="radio" aria-checked={where.kind === "existing-branch"} data-where="existing-branch" className={`task-launcher-option${where.kind === "existing-branch" ? " selected" : ""}`} onClick={() => setWhere("existing-branch")}>
-          {t("launcher.whereExisting")}
-        </button>
-        {where.kind === "existing-branch" && (
-          <select
+    <div className="task-launcher-where">
+      <Segmented<WhereKind>
+        label={t("launcher.whereLabel")}
+        value={where.kind}
+        onChange={setWhere}
+        options={[
+          { value: "new-worktree", label: t("launcher.whereWorktree"), attrs: { "data-where": "new-worktree" } },
+          { value: "existing-branch", label: t("launcher.whereExisting"), attrs: { "data-where": "existing-branch" } },
+          { value: "current-checkout", label: t("launcher.whereCurrent", { branch: currentBranch || "HEAD" }), attrs: { "data-where": "current-checkout" } },
+        ]}
+      />
+      {where.kind === "new-worktree" && (
+        <div className="task-launcher-where-row">
+          <label className="task-launcher-inline-label" htmlFor="task-launcher-branch">{t("launcher.branchLabel")}</label>
+          <Input
+            id="task-launcher-branch"
+            code
+            className="task-launcher-branch"
+            value={branch}
+            spellCheck={false}
+            onChange={(e) => {
+              setBranch(e.target.value);
+              setBranchEdited(true);
+            }}
+          />
+          <span className="task-launcher-inline-label" aria-hidden="true">{t("launcher.baseLabel")}</span>
+          <Select
+            code
+            className="task-launcher-base"
+            aria-label={t("launcher.baseLabel")}
+            value={where.baseBranch}
+            options={baseOptions}
+            onChange={(v) => update({ where: { kind: "new-worktree", baseBranch: v, branch: "" } })}
+          />
+        </div>
+      )}
+      {where.kind === "existing-branch" && (
+        <div className="task-launcher-where-row">
+          <Select
+            code
             className="task-launcher-existing"
             aria-label={t("launcher.whereExisting")}
             value={where.branch}
-            onChange={(e) => update({ where: { kind: "existing-branch", branch: e.target.value } })}
-          >
-            {localBranches.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-        )}
-      </div>
-      <div className="task-launcher-where-row">
-        <button type="button" role="radio" aria-checked={where.kind === "current-checkout"} data-where="current-checkout" className={`task-launcher-option${where.kind === "current-checkout" ? " selected" : ""}`} onClick={() => setWhere("current-checkout")}>
-          {t("launcher.whereCurrent", { branch: currentBranch || "HEAD" })}
-        </button>
-      </div>
+            options={localBranches.map((b) => ({ value: b, label: b }))}
+            onChange={(v) => update({ where: { kind: "existing-branch", branch: v } })}
+          />
+        </div>
+      )}
     </div>
   );
 
   const approvalBlock = choice && agentCaps && (
     <div className="task-launcher-approval" data-danger={danger ? "true" : "false"}>
-      <div className="task-launcher-approval-modes" role="radiogroup" aria-label={t("launcher.approvalLabel")}>
-        {agentCaps.approvalModes.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            role="radio"
-            aria-checked={m.id === choice.approvalModeId}
-            data-mode={m.id}
-            className={`task-launcher-option${m.id === choice.approvalModeId ? " selected" : ""}${m.danger ? " danger" : ""}`}
-            onClick={() => update({ approvalModeId: m.id })}
-          >
-            {approvalLabel(choice.agentId, m.id)}
-          </button>
-        ))}
+      <div className="task-launcher-approval-modes" role="group" aria-label={t("launcher.approvalLabel")}>
+        {agentCaps.approvalModes.map((m) =>
+          optionChip(m.id, m.id === choice.approvalModeId, () => update({ approvalModeId: m.id }), approvalLabel(choice.agentId, m.id), { "data-mode": m.id }, { danger: !!m.danger }),
+        )}
       </div>
       <div className={`task-launcher-approval-note${danger ? " danger" : ""}`}>{approvalNote(choice.agentId, choice.approvalModeId)}</div>
       <div className="task-launcher-muted">
@@ -985,50 +1014,41 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     const alsoEfforts = effortsFor(c, also.modelId);
     return (
       <div className="task-launcher-also-fields">
-        <select
+        <Select
           className="task-launcher-also-agent"
           aria-label={t("launcher.alsoAgent")}
           value={also.agentId}
-          onChange={(e) => {
-            const id = e.target.value;
+          options={agents.filter((a) => a.id !== choice?.agentId && !a.custom).map((a) => ({ value: a.id, label: a.name }))}
+          onChange={(id) => {
             userTouched.current = true;
             setChoice((cur) => (cur ? { ...cur, alsoOn: { ...freshChoice(id), where: cur.where } } : cur));
           }}
-        >
-          {agents.filter((a) => a.id !== choice?.agentId && !a.custom).map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
-        <select className="task-launcher-also-approval" aria-label={t("launcher.approvalLabel")} value={also.approvalModeId} onChange={(e) => updateAlso({ approvalModeId: e.target.value })}>
-          {(c?.approvalModes ?? []).map((m) => (
-            <option key={m.id} value={m.id}>{approvalLabel(also.agentId, m.id)}</option>
-          ))}
-        </select>
-        <select
+        />
+        <Select
+          className="task-launcher-also-approval"
+          aria-label={t("launcher.approvalLabel")}
+          value={also.approvalModeId}
+          options={(c?.approvalModes ?? []).map((m) => ({ value: m.id, label: approvalLabel(also.agentId, m.id) }))}
+          onChange={(v) => updateAlso({ approvalModeId: v })}
+        />
+        <Select
           className="task-launcher-also-model"
           aria-label={t("launcher.modelLabel")}
           value={also.modelId}
-          onChange={(e) => {
-            const ef = effortsFor(c, e.target.value);
-            updateAlso({ modelId: e.target.value, effort: also.effort && ef.includes(also.effort) ? also.effort : null });
+          options={(c?.models ?? []).map((m) => ({ value: m.id, label: m.id === "default" ? t("launcher.modelDefault") : m.label, disabled: !m.available }))}
+          onChange={(v) => {
+            const ef = effortsFor(c, v);
+            updateAlso({ modelId: v, effort: also.effort && ef.includes(also.effort) ? also.effort : null });
           }}
-        >
-          {(c?.models ?? []).map((m) => (
-            <option key={m.id} value={m.id} disabled={!m.available}>{m.id === "default" ? t("launcher.modelDefault") : m.label}</option>
-          ))}
-        </select>
-        <select
+        />
+        <Select
           className="task-launcher-also-effort"
           aria-label={t("launcher.effortLabel")}
           value={also.effort ?? ""}
           disabled={alsoEfforts.length === 0}
-          onChange={(e) => updateAlso({ effort: e.target.value || null })}
-        >
-          <option value="">{alsoEfforts.length === 0 ? t("launcher.effortNa") : t("launcher.effortDefault")}</option>
-          {alsoEfforts.map((ef) => (
-            <option key={ef} value={ef}>{ef}</option>
-          ))}
-        </select>
+          options={[{ value: "", label: alsoEfforts.length === 0 ? t("launcher.effortNa") : t("launcher.effortDefault") }, ...alsoEfforts.map((ef) => ({ value: ef, label: ef }))]}
+          onChange={(v) => updateAlso({ effort: v || null })}
+        />
       </div>
     );
   };
@@ -1044,36 +1064,40 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           <span className="task-launcher-subtitle">{t("launcher.subtitle")}</span>
           <span className="task-launcher-spacer" />
           <span className="task-launcher-keyhint">{shortcutLabel("file.new-session")}</span>
-          {onClose && (
-            <button type="button" className="task-launcher-close" aria-label={t("launcher.close")} onClick={() => close(false)}>
-              ×
-            </button>
-          )}
+          {onClose && <CloseButton className="task-launcher-close" label={t("launcher.close")} onClick={() => close(false)} />}
         </div>
       )}
 
       <div className="task-launcher-presets" role="toolbar" aria-label={t("launcher.presetsLabel")}>
         {presets.map((p, i) => (
-          <button
+          <Chip
             key={p.id}
-            type="button"
-            className={`task-launcher-preset${i === presetIndex ? " selected" : ""}`}
-            data-preset-id={p.id}
-            aria-pressed={i === presetIndex}
-            title={i < PRESET_SHORTCUTS ? fmt(`{mod}${i + 1}`) : undefined}
-            onClick={() => applyPreset(p)}
+            selected={i === presetIndex}
+            onToggle={() => applyPreset(p)}
+            buttonAttrs={{
+              className: cx("task-launcher-preset", i === presetIndex && "selected"),
+              "data-preset-id": p.id,
+              title: i < PRESET_SHORTCUTS ? fmt(`{mod}${i + 1}`) : undefined,
+            }}
           >
             {i < PRESET_SHORTCUTS && <span className="task-launcher-preset-key">{fmt(`{mod}${i + 1}`)}</span>}
             {p.name}
-          </button>
+          </Chip>
         ))}
         {saving === null ? (
-          <button type="button" className="task-launcher-link task-launcher-save-preset" onClick={() => setSaving(choice ? uniquePresetName(defaultPresetName(choice), presets) : "")} disabled={!choice}>
+          <Button
+            variant="quiet"
+            size="sm"
+            className="task-launcher-save-preset"
+            onClick={() => setSaving(choice ? uniquePresetName(defaultPresetName(choice), presets) : "")}
+            disabled={!choice}
+          >
             {t("launcher.saveAsPreset")}
-          </button>
+          </Button>
         ) : (
           <span className="task-launcher-preset-form" data-own-enter="true">
-            <input
+            <Input
+              size="sm"
               className="task-launcher-preset-name"
               aria-label={t("launcher.presetName")}
               value={saving}
@@ -1091,9 +1115,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
                 }
               }}
             />
-            <button
-              type="button"
-              className="task-launcher-btn task-launcher-preset-save"
+            <Button
+              size="sm"
+              className="task-launcher-preset-save"
               disabled={!saving.trim()}
               onClick={() => {
                 if (effective) void savePreset(saving, rememberedForm(effective));
@@ -1101,10 +1125,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
               }}
             >
               {t("launcher.presetSave")}
-            </button>
-            <button type="button" className="task-launcher-link" onClick={() => setSaving(null)}>
+            </Button>
+            <Button variant="quiet" size="sm" onClick={() => setSaving(null)}>
               {t("launcher.cancel")}
-            </button>
+            </Button>
           </span>
         )}
       </div>
@@ -1112,7 +1136,12 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       {suggest && (
         <div className="task-launcher-suggest" role="group" aria-label={t("launcher.suggestTitle")} data-own-enter="true">
           <span>{t("launcher.suggestTitle", { count: suggestCount })}</span>
-          <input className="task-launcher-suggest-name" aria-label={t("launcher.presetName")} value={suggestName} onChange={(e) => setSuggestName(e.target.value)}
+          <Input
+            size="sm"
+            className="task-launcher-suggest-name"
+            aria-label={t("launcher.presetName")}
+            value={suggestName}
+            onChange={(e) => setSuggestName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -1122,19 +1151,28 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
               }
             }}
           />
-          <button type="button" className="task-launcher-btn task-launcher-suggest-save" disabled={!suggestName.trim()} onClick={() => { void savePreset(suggestName, suggest); setSuggest(null); }}>
+          <Button
+            size="sm"
+            className="task-launcher-suggest-save"
+            disabled={!suggestName.trim()}
+            onClick={() => {
+              void savePreset(suggestName, suggest);
+              setSuggest(null);
+            }}
+          >
             {t("launcher.presetSave")}
-          </button>
-          <button
-            type="button"
-            className="task-launcher-link task-launcher-suggest-dismiss"
+          </Button>
+          <Button
+            variant="quiet"
+            size="sm"
+            className="task-launcher-suggest-dismiss"
             onClick={() => {
               if (gitRoot) void backend.dismissSuggestion(suggest, gitRoot).catch(() => {});
               setSuggest(null);
             }}
           >
             {t("launcher.suggestDismiss")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1151,7 +1189,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       )}
 
       <label className="task-launcher-sr" htmlFor="task-launcher-task">{t("launcher.taskLabel")}</label>
-      <textarea
+      <Textarea
         id="task-launcher-task"
         ref={taskRef}
         className="task-launcher-task"
@@ -1163,11 +1201,11 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
 
       {choice && (
         <div className="task-launcher-chips" role="toolbar" aria-label={t("launcher.chipsLabel")} onKeyDown={onMenuKeys}>
-          <button type="button" ref={(el) => { chipRefs.current.agent = el; }} className={chipClass("agent")} data-chip="agent" aria-expanded={menu === "agent"} onClick={() => openMenu("agent")}>
-            {agentName(choice.agentId)} · {accountLabel(agentCaps, choice.accountId)} ▾
-          </button>
+          {menuChip("agent", `${agentName(choice.agentId)} · ${accountLabel(agentCaps, choice.accountId)}`)}
           {isCustom && (
-            <input
+            <Input
+              size="sm"
+              code
               className="task-launcher-custom-command"
               aria-label={t("launcher.customCommand")}
               placeholder={t("launcher.customCommandPlaceholder")}
@@ -1176,38 +1214,30 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
               onChange={(e) => update({ extraArgs: e.target.value })}
             />
           )}
-          <button type="button" ref={(el) => { chipRefs.current.project = el; }} className={chipClass("project")} data-chip="project" aria-expanded={menu === "project"} onClick={() => openMenu("project")}>
-            {repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone")} ▾
-          </button>
-          <button type="button" ref={(el) => { chipRefs.current.where = el; }} className={chipClass("where")} data-chip="where" aria-expanded={menu === "where"} onClick={() => openMenu("where")}>
-            {whereChipText} ▾
-          </button>
-          {!isCustom && (
-            <button type="button" ref={(el) => { chipRefs.current.approval = el; }} className={chipClass("approval", danger ? "danger" : "")} data-chip="approval" aria-expanded={menu === "approval"} onClick={() => openMenu("approval")}>
-              {approvalLabel(choice.agentId, choice.approvalModeId)} ▾
-            </button>
-          )}
-          {!isCustom && (
-            <button type="button" ref={(el) => { chipRefs.current.model = el; }} className={chipClass("model")} data-chip="model" aria-expanded={menu === "model"} onClick={() => openMenu("model")}>
-              {t("launcher.modelChip", { model: choice.modelId === "default" ? t("launcher.modelDefault") : choice.modelId })} ▾
-            </button>
-          )}
-          {!isCustom && (
-            <button
-              type="button"
-              ref={(el) => { chipRefs.current.effort = el; }}
-              className={chipClass("effort", hasEffort ? "" : "off")}
-              data-chip="effort"
-              aria-expanded={menu === "effort"}
-              disabled={!hasEffort}
-              onClick={() => openMenu("effort")}
-            >
-              {hasEffort ? `${t("launcher.effortChip", { effort: choice.effort ?? t("launcher.effortDefault") })} ▾` : t("launcher.effortNaFor", { model: choice.modelId === "default" ? t("launcher.modelDefault") : choice.modelId })}
-            </button>
-          )}
-          <button type="button" className="task-launcher-link task-launcher-expand" aria-expanded={expanded} onClick={() => { setExpanded((x) => !x); setMenu(null); }}>
+          {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"))}
+          {menuChip("where", whereChipText)}
+          {!isCustom && menuChip("approval", approvalLabel(choice.agentId, choice.approvalModeId), { danger })}
+          {!isCustom && menuChip("model", t("launcher.modelChip", { model: choice.modelId === "default" ? t("launcher.modelDefault") : choice.modelId }))}
+          {!isCustom &&
+            menuChip(
+              "effort",
+              hasEffort
+                ? t("launcher.effortChip", { effort: choice.effort ?? t("launcher.effortDefault") })
+                : t("launcher.effortNaFor", { model: choice.modelId === "default" ? t("launcher.modelDefault") : choice.modelId }),
+              { off: !hasEffort },
+            )}
+          <Button
+            variant="quiet"
+            size="sm"
+            className="task-launcher-expand"
+            aria-expanded={expanded}
+            onClick={() => {
+              setExpanded((x) => !x);
+              setMenu(null);
+            }}
+          >
             {expanded ? t("launcher.fewerOptions") : t("launcher.moreOptions", { shortcut: fmt("{mod}.") })}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1216,25 +1246,27 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           {menu === "agent" && (
             <>
               <div className="task-launcher-menu-items">
-                {agents.map((a) => (
-                  <button key={a.id} type="button" data-agent-id={a.id} aria-pressed={a.id === choice.agentId} className={`task-launcher-option${a.id === choice.agentId ? " selected" : ""}`} onClick={() => { pickAgent(a.id); }}>
-                    {a.name}
-                    <span className="task-launcher-option-note">{agentNote(a.id)}</span>
-                  </button>
-                ))}
+                {agents.map((a) => optionChip(a.id, a.id === choice.agentId, () => pickAgent(a.id), a.name, { "data-agent-id": a.id }, { note: agentNote(a.id) }))}
               </div>
               <div className="task-launcher-menu-caption">{t("launcher.accountFor", { agent: agentName(choice.agentId) })}</div>
               <div className="task-launcher-menu-items">
-                {(agentCaps?.accounts ?? []).map((a) => (
-                  <button key={a.id} type="button" data-account-id={a.id} aria-pressed={a.id === choice.accountId} className={`task-launcher-option${a.id === choice.accountId ? " selected" : ""}`} onClick={() => { update({ accountId: a.id }); closeMenu(); }}>
-                    {a.id === "default" ? t("launcher.accountDefault") : a.label}
-                    <span className="task-launcher-option-note">{a.detail || (a.signedIn ? t("launcher.accountSignedIn") : t("launcher.accountSignedOut"))}</span>
-                  </button>
-                ))}
+                {(agentCaps?.accounts ?? []).map((a) =>
+                  optionChip(
+                    a.id,
+                    a.id === choice.accountId,
+                    () => {
+                      update({ accountId: a.id });
+                      closeMenu();
+                    },
+                    a.id === "default" ? t("launcher.accountDefault") : a.label,
+                    { "data-account-id": a.id },
+                    { note: a.detail || (a.signedIn ? t("launcher.accountSignedIn") : t("launcher.accountSignedOut")) },
+                  ),
+                )}
                 {onManageAccounts && (
-                  <button type="button" className="task-launcher-link task-launcher-manage-accounts" onClick={onManageAccounts}>
+                  <Button variant="link" className="task-launcher-link task-launcher-manage-accounts" onClick={onManageAccounts}>
                     {t("launcher.manageAccounts")}
-                  </button>
+                  </Button>
                 )}
               </div>
             </>
@@ -1243,18 +1275,33 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
             <>
               <div className="task-launcher-menu-caption">{t("launcher.projectsCaption")}</div>
               <div className="task-launcher-menu-items task-launcher-menu-column">
-                {projects.map((p) => (
-                  <button key={p.path} type="button" data-project-path={p.path} aria-pressed={samePath(p.path, repoPath)} className={`task-launcher-option${samePath(p.path, repoPath) ? " selected" : ""}`} onClick={() => { setRepoPath(p.path); closeMenu(); }}>
-                    {p.name}
-                    <span className="task-launcher-option-note">{p.path}</span>
-                  </button>
-                ))}
-                <button type="button" className="task-launcher-link task-launcher-browse" onClick={() => void chooseFolder()}>
+                {projects.map((p) =>
+                  optionChip(
+                    p.path,
+                    samePath(p.path, repoPath),
+                    () => {
+                      setRepoPath(p.path);
+                      closeMenu();
+                    },
+                    p.name,
+                    { "data-project-path": p.path, title: p.path },
+                    { note: p.path },
+                  ),
+                )}
+                <Button size="sm" className="task-launcher-browse" onClick={() => void chooseFolder()}>
                   {t("launcher.browse")}
-                </button>
+                </Button>
               </div>
               <label className="task-launcher-inline-label" htmlFor="task-launcher-repo">{t("launcher.repoTyped")}</label>
-              <input id="task-launcher-repo" className="task-launcher-repo" value={repoPath} spellCheck={false} placeholder={t("launcher.repoPlaceholder")} onChange={(e) => setRepoPath(e.target.value)} />
+              <Input
+                id="task-launcher-repo"
+                code
+                className="task-launcher-repo"
+                value={repoPath}
+                spellCheck={false}
+                placeholder={t("launcher.repoPlaceholder")}
+                onChange={(e) => setRepoPath(e.target.value)}
+              />
             </>
           )}
           {menu === "where" && whereBlock}
@@ -1262,26 +1309,39 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           {menu === "model" && agentCaps && (
             <>
               <div className="task-launcher-menu-items">
-                {agentCaps.models.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    data-model-id={m.id}
-                    aria-pressed={m.id === choice.modelId}
-                    disabled={!m.available}
-                    title={m.unavailableReason}
-                    className={`task-launcher-option${m.id === choice.modelId ? " selected" : ""}`}
-                    onClick={() => { pickModel(m.id); closeMenu(); }}
-                  >
-                    {m.id === "default" ? t("launcher.modelDefault") : m.label}
-                    <span className="task-launcher-option-note">
-                      {!m.available ? m.unavailableReason || t("launcher.modelUnavailable") : m.id === "default" ? t("launcher.modelDefaultNote") : m.efforts.length === 0 ? t("launcher.modelNoEffort") : m.note || ""}
-                    </span>
-                  </button>
-                ))}
+                {agentCaps.models.map((m) =>
+                  optionChip(
+                    m.id,
+                    m.id === choice.modelId,
+                    () => {
+                      pickModel(m.id);
+                      closeMenu();
+                    },
+                    m.id === "default" ? t("launcher.modelDefault") : m.label,
+                    { "data-model-id": m.id, title: m.unavailableReason },
+                    {
+                      disabled: !m.available,
+                      note: !m.available
+                        ? m.unavailableReason || t("launcher.modelUnavailable")
+                        : m.id === "default"
+                          ? t("launcher.modelDefaultNote")
+                          : m.efforts.length === 0
+                            ? t("launcher.modelNoEffort")
+                            : m.note || "",
+                    },
+                  ),
+                )}
               </div>
               {agentCaps.modelSource === "free-text" && (
-                <input className="task-launcher-model-text" aria-label={t("launcher.modelLabel")} placeholder={t("launcher.modelTyped")} value={choice.modelId === "default" ? "" : choice.modelId} onChange={(e) => update({ modelId: e.target.value.trim() || "default", effort: null })} />
+                <Input
+                  size="sm"
+                  code
+                  className="task-launcher-model-text"
+                  aria-label={t("launcher.modelLabel")}
+                  placeholder={t("launcher.modelTyped")}
+                  value={choice.modelId === "default" ? "" : choice.modelId}
+                  onChange={(e) => update({ modelId: e.target.value.trim() || "default", effort: null })}
+                />
               )}
               <div className="task-launcher-menu-caption">{t(`launcher.modelSource.${agentCaps.modelSource}`, { agent: agentName(choice.agentId), version: agentCaps.cliVersion ?? "" })}</div>
             </>
@@ -1289,14 +1349,28 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           {menu === "effort" && (
             <>
               <div className="task-launcher-menu-items">
-                <button type="button" data-effort="" aria-pressed={choice.effort === null} className={`task-launcher-option${choice.effort === null ? " selected" : ""}`} onClick={() => { update({ effort: null }); closeMenu(); }}>
-                  {t("launcher.effortDefault")}
-                </button>
-                {efforts.map((ef) => (
-                  <button key={ef} type="button" data-effort={ef} aria-pressed={ef === choice.effort} className={`task-launcher-option${ef === choice.effort ? " selected" : ""}`} onClick={() => { update({ effort: ef }); closeMenu(); }}>
-                    {ef}
-                  </button>
-                ))}
+                {optionChip(
+                  "",
+                  choice.effort === null,
+                  () => {
+                    update({ effort: null });
+                    closeMenu();
+                  },
+                  t("launcher.effortDefault"),
+                  { "data-effort": "" },
+                )}
+                {efforts.map((ef) =>
+                  optionChip(
+                    ef,
+                    ef === choice.effort,
+                    () => {
+                      update({ effort: ef });
+                      closeMenu();
+                    },
+                    ef,
+                    { "data-effort": ef },
+                  ),
+                )}
               </div>
               <div className="task-launcher-menu-caption">{t("launcher.effortSource", { agent: agentName(choice.agentId) })}</div>
             </>
@@ -1319,19 +1393,30 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           {hasAgentView(choice.agentId) && (
             <div className="task-launcher-opt-row">
               <span className="task-launcher-opt-label">{t("launcher.viewLabel")}</span>
-              <div className="task-launcher-view" role="radiogroup" aria-label={t("launcher.viewLabel")}>
-                {(["terminal", "agent"] as const).map((m) => (
-                  <button key={m} type="button" role="radio" aria-checked={viewMode === m} data-mode={m} className={`task-launcher-option${viewMode === m ? " selected" : ""}`} onClick={() => setViewMode(m)}>
-                    {m === "terminal" ? t("launcher.viewTerminal") : t("launcher.viewAgent")}
-                  </button>
-                ))}
-              </div>
+              <Segmented<SessionMode>
+                className="task-launcher-view"
+                label={t("launcher.viewLabel")}
+                value={viewMode}
+                onChange={setViewMode}
+                options={[
+                  { value: "terminal", label: t("launcher.viewTerminal"), attrs: { "data-mode": "terminal" } },
+                  { value: "agent", label: t("launcher.viewAgent"), attrs: { "data-mode": "agent" } },
+                ]}
+              />
             </div>
           )}
           {!isCustom && (
             <div className="task-launcher-opt-row">
               <label className="task-launcher-opt-label" htmlFor="task-launcher-extra-args">{t("launcher.extraArgsLabel")}</label>
-              <input id="task-launcher-extra-args" className="task-launcher-extra-args" value={choice.extraArgs} spellCheck={false} placeholder={t("launcher.extraArgsPlaceholder")} onChange={(e) => update({ extraArgs: e.target.value })} />
+              <Input
+                id="task-launcher-extra-args"
+                code
+                className="task-launcher-extra-args"
+                value={choice.extraArgs}
+                spellCheck={false}
+                placeholder={t("launcher.extraArgsPlaceholder")}
+                onChange={(e) => update({ extraArgs: e.target.value })}
+              />
               <span className="task-launcher-muted task-launcher-prefix-note">
                 {prefixOf(choice.agentId) ? t("launcher.prefixFromSettings", { prefix: prefixOf(choice.agentId) }) : t("launcher.prefixNone")}
               </span>
@@ -1340,8 +1425,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           {takesChannels(choice.agentId) && (
             <div className="task-launcher-opt-row">
               <label className="task-launcher-opt-label" htmlFor="task-launcher-channels">{t("launcher.channelsLabel")}</label>
-              <input
+              <Input
                 id="task-launcher-channels"
+                code
                 className="task-launcher-channels"
                 value={choice.channels.join(" ")}
                 spellCheck={false}
@@ -1356,7 +1442,8 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
               {doneWhen.error && <span className="task-launcher-muted">{t("launcher.doneWhenUnreadable", { reason: doneWhen.error })}</span>}
               {checks.map((c, i) => (
                 <span key={i} className="task-launcher-check">
-                  <input
+                  <Input
+                    code
                     className="task-launcher-check-input"
                     aria-label={t("launcher.checkN", { n: i + 1 })}
                     value={c}
@@ -1366,35 +1453,50 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
                       setChecks((list) => list.map((x, j) => (j === i ? e.target.value : x)));
                     }}
                   />
-                  <button type="button" className="task-launcher-link" aria-label={t("launcher.checkRemove", { n: i + 1 })} onClick={() => { setChecksEdited(true); setChecks((list) => list.filter((_, j) => j !== i)); }}>
-                    ×
-                  </button>
+                  <IconButton
+                    size="sm"
+                    className="task-launcher-check-remove"
+                    label={t("launcher.checkRemove", { n: i + 1 })}
+                    icon={<CloseGlyph />}
+                    onClick={() => {
+                      setChecksEdited(true);
+                      setChecks((list) => list.filter((_, j) => j !== i));
+                    }}
+                  />
                 </span>
               ))}
-              <button type="button" className="task-launcher-link task-launcher-check-add" onClick={() => { setChecksEdited(true); setChecks((list) => [...list, ""]); }}>
+              <Button
+                variant="quiet"
+                size="sm"
+                className="task-launcher-check-add"
+                onClick={() => {
+                  setChecksEdited(true);
+                  setChecks((list) => [...list, ""]);
+                }}
+              >
                 {t("launcher.checkAdd")}
-              </button>
+              </Button>
               <span className="task-launcher-muted">{checks.length ? t("launcher.checksHint") : t("launcher.doneWhenNone")}</span>
             </div>
           </div>
           <div className="task-launcher-opt-row">
             <span className="task-launcher-opt-label">{t("launcher.planningLabel")}</span>
-            <label className="task-launcher-feature">
-              <input type="checkbox" className="task-launcher-feature-box" checked={choice.trackAsFeature} onChange={(e) => update({ trackAsFeature: e.target.checked })} />
-              <span>
-                {t("launcher.trackAsFeature")}
-                <span className="task-launcher-option-note">{t("launcher.trackAsFeatureNote", { slug: taskBranch(task).replace(/^hermes\//, "") })}</span>
-              </span>
-            </label>
+            <Checkbox
+              className="task-launcher-feature"
+              inputClassName="task-launcher-feature-box"
+              checked={choice.trackAsFeature}
+              onChange={(on) => update({ trackAsFeature: on })}
+              label={t("launcher.trackAsFeature")}
+              description={t("launcher.trackAsFeatureNote", { slug: taskBranch(task).replace(/^hermes\//, "") })}
+            />
           </div>
           {!isCustom && (
             <div className="task-launcher-opt-row">
               <span className="task-launcher-opt-label">{t("launcher.alsoLabel")}</span>
-              <button
-                type="button"
-                className={`task-launcher-option task-launcher-also-toggle${choice.alsoOn ? " selected" : ""}`}
-                aria-pressed={!!choice.alsoOn}
-                onClick={() => {
+              <Chip
+                selected={!!choice.alsoOn}
+                buttonAttrs={{ className: cx("task-launcher-option", "task-launcher-also-toggle", !!choice.alsoOn && "selected") }}
+                onToggle={() => {
                   userTouched.current = true;
                   setChoice((cur) => {
                     if (!cur) return cur;
@@ -1409,7 +1511,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
                 }}
               >
                 {choice.alsoOn ? t("launcher.alsoOn", { agent: agentName(choice.alsoOn.agentId) }) : t("launcher.alsoAdd")}
-              </button>
+              </Chip>
               {choice.alsoOn && alsoSelects(choice.alsoOn)}
               {choice.alsoOn && <span className="task-launcher-muted">{t("launcher.alsoNote", { branch: plannedAgents[1]?.branch ?? "" })}</span>}
             </div>
@@ -1424,9 +1526,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           {capsError && (
             <div className="task-launcher-block" data-kind="caps-error" data-agent-id={capsError.agentId}>
               <span>{t("launcher.block.capsError", { agent: agentName(capsError.agentId), error: capsError.error || "—" })}</span>
-              <button type="button" className="task-launcher-link task-launcher-caps-retry" onClick={() => setCapsAttempt((n) => n + 1)}>
+              <Button variant="link" className="task-launcher-link task-launcher-caps-retry" onClick={() => setCapsAttempt((n) => n + 1)}>
                 {t("launcher.capsRetry")}
-              </button>
+              </Button>
             </div>
           )}
           {validation && (
@@ -1461,9 +1563,17 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         <div className="task-launcher-recents">
           <span>{t("launcher.recent")}</span>
           {recents.map((r) => (
-            <button key={r} type="button" className="task-launcher-recent" onClick={() => { setTask(r); taskRef.current?.focus(); }}>
+            <Button
+              key={r}
+              size="sm"
+              className="task-launcher-recent"
+              onClick={() => {
+                setTask(r);
+                taskRef.current?.focus();
+              }}
+            >
               {taskLabel(r, 32)}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -1477,26 +1587,27 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
 
       <div className="task-launcher-footer">
         {onOpenAdvanced ? (
-          <button type="button" className="task-launcher-link task-launcher-advanced" onClick={onOpenAdvanced}>
+          <Button variant="quiet" className="task-launcher-advanced" onClick={onOpenAdvanced}>
             {t("launcher.advanced", { shortcut: shortcutLabel("file.new-session-advanced") })}
-          </button>
+          </Button>
         ) : (
           <span />
         )}
         <div className="task-launcher-actions">
           {!inline && onClose && (
-            <button type="button" className="task-launcher-btn task-launcher-cancel" onClick={() => close(false)}>
+            <Button variant="quiet" className="task-launcher-cancel" onClick={() => close(false)}>
               {t("launcher.cancelEsc")}
-            </button>
+            </Button>
           )}
           {!inline && (
-            <button type="button" className="task-launcher-btn task-launcher-launch-next" disabled={!canGo} onClick={() => void launch(true)}>
+            <Button className="task-launcher-launch-next" disabled={!canGo} onClick={() => void launch(true)}>
               {t("launcher.launchNext", { shortcut: fmt("{mod}⏎") })}
-            </button>
+            </Button>
           )}
-          <button type="button" className="task-launcher-btn task-launcher-launch" disabled={!canGo} onClick={() => void launch(false)}>
+          {/* One primary per surface: in the welcome, its own Finish is the primary. */}
+          <Button variant={inline ? "secondary" : "primary"} className="task-launcher-launch" disabled={!canGo} onClick={() => void launch(false)}>
             {launching ? t("launcher.launching") : t("launcher.launchEnter")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -2,8 +2,9 @@
 // Stylesheet lint with a baseline: the rules in .stylelintrc.json
 // (docs/design-system/09-migration.md) hold for
 //
-//   - every line of the control set's stylesheets (src/styles/ui/) and of
-//     any stylesheet added since the base commit, and
+//   - every line of the control set's stylesheets (src/styles/ui/), of the
+//     screens already moved to it (STRICT_FILES) and of any stylesheet
+//     added since the base commit, and
 //   - only the added or changed lines of every other stylesheet.
 //
 // Existing lines of older stylesheets are the baseline: they migrate when a
@@ -26,6 +27,18 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** Stylesheets held to the rules on every line, whatever changed. */
 export const STRICT_DIRS = ["src/styles/ui/"];
 
+/**
+ * Stylesheets of screens that have moved to the control set: they are held
+ * to the rules on every line too, so a raw value cannot creep back in.
+ */
+export const STRICT_FILES = [
+  "src/styles/components/AgentDoctor.css",
+  "src/styles/components/SessionBranchSelector.css",
+  "src/styles/components/SessionCreator.css",
+  "src/styles/components/SetupWizard.css",
+  "src/styles/components/TaskLauncher.css",
+];
+
 /** Line numbers (in the new file) added or changed by a unified diff with -U0. */
 export function addedLines(diff) {
   const lines = new Set();
@@ -45,7 +58,7 @@ function git(args, cwd) {
  * Which stylesheets to lint and which of their lines count:
  * Map<relative path, "all" | Set<line>>.
  */
-export function lintScope({ cwd = ROOT, base }) {
+export function lintScope({ cwd = ROOT, base, strictFiles = STRICT_FILES }) {
   const mergeBase = git(["merge-base", base, "HEAD"], cwd).trim();
   const scope = new Map();
   // Changed against the merge-base, working tree included. Renames count as new files.
@@ -53,7 +66,7 @@ export function lintScope({ cwd = ROOT, base }) {
   for (const line of status.split("\n").filter(Boolean)) {
     const [code, file] = line.split("\t");
     if (code === "D") continue;
-    if (code === "A" || STRICT_DIRS.some((d) => file.startsWith(d))) {
+    if (code === "A" || STRICT_DIRS.some((d) => file.startsWith(d)) || strictFiles.includes(file)) {
       scope.set(file, "all");
       continue;
     }
@@ -67,6 +80,10 @@ export function lintScope({ cwd = ROOT, base }) {
   }
   // The control set is always checked in full.
   for (const file of git(["ls-files", "--", ...STRICT_DIRS.map((d) => `${d}*.css`)], cwd).split("\n").filter(Boolean)) {
+    if (existsSync(join(cwd, file))) scope.set(file, "all");
+  }
+  // So are the stylesheets of the screens already on it.
+  for (const file of strictFiles) {
     if (existsSync(join(cwd, file))) scope.set(file, "all");
   }
   return scope;
@@ -86,9 +103,9 @@ export function problemsInScope(results, scope, cwd = ROOT) {
   return out;
 }
 
-export async function lintChangedCss({ cwd = ROOT, base = "origin/main", configFile = join(ROOT, ".stylelintrc.json") } = {}) {
+export async function lintChangedCss({ cwd = ROOT, base = "origin/main", configFile = join(ROOT, ".stylelintrc.json"), strictFiles = STRICT_FILES } = {}) {
   const { default: stylelint } = await import("stylelint");
-  const scope = lintScope({ cwd, base });
+  const scope = lintScope({ cwd, base, strictFiles });
   const files = [...scope.keys()].filter((f) => existsSync(join(cwd, f)));
   if (files.length === 0) return { scope, problems: [] };
   const { results } = await stylelint.lint({

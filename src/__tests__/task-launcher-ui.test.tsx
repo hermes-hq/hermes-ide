@@ -142,6 +142,14 @@ async function pick(chipName: string, selector: string) {
   fireEvent.click(document.querySelector(`.task-launcher-menu ${selector}`) as HTMLElement);
   await settle();
 }
+/** Picks a value of a Select the way the mouse does: open its list, click the option. */
+function choose(selector: string, value: string) {
+  const trigger = document.querySelector(selector) as HTMLElement;
+  expect(trigger?.getAttribute("role")).toBe("combobox");
+  fireEvent.click(trigger);
+  const list = document.getElementById(trigger.getAttribute("aria-controls") ?? "") as HTMLElement;
+  fireEvent.click(list.querySelector(`[data-value="${value}"]`) as HTMLElement);
+}
 async function expand() {
   fireEvent.click(document.querySelector(".task-launcher-expand") as HTMLElement);
   await settle();
@@ -320,8 +328,7 @@ describe("TaskLauncher: the chips", () => {
     fireEvent.click(chip("where"));
     fireEvent.click(document.querySelector('.task-launcher-menu [data-where="existing-branch"]') as HTMLElement);
     await settle();
-    const select = document.querySelector(".task-launcher-menu .task-launcher-existing") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "feature/inbox" } });
+    choose(".task-launcher-menu .task-launcher-existing", "feature/inbox");
     await settle();
     expect(chip("where")).toHaveTextContent("existing branch · feature/inbox");
     await launchWithEnter();
@@ -344,7 +351,7 @@ describe("TaskLauncher: the chips", () => {
     fireEvent.click(chip("where"));
     fireEvent.click(document.querySelector('.task-launcher-menu [data-where="new-worktree"]') as HTMLElement);
     await settle();
-    fireEvent.change(document.querySelector(".task-launcher-menu .task-launcher-base") as HTMLSelectElement, { target: { value: "develop" } });
+    choose(".task-launcher-menu .task-launcher-base", "develop");
     await settle();
     expect(preview()).toContain("in worktree hermes/fix-the-badge from develop");
     await launchWithEnter();
@@ -409,10 +416,10 @@ describe("TaskLauncher: + options", () => {
     fireEvent.click(feature);
     fireEvent.click(document.querySelector(".task-launcher-also-toggle") as HTMLElement);
     await settle();
-    fireEvent.change(document.querySelector(".task-launcher-also-approval") as HTMLSelectElement, { target: { value: "bypassPermissions" } });
-    fireEvent.change(document.querySelector(".task-launcher-also-model") as HTMLSelectElement, { target: { value: "gpt-fake-terra" } });
+    choose(".task-launcher-also-approval", "bypassPermissions");
+    choose(".task-launcher-also-model", "gpt-fake-terra");
     await settle();
-    fireEvent.change(document.querySelector(".task-launcher-also-effort") as HTMLSelectElement, { target: { value: "ultra" } });
+    choose(".task-launcher-also-effort", "ultra");
     await settle();
     expect(preview()).toContain('--channels plugin:telegram --debug  +  codex --dangerously-bypass-approvals-and-sandbox "Add ru locale" -m gpt-fake-terra -c model_reasoning_effort=ultra');
     await launchWithEnter();
@@ -796,7 +803,7 @@ describe("TaskLauncher: a base branch the repository does not have", () => {
     expect(preview()).toContain("in worktree hermes/fix-the-release from main");
     expect(preview()).not.toContain("release/gone");
     fireEvent.click(chip("where"));
-    expect((document.querySelector(".task-launcher-menu .task-launcher-base") as HTMLSelectElement).value).toBe("");
+    expect(document.querySelector(".task-launcher-menu .task-launcher-base")?.getAttribute("data-value")).toBe("");
     await launchWithEnter();
     expect(onLaunch.mock.calls[0][0].agents[0]).toMatchObject({ baseBranch: "", createBranch: true, branch: "hermes/fix-the-release" });
   });
@@ -825,7 +832,7 @@ describe("TaskLauncher: a base branch the repository does not have", () => {
     await open();
     await typeTask("Switch me");
     fireEvent.click(chip("where"));
-    fireEvent.change(document.querySelector(".task-launcher-menu .task-launcher-base") as HTMLSelectElement, { target: { value: "develop" } });
+    choose(".task-launcher-menu .task-launcher-base", "develop");
     await settle();
     expect(preview()).toContain("from develop");
     await pick("project", `[data-project-path="${OTHER}"]`);

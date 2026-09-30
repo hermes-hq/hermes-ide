@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import "../../styles/ui/choice.css";
+import type { ControlAttrs } from "./attrs";
 import { cx } from "./Button";
 
 interface ChoiceText {
@@ -31,10 +32,12 @@ export interface CheckboxProps
   /** Some but not all of a group are on (a bar instead of a check). */
   indeterminate?: boolean;
   onChange: (checked: boolean) => void;
+  /** A hook class for the box itself (className goes on the row). */
+  inputClassName?: string;
 }
 
 /** For picking items and for consent. Settings on/off use Toggle. */
-export function Checkbox({ checked, indeterminate = false, onChange, label, description, className, disabled, ...rest }: CheckboxProps) {
+export function Checkbox({ checked, indeterminate = false, onChange, label, description, className, inputClassName, disabled, ...rest }: CheckboxProps) {
   const ref = useRef<HTMLInputElement>(null);
   const labelId = useId();
   useEffect(() => {
@@ -46,7 +49,7 @@ export function Checkbox({ checked, indeterminate = false, onChange, label, desc
         {...rest}
         ref={ref}
         type="checkbox"
-        className="h-checkbox"
+        className={cx("h-checkbox", inputClassName)}
         checked={checked}
         disabled={disabled}
         aria-checked={indeterminate ? "mixed" : undefined}
@@ -92,6 +95,8 @@ export function Toggle({ checked, onChange, label, description, disabled, id, cl
 export interface RadioOption<V extends string = string> extends ChoiceText {
   value: V;
   disabled?: boolean;
+  /** Hook class, id, tooltip and data-* attributes for the option's radio. */
+  attrs?: ControlAttrs;
 }
 
 export interface RadioGroupProps<V extends string = string> {
@@ -130,37 +135,44 @@ export function RadioGroup<V extends string = string>({ label, name, options, va
 
   return (
     <div role="radiogroup" aria-label={label} className={cx("h-radio-group", className)}>
-      {options.map((o, i) => (
-        <Radio
-          key={o.value}
-          inputRef={(el) => {
-            refs.current[i] = el;
-          }}
-          name={groupName}
-          value={o.value}
-          checked={o.value === value}
-          disabled={o.disabled}
-          tabIndex={i === tabStop ? 0 : -1}
-          label={o.label}
-          description={o.description}
-          onChange={() => onChange(o.value)}
-          onKeyDown={(e) => onKeyDown(e, i)}
-        />
-      ))}
+      {options.map((o, i) => {
+        const { className: hook, ...attrs } = o.attrs ?? {};
+        return (
+          <Radio
+            {...attrs}
+            key={o.value}
+            inputRef={(el) => {
+              refs.current[i] = el;
+            }}
+            inputClassName={hook}
+            name={groupName}
+            value={o.value}
+            checked={o.value === value}
+            disabled={o.disabled}
+            tabIndex={i === tabStop ? 0 : -1}
+            label={o.label}
+            description={o.description}
+            onChange={() => onChange(o.value)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+          />
+        );
+      })}
     </div>
   );
 }
 
 export interface RadioProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type">, ChoiceText {
   inputRef?: (el: HTMLInputElement | null) => void;
+  /** A hook class for the radio itself (className goes on the row). */
+  inputClassName?: string;
 }
 
 /** A single radio; use RadioGroup unless the radios are laid out apart. */
-export function Radio({ label, description, className, disabled, inputRef, ...rest }: RadioProps) {
+export function Radio({ label, description, className, disabled, inputRef, inputClassName, ...rest }: RadioProps) {
   const labelId = useId();
   return (
     <label className={cx("h-choice", disabled && "h-choice--disabled", className)}>
-      <input {...rest} ref={inputRef} type="radio" className="h-radio" disabled={disabled} />
+      <input {...rest} ref={inputRef} type="radio" className={cx("h-radio", inputClassName)} disabled={disabled} />
       <ChoiceLabel id={labelId} label={label} description={description} />
     </label>
   );

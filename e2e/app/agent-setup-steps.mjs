@@ -145,7 +145,7 @@ export async function startAgentSession(bridge, log, { agent, prefix, suffix = "
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(${JSON.stringify(PRIMARY)}), "Next"));`);
 
   // Folder step: add each folder by path; the first is the session's folder.
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   for (const folder of folders) {
     const name = folder.split(/[\\/]/).pop();
     const listed = await bridge.eval(`
@@ -155,7 +155,7 @@ export async function startAgentSession(bridge, log, { agent, prefix, suffix = "
       return true;
     `);
     if (!listed) {
-      await bridge.eval(setInputJs(`e2e.first(".workspace-scan-input")`, folder));
+      await bridge.eval(setInputJs(`e2e.first(".session-creator-scan-input")`, folder));
       await bridge.clickByName("Scan", { within: ".project-picker-footer" });
     }
     await bridge.waitFor(`${name} to be selected`, `
@@ -168,7 +168,7 @@ export async function startAgentSession(bridge, log, { agent, prefix, suffix = "
     if (!(await bridge.exists(".session-creator"))) break;
     const clicked = await bridge.clickWhenReady(`
       if (!e2e.first(".session-creator")) return null;
-      const nameInput = e2e.first('input.command-palette-input[placeholder="Session name (optional)"]');
+      const nameInput = e2e.first('input.session-creator-name[placeholder="Session name (optional)"]');
       if (nameInput && ${JSON.stringify(label ?? "")} && nameInput.value !== ${JSON.stringify(label ?? "")}) {
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
         setter.call(nameInput, ${JSON.stringify(label ?? "")});
@@ -232,9 +232,9 @@ export async function startAgentViewSession(bridge, log, { folder }) {
   }
   await bridge.waitFor("the Agent view to be chosen", `return ${agentViewBox}?.checked === true;`);
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(${JSON.stringify(PRIMARY)}), "Next"));`);
-  await bridge.waitFor("the folder step", `return !!e2e.first(".workspace-scan-input");`);
+  await bridge.waitFor("the folder step", `return !!e2e.first(".session-creator-scan-input");`);
   const name = folder.split(/[\\/]/).pop();
-  await bridge.eval(setInputJs(`e2e.first(".workspace-scan-input")`, folder));
+  await bridge.eval(setInputJs(`e2e.first(".session-creator-scan-input")`, folder));
   await bridge.clickByName("Scan", { within: ".project-picker-footer" });
   await bridge.waitFor(`${name} to be selected`, `
     return e2e.all(".project-picker-item.project-picker-item-attached").some((el) => el.innerText.includes(${JSON.stringify(name)}));

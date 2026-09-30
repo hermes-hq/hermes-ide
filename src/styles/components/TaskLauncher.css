@@ -1,4 +1,9 @@
-/* ─── Task launcher (⌘N) ─────────────────────────────────────────────── */
+/* ─── Task launcher (⌘N) ───────────────────────────────────────────────
+ * Layout only: every button, field, chip, select, segmented control and
+ * checkbox is a control from src/components/ui (docs/design-system/
+ * 06-components.md · Controls). The class names the screen puts on them
+ * are hooks for tests and carry no rules here.
+ * ──────────────────────────────────────────────────────────────────── */
 
 .task-launcher-overlay {
   position: fixed;
@@ -16,15 +21,15 @@
   max-height: 88vh;
   display: flex;
   background: var(--bg-1);
-  border: 1px solid var(--border-light);
+  border: var(--control-border-width) solid var(--border-light);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-4);
   overflow: hidden;
-  animation: task-launcher-in 0.12s ease-out;
+  animation: task-launcher-in var(--dur-quick) var(--ease-out-soft);
 }
 
 @keyframes task-launcher-in {
-  from { opacity: 0; transform: translateY(-8px); }
+  from { opacity: 0; transform: translateY(calc(-2 * var(--space-1))); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -44,12 +49,12 @@
 
 .task-launcher-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
 }
 
 .task-launcher-title {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text-0);
   font-size: var(--text-base);
 }
@@ -57,17 +62,6 @@
 .task-launcher-subtitle,
 .task-launcher-keyhint { color: var(--text-2); font-size: var(--text-xs); }
 .task-launcher-spacer { flex: 1; }
-
-.task-launcher-close {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  font-size: var(--text-lg);
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 4px;
-}
-.task-launcher-close:hover { color: var(--text-0); }
 
 .task-launcher-sr {
   position: absolute;
@@ -80,80 +74,44 @@
 
 /* Presets */
 
-.task-launcher-presets {
+.task-launcher-presets,
+.task-launcher-preset-form,
+.task-launcher-suggest {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1-5);
   align-items: center;
 }
 
-.task-launcher-preset {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-1) calc(var(--space-1) * 2.5);
-  border-radius: var(--radius-full);
-  border: var(--control-border-width) solid var(--border);
-  background: var(--bg-2);
-  color: var(--text-1);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.task-launcher-preset:hover { background: var(--bg-hover); }
-.task-launcher-preset.selected { border-color: var(--accent); background: var(--accent-dim); color: var(--text-0); }
-.task-launcher-preset-key { color: var(--text-3); font-family: var(--font-mono); }
-
-.task-launcher-preset-form,
-.task-launcher-suggest {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1-5);
-  flex-wrap: wrap;
-}
+.task-launcher-preset-key { margin-right: var(--space-1-5); color: var(--text-2); font-family: var(--font-code); }
 
 .task-launcher-suggest {
   padding: var(--space-2) calc(var(--space-1) * 2.5);
-  border-radius: var(--radius);
-  border: var(--control-border-width) solid var(--accent);
-  background: var(--accent-dim);
+  border-radius: var(--radius-md);
+  border: var(--control-border-width) solid var(--chip-selected-border);
+  background: var(--chip-selected-bg);
   color: var(--text-0);
 }
 
 .task-launcher-preset-name,
-.task-launcher-suggest-name {
-  width: calc(var(--space-1) * 50);
-}
+.task-launcher-suggest-name { width: calc(var(--space-1) * 50); }
 
 .task-launcher-fallback {
   padding: var(--space-2) calc(var(--space-1) * 2.5);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   border: var(--control-border-width) solid var(--yellow);
   background: var(--yellow-dim);
   color: var(--text-0);
   font-size: var(--text-xs);
 }
 .task-launcher-fallback ul { margin: var(--space-1) 0 0; padding-left: calc(var(--space-1) * 4.5); }
-.task-launcher-fallback-block { display: block; color: var(--danger-bright); margin-top: var(--space-0-5); }
+.task-launcher-fallback-block { display: block; color: var(--danger-fg); margin-top: var(--space-0-5); }
 
 /* Task */
 
-.task-launcher-task {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: calc(var(--space-1) * 17.5);
-  resize: none;
-  background: var(--bg-0);
-  color: var(--text-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: calc(var(--space-1) * 2.5) var(--space-3);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  line-height: var(--leading-normal);
-}
-.task-launcher-task:focus { border-color: var(--accent); }
+.task-launcher-task { width: 100%; resize: none; }
 
-/* Chips */
+/* Chips and their menus */
 
 .task-launcher-chips {
   display: flex;
@@ -161,31 +119,7 @@
   gap: var(--space-2);
   align-items: center;
 }
-
-.task-launcher-chip {
-  padding: var(--space-1-5) calc(var(--space-1) * 2.75);
-  border-radius: var(--radius-md);
-  border: var(--control-border-width) solid var(--border-light);
-  background: var(--bg-2);
-  color: var(--text-0);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  text-align: left;
-  white-space: nowrap;
-  max-width: calc(var(--space-1) * 80);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.task-launcher-chip:hover { background: var(--bg-hover); }
-.task-launcher-chip.open { border-color: var(--accent); background: var(--accent-dim); }
-.task-launcher-chip.danger { border-color: var(--danger); background: var(--danger-dim); color: var(--danger-bright); }
-.task-launcher-chip.off,
-.task-launcher-chip:disabled { color: var(--text-3); cursor: default; background: var(--bg-1); }
-.task-launcher-chip:focus-visible,
-.task-launcher-option:focus-visible,
-.task-launcher-preset:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: var(--focus-ring-offset); }
-
-/* Menus and options */
+.task-launcher-chips .h-chip { max-width: calc(var(--space-1) * 80); }
 
 .task-launcher-menu {
   display: flex;
@@ -201,68 +135,40 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1-5);
-  align-items: stretch;
+  align-items: center;
 }
-.task-launcher-menu-column { flex-direction: column; }
+.task-launcher-menu-column { flex-direction: column; align-items: flex-start; }
 
 .task-launcher-menu-caption { color: var(--text-2); font-size: var(--text-xs); padding: 0 var(--space-0-5); }
 
-.task-launcher-option {
-  padding: var(--space-1-5) calc(var(--space-1) * 2.5);
-  border-radius: var(--radius-md);
-  border: var(--control-border-width) solid var(--border-light);
-  background: var(--bg-2);
-  color: var(--text-0);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  text-align: left;
-}
-.task-launcher-option:hover:not(:disabled) { background: var(--bg-hover); }
-.task-launcher-option.selected { border-color: var(--accent); background: var(--accent-dim); }
-.task-launcher-option.danger { color: var(--danger-bright); }
-.task-launcher-option.danger.selected { border-color: var(--danger); background: var(--danger-dim); }
-.task-launcher-option:disabled { color: var(--text-3); cursor: default; }
-.task-launcher-option-note { display: block; font-size: var(--text-xs); color: var(--text-2); margin-top: var(--space-0-5); }
+/* The second, quieter part of an option chip ("installed 2.1.300", a path). */
+.task-launcher-option-note { margin-left: var(--space-1-5); color: var(--text-2); font-weight: var(--weight-regular); }
+.h-chip--selected .task-launcher-option-note,
+.h-chip--danger .task-launcher-option-note { color: inherit; }
 
-.task-launcher-approval { display: flex; flex-direction: column; gap: var(--space-1-5); flex: 1; }
+.task-launcher-approval { display: flex; flex-direction: column; gap: var(--space-1-5); flex: 1; min-width: 0; }
 .task-launcher-approval-modes { display: flex; flex-wrap: wrap; gap: var(--space-1-5); }
 .task-launcher-approval-note { color: var(--text-0); }
-.task-launcher-approval-note.danger { color: var(--danger-bright); }
+.task-launcher-approval-note.danger { color: var(--danger-fg); }
 
-.task-launcher-where { display: flex; flex-direction: column; gap: var(--space-1-5); flex: 1; }
-.task-launcher-where-row { display: flex; flex-wrap: wrap; gap: var(--space-1-5); align-items: center; }
+.task-launcher-where { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); flex: 1; min-width: 0; }
+.task-launcher-where-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.task-launcher-where .h-select-trigger { min-width: calc(var(--space-1) * 45); }
 
 .task-launcher-inline-label { color: var(--text-2); font-size: var(--text-xs); }
 
-.task-launcher input:not([type="checkbox"]),
-.task-launcher select {
-  background: var(--bg-0);
-  color: var(--text-0);
-  border: var(--control-border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-sm);
-}
-.task-launcher input:focus,
-.task-launcher select:focus { border-color: var(--accent); }
-
-.task-launcher-branch,
-.task-launcher-repo,
-.task-launcher-extra-args,
-.task-launcher-channels,
-.task-launcher-check-input,
-.task-launcher-custom-command,
-.task-launcher-model-text { font-family: var(--font-mono); }
-
-.task-launcher-repo { width: 100%; box-sizing: border-box; }
+.task-launcher-repo { width: 100%; }
 .task-launcher-extra-args,
 .task-launcher-channels { flex: 1; min-width: calc(var(--space-1) * 50); }
 .task-launcher-custom-command { min-width: calc(var(--space-1) * 55); }
+.task-launcher-model-text { max-width: calc(var(--space-1) * 60); }
+
+/* + options */
 
 .task-launcher-options {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--space-1) * 2.5);
+  gap: var(--space-3);
   padding: var(--space-3) calc(var(--space-1) * 3.5);
   background: var(--bg-0);
   border: var(--control-border-width) solid var(--border);
@@ -270,21 +176,24 @@
 }
 
 .task-launcher-opt-row { display: flex; gap: var(--space-3); align-items: flex-start; flex-wrap: wrap; }
-.task-launcher-opt-label { width: calc(var(--space-1) * 21); flex: none; color: var(--text-2); font-size: var(--text-xs); padding-top: var(--space-1-5); }
-
-.task-launcher-view { display: flex; gap: var(--space-1-5); }
+.task-launcher-opt-label {
+  width: calc(var(--space-1) * 21);
+  flex: none;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  line-height: var(--control-h-md);
+}
 
 .task-launcher-checks { display: flex; flex-wrap: wrap; gap: var(--space-1-5); align-items: center; flex: 1; }
 .task-launcher-check { display: inline-flex; gap: var(--space-0-5); align-items: center; }
 
-.task-launcher-feature { display: flex; gap: var(--space-2); align-items: flex-start; cursor: pointer; max-width: calc(var(--space-1) * 140); }
-.task-launcher-feature input { margin-top: calc(var(--space-1) * 0.75); }
+.task-launcher-feature { max-width: calc(var(--space-1) * 140); }
 
-.task-launcher-also-toggle { flex: none; }
 .task-launcher-also-fields { display: flex; flex-wrap: wrap; gap: var(--space-1-5); }
+.task-launcher-also-fields .h-select-trigger { min-width: calc(var(--space-1) * 36); }
 
 .task-launcher-muted { color: var(--text-2); font-size: var(--text-xs); }
-.task-launcher-muted code { font-family: var(--font-mono); color: var(--text-1); }
+.task-launcher-muted code { font-family: var(--font-code); color: var(--text-1); }
 
 /* Rows that stop Launch */
 
@@ -296,11 +205,11 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
-  padding: 6px 10px;
-  border-radius: var(--radius);
+  padding: var(--space-1-5) calc(var(--space-1) * 2.5);
+  border-radius: var(--radius-md);
   font-size: var(--text-xs);
 }
-.task-launcher-block { background: var(--danger-dim); color: var(--text-0); border: var(--control-border-width) solid var(--danger); }
+.task-launcher-block { background: var(--danger-dim); color: var(--text-0); border: var(--control-border-width) solid var(--danger-border); }
 .task-launcher-note { background: var(--bg-2); color: var(--text-1); }
 
 /* Preview, recents, footer */
@@ -315,7 +224,7 @@
 }
 .task-launcher-preview-label { color: var(--text-2); font-size: var(--text-xs); }
 .task-launcher-command {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
   font-size: var(--text-xs);
   color: var(--text-0);
   white-space: nowrap;
@@ -324,26 +233,16 @@
 }
 
 .task-launcher-recents { display: flex; flex-wrap: wrap; gap: var(--space-1-5); align-items: center; color: var(--text-2); font-size: var(--text-xs); }
-.task-launcher-recent {
-  padding: calc(var(--space-1) * 0.75) var(--space-2);
-  border-radius: var(--radius);
-  border: var(--control-border-width) solid var(--border);
-  background: transparent;
-  color: var(--text-1);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.task-launcher-recent:hover { background: var(--bg-hover); }
 
 .task-launcher-launched { color: var(--text-1); font-size: var(--text-xs); }
-.task-launcher-queued { color: var(--yellow); }
+.task-launcher-queued { color: var(--warning-ink); }
 
 .task-launcher-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  border-top: 1px solid var(--border);
+  border-top: var(--control-border-width) solid var(--border);
   padding-top: calc(var(--space-1) * 2.5);
   /* With every option open the sheet scrolls; Launch stays in reach. */
   position: sticky;
@@ -355,30 +254,3 @@
 .task-launcher-inline .task-launcher-footer { border-top: none; padding-top: 0; position: static; margin-bottom: 0; padding-bottom: 0; background: none; }
 
 .task-launcher-actions { display: flex; align-items: center; gap: var(--space-2); }
-
-.task-launcher-btn {
-  padding: calc(var(--space-1) * 1.75) calc(var(--space-1) * 3.25);
-  border-radius: var(--radius-md);
-  border: var(--control-border-width) solid var(--border-light);
-  background: transparent;
-  color: var(--text-1);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.task-launcher-btn:hover:not(:disabled) { background: var(--bg-hover); }
-.task-launcher-btn:disabled { opacity: 0.5; cursor: default; }
-.task-launcher-launch-next { border-color: var(--accent); color: var(--text-0); }
-.task-launcher-launch { background: var(--primary-bg); border-color: var(--primary-bg); color: var(--primary-fg); font-weight: var(--weight-semibold); }
-.task-launcher-launch:hover:not(:disabled) { background: var(--primary-bg-hover); border-color: var(--primary-bg-hover); }
-
-.task-launcher-link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--accent-bright);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.task-launcher-link:hover:not(:disabled) { text-decoration: underline; }
-.task-launcher-link:disabled { color: var(--text-3); cursor: default; }
-.task-launcher-expand { font-size: var(--text-sm); }
