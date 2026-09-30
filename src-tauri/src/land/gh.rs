@@ -147,8 +147,13 @@ pub fn run(
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("Could not run gh: {e}"))?;
     if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        pipe.write_all(text.as_bytes())
-            .map_err(|e| format!("Could not talk to gh: {e}"))?;
+        match pipe.write_all(text.as_bytes()) {
+            // gh stopped before reading all of it (it refused early, for
+            // example because the pull request exists); its exit code and
+            // message below say why, which is what the user needs to see.
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+            r => r.map_err(|e| format!("Could not talk to gh: {e}"))?,
+        }
     }
     let out = child
         .wait_with_output()
@@ -466,6 +471,24 @@ mod tests {
             "echo 'noise on stdout'\necho '  ' >&2\necho 'a pull request already exists' >&2\nexit 1",
         );
         let err = create_pr(&gh, dir.path(), "main", "task", "Title", "Body").unwrap_err();
+        assert_eq!(
+            err,
+            "gh could not open the pull request: a pull request already exists"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gh_that_refuses_before_reading_the_body_still_says_why() {
+        // A body far larger than a pipe's buffer, and a gh that never reads
+        // it: writing the body always meets a closed pipe.
+        let dir = TempDir::new().unwrap();
+        let (gh, _) = script_gh(
+            dir.path(),
+            "exec 0<&-\necho 'a pull request already exists' >&2\nexit 1",
+        );
+        let body = "x".repeat(4 * 1024 * 1024);
+        let err = create_pr(&gh, dir.path(), "main", "task", "Title", &body).unwrap_err();
         assert_eq!(
             err,
             "gh could not open the pull request: a pull request already exists"
