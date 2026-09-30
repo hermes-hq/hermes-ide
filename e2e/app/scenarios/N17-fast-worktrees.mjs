@@ -587,8 +587,8 @@ try {
       log(`  blob extents: clone ${JSON.stringify(mine)}; source ${JSON.stringify(source)}`);
       assert(mine.length > 0 && JSON.stringify(mine) === JSON.stringify(source), `the ${BLOB_BYTES / 2 ** 20} MB blob was shared, not copied (same clusters as the source)`);
     } else {
-      // A copy would hold the blob plus the filler (over 290 MB) of its
-      // own; a clone next to nothing. The same limit as when this was
+      // A copy would hold the blob plus the filler (about 259 MB in some
+      // 6,000 files) of its own; a clone next to nothing. The same limit as when this was
       // measured as free space.
       const used = own.privateBytes;
       assert(own.bytes > BLOB_BYTES, `the worktree has the blob and the filler (${(own.bytes / 2 ** 20).toFixed(1)} MB in ${own.files} files)`);

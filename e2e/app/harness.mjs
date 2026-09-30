@@ -435,14 +435,42 @@ export function finishScenario({ scenario, evidenceDir, failed, startedAt, log =
   process.exit(failed ? 1 : 0);
 }
 
+/** Thrown by skipScenario inside a runScenario body, so its cleanups still run. */
+export class ScenarioSkip extends Error {
+  constructor(reason) {
+    super(`scenario skipped: ${reason}`);
+    this.name = "ScenarioSkip";
+    this.reason = reason;
+  }
+}
+
+let skippableBodies = 0;
+
+/**
+ * Run a scenario body in which skipScenario throws a ScenarioSkip instead of
+ * exiting, so the caller can quit the app and run its cleanups first (and
+ * then call skipScenario itself, outside the body).
+ */
+export async function inSkippableBody(fn) {
+  skippableBodies++;
+  try {
+    return await fn();
+  } finally {
+    skippableBodies--;
+  }
+}
+
 /**
  * A scenario that cannot run here (a platform, CI, a missing CLI): nothing
  * was tested. Writes result.json with status "skip" and the reason, prints
  * the RESULT line and exits 0. run.mjs reports it as skipped, and the
  * acceptance gate never counts a skip as a pass (a scenario that only
- * skipped on a platform it must be green on has no result there).
+ * skipped on a platform it must be green on has no result there). Inside
+ * a runScenario body it throws a ScenarioSkip instead: runScenario quits
+ * the app, runs the cleanups, and then skips.
  */
 export function skipScenario({ scenario, evidenceDir, reason, startedAt = Date.now(), log = console.log }) {
+  if (skippableBodies > 0) throw new ScenarioSkip(reason);
   const dir = evidenceDir || process.env.HERMES_E2E_EVIDENCE;
   if (dir) {
     mkdirSync(dir, { recursive: true });
