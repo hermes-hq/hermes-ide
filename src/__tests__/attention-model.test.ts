@@ -199,6 +199,47 @@ describe("status bridge", () => {
     bridge.stop();
   });
 
+  it("a guessed approval (Antigravity's, from the OS layer) never raises or keeps an item, and so never notifies", () => {
+    const bridge = startStatusBridge();
+    const notified: string[] = [];
+    const notifier = createNotifier({
+      now,
+      isWindowFocused: () => false,
+      activeSessionId: () => null,
+      mutes: getMutes,
+      text: (i) => ({ title: i.id, body: "" }),
+      awayPayload: () => ({ agent: "Antigravity CLI", task: "t", state: "needs_approval" }),
+      showOs: (_t, i) => notified.push(i.id),
+      sendAway: (p) => notified.push(`away:${p.state}`),
+    });
+    const ev = (kind: AgentStatusKind, confidence: "exact" | "guessed", source: string, at: number, detail = "") => {
+      dispatchSessionEvent("G", { type: "status", at, source, status: { kind, confidence, detail } });
+      notifier.update(listInboxItems());
+    };
+    // The agent's own hooks: a turn, then a tool call announced (PreToolUse).
+    ev("working", "exact", "hook:antigravity", 1_000);
+    ev("working", "exact", "hook:antigravity", 1_100);
+    // Nothing runs for 1.5 s: the OS layer guesses an approval, under the hook's source.
+    ev("needs_approval", "guessed", "hook:antigravity", 2_700, "run_command");
+    expect(listInboxItems()).toEqual([]);
+    expect(trustedStatus(getSessionEventSnapshot("G"), [])).toMatchObject({ kind: "working", confidence: "exact" });
+    // The person approves; the command starts; the OS layer takes the guess back.
+    noteUserInput("G", "y", 4_000);
+    ev("working", "guessed", "os", 4_500, "a command is running (zsh)");
+    ev("working", "guessed", "hook:antigravity", 4_500, "a command is running (zsh)");
+    expect(listInboxItems()).toEqual([]);
+    // The tool finishes (PostToolUse), the turn ends: a ready item, as before.
+    ev("working", "exact", "hook:antigravity", 8_000);
+    ev("done_unread", "exact", "hook:antigravity", 9_000);
+    expect(listInboxItems().map((i) => i.kind)).toEqual(["ready"]);
+    expect(notified.filter((n) => n.includes("needs_approval"))).toEqual([]);
+    // An exact approval raised before a guess stays raised (the guess is skipped, not a resolve).
+    ev("needs_approval", "exact", "hook:antigravity", 10_000, "Bash");
+    ev("needs_approval", "guessed", "hook:antigravity", 11_000, "run_command");
+    expect(listInboxItems().map((i) => [i.kind, i.detail])).toEqual([["blocked", "Bash"]]);
+    bridge.stop();
+  });
+
   it("an exact approval is never resolved by the terminal's guess, answered or not", () => {
     const bridge = startStatusBridge();
     status("A", "needs_approval", "Bash", 10);

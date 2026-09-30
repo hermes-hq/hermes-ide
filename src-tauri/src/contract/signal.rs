@@ -28,6 +28,11 @@ pub struct SignalRecord {
     pub v: u32,
     /// Epoch seconds.
     pub ts: i64,
+    /// Epoch milliseconds, when the writer knows them (`hi` does): the time
+    /// a status is dated with, so how long Hermes took to show it can be
+    /// measured. `ts` stays for older writers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_ms: Option<i64>,
     /// Hermes session id the hook was configured for.
     pub session: String,
     /// Catalog agent id (claude, codex, gemini, copilot, opencode, goose...).
@@ -37,6 +42,27 @@ pub struct SignalRecord {
     pub event: String,
     #[serde(default)]
     pub payload: Map<String, Value>,
+}
+
+impl SignalRecord {
+    /// When the event happened, epoch milliseconds: `ts_ms` when the writer
+    /// gave it and it agrees with `ts` to the second, else `ts`.
+    pub fn at_ms(&self) -> i64 {
+        match self.ts_ms {
+            Some(ms) if ms.div_euclid(1000) == self.ts => ms,
+            _ => self.ts.saturating_mul(1000),
+        }
+    }
+}
+
+/// The tools an agent asks the person a question with (Claude's
+/// `AskUserQuestion`, Codex's `request_user_input`, Antigravity's
+/// `ask_question`): their use means "needs an answer", not "needs approval".
+pub fn is_question_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "AskUserQuestion" | "request_user_input" | "ask_question"
+    )
 }
 
 /// Parse one spool line. A line of another version, or with an empty
@@ -64,9 +90,8 @@ pub fn parse_signal_line(line: &str) -> Result<SignalRecord, String> {
 pub fn status_kind_of(event: &str) -> Option<AgentStatusKind> {
     Some(match event {
         "UserPromptSubmit" | "BeforeAgent" | "PostToolUse" | "PostToolUseFailure"
-        | "PostToolBatch" | "PermissionDenied" | "PreToolUse" | "session.status" => {
-            AgentStatusKind::Working
-        }
+        | "PostToolBatch" | "PermissionDenied" | "PreToolUse" | "session.status"
+        | "PreInvocation" | "PostInvocation" => AgentStatusKind::Working,
         "PermissionRequest" | "permission.asked" => AgentStatusKind::NeedsApproval,
         "AskUserQuestion" | "Question" => AgentStatusKind::NeedsAnswer,
         "ExitPlanMode" => AgentStatusKind::PlanReady,
@@ -294,7 +319,7 @@ pub fn map_signal_record(
     if record.nonce != expected_nonce {
         return Vec::new();
     }
-    let at = record.ts.saturating_mul(1000);
+    let at = record.at_ms();
     let source = Some(source.to_string());
     let payload = &record.payload;
     let status = |kind: AgentStatusKind, detail: String| SessionEvent::Status {
@@ -328,9 +353,21 @@ pub fn map_signal_record(
     }
     let primary = match record.event.as_str() {
         "PreToolUse" => match payload_str(payload, "tool_name") {
-            Some("AskUserQuestion") => status(AgentStatusKind::NeedsAnswer, detail_of(payload)),
+            Some(tool) if is_question_tool(tool) => {
+                status(AgentStatusKind::NeedsAnswer, detail_of(payload))
+            }
             Some("ExitPlanMode") => status(AgentStatusKind::PlanReady, String::new()),
             _ => status(AgentStatusKind::Working, String::new()),
+        },
+        // Claude asks permission for its question and plan tools too (the
+        // PermissionRequest follows their PreToolUse within milliseconds):
+        // what the person is asked is still a question, or a plan.
+        "PermissionRequest" => match payload_str(payload, "tool_name") {
+            Some(tool) if is_question_tool(tool) => {
+                status(AgentStatusKind::NeedsAnswer, detail_of(payload))
+            }
+            Some("ExitPlanMode") => status(AgentStatusKind::PlanReady, String::new()),
+            _ => status(AgentStatusKind::NeedsApproval, detail_of(payload)),
         },
         "Notification" => match notification_status(payload) {
             Some(kind) => status(kind, detail_of(payload)),

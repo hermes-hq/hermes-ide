@@ -36,6 +36,9 @@ export const CI_EXCLUDED = {
   "REAL-models-codex.mjs": "local only: needs a signed-in real codex and costs a few tiny turns; it says SKIP in CI",
   "REAL-models-agy.mjs": "local only: needs a signed-in real agy and costs a few tiny turns; it says SKIP in CI",
   "REAL-launcher-claude.mjs": "local only: needs a signed-in real claude and costs a turn; it says SKIP in CI",
+  "REAL-status-claude.mjs": "local only: needs a signed-in real claude and costs a few turns; it says SKIP in CI",
+  "REAL-status-codex.mjs": "local only: needs a signed-in real codex and costs a few turns; it says SKIP in CI",
+  "REAL-status-agy.mjs": "local only: needs a signed-in real agy and costs a few turns; it says SKIP in CI",
 };
 
 /** The scenarios the shard jobs split between them: every file not listed above. */

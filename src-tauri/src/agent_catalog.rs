@@ -284,6 +284,15 @@ pub struct Signals {
     /// meaningful for the `settings_file` method.
     #[serde(default)]
     pub check_hook: Option<String>,
+    /// `config_flags` only: the events' hooks also go on the command line,
+    /// in this shape (`toml_config`: `-c hooks.<Event>=[...]`, Codex's).
+    #[serde(default)]
+    pub hook_flags: Option<String>,
+    /// How Hermes gets the agent to run those hooks without asking the
+    /// person to review them (`app_server_hooks_list`: the hashes the
+    /// agent's app server reports, passed as this launch's hook state).
+    #[serde(default)]
+    pub hook_trust: Option<String>,
 }
 
 fn default_confidence() -> String {

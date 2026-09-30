@@ -132,6 +132,10 @@ pub struct LaunchInput<'a> {
     pub login: bool,
     /// Clear the screen before the agent starts (a relaunch after a refusal).
     pub clear_screen: bool,
+    /// The agent's hook state that trusts exactly Hermes's hooks for this
+    /// launch (see `hook_trust`), when the catalog asks for one and the
+    /// agent could say.
+    pub hook_trust: Option<&'a str>,
 }
 
 /// The launch file `hi run` reads. Field names are the wire format.
@@ -317,14 +321,21 @@ fn plain_events<'a>(agent: &'a Agent, status: &str) -> impl Iterator<Item = &'a 
 /// everything (`None`). Sorted, so generated files are stable.
 fn catalog_hooks(agent: &Agent) -> BTreeMap<String, Option<Vec<String>>> {
     let mut hooks: BTreeMap<String, Option<Vec<String>>> = BTreeMap::new();
-    // `statusLine` (N19) is the status line setting, not a hook event.
+    // `statusLine` (N19) is the status line setting, and `osc9:` / `notify:`
+    // name what the agent prints or passes to its notify program: none of
+    // them is a hook event.
     let mut names: Vec<&String> = agent
         .terminal
         .signals
         .events
         .values()
         .flatten()
-        .filter(|name| name.split(':').next() != Some(STATUS_LINE_EVENT))
+        .filter(|name| {
+            !matches!(
+                name.split(':').next(),
+                Some(STATUS_LINE_EVENT | "osc9" | "notify")
+            )
+        })
         .collect();
     names.sort();
     for name in names {
@@ -540,6 +551,30 @@ pub fn plugin_hooks_json(agent: &Agent, hi: &Path, env: &BTreeMap<String, String
         .unwrap_or_default()
 }
 
+/// The hooks as command-line config for the `toml_config` shape (Codex):
+/// one `-c hooks.<Event>=[{matcher=..., hooks=[{type="command", ...}]}]`
+/// pair per catalog event. The command is a shell line (Codex runs hooks
+/// through a shell); the values are TOML basic strings.
+pub fn toml_hook_flags(agent: &Agent, hi: &Path) -> Vec<String> {
+    let toml = |s: &str| serde_json::to_string(s).unwrap_or_default();
+    let command = signal_command(hi, &agent.id, None);
+    let mut flags = Vec::new();
+    for (event, matchers) in catalog_hooks(agent) {
+        // Codex caps its session-end hooks at 3 seconds.
+        let timeout = if event == "SessionEnd" { 3 } else { 5 };
+        let matcher = matchers
+            .filter(|_| takes_tool_matcher(&event))
+            .map(|list| format!("matcher={},", toml(&list.join("|"))))
+            .unwrap_or_default();
+        flags.push("-c".to_string());
+        flags.push(format!(
+            "hooks.{event}=[{{{matcher}hooks=[{{type=\"command\",command={},timeout={timeout}}}]}}]",
+            toml(&command)
+        ));
+    }
+    flags
+}
+
 /// The hook entry Hermes adds to a file inside its own worktree
 /// (`worktree_file` method): Antigravity's `.agents/hooks.json` keyed by
 /// hook name, or the Claude-like `{"hooks": {...}}` shape goose plugins use.
@@ -565,9 +600,21 @@ pub fn worktree_hooks_json(agent: &Agent, hi: &Path, existing: Option<&str>) -> 
         .filter(serde_json::Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}));
     if agent.id == "antigravity" {
+        // Antigravity's shape (its bundled hooks docs, 1.2): the tool events
+        // take groups with a matcher (a regex, `*` for every tool); the
+        // others take a flat list of handlers. A group without a matcher, or
+        // a group where a flat list belongs, is silently not run.
         let mut entry = serde_json::Map::new();
         entry.insert("enabled".to_string(), serde_json::Value::Bool(true));
-        entry.extend(events);
+        for (event, matchers) in catalog_hooks(agent) {
+            let value = if takes_tool_matcher(&event) {
+                let matcher = matchers.map_or_else(|| "*".to_string(), |m| m.join("|"));
+                serde_json::json!([{ "matcher": matcher, "hooks": [command(&event)] }])
+            } else {
+                serde_json::json!([command(&event)])
+            };
+            entry.insert(event, value);
+        }
         root["hermes-signal"] = serde_json::Value::Object(entry);
     } else {
         let hooks = root
@@ -689,6 +736,9 @@ fn signal_setup(
         ("secret", stream.1),
     ];
     setup.args = fill(&signals.args, &vars);
+    if signals.hook_flags.as_deref() == Some("toml_config") {
+        setup.args.extend(toml_hook_flags(agent, hi));
+    }
     for (k, v) in &signals.env {
         setup
             .env
@@ -830,7 +880,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             .to_string_lossy()
             .to_string(),
     );
-    let signals = signal_setup(
+    let mut signals = signal_setup(
         agent,
         input.hi,
         input.session_dir,
@@ -839,6 +889,13 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         (input.stream_port, input.stream_secret),
         !input.user_status_line,
     );
+    if let Some(state) = input
+        .hook_trust
+        .filter(|_| terminal.signals.hook_trust.is_some())
+    {
+        signals.args.push("-c".to_string());
+        signals.args.push(format!("hooks.state={state}"));
+    }
     env.extend(signals.env.iter().map(|(k, v)| (k.clone(), v.clone())));
 
     // Claude reads a positional argument after --channels as another
@@ -1306,7 +1363,33 @@ fn free_loopback_port() -> u16 {
 ///
 /// Mutates the session: records the pre-assigned or resumed conversation id
 /// and marks the agent as launching.
-pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperLaunch {
+/// For an agent whose catalog asks for it (`hook_trust`), the hook state
+/// that trusts exactly Hermes's own hooks for this launch (see
+/// `super::hook_trust`), or None. It may wait up to
+/// `hook_trust::LAUNCH_WAIT` for the agent's app server, so callers run it
+/// outside the session lock.
+pub(crate) fn hook_trust_for(app: &AppHandle, provider: &str, cwd: &str) -> Option<String> {
+    let agent = recipe_for(provider)?;
+    if agent.terminal.signals.hook_trust.as_deref() != Some("app_server_hooks_list") {
+        return None;
+    }
+    let hi = hi_path(app)?;
+    let flags = toml_hook_flags(agent, &hi);
+    let program = super::hook_trust::find_program(&agent.terminal.argv[0])?;
+    super::hook_trust::trusted_state(
+        &program,
+        &flags,
+        Path::new(cwd),
+        &hook_path(&hi),
+        super::hook_trust::LAUNCH_WAIT,
+    )
+}
+
+pub(crate) fn prepare_helper_launch(
+    app: &AppHandle,
+    s: &mut Session,
+    hook_trust: Option<&str>,
+) -> HelperLaunch {
     let Some(provider) = s.ai_provider.clone() else {
         return HelperLaunch::TypeCommand;
     };
@@ -1380,6 +1463,7 @@ pub(crate) fn prepare_helper_launch(app: &AppHandle, s: &mut Session) -> HelperL
             .map(|p| (p.name.as_str(), p.value.as_str())),
         login: s.agent_launch.login,
         clear_screen: s.agent_launch.relaunch,
+        hook_trust,
     }) else {
         return HelperLaunch::TypeCommand;
     };
@@ -2128,8 +2212,22 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         session_dir.join(SIGNALS_FILE),
         nonce.clone(),
     );
+    // The OS layer: process facts about this agent, below its own reports.
+    super::os_activity::watch(
+        app.clone(),
+        Arc::clone(&session),
+        &session_id,
+        expects_start_signal,
+    );
+    // Events after which the agent may sit at an approval it does not
+    // report (the catalog's `tool_pending`; Antigravity).
+    let tool_pending: Vec<String> = crate::agent_catalog::agent(&agent)
+        .and_then(|a| a.terminal.signals.events.get("tool_pending").cloned())
+        .unwrap_or_default();
     std::thread::spawn(move || {
-        use crate::contract::signal::{map_signal_record, parse_signal_line, subagent_delta};
+        use crate::contract::signal::{
+            is_question_tool, map_signal_record, parse_signal_line, subagent_delta,
+        };
         let mut reader = SpoolReader::new(session_dir.join(SIGNALS_FILE));
         let mut watch = LaunchWatch::new(expects_start_signal);
         let mut guess = PromptGuess::new(Instant::now());
@@ -2218,6 +2316,17 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     crate::contract::emit_session_event(&app, &session_id, event);
                 }
                 if record.nonce == nonce {
+                    let tool = record
+                        .payload
+                        .get("tool_name")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("");
+                    if tool_pending.iter().any(|e| e == &record.event) && !is_question_tool(tool) {
+                        let tool = if tool.is_empty() { "a tool" } else { tool };
+                        super::os_activity::note_tool_pending(&session_id, tool, &source);
+                    } else {
+                        super::os_activity::note_agent_signal(&session_id);
+                    }
                     let delta = subagent_delta(&record);
                     if delta != 0 {
                         subagents = (subagents + delta).max(0);
@@ -2225,7 +2334,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                             &app,
                             &session_id,
                             crate::contract::SessionEvent::Subagents {
-                                at: record.ts.saturating_mul(1000),
+                                at: record.at_ms(),
                                 source: Some(source.clone()),
                                 tags: None,
                                 running: subagents as u32,
@@ -2318,6 +2427,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
             }
             if stop {
                 end_output_watch(&session_id);
+                // The helper said the agent is gone (or the session is):
+                // the OS layer has nothing more to add.
+                super::os_activity::unwatch(&session_id);
                 break;
             }
         }
@@ -2451,6 +2563,7 @@ mod tests {
             profile_env: None,
             login: false,
             clear_screen: false,
+            hook_trust: None,
         }
     }
 
@@ -2887,11 +3000,25 @@ mod tests {
             "the repository's own entry survives"
         );
         assert_eq!(json["hermes-signal"]["enabled"], true);
-        assert_eq!(
-            json["hermes-signal"]["Stop"][0]["hooks"][0]["command"],
-            "\"/app/hi\" signal --agent antigravity --event Stop"
-        );
-        assert!(json["hermes-signal"]["PreToolUse"].is_array());
+        // Antigravity's shape (verified against agy 1.2.13: the grouped form
+        // on Stop never ran): Stop and the invocation events take a flat
+        // list of handlers; the tool events a group with a matcher.
+        let ours = &json["hermes-signal"];
+        for event in ["Stop", "PreInvocation", "PostInvocation"] {
+            assert_eq!(
+                ours[event][0]["command"],
+                format!("\"/app/hi\" signal --agent antigravity --event {event}"),
+                "{event} is a flat handler list"
+            );
+            assert!(ours[event][0].get("hooks").is_none(), "{event}");
+        }
+        for event in ["PreToolUse", "PostToolUse"] {
+            assert_eq!(ours[event][0]["matcher"], "*", "{event} matches every tool");
+            assert_eq!(
+                ours[event][0]["hooks"][0]["command"],
+                format!("\"/app/hi\" signal --agent antigravity --event {event}")
+            );
+        }
         assert_eq!(plan.git_excludes, vec![".agents/hooks.json".to_string()]);
         assert!(!plan.expects_start_signal);
 
@@ -3116,6 +3243,80 @@ mod tests {
             assert!(plan.spec.fallback.is_none(), "{agent}");
             assert!(plan.not_found_output.is_empty(), "{agent}");
         }
+    }
+
+    /// Codex 0.145 runs hooks set with `-c hooks.<Event>=...` (verified with
+    /// the real CLI), but only trusted ones: the launch carries the hook
+    /// state for exactly Hermes's hooks when the app server gave it, and
+    /// nothing that would bypass the review of anyone else's.
+    #[test]
+    fn codex_gets_its_hooks_as_config_flags_and_trust_for_exactly_those() {
+        let hi = Path::new("/Applications/Hermes IDE.app/Contents/MacOS/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let plan = plan_launch(&input("codex", None, hi, dir)).unwrap();
+        let args = &plan.spec.args;
+        let hook = |event: &str| {
+            args.iter()
+                .find(|a| a.starts_with(&format!("hooks.{event}=")))
+                .cloned()
+                .unwrap_or_else(|| panic!("no {event} hook in {args:?}"))
+        };
+        let cmd =
+            r#"command="\"/Applications/Hermes IDE.app/Contents/MacOS/hi\" signal --agent codex""#;
+        for event in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PermissionRequest",
+            "PostToolUse",
+            "Stop",
+            "SubagentStart",
+            "SubagentStop",
+        ] {
+            let flag = hook(event);
+            assert!(flag.contains(cmd), "{flag}");
+            assert!(flag.contains("timeout=5"), "{flag}");
+            assert!(!flag.contains("matcher"), "{flag}");
+        }
+        assert!(hook("SessionEnd").contains("timeout=3"));
+        // The question tool is the only PreToolUse Hermes needs.
+        assert_eq!(
+            hook("PreToolUse"),
+            format!(
+                r#"hooks.PreToolUse=[{{matcher="request_user_input",hooks=[{{type="command",{cmd},timeout=5}}]}}]"#
+            )
+        );
+        // Printed notifications and the notify program are not hook events.
+        assert!(!args
+            .iter()
+            .any(|a| a.starts_with("hooks.osc9") || a.starts_with("hooks.notify")));
+        assert!(
+            !args.iter().any(|a| a.contains("hooks.state")),
+            "no trust without the app server's answer"
+        );
+        assert!(!args.iter().any(|a| a.contains("bypass")));
+        // Every hook flag follows its own -c.
+        for (i, a) in args.iter().enumerate() {
+            if a.starts_with("hooks.") {
+                assert_eq!(args[i - 1], "-c");
+            }
+        }
+
+        let trust = r#"{"/<session-flags>/config.toml:stop:0:0"={trusted_hash="sha256:689b"}}"#;
+        let mut with_trust = input("codex", None, hi, dir);
+        with_trust.hook_trust = Some(trust);
+        let plan = plan_launch(&with_trust).unwrap();
+        let at = plan
+            .spec
+            .args
+            .iter()
+            .position(|a| a == &format!("hooks.state={trust}"))
+            .expect("the hook state travels as one flag");
+        assert_eq!(plan.spec.args[at - 1], "-c");
+        // An agent whose catalog asks for no trust never gets one.
+        let mut claude = input("claude", None, hi, dir);
+        claude.hook_trust = Some(trust);
+        let plan = plan_launch(&claude).unwrap();
+        assert!(!plan.spec.args.iter().any(|a| a.contains("hooks.state")));
     }
 
     #[test]
@@ -3662,6 +3863,50 @@ mod tests {
 
     fn state(s: &Session) -> AgentStartupState {
         s.agent_startup.as_ref().unwrap().state
+    }
+
+    /// An agent that never says it started (no start hook) no longer shows
+    /// "starting" for ever: once its process is up and quiet, the OS layer
+    /// marks it started, as a guess, and only while it is still launching.
+    #[test]
+    fn a_quiet_live_agent_without_a_start_signal_is_started_as_a_guess() {
+        use super::super::os_activity::{
+            mark_started_by_process, start_settled_by_process, Sample,
+        };
+        let quiet = Sample {
+            helper_alive: true,
+            agent_alive: true,
+            tool: None,
+            cpu_ms: 0,
+            interval_ms: 500,
+        };
+        assert!(!start_settled_by_process(Duration::from_secs(2), &quiet));
+        assert!(start_settled_by_process(Duration::from_secs(3), &quiet));
+        let busy = Sample {
+            cpu_ms: 400,
+            ..quiet.clone()
+        };
+        assert!(!start_settled_by_process(Duration::from_secs(9), &busy));
+        let gone = Sample {
+            agent_alive: false,
+            ..quiet
+        };
+        assert!(!start_settled_by_process(Duration::from_secs(9), &gone));
+
+        let mut s = starting(AgentStartupState::Launching);
+        assert!(mark_started_by_process(&mut s));
+        let startup = s.agent_startup.as_ref().unwrap();
+        assert_eq!(startup.state, AgentStartupState::Started);
+        assert_eq!(startup.confidence, "guessed");
+        for other in [
+            AgentStartupState::Started,
+            AgentStartupState::Ended,
+            AgentStartupState::WaitingAtStartupPrompt,
+        ] {
+            let mut s = starting(other);
+            assert!(!mark_started_by_process(&mut s), "{other:?} is left alone");
+            assert_eq!(state(&s), other);
+        }
     }
 
     #[test]

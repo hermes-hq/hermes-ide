@@ -103,16 +103,19 @@
             "-c", "tui.notification_condition=\"always\"",
             "-c", "notify=[\"{hi}\",\"signal\",\"--agent\",\"codex\",\"--argv-json\"]"
           ],
+          "hook_flags": "toml_config",
+          "hook_trust": "app_server_hooks_list",
           "events": {
             "session_start": ["SessionStart"],
             "working": ["UserPromptSubmit", "PostToolUse"],
             "needs_approval": ["PermissionRequest", "osc9:Approval requested"],
-            "needs_answer": ["osc9:Question requested"],
+            "needs_answer": ["PreToolUse:request_user_input", "osc9:Question requested"],
             "turn_end": ["notify:agent-turn-complete", "Stop"],
-            "exited": ["SessionEnd"]
+            "exited": ["SessionEnd"],
+            "subagents": ["SubagentStart", "SubagentStop"]
           },
           "confidence": "exact",
-          "note": "No flag assigns a session id up front; it is read from the hook session_id or the notify thread-id."
+          "note": "The hooks go on the command line (-c hooks.<Event>=...) and only Hermes's own are trusted for the launch, with the hashes Codex's app server reports; the user's config is never written. SessionStart fires with the first prompt, not at startup. request_user_input exists only in plan mode. No flag assigns a session id up front; it is read from the hook session_id or the notify thread-id."
         },
         "permission_flags": {
           "default": [],
@@ -160,18 +163,20 @@
           "method": "worktree_file",
           "files": [".agents/hooks.json"],
           "events": {
-            "working": ["PreToolUse", "PostToolUse"],
+            "working": ["PreInvocation", "PostInvocation", "PostToolUse"],
+            "tool_pending": ["PreToolUse"],
+            "needs_answer": ["PreToolUse:ask_question"],
             "turn_end": ["Stop:fullyIdle"],
             "error": ["Stop:error"]
           },
           "confidence": "exact",
-          "note": "No per-launch flag exists; the hook file goes into the Hermes-owned worktree and is excluded from git. There is no approval event, so approvals stay guessed."
+          "note": "No per-launch flag exists; the hook file goes into the Hermes-owned worktree and is excluded from git. The tool events take a matcher, the others a flat list of handlers. There is no approval event: a tool call that neither starts a command nor finishes within a moment, while the agent is quiet, shows as a guessed approval."
         },
         "permission_flags": {
           "default": [],
           "bypassPermissions": ["--dangerously-skip-permissions"]
         },
-        "min_version": "1.0.6",
+        "min_version": "1.2.13",
         "safety": {
           "default_mode": "default",
           "fit": "stricter",
@@ -187,7 +192,7 @@
       },
       "detect": { "command": ["agy", "--version"] },
       "auth": { "check": null, "hint": "Run 'agy' and sign in with Google in the browser, or set GEMINI_API_KEY" },
-      "evidence": { "level": "help", "version": "1.0.6" },
+      "evidence": { "level": "help", "version": "1.2.13" },
       "setup": {
         "instructions": { "project": ["AGENTS.md", "GEMINI.md"], "global": ["~/.gemini/GEMINI.md"], "imports": false },
         "settings": { "project": [".agents/hooks.json"], "global": [] },

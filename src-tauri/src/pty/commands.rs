@@ -700,9 +700,22 @@ struct AgentLaunch {
 /// vendor command typed as before. None when the session has no agent, or
 /// an agent Hermes does not know.
 fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Option<AgentLaunch> {
+    // Outside the session lock: the hook trust may ask the agent's app
+    // server (once per app run).
+    let hook_trust = {
+        let s = session.lock().ok()?;
+        let wants = s.launch_helper && s.ssh_info.is_none();
+        let provider = s.ai_provider.clone();
+        let cwd = s.working_directory.clone();
+        drop(s);
+        match provider {
+            Some(p) if wants => crate::pty::launch::hook_trust_for(app, &p, &cwd),
+            _ => None,
+        }
+    };
     let mut s = session.lock().ok()?;
     let provider = s.ai_provider.clone()?;
-    match crate::pty::launch::prepare_helper_launch(app, &mut s) {
+    match crate::pty::launch::prepare_helper_launch(app, &mut s, hook_trust.as_deref()) {
         crate::pty::launch::HelperLaunch::Prepared(prepared) => {
             return Some(AgentLaunch {
                 cmd: prepared.line,

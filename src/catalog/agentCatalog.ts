@@ -27,6 +27,10 @@ export interface AgentSignals {
 	events?: Readonly<Record<string, readonly string[]>>;
 	/** Done-When (F27): the settings-file hook that can refuse a stop. */
 	check_hook?: string;
+	/** config_flags only: the hooks also go on the command line in this shape (read by the backend). */
+	hook_flags?: "toml_config";
+	/** How the agent runs exactly Hermes's own hooks without a review prompt (read by the backend). */
+	hook_trust?: "app_server_hooks_list";
 	confidence: "exact" | "signal" | "guessed";
 	note?: string;
 }

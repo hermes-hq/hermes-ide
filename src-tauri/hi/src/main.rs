@@ -750,10 +750,10 @@ fn run_child(
     }
 }
 
-fn now_unix() -> u64 {
+fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
 
@@ -801,9 +801,11 @@ impl Reporter {
         let Some(file) = &self.file else {
             return;
         };
+        let ms = now_unix_ms();
         let mut line = serde_json::json!({
             "v": 1,
-            "ts": now_unix(),
+            "ts": ms / 1000,
+            "ts_ms": ms,
             "session": self.session,
             "agent": self.agent,
             "event": event,
@@ -1179,6 +1181,21 @@ pub fn signal_line(
         if let Some(rl) = map.get("rate_limits").and_then(kept_rate_limits) {
             kept.insert("rate_limits".to_string(), rl);
         }
+        // Antigravity names the tool inside `toolCall` (its arguments, which
+        // can hold a command line, are dropped): lift the name alone.
+        if !kept.contains_key("tool_name") {
+            if let Some(name) = map
+                .get("toolCall")
+                .and_then(|c| c.get("name"))
+                .and_then(|n| n.as_str())
+                .filter(|n| !n.is_empty())
+            {
+                kept.insert(
+                    "tool_name".to_string(),
+                    serde_json::Value::String(truncate_chars(name, 128)),
+                );
+            }
+        }
     }
     let kept_str = |key: &str| {
         kept.get(key)
@@ -1191,9 +1208,11 @@ pub fn signal_line(
         .or_else(|| event_flag.filter(|e| !e.is_empty()).map(str::to_string))
         .or_else(|| kept_str("type"))
         .unwrap_or_else(|| "unknown".to_string());
+    let ms = now_unix_ms();
     let mut line = serde_json::json!({
         "v": 1,
-        "ts": now_unix(),
+        "ts": ms / 1000,
+        "ts_ms": ms,
         "session": session,
         "agent": agent,
         "event": truncate_chars(&event, 64),
@@ -1328,9 +1347,11 @@ fn report_check(payload: serde_json::Value) {
     let Some(file) = std::env::var_os(SIGNAL_FILE_ENV).filter(|f| !f.is_empty()) else {
         return;
     };
+    let ms = now_unix_ms();
     let mut line = serde_json::json!({
         "v": 1,
-        "ts": now_unix(),
+        "ts": ms / 1000,
+        "ts_ms": ms,
         "session": std::env::var(SESSION_ID_ENV).unwrap_or_default(),
         "agent": std::env::var(AGENT_ENV).unwrap_or_else(|_| "unknown".to_string()),
         "event": CHECK_EVENT,
@@ -1822,6 +1843,38 @@ mod tests {
         )
         .unwrap_err()
         .contains("exit_codes"));
+    }
+
+    #[test]
+    fn signal_lines_are_dated_to_the_millisecond_and_name_antigravity_tools() {
+        // Antigravity's PreToolUse: no event name in the payload (the hook
+        // file names it), the tool inside `toolCall` with its arguments.
+        let payload = serde_json::json!({
+            "conversationId": "c-1",
+            "stepIdx": 4,
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "curl https://example.com"}},
+        });
+        let before = now_unix_ms();
+        let line = signal_line(
+            Some("PreToolUse"),
+            "antigravity",
+            "hermes-1",
+            Some("n"),
+            Some(&payload),
+        );
+        let after = now_unix_ms();
+        assert_eq!(line["event"], "PreToolUse");
+        let kept = line["payload"].as_object().unwrap();
+        assert_eq!(kept["tool_name"], "run_command");
+        assert!(kept.get("toolCall").is_none());
+        assert!(!serde_json::to_string(&line).unwrap().contains("curl"));
+        let ms = line["ts_ms"].as_u64().unwrap();
+        assert!(ms >= before && ms <= after);
+        assert_eq!(line["ts"].as_u64().unwrap(), ms / 1000);
+        // A payload's own tool_name wins over toolCall.
+        let both = serde_json::json!({"tool_name": "Bash", "toolCall": {"name": "x"}});
+        let line = signal_line(None, "claude", "s", Some("n"), Some(&both));
+        assert_eq!(line["payload"]["tool_name"], "Bash");
     }
 
     #[test]

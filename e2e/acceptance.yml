@@ -496,6 +496,12 @@ features:
     # Claude passed, the real Codex could not complete a turn on that
     # account). Claude over SSH (in-band markers) is unit-tested, not run
     # against a real host.
+    # The real claude, codex and agy CLIs are driven through approval,
+    # turn end, question and exit by the local-only scenarios
+    # REAL-status-claude/-codex/-agy.mjs (they need the maintainer's logins
+    # and cost a few turns, so they say SKIP in CI and are not listed as
+    # proof here); they assert every state is on the strip within 2 s of the
+    # agent's own hook and record a corpus for the accuracy measurement.
     status: partial
     criteria:
       F11-1:
@@ -517,6 +523,21 @@ features:
       F11-6:
         text: "The status strip says where its status comes from: \"exact · reported by <agent>\" when the agent reported it, \"guessed\" otherwise"
         scenarios: [F11-zero-setup-signals.mjs, F12-morning-view.mjs]
+      F11-7:
+        # The OS layer: the agent's process tree (a command running under it,
+        # its CPU use) read twice a second. Negative control:
+        # HERMES_E2E_OSL_NO_SHELL=1 (the fake's command runs without a shell).
+        text: "An agent that reports nothing shows \"working · guessed · process activity\" within two seconds of running a command, and leaves it when the command ends"
+        scenarios: [F11-os-layer.mjs]
+      F11-8:
+        text: "A guess never overrides an exact report: an agent's exact \"done\" stays on the strip and in the sidebar while it runs a command or uses the CPU"
+        scenarios: [F11-os-layer.mjs]
+      F11-9:
+        # Negative control: HERMES_E2E_OSL_AGY_ONLY=1 with
+        # HERMES_E2E_OSL_NO_SHELL=1 (no command after the approval, so the
+        # guess is never taken back).
+        text: "Antigravity waiting for an approval it never reports shows \"needs approval · guessed\" within 3.5 s, raises no inbox item and sends no notification, and goes back to working within two seconds of the approved command starting"
+        scenarios: [F11-os-layer.mjs]
   C0:
     name: "Hermes 2.0 contracts: the seams the 2.0 features build on"
     # Types, stores, parsers and a migration, no UI (docs/adr/004-2.0-contracts.md).
@@ -1245,3 +1266,21 @@ features:
       REAL-CAP-3:
         text: "A second Claude account in a temporary profile folder the test creates reads as signed out"
         scenarios: ["REAL-models-claude.mjs@darwin,linux"]
+  REAL-STATUS:
+    name: "Exact status from the real Claude, Codex and Antigravity CLIs"
+    # Local only, like REAL above: each scenario needs the signed-in CLI and
+    # costs a few tiny turns, says SKIP in CI (e2e/app/ci-plan.mjs excludes
+    # them) and records a corpus for the accuracy measurement outside the
+    # repository (HERMES_STATUS_CORPUS). All three passed on the maintainer's
+    # Mac on 2026-09-29 (claude 2.1.284, codex 0.145.0, agy 1.2.13).
+    status: planned
+    criteria:
+      REAL-STATUS-1:
+        text: "Claude: working, needs approval, done, needs an answer and exited each appear on the strip as exact within 2 s of Claude's own hook"
+        scenarios: ["REAL-status-claude.mjs@darwin,linux"]
+      REAL-STATUS-2:
+        text: "Codex: the same five states as exact within 2 s, from hooks passed on the command line and trusted for that launch only (no review prompt, no blanket bypass)"
+        scenarios: ["REAL-status-codex.mjs@darwin,linux"]
+      REAL-STATUS-3:
+        text: "Antigravity: working, done, a question and exited as exact within 2 s; its approval, which it never reports, as a guess within 3.5 s"
+        scenarios: ["REAL-status-agy.mjs@darwin,linux"]

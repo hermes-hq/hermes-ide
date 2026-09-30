@@ -32,6 +32,12 @@
 }
 .agent-status-guessed::before { content: "· "; }
 
+/* Who is sure: "exact" (the agent said so) or "signal" (a notification). */
+.agent-status-sure {
+  color: var(--text-3);
+}
+.agent-status-sure::before { content: "· "; }
+
 .agent-status-tag-strip {
   font-size: var(--text-xs, var(--text-2xs));
   font-weight: var(--weight-medium);

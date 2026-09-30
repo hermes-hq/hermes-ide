@@ -26,6 +26,8 @@ export interface SignalRecord {
   readonly v: 1;
   /** Epoch seconds, as `date +%s` prints it. */
   readonly ts: number;
+  /** Epoch milliseconds, when the writer knows them (`hi` does). */
+  readonly ts_ms?: number;
   /** Hermes session id the hook was configured for. */
   readonly session: string;
   /** Catalog agent id: claude, codex, gemini, copilot, opencode, goose... */
@@ -60,6 +62,7 @@ export function parseSignalRecord(line: string): SignalParse {
     record: {
       v: 1,
       ts: r.ts,
+      ...(typeof r.ts_ms === "number" && Number.isFinite(r.ts_ms) ? { ts_ms: r.ts_ms } : {}),
       session: r.session as string,
       agent: r.agent as string,
       nonce: r.nonce as string,
@@ -67,6 +70,25 @@ export function parseSignalRecord(line: string): SignalParse {
       payload: payload as Record<string, unknown>,
     },
   };
+}
+
+/**
+ * When the event happened, epoch ms: `ts_ms` when given and it agrees with
+ * `ts` to the second, else `ts`. Mirrors `SignalRecord::at_ms`.
+ */
+export function signalRecordAt(record: SignalRecord): number {
+  const ms = record.ts_ms;
+  if (typeof ms === "number" && Number.isInteger(ms) && Math.floor(ms / 1000) === record.ts) return ms;
+  return Math.round(record.ts * 1000);
+}
+
+/**
+ * The tools an agent asks the person a question with (Claude's
+ * AskUserQuestion, Codex's request_user_input, Antigravity's ask_question):
+ * their use means "needs an answer", not "needs approval".
+ */
+export function isQuestionTool(name: string | null): boolean {
+  return name === "AskUserQuestion" || name === "request_user_input" || name === "ask_question";
 }
 
 /**
@@ -83,6 +105,8 @@ export function signalStatusKind(event: string): AgentStatusKind | null {
     case "PermissionDenied":
     case "PreToolUse":
     case "session.status":
+    case "PreInvocation":
+    case "PostInvocation":
       return "working";
     case "PermissionRequest":
     case "permission.asked":
@@ -236,7 +260,7 @@ export function tagsInPayload(payload: Record<string, unknown>): string[] {
  */
 export function mapSignalRecord(record: SignalRecord, expectedNonce: string, confidence: Confidence, source: string): SessionEvent[] {
   if (record.nonce !== expectedNonce) return [];
-  const at = Math.round(record.ts * 1000);
+  const at = signalRecordAt(record);
   const payload = record.payload;
   const status = (kind: AgentStatusKind, detail: string): SessionEvent => ({ type: "status", at, source, status: { kind, confidence, detail } });
   const out: SessionEvent[] = [];
@@ -252,7 +276,14 @@ export function mapSignalRecord(record: SignalRecord, expectedNonce: string, con
   switch (record.event) {
     case "PreToolUse": {
       const tool = payloadStr(payload, "tool_name");
-      primary = tool === "AskUserQuestion" ? status("needs_answer", detailOf(payload)) : tool === "ExitPlanMode" ? status("plan_ready", "") : status("working", "");
+      primary = isQuestionTool(tool) ? status("needs_answer", detailOf(payload)) : tool === "ExitPlanMode" ? status("plan_ready", "") : status("working", "");
+      break;
+    }
+    // Claude asks permission for its question and plan tools too: what the
+    // person is asked is still a question, or a plan.
+    case "PermissionRequest": {
+      const tool = payloadStr(payload, "tool_name");
+      primary = isQuestionTool(tool) ? status("needs_answer", detailOf(payload)) : tool === "ExitPlanMode" ? status("plan_ready", "") : status("needs_approval", detailOf(payload));
       break;
     }
     case "Notification": {

@@ -49,6 +49,17 @@ export const STATUS_TONES: Readonly<Record<AgentStatusKind, StatusTone>> = Objec
   exited: "quiet",
 });
 
+/**
+ * The catalog id of the agent a status source names (`hook:claude`,
+ * `hook:claude:osc`, `stream:opencode`, `protocol:codex`), or null for
+ * Hermes's own sources and notifications.
+ */
+export function reporterOfSource(source: string | null | undefined): string | null {
+  if (!source) return null;
+  const [kind, id] = source.split(":");
+  return (kind === "hook" || kind === "stream" || kind === "protocol") && id ? id : null;
+}
+
 /** The language-pack key of a status's word. */
 export function statusWordKey(kind: AgentStatusKind): string {
   return `agentStatus.${kind}`;
@@ -60,6 +71,15 @@ export function confidenceKey(confidence: Confidence): string {
 }
 
 export const GUESSED_WORD_KEY = "agentStatus.guessed";
+/** The short word for a status the agent reported itself / a notification. */
+export const SURE_WORD_KEYS: Readonly<Record<"exact" | "signal", string>> = Object.freeze({
+  exact: "agentStatus.exact",
+  signal: "agentStatus.signal",
+});
+/** The tooltip line naming the agent that reported the status. */
+export const REPORTED_BY_KEY = "agentStatus.reportedBy";
+/** The tooltip line for a guess from the agent's processes (the OS layer). */
+export const OS_GUESS_KEY = "agentStatus.confidence.os";
 
 /** Every key this module needs, for the language-pack tests. */
 export const STATUS_MESSAGE_KEYS: readonly string[] = [
@@ -68,6 +88,10 @@ export const STATUS_MESSAGE_KEYS: readonly string[] = [
   confidenceKey("signal"),
   confidenceKey("guessed"),
   GUESSED_WORD_KEY,
+  SURE_WORD_KEYS.exact,
+  SURE_WORD_KEYS.signal,
+  REPORTED_BY_KEY,
+  OS_GUESS_KEY,
 ];
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -78,7 +102,9 @@ export interface StatusLabel {
   readonly tone: StatusTone;
   /** "guessed" (translated) for a guessed status, else null. */
   readonly guessed: string | null;
-  /** The tooltip: the detail line, then how sure Hermes is. */
+  /** "exact" or "signal" (translated) for a status someone reported, else null. */
+  readonly sure: string | null;
+  /** The tooltip: the detail line, then how sure Hermes is and who said so. */
   readonly title: string;
 }
 
@@ -88,6 +114,10 @@ export interface StatusLabelInput {
   readonly detail: string;
   /** For `exited`: the process's code and signal, worded by the renderer. */
   readonly exit?: { readonly code: number | null; readonly signal: string | null } | null;
+  /** Where the status came from ("hook:<agent>", "os", "pty", ...), when known. */
+  readonly source?: string | null;
+  /** The display name of the agent that reported it, when known. */
+  readonly agentName?: string | null;
 }
 
 /** Everything a status tag shows, in the person's language. */
@@ -97,12 +127,18 @@ export function statusLabel(status: StatusLabelInput, t: Translate): StatusLabel
     if (status.exit.signal) detail = t("agentError.exitSignal", { signal: status.exit.signal });
     else if (status.exit.code !== null) detail = t("agentError.exitCode", { code: status.exit.code });
   }
-  const sure = t(confidenceKey(status.confidence));
+  const how =
+    status.confidence === "exact" && status.agentName
+      ? t(REPORTED_BY_KEY, { agent: status.agentName })
+      : status.confidence === "guessed" && status.source === "os"
+        ? t(OS_GUESS_KEY)
+        : t(confidenceKey(status.confidence));
   return {
     glyph: STATUS_GLYPHS[status.kind],
     word: t(statusWordKey(status.kind)),
     tone: STATUS_TONES[status.kind],
     guessed: status.confidence === "guessed" ? t(GUESSED_WORD_KEY) : null,
-    title: detail ? `${detail}\n${sure}` : sure,
+    sure: status.confidence === "guessed" ? null : t(SURE_WORD_KEYS[status.confidence]),
+    title: detail ? `${detail}\n${how}` : how,
   };
 }

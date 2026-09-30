@@ -17,9 +17,10 @@ vi.mock("../api/settings", () => ({
 import { I18nProvider } from "../i18n/I18nProvider";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent, getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { SessionEvent } from "../agent/contract/events";
-import { INBOX_SHORTCUT, SessionStatusStrip, guessedStatus, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
+import { INBOX_SHORTCUT, SessionStatusStrip, guessedStatus, stripSourceText, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
 import { PLATFORM } from "../utils/platform";
 import { AGENT_STATUS_KINDS } from "../agent/contract/status";
+import { foldStatus } from "../agent/status/deriveStatus";
 import {
   _resetStatusStripPreferenceForTest,
   initStatusStripPreference,
@@ -72,6 +73,7 @@ describe("guessedStatus / stripStatus", () => {
     expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({
       status: { kind: "needs_approval", confidence: "exact", detail: "Bash" },
       source: "hook",
+      reporter: "claude",
     });
     dispatchSessionEvent(SID, status("needs_approval", "signal", "osc"));
     expect(stripStatus(getSessionEventSnapshot(SID), "busy").source).toBe("osc");
@@ -98,6 +100,7 @@ describe("guessedStatus / stripStatus", () => {
     expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({
       status: { kind: "needs_approval", confidence: "exact", detail: "Bash" },
       source: "hook",
+      reporter: "claude",
     });
   });
 
@@ -121,6 +124,108 @@ describe("guessedStatus / stripStatus", () => {
     expect(stripStatus(getSessionEventSnapshot(SID), "busy", [20, 70])).toMatchObject({ status: { kind: "needs_approval", confidence: "exact" }, source: "hook" });
   });
 
+  it("the OS layer's process facts show only while nobody reported anything, and never replace a report", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("needs_answer", "guessed", "pty"), 1));
+    dispatchSessionEvent(SID, at(status("working", "guessed", "os", "a command is running (zsh)"), 2));
+    // A command runs under the agent: that beats the screen's shape.
+    expect(stripStatus(getSessionEventSnapshot(SID), "needs_input")).toEqual({
+      status: { kind: "working", confidence: "guessed", detail: "a command is running (zsh)" },
+      source: "os",
+    });
+    // Quiet again: back to the screen's guess, not "idle".
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "os"), 3));
+    expect(stripStatus(getSessionEventSnapshot(SID), "needs_input").status.kind).toBe("needs_answer");
+    // The agent reports: the report stands, whatever the processes do next.
+    dispatchSessionEvent(SID, at(status("done_unread", "exact", "hook:codex"), 4));
+    dispatchSessionEvent(SID, at(status("working", "guessed", "os", "the agent is using the CPU"), 5));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({
+      status: { kind: "done_unread", confidence: "exact", detail: "" },
+      source: "hook",
+      reporter: "codex",
+    });
+  });
+
+  it("the launch helper echoing the agent keeps the agent as the one who said it; alone it is Hermes", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("starting", "exact", "hi"), 1));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toMatchObject({ status: { kind: "starting" }, source: "hermes" });
+    // SessionStart from the agent, then the helper's "started" (idle) echo.
+    dispatchSessionEvent(SID, at(status("idle", "exact", "hook:agy-like"), 2));
+    dispatchSessionEvent(SID, at(status("idle", "exact", "hi"), 3));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toMatchObject({ status: { kind: "idle" }, source: "hook", reporter: "agy-like" });
+    // The agent's exit, then the helper's "ended": still the agent's word.
+    dispatchSessionEvent(SID, { type: "exit", at: 4, source: "hook:codex", code: 0, signal: null });
+    dispatchSessionEvent(SID, at(status("exited", "exact", "hi"), 5));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toMatchObject({ status: { kind: "exited" }, source: "hook", reporter: "codex" });
+  });
+
+  it("the helper's 'started' landing after the agent's first prompt does not hide the work (measured with the real Codex)", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("starting", "exact", "hi"), 1));
+    dispatchSessionEvent(SID, at(status("idle", "exact", "hook:codex"), 2)); // SessionStart
+    dispatchSessionEvent(SID, at(status("working", "exact", "hook:codex"), 2)); // UserPromptSubmit, same poll
+    dispatchSessionEvent(SID, at(status("idle", "exact", "hi"), 3)); // the helper's "started"
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toMatchObject({ status: { kind: "working", confidence: "exact" }, source: "hook", reporter: "codex" });
+  });
+
+  it("Antigravity's guessed approval shows until the OS layer takes it back when the command starts", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("working", "exact", "hook:antigravity"), 1_000));
+    dispatchSessionEvent(SID, at(status("working", "exact", "hook:antigravity"), 1_100)); // PreToolUse
+    dispatchSessionEvent(SID, at(status("needs_approval", "guessed", "hook:antigravity", "run_command"), 2_700));
+    const input = [4_000];
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input).status).toEqual({ kind: "needs_approval", confidence: "guessed", detail: "run_command" });
+    // The process facts alone do not replace the named guess...
+    dispatchSessionEvent(SID, at(status("working", "guessed", "os", "a command is running (zsh)"), 4_500));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input).status.kind).toBe("needs_approval");
+    // ...the OS layer's retraction, under the guess's own source, does.
+    dispatchSessionEvent(SID, at(status("working", "guessed", "hook:antigravity", "a command is running (zsh)"), 4_500));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input).status).toEqual({ kind: "working", confidence: "guessed", detail: "a command is running (zsh)" });
+    expect(foldStatus(getSessionEventSnapshot(SID).events, undefined, input)).toMatchObject({ kind: "working", confidence: "guessed", source: "hook:antigravity" });
+    // The command ends (the OS layer goes quiet): still working until the tool's own report.
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "os"), 9_000));
+    expect(foldStatus(getSessionEventSnapshot(SID).events, undefined, input).kind).toBe("working");
+    dispatchSessionEvent(SID, at(status("done_unread", "exact", "hook:antigravity"), 9_500));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy", input)).toMatchObject({ status: { kind: "done_unread", confidence: "exact" }, source: "hook", reporter: "antigravity" });
+  });
+
+  it("an exit Hermes saw itself (the terminal's process) is exact, from Hermes", () => {
+    dispatchSessionEvent(SID, { type: "exit", at: 1, source: "pty", code: 0, signal: null });
+    expect(stripStatus(getSessionEventSnapshot(SID), "destroyed")).toEqual({ status: { kind: "exited", confidence: "exact", detail: "" }, source: "hermes" });
+  });
+
+  it("with only guesses, the strip shows the same best guess as the sidebar (a quiet named guess yields to process facts)", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("starting", "exact", "hi"), 1));
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "hi", "the agent's process is up and quiet"), 2));
+    expect(stripStatus(getSessionEventSnapshot(SID), "idle")).toMatchObject({ status: { kind: "idle", confidence: "guessed" }, source: "guessed" });
+    dispatchSessionEvent(SID, at(status("working", "guessed", "os", "a command is running (sh)"), 3));
+    expect(stripStatus(getSessionEventSnapshot(SID), "idle")).toEqual({ status: { kind: "working", confidence: "guessed", detail: "a command is running (sh)" }, source: "os" });
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "os"), 4));
+    expect(stripStatus(getSessionEventSnapshot(SID), "idle")).toMatchObject({ status: { kind: "idle", confidence: "guessed" }, source: "guessed" });
+  });
+
+  it("words the source: how sure first, then who said so", () => {
+    const t = (key: string, v?: Record<string, string | number>) =>
+      ({
+        "status.confidence.exact": "exact",
+        "status.confidence.signal": "signal",
+        "status.confidence.guessed": "guessed",
+        "status.source.osc": "notification",
+        "status.source.e2e": "test",
+        "status.source.os": "process activity",
+        "status.reportedBy": `reported by ${v?.agent}`,
+        "status.reportedByAgent": "reported by the agent",
+      })[key] ?? key;
+    expect(stripSourceText(t, "exact", "hook", "Codex")).toBe("exact · reported by Codex");
+    expect(stripSourceText(t, "exact", "stream", null)).toBe("exact · reported by the agent");
+    expect(stripSourceText(t, "signal", "osc", "Codex")).toBe("signal · notification");
+    expect(stripSourceText(t, "exact", "e2e", null)).toBe("exact · test");
+    expect(stripSourceText(t, "guessed", "os", null)).toBe("guessed · process activity");
+    expect(stripSourceText(t, "guessed", "guessed", "Codex")).toBe("guessed");
+  });
+
   it("has a glyph for every status kind", () => {
     for (const kind of AGENT_STATUS_KINDS) expect(STATUS_GLYPHS[kind], kind).toBeTruthy();
   });
@@ -139,7 +244,7 @@ describe("<SessionStatusStrip>", () => {
     expect(el.textContent).toContain(INBOX_SHORTCUT);
   });
 
-  it("shows needs approval as 'exact · reported by <agent>' the moment the event lands, and the detail", () => {
+  it("shows needs approval with 'exact · reported by Claude Code' the moment the event lands, and the detail", () => {
     renderStrip("busy");
     act(() => {
       dispatchSessionEvent(SID, status("needs_approval", "exact", "hook:claude", "Bash"));
@@ -154,7 +259,7 @@ describe("<SessionStatusStrip>", () => {
     expect(el.querySelector(".session-status-strip-detail")?.textContent).toBe("Bash");
   });
 
-  it("marks a terminal notification as 'signal · notification', never exact or reported by the agent", () => {
+  it("marks a terminal notification as 'signal · notification', never exact", () => {
     renderStrip();
     act(() => {
       dispatchSessionEvent(SID, { type: "attention", at: 1, source: "osc", detail: "Approval requested" });
@@ -165,13 +270,13 @@ describe("<SessionStatusStrip>", () => {
     expect(el.querySelector(".session-status-strip-source")?.textContent).toBe("signal · notification");
   });
 
-  it("says 'exact' without a name when the agent's name is unknown, and 'guessed' before any signal", () => {
+  it("names the agent the event came from, whatever the session's agent name, and says 'guessed' before any signal", () => {
     renderStrip("busy", null);
     expect(strip().querySelector(".session-status-strip-source")?.textContent).toBe("guessed");
     act(() => {
       dispatchSessionEvent(SID, status("working", "exact", "hook:claude"));
     });
-    expect(strip().querySelector(".session-status-strip-source")?.textContent).toBe("exact");
+    expect(strip().querySelector(".session-status-strip-source")?.textContent).toBe("exact · reported by Claude Code");
   });
 
   it("counts running sub-agents and drops the counter when the agent exits", () => {

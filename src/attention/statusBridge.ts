@@ -10,6 +10,11 @@
 // Vendor-neutral by construction: it reads AgentStatus only, so a Claude
 // hook, an OSC notification from any agent or a plugin all land the same.
 //
+// A guess never says the person is blocked: a "needs approval" (or a
+// question, or a plan) at guessed confidence — the OS layer's approval
+// guess for an agent that reports none (Antigravity), a plugin's guess —
+// neither raises nor keeps an item, so it sends no notification either.
+//
 // An item keeps its place (its createdAt) while the session stays in the
 // same state with the same detail, so a status reported twice does not send
 // the session to the back of the ⌘I queue. A "ready" item that was read
@@ -24,7 +29,7 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem, type InboxKind } from "../agent/contract/inbox";
 import type { AgentStatus } from "../agent/contract/status";
 import { inboxKindForStatus } from "./model";
-import { PTY_SOURCE, resumedIndex } from "../agent/status/deriveStatus";
+import { isHeuristicSource, resumedIndex } from "../agent/status/deriveStatus";
 import { userInputTimes } from "../agent/status/userInput";
 
 const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
@@ -41,22 +46,31 @@ const QUIET: AgentStatus = Object.freeze({ kind: "idle", confidence: "guessed", 
  * after a signal the person answered, the terminal's working guess stands in
  * for the signal (it resolves the item), and anything the terminal guesses
  * after it reads as quiet (a guess never raises an item).
+ *
+ * A guessed "blocked" report (see isGuessedBlock) is skipped like the
+ * terminal's guesses: what was reported before it stands.
  */
 export function trustedStatus(snap: SessionEventSnapshot, inputTimes: readonly number[] = userInputTimes(snap.sessionId)): AgentStatus | null {
   let latestGuess: AgentStatus | null = null;
   for (let i = snap.events.length - 1; i >= 0; i--) {
     const e = snap.events[i];
     if (e.type === "exit") return EXITED;
-    if (e.type === "status" && e.source === PTY_SOURCE) {
+    if (e.type === "status" && isHeuristicSource(e.source)) {
       latestGuess ??= e.status;
       continue;
     }
+    if (e.type === "status" && isGuessedBlock(e.status)) continue;
     if (e.type === "status") {
       if (latestGuess && resumedIndex(snap.events, i, inputTimes) >= 0) return latestGuess.kind === "working" ? latestGuess : QUIET;
       return e.status;
     }
   }
   return null;
+}
+
+/** A status that would block on the person, but only as a guess. */
+export function isGuessedBlock(status: AgentStatus): boolean {
+  return status.confidence === "guessed" && inboxKindForStatus(status.kind) === "blocked";
 }
 
 /** The `source` of every item this bridge raises. */

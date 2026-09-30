@@ -1033,6 +1033,237 @@
       ]
     },
     {
+      "name": "claude PermissionRequest for its AskUserQuestion tool is a question, not an approval",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PermissionRequest",
+        "payload": {
+          "hook_event_name": "PermissionRequest",
+          "tool_name": "AskUserQuestion"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "needs_answer",
+            "confidence": "exact",
+            "detail": "AskUserQuestion"
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "claude PermissionRequest for ExitPlanMode is a plan to read",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "PermissionRequest",
+        "payload": {
+          "hook_event_name": "PermissionRequest",
+          "tool_name": "ExitPlanMode"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "plan_ready",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "codex PermissionRequest (a session-flag hook)",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "codex",
+        "nonce": "n-abc",
+        "event": "PermissionRequest",
+        "payload": {
+          "hook_event_name": "PermissionRequest",
+          "tool_name": "Bash"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:codex",
+          "status": {
+            "kind": "needs_approval",
+            "confidence": "exact",
+            "detail": "Bash"
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "codex PreToolUse request_user_input is a question",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "codex",
+        "nonce": "n-abc",
+        "event": "PreToolUse",
+        "payload": {
+          "hook_event_name": "PreToolUse",
+          "tool_name": "request_user_input"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:codex",
+          "status": {
+            "kind": "needs_answer",
+            "confidence": "exact",
+            "detail": "request_user_input"
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "antigravity PreInvocation is the model at work",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "antigravity",
+        "nonce": "n-abc",
+        "event": "PreInvocation",
+        "payload": {
+          "conversationId": "c-1"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:antigravity",
+          "status": {
+            "kind": "working",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "antigravity PreToolUse ask_question is a question",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "session": "s1",
+        "agent": "antigravity",
+        "nonce": "n-abc",
+        "event": "PreToolUse",
+        "payload": {
+          "tool_name": "ask_question",
+          "conversationId": "c-1"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:antigravity",
+          "status": {
+            "kind": "needs_answer",
+            "confidence": "exact",
+            "detail": "ask_question"
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "a record with milliseconds is dated to the millisecond",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "ts_ms": 1790000000437,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "hook_event_name": "Stop"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000437,
+          "source": "hook:claude",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
+      "name": "milliseconds that disagree with the seconds are ignored",
+      "record": {
+        "v": 1,
+        "ts": 1790000000,
+        "ts_ms": 1790000009999,
+        "session": "s1",
+        "agent": "claude",
+        "nonce": "n-abc",
+        "event": "Stop",
+        "payload": {
+          "hook_event_name": "Stop"
+        }
+      },
+      "events": [
+        {
+          "type": "status",
+          "at": 1790000000000,
+          "source": "hook:claude",
+          "status": {
+            "kind": "done_unread",
+            "confidence": "exact",
+            "detail": ""
+          }
+        }
+      ],
+      "nonce": "n-abc",
+      "confidence": "exact"
+    },
+    {
       "name": "a record with another nonce maps to nothing",
       "nonce": "n-abc",
       "confidence": "exact",

@@ -770,6 +770,19 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
     launch.login = false;
     launch.relaunch = true;
 
+    // Outside the session lock, as a first launch does: the hook trust may
+    // ask the agent's app server.
+    let hook_trust = {
+        let s = session.lock().map_err(|e| e.to_string())?;
+        let wants = s.launch_helper && s.ssh_info.is_none();
+        let cwd = s.working_directory.clone();
+        drop(s);
+        if wants {
+            crate::pty::launch::hook_trust_for(app, &provider, &cwd)
+        } else {
+            None
+        }
+    };
     let prepared = {
         let mut s = session.lock().map_err(|e| e.to_string())?;
         // A refused fresh launch never started a conversation: start fresh.
@@ -779,7 +792,7 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
             s.vendor_session_id = None;
         }
         s.agent_launch = launch;
-        match crate::pty::launch::prepare_helper_launch(app, &mut s) {
+        match crate::pty::launch::prepare_helper_launch(app, &mut s, hook_trust.as_deref()) {
             crate::pty::launch::HelperLaunch::Prepared(p) => {
                 s.phase = crate::pty::SessionPhase::LaunchingAgent;
                 let _ = app.emit("session-updated", crate::pty::SessionUpdate::from(&*s));

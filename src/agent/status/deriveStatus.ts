@@ -21,11 +21,23 @@
 //   6. A report at signal confidence (a terminal notification any program
 //      could print, e.g. an OSC-only agent's "approval requested") yields
 //      when the agent visibly resumes: the terminal's working guess, made
-//      after the person typed into the session after that report. An exact
-//      report never yields to a guess.
-// Certainty tiers, highest first: exact, signal, guessed, and below every
-// named guess the terminal's generic heuristics (source "pty"), so a
-// helper's specific guess is never overwritten by shell-output shapes.
+//      after the person typed into the session after that report (or the
+//      OS layer seeing it work again). An exact report never yields to a
+//      guess.
+//   7. The OS layer (source "os": the agent's process tree, a command
+//      running under it, its CPU use) says "working" or, once quiet, has
+//      no opinion: its quiet `idle` only takes back its own "working"
+//      (falling back to the terminal's latest guess) and replaces nothing
+//      else.
+//   8. What the agent reported itself (a hook, its event stream, its
+//      protocol) at exact confidence never yields to Hermes's own guesses,
+//      not even an idle (rule 4's exception), and an equal report from
+//      Hermes's bookkeeping does not take its place as the source.
+// Certainty tiers, highest first: exact, signal, guessed, then the OS
+// layer's process facts, and below everything the terminal's generic
+// heuristics (source "pty"), so a helper's specific guess is never
+// overwritten by process facts or shell-output shapes, and a process fact
+// never by a screen shape.
 //
 // Known limit (F11 reconciles it): an exact `working` holds until the agent
 // reports again, so an agent that stops without saying so keeps showing
@@ -49,6 +61,17 @@ export interface DerivedStatus extends AgentStatus {
 }
 
 export const PTY_SOURCE = "pty";
+/** The OS layer: facts about the agent's processes (src-tauri pty/os_activity.rs). */
+export const OS_SOURCE = "os";
+
+/**
+ * Whether a source is one of Hermes's own observations (the terminal's
+ * screen heuristics, the OS layer's process facts) rather than something
+ * the agent, a notification or a plugin reported.
+ */
+export function isHeuristicSource(source: string | null | undefined): boolean {
+  return source === PTY_SOURCE || source === OS_SOURCE;
+}
 
 /**
  * How sure an event is when it does not say so itself (turn, attention and
@@ -56,22 +79,26 @@ export const PTY_SOURCE = "pty";
  */
 export function confidenceOfSource(source: string | undefined | null): Confidence {
   if (!source) return "signal";
-  if (source === PTY_SOURCE) return "guessed";
+  if (isHeuristicSource(source)) return "guessed";
   if (source === "hi" || source === "agent-view" || source === "hook" || source.startsWith("hook:") || source.startsWith("protocol:")) {
     return "exact";
   }
   return "signal";
 }
 
-/** Higher is more certain. The terminal's heuristics rank below any named guess. */
+/**
+ * Higher is more certain. Among guesses: a named guess (the launch helper's,
+ * an agent hook's), then the OS layer's process facts, then the terminal's
+ * screen heuristics.
+ */
 export function certaintyRank(confidence: Confidence, source: string | null | undefined): number {
   switch (confidence) {
     case "exact":
-      return 3;
+      return 6;
     case "signal":
-      return 2;
+      return 4;
     case "guessed":
-      return source === PTY_SOURCE ? 0 : 1;
+      return source === PTY_SOURCE ? 0 : source === OS_SOURCE ? 1 : 2;
   }
 }
 
@@ -132,16 +159,16 @@ type Report = Pick<DerivedStatus, "kind" | "confidence" | "source" | "at">;
 
 /**
  * Rule 6: `next` is the agent visibly resuming after `current`, a signal:
- * the terminal's working guess, made after the person typed into the
- * session after the signal.
+ * the terminal's (or the OS layer's) working guess, made after the person
+ * typed into the session after the signal.
  */
 export function resumesAfterInput(current: Report, next: Report, inputTimes: readonly number[]): boolean {
   return (
     current.confidence === "signal" &&
-    current.source !== PTY_SOURCE &&
+    !isHeuristicSource(current.source) &&
     current.at !== null &&
     next.kind === "working" &&
-    next.source === PTY_SOURCE &&
+    isHeuristicSource(next.source) &&
     next.at !== null &&
     typedBetween(inputTimes, current.at, next.at)
   );
@@ -160,8 +187,8 @@ export function resumedIndex(events: readonly SessionEvent[], index: number, inp
   if (!report) return -1;
   for (let j = index + 1; j < events.length; j++) {
     const later = events[j];
-    if (later.type !== "status" || later.source !== PTY_SOURCE) continue;
-    if (resumesAfterInput(report, { ...later.status, at: later.at, source: PTY_SOURCE }, inputTimes)) return j;
+    if (later.type !== "status" || !isHeuristicSource(later.source)) continue;
+    if (resumesAfterInput(report, { ...later.status, at: later.at, source: later.source ?? null }, inputTimes)) return j;
   }
   return -1;
 }
@@ -170,23 +197,72 @@ export function resumedIndex(events: readonly SessionEvent[], index: number, inp
 export function replaces(current: DerivedStatus, next: DerivedStatus, nextIsExit: boolean, inputTimes: readonly number[] = NO_INPUT): boolean {
   if (nextIsExit) return true;
   if (current.source !== null && current.source === next.source) return true;
+  // Rule 7: process facts count only below what an agent reported exactly.
+  if (next.source === OS_SOURCE && current.confidence === "exact" && !isHeuristicSource(current.source)) return false;
+  // Rule 8: the launch helper's "started" (idle) is bookkeeping, not news
+  // about the agent: it lands right after the agent's own start hook — and
+  // after its first prompt when both arrive together (Codex) — so it never
+  // replaces what the agent reported.
+  if (isHelperStartedEcho(next) && isAgentReported(current.source)) return false;
   const cur = certaintyRank(current.confidence, current.source);
   const nxt = certaintyRank(next.confidence, next.source);
-  if (nxt >= cur) return true;
+  if (nxt >= cur) {
+    // The same status again from Hermes's own bookkeeping (the launch
+    // helper echoing "started" right after the agent's own start hook)
+    // keeps the agent as the source (rule 8).
+    if (nxt === cur && next.kind === current.kind && isAgentReported(current.source) && !isAgentReported(next.source)) return false;
+    return true;
+  }
   if (current.kind === "exited" && !current.processExited) return next.kind !== "idle";
   if (resumesAfterInput(current, next, inputTimes)) return true;
+  // Rule 8: an idle the agent itself reported exactly never yields to
+  // Hermes's own guesses (its TUI drawing at startup is not work).
+  if (current.confidence === "exact" && isAgentReported(current.source) && isHeuristicSource(next.source)) return false;
   return YIELDING.has(current.kind);
+}
+
+/** The launch helper saying the agent started (source "hi", idle). */
+export function isHelperStartedEcho(report: Pick<DerivedStatus, "kind" | "source">): boolean {
+  return report.source === "hi" && report.kind === "idle";
+}
+
+/** A source that is the agent itself: its hooks, its event stream, its protocol. */
+export function isAgentReported(source: string | null | undefined): boolean {
+  return !!source && (source.startsWith("hook:") || source.startsWith("stream:") || source.startsWith("protocol:"));
 }
 
 const NOTHING: DerivedStatus = Object.freeze({ ...UNKNOWN_STATUS, at: null, source: null });
 
+/** The OS layer saying it has no opinion any more (rule 7). */
+export function isOsQuiet(event: SessionEvent): boolean {
+  return event.type === "status" && event.source === OS_SOURCE && event.status.kind === "idle";
+}
+
 /** Fold a list of events, oldest first, from `start`. */
 export function foldStatus(events: readonly SessionEvent[], start: DerivedStatus = NOTHING, inputTimes: readonly number[] = NO_INPUT): DerivedStatus {
   let current = start;
+  // The terminal's latest guess, for when the OS layer takes back its own
+  // "working" (rule 7).
+  let lastScreenGuess: DerivedStatus | null = null;
+  // What the OS layer's "working" replaced, to come back to when it is
+  // quiet (unless the screen has guessed since).
+  let beforeOs: DerivedStatus | null = null;
   for (const event of events) {
     const next = statusOfEvent(event);
     if (!next) continue;
-    if (current === NOTHING || replaces(current, next, event.type === "exit", inputTimes)) current = next;
+    if (next.source === PTY_SOURCE) lastScreenGuess = next;
+    if (isOsQuiet(event)) {
+      if (current.source === OS_SOURCE) {
+        const screenIsNewer = lastScreenGuess !== null && (beforeOs === null || (lastScreenGuess.at ?? 0) > (beforeOs.at ?? 0));
+        current = (screenIsNewer ? lastScreenGuess : beforeOs) ?? next;
+        beforeOs = null;
+      }
+      continue;
+    }
+    if (current === NOTHING || replaces(current, next, event.type === "exit", inputTimes)) {
+      if (next.source === OS_SOURCE && current.source !== OS_SOURCE) beforeOs = current === NOTHING ? null : current;
+      current = next;
+    }
   }
   return current;
 }
@@ -226,16 +302,17 @@ const EXITED_STATUS: AgentStatus = Object.freeze({ kind: "exited", confidence: "
 
 /**
  * The last status the agent (or a plugin, a hook, a notification) reported,
- * an exit included; the terminal's own guesses (source "pty") left out.
- * Null when nothing but the terminal said anything. For features that act on
- * what an agent is doing (the task queue, tiling working agents), where a
- * plain shell's busy prompt must not count.
+ * an exit included; Hermes's own observations (the terminal's guesses,
+ * source "pty", and the OS layer's, source "os") left out. Null when
+ * nothing but those said anything. For features that act on what an agent
+ * is doing (the task queue, tiling working agents), where a plain shell's
+ * busy prompt must not count.
  */
 export function lastReportedStatus(snap: SessionEventSnapshot): AgentStatus | null {
   for (let i = snap.events.length - 1; i >= 0; i--) {
     const e = snap.events[i];
     if (e.type === "exit") return EXITED_STATUS;
-    if (e.type === "status" && e.source !== PTY_SOURCE) return e.status;
+    if (e.type === "status" && !isHeuristicSource(e.source)) return e.status;
   }
   return null;
 }

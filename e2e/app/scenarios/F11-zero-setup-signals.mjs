@@ -13,15 +13,15 @@
 //          status strip (the negative control that the flag gates it). Turn the
 //          `launchHelper` and `agentCatalog` flags on in Settings > Flags.
 //   run 1  flag ON:
-//          - the strip says "idle · hook, exact" once the agent started;
-//          - a permission request shows "needs approval · hook, exact"
+//          - the strip says "idle · exact · reported by Claude Code" once the agent started;
+//          - a permission request shows "needs approval · exact · reported by Claude Code"
 //            within one second of the agent asking, with the tool as detail;
 //          - an ordinary tool does not fire the narrowed PreToolUse hook;
 //          - question, plan, turn end, failure, prompt: each its own status;
 //          - a denied permission puts the strip back to working (exact);
 //          - two sub-agents started, one stopped: the counter says so;
 //          - an OSC 9 notification printed by the agent (no hook) raises
-//            "needs approval · notification, signal" — never exact;
+//            "needs approval · signal · notification" — never exact;
 //          - the Hermes marker with a forged nonce is attention only, the
 //            one with this launch's nonce is exact;
 //          - every hook printed nothing and exited 0 (Hermes never answers);

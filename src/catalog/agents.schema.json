@@ -111,7 +111,8 @@
         "exited",
         "session_start",
         "subagents",
-        "limited"
+        "limited",
+        "tool_pending"
       ]
     },
     "signals": {
@@ -173,6 +174,18 @@
           "description": "Done-When (F27): the hook event, in the per-launch settings file, whose command can refuse the agent's stop and feed failures back (exit code 2). Only for method settings_file.",
           "type": "string",
           "pattern": "^[A-Za-z]+$"
+        },
+        "hook_flags": {
+          "description": "config_flags only: the events' hooks also go on the command line, in this shape (toml_config: -c hooks.<Event>=[...]).",
+          "enum": [
+            "toml_config"
+          ]
+        },
+        "hook_trust": {
+          "description": "How Hermes has the agent run exactly its own per-launch hooks without a review prompt (app_server_hooks_list: the hashes the agent's app server reports, passed as the launch's hook state). Never a blanket bypass: hooks anyone else configured keep their review.",
+          "enum": [
+            "app_server_hooks_list"
+          ]
         },
         "confidence": {
           "enum": [
