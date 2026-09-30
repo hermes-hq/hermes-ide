@@ -342,6 +342,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   mkdirSync(agentFolder, { recursive: true });
   writeFileSync(join(agentFolder, "notes.md"), "synthetic\n");
   await startAgentViewSession(bridge, log, { folder: agentFolder });
+  // The view mounts its composer a moment after the session opens (a slow
+  // runner showed neither the composer nor its button right away).
+  await bridge.waitFor("the Agent view composer", `return !!e2e.first(".session-composer-input, .session-composer-fab");`, { timeoutMs: 20_000 });
   await sendAgentMessage(bridge, log, "hello");
   await bridge.waitFor("the fake agent's reply", `return document.body.innerText.includes("fake reply: hello");`, { timeoutMs: 30_000 });
   await bridge.waitFor("the composer's model chip", `return !!e2e.first(".composer-chip-model");`, { timeoutMs: 20_000 });
