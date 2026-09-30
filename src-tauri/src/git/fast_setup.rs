@@ -830,6 +830,21 @@ mod tests {
     }
 
     #[test]
+    fn a_port_nothing_listens_on_is_free() {
+        // The OS hands out a fresh port, which is closed again before the
+        // check. Another test running in parallel may take that same port
+        // in between, so a busy answer is retried on another fresh port;
+        // only a port_is_free that never says "free" fails every attempt.
+        let free = (0..10).any(|_| {
+            let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
+            port_is_free(port)
+        });
+        assert!(free, "ten ports nothing listens on all looked busy");
+    }
+
+    #[test]
     fn a_port_only_listening_on_ipv6_loopback_is_not_free() {
         // 127.0.0.1 can still be bound on that port; only the ::1 probe
         // sees the server.
