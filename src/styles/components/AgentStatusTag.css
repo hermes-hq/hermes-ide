@@ -16,17 +16,21 @@
   text-align: center;
 }
 
-.agent-status-tag[data-tone="attention"] { color: var(--warning); }
+/* The tone inks are held to 4.5:1 on every surface (contrast-audit). */
+.agent-status-tag[data-tone="attention"] { color: var(--warning-ink); }
 .agent-status-tag[data-status="error"],
-.agent-status-tag[data-status="check_failed"] { color: var(--danger); }
-.agent-status-tag[data-tone="ready"] { color: var(--accent); }
-.agent-status-tag[data-tone="active"] { color: var(--success); }
+.agent-status-tag[data-status="check_failed"] { color: var(--danger-fg); }
+.agent-status-tag[data-tone="ready"] { color: var(--info-ink); }
+.agent-status-tag[data-tone="active"] { color: var(--success-ink); }
 .agent-status-tag[data-tone="quiet"] { color: var(--text-3); }
 
-/* A guess is dimmed and says so in words. */
-.agent-status-tag[data-confidence="guessed"] { opacity: 0.62; }
-/* Same colour as the word: the whole tag is already dimmed, and the word
-   "guessed" must stay readable. */
+/* A guess is dimmed and says so in words: drawn in the quietest ink that
+   still reads at 4.5:1 (--text-3), never faded below it, and in italics, as
+   the status strip draws a guess. On the current or hovered row every ink
+   lifts to stay readable on the fill, so the italics carry the difference
+   there. */
+.agent-status-tag[data-confidence="guessed"] { color: var(--text-3); font-style: italic; }
+/* Same colour as the word. */
 .agent-status-guessed {
   font-style: italic;
 }

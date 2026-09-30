@@ -1,134 +1,56 @@
 /* ─── Scope Bar (Attached Projects) ───────────────────────── */
+/* One dense-chrome line: each attached project is a small removable Chip,
+ * "Attach project" a small IconButton, the agent's model an info Badge. */
 
 .scope-bar {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px 12px;
+  padding: 0 var(--space-3);
   background: var(--bg-1);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--control-border-width) solid var(--border);
   flex-shrink: 0;
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   overflow-x: auto;
   overflow-y: hidden;
 }
+/* The bar scrolls sideways and clips its 28 px line, so rings are drawn
+ * inside the controls instead of 2 px outside them. */
+.scope-bar :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
 
-.scope-bar-empty {
-  padding: 1px 12px;
-}
-
-.scope-bar::-webkit-scrollbar { height: 4px; }
+.scope-bar::-webkit-scrollbar { height: var(--space-1); }
 .scope-bar::-webkit-scrollbar-track { background: transparent; }
 .scope-bar::-webkit-scrollbar-thumb {
   background: var(--bg-3);
-  border-radius: 2px;
+  border-radius: var(--radius-full);
 }
 .scope-bar::-webkit-scrollbar-thumb:hover {
   background: var(--text-3);
 }
 
-.scope-pill {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 3px 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-base);
-  color: var(--text-1);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
+.scope-pill { flex-shrink: 0; }
+.scope-pill .h-chip-label { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .scope-pill-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: var(--space-1-5);
+  height: var(--space-1-5);
+  border-radius: var(--radius-full);
   flex-shrink: 0;
-  align-self: center;
-}
-
-.scope-pill-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
-
-.scope-pill-name {
-  font-weight: 500;
 }
 
 .scope-pill-branch {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-size: var(--text-sm);
-  font-weight: 500;
+  gap: var(--space-0-5);
   color: var(--text-2);
-  max-width: 140px;
+  max-width: calc(var(--control-h-md) * 4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.scope-pill-branch svg {
-  flex-shrink: 0;
-}
+.scope-pill-branch svg { flex-shrink: 0; }
 
-.scope-pill-status {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-}
+.scope-pill-status { color: var(--text-2); }
 
-.scope-pill-close {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: var(--text-base);
-  padding: 0 2px;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-ui);
-  line-height: 1;
-}
-.scope-pill-close:hover {
-  color: var(--red);
-  background: var(--red-dim);
-}
-
-.scope-bar-add {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: var(--text-base);
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-ui);
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.scope-bar-add:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* ─── Scope Bar Provider Badge ──────────────────────────────────── */
-
-.scope-bar-provider {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-dim);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
+.scope-bar-add { flex-shrink: 0; }

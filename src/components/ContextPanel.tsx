@@ -17,6 +17,7 @@ import { useI18n } from "../i18n/I18nProvider";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { spendOf, spendText } from "../fleet/spend";
+import { CloseButton } from "./ui/Button";
 
 interface ContextPanelProps {
   session: SessionData;
@@ -691,7 +692,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
                 <span className={`ctx-pin-scope-badge ${pin.session_id === null ? "ctx-pin-scope-project" : "ctx-pin-scope-session"}`}>
                   {pin.session_id === null ? "project" : "session"}
                 </span>
-                <button className="ctx-memory-delete" onClick={() => removePin(pin.id)} title="Unpin">&times;</button>
+                <CloseButton className="ctx-memory-delete" label="Unpin" onClick={() => removePin(pin.id)} />
               </div>
             ))}
             {showPinAdd && (
@@ -816,7 +817,7 @@ export function ContextPanel({ session }: ContextPanelProps) {
                   <span className={`ctx-pin-scope-badge ${m.scope === "project" ? "ctx-pin-scope-project" : "ctx-pin-scope-global"}`}>
                     {m.scope === "project" ? "project" : "global"}
                   </span>
-                  <button className="ctx-memory-delete" onClick={() => deleteMemoryFact(m.key)} title="Delete">&times;</button>
+                  <CloseButton className="ctx-memory-delete" label="Delete" onClick={() => deleteMemoryFact(m.key)} />
                 </div>
               ))}
               {showMemoryAdd && (

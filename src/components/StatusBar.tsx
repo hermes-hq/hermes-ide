@@ -13,6 +13,7 @@ import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useReportedTotals } from "../fleet/useReportedTotals";
 import { spendText } from "../fleet/spend";
+import { IconButton } from "./ui/Button";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
@@ -243,8 +244,10 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         {/* ThemePicker removed in 1.1.15 — theme switching now lives
             in Settings → Appearance, the single source of truth.  The
             status bar should communicate state, not configuration. */}
-        <button
+        <IconButton
+          size="sm"
           className="status-bug-btn"
+          label={t("status.reportBug")}
           onClick={() => {
             const os = PLATFORM === "mac" ? "macOS" : PLATFORM === "win" ? "Windows" : "Linux";
             const params = new URLSearchParams({
@@ -255,24 +258,29 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
             });
             open(`https://github.com/hermes-hq/hermes-ide/issues/new?${params}`);
           }}
-          title={t("status.reportBug")}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 2l1.88 1.88" /><path d="M14.12 3.88L16 2" />
-            <path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1" />
-            <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6" />
-            <path d="M12 20v-9" /><path d="M6.53 9C4.6 8.8 3 7.1 3 5" /><path d="M6 13H2" /><path d="M3 21c0-2.1 1.7-3.9 3.8-4" />
-            <path d="M20.97 5c0 2.1-1.6 3.8-3.5 4" /><path d="M22 13h-4" /><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
-          </svg>
-        </button>
+          icon={
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M8 2l1.88 1.88" /><path d="M14.12 3.88L16 2" />
+              <path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1" />
+              <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6" />
+              <path d="M12 20v-9" /><path d="M6.53 9C4.6 8.8 3 7.1 3 5" /><path d="M6 13H2" /><path d="M3 21c0-2.1 1.7-3.9 3.8-4" />
+              <path d="M20.97 5c0 2.1-1.6 3.8-3.5 4" /><path d="M22 13h-4" /><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
+            </svg>
+          }
+        />
         {onOpenShortcuts && (
-          <button
+          <IconButton
+            size="sm"
             className="status-shortcuts-btn"
+            label={t("status.keyboardShortcuts", { shortcut: fmt("{mod}/") })}
             onClick={onOpenShortcuts}
-            title={t("status.keyboardShortcuts", { shortcut: fmt("{mod}/") })}
-          >
-            ⌨
-          </button>
+            icon={
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="1.5" y="4" width="13" height="8.5" rx="1.5" />
+                <path d="M4 6.5h.01M6.5 6.5h.01M9 6.5h.01M11.5 6.5h.01M4 9h.01M11.5 9h.01M6 10h4" />
+              </svg>
+            }
+          />
         )}
       </div>
     </div>

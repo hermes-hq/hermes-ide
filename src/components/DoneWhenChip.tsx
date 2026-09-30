@@ -4,6 +4,8 @@ import { useI18n } from "../i18n/I18nProvider";
 import { useDoneWhen } from "../doneWhen/store";
 import { agentOwnsTerminal, runChecksNow, sendFailuresBack } from "../doneWhen/controller";
 import { failedCommands, isPassed, type CheckRecord } from "../doneWhen/types";
+import { Button } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 
 type ChipState = "running" | "passed" | "failed" | "retrying" | "check_failed" | "error";
 
@@ -109,20 +111,20 @@ export function DoneWhenChip({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="done-when" ref={rootRef}>
-      <button
-        type="button"
+      <Chip
+        size="sm"
         className="done-when-chip"
         data-state={state}
         title={title}
-        aria-expanded={open}
-        aria-haspopup="dialog"
+        expanded={open}
+        haspopup="dialog"
         onClick={(e) => {
           e.stopPropagation();
           if (last) setOpen((o) => !o);
         }}
       >
         {label}
-      </button>
+      </Chip>
       {open && last && run && (
         <div className="done-when-popover" role="dialog" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
           <div className="done-when-popover-title">{title}</div>
@@ -154,18 +156,18 @@ export function DoneWhenChip({ sessionId }: { sessionId: string }) {
           )}
           <div className="done-when-actions">
             {canSend && (
-              <button type="button" className="done-when-send" disabled={sending} onClick={() => void onSend()}>
+              <Button variant="primary" size="sm" className="done-when-send" disabled={sending} onClick={() => void onSend()}>
                 {sentAt ? t("doneWhen.popover.sent") : t("doneWhen.popover.sendBack")}
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              size="sm"
               className="done-when-rerun"
               disabled={running}
               onClick={() => void runChecksNow(sessionId, "manual")}
             >
               {t("doneWhen.popover.rerun")}
-            </button>
+            </Button>
           </div>
         </div>
       )}

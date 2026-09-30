@@ -1239,6 +1239,30 @@ features:
         # this fix fails exactly these checks.
         text: "On the creator's branch step, a name typed in the New branch form is what Continue uses (shown as the new branch on the confirm step), a name that cannot be created holds Continue back, and the field keeps the focus while its error shows; a plain shell's chosen folder stays chosen when picked again"
         scenarios: [UI-launch-surfaces.mjs]
+      # UI-14..18: the always-visible chrome on the control set (track UI-B).
+      # Two fake claude sessions ask for permission; checked in Frosted Dark
+      # and Frosted Light. Keys are DOM key events, as in F12; real Tab focus
+      # is UI-9's. On Windows the fake claude goes on the registry Path, so
+      # the scenario runs there only on a CI runner. Negative controls:
+      # HERMES_E2E_UICHROME_NEGATIVE=1 (the old grey current row, no rail;
+      # its metadata measures 1.37:1) and HERMES_E2E_UICHROME_NEGATIVE=clip
+      # (the strip, header, scope bar and status bar rings drawn 2 px
+      # outside again, where their containers cut them off).
+      UI-14:
+        text: "The sidebar's current session row is filled with --row-active-bg and carries a 2 px brass rail, and every piece of text in the session rows, the status strip, the pane header, the inbox and the command palette is at least 4.5:1, in Frosted Dark and Frosted Light"
+        scenarios: [UI-chrome.mjs]
+      UI-15:
+        text: "The pane header line, the status strip and the status bar are 28 px with 28 px buttons and 24 px header chips; every close button in the chrome is the one 28 px Close with a single drawn x"
+        scenarios: [UI-chrome.mjs]
+      UI-16:
+        text: "The inbox opens on its shortcut with 44 px rows and the command palette with 32 px rows; the arrows move the highlight named by aria-activedescendant, the session in view is the current row, Esc closes; the next-agent shortcut moves the current row"
+        scenarios: [UI-chrome.mjs]
+      UI-17:
+        text: "Every control of the sidebar, pane header, status strip, status bar, activity bar, inbox and palette draws the solid focus ring, and no ring is cut off by the window or by a container that clips; counts are neutral Counters, brass only while agents wait"
+        scenarios: [UI-chrome.mjs]
+      UI-18:
+        text: "A sidebar row's model and permission-mode tags are 18 px tags that share one line, and a guessed status is set in italics as well as the quietest ink, so it still reads as a guess on the current or hovered row"
+        scenarios: [UI-chrome.mjs, F10-agent-status.mjs]
   CAP:
     name: "Models, effort and accounts for every agent (2.0 launch contract)"
     # The launcher's own chips (model, effort, account, presets row) are

@@ -5,44 +5,11 @@
   margin-left: auto;
 }
 
-.attention-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-2);
-  color: var(--text-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: background var(--dur-quick) var(--ease-standard), color var(--dur-quick) var(--ease-standard),
-    border-color var(--dur-quick) var(--ease-standard);
-}
-
-.attention-badge:hover {
-  background: var(--bg-hover);
-  color: var(--text-0);
-}
-
-.attention-badge:focus-visible,
+/* The title-bar trigger is the control set's quiet Button with a Counter
+ * (brass only while something is blocked on you). The list keeps the one
+ * focus ring, drawn inside it so the inbox's edge does not clip it. */
 .attention-list:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-shadow);
-}
-
-.attention-badge-hot {
-  background: var(--warning-dim);
-  border-color: var(--warning);
-  color: var(--text-0);
-}
-
-.attention-badge-count {
-  min-width: 1ch;
-  font-weight: var(--weight-semibold);
+  outline-offset: calc(-1 * var(--focus-ring-width));
 }
 
 /* Screen-reader only live region. */
@@ -84,7 +51,6 @@
 .attention-list {
   overflow-y: auto;
   padding: var(--space-1) 0;
-  outline: none;
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -97,24 +63,12 @@
   color: var(--text-3);
 }
 
+/* Rows are the control set's ListRow (44 px, two lines): highlight is the
+ * hover fill, the session in view is the current row (fill + brass rail). */
 .attention-option {
-  display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
-  padding: 6px var(--space-3);
-  cursor: pointer;
+  margin: 0 var(--space-1);
   font-size: var(--text-sm);
-  color: var(--text-1);
-}
-
-.attention-option:hover {
-  background: var(--bg-hover);
-}
-
-.attention-option-selected,
-.attention-option-selected:hover {
-  background: var(--bg-active);
-  color: var(--text-0);
 }
 
 .attention-option-muted {
@@ -125,7 +79,7 @@
   flex-shrink: 0;
   width: 8px;
   height: 8px;
-  margin-top: 5px;
+  margin-top: var(--space-1-5);
   border-radius: 50%;
   background: var(--warning);
 }
@@ -189,11 +143,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.attention-option-muted-tag {
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-}
-
 .attention-empty {
   margin: 0;
   padding: var(--space-4) var(--space-3);
@@ -253,12 +202,6 @@
   color: var(--text-3);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .attention-badge {
-    transition: none;
-  }
-}
-
 /* ⌘I: where in the line of waiting agents this one is ("2 of 3"). */
 .attention-position {
   position: fixed;
@@ -311,13 +254,3 @@
   border-top: var(--control-border-width) solid var(--border);
 }
 .attention-morning-answer { color: var(--text-2); font-size: var(--text-xs); }
-.attention-morning-start {
-  padding: var(--space-1-5) var(--space-3);
-  border-radius: var(--radius);
-  border: var(--control-border-width) solid var(--accent);
-  background: transparent;
-  color: var(--text-0);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.attention-morning-start:hover { background: var(--accent-dim); }

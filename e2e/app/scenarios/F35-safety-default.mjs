@@ -95,7 +95,9 @@ await runScenario("F35-safety-default", async ({ evidenceDir, log, assert, apps,
   if (!NEGATIVE) assert(looser.bannerLine.includes(LOOSER_FLAG), `the agent really runs with ${LOOSER_FLAG}`);
   const chip = await bridge.waitFor('the "Looser than default" chip', `
     const c = e2e.first(".agent-setup-chips .agent-safety-chip");
-    return c ? { text: e2e.norm(c.innerText), title: c.getAttribute("title") } : null;
+    // The words, not their drawn case: the chip is a warning Badge, which
+    // sets its label in capitals.
+    return c ? { text: e2e.norm(c.textContent), title: c.getAttribute("title") } : null;
   `, { timeoutMs: 15_000 });
   log(`  chip: ${JSON.stringify(chip)}`);
   assert(chip.text === "Looser than default", "the chip says Looser than default");

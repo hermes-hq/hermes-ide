@@ -186,6 +186,32 @@ describe("F12 attention center", () => {
     expect(onJump.mock.calls.map((c) => c[0])).toEqual(["B", "B"]);
   });
 
+  it("rows are 44 px ListRows: ↓ moves the highlight, the session in view is the current row; the count is brass only while something waits", () => {
+    const { badge } = setup("A");
+    const counter = () => badge().querySelector(".h-counter");
+    expect(counter()).toHaveAttribute("data-tone", "neutral");
+    status("B", "needs_approval", "Bash: rm -rf build");
+    clock += 1_000;
+    status("A", "needs_answer", "Ship it?");
+    expect(counter()).toHaveAttribute("data-tone", "attention");
+    expect(counter()).toHaveTextContent("2");
+
+    pressInbox();
+    const list = screen.getByRole("listbox", { name: "Attention inbox" });
+    const options = () => within(list).getAllByRole("option");
+    for (const o of options()) expect(o).toHaveClass("h-row", "h-row--lg");
+    // B waited longest: it is highlighted first; A is the session in view.
+    expect(options().map((o) => o.getAttribute("data-session-id"))).toEqual(["B", "A"]);
+    expect(options()[0]).toHaveAttribute("data-highlighted");
+    expect(options()[0]).not.toHaveAttribute("data-current");
+    expect(options()[1]).toHaveAttribute("data-current");
+    expect(options()[1]).toHaveAttribute("aria-current", "true");
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    expect(options()[0]).not.toHaveAttribute("data-highlighted");
+    expect(options()[1]).toHaveAttribute("data-highlighted");
+    expect(list).toHaveAttribute("aria-activedescendant", options()[1].id);
+  });
+
   it("never notifies for the session you look at in a focused window; others notify once and go away minimal", () => {
     rememberUserLabel("B", "bravo-task");
     setup("A");

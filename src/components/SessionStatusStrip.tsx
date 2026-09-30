@@ -23,6 +23,7 @@ import { useSessionEvents, type SessionEventSnapshot } from "../agent/contract/s
 import type { AgentStatus, AgentStatusKind, Confidence } from "../agent/contract/status";
 import { useI18n } from "../i18n/I18nProvider";
 import { fmt } from "../utils/platform";
+import { Button } from "./ui/Button";
 
 /** The attention inbox shortcut as this platform writes it (⌘I / Ctrl+I). */
 export const INBOX_SHORTCUT = fmt("{mod}I");
@@ -172,9 +173,16 @@ export function SessionStatusStrip({ sessionId, phase, agentName }: SessionStatu
       {status.detail && (
         <span className="session-status-strip-detail" title={status.detail}>{status.detail}</span>
       )}
-      <button type="button" className="session-status-strip-inbox" title={t("status.inboxHint", { shortcut: INBOX_SHORTCUT })} onClick={openInbox}>
-        {INBOX_SHORTCUT}
-      </button>
+      <Button
+        variant="quiet"
+        size="sm"
+        className="session-status-strip-inbox"
+        title={t("status.inboxHint", { shortcut: INBOX_SHORTCUT })}
+        aria-label={t("status.inboxHint", { shortcut: INBOX_SHORTCUT })}
+        onClick={openInbox}
+      >
+        <kbd className="h-row-shortcut">{INBOX_SHORTCUT}</kbd>
+      </Button>
     </div>
   );
 }

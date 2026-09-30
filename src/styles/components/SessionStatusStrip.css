@@ -1,13 +1,15 @@
 /* ─── Session status strip (F11) ───────────────────────────────────── */
 /* One line above a terminal agent session: status, source, sub-agents, ⌘I. */
 
+/* One dense-chrome line: as tall as its small inbox button (28 px). */
 .session-status-strip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
   flex-shrink: 0;
-  min-height: 22px;
-  padding: 2px 8px;
+  box-sizing: content-box;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-1) 0 var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-2);
   border-bottom: 1px solid var(--border);
@@ -16,9 +18,12 @@
   overflow: hidden;
 }
 
-.session-status-strip-guessed {
-  opacity: 0.6;
+/* A guess: every part in the quietest ink that still reads at 4.5:1. */
+.session-status-strip-guessed .session-status-strip-word,
+.session-status-strip-guessed .session-status-strip-glyph {
+  color: var(--text-3);
 }
+.session-status-strip-guessed .session-status-strip-word { font-style: italic; }
 
 .session-status-strip-glyph {
   width: 1em;
@@ -29,16 +34,16 @@
 .session-status-strip[data-status-kind="needs_approval"] .session-status-strip-glyph,
 .session-status-strip[data-status-kind="needs_answer"] .session-status-strip-glyph,
 .session-status-strip[data-status-kind="plan_ready"] .session-status-strip-glyph {
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 .session-status-strip[data-status-kind="error"] .session-status-strip-glyph,
 .session-status-strip[data-status-kind="check_failed"] .session-status-strip-glyph {
-  color: var(--danger, var(--warning));
+  color: var(--danger-fg);
 }
 
 .session-status-strip[data-status-kind="done_unread"] .session-status-strip-glyph {
-  color: var(--accent);
+  color: var(--info-ink);
 }
 
 .session-status-strip-word {
@@ -62,20 +67,8 @@
   flex: 1;
 }
 
-.session-status-strip-inbox {
-  margin-left: auto;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-3);
-  font-size: var(--text-2xs);
-  font-family: var(--font-numeric);
-  padding: 0 4px;
-  line-height: 1.5;
-  cursor: pointer;
-}
-
-.session-status-strip-inbox:hover {
-  color: var(--text-1);
-  border-color: var(--accent);
-}
+/* The inbox shortcut is the control set's quiet small Button. */
+.session-status-strip-inbox { margin-left: auto; }
+/* The strip is exactly as tall as the button and clips (overflow: hidden), so
+ * the ring is drawn inside the control instead of 2 px outside it. */
+.session-status-strip :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }

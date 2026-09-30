@@ -624,6 +624,7 @@ export const hiPack: LanguagePack = {
     "land.archiveOnly": "केवल संग्रहीत करें",
     "palette.checkPluginUpdates": "प्लगइन अपडेट जांचें",
     "palette.placeholder": "कमांड या सत्र नाम लिखें...",
+    "palette.resultsLabel": "कमांड और सत्र",
     "palette.noResults": "\"{query}\" के लिए कोई परिणाम नहीं",
     "sessions.title": "सत्र",
     "sessions.noActive": "कोई सक्रिय सत्र नहीं",

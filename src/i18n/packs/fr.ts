@@ -512,6 +512,7 @@ export const frPack: LanguagePack = {
     "land.archiveOnly": "Archiver seulement",
     "palette.checkPluginUpdates": "Vérifier les mises à jour des extensions",
     "palette.placeholder": "Tapez une commande ou un nom de session...",
+    "palette.resultsLabel": "Commandes et sessions",
     "palette.noResults": "Aucun résultat pour \"{query}\"",
     "close.agent.title": "Terminer la conversation ?",
     "close.terminal.title": "Fermer la session ?",

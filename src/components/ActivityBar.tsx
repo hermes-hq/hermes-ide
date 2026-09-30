@@ -1,12 +1,21 @@
 import { type ReactNode, useRef, useState, useEffect } from "react";
 import { Blocks, Settings } from "lucide-react";
 import "../styles/components/ActivityBar.css";
+import { Counter } from "./ui/Badge";
 
 export interface ActivityBarTab {
   id: string;
   label: string;
   icon: ReactNode;
   badge?: number;
+  /** neutral (a plain count) by default; attention (brass) only when the count needs you. */
+  badgeTone?: "neutral" | "attention";
+}
+
+/** A tab's count: the control set's Counter, neutral unless it needs you. */
+function TabBadge({ tab }: { tab: ActivityBarTab }) {
+  if (tab.badge == null || tab.badge <= 0) return null;
+  return <Counter className="activity-bar-badge" value={tab.badge} tone={tab.badgeTone ?? "neutral"} />;
 }
 
 interface ActivityBarAction {
@@ -162,9 +171,7 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
         >
           <span className="activity-bar-icon-wrap">
             {tab.icon}
-            {tab.badge != null && tab.badge > 0 && (
-              <span className="activity-bar-badge">{tab.badge}</span>
-            )}
+            <TabBadge tab={tab} />
           </span>
           <span className="activity-bar-label">{tab.label}</span>
         </button>
@@ -186,9 +193,7 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
             >
               <span className="activity-bar-icon-wrap">
                 {tab.icon}
-                {tab.badge != null && tab.badge > 0 && (
-                  <span className="activity-bar-badge">{tab.badge}</span>
-                )}
+                <TabBadge tab={tab} />
               </span>
               <span className="activity-bar-label">{tab.label}</span>
             </button>

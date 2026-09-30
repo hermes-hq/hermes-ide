@@ -5,10 +5,13 @@ import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt } from "../utils/platform";
 import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
+import { ListRow } from "./ui/ListRow";
 
 interface CommandPaletteProps {
   onClose: () => void;
   sessions: SessionData[];
+  /** The session in view: its row is marked as the current one. */
+  activeSessionId?: string | null;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onToggleContext: () => void;
@@ -47,7 +50,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
+  onClose, sessions, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -114,6 +117,10 @@ export function CommandPalette({
 
   useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => { setSelectedIndex(0); }, [query]);
+  // Keep the highlighted row in sight while the arrows move it.
+  useEffect(() => {
+    document.getElementById(`command-palette-option-${selectedIndex}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedIndex]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { onClose(); return; }
@@ -132,6 +139,11 @@ export function CommandPalette({
         <input
           ref={inputRef}
           className="command-palette-input"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="command-palette-results"
+          aria-autocomplete="list"
+          aria-activedescendant={filtered.length > 0 ? `command-palette-option-${Math.min(selectedIndex, filtered.length - 1)}` : undefined}
           placeholder={t("palette.placeholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -142,20 +154,25 @@ export function CommandPalette({
           autoCapitalize="off"
           spellCheck={false}
         />
-        <div className="command-palette-results" role="listbox">
+        <div className="command-palette-results" role="listbox" id="command-palette-results" aria-label={t("palette.resultsLabel")}>
           {filtered.map((cmd, i) => (
-            <div
+            <ListRow
               key={cmd.id}
-              className={`command-palette-item ${i === selectedIndex ? "command-palette-item-selected" : ""}`}
+              id={`command-palette-option-${i}`}
+              size="sm"
+              className="command-palette-item"
               role="option"
               aria-selected={i === selectedIndex}
+              highlighted={i === selectedIndex}
+              current={!!activeSessionId && cmd.id === `session-${activeSessionId}`}
+              aria-current={activeSessionId && cmd.id === `session-${activeSessionId}` ? "true" : undefined}
               onClick={cmd.action}
               onMouseEnter={() => setSelectedIndex(i)}
             >
-              <span className="command-palette-label">{cmd.label}</span>
-              <span className="command-palette-category">{cmd.category}</span>
-              {cmd.shortcut && <span className="command-palette-shortcut">{cmd.shortcut}</span>}
-            </div>
+              <span className="h-row-label command-palette-label">{cmd.label}</span>
+              <span className="h-row-detail command-palette-category">{cmd.category}</span>
+              {cmd.shortcut && <kbd className="h-row-shortcut command-palette-shortcut">{cmd.shortcut}</kbd>}
+            </ListRow>
           ))}
           {filtered.length === 0 && (
             <div className="command-palette-empty">{t("palette.noResults", { query })}</div>

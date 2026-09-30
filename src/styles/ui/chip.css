@@ -74,3 +74,10 @@
 .h-chip--interactive .h-chip-remove { margin: 0 var(--space-1-5) 0 calc(-1 * var(--space-1)); }
 .h-chip-remove svg { width: var(--check-mark); height: var(--check-mark); }
 .h-chip-remove:hover { background: var(--quiet-hover-bg); }
+
+/* An action chip: the whole pill is one button (a header chip that opens its detail). */
+.h-chip--action { cursor: pointer; max-width: 100%; }
+.h-chip--action:hover:not(:disabled) { background: var(--control-bg-hover); }
+.h-chip--action[aria-expanded="true"] { background: var(--control-bg-active); }
+.h-chip--action:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
+.h-chip--action { overflow: hidden; text-overflow: ellipsis; }

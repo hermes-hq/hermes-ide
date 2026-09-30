@@ -512,6 +512,7 @@ export const ptBRPack: LanguagePack = {
     "land.archiveOnly": "Apenas arquivar",
     "palette.checkPluginUpdates": "Verificar atualizações de plugins",
     "palette.placeholder": "Digite um comando ou nome de sessão...",
+    "palette.resultsLabel": "Comandos e sessões",
     "palette.noResults": "Nenhum resultado para \"{query}\"",
     "close.agent.title": "Encerrar conversa?",
     "close.terminal.title": "Fechar sessão?",

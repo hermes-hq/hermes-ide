@@ -14,3 +14,4 @@ export { Segmented } from "./Segmented";
 export { Tabs, TabPanel } from "./Tabs";
 export { Checkbox, Toggle, Radio, RadioGroup } from "./Choice";
 export { Badge, Counter } from "./Badge";
+export { ListRow } from "./ListRow";

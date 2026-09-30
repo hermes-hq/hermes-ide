@@ -72,7 +72,11 @@ more specific rule (`.item:focus-visible`, `.field input`), or in a
 lazily loaded stylesheet that lands after `base.css`, hides it.
 
 Inside a container that would clip it (a segmented well, a tab bar, a
-scrolling list, a borderless sheet that fills its panel) the ring is drawn inset (`outline-offset: calc(-1 * var(--focus-ring-width))`).
+scrolling list, a borderless sheet that fills its panel, a 28 px chrome
+line that holds 28 px buttons: the pane header, the scope bar, the status
+strip and the status bar at the window's edge) the ring is drawn inset (`outline-offset: calc(-1 * var(--focus-ring-width))`).
+The UI-chrome scenario checks that each chrome ring fits inside the window
+and every clipping ancestor.
 `--focus-ring-shadow` draws the same ring for the few components that
 still show focus with a box-shadow.
 

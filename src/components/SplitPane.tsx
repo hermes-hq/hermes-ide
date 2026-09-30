@@ -25,7 +25,7 @@ import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from
 import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { agentDisplayName } from "../catalog/agentCatalog";
-import { Button } from "./ui/Button";
+import { Button, CloseButton } from "./ui/Button";
 
 // The agent view (and everything it pulls in: markdown, syntax
 // highlighting, tool cards) loads on demand, the first time an
@@ -344,11 +344,11 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           {session.mode !== "agent" && <AgentSetupChips session={session} />}
           {/* Done-When checks (F27), with the launch helper that runs them. */}
           {session.mode !== "agent" && isFeatureFlagEnabled("launchHelper") && <DoneWhenChip sessionId={sessionId} />}
-          <button
+          <CloseButton
             className="split-pane-close"
+            label="Close pane"
             onClick={(e) => { e.stopPropagation(); dispatch({ type: "CLOSE_PANE", paneId }); }}
-            title="Close pane"
-          >&times;</button>
+          />
         </div>
         <ScopeBar sessionId={sessionId} />
         {/* ProviderActionsBar is the legacy TUI quick-actions row. Hide it

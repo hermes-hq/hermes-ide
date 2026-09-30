@@ -512,6 +512,7 @@ export const esPack: LanguagePack = {
     "land.archiveOnly": "Solo archivar",
     "palette.checkPluginUpdates": "Buscar actualizaciones de plugins",
     "palette.placeholder": "Escribe un comando o nombre de sesión...",
+    "palette.resultsLabel": "Comandos y sesiones",
     "palette.noResults": "No hay resultados para \"{query}\"",
     "close.agent.title": "¿Terminar la conversación?",
     "close.terminal.title": "¿Cerrar la sesión?",

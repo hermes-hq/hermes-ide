@@ -294,6 +294,18 @@ function readRow(bridge, id) {
         guessed: tag.querySelector(".agent-status-guessed") ? e2e.norm(tag.querySelector(".agent-status-guessed").innerText) : null,
         title: tag.getAttribute("title") ?? "",
         opacity: Number(getComputedStyle(tag).opacity),
+        // Dimmed: drawn in the quietest ink (--text-3 where the tag sits), never faded.
+        dimmed: (() => {
+          const probe = document.createElement("span");
+          probe.style.color = "var(--text-3)";
+          tag.appendChild(probe);
+          const quiet = getComputedStyle(probe).color;
+          probe.remove();
+          return getComputedStyle(tag).color === quiet;
+        })(),
+        // On the current or hovered row every ink lifts to stay readable, so a
+        // guess is also set in italics (as the status strip sets it).
+        italic: getComputedStyle(tag).fontStyle === "italic",
       },
       phase: phase ? e2e.norm(phase.innerText) : null,
     };
@@ -376,7 +388,7 @@ try {
   log(`  row: ${JSON.stringify(approval)}`);
   assert(approval.tag.word === EXPECT_APPROVAL_WORD, `the row says "${approval.tag.word}" (expected "${EXPECT_APPROVAL_WORD}"), not "ready"`);
   assert(approval.tag.glyph === "!", `with its glyph "${approval.tag.glyph}" next to the word (not colour alone)`);
-  assert(approval.tag.confidence === "exact" && approval.tag.guessed === null && approval.tag.opacity === 1, "exact: not dimmed, no 'guessed'");
+  assert(approval.tag.confidence === "exact" && approval.tag.guessed === null && approval.tag.opacity === 1 && !approval.tag.dimmed && !approval.tag.italic, "exact: not dimmed, not italic, no 'guessed'");
   assert(/Bash: rm -rf build/.test(approval.tag.title), `the tooltip names the command (${JSON.stringify(approval.tag.title)})`);
   assert(approval.phase === null, "the old phase tag is gone");
   const strip = await bridge.eval(`
@@ -422,7 +434,8 @@ try {
   const idleRow = await readRow(bridge, termId);
   log(`  row: ${JSON.stringify(idleRow)}`);
   assert(idleRow.tag.confidence === "guessed" && idleRow.tag.guessed === "guessed", "a terminal heuristic says 'guessed' in words");
-  assert(idleRow.tag.opacity < 1, `and is dimmed (opacity ${idleRow.tag.opacity})`);
+  assert(idleRow.tag.dimmed && idleRow.tag.opacity === 1, `and is dimmed: the quiet ink, not faded (opacity ${idleRow.tag.opacity})`);
+  assert(idleRow.tag.italic, "and set in italics, which still tells it apart on the current row");
   await bridge.screenshot(join(evidenceDir, "02-terminal-idle-guessed.png"));
   await sleep(800);
   await bridge.typeInTerminal(termId, `${probeCommand()}\n`);
@@ -489,10 +502,16 @@ try {
   // Read the dimming once the style has been applied (a frame later on some webviews).
   await bridge.waitFor("the guess to be dimmed", `
     const tag = e2e.first(${JSON.stringify(ROW(agentId) + ' .agent-status-tag[data-confidence="guessed"]')});
-    return !!tag && Number(getComputedStyle(tag).opacity) < 1;
+    if (!tag) return false;
+    const probe = document.createElement("span");
+    probe.style.color = "var(--text-3)";
+    tag.appendChild(probe);
+    const quiet = getComputedStyle(probe).color;
+    probe.remove();
+    return getComputedStyle(tag).color === quiet;
   `, { timeoutMs: 5_000 });
   const guessed = await readRow(bridge, agentId);
-  assert(guessed.tag.guessed === "guessed" && guessed.tag.opacity < 1, `"${guessed.tag.word} · ${guessed.tag.guessed}", opacity ${guessed.tag.opacity}`);
+  assert(guessed.tag.guessed === "guessed" && guessed.tag.dimmed && guessed.tag.italic, `"${guessed.tag.word} · ${guessed.tag.guessed}", in the quiet ink and italics (opacity ${guessed.tag.opacity})`);
 
   log("C: a finished turn reads done until the session is chosen");
   await emitFromRust(bridge, agentId, { type: "turn_start", at: "now", source: "hook:fake", n: 1 });

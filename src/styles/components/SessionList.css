@@ -57,9 +57,8 @@
   overflow: hidden;
 }
 
-.session-item:hover { background: var(--bg-hover); }
-.session-item-active { background: var(--bg-active); }
-.session-item-active:hover { background: var(--bg-active); }
+/* Hover, the current row's fill and its brass rail come from the row's
+ * wrapper, the control set's ListRow (src/styles/ui/row.css). */
 
 /* Phase carries the row's state — band shimmers when busy, pulses
  * amber when awaiting input, solid red on error. */
@@ -419,14 +418,10 @@
   margin-top: var(--space-1);
 }
 
-/* Demote per-row tags — agent/SSH labels are now monogram glyphs
- * inline with the name. These remain for back-compat. */
+/* The agent (and its model): plain metadata in the row's ink. */
 .session-agent-tag {
   font-size: var(--text-2xs);
-  background: var(--accent-dim);
-  color: var(--accent);
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
+  color: var(--text-1);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-snug);
 }
@@ -443,37 +438,32 @@
   gap: var(--space-1);
   margin-top: var(--space-1);
   min-width: 0;
+  /* The tags sit below the row's Close (a 28 px button at the top), so their
+   * line also runs under the Close's column: the model and the permission
+   * mode fit on one line. */
+  margin-right: calc(-1 * (var(--control-h-sm) + var(--space-2)));
 }
 
-.session-model-chip,
-.session-permission-chip {
-  font-size: var(--text-2xs);
-  color: var(--text-2);
-  background: var(--bg-3);
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
-  letter-spacing: var(--tracking-snug);
-  font-family: var(--font-numeric);
-  overflow-wrap: anywhere;
+/* Chips of the control set at tag density (badge height, 10 px), so the
+ * model and the permission mode share one line of a sidebar row; a long
+ * model id wraps inside its chip instead of being cut. */
+.h-chip.session-model-chip,
+.h-chip.session-permission-chip {
+  height: auto;
+  min-height: var(--badge-h);
   max-width: 100%;
-  min-width: 0;
+  padding: 0 var(--space-1);
+  font-family: var(--font-numeric);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-snug);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 2.0: the model asked for at launch, until the agent reports its own. */
-.session-model-chip-requested {
+.h-chip.session-model-chip-requested {
+  border-style: dashed;
   background: transparent;
-  border: var(--control-border-width) dashed var(--border);
-  color: var(--text-3);
-}
-
-.session-ssh-tag {
-  font-size: var(--text-2xs);
-  background: var(--info-dim, rgba(57, 197, 207, 0.15));
-  color: var(--info, #39c5cf);
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-snug);
 }
 
 /* Phase signal lives on the band; the text label is now whisper-level. */
@@ -483,16 +473,16 @@
   font-family: var(--font-numeric);
   letter-spacing: var(--tracking-snug);
 }
-.session-phase-tag[data-phase="busy"] { color: var(--success); }
-.session-phase-tag[data-phase="needs_input"] { color: var(--warning); }
-.session-phase-tag[data-phase="error"] { color: var(--danger); }
+.session-phase-tag[data-phase="busy"] { color: var(--success-ink); }
+.session-phase-tag[data-phase="needs_input"] { color: var(--warning-ink); }
+.session-phase-tag[data-phase="error"] { color: var(--danger-fg); }
 .session-phase-tag[data-phase="idle"] { color: var(--text-2); }
 
 /* An agent that sent no start signal in time: most likely a folder-trust or
    login prompt is waiting for the person. */
 .session-startup-tag {
   font-size: var(--text-2xs);
-  color: var(--warning);
+  color: var(--warning-ink);
   letter-spacing: var(--tracking-snug);
 }
 
@@ -527,9 +517,9 @@
   height: 100%;
   background: var(--accent);
 }
-.session-context-gauge[data-level="warn"] { color: var(--warning); }
+.session-context-gauge[data-level="warn"] { color: var(--warning-ink); }
 .session-context-gauge[data-level="warn"] .session-context-gauge-fill { background: var(--warning); }
-.session-context-gauge[data-level="critical"] { color: var(--danger); }
+.session-context-gauge[data-level="critical"] { color: var(--danger-fg); }
 .session-context-gauge[data-level="critical"] .session-context-gauge-fill { background: var(--danger); }
 
 /* F24: memory used by the session's processes. */
@@ -545,36 +535,21 @@
 .session-phase-tag[data-phase="destroyed"] { color: var(--text-3); }
 
 .session-item-reconnect-btn {
-  background: var(--accent);
-  color: var(--bg-0);
-  border: none;
-  border-radius: 4px;
-  padding: 3px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  margin: 4px 0 2px;
   width: 100%;
+  margin: var(--space-1) 0 var(--space-0-5);
 }
-.session-item-reconnect-btn:hover { opacity: 0.9; }
 
-.session-phase-tag[data-phase="disconnected"] { color: var(--warning, #d29922); }
+.session-phase-tag[data-phase="disconnected"] { color: var(--warning-ink); }
 
+/* The one Close (a small icon button): shown on the current row, on hover
+ * and whenever it has the keyboard. */
 .session-item-close {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: var(--text-xl);
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
+  align-self: flex-start;
   opacity: 0;
-  transition: opacity 0.1s, background 0.1s, color 0.1s;
-  flex-shrink: 0;
 }
-/* --text-3 is under 3:1 on the current row's --bg-active in some themes. */
-.session-item-active .session-item-close { color: var(--text-2); }
-.session-item:hover .session-item-close { opacity: 1; }
-.session-item-close:hover { background: var(--red-dim); color: var(--red); }
+.session-item-active .session-item-close,
+.session-item:hover .session-item-close,
+.session-item-close:focus-visible { opacity: 1; }
 
 /* ─── Git Branch Info ────────────────────────────────── */
 
@@ -620,7 +595,7 @@
 }
 
 .session-item-git-conflicts {
-  color: var(--warning, #e6a23c);
+  color: var(--warning-ink);
 }
 
 .session-item-git-ahead-behind {
@@ -652,10 +627,11 @@
   flex-shrink: 0;
 }
 
-/* Branch color accent on session wrapper */
-.session-item-wrapper {
-  border-radius: var(--radius);
-  border-left: 3px solid transparent;
+/* The row's wrapper is a ListRow: a column (the card, then its sub-view
+ * toolbar) with room on the left for the current row's brass rail. */
+.h-row.session-item-wrapper {
+  display: block;
+  padding-left: var(--space-1);
 }
 
 /* ─── Projects (session groups) ──────────────────────── */
@@ -906,23 +882,6 @@
 
 /* ─── Session Sub-Views (nested inside active session) ── */
 
-.session-item-wrapper {
-  border-radius: var(--radius);
-}
-
-.session-item-wrapper-active {
-  background: var(--bg-active);
-  border-radius: var(--radius);
-}
-
-/* When wrapped, the session-item itself doesn't need its own background */
-.session-item-wrapper-active .session-item-active {
-  background: none;
-}
-.session-item-wrapper-active .session-item-active:hover {
-  background: none;
-}
-
 .session-subviews {
   display: flex;
   flex-wrap: wrap;
@@ -930,59 +889,13 @@
   padding: 4px 10px 8px 16px;
 }
 
-.session-subview-btn {
-  position: relative;
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-3);
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.session-subview-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
-  border-color: var(--text-3);
-}
-
-.session-subview-active {
-  color: var(--accent);
-  background: var(--accent-dim);
-  border-color: var(--accent);
-}
-
-.session-subview-active:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.session-subview-btn svg {
-  flex-shrink: 0;
-}
-
+/* Small IconButtons of the control set; a count sits on the corner as a
+ * neutral Counter. */
+.session-subview-btn { position: relative; }
 .session-subview-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  font-size: 8px;
-  font-weight: 600;
-  background: var(--accent);
-  color: var(--bg-0);
-  min-width: 13px;
-  height: 13px;
-  line-height: 13px;
-  text-align: center;
-  border-radius: var(--radius-pill);
-  padding: 0 3px;
-  font-family: var(--font-ui);
+  top: calc(-1 * var(--space-1));
+  right: calc(-1 * var(--space-1));
   pointer-events: none;
 }
 

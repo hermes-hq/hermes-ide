@@ -29,6 +29,10 @@ import { SessionLimitTag } from "./SessionLimitTag";
 import { HandoffDialog } from "./HandoffDialog";
 import { canHandOff, nestUnderParents, type HandoffKind } from "../limits/handoff";
 import { SessionContextGauge, SessionMemoryTag } from "./SessionFleetTags";
+import { Badge, Counter } from "./ui/Badge";
+import { Button, CloseButton, IconButton } from "./ui/Button";
+import { Chip } from "./ui/Chip";
+import { ListRow } from "./ui/ListRow";
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -90,33 +94,36 @@ export function SessionIdentityChips({ session }: { session: SessionData }) {
   return (
     <div className="session-item-identity-row" data-testid="session-identity-row">
       {identity.model && (
-        <span
+        <Chip
+          size="sm"
           className="session-model-chip"
           data-testid="session-model-chip"
           data-source="reported"
           title={t("sessions.modelChipLabel", { model: identity.model })}
         >
           {identity.model}
-        </span>
+        </Chip>
       )}
       {requested && (
-        <span
+        <Chip
+          size="sm"
           className="session-model-chip session-model-chip-requested"
           data-testid="session-model-chip"
           data-source="requested"
           title={t("sessions.modelRequestedTitle", { model: requested })}
         >
           {t("sessions.modelRequested", { model: requested })}
-        </span>
+        </Chip>
       )}
       {identity.permissionMode && (
-        <span
+        <Chip
+          size="sm"
           className="session-permission-chip"
           data-testid="session-permission-chip"
           title={t("sessions.permissionModeChipLabel", { mode: identity.permissionMode })}
         >
           {identity.permissionMode}
-        </span>
+        </Chip>
       )}
     </div>
   );
@@ -979,8 +986,9 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
     const isLinkedWorktree = isHermesWorktreePath(session.working_directory);
     const nested = !!session.parent_session_id && sessions.some((s) => s.id === session.parent_session_id);
     return (
-      <div
+      <ListRow
         key={session.id}
+        current={isActive}
         className={`session-item-wrapper${isActive ? " session-item-wrapper-active" : ""}${nested ? " session-item-wrapper-nested" : ""}`}
         data-parent-session-id={nested ? session.parent_session_id ?? undefined : undefined}
       >
@@ -1021,7 +1029,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             <InlineDescriptionEditor sessionId={session.id} description={session.description} isActive={isActive} />
             <div className="session-item-meta">
               {session.ssh_info && (
-                <span className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</span>
+                <Badge tone="info" className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</Badge>
               )}
               <SessionAgentTag session={session} />
               {fleetOn && session.phase !== "destroyed" && <SessionSpendChip session={session} />}
@@ -1055,12 +1063,14 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
             </div>
             <SessionIdentityChips session={session} />
             {session.phase === "disconnected" && session.ssh_info && onReconnect && (
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 className="session-item-reconnect-btn"
                 onClick={(e) => { e.stopPropagation(); onReconnect(session); }}
               >
                 {t("sessions.reconnect")}
-              </button>
+              </Button>
             )}
             <SessionItemGitInfo sessionId={session.id} isDestroyed={session.phase === "destroyed" || session.phase === "disconnected"} workingDirectory={session.working_directory} isSsh={!!session.ssh_info} />
             {/* Inline project tag */}
@@ -1089,11 +1099,11 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               </div>
             )}
           </div>
-          <button
+          <CloseButton
             className="session-item-close"
+            label={sessionCloseTitle(session.mode, t)}
             onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
-            title={sessionCloseTitle(session.mode, t)}
-          >&times;</button>
+          />
         </div>
         {/* Tmux window tabs for SSH+tmux sessions */}
         {session.ssh_info?.tmux_session && isActive && (
@@ -1184,41 +1194,50 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               if (item.id === "files" && session.mode === "agent") return false;
               return true;
             }).map((item) => (
-              <button
+              <IconButton
                 key={item.id}
+                size="sm"
                 className={`session-subview-btn${activeView === item.id ? " session-subview-active" : ""}`}
+                pressed={activeView === item.id}
+                label={item.title}
                 onClick={() => toggleView(item.id)}
-                title={item.title}
-              >
-                {item.icon}
-                {item.badge != null && item.badge > 0 && (
-                  <span className="session-subview-badge">{item.badge}</span>
-                )}
-              </button>
+                icon={
+                  <>
+                    {item.icon}
+                    {item.badge != null && item.badge > 0 && <Counter className="session-subview-badge" value={item.badge} />}
+                  </>
+                }
+              />
             ))}
             {session.ssh_info && (
-              <button
+              <IconButton
+                size="sm"
                 className={`session-subview-btn${portsSessionId === session.id ? " session-subview-active" : ""}`}
+                pressed={portsSessionId === session.id}
+                label="Port Forwards"
                 onClick={() => setPortsSessionId(portsSessionId === session.id ? null : session.id)}
-                title="Port Forwards"
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-                  <path d="M1.5 2.75a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Zm0 5a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Zm0 5a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Z" />
-                </svg>
-              </button>
+                icon={
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+                    <path d="M1.5 2.75a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Zm0 5a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Zm0 5a.75.75 0 0 0 0 1.5h12a.75.75 0 0 0 0-1.5h-12Z" />
+                  </svg>
+                }
+              />
             )}
             {pluginSessionActions?.map((action) => (
-              <button
+              <IconButton
                 key={action.id}
+                size="sm"
                 className={`session-subview-btn${activePluginPanel === action.panelId ? " session-subview-active" : ""}`}
+                pressed={activePluginPanel === action.panelId}
+                label={action.name}
                 onClick={() => onPluginActionClick?.(action.id, action.panelId)}
-                title={action.name}
-              >
-                <span dangerouslySetInnerHTML={{ __html: action.icon }} />
-                {action.badge?.count ? (
-                  <span className="session-subview-badge">{action.badge.count}</span>
-                ) : null}
-              </button>
+                icon={
+                  <>
+                    <span dangerouslySetInnerHTML={{ __html: action.icon }} />
+                    {action.badge?.count ? <Counter className="session-subview-badge" value={action.badge.count} /> : null}
+                  </>
+                }
+              />
             ))}
           </div>
         )}
@@ -1226,7 +1245,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
         {portsSessionId === session.id && session.ssh_info && (
           <PortForwardsPanel sessionId={session.id} onClose={() => setPortsSessionId(null)} />
         )}
-      </div>
+      </ListRow>
     );
   };
 

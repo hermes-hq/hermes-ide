@@ -5,25 +5,15 @@
   display: inline-flex;
 }
 
-.done-when-chip {
-  background: none;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-pill);
-  padding: 0 7px;
-  font-size: var(--text-2xs);
-  line-height: 16px;
-  color: var(--text-2);
-  cursor: pointer;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.done-when-chip:hover { color: var(--text-0); }
-.done-when-chip[data-state="passed"] { color: var(--success); border-color: var(--success-dim); }
+/* The control set's small action Chip; its ink says how the checks went
+ * (the word says it too). */
+.done-when-chip { font-variant-numeric: tabular-nums; }
+.done-when-chip[data-state="passed"] { color: var(--success-ink); }
 .done-when-chip[data-state="failed"],
-.done-when-chip[data-state="retrying"] { color: var(--warning); border-color: var(--warning-dim); }
+.done-when-chip[data-state="retrying"] { color: var(--warning-ink); }
 .done-when-chip[data-state="check_failed"],
-.done-when-chip[data-state="error"] { color: var(--danger); border-color: var(--danger-dim); }
-.done-when-chip[data-state="running"] { color: var(--text-3); }
+.done-when-chip[data-state="error"] { color: var(--danger-fg); }
+.done-when-chip[data-state="running"] { color: var(--text-2); }
 
 .done-when-popover {
   position: absolute;
@@ -95,17 +85,6 @@
   margin-top: 10px;
   justify-content: flex-end;
 }
-.done-when-actions button {
-  border-radius: var(--radius-sm);
-  padding: 3px 10px;
-  font-size: var(--text-xs);
-  cursor: pointer;
-  border: 1px solid var(--border-light);
-  background: var(--bg-2);
-  color: var(--text-0);
-}
-.done-when-actions .done-when-send { background: var(--accent); border-color: var(--accent); color: var(--bg-0); }
-.done-when-actions button:disabled { opacity: 0.6; cursor: default; }
 
 /* Land sheet block (for F22) */
 .done-when-land { display: flex; flex-direction: column; gap: 8px; font-size: var(--text-sm); }

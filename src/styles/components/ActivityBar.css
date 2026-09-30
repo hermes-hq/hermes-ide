@@ -158,37 +158,13 @@
 
 /* ─── Badge ────────────────────────────────────────────────── */
 
+/* The count is the control set's Counter (neutral; brass only for
+ * attention), placed over the icon's corner. */
 .activity-bar-badge {
   position: absolute;
-  top: -2px;
-  right: -4px;
-  min-width: 14px;
-  height: 14px;
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  line-height: 14px;
-  text-align: center;
-  background: var(--brass, var(--voice-user));
-  color: var(--bg-0);
-  border-radius: var(--radius-pill);
-  padding: 0 3px;
+  top: calc(-1 * var(--space-1));
+  right: calc(-1 * var(--space-1-5));
   pointer-events: none;
-  font-family: var(--font-numeric);
-  font-variant-numeric: tabular-nums;
-  border: 1px solid var(--bg-0);
-  box-sizing: content-box;
-}
-
-/* Heartbeat pulse when badge value just increased */
-.activity-bar-badge[data-fresh="true"] {
-  animation: badge-heartbeat 0.6s var(--ease-spring) 2;
-}
-@keyframes badge-heartbeat {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.18); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .activity-bar-badge[data-fresh="true"] { animation: none; }
 }
 
 /* ─── Action button (+, Settings, Plugins) ─────────────────── */

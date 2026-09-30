@@ -542,6 +542,7 @@ const ENGLISH_PACK: LanguagePack = {
     "land.archiveOnly": "Archive only",
     "palette.checkPluginUpdates": "Check for Plugin Updates",
     "palette.placeholder": "Type a command or session name...",
+    "palette.resultsLabel": "Commands and sessions",
     "palette.noResults": "No results for \"{query}\"",
     "close.agent.title": "End conversation?",
     "close.terminal.title": "Close session?",

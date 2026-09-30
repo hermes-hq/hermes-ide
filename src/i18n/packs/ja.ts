@@ -512,6 +512,7 @@ export const jaPack: LanguagePack = {
     "land.archiveOnly": "アーカイブのみ",
     "palette.checkPluginUpdates": "プラグイン更新を確認",
     "palette.placeholder": "コマンドまたはセッション名を入力…",
+    "palette.resultsLabel": "コマンドとセッション",
     "palette.noResults": "\"{query}\" の結果はありません",
     "close.agent.title": "会話を終了しますか？",
     "close.terminal.title": "セッションを閉じますか？",

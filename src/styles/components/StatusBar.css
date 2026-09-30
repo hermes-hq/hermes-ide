@@ -5,6 +5,8 @@
   align-items: center;
   justify-content: space-between;
   height: var(--statusbar-h);
+  /* The rule sits outside the 28 px, so the small icon buttons fit whole. */
+  box-sizing: content-box;
   background: var(--bg-1);
   border-top: 1px solid var(--rule-zone);
   padding: 0 var(--space-3);
@@ -21,6 +23,9 @@
   gap: var(--space-2);
 }
 .status-bar-right { max-width: 60%; }
+/* The bar is the bottom edge of the window, which clips: rings are drawn
+ * inside the controls instead of 2 px outside them. */
+.status-bar :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
 
 .status-bar-item {
   display: flex;
@@ -328,43 +333,8 @@
 
 /* ─── Shortcuts Button ───────────────────────── */
 
-.status-shortcuts-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 1px 4px;
-  border-radius: var(--radius-sm);
-  line-height: 1;
-  opacity: 0.6;
-  transition: opacity 0.15s, background 0.15s;
-}
-.status-shortcuts-btn:hover {
-  opacity: 1;
-  background: var(--bg-hover);
-}
-
-/* ─── Bug Report Button ─────────────────────── */
-
-.status-bug-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  line-height: 1;
-  opacity: 0.6;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-  display: inline-flex;
-  align-items: center;
-}
-.status-bug-btn:hover {
-  opacity: 1;
-  color: var(--yellow);
-  background: var(--bg-hover);
-}
+/* Keyboard shortcuts and Report a bug are the control set's small
+ * IconButtons (28 px). */
 
 /* ─── Theme Picker ──────────────────────────── */
 

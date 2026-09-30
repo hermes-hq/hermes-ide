@@ -8,41 +8,14 @@
   min-width: 0;
 }
 
-.agent-rules-chip,
-.agent-safety-chip {
-  display: inline-flex;
-  align-items: center;
-  max-width: 260px;
-  padding: 0 6px;
-  height: 18px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  line-height: 18px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* The rules chip is the control set's small action Chip (file names in the
+ * code font); "Looser than default" is a warning Badge. */
 .agent-rules-chip {
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  cursor: pointer;
+  max-width: calc(var(--control-h-md) * 8);
+  font-family: var(--font-code);
 }
 
-.agent-rules-chip:hover,
-.agent-rules-chip[aria-expanded="true"] {
-  border-color: var(--accent);
-  color: var(--text-0);
-}
-
-.agent-safety-chip {
-  border: 1px solid var(--warning);
-  background: var(--warning-dim);
-  color: var(--warning-bright);
-  cursor: help;
-}
+.agent-safety-chip { cursor: help; }
 
 .agent-setup-popover {
   position: absolute;
@@ -147,21 +120,7 @@
   margin-top: 6px;
 }
 
-.agent-setup-link-btn {
-  align-self: flex-start;
-  padding: 2px 8px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--accent);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.agent-setup-link-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
+.agent-setup-link-btn { align-self: flex-start; }
 
 .agent-setup-mcp-agent {
   margin-top: 4px;

@@ -44,6 +44,9 @@ import { claimPcAppChords } from "../utils/keymap";
 import { notifyAttention } from "../utils/notifications";
 import { fmt, PLATFORM } from "../utils/platform";
 import { matchAppShortcut } from "../utils/shortcuts";
+import { Badge, Counter } from "./ui/Badge";
+import { Button } from "./ui/Button";
+import { ListRow } from "./ui/ListRow";
 
 interface AttentionCenterProps {
   sessions: Record<string, SessionData>;
@@ -507,12 +510,18 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     const place = item.sessionId ? blockedOrder.indexOf(item.sessionId) + 1 : 0;
     const muted = isMuted(mutes, item.sessionId, now);
     const isSelected = selected?.id === item.id;
+    // The session in view: the current row (fill and brass rail).
+    const current = !!item.sessionId && item.sessionId === activeSessionId;
     return (
-      <div
+      <ListRow
         key={item.id}
         id={optionId(item)}
+        size="lg"
         role="option"
         aria-selected={isSelected}
+        aria-current={current ? "true" : undefined}
+        highlighted={isSelected}
+        current={current}
         data-item-id={item.id}
         data-session-id={item.sessionId ?? ""}
         data-kind={item.kind}
@@ -541,10 +550,10 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
               {t(`status.confidence.${confidenceOf(item)}`)}
             </span>
           )}
-          {muted ? <span className="attention-option-muted-tag">{t("attention.muted")}</span> : null}
+          {muted ? <Badge className="attention-option-muted-tag">{t("attention.muted")}</Badge> : null}
           <span className="attention-option-age">{age(item.createdAt)}</span>
         </span>
-      </div>
+      </ListRow>
     );
   };
 
@@ -553,8 +562,9 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
 
   return (
     <div className="attention-center topbar-controls" ref={rootRef}>
-      <button
-        type="button"
+      <Button
+        variant="quiet"
+        size="sm"
         className={`attention-badge${count > 0 ? " attention-badge-hot" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -562,18 +572,21 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
         title={t("attention.badgeLabel", { count })}
         data-count={count}
         onClick={() => (open ? closeInbox(true) : openInbox(false))}
+        icon={
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M8 1.5a4 4 0 0 0-4 4v2.3L2.7 10.4a.6.6 0 0 0 .5.9h9.6a.6.6 0 0 0 .5-.9L12 7.8V5.5a4 4 0 0 0-4-4ZM6.3 13a1.8 1.8 0 0 0 3.4 0"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        }
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path
-            d="M8 1.5a4 4 0 0 0-4 4v2.3L2.7 10.4a.6.6 0 0 0 .5.9h9.6a.6.6 0 0 0 .5-.9L12 7.8V5.5a4 4 0 0 0-4-4ZM6.3 13a1.8 1.8 0 0 0 3.4 0"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span className="attention-badge-count">{count}</span>
-      </button>
+        {/* Brass only when something is blocked on you; a quiet zero otherwise. */}
+        <Counter className="attention-badge-count" value={count} tone={count > 0 ? "attention" : "neutral"} />
+      </Button>
       <div className="attention-live" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </div>
@@ -646,8 +659,9 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
           {morning && onStartTasks && (
             <div className="attention-morning-actions">
               <span className="attention-morning-answer">{t("attention.morningAnswerHint")}</span>
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="sm"
                 className="attention-morning-start"
                 onClick={() => {
                   closeInbox(false);
@@ -655,7 +669,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
                 }}
               >
                 {t("attention.morningStart", { shortcut: fmt("{mod}N") })}
-              </button>
+              </Button>
             </div>
           )}
           <div className="attention-inbox-footer" aria-hidden="true">

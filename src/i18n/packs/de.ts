@@ -512,6 +512,7 @@ export const dePack: LanguagePack = {
     "land.archiveOnly": "Nur archivieren",
     "palette.checkPluginUpdates": "Nach Plugin-Updates suchen",
     "palette.placeholder": "Befehl oder Sitzungsnamen eingeben...",
+    "palette.resultsLabel": "Befehle und Sitzungen",
     "palette.noResults": "Keine Ergebnisse für \"{query}\"",
     "close.agent.title": "Unterhaltung beenden?",
     "close.terminal.title": "Sitzung schließen?",

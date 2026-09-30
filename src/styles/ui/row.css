@@ -1,0 +1,62 @@
+/* ─── ListRow ────────────────────────────────────────────────────────
+ * docs/design-system/06-components.md · Controls. One-line rows are 32 px
+ * (command palette), two-line rows 44 px (inbox); a sidebar session row
+ * sizes to its content. Highlight: --quiet-hover-bg. Current: the
+ * --row-active-bg fill plus a 2 px brass rail on the left.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.h-row {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--text-1);
+  cursor: pointer;
+  transition: background-color var(--dur-quick) var(--ease-out-soft);
+}
+.h-row--sm { min-height: var(--row-h-sm); padding: 0 var(--space-3); }
+.h-row--lg { min-height: var(--row-h-lg); padding: var(--space-1) var(--space-3); }
+
+.h-row:hover,
+.h-row[data-highlighted] { background: var(--quiet-hover-bg); color: var(--text-0); }
+
+.h-row[data-current],
+.h-row[data-current]:hover { background: var(--row-active-bg); color: var(--text-0); }
+/* The current row's metadata goes one step up the ink ladder: --text-3 is
+ * not held to 4.5:1 on the current fill, --text-2 is (contrast-audit). */
+.h-row[data-current] { --text-3: var(--text-2); }
+.h-row[data-current]::before {
+  content: "";
+  position: absolute;
+  top: var(--space-1-5);
+  bottom: var(--space-1-5);
+  left: 0;
+  width: var(--rail-width);
+  border-radius: var(--radius-full);
+  background: var(--primary-bg);
+  pointer-events: none;
+}
+/* On the hover fill the metadata inks lift to --text-1, as a highlighted
+ * menu option's detail does: --text-1 is held to 4.5:1 on that fill. */
+.h-row:hover,
+.h-row[data-highlighted] { --text-2: var(--text-1); --text-3: var(--text-1); }
+/* Current and highlighted: the fill stays (text contrast), a hairline shows the highlight. */
+.h-row[data-current][data-highlighted] {
+  outline: var(--control-border-width) solid var(--control-border);
+  outline-offset: calc(-1 * var(--control-border-width));
+}
+
+.h-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-row-detail { flex-shrink: 0; color: var(--text-2); font-size: var(--text-sm); white-space: nowrap; }
+.h-row-shortcut {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}

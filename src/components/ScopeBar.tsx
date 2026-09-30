@@ -10,6 +10,9 @@ import { useSessionModel } from "../agent/useSessionModel";
 import { CUSTOM_AGENT_ID, agentDisplayName } from "../catalog/agentCatalog";
 import { useContextMenu, menuItem, separator, subMenu } from "../hooks/useContextMenu";
 import { homeDir } from "@tauri-apps/api/path";
+import { Badge } from "./ui/Badge";
+import { Button, IconButton } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",
@@ -117,9 +120,9 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
   if (projects.length === 0 && !pickerOpen) {
     return (
       <div className="scope-bar scope-bar-empty">
-        <button className="scope-bar-add" onClick={() => setPickerOpen(true)}>
+        <Button variant="quiet" size="sm" className="scope-bar-add" onClick={() => setPickerOpen(true)}>
           + Add Project
-        </button>
+        </Button>
       </div>
     );
   }
@@ -137,49 +140,50 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
         {projects.map((project) => {
           const branchInfo = allBranches.find(b => b.projectName === project.name);
           return (
-            <div
+            <Chip
               key={project.id}
+              size="sm"
               className="scope-pill"
               title={project.path}
               onContextMenu={(e) => handlePillContextMenu(e, project, branchInfo?.branch)}
+              removeLabel="Remove project"
+              onRemove={() => detach(project.id).then(() => nudgeProjectContext(sessionId).catch(console.warn))}
             >
               <span
                 className="scope-pill-dot"
                 style={{ background: getLangColor(project) }}
               />
-              <span className="scope-pill-text">
-                <span className="scope-pill-name">{project.name}</span>
-                {branchInfo && (
-                  <span className="scope-pill-branch" title={branchInfo.branch}>
-                    <svg viewBox="0 0 16 16" fill="currentColor" width="9" height="9" aria-hidden="true">
-                      <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
-                    </svg>
-                    {branchInfo.branch}
-                  </span>
-                )}
-              </span>
-              <span className="scope-pill-status" data-status={project.scan_status}>
-                {project.scan_status === "pending" ? "..." : ""}
-              </span>
-              <button
-                className="scope-pill-close"
-                onClick={() => detach(project.id).then(() => nudgeProjectContext(sessionId).catch(console.warn))}
-                title="Remove project"
-                aria-label="Remove project"
-              >
-                &times;
-              </button>
-            </div>
+              <span className="scope-pill-name">{project.name}</span>
+              {branchInfo && (
+                <span className="scope-pill-branch" title={branchInfo.branch}>
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="9" height="9" aria-hidden="true">
+                    <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Z" />
+                  </svg>
+                  {branchInfo.branch}
+                </span>
+              )}
+              {project.scan_status === "pending" && (
+                <span className="scope-pill-status" data-status={project.scan_status}>…</span>
+              )}
+            </Chip>
           );
         })}
         {(model ?? activeSession?.ai_provider) && (
-          <span className="scope-bar-provider" title={activeSession?.ai_provider ?? undefined}>
+          <Badge tone="info" className="scope-bar-provider" title={activeSession?.ai_provider ?? undefined}>
             {model ?? (activeSession?.ai_provider === CUSTOM_AGENT_ID ? agentDisplayName(activeSession) : activeSession?.ai_provider)}
-          </span>
+          </Badge>
         )}
-        <button className="scope-bar-add" onClick={() => setPickerOpen(true)} title="Attach project">
-          +
-        </button>
+        <IconButton
+          size="sm"
+          className="scope-bar-add"
+          label="Attach project"
+          onClick={() => setPickerOpen(true)}
+          icon={
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+              <path d="M8 3.5v9M3.5 8h9" />
+            </svg>
+          }
+        />
       </div>
       {pickerOpen && (
         <ProjectPicker

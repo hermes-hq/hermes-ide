@@ -512,6 +512,7 @@ export const ruPack: LanguagePack = {
     "land.archiveOnly": "Только архивировать",
     "palette.checkPluginUpdates": "Проверить обновления плагинов",
     "palette.placeholder": "Введите команду или имя сессии...",
+    "palette.resultsLabel": "Команды и сессии",
     "palette.noResults": "Нет результатов для \"{query}\"",
     "close.agent.title": "Завершить разговор?",
     "close.terminal.title": "Закрыть сессию?",

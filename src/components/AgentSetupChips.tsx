@@ -32,6 +32,9 @@ import {
   type AgentSetupOverview,
   type SetupItem,
 } from "../api/agentSetup";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 
 /** How often the processes under the shell are read. */
 export const ARGV_POLL_MS = 2_000;
@@ -174,19 +177,20 @@ export function AgentSetupChips({ session }: Props) {
       data-files={names.join(",")}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <button
-        type="button"
+      <Chip
+        size="sm"
         className="agent-rules-chip"
-        aria-expanded={open}
+        expanded={open}
+        haspopup="dialog"
         title={t("agentSetup.chipTitle")}
         onClick={() => setOpen((o) => !o)}
       >
         {label}
-      </button>
+      </Chip>
       {verdict?.level === "looser" && (
-        <span className="agent-safety-chip" role="status" title={looserTitle}>
+        <Badge tone="warning" className="agent-safety-chip" role="status" title={looserTitle}>
           {t("safety.looser")}
-        </span>
+        </Badge>
       )}
       {open && overview && (
         <div className="agent-setup-popover" role="dialog" aria-label={t("agentSetup.title", { agent: agentName })}>
@@ -197,9 +201,9 @@ export function AgentSetupChips({ session }: Props) {
           <Section title={t("agentSetup.instructions")} items={overview.instructions} emptyText={t("agentSetup.none")} />
           {overview.link && (
             <div className="agent-setup-link">
-              <button type="button" className="agent-setup-link-btn" disabled={linking} onClick={link}>
+              <Button size="sm" className="agent-setup-link-btn" loading={linking} onClick={link}>
                 {t("agentSetup.link", { file: overview.link.file })}
-              </button>
+              </Button>
               <span className="agent-setup-note">{t("agentSetup.linkHint", { file: overview.link.file })}</span>
               {linkError && <span className="agent-setup-error">{t("agentSetup.linkFailed", { error: linkError })}</span>}
             </div>

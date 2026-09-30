@@ -1,5 +1,7 @@
 import "../styles/components/ToastContainer.css";
 import type { Toast } from "../hooks/useToastStore";
+import { CloseButton } from "./ui/Button";
+import { useI18n } from "../i18n/I18nProvider";
 
 const CheckIcon = () => (
 	<svg viewBox="0 0 24 24" width="14" height="14">
@@ -46,6 +48,7 @@ interface ToastContainerProps {
 }
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
+	const { t } = useI18n();
 	if (toasts.length === 0) return null;
 
 	return (
@@ -73,7 +76,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
 						</div>
 					)}
 					{toast.dismissible !== false && (
-						<button className="toast-close" onClick={() => onDismiss(toast.id)}>&times;</button>
+						<CloseButton className="toast-close" label={t("common.close")} onClick={() => onDismiss(toast.id)} />
 					)}
 				</div>
 			))}

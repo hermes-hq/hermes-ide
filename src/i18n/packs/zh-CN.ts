@@ -512,6 +512,7 @@ export const zhCNPack: LanguagePack = {
     "land.archiveOnly": "仅归档",
     "palette.checkPluginUpdates": "检查插件更新",
     "palette.placeholder": "输入命令或会话名称…",
+    "palette.resultsLabel": "命令和会话",
     "palette.noResults": "没有“{query}”的结果",
     "close.agent.title": "结束对话？",
     "close.terminal.title": "关闭会话？",

@@ -252,20 +252,10 @@
   border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
-.ctx-memory-delete {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  padding: 0 2px;
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: opacity 0.1s, color 0.1s, background 0.1s;
-  flex-shrink: 0;
-}
-.ctx-memory-row:hover .ctx-memory-delete { opacity: 1; }
-.ctx-memory-delete:hover { color: var(--red); background: var(--red-dim); }
+/* The one Close (a small icon button), shown on hover and with the keyboard. */
+.ctx-memory-delete { opacity: 0; }
+.ctx-memory-row:hover .ctx-memory-delete,
+.ctx-memory-delete:focus-visible { opacity: 1; }
 .ctx-memory-add-btn {
   background: none;
   border: 1px solid var(--border);
@@ -404,7 +394,6 @@
   gap: 6px;
   padding: 3px 0;
 }
-.ctx-pin-row .ctx-memory-delete { opacity: 0; }
 .ctx-pin-row:hover .ctx-memory-delete { opacity: 1; }
 .ctx-pin-badge {
   font-size: var(--text-xs);
