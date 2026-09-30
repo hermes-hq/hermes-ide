@@ -15,17 +15,22 @@
 //                on General, Git, Plugins and Privacy every on/off is a switch
 //                (role=switch, no checkbox left) and every choice a styled
 //                select; Export/Import are control-set buttons whose text
-//                meets 4.5:1; a real click on a switch saves the setting.
+//                meets 4.5:1; a real click on a switch saves the setting;
+//                the window-size boxes are named apart (width / height).
+//   Folders      the command palette's Folders panel has the set's close button.
 //   Review Desk  Review / Repository / Worktrees are tabs with the brass rail;
 //                By file / By turn is a segmented control (→ picks By turn);
-//                each file's viewed box is the control-set checkbox; the
-//                Changes section's Commit/Pull/Push are control-set buttons.
+//                each file's viewed box is the control-set checkbox; every
+//                button of the Changes section (each file's Open / Discard /
+//                Stage, the Discard confirm as a danger button, Commit / Pull
+//                / Push) is a control-set button.
 //   Land sheet   radios, the archive checkbox, the message box and the footer
 //                buttons are the control set, with one primary.
 //   Turn sheet   Close/Restore and the restore confirm (solid danger).
 //   Pickers      the model, effort and permission chips open the kit Menu
 //                with ↓ / ↑; Home/End jump; type-ahead moves ("o" → Opus);
-//                Enter picks, Esc closes and gives focus back to the chip.
+//                Enter picks, Esc closes and gives focus back to the chip;
+//                each menu's note says that a change restarts Claude.
 //
 // Everywhere: every control's height is its size's (28/32/36; toggle 18,
 // box 16, chip 24/28), every control's text meets 4.5:1 on what it is drawn
@@ -443,6 +448,17 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     return (${pred})(s) ? s : null;
   `, { timeoutMs: 4_000 }).catch(() => null);
 
+  /** The open menu's footer note: shown, describing the menu, and saying `text`. */
+  const footerSays = async (text) => {
+    const f = await bridge.eval(`
+      const m = document.querySelector('[role="menu"]:not([hidden])');
+      const foot = m && m.querySelector(".h-menu-footer");
+      return foot ? { text: e2e.norm(foot.innerText), describes: m.getAttribute("aria-describedby") === foot.id, item: foot.getAttribute("role") } : null;
+    `);
+    log(`  menu footer: ${JSON.stringify(f)}`);
+    return !!f && f.text.includes(text) && f.describes && f.item === "none";
+  };
+
   for (const theme of THEMES) {
     const dark = theme === "frosted-dark";
     log(`══ ${theme} ══`);
@@ -527,6 +543,24 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     }
     check(switches.length >= 7, `Settings has at least 7 switches across General, Git, Plugins and Privacy (${switches.length})`);
 
+    // Appearance: the window-size stepper. Each box is named for what it
+    // holds, and the press-and-hold buttons select no text on the way.
+    await settingsTab("Appearance");
+    const stepper = await bridge.eval(`
+      const inputs = e2e.all(".settings-stepper input");
+      const btns = e2e.all(".settings-stepper button");
+      return {
+        names: inputs.map((i) => i.getAttribute("aria-label")),
+        btnNames: btns.map((b) => b.getAttribute("aria-label")),
+        kit: btns.every((b) => b.classList.contains("h-icon-btn")),
+        hold: btns.map((b) => { const cs = getComputedStyle(b); return cs.touchAction + "/" + (cs.userSelect || cs.webkitUserSelect); }),
+      };
+    `);
+    log(`  stepper: ${JSON.stringify(stepper)}`);
+    check(JSON.stringify(stepper.names) === JSON.stringify(["Window width", "Window height"]), `the window-size boxes are named apart (${stepper.names.join(", ")})`);
+    check(stepper.btnNames.length === 4 && stepper.kit && new Set(stepper.btnNames).size === 4, `the stepper's four buttons are named control-set icon buttons (${stepper.btnNames.join(", ")})`);
+    check(stepper.hold.every((h) => h === "none/none"), `the press-and-hold buttons select no text and do not pan (${[...new Set(stepper.hold)].join(", ")})`);
+
     await settingsTab("General");
     const footer = await bridge.eval(`${PAGE};
       const out = [];
@@ -577,6 +611,26 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     }
     await closeSettings();
 
+    // ── Folders (command palette) ───────────────────────────────────
+    // It shared Settings' old close-button rule; it has the set's own now.
+    log(`${theme}: the Folders panel`);
+    await menuAction(bridge, "view.command-palette");
+    await bridge.waitFor("the command palette", `return !!e2e.first(".command-palette .command-palette-input");`);
+    await bridge.clickWhenReady(`
+      const item = e2e.all(".command-palette-label").find((el) => e2e.norm(el.innerText) === "Folders");
+      return e2e.click(e2e.must(item, "the Folders command"));
+    `);
+    await bridge.waitFor("the Folders panel", `return !!e2e.first(".workspace-panel .workspace-header");`, { timeoutMs: 10_000 });
+    const folders = await bridge.eval(`
+      const b = e2e.first(".workspace-header button");
+      return b ? { kit: b.classList.contains("h-close-btn"), h: +b.offsetHeight, name: b.getAttribute("aria-label") } : null;
+    `);
+    check(!!folders && folders.kit && Math.abs(folders.h - 28) <= 0.5 && folders.name === "Close", `the Folders panel closes with the control-set close button (${JSON.stringify(folders)})`);
+    await shot(`${theme}-02b-folders-panel.png`);
+    await ringOf(`${theme} Folders panel`, `return [e2e.first(".workspace-header button")];`);
+    await bridge.click(".workspace-header button");
+    await bridge.waitFor("the Folders panel to close", `return !e2e.first(".workspace-panel");`);
+
     // ── Review Desk ─────────────────────────────────────────────────
     log(`${theme}: Review Desk`);
     await focusSession(SHELL_LABEL);
@@ -597,6 +651,10 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
         boxes: e2e.all(".review-file-row").map((r) => !!r.querySelector("input.h-checkbox")),
         changes: ["git-btn-commit", "git-btn-pull", "git-btn-push"].map((c) => e2e.first(".review-changes ." + c)?.classList.contains("h-btn") ?? false),
         commitBox: !!e2e.first(".review-changes textarea.h-textarea"),
+        // Every button in the section: the per-file row actions (Open, Stage,
+        // Discard), the group's "+ all" and Commit / Pull / Push.
+        rowActions: e2e.all(".review-changes .git-file-row").map((r) => e2e.all(".git-file-actions button", r).map((b) => e2e.norm(b.innerText) + (b.classList.contains("h-btn") ? "" : "!legacy"))),
+        legacyButtons: e2e.all(".review-changes button").filter((b) => !b.classList.contains("h-btn") && !b.classList.contains("h-icon-btn")).map((b) => b.className + ":" + e2e.norm(b.innerText)),
         close: !!e2e.first(".review-desk .review-close.h-close-btn"),
       };
     `);
@@ -606,6 +664,30 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     check(JSON.stringify(desk.segmented) === JSON.stringify(["By file=true", "By turn=false"]), `By file / By turn is a segmented control (${desk.segmented})`);
     check(desk.boxes.length === 2 && desk.boxes.every(Boolean), "each file's viewed box is the control-set checkbox");
     check(desk.changes.every(Boolean) && desk.commitBox, "the Changes section's Commit, Pull, Push and message box are the control set");
+    check(desk.rowActions.length === 2 && desk.rowActions.every((a) => JSON.stringify(a) === JSON.stringify(["Open", "Discard", "Stage"])), `each changed file's Open, Discard and Stage are control-set buttons (${JSON.stringify(desk.rowActions)})`);
+    check(desk.legacyButtons.length === 0, `no button in the Changes section is outside the control set${desk.legacyButtons.length ? ` (${desk.legacyButtons.join("; ")})` : ""}`);
+    // Discard asks first: Confirm is the danger button, Cancel a quiet one.
+    const firstRow = ".review-changes .git-file-row";
+    await bridge.click(`${firstRow} .git-file-action-discard`);
+    const confirm = await bridge.waitFor("the discard confirm", `
+      const row = e2e.first(${JSON.stringify(firstRow)});
+      const c = row && e2e.first(".git-file-action-discard-confirm", row);
+      const x = row && e2e.first(".git-file-action-cancel", row);
+      return c && x ? { confirm: c.className, cancel: x.className, text: e2e.norm(c.innerText) } : null;
+    `, { timeoutMs: 5_000 }).catch(() => null);
+    check(!!confirm && confirm.confirm.includes("h-btn--danger") && confirm.cancel.includes("h-btn--quiet") && confirm.text === "Confirm", `Discard asks with a danger Confirm and a quiet Cancel (${JSON.stringify(confirm)})`);
+    if (confirm) {
+      // The row's actions show on hover; the test pointer is not on it, so
+      // show them for the picture only.
+      await bridge.eval(`e2e.first(".git-file-actions", e2e.first(${JSON.stringify(firstRow)})).style.opacity = "1"; return true;`);
+      await shot(`${theme}-03b-review-discard-confirm.png`);
+      await bridge.eval(`e2e.first(".git-file-actions", e2e.first(${JSON.stringify(firstRow)})).style.opacity = ""; return true;`);
+      await measureAll(`${theme} Changes discard confirm`, ".review-changes");
+      await ringOf(`${theme} Changes discard confirm`, `return [e2e.first(".review-changes .git-file-action-discard-confirm"), e2e.first(".review-changes .git-file-action-cancel")];`);
+      await bridge.click(`${firstRow} .git-file-action-cancel`);
+      await bridge.waitFor("the confirm to go", `return !e2e.first(".review-changes .git-file-action-discard-confirm");`);
+    }
+    check(await bridge.eval(`return e2e.all(".review-file-row").length === 2;`), "Cancel discarded nothing: both files are still changed");
     check(desk.close, "the desk closes with the control-set close button");
     await shot(`${theme}-03-review-desk.png`);
     await measureAll(`${theme} Review Desk`, ".review-desk");
@@ -618,16 +700,16 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
         document.querySelector(".review-desk .review-close"),
       ];
     `);
+    log("  keyboard: → on By file picks By turn");
+    await keyOn('.review-desk [role="radio"][aria-checked="true"]', "ArrowRight");
+    const turned = await bridge.waitFor("the by-turn list", `
+      return e2e.first(".review-desk")?.getAttribute("data-group") === "turn" && e2e.all(".review-turn-row").length === 1 ? true : null;
+    `, { timeoutMs: 5_000 }).catch(() => null);
+    check(!!turned, "→ switched the desk to By turn and lists T1");
+    await shot(`${theme}-04-review-by-turn.png`);
+    await keyOn('.review-desk [role="radio"][aria-checked="true"]', "ArrowLeft");
+    await bridge.waitFor("by file again", `return e2e.first(".review-desk")?.getAttribute("data-group") === "file";`);
     if (dark) {
-      log("  keyboard: → on By file picks By turn");
-      await keyOn('.review-desk [role="radio"][aria-checked="true"]', "ArrowRight");
-      const turned = await bridge.waitFor("the by-turn list", `
-        return e2e.first(".review-desk")?.getAttribute("data-group") === "turn" && e2e.all(".review-turn-row").length === 1 ? true : null;
-      `, { timeoutMs: 5_000 }).catch(() => null);
-      check(!!turned, "→ switched the desk to By turn and lists T1");
-      await shot(`${theme}-04-review-by-turn.png`);
-      await keyOn('.review-desk [role="radio"][aria-checked="true"]', "ArrowLeft");
-      await bridge.waitFor("by file again", `return e2e.first(".review-desk")?.getAttribute("data-group") === "file";`);
       log("  keyboard: → on the Review tab opens Repository");
       await keyOn('.review-desk [role="tab"][aria-selected="true"]', "ArrowRight");
       const repoTab = await bridge.waitFor("the Repository tab", `return e2e.first(".review-desk")?.getAttribute("data-tab") === "repository" ? true : null;`, { timeoutMs: 5_000 }).catch(() => null);
@@ -709,6 +791,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     if (opened) {
       const st = await menuState();
       check(st.label === "Select model" && st.focusInMenu, "the open menu is named and holds the focus");
+      check(await footerSays("Claude restarts with the new --model"), "the model menu says that a switch restarts Claude");
       await keyMenu("End");
       check(!!(await waitMenu("End", `(s) => s.active === "Open Claude's picker…"`)), "End jumps to the last row");
       await keyMenu("Home");
@@ -748,6 +831,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     const effortOpen = await waitMenu("the effort menu", `(s) => s.open`);
     check(!!effortOpen, "↓ on the effort chip opens the effort menu");
     if (effortOpen) {
+      check(await footerSays("Claude restarts with the new --effort"), "the effort menu says that a change restarts Claude");
       await sleep(600);
       await keyMenu("x");
       check(!!(await waitMenu("xhigh", `(s) => s.active === "xhigh"`)), "typing x jumps to xhigh");
@@ -769,6 +853,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     if (permOpen) {
       const danger = await bridge.eval(`return e2e.all('[role="menu"]:not([hidden]) .h-menu-item--danger').map((r) => e2e.norm(r.querySelector(".h-option-label").innerText));`);
       check(JSON.stringify(danger) === JSON.stringify(["Bypass"]), `Bypass is the one destructive row (${danger})`);
+      check(await footerSays("Claude restarts with the new --permission-mode"), "the permission menu says that a change restarts Claude");
       await keyMenu("Home");
       await sleep(600);
       await keyMenu("p");

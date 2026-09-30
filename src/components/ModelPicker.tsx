@@ -40,5 +40,13 @@ export function ModelPicker({ options, currentModel, onSelect, renderTrigger }: 
       onSelect: () => onSelect(OPEN_PICKER_ID),
     },
   );
-  return <Menu label="Select model" entries={entries} renderTrigger={renderTrigger} className="model-picker" />;
+  return (
+    <Menu
+      label="Select model"
+      entries={entries}
+      renderTrigger={renderTrigger}
+      className="model-picker"
+      footer={<>From your next message: Claude restarts with the new <kbd>--model</kbd>, same conversation</>}
+    />
+  );
 }

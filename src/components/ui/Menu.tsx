@@ -54,6 +54,11 @@ export interface MenuProps {
   /** Renders the button that opens the menu, e.g. `(p) => <Button {...p}>More</Button>`. */
   renderTrigger: (props: MenuTriggerProps) => ReactNode;
   className?: string;
+  /**
+   * A quiet note under the items, e.g. what picking one does. Not an item:
+   * the keyboard skips it; the menu is described by it.
+   */
+  footer?: ReactNode;
 }
 
 /**
@@ -62,11 +67,12 @@ export interface MenuProps {
  * type-ahead move; Enter or Space runs the item; Esc or Tab close it and
  * focus returns to the trigger.
  */
-export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
+export function Menu({ label, entries, renderTrigger, className, footer }: MenuProps) {
   const autoId = useId();
   const baseId = `h-menu-${autoId}`;
   const menuId = `${baseId}-menu`;
   const triggerId = `${baseId}-trigger`;
+  const footerId = `${baseId}-footer`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
   const [open, setOpen] = useState(false);
@@ -199,6 +205,7 @@ export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
           tabIndex={-1}
           hidden={!open}
           aria-label={label}
+          aria-describedby={footer ? footerId : undefined}
           aria-activedescendant={open && active >= 0 ? `${baseId}-item-${active}` : undefined}
           className={cx("h-popover", "h-menu", className)}
           style={style}
@@ -231,6 +238,11 @@ export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
                 {entry.shortcut && <kbd className="h-menu-shortcut">{entry.shortcut}</kbd>}
               </li>
             ),
+          )}
+          {footer && (
+            <li role="none" id={footerId} className="h-menu-footer" onMouseDown={(e) => e.preventDefault()}>
+              {footer}
+            </li>
           )}
         </ul>,
         document.body,

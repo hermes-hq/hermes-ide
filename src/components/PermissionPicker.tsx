@@ -52,6 +52,7 @@ export function PermissionPicker({ current, onSelect, renderTrigger }: Permissio
       label="Select permission mode"
       className="permission-picker"
       renderTrigger={renderTrigger}
+      footer={<>Applies now; on your next message Claude restarts with the new <kbd>--permission-mode</kbd></>}
       entries={CLAUDE_PERMISSION_MODES.map((opt) => ({
         id: `mode-${opt.id}`,
         label: opt.label,

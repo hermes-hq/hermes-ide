@@ -545,6 +545,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <div className="settings-stepper">
                       <IconButton
                         size="sm"
+                        className="settings-stepper-btn"
                         icon={"\u2212"}
                         label={t("settings.decreaseWidth")}
                         onPointerDown={() => startRepeat("w", -10)}
@@ -555,7 +556,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         size="sm"
                         code
                         className="settings-stepper-input"
-                        aria-label={t("settings.windowSize")}
+                        aria-label={t("settings.windowWidth")}
                         type="text"
                         inputMode="numeric"
                         placeholder="1200"
@@ -565,6 +566,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                       <IconButton
                         size="sm"
+                        className="settings-stepper-btn"
                         icon="+"
                         label={t("settings.increaseWidth")}
                         onPointerDown={() => startRepeat("w", 10)}
@@ -576,6 +578,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <div className="settings-stepper">
                       <IconButton
                         size="sm"
+                        className="settings-stepper-btn"
                         icon={"\u2212"}
                         label={t("settings.decreaseHeight")}
                         onPointerDown={() => startRepeat("h", -10)}
@@ -586,7 +589,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         size="sm"
                         code
                         className="settings-stepper-input"
-                        aria-label={t("settings.windowSize")}
+                        aria-label={t("settings.windowHeight")}
                         type="text"
                         inputMode="numeric"
                         placeholder="800"
@@ -596,6 +599,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                       <IconButton
                         size="sm"
+                        className="settings-stepper-btn"
                         icon="+"
                         label={t("settings.increaseHeight")}
                         onPointerDown={() => startRepeat("h", 10)}

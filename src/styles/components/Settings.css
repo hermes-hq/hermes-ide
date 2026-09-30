@@ -172,6 +172,12 @@
   width: calc(var(--control-h-sm) * 2);
   text-align: center;
 }
+/* Press and hold repeats: no text selection or touch panning on the way. */
+.settings-stepper-btn {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
 
 .settings-size-separator {
   color: var(--text-3);

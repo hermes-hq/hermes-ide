@@ -129,7 +129,13 @@
 .land-sheet-option .land-sheet-gh-link {
   margin-left: calc(var(--choice-size) + var(--space-2));
   font-size: var(--text-xs);
+}
+.land-sheet-option-hint {
   color: var(--text-2);
+}
+/* A link inside hint text: its own colour, and underlined so colour is not the only cue. */
+.land-sheet-option .land-sheet-gh-link {
+  text-decoration: underline;
 }
 .land-sheet-option-reason {
   color: var(--yellow);

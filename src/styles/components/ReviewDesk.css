@@ -135,6 +135,10 @@
 .review-changes .git-commit-textarea { width: 100%; }
 .review-changes .git-commit-actions > .h-btn { flex: 1; }
 .review-changes .git-commit-actions > .git-btn-commit { flex: 2; }
+.review-changes .git-merge-actions > .h-btn { flex: 1; }
+.review-changes .git-merge-actions > .git-merge-complete { flex: 2; }
+/* A row's actions show on hover, and while one of them has keyboard focus. */
+.review-changes .git-file-row:focus-within .git-file-actions { opacity: 1; }
 .review-changes-toast {
   margin-top: var(--space-1);
   padding: var(--space-1) var(--space-2);

@@ -29,5 +29,13 @@ export function EffortPicker({ levels, current, pending, onSelect, renderTrigger
           checked: level.toLowerCase() === activeKey,
           onSelect: () => onSelect(level),
         }));
-  return <Menu label="Select thinking effort" entries={entries} renderTrigger={renderTrigger} className="effort-picker" />;
+  return (
+    <Menu
+      label="Select thinking effort"
+      entries={entries}
+      renderTrigger={renderTrigger}
+      className="effort-picker"
+      footer={<>From your next message: Claude restarts with the new <kbd>--effort</kbd>, same conversation</>}
+    />
+  );
 }

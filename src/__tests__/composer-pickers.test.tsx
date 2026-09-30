@@ -146,3 +146,27 @@ describe("PermissionPicker", () => {
     expect(screen.getByRole("menuitemradio", { name: /^Default/ })).toHaveAttribute("aria-checked", "true");
   });
 });
+
+describe("picker footers", () => {
+  it("each menu ends with a note on what picking does, which describes the menu and is skipped by the keys", () => {
+    const cases: Array<[string, () => void, string]> = [
+      ["model", () => render(<ModelPicker options={CLAUDE_MODEL_OPTIONS} currentModel={null} onSelect={vi.fn()} renderTrigger={chip("model")} />), "From your next message: Claude restarts with the new --model, same conversation"],
+      ["effort", () => render(<EffortPicker levels={["low", "high"]} current={null} pending={null} onSelect={vi.fn()} renderTrigger={chip("effort")} />), "From your next message: Claude restarts with the new --effort, same conversation"],
+      ["perms", () => render(<PermissionPicker current={null} onSelect={vi.fn()} renderTrigger={chip("perms")} />), "Applies now; on your next message Claude restarts with the new --permission-mode"],
+    ];
+    for (const [name, mount, text] of cases) {
+      mount();
+      const trigger = screen.getByRole("button", { name });
+      fireEvent.keyDown(trigger, { key: "ArrowDown" });
+      const foot = menu().querySelector(".h-menu-footer");
+      expect(foot).toHaveTextContent(text);
+      expect(foot).toHaveAttribute("role", "none");
+      expect(menu()).toHaveAccessibleDescription(text);
+      // End lands on the last item, never on the note.
+      key("End");
+      expect(active()).not.toBe(foot);
+      expect(active()?.getAttribute("role")).toMatch(/^menuitem/);
+      cleanup();
+    }
+  });
+});

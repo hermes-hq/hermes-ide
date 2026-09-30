@@ -73,6 +73,15 @@
   margin: var(--space-1) 0;
   border-top: var(--control-border-width) solid var(--rule-hair);
 }
+.h-menu-footer {
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border-top: var(--control-border-width) solid var(--rule-hair);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  list-style: none;
+}
+.h-menu-footer kbd { font-family: var(--font-mono); color: var(--text-1); }
 .h-menu-item--danger { color: var(--danger-fg); }
 .h-menu-item--danger .h-option-check { color: var(--danger-fg); }
 /* Highlighted destructive item: red row, --text-0 label. */
