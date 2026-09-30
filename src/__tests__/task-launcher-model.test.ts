@@ -53,7 +53,7 @@ function check(over: Partial<LaunchCheckInput> = {}): LaunchCheckInput {
     doctor: { claude: row("claude") },
     repoPath: "/fixture-home/repo",
     gitRoot: "/fixture-home/repo",
-    branchExists: () => false,
+    branches: [],
     disk: { freeBytes: 50 * GB, requiredBytes: 10 * GB, belowThreshold: false },
     ...over,
   };
@@ -136,14 +136,26 @@ describe("blocking rows", () => {
   });
 
   it("an existing branch blocks and suggests a free one", () => {
-    const taken = new Set(["hermes/fix-login", "hermes/fix-login-2"]);
-    expect(blockingRows(check({ branchExists: (b) => taken.has(b) }))).toEqual([
-      { kind: "branch-exists", branch: "hermes/fix-login", suggestion: "hermes/fix-login-3" },
+    const taken = ["hermes/fix-login", "hermes/fix-login-2"];
+    expect(blockingRows(check({ branches: taken }))).toEqual([
+      { kind: "branch-exists", branch: "hermes/fix-login", suggestion: "hermes/fix-login-3", existing: "hermes/fix-login", clash: "same" },
     ]);
   });
 
+  it("a branch that differs from an existing one only in letter case blocks and names the existing one", () => {
+    // On macOS and Windows hermes/Fix-Login IS hermes/fix-login: creating it would hand back the existing branch.
+    expect(blockingRows(check({ agents: [{ id: "claude", branch: "hermes/Fix-Login" }], branches: ["main", "hermes/fix-login", "hermes/FIX-LOGIN-2"] }))).toEqual([
+      { kind: "branch-exists", branch: "hermes/Fix-Login", suggestion: "hermes/Fix-Login-3", existing: "hermes/fix-login", clash: "case" },
+    ]);
+    // A folder that differs only in case is the same folder there.
+    expect(blockingRows(check({ agents: [{ id: "claude", branch: "Feature/new" }], branches: ["feature/inbox"] }))).toMatchObject([
+      { kind: "branch-exists", branch: "Feature/new", existing: "feature/inbox", clash: "folder" },
+    ]);
+    expect(blockingRows(check({ agents: [{ id: "claude", branch: "feature/new" }], branches: ["feature/inbox", "Develop"] }))).toEqual([]);
+  });
+
   it("a folder that is not a repository blocks, and no branch is judged there", () => {
-    expect(blockingRows(check({ gitRoot: null, branchExists: () => true }))).toEqual([{ kind: "not-git", path: "/fixture-home/repo" }]);
+    expect(blockingRows(check({ gitRoot: null, branches: ["hermes/fix-login"] }))).toEqual([{ kind: "not-git", path: "/fixture-home/repo" }]);
     expect(blockingRows(check({ repoPath: "  ", gitRoot: undefined }))).toEqual([{ kind: "no-repo" }]);
     // Still checking: nothing to say yet, and Launch waits.
     expect(blockingRows(check({ gitRoot: undefined }))).toEqual([]);
@@ -163,7 +175,7 @@ describe("blocking rows", () => {
           { id: "codex", branch: "hermes/x-codex" },
         ],
         doctor: { claude: row("claude"), codex: row("codex", { signed_in: "no" }) },
-        branchExists: (b) => b === "hermes/x-codex",
+        branches: ["hermes/x-codex"],
       }),
     );
     expect(rows.map((r) => r.kind)).toEqual(["signed-out", "branch-exists"]);

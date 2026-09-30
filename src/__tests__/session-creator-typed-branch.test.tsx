@@ -117,7 +117,7 @@ describe("SessionCreator branch step: Continue commits the typed name", () => {
 		const onCreate = vi.fn<OnCreate>(async () => {});
 		await openAtBranchStep(onCreate);
 		await typeName("develop"); // already a branch
-		expect(screen.getByText("A branch with this name already exists")).toBeInTheDocument();
+		expect(screen.getByText("A branch named develop already exists")).toBeInTheDocument();
 		expect(primary()).toBeDisabled();
 		available.mockReturnValueOnce({ available: false, usedBySession: null });
 		await typeName("feature/taken");
@@ -133,13 +133,13 @@ describe("SessionCreator branch step: Continue commits the typed name", () => {
 		const field = nameField();
 		field.focus();
 		await typeName("develop");
-		expect(screen.getByText("A branch with this name already exists")).toBeInTheDocument();
+		expect(screen.getByText("A branch named develop already exists")).toBeInTheDocument();
 		expect(nameField()).toBe(field);
 		expect(document.activeElement).toBe(field);
 		expect(field).toHaveAttribute("aria-invalid", "true");
-		expect(field).toHaveAccessibleDescription("A branch with this name already exists");
+		expect(field).toHaveAccessibleDescription("A branch named develop already exists");
 		await typeName("feature/ok");
-		expect(screen.queryByText("A branch with this name already exists")).toBeNull();
+		expect(screen.queryByText("A branch named develop already exists")).toBeNull();
 		expect(document.activeElement).toBe(field);
 	});
 

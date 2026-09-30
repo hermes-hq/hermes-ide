@@ -39,6 +39,7 @@ import { startStatusBridge, trustedStatus, type StatusBridge } from "../attentio
 import { isWindowFocused, subscribeWindowFocus } from "../attention/windowFocus";
 import { isStartupSession } from "../attention/startupSessions";
 import { useI18n } from "../i18n/I18nProvider";
+import { overlayOpened } from "../state/overlays";
 import type { SessionData } from "../types/session";
 import { claimPcAppChords } from "../utils/keymap";
 import { notifyAttention } from "../utils/notifications";
@@ -271,8 +272,23 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     latest.current.onJump(sessionId);
   }, []);
 
+  // The last element outside the attention center that had the keyboard
+  // (the terminal, usually): where it goes back to when the inbox closes,
+  // also when the badge was clicked to open it (a click can move the focus
+  // to the badge first).
+  const lastOutsideFocusRef = useRef<Element | null>(null);
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target instanceof Element && !rootRef.current?.contains(e.target)) lastOutsideFocusRef.current = e.target;
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+
   const openInbox = useCallback((asMorning = false) => {
-    returnFocusRef.current = document.activeElement;
+    const active = document.activeElement;
+    const outside = active instanceof HTMLElement && active !== document.body && !rootRef.current?.contains(active);
+    returnFocusRef.current = outside ? active : lastOutsideFocusRef.current;
     setOpen(true);
     setMorning(asMorning);
     setPeek(false);
@@ -281,13 +297,14 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     announce(t("attention.announceOpen", { blocked: g.blocked.length, ready: g.ready.length }));
   }, [items, announce, t]);
 
+  // Where the keyboard goes once the inbox has closed (see the effect below).
+  const pendingReturnRef = useRef<Element | null>(null);
   const closeInbox = useCallback((restoreFocus: boolean) => {
     setOpen(false);
     setMorning(false);
     setPeek(false);
-    const back = returnFocusRef.current;
+    pendingReturnRef.current = restoreFocus ? (returnFocusRef.current ?? document.body) : null;
     returnFocusRef.current = null;
-    if (restoreFocus && back instanceof HTMLElement && back.isConnected) back.focus({ preventScroll: true });
   }, []);
 
   const jumpNext = useCallback(() => {
@@ -402,6 +419,30 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
       document.removeEventListener("focusin", onFocusIn);
     };
   }, [open]);
+
+  // Closed (Esc, ⌘⇧I, the badge): the keyboard goes back where it was, to
+  // the terminal the inbox was opened from. Only now, once the guard above
+  // is gone: focusing the terminal while it was still in place handed the
+  // focus straight back to the list, which then left the page, and the
+  // focus ended on <body>. No element to go back to: the session in view.
+  useEffect(() => {
+    if (open) return;
+    const back = pendingReturnRef.current;
+    pendingReturnRef.current = null;
+    if (!back) return;
+    if (back instanceof HTMLElement && back !== document.body && back.isConnected) {
+      back.focus({ preventScroll: true });
+    } else if (latest.current.activeSessionId) {
+      latest.current.onJump(latest.current.activeSessionId);
+    }
+  }, [open]);
+
+  // One overlay at a time: the inbox closes when the palette or the launcher
+  // opens, and opening it closes them (src/state/overlays.ts).
+  useEffect(() => {
+    if (!open) return;
+    return overlayOpened("inbox", () => closeInbox(false));
+  }, [open, closeInbox]);
 
   // Keep a valid selection as items come and go.
   const selectedIndex = Math.max(0, rows.findIndex((r) => r.id === selectedId));

@@ -5,6 +5,7 @@ import { useTextContextMenu } from "../hooks/useTextContextMenu";
 import { fmt } from "../utils/platform";
 import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
+import { overlayOpened } from "../state/overlays";
 import { ListRow } from "./ui/ListRow";
 
 interface CommandPaletteProps {
@@ -116,6 +117,11 @@ export function CommandPalette({
   }, [query, commands]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
+  // One overlay at a time: opening the palette closes the inbox or the
+  // launcher, and it closes when one of them opens (src/state/overlays.ts).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => overlayOpened("palette", () => onCloseRef.current()), []);
   useEffect(() => { setSelectedIndex(0); }, [query]);
   // Keep the highlighted row in sight while the arrows move it.
   useEffect(() => {

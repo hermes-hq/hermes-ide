@@ -378,6 +378,9 @@ mod macos {
                 .ok_or_else(|| anyhow::anyhow!("program name is not valid UTF-8"))?,
         )?;
 
+        // Logged before and after: a spawn that never returns (the child
+        // stuck opening the TTY) shows up in the log as the first line alone.
+        log::info!("Spawning PTY child on {:?}", tty_path);
         let mut pid: libc::pid_t = 0;
         let ret = unsafe {
             libc::posix_spawnp(

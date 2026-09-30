@@ -17,6 +17,7 @@ import { isFeatureSlug, type FeatureTrack } from "../agent/contract/featureFront
 import { getAgent } from "../catalog/agentCatalog";
 import { slugify } from "../state/isolation";
 import type { DoctorRow } from "../api/doctor";
+import { findBranchClash, type BranchClash } from "../utils/branchClash";
 
 export type TaskTrack = FeatureTrack;
 export const TASK_TRACKS: readonly TaskTrack[] = ["Quick", "Light", "Full"];
@@ -99,7 +100,12 @@ export type BlockingRow =
   | { kind: "signed-out"; agentId: string }
   | { kind: "no-repo" }
   | { kind: "not-git"; path: string }
-  | { kind: "branch-exists"; branch: string; suggestion: string }
+  /**
+   * The branch to create is taken: by a branch of that exact name, or by one
+   * whose name (or folder) differs only in letter case, which macOS and
+   * Windows treat as the same (`existing` is that branch's name).
+   */
+  | { kind: "branch-exists"; branch: string; suggestion: string; existing: string; clash: BranchClash["kind"] }
   | { kind: "bad-branch"; branch: string }
   | { kind: "low-disk"; freeBytes: number; requiredBytes: number };
 
@@ -111,8 +117,8 @@ export interface LaunchCheckInput {
   repoPath: string;
   /** null while the repository is still being checked. */
   gitRoot: string | null | undefined;
-  /** Branches that already exist in the repository. */
-  branchExists: (branch: string) => boolean;
+  /** The local branches of the repository. */
+  branches: readonly string[];
   disk: { freeBytes: number | null; requiredBytes: number; belowThreshold: boolean } | null;
 }
 
@@ -136,8 +142,12 @@ export function blockingRows(input: LaunchCheckInput): BlockingRow[] {
     for (const { branch } of input.agents) {
       if (!isUsableBranchName(branch)) {
         rows.push({ kind: "bad-branch", branch });
-      } else if (input.branchExists(branch)) {
-        rows.push({ kind: "branch-exists", branch, suggestion: nextFreeBranch(branch, input.branchExists) });
+      } else {
+        const clash = findBranchClash(branch, input.branches);
+        if (clash) {
+          const taken = (b: string) => findBranchClash(b, input.branches) !== null;
+          rows.push({ kind: "branch-exists", branch, suggestion: nextFreeBranch(branch, taken), existing: clash.existing, clash: clash.kind });
+        }
       }
     }
   }
