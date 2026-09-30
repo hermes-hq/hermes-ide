@@ -14,7 +14,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CI, launchApp, sleep } from "./harness.mjs";
+import { IS_CI, launchApp, skipScenario, sleep } from "./harness.mjs";
 
 export const home = homedir();
 
@@ -23,13 +23,12 @@ export function which(name) {
   return r.status === 0 ? r.stdout.trim().split(/\r?\n/)[0] : "";
 }
 
-/** SKIP (exit 0) unless a real `bin` is here, outside CI, on macOS or Linux. */
-export function requireRealCli(bin, log) {
+/** SKIP (a skip result, exit 0) unless a real `bin` is here, outside CI, on macOS or Linux. */
+export function requireRealCli(bin, log, { scenario, evidenceDir }) {
   const path = which(bin);
   if (IS_CI || platform() === "win32" || !path) {
     log(`needs a real, signed-in ${bin} on PATH, macOS or Linux, and no CI (CI=${process.env.CI ?? ""}, ${bin}=${path || "none"})`);
-    log(`RESULT: SKIP (real ${bin} not available here, or CI)`);
-    process.exit(0);
+    skipScenario({ scenario, evidenceDir, reason: `real ${bin} not available here, or CI`, log });
   }
   const version = spawnSync(path, ["--version"], { encoding: "utf8" }).stdout.trim().split("\n")[0];
   return { path, version };

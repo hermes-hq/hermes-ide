@@ -24,7 +24,10 @@
 //   --scenarios DIR scenario folder (default e2e/app/scenarios)
 //   --ledger FILE   acceptance ledger (default e2e/acceptance.yml)
 //
-// Scenarios whose ledger entry excludes this platform are skipped. Results
+// Scenarios whose ledger entry excludes this platform are skipped, and so is
+// a scenario that exits 0 with a "skip" result.json (it cannot run here: a
+// platform, CI, a missing CLI); it is recorded as a skip, never as a pass,
+// and named in the summary. Exiting 0 without any result is a failure. Results
 // accumulate across invocations so a workflow can run different scenario
 // sets into the same results.json — which also means one old red run keeps
 // `acceptance-check --results` red until you pass --fresh (or delete the
@@ -120,6 +123,8 @@ const save = () => writeFileSync(resultsFile, JSON.stringify(runs, null, 2) + "\
 const failed = [];
 let runCount = 0;
 const skipped = [];
+/** Scenarios that ran and reported they cannot run here: { name, reason }. */
+const scenarioSkips = [];
 const notRun = [];
 const shardLabel = shard ? `   shard: ${shard.index}/${shard.count}` : "";
 console.log(`platform: ${platform()}   repeat: ${repeat}${shardLabel}   evidence: ${out}`);
@@ -155,7 +160,9 @@ for (const [idx, file] of scenarios.entries()) {
         result = null;
       }
     }
-    const status = res.status === 0 && result?.status === "pass" ? "pass" : "fail";
+    // A skip (the scenario cannot run here, and says so in its result) is
+    // neither a pass nor a failure; exiting 0 without a result is a failure.
+    const status = res.status === 0 && result?.status === "pass" ? "pass" : res.status === 0 && result?.status === "skip" ? "skip" : "fail";
     runCount++;
     runs.push({
       scenario: name,
@@ -169,6 +176,11 @@ for (const [idx, file] of scenarios.entries()) {
       finishedAt: new Date().toISOString(),
     });
     save();
+    if (status === "skip") {
+      scenarioSkips.push({ name, reason: result.reason ?? "" });
+      console.log(`=== ${name} (${n}/${times}): SKIP (${result.reason ?? "no reason given"})`);
+      break;
+    }
     if (status === "fail") {
       failed.push({ name, n, of: times, exitCode: res.status, signal: res.signal ?? null, evidence: evidenceDir, result: result?.status ?? "none" });
       console.log(`=== ${name} (${n}/${times}): FAIL (exit ${res.status}${res.signal ? `, signal ${res.signal}` : ""})`);
@@ -182,7 +194,10 @@ if (runCount === 0 && !existsSync(resultsFile)) save();
 
 const inGitHub = process.env.GITHUB_ACTIONS === "true";
 console.log(`\n── this invocation${shard ? ` (shard ${shard.index}/${shard.count})` : ""} on ${platform()} ──`);
-console.log(`runs: ${runCount}; failed: ${failed.length}; skipped here: ${skipped.length}${notRun.length ? `; not run after a failure: ${notRun.length}` : ""}`);
+console.log(
+  `runs: ${runCount}; failed: ${failed.length}; skipped here: ${skipped.length + scenarioSkips.length}${notRun.length ? `; not run after a failure: ${notRun.length}` : ""}`,
+);
+for (const s of scenarioSkips) console.log(`SKIPPED: ${s.name} (${s.reason || "no reason given"})`);
 for (const f of failed) {
   const how = `run ${f.n}/${f.of}, exit ${f.exitCode ?? "none"}${f.signal ? `, signal ${f.signal}` : ""}, result ${f.result}`;
   console.log(`FAILED: ${f.name} (${how}) — evidence: ${f.evidence}`);

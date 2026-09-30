@@ -60,7 +60,7 @@ function assert(condition, message) {
   log(`  ok — ${message}`);
 }
 
-const cli = requireRealCli("agy", log);
+const cli = requireRealCli("agy", log, { scenario: SCENARIO, evidenceDir });
 const guarded = guard([join(home, ".gemini", "settings.json")], log);
 const repo = throwawayRepo("real-agy");
 const profileRoot = tempProfileRoot("real-agy");

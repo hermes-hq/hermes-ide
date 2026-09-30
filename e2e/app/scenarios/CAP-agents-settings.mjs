@@ -31,7 +31,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { platform } from "node:os";
-import { createLogger, finishScenario, outDir, sleep } from "../harness.mjs";
+import { createLogger, finishScenario, outDir, sleep, skipScenario } from "../harness.mjs";
 import {
   agentCard,
   closeSettings,
@@ -64,8 +64,7 @@ const f = setupFakes("cap-settings", ["claude", "codex", "agy"]);
 const restorePath = registryPath(f, log);
 if (restorePath === null) {
   log("this scenario needs the fake agents on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
-  log("RESULT: SKIP (Windows outside CI)");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
 }
 setFake(f, "version", "claude", "2.1.284");
 setFake(f, "version", "codex", "0.145.0");

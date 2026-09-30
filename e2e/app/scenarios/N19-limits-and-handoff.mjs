@@ -49,7 +49,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
 
 const SCENARIO = "N19-limits-and-handoff";
 const startedAt = Date.now();
@@ -149,8 +149,7 @@ function addFakeBinToRegistryPath() {
 }
 if (onWindows && !canEditRegistryPath) {
   log("this scenario needs the fake agents on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
-  log("RESULT: SKIP (Windows outside CI)");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
 }
 
 /** The fakes' launch records, oldest first (a record being written is skipped). */

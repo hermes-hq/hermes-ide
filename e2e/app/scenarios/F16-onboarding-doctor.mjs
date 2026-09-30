@@ -40,7 +40,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
 
 const SCENARIO = "F16-onboarding-doctor";
 const startedAt = Date.now();
@@ -130,8 +130,7 @@ function addFakeBinToRegistryPath() {
 }
 if (onWindows && !canEditRegistryPath) {
   log("this scenario needs the fake agents on a Windows terminal's PATH (the user's registry Path); that is only changed on a CI runner");
-  log("RESULT: SKIP (Windows outside CI)");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
 }
 
 const records = () =>

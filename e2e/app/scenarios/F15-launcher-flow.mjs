@@ -23,7 +23,7 @@
 
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createLogger, finishScenario, outDir, sleep } from "../harness.mjs";
+import { createLogger, finishScenario, outDir, sleep, skipScenario } from "../harness.mjs";
 import { setCapInSettings } from "../fleet-steps.mjs";
 import {
   MOD,
@@ -62,8 +62,7 @@ const hasSeq = (argv, seq) => argv.some((_, i) => seq.every((w, j) => argv[i + j
 const fx = launcherFixtures("f15-flow", log);
 if (onWindows && !fx.canEditRegistryPath) {
   log("this scenario needs the fake agents on a Windows terminal's PATH (the user's registry Path); that is only changed on a CI runner");
-  log("RESULT: SKIP (Windows outside CI)");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
 }
 
 let app;

@@ -60,7 +60,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
 
 const SCENARIO = "F21-review-desk";
 const startedAt = Date.now();
@@ -150,9 +150,8 @@ const realBinaryOf = (bin) =>
 const VENDOR_C = VENDOR_C_CANDIDATES.find((v) => !realBinaryOf(v.bin));
 if (!VENDOR_C) {
   log(`every no-prompt-hook vendor (${VENDOR_C_CANDIDATES.map((v) => v.bin).join(", ")}) is really installed here; a real CLI must never be started by a test`);
-  log("RESULT: SKIP (no vendor free for the fake)");
   rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "no vendor free for the fake", log });
 }
 const FAKE_NAMES = ["claude", VENDOR_C.bin];
 for (const name of FAKE_NAMES) {
@@ -189,9 +188,8 @@ function addFakeBinToRegistryPath() {
 }
 if (onWindows && !canEditRegistryPath) {
   log("this scenario needs the fake claude on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
-  log("RESULT: SKIP (Windows outside CI)");
   rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
 }
 let undoRegistryPath = null;
 

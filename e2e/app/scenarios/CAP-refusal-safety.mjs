@@ -48,7 +48,7 @@
 
 import { cpSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { createLogger, finishScenario, outDir, sleep } from "../harness.mjs";
+import { createLogger, finishScenario, outDir, sleep, skipScenario } from "../harness.mjs";
 import {
   completeOnboarding,
   launch,
@@ -83,8 +83,7 @@ const f = setupFakes("cap-safety", ["claude", "codex"]);
 const restorePath = registryPath(f, log);
 if (restorePath === null) {
   log("this scenario needs the fake agents on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
-  log("RESULT: SKIP (Windows outside CI)");
-  process.exit(0);
+  skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
 }
 
 /** How long "nothing happened" is watched for. */
