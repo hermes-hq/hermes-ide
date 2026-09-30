@@ -501,18 +501,24 @@ try {
   await bridge.waitFor("demo.ts in the file explorer", `return e2e.all(".file-tree-node").some((n) => (n.title || "").endsWith("demo.ts"));`, { timeoutMs: 20_000 });
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".file-tree-node").find((n) => (n.title || "").endsWith("demo.ts")), "demo.ts"));`);
   await bridge.waitFor("the editor with the file", `return !!e2e.first(".file-preview .cm-editor .cm-content") && e2e.first(".cm-content").innerText.includes("answer = 42");`, { timeoutMs: 20_000 });
-  const typed = await bridge.eval(`
-    const content = e2e.first(".cm-content");
-    content.focus();
-    const sel = window.getSelection();
-    sel.selectAllChildren(content.querySelector(".cm-line") || content);
-    sel.collapseToEnd();
-    document.execCommand("insertText", false, "!");
-    return true;
-  `);
-  assert(typed, "a character was typed into the editor");
-  await bridge.waitFor("the unsaved-changes dot", `return !!e2e.first(".file-preview-header .file-editor-dirty-dot");`, { timeoutMs: 10_000 });
+  // The editor saves on its own 2 s after the last change, so Back only asks
+  // while a change is fresh: type, then press Back right away.
+  const typeOne = async () => {
+    const typed = await bridge.eval(`
+      const content = e2e.first(".cm-content");
+      content.focus();
+      const sel = window.getSelection();
+      sel.selectAllChildren(content.querySelector(".cm-line") || content);
+      sel.collapseToEnd();
+      document.execCommand("insertText", false, "!");
+      return true;
+    `);
+    assert(typed, "a character was typed into the editor");
+    await bridge.waitFor("the unsaved-changes dot", `return !!e2e.first(".file-preview-header .file-editor-dirty-dot");`, { timeoutMs: 10_000 });
+  };
+  await typeOne();
   await eachTheme(bridge, "file-preview-header", ".file-preview-header");
+  await typeOne();
   await bridge.click(".file-preview-back");
   await bridge.waitFor("the unsaved-changes confirm", `return !!e2e.first(".file-editor-confirm-dialog");`);
   await eachTheme(bridge, "file-preview-unsaved", ".file-editor-confirm-dialog", { strong: "primary" });
@@ -524,7 +530,7 @@ try {
   );
   await bridge.clickByName("Discard", { within: ".file-editor-confirm-dialog" });
   await bridge.waitFor("the file preview to close", `return !e2e.first(".file-preview") && !e2e.first(".file-editor-confirm-dialog");`);
-  assert(true, "Discard closed the file without saving");
+  assert(true, "Discard closed the file");
 
   log("step 2c: Worktrees: the orphaned folder, its checkbox, Clean up and the delete confirm");
   if (await bridge.exists('.session-subview-btn[title="Review Desk"]')) {
