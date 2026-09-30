@@ -13,7 +13,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tauri::AppHandle;
 
 /// The patch text handed to the frontend is capped; files past the cap keep
@@ -80,7 +79,7 @@ pub struct RevertResult {
 }
 
 fn git(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String, String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::git::cli::git_command();
     cmd.current_dir(repo).args(args);
     for (k, v) in env {
         cmd.env(k, v);
@@ -490,6 +489,7 @@ pub fn review_write_file(
 mod tests {
     use super::*;
     use std::fs;
+    use std::process::Command;
 
     fn run(repo: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
@@ -776,5 +776,128 @@ diff --git a/tool.bin b/tool.bin\nnew file mode 100644\nindex 0..5\nBinary files
     fn quoted_paths_are_unquoted() {
         assert_eq!(unquote_path("\"a b/\\\"c\\\".txt\""), "a b/\"c\".txt");
         assert_eq!(unquote_path("plain.txt"), "plain.txt");
+    }
+
+    #[test]
+    fn only_a_path_quoted_on_both_ends_is_unquoted() {
+        assert_eq!(unquote_path("\"half.txt"), "\"half.txt");
+        assert_eq!(unquote_path("half.txt\""), "half.txt\"");
+        assert_eq!(unquote_path("\""), "\"");
+        assert_eq!(
+            unquote_path("\"tab\\there\\\\x\\qy\\\""),
+            "tab\there\\x\\qy\\"
+        );
+    }
+
+    #[test]
+    fn file_headers_are_not_counted_as_changed_lines() {
+        let text = "--- a/x.txt\n+++ b/x.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n+more\n context\n";
+        assert_eq!(count_lines(text), (2, 1));
+    }
+
+    #[test]
+    fn a_mode_change_says_whether_the_file_is_now_executable() {
+        let text = "diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n\
+diff --git a/lib.sh b/lib.sh\nold mode 100755\nnew mode 100644\n";
+        let files = parse_patch(text);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "run.sh");
+        assert!(files[0].executable, "100644 -> 100755 is executable");
+        assert_eq!(files[1].path, "lib.sh");
+        assert!(!files[1].executable, "100755 -> 100644 is not");
+    }
+
+    #[test]
+    fn a_deleted_file_is_named_by_its_old_side_even_with_a_space_before_b() {
+        // git does not quote spaces, so the header alone ("a/dir b/f.txt
+        // b/dir b/f.txt") cannot be split; the "---" line names the file.
+        let text = "diff --git a/dir b/f.txt b/dir b/f.txt\ndeleted file mode 100644\nindex 4..0\n--- a/dir b/f.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n";
+        let files = parse_patch(text);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "dir b/f.txt");
+        assert_eq!(files[0].status, FileStatus::Deleted);
+        assert_eq!((files[0].additions, files[0].deletions), (0, 1));
+    }
+
+    /// One file's diff, `len` bytes long exactly (filler lines are added).
+    fn file_diff(name: &str, len: usize) -> String {
+        let head = format!(
+            "diff --git a/{name} b/{name}\nindex 1..2 100644\n--- a/{name}\n+++ b/{name}\n@@ -1 +1 @@\n-old\n"
+        );
+        assert!(len > head.len() + 2, "{len} is too short for a diff");
+        let mut body = String::new();
+        let mut left = len - head.len();
+        while left > 0 {
+            // "+" and "\n" around each line; the last line takes the rest.
+            let line = if left > 1002 { 1000 } else { left - 2 };
+            body.push('+');
+            body.push_str(&"x".repeat(line));
+            body.push('\n');
+            left -= line + 2;
+        }
+        let text = head + &body;
+        assert_eq!(text.len(), len);
+        text
+    }
+
+    fn header_of(diff: &str) -> &str {
+        &diff[..diff.find("@@").unwrap()]
+    }
+
+    #[test]
+    fn a_file_past_the_patch_cap_keeps_its_header_and_counts_but_no_hunks() {
+        let cap = PATCH_TEXT_CAP_BYTES;
+        // Exactly at the cap: kept whole.
+        let at_cap = file_diff("big.txt", cap);
+        let files = parse_patch(&at_cap);
+        assert!(!files[0].truncated, "a file of exactly the cap is kept");
+        assert_eq!(files[0].patch, at_cap);
+        // One byte over: only the header is kept, the counts are still real.
+        let over = file_diff("big.txt", cap + 1);
+        let files = parse_patch(&over);
+        assert!(files[0].truncated);
+        assert_eq!(files[0].patch, header_of(&over));
+        let added = over.lines().filter(|l| l.starts_with("+x")).count() as u32;
+        assert_eq!((files[0].additions, files[0].deletions), (added, 1));
+    }
+
+    #[test]
+    fn the_cap_counts_the_files_before_this_one() {
+        let small = file_diff("small.txt", 200);
+        // Fits by itself, not after the small file.
+        let second = file_diff("second.txt", PATCH_TEXT_CAP_BYTES - 100);
+        let third = file_diff("third.txt", 150);
+        let text = format!("{small}{second}{third}");
+        let files = parse_patch(&text);
+        assert_eq!(files.len(), 3);
+        assert!(!files[0].truncated);
+        assert_eq!(files[0].patch, small);
+        assert!(files[1].truncated, "200 + (cap - 100) is past the cap");
+        assert_eq!(files[1].patch, header_of(&second));
+        // What the truncated file kept (its header) counts, so the third
+        // file still fits.
+        assert!(!files[2].truncated);
+        assert_eq!(files[2].patch, third);
+    }
+
+    #[test]
+    fn a_patch_without_its_last_newline_still_reverts() {
+        let (_dir, repo) = fixture();
+        fs::write(
+            repo.join("src/app.js"),
+            "const a = 1;\nconst b = 3;\nexport default a + b;\n",
+        )
+        .unwrap();
+        let patch = run(&repo, &["diff"]);
+        let trimmed = patch.trim_end_matches('\n').to_string();
+        let preview =
+            review_revert_preview(repo.to_string_lossy().to_string(), trimmed.clone()).unwrap();
+        assert!(preview.clean, "{}", preview.message);
+        let result = review_revert_patch(repo.to_string_lossy().to_string(), trimmed).unwrap();
+        assert!(result.ok, "{}", result.message);
+        assert_eq!(
+            fs::read_to_string(repo.join("src/app.js")).unwrap(),
+            "const a = 1;\nconst b = 2;\nexport default a + b;\n"
+        );
     }
 }

@@ -32,6 +32,10 @@ on:
         description: "How many times to run the fleet performance scenario (F24) on each OS"
         required: false
         default: "1"
+      scenario_repeat:
+        description: "Run one more scenario several times on each OS, as FILE=N (for example F21-review-desk.mjs=5); empty for none"
+        required: false
+        default: ""
 
 # Superseded PR pushes are cancelled. Runs on main and in the merge queue are
 # never cancelled: each of those commits must finish its checks.
@@ -54,6 +58,9 @@ env:
   # The fleet scenario (F24) measures memory and speed against per-OS
   # budgets; a manual run can repeat it to show a measurement is stable.
   FLEET_REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.fleet_repeat || '1' }}
+  # A manual run can repeat any other scenario too, to show a fix for a flaky
+  # one holds (FILE=N; the shard that holds FILE runs it N times).
+  SCENARIO_REPEAT: ${{ github.event_name == 'workflow_dispatch' && inputs.scenario_repeat || '' }}
 
 jobs:
   # ── Detect what changed to skip irrelevant jobs ──────────────────────
@@ -522,6 +529,14 @@ jobs:
             sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb xdotool
           fi
 
+      # F21-review-no-repo-locale runs git under a German locale; the runner
+      # image only has C and en_US.
+      - name: German locale for the locale scenario (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo locale-gen de_DE.UTF-8
+          locale -a
+
       - name: Download the test app
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
@@ -550,7 +565,7 @@ jobs:
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT"
+          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Run scenarios
         if: runner.os != 'Linux'
@@ -558,7 +573,7 @@ jobs:
         env:
           CI: "true"
         run: |
-          node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT"
+          node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       # F05: a focused terminal keeps Ctrl+letter. UI-focus-ring: Tab in
       # Settings draws the focus ring for real. Real OS key presses

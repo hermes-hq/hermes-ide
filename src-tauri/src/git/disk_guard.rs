@@ -297,7 +297,7 @@ fn build_output_candidates(root: &Path) -> Vec<PathBuf> {
 }
 
 fn git_in(worktree: &Path) -> Command {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::git::cli::git_command();
     cmd.arg("-C").arg(worktree);
     cmd
 }
@@ -530,7 +530,7 @@ pub fn sweep_orphan_folders(
     }
 
     for repo in &repos_to_prune {
-        let _ = Command::new("git")
+        let _ = crate::git::cli::git_command()
             .arg("-C")
             .arg(repo)
             .args(["worktree", "prune"])

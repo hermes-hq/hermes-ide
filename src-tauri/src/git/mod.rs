@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod cow_clone;
 pub mod disk_guard;
 pub mod fast_setup;
@@ -3495,7 +3496,7 @@ pub fn git_fetch_remote_branches(
     // Run `git fetch --all --prune` with a 5-second timeout.
     // If the fetch takes too long (slow network, auth prompt, etc.) we kill it
     // and fall back to listing whatever remote refs are cached locally.
-    match std::process::Command::new("git")
+    match crate::git::cli::git_command()
         .current_dir(&project_path)
         .args(["fetch", "--all", "--prune"])
         .stdout(std::process::Stdio::null())
@@ -3969,7 +3970,7 @@ pub fn git_cleanup_orphan_worktrees(
                     // The repo hash dir contains repo_path.txt to find the repo root.
                     if let Some(hash_dir) = validated.parent() {
                         if let Some(repo_path) = worktree::read_repo_path(hash_dir) {
-                            let _ = std::process::Command::new("git")
+                            let _ = crate::git::cli::git_command()
                                 .arg("-C")
                                 .arg(repo_path.trim())
                                 .arg("worktree")

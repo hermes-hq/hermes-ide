@@ -49,7 +49,7 @@ pub enum WriteTree {
 }
 
 fn base_command(dir: &Path) -> Command {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::git::cli::git_command();
     cmd.current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         // Never let a read-only git command refresh (write) the user's index.
