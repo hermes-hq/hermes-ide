@@ -713,6 +713,22 @@ describe("TaskLauncher: rows that stop Launch", () => {
     expect(launchButton()).toBeEnabled();
   });
 
+  it("a branch that differs from an existing one only in letter case blocks, names it, and can be used on purpose", async () => {
+    h.probe.set(REPO, { ...(h.probe.get(REPO) as RepoProbe), local_branches: ["main", "Hermes/Fix-It"] });
+    await open();
+    await typeTask("Fix it");
+    expect(blocks()).toEqual(["branch-exists"]);
+    expect(document.querySelector('.task-launcher-block[data-kind="branch-exists"]')).toHaveTextContent(
+      "Branch Hermes/Fix-It already exists; hermes/fix-it differs only in letter case",
+    );
+    expect(launchButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Use the existing Hermes/Fix-It" }));
+    await settle();
+    expect(blocks()).toEqual([]);
+    expect(launchButton()).toBeEnabled();
+    expect(document.querySelector('[data-chip="where"]')).toHaveTextContent("Hermes/Fix-It");
+  });
+
   it("low disk blocks a new worktree, not the current checkout", async () => {
     h.disk = { free_bytes: 2e9, required_bytes: 10e9, below_threshold: true };
     await open();

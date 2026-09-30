@@ -1532,6 +1532,10 @@ pub fn git_create_branch(
         .and_then(|h| h.peel_to_commit())
         .map_err(|e| format!("Cannot resolve HEAD: {}", e))?;
 
+    // Not even a case-only variant of an existing branch (see BranchClash).
+    if let Some(clash) = worktree::local_branch_clash(&repo, &name) {
+        return Err(worktree::branch_clash_error(&name, &clash));
+    }
     repo.branch(&name, &head_commit, false)
         .map_err(|e| format!("Failed to create branch '{}': {}", name, e))?;
 
@@ -1626,6 +1630,9 @@ pub async fn git_checkout_branch(
         if let Ok(remote_ref) = repo.find_reference(&remote_refname) {
             let commit = remote_ref.peel_to_commit().map_err(|e| e.to_string())?;
             let local_name = name.split_once('/').map_or(name.as_str(), |(_, rest)| rest);
+            if let Some(clash) = worktree::local_branch_clash(&repo, local_name) {
+                return Err(worktree::branch_clash_error(local_name, &clash));
+            }
 
             let mut local_branch = repo
                 .branch(local_name, &commit, false)

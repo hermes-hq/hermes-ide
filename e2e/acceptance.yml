@@ -434,6 +434,58 @@ features:
       FIX-sessions-survive-quit-3:
         text: "A session closed just before quitting still stays closed"
         scenarios: [FIX-sessions-survive-quit.mjs, FIX-close-before-quit.mjs]
+  FIX-branch-case:
+    # A bug fix (data safety), not new 2.0 work, so it is not behind a
+    # feature flag. Negative control (run by hand): a build of main before the
+    # fix ends in RESULT: FAIL (the form takes Develop as new and the backend
+    # checks develop out under that name).
+    name: "A new branch that differs from an existing one only in letter case never becomes that branch"
+    status: shipped
+    criteria:
+      FIX-branch-case-1:
+        text: "Next to develop, a new branch Develop (or DEVELOP, or Feature/x next to feature/inbox) is blocked in the launcher and the New branch form, which name the existing branch and offer to use it on purpose"
+        scenarios: [FIX-branch-case.mjs]
+      FIX-branch-case-2:
+        text: "The backend refuses to create or check out Develop next to develop; no branch or worktree is made and develop does not move"
+        scenarios: [FIX-branch-case.mjs]
+      FIX-branch-case-3:
+        text: "Choosing the existing develop on purpose puts the session on develop, and only then does a commit there move it"
+        scenarios: [FIX-branch-case.mjs]
+  FIX-overlay-focus:
+    # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
+    # main before the fix ends in RESULT: FAIL (the keyboard ends on <body>,
+    # and the palette opens over the inbox).
+    name: "The inbox gives the keyboard back, and one overlay is open at a time"
+    status: shipped
+    criteria:
+      FIX-overlay-focus-1:
+        text: "Closing the attention inbox with Esc, its shortcut or the badge gives the keyboard back to the terminal it was opened from"
+        scenarios: [FIX-overlay-focus.mjs]
+      FIX-overlay-focus-2:
+        text: "Opening the inbox, the command palette or the task launcher closes whichever of the others is open; the launcher keeps what was typed"
+        scenarios: [FIX-overlay-focus.mjs]
+  FIX-spawn-no-freeze:
+    # A bug fix, not new 2.0 work. Found as N20-session-host's "the webview
+    # did not answer" on the macOS CI runner: a restored terminal never
+    # finished opening, and the whole window froze with it. The test build
+    # holds the opening (HERMES_E2E_SLOW_SPAWN_MS). Negative control (run by
+    # hand): a build of main with only that hook added ends in RESULT: FAIL
+    # with the same "the webview did not answer".
+    name: "A terminal that is slow to open never freezes the app"
+    status: shipped
+    criteria:
+      FIX-spawn-no-freeze-1:
+        text: "While a terminal is being opened (held for 8 s) the app answers within 2.5 s, the window is drawn, the terminal opens once the hold ends, and Quit works while another one is being opened"
+        scenarios: [FIX-spawn-no-freeze.mjs]
+  FIX-launcher-reopen:
+    # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
+    # main before the fix fails the step (no launcher comes up).
+    name: "⌘N pressed while a launch is finishing is not lost"
+    status: shipped
+    criteria:
+      FIX-launcher-reopen-1:
+        text: "⌘N pressed right after Launch, while the sheet is still finishing the launch, opens a fresh launcher once the launched sheet has closed"
+        scenarios: [F15-launcher-chips.mjs]
   N12:
     name: "Agents start reliably, with no typing into your shell"
     # partial: fish is not covered by a scenario yet (zsh and bash on macOS

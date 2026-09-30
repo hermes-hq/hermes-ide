@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { gitListBranchesForProject, listWorktrees, checkBranchAvailable, fetchRemoteBranches } from "../api/git";
 import { validateBranchName } from "./GitBranchSelector";
 import { defaultTaskBranch } from "../state/isolation";
+import { findBranchClash } from "../utils/branchClash";
 import type { GitBranch, WorktreeInfo } from "../types/git";
 import { useI18n } from "../i18n/I18nProvider";
 import { Badge, Button, Input, Segmented, Select } from "./ui";
@@ -384,6 +385,16 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
     }
   }, [highlightedIndex]);
 
+  // A typed name that is an existing branch, also when only the letter case
+  // differs (on macOS and Windows `Develop` IS `develop`): never "new".
+  const nameClash = useMemo(
+    () => (newBranchName.trim() ? findBranchClash(newBranchName.trim(), localBranchNames) : null),
+    [newBranchName, localBranchNames],
+  );
+  const clashedBranch = nameClash && nameClash.kind !== "folder"
+    ? augmentedBranches.find((b) => !b.is_remote && b.name === nameClash.existing)
+    : undefined;
+
   // Validate new branch name
   useEffect(() => {
     if (!newBranchName.trim()) {
@@ -395,8 +406,14 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
       setValidationError(nameError);
       return;
     }
-    if (localBranchNames.has(newBranchName)) {
-      setValidationError("A branch with this name already exists");
+    if (nameClash) {
+      setValidationError(
+        nameClash.kind === "same"
+          ? t("branch.exists", { branch: nameClash.existing })
+          : nameClash.kind === "case"
+            ? t("branch.caseClash", { branch: nameClash.existing })
+            : t("branch.folderClash", { branch: nameClash.existing }),
+      );
       return;
     }
     // Check availability via backend
@@ -421,7 +438,7 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
         .finally(() => setCheckingAvailability(false));
     }, 300);
     return () => clearTimeout(timer);
-  }, [newBranchName, projectId, localBranchNames]);
+  }, [newBranchName, projectId, nameClash, t]);
 
   // Tell the parent what the New branch form holds (see onDraftChange). While
   // the availability check runs, the last answer belongs to the previous name.
@@ -431,7 +448,7 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
   const draftOk =
     !!draftName &&
     !validateBranchName(draftName) &&
-    !localBranchNames.has(draftName) &&
+    !nameClash &&
     (checkingAvailability || !validationError);
   useEffect(() => {
     onDraftChangeRef.current?.(draftName ? { name: draftName, ok: draftOk } : null);
@@ -668,6 +685,18 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
               <span id={`branch-selector-name-error-${projectId}`} className="h-field-error branch-selector-validation-error">
                 {validationError}
               </span>
+            )}
+            {/* The name is an existing branch: use that one on purpose, or type another name. */}
+            {clashedBranch && !clashedBranch.taken && (
+              <Button
+                variant="link"
+                size="sm"
+                className="branch-selector-use-existing"
+                data-branch={clashedBranch.name}
+                onClick={() => handleCommitBranch(clashedBranch.name)}
+              >
+                {t("branch.useExisting", { branch: clashedBranch.name })}
+              </Button>
             )}
           </div>
           <div className="branch-selector-field">

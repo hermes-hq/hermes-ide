@@ -58,6 +58,107 @@ pub fn parse_branch_in_use_error(err: &str) -> Option<(String, String)> {
     ))
 }
 
+/// How a branch name collides with a local branch that already exists.
+///
+/// Git keeps a branch as a file under `.git/refs/heads/`. On a file system
+/// that ignores letter case (macOS, Windows) `Develop` and `develop` are the
+/// same file, so "creating" `Develop` next to `develop` silently hands back
+/// `develop`, and a commit made on it moves `develop`. The same goes for a
+/// folder of branches (`Feature/x` next to `feature/y` lands in `feature/`).
+/// Hermes treats these names as taken on every OS: a repository made on
+/// Linux is often cloned on a Mac.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BranchClash {
+    /// A branch with exactly this name exists.
+    Same(String),
+    /// A branch whose name differs only in letter case exists (the name it has).
+    Case(String),
+    /// A folder of the name differs only in letter case from one an existing
+    /// branch uses (that branch's name).
+    Folder(String),
+}
+
+impl BranchClash {
+    /// The existing branch the name collides with.
+    pub fn existing(&self) -> &str {
+        match self {
+            BranchClash::Same(b) | BranchClash::Case(b) | BranchClash::Folder(b) => b,
+        }
+    }
+}
+
+/// How `name` collides with one of `existing` (exact names first, then a
+/// case-only match, then a case-only folder match), or None when it does not.
+pub fn branch_name_clash<'a, I>(name: &str, existing: I) -> Option<BranchClash>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let lower = name.to_lowercase();
+    let parts: Vec<&str> = name.split('/').collect();
+    let mut case = None;
+    let mut folder = None;
+    for other in existing {
+        if other == name {
+            return Some(BranchClash::Same(other.to_string()));
+        }
+        if case.is_none() && other.to_lowercase() == lower {
+            case = Some(other.to_string());
+            continue;
+        }
+        if folder.is_none() {
+            // The first folder (or the name itself) where the two differ:
+            // when it differs only in case, one folder on disk holds both.
+            let first_diff = parts
+                .iter()
+                .zip(other.split('/'))
+                .find(|(a, b)| *a != b)
+                .map(|(a, b)| (a.to_lowercase(), b.to_lowercase()));
+            if let Some((a, b)) = first_diff {
+                if a == b {
+                    folder = Some(other.to_string());
+                }
+            }
+        }
+    }
+    case.map(BranchClash::Case)
+        .or(folder.map(BranchClash::Folder))
+}
+
+/// `branch_name_clash` against the local branches of `repo`.
+pub fn local_branch_clash(repo: &Repository, name: &str) -> Option<BranchClash> {
+    let names: Vec<String> = repo
+        .branches(Some(BranchType::Local))
+        .map(|it| {
+            it.filter_map(|b| b.ok())
+                .filter_map(|(b, _)| b.name().ok().flatten().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    branch_name_clash(name, names.iter().map(String::as_str))
+}
+
+/// Prefix of the error returned when a branch cannot be created or used
+/// because its name collides with an existing branch (see `BranchClash`).
+/// The rest of the message says which branch, for a person to read.
+pub const BRANCH_NAME_CLASH_PREFIX: &str = "BRANCH_NAME_CLASH:";
+
+/// The error for `name`, which collides as `clash` says.
+pub fn branch_clash_error(name: &str, clash: &BranchClash) -> String {
+    let why = match clash {
+        BranchClash::Same(b) => format!("a branch named '{b}' already exists"),
+        BranchClash::Case(b) => format!(
+            "it differs from the existing branch '{b}' only in letter case, and on macOS and Windows they are the same branch"
+        ),
+        BranchClash::Folder(b) => format!(
+            "its folder differs from the one of the existing branch '{b}' only in letter case, and on macOS and Windows they are the same folder"
+        ),
+    };
+    format!(
+        "{BRANCH_NAME_CLASH_PREFIX} cannot use the branch name '{name}': {why}. Choose '{}' as an existing branch, or pick another name.",
+        clash.existing()
+    )
+}
+
 /// Which branch `commit_worktree_changes` puts a session's uncommitted work on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -321,13 +422,23 @@ pub fn attach_existing_worktree(
 fn free_archive_branch_name(repo: &Repository, branch: &str) -> String {
     let stem = branch.strip_prefix("hermes/").unwrap_or(branch);
     let base = format!("hermes-archive/{}", stem);
-    if repo.find_branch(&base, BranchType::Local).is_err() {
+    // Free in letter case too: on macOS and Windows `hermes-archive/Fix`
+    // would be written over an existing `hermes-archive/fix`. (A folder
+    // that differs only in case is not overwritten, and every candidate
+    // shares it, so it does not count here.)
+    let taken = |name: &str| {
+        matches!(
+            local_branch_clash(repo, name),
+            Some(BranchClash::Same(_) | BranchClash::Case(_))
+        )
+    };
+    if !taken(&base) {
         return base;
     }
     let mut n = 2;
     loop {
         let candidate = format!("{}-{}", base, n);
-        if repo.find_branch(&candidate, BranchType::Local).is_err() {
+        if !taken(&candidate) {
             return candidate;
         }
         n += 1;
@@ -507,6 +618,13 @@ pub fn create_worktree_from(
             });
         }
 
+        // A local branch whose name differs only in letter case would be
+        // taken for this one on macOS and Windows: never use it by accident.
+        match local_branch_clash(&repo, &local_name) {
+            None | Some(BranchClash::Same(_)) => {}
+            Some(clash) => return Err(branch_clash_error(&local_name, &clash)),
+        }
+
         // Check if a local branch with the derived name already exists
         if let Ok(local_branch) = repo.find_branch(&local_name, BranchType::Local) {
             // Local branch exists — verify it points to the same commit as the remote
@@ -604,24 +722,31 @@ pub fn create_worktree_from(
         });
     }
 
+    // A new branch must not collide with any existing one, not even in
+    // letter case: on macOS and Windows `git worktree add … Develop` would
+    // check out `develop`, and the session's commits would move it. An
+    // existing branch is used only under its exact name (the user chose it).
+    let clash = local_branch_clash(&repo, branch_name);
     if create_branch {
-        // Ensure the branch does not already exist before creating it
-        if repo.find_branch(branch_name, BranchType::Local).is_err() {
-            let base = match base_branch {
-                Some(base) => repo
-                    .find_branch(base, BranchType::Local)
-                    .map_err(|e| format!("Base branch '{}' not found: {}", base, e))?
-                    .into_reference(),
-                None => repo
-                    .head()
-                    .map_err(|e| format!("Failed to get HEAD: {}", e))?,
-            };
-            let commit = base
-                .peel_to_commit()
-                .map_err(|e| format!("Failed to resolve base commit: {}", e))?;
-            repo.branch(branch_name, &commit, false)
-                .map_err(|e| format!("Failed to create branch '{}': {}", branch_name, e))?;
+        if let Some(clash) = clash {
+            return Err(branch_clash_error(branch_name, &clash));
         }
+        let base = match base_branch {
+            Some(base) => repo
+                .find_branch(base, BranchType::Local)
+                .map_err(|e| format!("Base branch '{}' not found: {}", base, e))?
+                .into_reference(),
+            None => repo
+                .head()
+                .map_err(|e| format!("Failed to get HEAD: {}", e))?,
+        };
+        let commit = base
+            .peel_to_commit()
+            .map_err(|e| format!("Failed to resolve base commit: {}", e))?;
+        repo.branch(branch_name, &commit, false)
+            .map_err(|e| format!("Failed to create branch '{}': {}", branch_name, e))?;
+    } else if let Some(clash @ (BranchClash::Case(_) | BranchClash::Folder(_))) = clash {
+        return Err(branch_clash_error(branch_name, &clash));
     }
 
     // Build the `git worktree add` command
@@ -2470,5 +2595,183 @@ mod tests {
         let outside = repo_dir.path().join("..").join("not-ours");
         let err = recreate_worktree(repo_path, outside.to_str().unwrap(), "main").unwrap_err();
         assert!(err.contains("refusing"), "got: {}", err);
+    }
+
+    // ── branch names that differ only in letter case ──────────────────
+
+    #[test]
+    fn test_branch_name_clash_kinds() {
+        let existing = ["main", "develop", "feature/inbox"];
+        let clash = |n: &str| branch_name_clash(n, existing.iter().copied());
+        assert_eq!(clash("develop"), Some(BranchClash::Same("develop".into())));
+        assert_eq!(clash("Develop"), Some(BranchClash::Case("develop".into())));
+        assert_eq!(clash("MAIN"), Some(BranchClash::Case("main".into())));
+        assert_eq!(
+            clash("Feature/other"),
+            Some(BranchClash::Folder("feature/inbox".into()))
+        );
+        assert_eq!(
+            clash("FEATURE/INBOX"),
+            Some(BranchClash::Case("feature/inbox".into()))
+        );
+        assert_eq!(clash("feature/other"), None);
+        assert_eq!(clash("developer"), None);
+        assert_eq!(clash("hermes/develop"), None);
+        // The exact name wins over a case-only match listed before it.
+        assert_eq!(
+            branch_name_clash("Dev", ["dev", "Dev"]),
+            Some(BranchClash::Same("Dev".into()))
+        );
+        assert!(
+            branch_clash_error("Develop", &BranchClash::Case("develop".into()))
+                .starts_with(BRANCH_NAME_CLASH_PREFIX)
+        );
+    }
+
+    fn repo_with_develop() -> (TempDir, String) {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap().to_string();
+        git_out(&repo_path, &["branch", "develop"]);
+        git_out(&repo_path, &["checkout", "-q", "develop"]);
+        std::fs::write(repo_dir.path().join("dev.txt"), "develop work").unwrap();
+        git_out(&repo_path, &["add", "dev.txt"]);
+        git_out(&repo_path, &["commit", "-q", "-m", "develop work"]);
+        git_out(&repo_path, &["checkout", "-q", "-"]);
+        (repo_dir, repo_path)
+    }
+
+    fn local_branches(repo_path: &str) -> Vec<String> {
+        git_out(
+            repo_path,
+            &["branch", "--list", "--format=%(refname:short)"],
+        )
+        .lines()
+        .map(str::to_string)
+        .collect()
+    }
+
+    #[test]
+    fn test_new_branch_differing_only_in_case_is_refused_and_develop_never_moves() {
+        let app_data = create_test_app_data_dir();
+        let (_repo_dir, repo_path) = repo_with_develop();
+        let develop_before = git_out(&repo_path, &["rev-parse", "develop"]);
+        let branches_before = local_branches(&repo_path);
+
+        let err =
+            create_worktree(app_data.path(), &repo_path, "s1", "Develop", true, None).unwrap_err();
+        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
+        assert!(
+            err.contains("'develop'"),
+            "names the existing branch: {err}"
+        );
+
+        // Nothing was made: no branch, no worktree, develop where it was.
+        assert_eq!(local_branches(&repo_path), branches_before);
+        assert_eq!(
+            git_out(&repo_path, &["rev-parse", "develop"]),
+            develop_before
+        );
+        let wt_path = worktree_path_for_session(app_data.path(), &repo_path, "s1", "Develop");
+        assert!(!wt_path.exists());
+        assert!(!git_out(&repo_path, &["worktree", "list"]).contains("Develop"));
+
+        // Asked to use an existing branch "Develop": also refused.
+        let err =
+            create_worktree(app_data.path(), &repo_path, "s1", "Develop", false, None).unwrap_err();
+        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
+        assert_eq!(
+            git_out(&repo_path, &["rev-parse", "develop"]),
+            develop_before
+        );
+    }
+
+    #[test]
+    fn test_new_branch_with_an_existing_name_is_refused() {
+        let app_data = create_test_app_data_dir();
+        let (_repo_dir, repo_path) = repo_with_develop();
+        let err =
+            create_worktree(app_data.path(), &repo_path, "s1", "develop", true, None).unwrap_err();
+        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
+        // A folder that differs only in case is refused too.
+        git_out(&repo_path, &["branch", "feature/inbox"]);
+        let err = create_worktree(app_data.path(), &repo_path, "s2", "Feature/new", true, None)
+            .unwrap_err();
+        assert!(err.contains("'feature/inbox'"), "got: {err}");
+        assert!(!local_branches(&repo_path)
+            .iter()
+            .any(|b| b.eq_ignore_ascii_case("feature/new")));
+    }
+
+    #[test]
+    fn test_choosing_the_existing_branch_uses_it() {
+        let app_data = create_test_app_data_dir();
+        let (_repo_dir, repo_path) = repo_with_develop();
+        let wt =
+            create_worktree(app_data.path(), &repo_path, "s1", "develop", false, None).unwrap();
+        assert_eq!(wt.branch_name, "develop");
+        assert_eq!(
+            get_worktree_branch(&wt.worktree_path).unwrap(),
+            Some("develop".to_string())
+        );
+        // Chosen on purpose: work in the session lands on develop.
+        std::fs::write(Path::new(&wt.worktree_path).join("more.txt"), "m").unwrap();
+        git_out(&wt.worktree_path, &["add", "more.txt"]);
+        git_out(&wt.worktree_path, &["commit", "-q", "-m", "more"]);
+        assert_eq!(
+            git_out(&repo_path, &["rev-parse", "develop"]),
+            git_out(&wt.worktree_path, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[test]
+    fn test_a_remote_branch_whose_local_name_differs_only_in_case_is_refused() {
+        let app_data = create_test_app_data_dir();
+        let (_remote_dir, local_dir) = create_cloned_test_repos();
+        let local_path = local_dir.path().to_str().unwrap();
+        git_out(local_path, &["branch", "Feature-XYZ"]);
+        let before = git_out(local_path, &["rev-parse", "Feature-XYZ"]);
+        let err = create_worktree(
+            app_data.path(),
+            local_path,
+            "session1",
+            "",
+            false,
+            Some("origin/feature-xyz"),
+        )
+        .unwrap_err();
+        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
+        assert_eq!(git_out(local_path, &["rev-parse", "Feature-XYZ"]), before);
+    }
+
+    #[test]
+    fn test_archive_branch_name_is_free_in_letter_case() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        git_out(repo_path, &["branch", "hermes-archive/Task-A"]);
+        // Packed, as `git gc` leaves it: a lookup by name is then exact even
+        // on macOS, and a loose `task-a` would shadow the packed `Task-A`.
+        git_out(repo_path, &["pack-refs", "--all"]);
+        let taken = git_out(repo_path, &["rev-parse", "hermes-archive/Task-A"]);
+        let out = commit_worktree_changes(
+            &wt.worktree_path,
+            "archived",
+            CommitTarget::Archive,
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(out.branch, "hermes-archive/task-a-2");
+        assert_eq!(
+            git_out(repo_path, &["rev-parse", "hermes-archive/Task-A"]),
+            taken
+        );
+        // A folder differing only in case never makes the search run forever.
+        let repo = Repository::open(repo_path).unwrap();
+        git_out(repo_path, &["branch", "Hermes-Archive/other"]);
+        assert_eq!(
+            free_archive_branch_name(&repo, "hermes/new"),
+            "hermes-archive/new"
+        );
     }
 }

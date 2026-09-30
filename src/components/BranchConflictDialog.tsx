@@ -18,7 +18,8 @@ export function validateNewBranchName(name: string, inUse: string): string | nul
   const trimmed = name.trim();
   if (!trimmed) return "Branch name cannot be empty";
   if (/\s/.test(trimmed)) return "Branch name cannot contain spaces";
-  if (trimmed === inUse) return "New branch must have a different name";
+  // Letter case alone does not make it another branch on macOS and Windows.
+  if (trimmed.toLowerCase() === inUse.toLowerCase()) return "New branch must have a different name";
   return null;
 }
 

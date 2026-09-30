@@ -68,6 +68,11 @@ describe("default task branch", () => {
     expect(defaultTaskBranch("task-ab12", ["hermes/task-ab12", "hermes/task-ab12-2"])).toBe("hermes/task-ab12-3");
     expect(defaultTaskBranch("!!!", [])).toBe("hermes/task");
   });
+
+  it("is free in letter case too (on macOS and Windows hermes/Task-AB12 IS hermes/task-ab12)", () => {
+    expect(defaultTaskBranch("task-ab12", ["Hermes/Task-AB12"])).toBe("hermes/task-ab12-2");
+    expect(defaultTaskBranch("task-ab12", ["hermes/TASK-AB12", "HERMES/task-ab12-2"])).toBe("hermes/task-ab12-3");
+  });
 });
 
 describe("pickRestoreId (D2: a restored session keeps its id)", () => {

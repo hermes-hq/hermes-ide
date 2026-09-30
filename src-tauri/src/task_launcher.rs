@@ -53,9 +53,10 @@ pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
         };
     };
     let root = main_checkout(&repo);
+    // Taken also when only the letter case differs (see BranchClash).
     let branch_exists = branch
         .filter(|b| !b.trim().is_empty())
-        .is_some_and(|b| repo.find_branch(b.trim(), BranchType::Local).is_ok());
+        .is_some_and(|b| crate::git::worktree::local_branch_clash(&repo, b.trim()).is_some());
     let local_branches: Vec<String> = repo
         .branches(Some(BranchType::Local))
         .map(|it| {
@@ -197,6 +198,9 @@ mod tests {
         );
         assert!(!probe_repo(dir.path(), Some("hermes/other")).branch_exists);
         assert!(!probe_repo(dir.path(), None).branch_exists);
+        // Only the letter case differs: the same branch on macOS and Windows.
+        assert!(probe_repo(dir.path(), Some("Hermes/Fix-Login")).branch_exists);
+        assert!(probe_repo(dir.path(), Some("HERMES/new-one")).branch_exists);
     }
 
     #[test]

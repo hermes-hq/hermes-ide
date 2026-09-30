@@ -91,6 +91,7 @@ import { getSessionWorktreeInfo } from "./api/git";
 import { writeTaskFeatureFile } from "./api/launcher";
 import { handleUndeliveredTask, launchTask, normalizeRepoPath, type UndeliveredTask } from "./launcher/launchTask";
 import { TASK_LAUNCHES_KEY } from "./launcher/taskLauncher";
+import { LauncherReopen } from "./launcher/launcherReopen";
 import type { TaskLaunchRequest, TaskLaunchResult } from "./components/TaskLauncher";
 import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
@@ -196,7 +197,12 @@ function AppContent() {
   );
   // Task launcher (F15, flag taskLauncher): ⌘N opens it; the creator above
   // stays at ⌘⇧N for SSH, tmux and existing branches.
-  const [taskLauncherOpen, setTaskLauncherOpen] = useState<false | { repo: string | null }>(false);
+  // `gen` names the sheet: a new one (fresh state) mounts when it changes.
+  const [taskLauncherOpen, setTaskLauncherOpen] = useState<false | { repo: string | null; gen: number }>(false);
+  const taskLauncherOpenRef = useRef(taskLauncherOpen);
+  taskLauncherOpenRef.current = taskLauncherOpen;
+  const launcherGenRef = useRef(0);
+  const [launcherReopen] = useState(() => new LauncherReopen());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
@@ -969,8 +975,13 @@ function AppContent() {
     else if (layout.focusedPaneId) dispatch({ type: "SET_PANE_SESSION", paneId: layout.focusedPaneId, sessionId });
   }, [dispatch]);
 
-  /** ⌘N: the launcher, on the repository of the active session. */
-  const openTaskLauncher = useCallback(async () => {
+  /**
+   * ⌘N: the launcher, on the repository of the active session. `fresh`: a
+   * new sheet even if one is open (after a launch that ⌘N came during).
+   */
+  const openTaskLauncher = useCallback(async (fresh = false) => {
+    // The open sheet is finishing a launch and will close: it opens again then.
+    if (!fresh && !launcherReopen.requestOpen(!!taskLauncherOpenRef.current)) return;
     const s = activeSessionRef.current;
     let repo: string | null = null;
     if (s && !s.ssh_info) {
@@ -980,8 +991,15 @@ function AppContent() {
         repo = s.working_directory;
       }
     }
-    setTaskLauncherOpen({ repo });
-  }, []);
+    setTaskLauncherOpen((cur) => ({ repo, gen: cur && !fresh ? cur.gen : ++launcherGenRef.current }));
+  }, [launcherReopen]);
+
+  /** The launcher sheet closed; a ⌘N pressed while it was launching opens a fresh one. */
+  const onTaskLauncherClosed = useCallback(() => {
+    const again = launcherReopen.closed();
+    setTaskLauncherOpen(false);
+    if (again) void openTaskLauncher(true);
+  }, [launcherReopen, openTaskLauncher]);
 
   const openNewSession = useCallback(() => {
     if (launcherOn) void openTaskLauncher();
@@ -1050,6 +1068,18 @@ function AppContent() {
     if (!result.ok) return false;
     return result.sessionIds.length === 0 && result.queued > 0 ? "queued" : true;
   }, [createSession, dispatch, showSession, fleet]);
+
+  /** A launch from the ⌘N sheet, which closes itself once it is done (unless it stays open). */
+  const runSheetLaunch = useCallback(async (req: TaskLaunchRequest): Promise<TaskLaunchResult> => {
+    if (!req.staysOpen) launcherReopen.launchStarted();
+    let result: TaskLaunchResult = false;
+    try {
+      result = await runTaskLaunch(req);
+      return result;
+    } finally {
+      if (!result) launcherReopen.launchFailed();
+    }
+  }, [launcherReopen, runTaskLaunch]);
 
   // ── Instant session creation (Cmd+N / Cmd+T) ──
   const createSessionDirect = useCallback(async () => {
@@ -1724,15 +1754,16 @@ function AppContent() {
       {taskLauncherOpen && (
         <Suspense fallback={null}>
           <TaskLauncher
+            key={taskLauncherOpen.gen}
             defaultRepo={taskLauncherOpen.repo}
-            onClose={() => setTaskLauncherOpen(false)}
+            onClose={onTaskLauncherClosed}
             onOpenAdvanced={openAdvancedCreator}
             onSignIn={(agentId) => void signInAgent(agentId)}
             onManageAccounts={() => {
               setTaskLauncherOpen(false);
               setSettingsOpen("agents");
             }}
-            onLaunch={runTaskLaunch}
+            onLaunch={runSheetLaunch}
           />
         </Suspense>
       )}
