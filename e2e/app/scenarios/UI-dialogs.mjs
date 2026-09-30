@@ -9,6 +9,14 @@
 //   toast            a session that could not be restored (the app's own
 //                    event), whose toast carries an action button
 //   project-picker   "+ Add Project" of a terminal pane
+//   file-preview     the session's Files view: demo.ts of the scanned
+//                    project opens in the editor, a typed character makes it
+//                    dirty, and Back asks in the unsaved-changes confirm
+//                    (Cancel / Discard / Save & Close)
+//   worktree-overview  the Review Desk's (or Git panel's) Worktrees view with
+//                    a synthetic orphaned worktree folder in the test app's
+//                    data folder: its checkbox, Clean up, and the delete
+//                    confirm (Cancel / Delete, danger-solid)
 //   plugin-manager   Settings > Plugins with a synthetic plugin built for the
 //                    old API (the "old API" badge) with a toggle, a select and
 //                    a text setting; its Uninstall asks in a confirm dialog
@@ -17,7 +25,8 @@
 // cannot make cheaply): quit with working agents, plugin update, what's
 // new, handoff, branch in use, uncommitted changes, permission request,
 // projects, shortcuts, cost, add MCP server, the startup problem screen,
-// branch mismatch, a crashed pane.
+// branch mismatch, a crashed pane, the process panel's Kill Process Tree
+// confirm (SIGKILL), a toast with two actions given primary first.
 //
 // For each dialog, in each theme:
 //   - every button, select and checkbox inside is a control-set component
@@ -25,12 +34,18 @@
 //   - heights: buttons 28/32/36, icon buttons 28/32 and square, fields 28/32,
 //     checkboxes 16, toggles 18, tabs 32, chips 24/28, badges 18, counters 16
 //   - at most one primary (brass) or confirm danger-solid button, and it is
-//     the right-most button of its row
+//     the right-most button of its row, on screen: its row's buttons sit on
+//     one line (a row that wraps fails) and none ends to its right
 //   - every focusable control draws the solid 2 px ring in --focus-ring at
 //     >= 3:1 against what is behind it (the stylesheets' own :focus-visible
 //     rules, copied in cascade order onto an attribute, because the test
 //     window has no keyboard focus; the log says whether the real
 //     :focus-visible matched too)
+//   - with real OS key presses (HERMES_E2E_OS_KEYS=1, Linux and Windows CI
+//     runners only): Tab inside the close-session dialog moves keyboard
+//     focus onto its controls, the real :focus-visible matches, and each
+//     focused control draws the solid 2 px ring. Elsewhere (macOS, local
+//     runs) the ring is proven on the copied rules only, and the log says so.
 //   - button and field text >= 4.5:1, field edges >= 3:1 (disabled exempt)
 //   - a screenshot
 //
@@ -39,6 +54,9 @@
 //                                   close dialog before it is measured
 //   HERMES_E2E_UIDIALOGS_EXPECT_MD=30  expects 30 px default controls
 //   HERMES_E2E_UIDIALOGS_NO_RING=1  sets --focus-ring-width to 0
+//   HERMES_E2E_UIDIALOGS_WRAP=1     narrows the uncommitted-changes action
+//                                   rows until the primary wraps onto a line
+//                                   of its own (the DOM order is unchanged)
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/UI-dialogs.mjs
@@ -46,10 +64,11 @@
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/UI-dialogs.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
+import { osKeysAvailable, pressChords } from "../os-keys.mjs";
 
 const SCENARIO = "UI-dialogs";
 const startedAt = Date.now();
@@ -62,6 +81,8 @@ const log = createLogger(logFile);
 const BESPOKE = process.env.HERMES_E2E_UIDIALOGS_BESPOKE === "1";
 const MD = Number(process.env.HERMES_E2E_UIDIALOGS_EXPECT_MD || 32);
 const NO_RING = process.env.HERMES_E2E_UIDIALOGS_NO_RING === "1";
+const OS_KEYS = process.env.HERMES_E2E_OS_KEYS === "1";
+const WRAP = process.env.HERMES_E2E_UIDIALOGS_WRAP === "1";
 const THEMES = [
   ["dark", "frosted-dark"],
   ["light", "frosted-light"],
@@ -89,8 +110,26 @@ const work = mkdtempSync(join(tmpdir(), "hermes-e2e-uidialogs-"));
 const projectDir = join(work, "demo-project");
 mkdirSync(projectDir, { recursive: true });
 writeFileSync(join(projectDir, "README.md"), "# Demo project\n");
+writeFileSync(join(projectDir, "demo.ts"), "export const answer = 42;\n");
 const onWindows = platform() === "win32";
 const homeDir = onWindows ? undefined : mkdtempSync(join(tmpdir(), "hermes-e2e-uidialogs-home-"));
+/** Where the synthetic orphaned worktree folder claims it came from (never created). */
+const goneRepo = join(work, "deleted-repo");
+let orphanPath = null;
+
+/**
+ * An orphaned worktree folder: under the test app's hermes-worktrees/, owned
+ * by no session, made from a repository that is gone (the disk guard's
+ * sweep lists it).
+ */
+function makeOrphan(dataDir) {
+  const hashDir = join(dataDir, "hermes-worktrees", "00000000deadbeef");
+  orphanPath = join(hashDir, "cafebabe_old-task");
+  mkdirSync(orphanPath, { recursive: true });
+  writeFileSync(join(orphanPath, "notes.txt"), "left behind\n");
+  writeFileSync(join(hashDir, "repo_path.txt"), goneRepo);
+  log(`  made an orphaned worktree folder in the test app's data folder`);
+}
 
 /** A plugin built for the original API (no apiVersion) with one setting of each kind. */
 function installPlugin(dataDir) {
@@ -238,9 +277,14 @@ window.__uiDlgInspect = (rootSel, opts) => {
   for (const k of ["h-btn", "h-icon-btn", "h-input", "h-checkbox", "h-toggle", "h-tab", "h-chip", "h-badge", "h-counter"]) out.counts[k] = inRoot("." + k).length;
 
   // 3. One strong button, right-most in its row.
+  // On screen, not in the DOM: the buttons of its row share one line (a row
+  // that wraps puts the primary on a line of its own) and none ends to its right.
   for (const s of inRoot(".h-btn--primary, .h-btn--danger-solid")) {
     const row = [...s.parentElement.children].filter((c) => c.tagName === "BUTTON" && visible(c));
-    out.strong.push({ name: nameOf(s), variant: s.matches(".h-btn--primary") ? "primary" : "danger-solid", last: row[row.length - 1] === s });
+    const box = s.getBoundingClientRect();
+    const oneLine = row.every((c) => Math.abs(c.getBoundingClientRect().top - box.top) <= 4);
+    const rightMost = row.every((c) => c === s || c.getBoundingClientRect().right <= box.left + 1);
+    out.strong.push({ name: nameOf(s), variant: s.matches(".h-btn--primary") ? "primary" : "danger-solid", last: oneLine && rightMost, oneLine, rightMost, row: row.length });
   }
 
   // 4. The ring, on every focusable control.
@@ -297,7 +341,7 @@ async function inspect(bridge, where, rootSel, opts = {}) {
   const strong = r.strong;
   check(strong.length <= (opts.maxStrong ?? 1), `${where}: at most ${opts.maxStrong ?? 1} primary / confirm button (${strong.map((s) => `${s.variant} "${s.name}"`).join(", ") || "none"})`);
   if (opts.strong !== undefined) check(strong.length === 1 && strong[0].variant === opts.strong, `${where}: its ${opts.strong} button is there`);
-  check(strong.every((s) => s.last), `${where}: the primary is the right-most button of its row`);
+  check(strong.every((s) => s.last), `${where}: the primary is the right-most button of its row, on one line${strong.some((s) => !s.last) ? ` (${strong.filter((s) => !s.last).map((s) => `"${s.name}": one line=${s.oneLine}, right-most=${s.rightMost}, ${s.row} buttons`).join("; ")})` : ""}`);
   // Tabs and segments draw the same ring inset (offset -2 px) so their container does not clip it.
   const badRing = r.ring.filter((x) => !(x.style === "solid" && x.width >= 2 && x.offset >= -2 && x.ratio >= 3));
   check(r.ring.length > 0 && badRing.length === 0, `${where}: all ${r.ring.length} focusable controls draw the solid 2 px ring at >= 3:1${badRing.length ? ` (missing on: ${badRing.map((x) => `"${x.name}" ${x.style} ${x.width}px ${x.ratio}:1`).join("; ")})` : ""}`);
@@ -349,19 +393,32 @@ let app;
 let failed = false;
 
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}   expect md=${MD}px   bespoke control=${BESPOKE}   no ring=${NO_RING}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}   expect md=${MD}px   bespoke control=${BESPOKE}   no ring=${NO_RING}   real keys=${OS_KEYS}`);
+  if (OS_KEYS && !osKeysAvailable()) throw new Error("HERMES_E2E_OS_KEYS=1 needs a Linux or Windows CI runner (CI=true); never on macOS");
   app = await launchApp({
     runDir: join(evidenceDir, "run"),
     log,
     home: onWindows ? "real" : "private",
     homeDir,
-    prepareDataDir: installPlugin,
+    prepareDataDir: (dataDir) => {
+      installPlugin(dataDir);
+      makeOrphan(dataDir);
+    },
   });
   const { bridge } = app;
   await returningUser(bridge);
   if (NO_RING) {
     await bridge.eval(`document.documentElement.style.setProperty("--focus-ring-width", "0px"); return true;`);
     log("  NEGATIVE CONTROL: --focus-ring-width forced to 0px");
+  }
+  if (WRAP) {
+    await bridge.eval(`
+      const st = document.createElement("style");
+      st.textContent = ".dirty-wt-actions-row { flex-wrap: wrap; max-width: 240px; margin-left: auto; }";
+      document.head.appendChild(st);
+      return true;
+    `);
+    log("  NEGATIVE CONTROL: the uncommitted-changes action rows narrowed until they wrap");
   }
 
   log("step 1: a plain terminal, then its close button: the close-session dialog");
@@ -388,6 +445,38 @@ try {
   };
   await openClose();
   await eachTheme(bridge, "close-session", ".close-dialog", { strong: "danger-solid" });
+
+  log("step 1b: real keyboard focus (Tab) in the close-session dialog");
+  if (OS_KEYS) {
+    const at = await bridge.eval(`
+      const r = e2e.must(e2e.first(".close-dialog-title"), "the dialog's title").getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), innerWidth: window.innerWidth, innerHeight: window.innerHeight, dpr: window.devicePixelRatio || 1 };
+    `);
+    await bridge.eval(`document.activeElement?.blur(); return true;`);
+    // Click the title with the real mouse (the webview takes keyboard focus),
+    // then Tab through the dialog: the checkbox, Cancel, the confirm.
+    const seen = [];
+    for (let i = 0; i < 3; i++) {
+      const diag = await pressChords(app.child.pid, ["tab"], i === 0 ? { clickAt: at } : {});
+      if (i === 0) log(`  real key presses sent: ${JSON.stringify(diag)}`);
+      const got = await bridge.waitFor(`focus after Tab ${i + 1}`, `
+        const el = document.activeElement;
+        if (!el || el === document.body) return null;
+        const cs = getComputedStyle(el);
+        return { hasFocus: document.hasFocus(), inDialog: !!el.closest(".close-dialog"), focusVisible: el.matches(":focus-visible"), what: el.tagName.toLowerCase() + "." + String(el.className).trim().split(/\\s+/).join("."), name: (el.getAttribute("aria-label") || el.innerText || "").trim(), outline: cs.outlineStyle + " " + (parseFloat(cs.outlineWidth) || 0) + "px" };
+      `, { timeoutMs: 10_000 });
+      log(`  after Tab ${i + 1}: ${JSON.stringify(got)}`);
+      seen.push(got);
+      await bridge.screenshot(join(evidenceDir, `close-session-real-tab-${i + 1}.png`));
+    }
+    check(seen.every((f) => f.hasFocus && f.inDialog), "the window has keyboard focus and every Tab stays inside the close dialog");
+    check(new Set(seen.map((f) => f.what + f.name)).size === seen.length, `Tab moved through ${seen.length} different controls (${seen.map((f) => f.name || f.what).join(" -> ")})`);
+    check(seen.every((f) => f.focusVisible), "the real :focus-visible matches on each control reached with Tab");
+    check(seen.every((f) => /^solid ([2-9]|\d{2,})/.test(f.outline)), `each control reached with Tab draws the solid 2 px ring (${seen.map((f) => f.outline).join(", ")})`);
+    await bridge.eval(`document.activeElement?.blur(); return true;`);
+  } else {
+    log(`  skipped here: real key presses run only on Linux and Windows CI runners (this is ${platform()}${OS_KEYS ? "" : ", HERMES_E2E_OS_KEYS unset"}); the dialogs' rings below are measured on the copied :focus-visible rules`);
+  }
   await bridge.clickByName("Cancel", { within: ".close-dialog" });
   await bridge.waitFor("the close dialog to close", `return !e2e.first(".close-dialog");`);
   assert((await bridge.eval(`return e2e.all(".session-item").length;`)) === 1, "Cancel kept the session");
@@ -406,6 +495,62 @@ try {
   await eachTheme(bridge, "project-picker", ".project-picker", { strong: "primary" });
   await bridge.clickByName("Done", { within: ".project-picker-footer" });
   await bridge.waitFor("the project picker to close", `return !e2e.first(".project-picker");`);
+
+  log("step 2b: the file preview: demo.ts in the editor, one typed character, Back asks about the unsaved change");
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first('.session-subview-btn[title="Files"]'), "Files button"));`);
+  await bridge.waitFor("demo.ts in the file explorer", `return e2e.all(".file-tree-node").some((n) => (n.title || "").endsWith("demo.ts"));`, { timeoutMs: 20_000 });
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".file-tree-node").find((n) => (n.title || "").endsWith("demo.ts")), "demo.ts"));`);
+  await bridge.waitFor("the editor with the file", `return !!e2e.first(".file-preview .cm-editor .cm-content") && e2e.first(".cm-content").innerText.includes("answer = 42");`, { timeoutMs: 20_000 });
+  const typed = await bridge.eval(`
+    const content = e2e.first(".cm-content");
+    content.focus();
+    const sel = window.getSelection();
+    sel.selectAllChildren(content.querySelector(".cm-line") || content);
+    sel.collapseToEnd();
+    document.execCommand("insertText", false, "!");
+    return true;
+  `);
+  assert(typed, "a character was typed into the editor");
+  await bridge.waitFor("the unsaved-changes dot", `return !!e2e.first(".file-preview-header .file-editor-dirty-dot");`, { timeoutMs: 10_000 });
+  await eachTheme(bridge, "file-preview-header", ".file-preview-header");
+  await bridge.click(".file-preview-back");
+  await bridge.waitFor("the unsaved-changes confirm", `return !!e2e.first(".file-editor-confirm-dialog");`);
+  await eachTheme(bridge, "file-preview-unsaved", ".file-editor-confirm-dialog", { strong: "primary" });
+  const unsavedRow = await bridge.eval(`return e2e.all(".file-editor-confirm-actions button").map((b) => ({ name: e2e.norm(b.innerText), cls: b.className }));`);
+  log(`  unsaved confirm: ${JSON.stringify(unsavedRow)}`);
+  check(
+    unsavedRow.map((b) => b.name).join("|") === "Cancel|Discard|Save & Close" && /h-btn--danger\b/.test(unsavedRow[1].cls) && /h-btn--primary/.test(unsavedRow[2].cls),
+    "the unsaved confirm reads Cancel, Discard (danger), Save & Close (primary)",
+  );
+  await bridge.clickByName("Discard", { within: ".file-editor-confirm-dialog" });
+  await bridge.waitFor("the file preview to close", `return !e2e.first(".file-preview") && !e2e.first(".file-editor-confirm-dialog");`);
+  assert(true, "Discard closed the file without saving");
+
+  log("step 2c: Worktrees: the orphaned folder, its checkbox, Clean up and the delete confirm");
+  if (await bridge.exists('.session-subview-btn[title="Review Desk"]')) {
+    await bridge.click('.session-subview-btn[title="Review Desk"]');
+    await bridge.waitFor("the Review Desk", `return !!e2e.first(".review-desk");`);
+    await bridge.clickByName("Worktrees", { within: ".review-desk" });
+  } else {
+    await bridge.click('.session-subview-btn[title="Git"]');
+    await bridge.waitFor("the session Git panel", `return !!e2e.first(".session-git-panel");`);
+    await bridge.clickByName("Worktrees", { within: ".session-git-panel" });
+  }
+  await bridge.waitFor("the orphaned folder in the list", `return e2e.all(".worktree-overview-orphan").some((el) => el.dataset.worktreePath === ${JSON.stringify(orphanPath)});`, { timeoutMs: 20_000 });
+  await bridge.clickWhenReady(`
+    const row = e2e.all(".worktree-overview-orphan").find((el) => el.dataset.worktreePath === ${JSON.stringify(orphanPath)});
+    return e2e.click(e2e.must(row?.querySelector("input.h-checkbox"), "the orphan's checkbox"));
+  `);
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".worktree-overview-cleanup-btn").find((b) => /^Clean up \\(1\\)/.test(e2e.norm(b.innerText))), "Clean up (1)"));`);
+  await bridge.waitFor("the delete confirm", `return !!e2e.first(".worktree-overview-confirm");`);
+  await eachTheme(bridge, "worktree-overview", ".worktree-overview", { strong: "danger-solid" });
+  await bridge.clickByName("Cancel", { within: ".worktree-overview-confirm" });
+  await bridge.waitFor("the confirm to close", `return !e2e.first(".worktree-overview-confirm");`);
+  assert(existsSync(orphanPath), "Cancel kept the orphaned folder on disk");
+  if (await bridge.exists(".review-desk")) {
+    await bridge.click(".review-desk .review-close");
+    await bridge.waitFor("the Review Desk to close", `return !e2e.first(".review-desk-backdrop");`);
+  }
 
   log("step 3: an update, opened from the status bar's version chip");
   await bridge.eval(`window.__HERMES_E2E__.forceUpdateReady("99.0.0", "A synthetic update for the dialog check"); return true;`);
@@ -471,6 +616,8 @@ try {
     ["startup-problem", ".startup-problem-card", { strong: "primary" }],
     ["branch-mismatch", ".branch-mismatch-alert", {}],
     ["pane-crash", ".contained-error", { strong: "primary" }],
+    ["process-kill", ".close-dialog", { strong: "danger-solid" }],
+    ["toast-actions", '[data-testid="e2e-dialog-gallery"] .toast-container', { strong: "primary" }],
   ];
   for (const [name, rootSel, opts] of gallery) {
     log(`  — ${name}`);
@@ -512,5 +659,5 @@ finishScenario({
   failed,
   startedAt,
   log,
-  details: { negativeControl: BESPOKE || NO_RING || MD !== 32, problems },
+  details: { negativeControl: BESPOKE || NO_RING || WRAP || MD !== 32, realKeys: OS_KEYS, problems },
 });

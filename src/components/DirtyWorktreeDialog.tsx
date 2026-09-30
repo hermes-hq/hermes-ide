@@ -256,42 +256,53 @@ export function DirtyWorktreeDialog({
         )}
 
         {/* Actions */}
-        <div className="dirty-wt-actions">
-          <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
-            Cancel
-          </Button>
-          {committing ? (
-            <>
+        {committing ? (
+          // Four long choices do not fit one row: the two other ways out sit
+          // on a row of their own, above Cancel and the one primary.
+          <div className="dirty-wt-actions dirty-wt-actions--rows">
+            <div className="dirty-wt-actions-row">
               <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
                 Discard changes and close
               </Button>
               <Button className="dirty-wt-btn--archive" onClick={handleArchiveAndClose} disabled={stashing}>
                 Archive (keep branch)
               </Button>
+            </div>
+            <div className="dirty-wt-actions-row">
+              <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
+                Cancel
+              </Button>
               <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleCommitAndClose} disabled={stashing}>
                 {stashing ? "Saving changes..." : "Commit to session branch & close"}
               </Button>
-            </>
-          ) : stashErrors && stashErrors.length > 0 ? (
-            <>
-              <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
-                Discard changes and close
-              </Button>
-              <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
-                {stashing ? "Stashing changes..." : "Try Again"}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
-                Discard changes and close
-              </Button>
-              <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
-                {stashing ? "Stashing changes..." : "Stash & Close"}
-              </Button>
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        ) : (
+          <div className="dirty-wt-actions">
+            <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
+              Cancel
+            </Button>
+            {stashErrors && stashErrors.length > 0 ? (
+              <>
+                <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+                  Discard changes and close
+                </Button>
+                <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
+                  {stashing ? "Stashing changes..." : "Try Again"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+                  Discard changes and close
+                </Button>
+                <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
+                  {stashing ? "Stashing changes..." : "Stash & Close"}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

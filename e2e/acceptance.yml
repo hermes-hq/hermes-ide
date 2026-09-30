@@ -1214,9 +1214,16 @@ features:
       # components with synthetic data, src/e2e/DialogGallery.tsx). That no
       # file gains a bespoke button, select or checkbox is enforced by
       # scripts/check-controls.mjs in the Frontend job, not by a scenario.
+      # The file preview and the Worktrees view are opened for real too (a
+      # typed character, a synthetic orphaned folder). The ring is measured
+      # on the copied :focus-visible rules everywhere; UI-11 presses Tab for
+      # real on the Linux and Windows CI runners (macOS runs no OS input).
       UI-10:
-        text: "Close, quit, update and plugin update, what's new, handoff, branch in use, uncommitted changes, permission request, project and workspace pickers, toasts and Settings > Plugins (tabs, counters, the old-API badge, a plugin's settings, the uninstall confirm) use only control-set buttons, fields, checkboxes and badges at their sizes, with at most one primary (right-most) and the solid focus ring, and meet the contrast rules in Frosted Dark and Frosted Light"
+        text: "Close, quit, update and plugin update, what's new, handoff, branch in use, uncommitted changes, permission request, project and workspace pickers, toasts, Settings > Plugins (tabs, counters, the old-API badge, a plugin's settings, the uninstall confirm), the file preview and its unsaved-changes confirm, the Worktrees view and its delete confirm, and the Kill Process Tree confirm use only control-set buttons, fields, checkboxes and badges at their sizes, with at most one primary (right-most on one line) and the solid focus ring, and meet the contrast rules in Frosted Dark and Frosted Light"
         scenarios: [UI-dialogs.mjs]
+      UI-11:
+        text: "With real key presses, Tab moves keyboard focus through the close-session dialog's checkbox and buttons, :focus-visible matches and each draws the solid 2 px ring"
+        scenarios: ["UI-dialogs.mjs@linux,win32"]
   CAP:
     name: "Models, effort and accounts for every agent (2.0 launch contract)"
     # The launcher's own chips (model, effort, account, presets row) are

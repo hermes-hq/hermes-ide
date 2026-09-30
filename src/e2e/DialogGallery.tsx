@@ -24,6 +24,8 @@ import { AddMcpDialog } from "../components/AddMcpDialog";
 import { StartupProblemScreen } from "../components/StartupProblemScreen";
 import { BranchMismatchAlert } from "../components/BranchMismatchAlert";
 import { ContainedErrorBoundary } from "../components/ContainedErrorBoundary";
+import { KillConfirmDialog } from "../components/ProcessPanel";
+import { ToastContainer } from "../components/ToastContainer";
 import { Button } from "../components/ui";
 import { WHATS_NEW_PREVIEW_STORAGE_KEY } from "../components/startupDialogSettings";
 import { changelog } from "../data/changelog";
@@ -44,6 +46,8 @@ export const GALLERY_DIALOGS = [
 	"startup-problem",
 	"branch-mismatch",
 	"pane-crash",
+	"process-kill",
+	"toast-actions",
 ] as const;
 export type GalleryDialog = (typeof GALLERY_DIALOGS)[number];
 
@@ -188,6 +192,39 @@ function render(name: GalleryDialog, close: () => void, firstSession: ReturnType
 			);
 		case "branch-mismatch":
 			return <BranchMismatchAlert branch="hermes/search-index" sessionLabel="Search index" onDismiss={noop} />;
+		case "process-kill":
+			// Kill Process Tree with SIGKILL: the warning shows, the confirm is danger-solid.
+			return (
+				<KillConfirmDialog
+					processName="node"
+					pid={4242}
+					signal="SIGKILL"
+					isTree
+					onConfirm={close}
+					onCancel={close}
+					skipConfirm={false}
+					onToggleSkip={noop}
+				/>
+			);
+		case "toast-actions":
+			// Two actions given primary first: the toast still puts the primary right-most.
+			return (
+				<ToastContainer
+					toasts={[
+						{
+							id: "e2e-toast",
+							message: "2 plugin updates available",
+							type: "info",
+							duration: null,
+							actions: [
+								{ label: "Review & Update", primary: true, onClick: noop },
+								{ label: "Later", onClick: noop },
+							],
+						},
+					]}
+					onDismiss={close}
+				/>
+			);
 		case "pane-crash":
 			return (
 				<Stage width="min(720px, 92vw)" height="60vh">

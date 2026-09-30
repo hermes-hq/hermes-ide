@@ -238,11 +238,6 @@ const hooks = {
     };
     window.__HERMES_TEST_UPDATE__.forcedUpdate = { version, body };
   },
-  /**
-   * UI-D: open one of the dialogs whose real trigger needs state a test run
-   * cannot make cheaply (src/e2e/DialogGallery.tsx lists them), or close it
-   * with null. The dialog is the app's own component, in the app's providers.
-   */
   /** A plain shell session (no agent), shown in the focused pane. Returns its id. */
   newTerminal: async (opts: { label?: string; cwd?: string } = {}): Promise<string | null> => {
     const bridge = getE2ESessionBridge();
@@ -252,6 +247,11 @@ const hooks = {
     bridge.show(session.id);
     return session.id;
   },
+  /**
+   * UI-D: open one of the dialogs whose real trigger needs state a test run
+   * cannot make cheaply (src/e2e/DialogGallery.tsx lists them), or close it
+   * with null. The dialog is the app's own component, in the app's providers.
+   */
   showDialog: (name: string | null): void => {
     if (name === null) window.localStorage.removeItem(WHATS_NEW_PREVIEW_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent(GALLERY_EVENT, { detail: name }));

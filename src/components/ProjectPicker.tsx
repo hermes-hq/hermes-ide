@@ -1,5 +1,6 @@
 import "../styles/components/ProjectPicker.css";
 import { Button, CloseButton, IconButton, Input } from "./ui";
+import { translate } from "../i18n/registry";
 import { CloseGlyph } from "./ui/icons";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -138,7 +139,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
           <span className="project-picker-count">
             {attachedProjects.length} attached
           </span>
-          <CloseButton className="project-picker-close" onClick={handleClose} label="Close" />
+          <CloseButton className="project-picker-close" onClick={handleClose} label={translate("common.close")} />
         </div>
 
         <Input

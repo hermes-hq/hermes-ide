@@ -61,11 +61,12 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
 					{toast.actions && toast.actions.length > 0 && (
 						<div className="toast-actions">
 							{/* The primary action, if any, is the right-most. */}
-							{[...toast.actions]
-								.sort((a, b) => Number(!!a.primary) - Number(!!b.primary))
-								.map((action) => (
+							{toast.actions
+								.map((action, index) => ({ action, index }))
+								.sort((a, b) => Number(!!a.action.primary) - Number(!!b.action.primary))
+								.map(({ action, index }) => (
 									<Button
-										key={action.label}
+										key={`${index}:${action.label}`}
 										size="sm"
 										variant={action.primary ? "primary" : "secondary"}
 										className={action.primary ? "toast-action-primary" : "toast-action-btn"}

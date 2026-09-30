@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { BASELINE_FILE, compareToBaseline, countFindings, findControls, isAllowed, scanCss, scanTsx } from "./check-controls.mjs";
+import { BASELINE_FILE, classesNamedIn, compareToBaseline, countFindings, findControls, isAllowed, scanCss, scanTsx } from "./check-controls.mjs";
 
 describe("scanTsx", () => {
   it("finds raw buttons, selects and checkboxes, with their classes", () => {
@@ -68,6 +68,17 @@ describe("scanCss", () => {
   });
 });
 
+describe("classesNamedIn", () => {
+  it("collects every class of every selector, context included, but not keyframe steps", () => {
+    const named = classesNamedIn(`
+      .a .b > .c:hover, .d { color: red; }
+      @media (min-width: 1px) { .e:not(.f) { margin: 0; } }
+      @keyframes k { from { opacity: 0; } }
+    `);
+    expect([...named].sort()).toEqual(["a", "b", "c", "d", "e", "f"]);
+  });
+});
+
 describe("allowlist", () => {
   it("allows the terminal and the editor, and the editor's own classes only in the file preview", () => {
     expect(isAllowed("src/components/TerminalPane.tsx")).toBe(true);
@@ -89,11 +100,13 @@ describe("findControls on a source tree", () => {
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), "check-controls-"));
     write("src/components/Dialog.tsx", `export const D = () => (<div><Button className="dlg-ok">OK</Button><button className="dlg-x">x</button></div>);`);
+    // A raw button whose stylesheet was deleted (the class is named nowhere any more).
+    write("src/components/Orphaned.tsx", `export const O = () => <button className="gone-btn gone-btn-confirm">Kill</button>;`);
     write("src/components/Clean.tsx", `export const C = () => <Button className="clean-ok">OK</Button>;`);
     write("src/components/TerminalPane.tsx", `export const T = () => <button className="term-btn">t</button>;`);
     write("src/components/ui/Button.tsx", `export const B = () => <button className="h-btn" />;`);
     write("src/__tests__/x.test.tsx", `export const X = () => <button className="test-only" />;`);
-    write("src/styles/components/Dialog.css", `.dlg-ok { background: red; }\n.dialog-body button { color: red; }\n.clean-ok { margin-left: auto; }\n`);
+    write("src/styles/components/Dialog.css", `.dlg-ok { background: red; }\n.dialog-body button { color: red; }\n.clean-ok { margin-left: auto; }\n.dlg .dlg-x:hover { color: red; }\n`);
     write("src/styles/ui/button.css", `.h-btn { background: var(--primary-bg); }\n.x button { color: red; }\n`);
   });
   afterAll(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
@@ -106,18 +119,31 @@ describe("findControls on a source tree", () => {
         "element-rule src/styles/components/Dialog.css",
         "kit-override src/components/Dialog.tsx",
         "raw-control src/components/Dialog.tsx",
+        "raw-control src/components/Orphaned.tsx",
+        "unstyled-raw src/components/Orphaned.tsx",
       ].sort(),
     );
+    expect(findings.find((f) => f.kind === "unstyled-raw").what).toBe('<button class="gone-btn gone-btn-confirm">: no stylesheet names these classes');
     const allowed = findings.filter((f) => f.allowed).map((f) => f.file);
     expect(allowed).toContain("src/components/TerminalPane.tsx");
     expect(allowed).toContain("src/components/ui/Button.tsx");
     expect(findings.some((f) => f.file.includes("__tests__"))).toBe(false);
   });
 
+  it("fails a raw control whose stylesheet was deleted, even when its raw-control count holds", () => {
+    const { over } = compareToBaseline(findControls({ root }), {
+      "raw-control": { "src/components/Dialog.tsx": 1, "src/components/Orphaned.tsx": 1 },
+      "kit-override": { "src/components/Dialog.tsx": 1 },
+      "element-rule": { "src/styles/components/Dialog.css": 1 },
+    });
+    expect(over.map((o) => `${o.kind} ${o.file} ${o.now}>${o.baseline}`)).toEqual(["unstyled-raw src/components/Orphaned.tsx 1>0"]);
+  });
+
   it("fails a file that gains a finding over its baseline and only notes one that lost some", () => {
     const findings = findControls({ root });
     const { over, under } = compareToBaseline(findings, {
-      "raw-control": { "src/components/Dialog.tsx": 0 },
+      "raw-control": { "src/components/Dialog.tsx": 0, "src/components/Orphaned.tsx": 1 },
+      "unstyled-raw": { "src/components/Orphaned.tsx": 1 },
       "kit-override": { "src/components/Dialog.tsx": 1 },
       "element-rule": { "src/styles/components/Dialog.css": 3 },
     });

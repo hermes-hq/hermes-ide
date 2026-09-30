@@ -1,9 +1,11 @@
 import { useState, useMemo, useCallback, useRef, memo } from "react";
 import "../styles/components/ProcessPanel.css";
+import "../styles/components/CloseSessionDialog.css";
 import { useProcesses } from "../hooks/useProcesses";
 import { killProcess, killProcessTree, getProcessDetail, revealProcessInFinder } from "../api/processes";
 import type { ProcessInfo, ProcessSortField, SortDirection, ProcessFilter } from "../types/process";
 import { useContextMenu, buildProcessMenuItems } from "../hooks/useContextMenu";
+import { Button, Checkbox } from "./ui";
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -239,7 +241,7 @@ interface KillConfirmDialogProps {
   onToggleSkip: () => void;
 }
 
-function KillConfirmDialog({ processName, pid, signal, isTree, onConfirm, onCancel, skipConfirm, onToggleSkip }: KillConfirmDialogProps) {
+export function KillConfirmDialog({ processName, pid, signal, isTree, onConfirm, onCancel, skipConfirm, onToggleSkip }: KillConfirmDialogProps) {
   const isDangerous = signal === "SIGKILL" || isTree;
   return (
     <div className="close-dialog-backdrop" onClick={onCancel}>
@@ -258,15 +260,12 @@ function KillConfirmDialog({ processName, pid, signal, isTree, onConfirm, onCanc
             </div>
           )}
         </div>
-        <label className="close-dialog-checkbox">
-          <input type="checkbox" checked={skipConfirm} onChange={onToggleSkip} />
-          Don't ask again this session
-        </label>
+        <Checkbox className="close-dialog-checkbox" checked={skipConfirm} onChange={onToggleSkip} label="Don't ask again this session" />
         <div className="close-dialog-actions">
-          <button className="close-dialog-btn" onClick={onCancel}>Cancel</button>
-          <button className="close-dialog-btn close-dialog-btn-confirm" onClick={onConfirm}>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button variant="danger-solid" className="process-kill-confirm" onClick={onConfirm}>
             {isTree ? "Kill Tree" : "Kill"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

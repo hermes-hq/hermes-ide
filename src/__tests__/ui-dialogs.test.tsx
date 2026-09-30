@@ -23,6 +23,7 @@ import { BranchConflictDialog } from "../components/BranchConflictDialog";
 import { DirtyWorktreeDialog } from "../components/DirtyWorktreeDialog";
 import { PermissionRequestModal } from "../components/PermissionRequestModal";
 import { ToastContainer } from "../components/ToastContainer";
+import { KillConfirmDialog } from "../components/ProcessPanel";
 import type { UpdateState } from "../hooks/useAutoUpdater";
 
 afterEach(() => cleanup());
@@ -160,9 +161,46 @@ describe("worktree dialogs", () => {
         onCancel={vi.fn()}
       />,
     );
-    expectActionRow(document.querySelector(".dirty-wt-actions"), "primary");
+    // Four long choices: the other ways out on a row of their own, then Cancel and the one primary.
+    const rows = [...document.querySelectorAll(".dirty-wt-actions--rows > .dirty-wt-actions-row")];
+    expect(rows.map((r) => [...r.querySelectorAll("button")].map((b) => b.textContent))).toEqual([
+      ["Discard changes and close", "Archive (keep branch)"],
+      ["Cancel", "Commit to session branch & close"],
+    ]);
+    expectActionRow(rows[0], null);
+    expectActionRow(rows[1], "primary");
     expect(screen.getByRole("button", { name: "Discard changes and close" })).toHaveClass("h-btn--danger");
     expect(screen.getByRole("button", { name: "Close" })).toHaveClass("h-close-btn");
+  });
+});
+
+describe("process panel", () => {
+  it("Kill Process Tree: Cancel, then the danger-solid Kill Tree; the kit checkbox; each does what it says", () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    const onToggleSkip = vi.fn();
+    render(
+      <KillConfirmDialog processName="node" pid={42} signal="SIGKILL" isTree onConfirm={onConfirm} onCancel={onCancel} skipConfirm={false} onToggleSkip={onToggleSkip} />,
+    );
+    expectActionRow(document.querySelector(".close-dialog-actions"), "danger-solid");
+    expect(screen.getByRole("button", { name: "Kill Tree" })).toHaveClass("h-btn--danger-solid");
+    expect(screen.getByText(/may cause data loss/)).toBeInTheDocument();
+    const box = screen.getByRole("checkbox", { name: "Don't ask again this session" });
+    expect(box).toHaveClass("h-checkbox");
+    fireEvent.click(box);
+    expect(onToggleSkip).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Kill Tree" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("a plain SIGTERM kill: the confirm reads Kill and there is no data-loss warning", () => {
+    render(<KillConfirmDialog processName="node" pid={42} signal="SIGTERM" isTree={false} onConfirm={vi.fn()} onCancel={vi.fn()} skipConfirm onToggleSkip={vi.fn()} />);
+    expectActionRow(document.querySelector(".close-dialog-actions"), "danger-solid");
+    expect(screen.getByRole("button", { name: "Kill" })).toBeInTheDocument();
+    expect(screen.queryByText(/may cause data loss/)).toBeNull();
+    expect(screen.getByRole("checkbox")).toBeChecked();
   });
 });
 
@@ -217,5 +255,24 @@ describe("toasts", () => {
     expect(review).toHaveBeenCalledTimes(1);
     expect(dismiss).toHaveBeenCalledWith("t1");
     expect(screen.getByRole("button", { name: "Close" })).toHaveClass("h-close-btn");
+  });
+
+  it("two actions with the same label both render and each runs its own handler", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ToastContainer
+        toasts={[{ id: "t2", message: "Two of a kind", type: "info", duration: null, actions: [{ label: "Open", onClick: first }, { label: "Open", onClick: second }] }]}
+        onDismiss={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByRole("button", { name: "Open" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("same key"))).toBe(false);
+    warn.mockRestore();
   });
 });

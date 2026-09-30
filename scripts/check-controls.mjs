@@ -16,6 +16,11 @@
 //                 stylesheet outside src/styles/ui/ uses to change how the
 //                 control looks (height, padding, colours, border, font…).
 //                 Layout (margin, flex, width, position…) is fine.
+//   unstyled-raw  a raw control (above) with classes, none of which any
+//                 stylesheet names: the rules it was drawn with are gone, so
+//                 unless an element rule reaches it, it renders as a bare OS
+//                 control. Deleting a migrated screen's CSS while another
+//                 screen still uses its classes on raw controls shows here.
 //
 // The terminal and the code editor draw their own chrome and are allowed
 // (ALLOWLIST below). Everything else found today is the migration debt in
@@ -286,14 +291,27 @@ export function cssRules(source) {
   return rules;
 }
 
+/** Every class a stylesheet names in any selector (not only a rule's subject). */
+export function classesNamedIn(source) {
+  const out = new Set();
+  for (const rule of cssRules(source)) {
+    if (rule.inKeyframes) continue;
+    for (const sel of rule.selectors) for (const m of sel.matchAll(/\.([A-Za-z_][\w-]*)/g)) out.add(m[1]);
+  }
+  return out;
+}
+
 /** All findings in the repo (or in `root`), allowed ones marked. */
 export function findControls({ root = ROOT } = {}) {
   const src = join(root, "src");
   const findings = [];
   const cssLook = new Map(); // class -> [{file, line}]
+  const cssNamed = new Set(); // every class any stylesheet names, anywhere in a selector
   for (const full of walk(src, [".css"])) {
     const file = toPosix(relative(root, full));
-    const { elementRules, lookClasses } = scanCss(readFileSync(full, "utf8"));
+    const source = readFileSync(full, "utf8");
+    for (const c of classesNamedIn(source)) cssNamed.add(c);
+    const { elementRules, lookClasses } = scanCss(source);
     for (const r of elementRules) {
       findings.push({ kind: "element-rule", file, line: r.line, what: r.selector, allowed: isAllowed(file, r.classes) });
     }
@@ -307,13 +325,11 @@ export function findControls({ root = ROOT } = {}) {
     const file = toPosix(relative(root, full));
     const { raw, kitClasses } = scanTsx(readFileSync(full, "utf8"), file);
     for (const r of raw) {
-      findings.push({
-        kind: "raw-control",
-        file,
-        line: r.line,
-        what: `<${r.kind === "checkbox" ? 'input type="checkbox"' : r.kind}${r.classes.length ? ` class="${r.classes.join(" ")}"` : ""}>`,
-        allowed: isAllowed(file, r.classes),
-      });
+      const what = `<${r.kind === "checkbox" ? 'input type="checkbox"' : r.kind}${r.classes.length ? ` class="${r.classes.join(" ")}"` : ""}>`;
+      findings.push({ kind: "raw-control", file, line: r.line, what, allowed: isAllowed(file, r.classes) });
+      if (r.classes.length && !r.classes.some((c) => cssNamed.has(c))) {
+        findings.push({ kind: "unstyled-raw", file, line: r.line, what: `${what}: no stylesheet names these classes`, allowed: isAllowed(file, r.classes) });
+      }
     }
     for (const k of kitClasses) {
       for (const c of k.classes) {

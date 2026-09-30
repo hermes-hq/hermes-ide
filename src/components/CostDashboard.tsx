@@ -4,6 +4,7 @@ import type { CostDailyEntry, ProjectCostEntry } from "../types";
 import { getCostHistory, getCostByProject } from "../api/costs";
 import { useContextMenu, menuItem } from "../hooks/useContextMenu";
 import { CloseButton, Segmented } from "./ui";
+import { translate } from "../i18n/registry";
 
 interface CostDashboardProps {
   onClose: () => void;
@@ -96,7 +97,7 @@ export function CostDashboard({ onClose }: CostDashboardProps) {
             onChange={(v) => setDays(Number(v))}
             options={[7, 14, 30].map((d) => ({ value: String(d), label: `${d}d` }))}
           />
-          <CloseButton className="cost-dashboard-close" onClick={onClose} label="Close" />
+          <CloseButton className="cost-dashboard-close" onClick={onClose} label={translate("common.close")} />
         </div>
 
         {loading ? (
