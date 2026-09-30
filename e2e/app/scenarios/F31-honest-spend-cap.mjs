@@ -148,7 +148,6 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   const text0 = await bodyText(bridge);
   const dollars0 = text0.match(/\$\d[\d.,]*/g) ?? [];
   assert(dollars0.length === 0, `no dollar amount anywhere in the window (found ${JSON.stringify(dollars0)})`);
-  assert((await statusCost(bridge)) === null, "the status bar shows no cost");
   const rowA0 = await bridge.waitFor("A's row to show n/a", `
     const row = document.querySelector('.session-item[data-session-item-id="' + CSS.escape(${JSON.stringify(a)}) + '"]');
     const spend = row?.querySelector(".session-spend");
@@ -157,6 +156,13 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   assert(rowA0.text === "n/a" && rowA0.kind === "na", `A's row says "${rowA0.text}": the agent reports no cost`);
   const rowB0 = await rowState(bridge, b);
   assert(rowB0.spend?.text === "n/a", `B's row says "${rowB0.spend?.text}"`);
+  // Two agents, neither reports a cost: the total is unknown, not zero and
+  // not the analyzer's estimate.
+  const status0 = await bridge.waitFor("the status bar to say n/a", `
+    const t = e2e.norm(e2e.first(".status-bar-cost")?.innerText ?? "");
+    return t === "n/a" ? t : null;
+  `, { timeoutMs: 10_000 }).catch(() => null);
+  assert(status0 === "n/a", `the status bar says n/a, no amount ("${await statusCost(bridge)}")`);
   await bridge.screenshot(join(evidenceDir, "02-flag-on-na.png"));
   const offers2 = await costDashboardOffers(bridge);
   log(`  Cost Dashboard with the flag on: ${JSON.stringify(offers2)}`);

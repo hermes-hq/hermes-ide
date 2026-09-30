@@ -7,8 +7,8 @@
 // hook names the transcript it writes, exactly like Claude Code, and each `c`
 // typed into it appends one model call with the usage the scenario chose.
 //
-//   1. before any model call the Claude row says "n/a" (nothing known) and
-//      the status bar shows no cost;
+//   1. before any model call the Claude row, the project header and the
+//      status bar say "n/a" (nothing known), never an amount;
 //   2. after two calls on a priced model the row, the project header, the
 //      status bar and the Context panel all say "≈$1.04 (estimated)", the
 //      store holds the transcript's token totals, tagged estimated, from
@@ -33,7 +33,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchApp, sleep } from "../harness.mjs";
+import { launchApp, sleep, skipScenario } from "../harness.mjs";
 import { completeOnboarding, createPlainTerminal, runScenario } from "../n11-steps.mjs";
 import { createClaudeTerminal, fakeClaudeOnPath } from "../perf-steps.mjs";
 import { invoke, menuAction, rowState } from "../fleet-steps.mjs";
@@ -75,8 +75,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   onCleanup(fake.undo);
   if (!fake.usable) {
     log("this scenario needs the fake claude on a Windows terminal's PATH, which means the user's registry Path; that is only changed on a CI runner");
-    log("RESULT: SKIP (Windows outside CI)");
-    process.exit(0);
+    skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows outside CI", log });
   }
 
   const env = { HERMES_FAKE_DIR: recordDir };
@@ -108,11 +107,18 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   `);
 
   // ── 1. Nothing known yet ───────────────────────────────────────────
-  log("step 1: before any model call: n/a in the row, no cost anywhere else");
+  log("step 1: before any model call: n/a in the row, the project header and the status bar");
   const before = await rowState(bridge, claude);
   assert(before?.spend?.kind === "na" && before.spend.text === "n/a", `the Claude row says "${before?.spend?.text}"`);
-  assert((await headerCost()) === null, "the project header shows no cost");
-  assert((await statusCost()) === null, "the status bar shows no cost");
+  const deadline1 = Date.now() + 10_000;
+  let headerBefore = await headerCost();
+  let statusBefore = await statusCost();
+  while (Date.now() < deadline1 && !(headerBefore?.text === "n/a" && statusBefore?.text === "n/a")) {
+    await sleep(200);
+    [headerBefore, statusBefore] = [await headerCost(), await statusCost()];
+  }
+  assert(headerBefore?.text === "n/a" && headerBefore.kind === "na", `the project header says n/a, no amount (${JSON.stringify(headerBefore)})`);
+  assert(statusBefore?.text === "n/a" && statusBefore.kind === "na", `the status bar says n/a, no amount (${JSON.stringify(statusBefore)})`);
 
   // ── 2. Two model calls in the transcript ───────────────────────────
   log("step 2: the agent makes two model calls");

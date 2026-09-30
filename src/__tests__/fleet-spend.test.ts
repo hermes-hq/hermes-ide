@@ -4,7 +4,7 @@
  * cap value.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { evaluateSpendCaps, formatUsd, spendOf, spendText, sumReported, totalSpend, tripKeyFor, type SpendSession } from "../fleet/spend";
+import { evaluateSpendCaps, formatUsd, spendOf, spendText, spendTotalText, sumReported, totalSpend, tripKeyFor, type SpendSession } from "../fleet/spend";
 import { createSpendCapWatcher, getCapTrip, _resetCapTripsForTest } from "../fleet/spendCapWatcher";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetInboxForTest, listInboxItems, raiseInboxItem } from "../agent/contract/inbox";
@@ -46,10 +46,39 @@ describe("spendOf / totalSpend / spendText", () => {
     expect(spendText(spendOf(null), t)).toBe("n/a");
   });
 
-  it("a total with one estimate in it is an estimate; unknown costs add nothing", () => {
-    expect(totalSpend([{ costUsd: 1, confidence: "exact" }, { costUsd: 0.5, confidence: "estimated" }, null])).toEqual({ kind: "estimated", costUsd: 1.5 });
-    expect(totalSpend([{ costUsd: 1, confidence: "exact" }, { costUsd: null, confidence: "estimated" }])).toEqual({ kind: "exact", costUsd: 1 });
-    expect(totalSpend([null, undefined])).toEqual({ kind: "na", costUsd: null });
+  it("a total with one estimate in it is an estimate; unknown costs add nothing but are counted", () => {
+    expect(totalSpend([{ costUsd: 1, confidence: "exact" }, { costUsd: 0.5, confidence: "estimated" }, null])).toEqual({ kind: "estimated", costUsd: 1.5, unknown: 1 });
+    expect(totalSpend([{ costUsd: 1, confidence: "exact" }, { costUsd: null, confidence: "estimated" }])).toEqual({ kind: "exact", costUsd: 1, unknown: 1 });
+    expect(totalSpend([{ costUsd: 1, confidence: "exact" }])).toEqual({ kind: "exact", costUsd: 1, unknown: 0 });
+    expect(totalSpend([null, undefined])).toEqual({ kind: "na", costUsd: null, unknown: 2 });
+    expect(totalSpend([])).toEqual({ kind: "na", costUsd: null, unknown: 0 });
+  });
+});
+
+describe("spendTotalText: a partial sum never passes for the total", () => {
+  const t = (key: string, vars?: Record<string, string | number>) =>
+    ({
+      "fleet.spendNa": "n/a",
+      "fleet.spendEstimated": `≈${vars?.cost} (estimated)`,
+      "fleet.spendUnknownOne": `${vars?.count} session n/a`,
+      "fleet.spendUnknownMany": `${vars?.count} sessions n/a`,
+    })[key] ?? key;
+  const text = (usages: Parameters<typeof totalSpend>[0]) => spendTotalText(totalSpend(usages), t);
+
+  it("every cost known: the sum alone", () => {
+    expect(text([{ costUsd: 0.25, confidence: "exact" }, { costUsd: 0.17, confidence: "exact" }])).toBe("$0.42");
+    expect(text([{ costUsd: 0.25, confidence: "exact" }, { costUsd: 0.12, confidence: "estimated" }])).toBe("≈$0.37 (estimated)");
+  });
+
+  it("some unknown: the known sum and how many sessions are n/a", () => {
+    expect(text([{ costUsd: 0.37, confidence: "exact" }, null])).toBe("$0.37 · 1 session n/a");
+    expect(text([{ costUsd: 0.37, confidence: "estimated" }, { costUsd: null, confidence: "estimated" }])).toBe("≈$0.37 (estimated) · 1 session n/a");
+    expect(text([{ costUsd: 0.2, confidence: "estimated" }, { costUsd: 0.17, confidence: "exact" }, null, null])).toBe("≈$0.37 (estimated) · 2 sessions n/a");
+  });
+
+  it("none known: n/a; no session at all: nothing", () => {
+    expect(text([null, { costUsd: null, confidence: "estimated" }])).toBe("n/a");
+    expect(text([])).toBeNull();
   });
 });
 

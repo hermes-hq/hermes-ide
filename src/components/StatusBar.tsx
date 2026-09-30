@@ -11,8 +11,8 @@ import { isAgentStatusEnabled } from "../agent/status/flag";
 import { useSessionStatus } from "../agent/status/attentionStore";
 import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
 import { isFeatureFlagEnabled } from "../featureFlags";
-import { useReportedTotals } from "../fleet/useReportedTotals";
-import { spendText } from "../fleet/spend";
+import { spendMember, spendTotalTitle, totalOf, useReportedTotals } from "../fleet/useReportedTotals";
+import { spendTotalText } from "../fleet/spend";
 import { IconButton } from "./ui/Button";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
@@ -70,12 +70,13 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   // costs, and Hermes's estimates from their transcripts, marked as such.
   // Tokens read off the screen are never counted.
   const fleetOn = isFeatureFlagEnabled("fleetControls");
-  const reported = useReportedTotals(sessions.map((s) => s.id), fleetOn);
+  // A session whose cost is unknown is counted, never silently left out of
+  // what reads as the total ("≈$0.37 (estimated) · 1 session n/a").
+  const reported = useReportedTotals(sessions.map(spendMember), fleetOn);
   const totalCost = fleetOn ? reported.costUsd ?? 0 : legacyCost;
-  const estimated = fleetOn && reported.spend === "estimated";
-  const costText = fleetOn
-    ? spendText({ kind: reported.spend, costUsd: reported.costUsd }, t)
-    : `$${totalCost.toFixed(2)}`;
+  const fleetCostText = fleetOn ? spendTotalText(totalOf(reported), t) : null;
+  const costText = fleetOn ? fleetCostText ?? "" : `$${totalCost.toFixed(2)}`;
+  const showCost = fleetOn ? fleetCostText !== null && (totalCost > 0 || reported.unknown.length > 0) : totalCost > 0;
   const totalTokens = useMemo(
     () => (fleetOn ? { input: reported.inputTokens ?? 0, output: reported.outputTokens ?? 0 } : legacyTokens),
     [fleetOn, reported.inputTokens, reported.outputTokens, legacyTokens],
@@ -172,12 +173,13 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
             <span className="status-bar-divider" />
           </>
         )}
-        {totalCost > 0 && (
+        {showCost && (
           <>
             <span
               className="status-bar-item status-bar-cost"
               data-spend={fleetOn ? reported.spend : undefined}
-              title={fleetOn ? (estimated ? t("fleet.spendEstimatedTitle") : t("fleet.spendReported")) : undefined}
+              data-unknown={fleetOn ? reported.unknown.length : undefined}
+              title={fleetOn ? spendTotalTitle(costText, reported, t) : undefined}
               onContextMenu={(e) => {
                 showStatusMenu(e, [
                   menuItem("status.copy-cost", t("status.copyCost")),

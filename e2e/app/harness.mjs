@@ -435,6 +435,24 @@ export function finishScenario({ scenario, evidenceDir, failed, startedAt, log =
   process.exit(failed ? 1 : 0);
 }
 
+/**
+ * A scenario that cannot run here (a platform, CI, a missing CLI): nothing
+ * was tested. Writes result.json with status "skip" and the reason, prints
+ * the RESULT line and exits 0. run.mjs reports it as skipped, and the
+ * acceptance gate never counts a skip as a pass (a scenario that only
+ * skipped on a platform it must be green on has no result there).
+ */
+export function skipScenario({ scenario, evidenceDir, reason, startedAt = Date.now(), log = console.log }) {
+  const dir = evidenceDir || process.env.HERMES_E2E_EVIDENCE;
+  if (dir) {
+    mkdirSync(dir, { recursive: true });
+    const result = { scenario, platform: platform(), status: "skip", reason, durationMs: Date.now() - startedAt, finishedAt: new Date().toISOString() };
+    writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 2) + "\n");
+  }
+  log(`RESULT: SKIP (${reason})`);
+  process.exit(0);
+}
+
 // ─── Launch / stop ───────────────────────────────────────────────────
 
 /**

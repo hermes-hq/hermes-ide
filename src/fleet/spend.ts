@@ -53,18 +53,32 @@ export function spendOf(usage: UsageLike | null | undefined): SpendView {
   return { kind: usage.confidence === "estimated" ? "estimated" : "exact", costUsd: usage.costUsd };
 }
 
+/**
+ * The sum over sessions whose agent could have a cost (a plain shell is not
+ * passed in). A session whose cost is unknown adds nothing to the sum but is
+ * counted in `unknown`, so a partial sum is never shown as the total.
+ */
+export interface SpendTotal extends SpendView {
+  /** How many of the sessions have no known cost. */
+  readonly unknown: number;
+}
+
 /** The sum over sessions; "estimated" as soon as one estimated cost is in it. */
-export function totalSpend(usages: readonly (UsageLike | null | undefined)[]): SpendView {
+export function totalSpend(usages: readonly (UsageLike | null | undefined)[]): SpendTotal {
   let total: number | null = null;
   let estimated = false;
+  let unknown = 0;
   for (const u of usages) {
     const s = spendOf(u);
-    if (s.costUsd === null) continue;
+    if (s.costUsd === null) {
+      unknown++;
+      continue;
+    }
     total = (total ?? 0) + s.costUsd;
     if (s.kind === "estimated") estimated = true;
   }
-  if (total === null) return { kind: "na", costUsd: null };
-  return { kind: estimated ? "estimated" : "exact", costUsd: total };
+  if (total === null) return { kind: "na", costUsd: null, unknown };
+  return { kind: estimated ? "estimated" : "exact", costUsd: total, unknown };
 }
 
 /** "$0.42", "≈$0.42 (estimated)" or "n/a", in the person's language. */
@@ -72,6 +86,19 @@ export function spendText(view: SpendView, t: (key: string, vars?: Record<string
   if (view.costUsd === null) return t("fleet.spendNa");
   const cost = formatUsd(view.costUsd);
   return view.kind === "estimated" ? t("fleet.spendEstimated", { cost }) : cost;
+}
+
+/**
+ * A total's text: "$0.42", "≈$0.42 (estimated) · 1 session n/a" when some
+ * sessions' cost is unknown, "n/a" when none is known, and null when there
+ * is no session to add up (nothing is shown).
+ */
+export function spendTotalText(total: SpendTotal, t: (key: string, vars?: Record<string, string | number>) => string): string | null {
+  if (total.costUsd === null) return total.unknown > 0 ? t("fleet.spendNa") : null;
+  const known = spendText(total, t);
+  if (total.unknown === 0) return known;
+  const unknown = t(total.unknown === 1 ? "fleet.spendUnknownOne" : "fleet.spendUnknownMany", { count: total.unknown });
+  return `${known} · ${unknown}`;
 }
 
 /** The cost a spend cap acts on: only what the agent itself reported. */

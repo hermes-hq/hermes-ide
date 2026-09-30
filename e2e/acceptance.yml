@@ -1075,7 +1075,9 @@ features:
     # "(estimated)"; what the terminal analyzer reads off the screen is still
     # never shown. HERMES_E2E_F31E_NEGATIVE=unpriced must fail.
     # On Windows the fake `claude` needs the user's registry Path, so
-    # F31-estimated-cost runs there on CI runners only (SKIP elsewhere).
+    # F31-estimated-cost and F31-partial-spend run there on CI runners only
+    # (SKIP elsewhere). F31-partial-spend: HERMES_E2E_F31P_NEGATIVE=priced
+    # must fail.
     name: "Honest cost and limits"
     status: partial
     criteria:
@@ -1088,6 +1090,9 @@ features:
       F31-3:
         text: "From the agent's transcript, the row, the project header, the status bar and the Context panel show the same estimated cost; n/a when nothing is known or a call's model has no list price"
         scenarios: [F31-estimated-cost.mjs]
+      F31-4:
+        text: "A project header or status bar total that leaves out sessions whose cost is unknown says so: the known sum and how many sessions are n/a, named in its tooltip; n/a when no cost is known"
+        scenarios: [F31-partial-spend.mjs]
   F37:
     # Behind the fleetControls flag. Turns come from a fake ledger (the e2e
     # hook setFakeTurnLedger) until F20 fills the real one; turn ends travel
