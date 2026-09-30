@@ -281,7 +281,8 @@ fn eval_js(app: &AppHandle, label: &str, script: &str, timeout: Duration) -> Res
         script = script
     );
 
-    let started = eval_once(&window, kickoff, Duration::from_secs(5).min(timeout))?;
+    let started = eval_once(&window, kickoff, Duration::from_secs(5).min(timeout))
+        .map_err(|e| format!("{e}; {}", who_is_busy(app)))?;
     if started.as_str() != Some("started") {
         return Err(format!(
             "script did not start (syntax error, or the page is still loading); webview returned: {}",
@@ -339,6 +340,30 @@ fn eval_once(
         Ok(raw) if raw.is_empty() => Ok(Value::Null),
         Ok(raw) => Ok(serde_json::from_str(&raw).unwrap_or(Value::String(raw))),
         Err(_) => Err("the webview did not answer (page not loaded yet?)".into()),
+    }
+}
+
+/// After the webview did not answer: whether the app's main thread (which
+/// delivers the answer, and runs the synchronous commands) is the one that
+/// is stuck, or the page itself is busy. Only for the error message, so a
+/// failed run says where to look.
+fn who_is_busy(app: &AppHandle) -> String {
+    let (tx, rx) = mpsc::channel::<()>();
+    let started = Instant::now();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(());
+        })
+        .is_err()
+    {
+        return "the main thread could not be reached".into();
+    }
+    match rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(()) => format!(
+            "the app's main thread answered in {} ms, so the page itself was busy",
+            started.elapsed().as_millis()
+        ),
+        Err(_) => "the app's main thread did not answer within 2 s either (it is blocked)".into(),
     }
 }
 
