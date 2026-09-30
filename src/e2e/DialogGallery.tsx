@@ -121,7 +121,7 @@ function render(name: GalleryDialog, close: () => void, firstSession: ReturnType
 				<BranchConflictDialog
 					branchName="hermes/search-index"
 					heldBy='session "Search index"'
-					path="/Users/test/projects/demo/.hermes/worktrees/search-index"
+					path="/work/demo/.hermes/worktrees/search-index"
 					onReuse={close}
 					onCreateNewBranch={close}
 					onCancel={close}
@@ -178,7 +178,7 @@ function render(name: GalleryDialog, close: () => void, firstSession: ReturnType
 							kind: "newer-data",
 							title: "This data was saved by a newer Hermes",
 							message: "Update Hermes to open it.",
-							dataPath: "/Users/test/Library/Application Support/hermes/hermes.db",
+							dataPath: "/work/hermes-data/hermes.db",
 							found: 99,
 							supported: 42,
 						}}
