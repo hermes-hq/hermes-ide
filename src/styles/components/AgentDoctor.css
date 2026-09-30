@@ -38,18 +38,19 @@
   padding: var(--space-1);
   border-bottom: var(--control-border-width) solid var(--border);
 }
+/* Cells wrap so the table fits the welcome dialog with wider fonts too
+ * (Windows); only the action buttons stay on one line. */
 .agent-doctor-table td {
   padding: var(--space-1);
-  white-space: nowrap;
   border-bottom: var(--control-border-width) solid var(--border);
   vertical-align: middle;
 }
 
 .agent-doctor-row.missing td { color: var(--text-3); }
 .agent-doctor-row.missing .agent-doctor-name { color: var(--text-2); }
-.agent-doctor-name { color: var(--text-0); white-space: nowrap; }
+.agent-doctor-name { color: var(--text-0); }
 .agent-doctor-muted { color: var(--text-3); white-space: normal; }
-.agent-doctor-actions { text-align: right; }
+.agent-doctor-actions { text-align: right; white-space: nowrap; }
 
 .agent-doctor-badge-wrap { display: inline-flex; margin-left: var(--space-1-5); vertical-align: middle; }
 

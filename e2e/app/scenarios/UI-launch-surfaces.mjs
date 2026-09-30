@@ -18,7 +18,8 @@
 //     the creator, which have no control), and no <select> is drawn by the OS;
 //   - control heights are 28, 32 or 36 px (chips 28, segmented wells 28/32,
 //     checkbox and radio rows at least 32; inline link buttons are text);
-//   - no control sticks out of the surface sideways (it would be cut off);
+//   - no control sticks out of the surface sideways (it would be cut off),
+//     on the agent check also with a wider font (as on Windows);
 //   - there is exactly one primary button, and exactly one button filled
 //     with the brass --primary-bg (so no look-alike primary either);
 //   - every control draws the solid focus ring (--focus-ring, ≥ 2 px) when
@@ -203,11 +204,21 @@ window.__uiLaunch = window.__uiLaunch || (() => {
     }
     return out;
   };
-  /** Where a real click lands to give the window the keyboard (page coordinates). */
+  /**
+   * Where a real click lands to give the window the keyboard (page
+   * coordinates). The field is scrolled into view first: a click below the
+   * fold of a scrolling body would land outside the window.
+   */
   const pointOf = (sel) => {
     const el = document.querySelector(sel);
     if (!el) return null;
+    el.scrollIntoView({ block: "center", inline: "nearest" });
     const r = el.getBoundingClientRect();
+    const cx = r.left + Math.min(12, r.width / 2);
+    const cy = r.top + r.height / 2;
+    if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) return { offscreen: true, x: Math.round(cx), y: Math.round(cy), innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+    const hit = document.elementFromPoint(cx, cy);
+    if (!hit || !(hit === el || el.contains(hit))) return { covered: hit ? describe(hit) : "nothing", x: Math.round(cx), y: Math.round(cy) };
     return { x: Math.round(r.left + Math.min(12, r.width / 2)), y: Math.round(r.top + r.height / 2), innerWidth: window.innerWidth, innerHeight: window.innerHeight, dpr: window.devicePixelRatio || 1 };
   };
   const focusedRing = (rootSel, startSel) => {
@@ -217,7 +228,7 @@ window.__uiLaunch = window.__uiLaunch || (() => {
     if (!el || el === document.body || !root) return { moved: false, what: el ? describe(el) : "none" };
     const cs = getComputedStyle(el);
     return {
-      moved: !el.matches(startSel),
+      moved: el !== document.querySelector(startSel),
       inSurface: root.contains(el),
       focusVisible: el.matches(":focus-visible"),
       hasFocus: document.hasFocus(),
@@ -275,13 +286,13 @@ async function surface(app, name, rootSel, { startSel = null, primaries = 1 } = 
   details.surfaces[name] = summary;
 
   if (startSel) {
+    // Where a real click would land: checked on every OS, pressed on CI.
+    await setTheme(bridge, THEMES[0]);
+    const at = await bridge.eval(`${PAGE}; return window.__uiLaunch.pointOf(${JSON.stringify(startSel)});`);
+    const clickable = !!at && !at.offscreen && !at.covered;
+    check(clickable, `${name}: the field to start Tab from (${startSel}) is there, in the window and on top (${JSON.stringify(at)})`);
+    if (!clickable) return;
     if (OS_KEYS) {
-      await setTheme(bridge, THEMES[0]);
-      const at = await bridge.eval(`${PAGE}; return window.__uiLaunch.pointOf(${JSON.stringify(startSel)});`);
-      if (!at) {
-        check(false, `${name}: the field to start Tab from (${startSel}) is there`);
-        return;
-      }
       const diag = await pressChords(app.child.pid, ["tab"], { clickAt: at });
       log(`  real Tab from ${startSel}: ${JSON.stringify(diag)}`);
       const got = await bridge
@@ -297,6 +308,21 @@ async function surface(app, name, rootSel, { startSel = null, primaries = 1 } = 
       log(`  real Tab: only on the Linux and Windows CI runners (this is ${platform()}${OS_KEYS ? "" : ", HERMES_E2E_OS_KEYS unset"}); the ring was checked on the copied :focus-visible rules above`);
     }
   }
+}
+
+/**
+ * The same surface with a wider font (Verdana, or DejaVu Sans on Linux, and
+ * extra letter spacing): text that fits by a hair on macOS does not on
+ * Windows, where the agent check once pushed its buttons out of the welcome.
+ */
+async function wideFont(bridge, name, rootSel) {
+  await bridge.eval(`const st = document.createElement("style"); st.dataset.uilaunchWide = ""; st.textContent = ${JSON.stringify(`${rootSel}, ${rootSel} * { font-family: Verdana, "DejaVu Sans", sans-serif !important; letter-spacing: .04em !important; }`)}; document.head.appendChild(st); return true;`);
+  await sleep(300);
+  const a = await bridge.eval(`${PAGE}; return window.__uiLaunch.audit(${JSON.stringify(rootSel)});`);
+  await bridge.eval(`document.querySelector("style[data-uilaunch-wide]")?.remove(); return true;`);
+  await sleep(200);
+  for (const x of a.clipped || []) log(`    CUT OFF (wide font)  ${x}`);
+  check(!a.error && a.clipped.length === 0, `${name}: with a wider font too, no control sticks out of the surface (${a.error || a.clipped.length})`);
 }
 
 /** Breaks the launcher sheet on purpose, for the negative controls. */
@@ -333,6 +359,7 @@ try {
   // A project, so the repository step lists it as a recent one (its radios).
   await invoke(bridge, "create_project", { path: fx.repo, name: null });
   await surface(app, "welcome-1-agents", ".setup-dialog", { startSel: "#setup-policy-accept" });
+  await wideFont(bridge, "welcome-1-agents", ".setup-dialog");
   await bridge.clickWhenReady(`const box = e2e.must(e2e.first("#setup-policy-accept"), "policy"); return box.checked ? true : e2e.click(box);`);
   await bridge.waitFor("Continue to be enabled", `return !e2e.first(".setup-continue").disabled;`);
   await bridge.click(".setup-continue");

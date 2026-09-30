@@ -308,6 +308,11 @@ async function createSession(bridge, { label, custom = null }) {
       }
     } else if (step === "confirm") {
       await bridge.eval(setInput('input.session-creator-name[placeholder="Session name (optional)"]', label));
+      // Create is the last click: while the session is created the step stays
+      // on screen with Create disabled, and pressing it again would wait for
+      // a button that goes away with the wizard.
+      await clickPrimary(bridge, step);
+      break;
     }
     await clickPrimary(bridge, step);
     await sleep(300);
