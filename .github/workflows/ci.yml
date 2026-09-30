@@ -850,8 +850,22 @@ jobs:
           pattern: e2e-evidence-*
           path: ${{ runner.temp }}/evidence
 
+      # A pull request that does not touch packaging skips the installer job
+      # (see `changes`), so its scenarios are not applicable to that run.
+      # Anywhere else (main, the merge queue, the nightly) the installers
+      # always run and their results are required.
       - name: Every shipped feature has a green scenario on every OS
-        run: node e2e/acceptance-check.mjs --results "${{ runner.temp }}/evidence"
+        env:
+          EVENT: ${{ github.event_name }}
+          INSTALLERS: ${{ needs.e2e-installers.result }}
+          EVIDENCE: ${{ runner.temp }}/evidence
+        shell: bash
+        run: |
+          skipped=()
+          if [ "$EVENT" = "pull_request" ] && [ "$INSTALLERS" = "skipped" ]; then
+            skipped+=(--skipped-job e2e-installers)
+          fi
+          node e2e/acceptance-check.mjs --results "$EVIDENCE" "${skipped[@]}"
 
   # ── Privacy: this repository is public ───────────────────────────────
   # Runs on every change. Fails on secrets (gitleaks over the new commits)

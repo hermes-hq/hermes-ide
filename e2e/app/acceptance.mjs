@@ -247,8 +247,13 @@ export function collectResults(root) {
  *
  * Returns { errors, warnings, rows } where rows describe every scenario ×
  * platform the ledger requires, for printing.
+ *
+ * `notRun` maps a scenario file to why the CI plan did not run it in this
+ * run (its job was skipped: a pull request that does not touch what the
+ * job tests). With no result, such a scenario is not applicable to the run
+ * instead of missing; a result it does have still counts, red included.
  */
-export function evaluateLedger(ledger, { scenarioFiles, results = null, platforms = ALL_PLATFORMS } = {}) {
+export function evaluateLedger(ledger, { scenarioFiles, results = null, platforms = ALL_PLATFORMS, notRun = new Map() } = {}) {
   const errors = [];
   const warnings = [];
   const rows = [];
@@ -288,8 +293,10 @@ export function evaluateLedger(ledger, { scenarioFiles, results = null, platform
           const passes = runs.filter((r) => r.status === "pass").length;
           const fails = runs.length - passes;
           const green = runs.length > 0 && fails === 0;
-          rows.push({ feature: feature.id, criterion: criterion.id, scenario: file, platform, runs: runs.length, passes, fails, green });
+          const skipped = runs.length === 0 && notRun.has(file) ? notRun.get(file) : null;
+          rows.push({ feature: feature.id, criterion: criterion.id, scenario: file, platform, runs: runs.length, passes, fails, green, ...(skipped ? { skipped } : {}) });
           if (feature.status === "planned") continue;
+          if (skipped) continue;
           if (runs.length === 0) {
             errors.push(`${clabel}: ${file} has no result on ${platform}`);
           } else if (fails > 0) {
@@ -313,7 +320,7 @@ export function formatRows(rows) {
   const lines = [];
   const width = Math.max(...rows.map((r) => r.scenario.length), 8);
   for (const r of rows) {
-    const mark = r.green ? "green" : r.runs === 0 ? "MISSING" : "RED";
+    const mark = r.green ? "green" : r.skipped ? `not run here (${r.skipped})` : r.runs === 0 ? "MISSING" : "RED";
     lines.push(
       `${r.feature.padEnd(5)} ${r.criterion.padEnd(8)} ${r.scenario.padEnd(width)} ${r.platform.padEnd(6)} ${String(r.passes).padStart(3)}/${String(r.runs).padEnd(3)} ${mark}`,
     );
