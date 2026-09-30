@@ -36,7 +36,7 @@ vi.mock("../state/SessionContext", () => ({
 
 import { renderToString } from "react-dom/server";
 import { StatusBar } from "../components/StatusBar";
-import { SessionSpendChip } from "../fleet/FleetRowBadges";
+import { ProjectSpend, SessionSpendChip } from "../fleet/FleetRowBadges";
 import { I18nProvider } from "../i18n/I18nProvider";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetCapTripsForTest } from "../fleet/spendCapWatcher";
@@ -108,5 +108,48 @@ describe("the session row's spend", () => {
 
   it("an agent recognised in a plain terminal shows n/a, not the analyzer's estimate", () => {
     expect(chip("s1", null, true)).toContain('data-spend="na"');
+  });
+});
+
+// Hermes's estimate from the agent's transcript (a `usage` event with
+// confidence "estimated"): shown, and always marked as an estimate — the
+// same number in the row, the project header and the status bar.
+describe("an estimated cost", () => {
+  const estimate = (id: string, costUsd: number | null) =>
+    dispatchSessionEvent(id, { type: "usage", at: 1, source: "transcript:claude", inputTokens: 96000, outputTokens: 2100, costUsd, confidence: "estimated" });
+  const header = (ids: string[]) => renderToString(<I18nProvider><ProjectSpend sessionIds={ids} /></I18nProvider>);
+
+  it("the row says ≈$1.23 (estimated), marked as such", () => {
+    estimate("s1", 1.2345);
+    const html = chip("s1", "claude");
+    expect(html).toContain('data-spend="estimated"');
+    expect(text(html)).toContain("≈$1.23 (estimated)");
+  });
+
+  it("the status bar adds it up and says it is an estimate", () => {
+    h.flag = true;
+    estimate("s1", 1.0);
+    dispatchSessionEvent("s2", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.23 });
+    const html = bar();
+    expect(html).toContain('data-spend="estimated"');
+    expect(text(html)).toContain("≈$1.23 (estimated)");
+  });
+
+  it("the project header shows the same sum, and nothing when no cost is known", () => {
+    estimate("s1", 1.0);
+    dispatchSessionEvent("s2", { type: "usage", at: 1, inputTokens: 10, outputTokens: 10, costUsd: 0.23 });
+    expect(text(header(["s1", "s2"]))).toContain("≈$1.23 (estimated)");
+    expect(header(["s2"])).toContain('data-spend="exact"');
+    expect(text(header(["s2"]))).toContain("$0.23");
+    expect(text(header(["s2"]))).not.toContain("estimated");
+    estimate("s3", null);
+    expect(header(["s3"])).toBe("");
+  });
+
+  it("tokens without a price stay n/a in the row", () => {
+    estimate("s1", null);
+    const html = chip("s1", "claude");
+    expect(html).toContain('data-spend="na"');
+    expect(text(html)).not.toContain("estimated");
   });
 });

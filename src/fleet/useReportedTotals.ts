@@ -1,28 +1,34 @@
-// Totals of what the agents themselves reported (F31): the status bar's
-// spend and token count with the `fleetControls` flag on. A part no agent
-// reported is null, and the status bar leaves it out.
+// Totals of the sessions' usage (F31): the status bar's spend and token
+// count with the `fleetControls` flag on. They come from the same usage
+// snapshots the session rows, the project headers and the Context panel
+// read, so every surface agrees. A part nobody reported is null, and the
+// status bar leaves it out; a total with an estimate in it is "estimated".
 
 import { useEffect, useState } from "react";
 import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
-import { sumReported } from "./spend";
+import { sumReported, totalSpend, type SpendKind } from "./spend";
 
 export interface ReportedTotals {
   readonly costUsd: number | null;
+  /** How the cost was arrived at ("na" when there is none). */
+  readonly spend: SpendKind;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
 }
 
 export function reportedTotals(sessionIds: readonly string[]): ReportedTotals {
   const usages = sessionIds.map((id) => getSessionEventSnapshot(id).usage);
+  const spend = totalSpend(usages);
   return {
-    costUsd: sumReported(usages.map((u) => u?.costUsd ?? null)),
+    costUsd: spend.costUsd,
+    spend: spend.kind,
     inputTokens: sumReported(usages.map((u) => u?.inputTokens ?? null)),
     outputTokens: sumReported(usages.map((u) => u?.outputTokens ?? null)),
   };
 }
 
 function same(a: ReportedTotals, b: ReportedTotals): boolean {
-  return a.costUsd === b.costUsd && a.inputTokens === b.inputTokens && a.outputTokens === b.outputTokens;
+  return a.costUsd === b.costUsd && a.spend === b.spend && a.inputTokens === b.inputTokens && a.outputTokens === b.outputTokens;
 }
 
 export function useReportedTotals(sessionIds: readonly string[], enabled = true): ReportedTotals {

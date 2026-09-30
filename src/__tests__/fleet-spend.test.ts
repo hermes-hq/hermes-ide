@@ -4,7 +4,7 @@
  * cap value.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { evaluateSpendCaps, formatUsd, sumReported, tripKeyFor, type SpendSession } from "../fleet/spend";
+import { evaluateSpendCaps, formatUsd, spendOf, spendText, sumReported, totalSpend, tripKeyFor, type SpendSession } from "../fleet/spend";
 import { createSpendCapWatcher, getCapTrip, _resetCapTripsForTest } from "../fleet/spendCapWatcher";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import { _resetInboxForTest, listInboxItems, raiseInboxItem } from "../agent/contract/inbox";
@@ -30,6 +30,26 @@ describe("formatUsd / sumReported", () => {
     expect(sumReported([])).toBeNull();
     expect(sumReported([null, 0.5, 0.25])).toBe(0.75);
     expect(sumReported([0])).toBe(0);
+  });
+});
+
+describe("spendOf / totalSpend / spendText", () => {
+  const t = (key: string, vars?: Record<string, string | number>) => (key === "fleet.spendNa" ? "n/a" : `≈${vars?.cost} (estimated)`);
+  it("says where a cost comes from, and n/a when none is known", () => {
+    expect(spendOf(null)).toEqual({ kind: "na", costUsd: null });
+    expect(spendOf({ costUsd: null, confidence: "estimated" })).toEqual({ kind: "na", costUsd: null });
+    expect(spendOf({ costUsd: 1.5, confidence: "exact" })).toEqual({ kind: "exact", costUsd: 1.5 });
+    expect(spendOf({ costUsd: 1.5 })).toEqual({ kind: "exact", costUsd: 1.5 });
+    expect(spendOf({ costUsd: 1.234, confidence: "estimated" })).toEqual({ kind: "estimated", costUsd: 1.234 });
+    expect(spendText(spendOf({ costUsd: 1.234, confidence: "estimated" }), t)).toBe("≈$1.23 (estimated)");
+    expect(spendText(spendOf({ costUsd: 1.234, confidence: "exact" }), t)).toBe("$1.23");
+    expect(spendText(spendOf(null), t)).toBe("n/a");
+  });
+
+  it("a total with one estimate in it is an estimate; unknown costs add nothing", () => {
+    expect(totalSpend([{ costUsd: 1, confidence: "exact" }, { costUsd: 0.5, confidence: "estimated" }, null])).toEqual({ kind: "estimated", costUsd: 1.5 });
+    expect(totalSpend([{ costUsd: 1, confidence: "exact" }, { costUsd: null, confidence: "estimated" }])).toEqual({ kind: "exact", costUsd: 1 });
+    expect(totalSpend([null, undefined])).toEqual({ kind: "na", costUsd: null });
   });
 });
 
@@ -163,6 +183,16 @@ describe("the spend cap watcher", () => {
     caps = { ...NO_CAPS, sessionUsd: 1 };
     expect(w.check()).toHaveLength(1);
     expect(interrupt).toHaveBeenCalledTimes(2);
+  });
+
+  it("an estimated cost never trips a cap: only what the agent itself reported does", () => {
+    const { w, interrupt } = watcher();
+    dispatchSessionEvent("s1", { type: "usage", at: 1, inputTokens: 100, outputTokens: 10, costUsd: 5, confidence: "estimated" });
+    expect(w.check()).toEqual([]);
+    expect(interrupt).not.toHaveBeenCalled();
+    // Negative control: the same amount, reported by the agent, trips it.
+    usage("s2", 5, 2);
+    expect(w.check().map((t) => t.key)).toEqual(["s2"]);
   });
 
   it("an interrupt that fails still leaves the inbox item", async () => {

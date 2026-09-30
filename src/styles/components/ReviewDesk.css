@@ -145,7 +145,7 @@
 
 .review-body {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) 1fr;
+  grid-template-columns: minmax(calc(var(--space-1) * 70), calc(var(--space-1) * 95)) 1fr;
   flex: 1;
   min-height: 0;
 }
@@ -154,6 +154,41 @@
   border-right: 1px solid var(--border);
   overflow: auto;
   padding: var(--space-1) 0;
+}
+
+/* Changes: the git actions of the replaced panels, at the top of the list. */
+.review-changes {
+  margin: var(--space-1) var(--space-2) var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.review-changes-title {
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: var(--space-1);
+}
+.review-changes .git-project-section {
+  border: 0;
+}
+.review-changes .git-commit-label {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  margin-bottom: var(--space-1);
+}
+.review-changes .git-commit-textarea {
+  resize: vertical;
+  min-height: 3.5em;
+  font-family: var(--font-ui, var(--font-mono));
+}
+.review-changes-toast {
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
 }
 
 .review-file-row,

@@ -22,6 +22,28 @@ export interface AgentViewObservation extends IdentityFields {
   readonly kind: AgentStatusKind;
   readonly detail: string;
   readonly exit: { readonly code: number | null; readonly signal: string | null } | null;
+  /**
+   * F31: the session's totals from the protocol's `result` events (the
+   * vendor's own cost), the same the Usage panel shows; null before the
+   * first result.
+   */
+  readonly usage?: AgentViewUsage | null;
+}
+
+export interface AgentViewUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly costUsd: number;
+}
+
+function usageOf(snapshot: AgentViewSnapshot): AgentViewUsage | null {
+  const { state } = snapshot;
+  if (!state.resultEvent) return null;
+  return {
+    inputTokens: state.cumulativeInputTokens,
+    outputTokens: state.cumulativeOutputTokens,
+    costUsd: state.cumulativeCostUsd,
+  };
 }
 
 function oneLine(text: string): string {
@@ -39,6 +61,10 @@ export function approvalDetail(toolName: string, input: Record<string, unknown>)
 }
 
 export function agentViewObservationOf(snapshot: AgentViewSnapshot): AgentViewObservation {
+  return { ...statusObservationOf(snapshot), usage: usageOf(snapshot) };
+}
+
+function statusObservationOf(snapshot: AgentViewSnapshot): AgentViewObservation {
   const { state } = snapshot;
   const init = state.initEvent;
   const identity: IdentityFields = {
@@ -82,6 +108,19 @@ export const agentViewProvider: SessionProvider<AgentViewObservation> = {
     };
     if (hasIdentity(identity) && !sameIdentity(prev, identity)) {
       events.push({ type: "identity", at, source: AGENT_VIEW_SOURCE, ...identity });
+    }
+    const u = next.usage ?? null;
+    const p = prev?.usage ?? null;
+    if (u && (!p || p.inputTokens !== u.inputTokens || p.outputTokens !== u.outputTokens || p.costUsd !== u.costUsd)) {
+      events.push({
+        type: "usage",
+        at,
+        source: AGENT_VIEW_SOURCE,
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        costUsd: u.costUsd,
+        confidence: "exact",
+      });
     }
     if (next.exit) {
       if (!prev?.exit) events.push({ type: "exit", at, source: AGENT_VIEW_SOURCE, code: next.exit.code, signal: next.exit.signal });

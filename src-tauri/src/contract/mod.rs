@@ -173,9 +173,10 @@ pub enum SessionEvent {
         tags: Option<Vec<String>>,
         running: u32,
     },
-    /// Usage totals for the session so far, as the agent itself reports
-    /// them (F31). A part the agent does not report is `None` ("n/a"); Hermes
-    /// never fills one in with an estimate.
+    /// Usage totals for the session so far (F31). A part nobody knows is
+    /// `None` ("n/a"). `confidence` (additive) says where the cost comes
+    /// from: absent or `exact` when the agent reported it, `estimated` when
+    /// Hermes priced the token counts of the agent's own transcript.
     #[serde(rename_all = "camelCase")]
     Usage {
         at: i64,
@@ -186,6 +187,8 @@ pub enum SessionEvent {
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
         cost_usd: Option<Usd>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confidence: Option<UsageConfidence>,
     },
     /// N19 (an addition to C0): the agent hit, or left, its vendor's usage
     /// limit. `resetsAt` (epoch ms) is when the vendor says the limit
@@ -264,6 +267,15 @@ pub enum RejectSuggestion {
     RetryDefault,
     SwitchAccount,
     SignIn,
+}
+
+/// How a usage event's cost was arrived at: `exact` when the agent reported
+/// it, `estimated` when Hermes priced the agent's own token counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageConfidence {
+    Exact,
+    Estimated,
 }
 
 /// Whether a [`SessionEvent::Limit`] starts or ends a limit.
@@ -353,7 +365,7 @@ mod tests {
     #[test]
     fn every_event_in_the_fixture_round_trips_byte_for_byte_as_json() {
         let events = fixture()["events"].as_array().unwrap().clone();
-        assert_eq!(events.len(), 22);
+        assert_eq!(events.len(), 23);
         let mut seen = std::collections::BTreeSet::new();
         for raw in events {
             let event: SessionEvent =

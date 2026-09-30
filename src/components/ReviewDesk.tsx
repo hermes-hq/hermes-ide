@@ -17,8 +17,10 @@
  * and curl | sh.
  *
  * It replaces SessionGitPanel, the Workbench Git tab and GitPanel as the
- * primary git surface (behind the `reviewDesk` flag); the log, stash and
- * conflict views live on in its Repository tab.
+ * primary git surface (behind the `reviewDesk` flag): their per-file stage,
+ * unstage and discard, commit, push, pull and branch switch live on in its
+ * Changes section (the same GitProjectSection), and the log, stash and
+ * conflict views in its Repository tab.
  *
  * Keys: j/k next/previous file or turn · [ ] previous/next turn ·
  * c comment on the selected line · s send the selected turn's comments ·
@@ -58,6 +60,10 @@ import { SessionWorktreeSetup } from "./WorktreeSetupSummary";
 import { openLandSheet } from "../land/LandSheetHost";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { GitConflictViewer } from "./GitConflictViewer";
+import { GitProjectSection } from "./GitProjectSection";
+import type { GitToast } from "./GitPanel";
+import { useGitStatus } from "../hooks/useGitStatus";
+import { draftMessage, draftSubject, type DraftInput } from "../land/draft";
 import "../styles/components/ReviewDesk.css";
 
 // A key name, shown as printed on the keyboard in every language.
@@ -163,10 +169,13 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Sessions working in the same folder: their turns belong to this review.
-  const repoSessions = useMemo(
-    () => sessions.filter((s) => s.working_directory && normalizePath(s.working_directory) === normalizePath(repoPath)),
-    [sessions, repoPath],
-  );
+  const sameFolder = sessions.filter((s) => s.working_directory && normalizePath(s.working_directory) === normalizePath(repoPath));
+  // Only which sessions they are and their names matter here: a status
+  // update (new session objects, many times a minute) must not reload the
+  // review, which would hide the diff and an open comment while it loads.
+  const repoSessionsKey = sameFolder.map((s) => `${s.id}\u0000${agentLabel(s, s.id.slice(0, 8))}`).join("\u0001");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const repoSessions = useMemo(() => sameFolder, [repoSessionsKey]);
 
   const load = useCallback(async () => {
     if (!repoPath) {
@@ -213,6 +222,25 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   }, [files]);
   const flagCount = useMemo(() => [...flagsByPath.values()].reduce((n, l) => n + l.length, 0), [flagsByPath]);
   const totals = useMemo(() => ({ add: files.reduce((n, f) => n + f.file.additions, 0), del: files.reduce((n, f) => n + f.file.deletions, 0) }), [files]);
+  // The Changes section's commit message starts from the turns (as the Land
+  // sheet drafts it). Without turns it is only the subject (from the branch):
+  // the review's totals cover the whole branch, not what is staged.
+  const commitDraft = useMemo(() => {
+    if (!diff) return "";
+    const input: DraftInput = {
+      branch: diff.branch ?? "",
+      label: focused ? agentLabel(focused, focused.id.slice(0, 8)) : "",
+      turns: turns.map((e) => ({ turn: e.turn, files: e.files.map((f) => f.path) })),
+      feature: null,
+      diffstat: { files: files.length, insertions: totals.add, deletions: totals.del },
+    };
+    return input.turns.length > 0 ? draftMessage(input) : draftSubject(input);
+  }, [diff, focused, turns, files.length, totals]);
+  const reloadReview = useCallback(() => setReloadTick((x) => x + 1), []);
+  const selectChangedFile = useCallback((path: string) => {
+    setGroupBy("file");
+    setSelection({ kind: "file", path });
+  }, []);
 
   // Keep the selection valid when the data changes.
   useEffect(() => {
@@ -392,6 +420,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         e.preventDefault();
         if (revert) setRevert(null);
         else if (draft) setDraft(null);
+        // In another text field (the commit message): leave the field, keep the desk and the text.
+        else if (typing) target.blur();
         else onClose();
         return;
       }
@@ -678,6 +708,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
 
             <div className="review-body">
               <nav className="review-nav" aria-label={groupBy === "file" ? t("review.byFile") : t("review.byTurn")}>
+                <ChangesSection sessionId={sessionId} draft={commitDraft} fromTurns={turns.length > 0} onChanged={reloadReview} onSelectFile={selectChangedFile} />
                 {loading && <div className="review-empty">{t("review.loading")}</div>}
                 {!loading && diffError && <div className="review-error">{diffError}</div>}
                 {!loading && noRepository && (
@@ -870,6 +901,69 @@ function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => v
         </button>
       ))}
     </>
+  );
+}
+
+/**
+ * Changes (reviewDesk flag): the git actions of the panels this desk
+ * replaced, mounted from the same GitProjectSection — per-file stage,
+ * unstage and discard (discard asks first), commit (the message starts from
+ * a draft of the turns), push, pull and the branch switch. Log, stash and
+ * conflicts stay in the Repository tab.
+ */
+function ChangesSection({
+  sessionId,
+  draft,
+  fromTurns,
+  onChanged,
+  onSelectFile,
+}: {
+  sessionId: string;
+  draft: string;
+  /** The draft lists the turns ("drafted from the turns"); else it is only a subject. */
+  fromTurns: boolean;
+  onChanged: () => void;
+  onSelectFile: (path: string) => void;
+}) {
+  const { t } = useI18n();
+  const { status, error, refresh } = useGitStatus(sessionId, true, 3000);
+  const [toast, setToast] = useState<GitToast | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+  const onRefresh = useCallback(() => {
+    void refresh();
+    onChanged();
+  }, [refresh, onChanged]);
+  const onToast = useCallback((message: string, type: GitToast["type"] = "success") => setToast({ message, type }), []);
+  const projects = (status?.projects ?? []).filter((p) => p.is_git_repo);
+  if (!status && !error) return null;
+  return (
+    <section className="review-changes" aria-label={t("review.changes")} data-projects={projects.length}>
+      <div className="review-changes-title">{t("review.changes")}</div>
+      {error && <div className="review-error">{error}</div>}
+      {projects.map((p) => (
+        <GitProjectSection
+          key={p.project_id}
+          sessionId={sessionId}
+          projectId={p.project_id}
+          project={p}
+          onRefresh={onRefresh}
+          onDiffFile={(_sid, _pid, file) => onSelectFile(file.path)}
+          onToast={onToast}
+          variant="changes"
+          draftMessage={draft}
+          commitLabel={t(fromTurns ? "review.commitDrafted" : "review.commitMessage")}
+        />
+      ))}
+      {toast && (
+        <div className={`review-changes-toast git-toast-${toast.type}`} role="status" data-type={toast.type}>
+          {toast.message}
+        </div>
+      )}
+    </section>
   );
 }
 

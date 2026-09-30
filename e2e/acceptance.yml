@@ -825,6 +825,14 @@ features:
       F21-7:
         text: "An agent whose launch installed no prompt hook shows \"pasted — cannot confirm\" instead of \"not delivered\""
         scenarios: [F21-review-desk.mjs]
+      # F21-8 restores what the replaced git panels offered (regression
+      # audit item 4, #126 #177), against a local bare remote. Negative
+      # controls, each must end in RESULT: FAIL: HERMES_E2E_F21C_FLAG=off (no
+      # desk) and HERMES_E2E_F21C_NEGATIVE=no-section (the desk without its
+      # Changes section).
+      F21-8:
+        text: "The Review Desk's Changes section stages one file, commits it with a drafted message, discards only after a confirm, pushes, pulls and switches the branch; log and stash stay in the Repository tab"
+        scenarios: [F21-review-changes.mjs]
   F22:
     name: "Land sheet with undo"
     # Behind the landSheet flag (off on stable until proven); the scenario
@@ -962,16 +970,26 @@ features:
     # scenario turns it on after a flag-off run that shows the estimate it
     # must hide. HERMES_E2E_F31_FLAG=off must fail (negative control).
     # Usage comes as `usage` SessionEvents pushed through the Rust side of
-    # the channel until F11/F14 produce them from the agents.
+    # the channel in F31-honest-spend-cap; F31-estimated-cost gets them from
+    # a fake `claude`'s own transcript (read by the F14 watcher).
+    # F31-1 changed with the regression audit (item 5): the maintainer asked
+    # for Hermes's estimate from the agent's transcript, always marked
+    # "(estimated)"; what the terminal analyzer reads off the screen is still
+    # never shown. HERMES_E2E_F31E_NEGATIVE=unpriced must fail.
+    # On Windows the fake `claude` needs the user's registry Path, so
+    # F31-estimated-cost runs there on CI runners only (SKIP elsewhere).
     name: "Honest cost and limits"
     status: partial
     criteria:
       F31-1:
-        text: "No estimated cost appears anywhere"
-        scenarios: [F31-honest-spend-cap.mjs]
+        text: "No cost read off the screen appears anywhere; a cost Hermes estimates is always marked (estimated)"
+        scenarios: [F31-honest-spend-cap.mjs, F31-estimated-cost.mjs]
       F31-2:
         text: "Hitting a cap interrupts the session and raises an inbox item"
         scenarios: [F31-honest-spend-cap.mjs]
+      F31-3:
+        text: "From the agent's transcript, the row, the project header, the status bar and the Context panel show the same estimated cost; n/a when nothing is known or a call's model has no list price"
+        scenarios: [F31-estimated-cost.mjs]
   F37:
     # Behind the fleetControls flag. Turns come from a fake ledger (the e2e
     # hook setFakeTurnLedger) until F20 fills the real one; turn ends travel

@@ -75,19 +75,25 @@ export interface SubagentsEvent extends EventBase {
 }
 
 /**
- * What the agent itself reports about its usage, as totals for the session
- * so far (F31). Only an agent's own numbers travel here — a transcript, a
- * protocol result, a hook payload — never an estimate made by Hermes. A part
- * the agent does not report is null, and stays "n/a" wherever it is shown.
- * Totals, not deltas: a repeated or late event can never double-count.
+ * The session's usage, as totals so far (F31). Token counts are the agent's
+ * own (a transcript, a protocol result, a hook payload). The cost is the
+ * agent's own when `confidence` is absent or "exact"; "estimated" (additive)
+ * means Hermes priced the token counts of the agent's own transcript, and
+ * every reader must say so. A part nobody knows is null, and stays "n/a"
+ * wherever it is shown. Totals, not deltas: a repeated or late event can
+ * never double-count.
  */
 export interface UsageEvent extends EventBase {
   readonly type: "usage";
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
-  /** US dollars, only when the vendor itself reports a cost. */
+  /** US dollars: reported by the vendor, or estimated (see `confidence`). */
   readonly costUsd: number | null;
+  /** Absent means "exact" (the vendor reported the cost). */
+  readonly confidence?: UsageConfidence;
 }
+
+export type UsageConfidence = "exact" | "estimated";
 
 /**
  * N19 (an addition to C0): the agent hit, or left, its vendor's usage
@@ -272,7 +278,9 @@ export function parseSessionEvent(value: unknown): SessionEvent | null {
       const outputTokens = optionalTokens(v.outputTokens);
       const costUsd = optionalUsd(v.costUsd);
       if (inputTokens === undefined || outputTokens === undefined || costUsd === undefined) return null;
-      return { ...base, type: "usage", inputTokens, outputTokens, costUsd };
+      if (v.confidence === undefined || v.confidence === null) return { ...base, type: "usage", inputTokens, outputTokens, costUsd };
+      if (v.confidence !== "exact" && v.confidence !== "estimated") return null;
+      return { ...base, type: "usage", inputTokens, outputTokens, costUsd, confidence: v.confidence };
     }
     case "limit": {
       if (v.state !== "limited" && v.state !== "cleared") return null;

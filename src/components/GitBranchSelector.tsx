@@ -60,6 +60,23 @@ export function validateBranchName(name: string): string | null {
   return null;
 }
 
+/**
+ * Where a position:fixed box's (0, 0) is: the window, or the nearest
+ * ancestor that is its containing block (a transform, filter or backdrop
+ * filter makes one).
+ */
+function fixedOrigin(el: HTMLElement): { top: number; left: number } {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const cs = getComputedStyle(p) as CSSStyleDeclaration & { webkitBackdropFilter?: string };
+    const makesBlock = [cs.transform, cs.filter, cs.backdropFilter, cs.webkitBackdropFilter, cs.perspective].some((v) => !!v && v !== "none");
+    if (makesBlock) {
+      const r = p.getBoundingClientRect();
+      return { top: r.top, left: r.left };
+    }
+  }
+  return { top: 0, left: 0 };
+}
+
 export function GitBranchSelector({ sessionId, projectId, currentBranch, onRefresh, onToast, onClose, triggerRef }: GitBranchSelectorProps) {
   const [branches, setBranches] = useState<GitBranch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,9 +100,12 @@ export function GitBranchSelector({ sessionId, projectId, currentBranch, onRefre
     const maxH = 320;
     const spaceBelow = window.innerHeight - rect.bottom - 8;
     const top = spaceBelow >= maxH ? rect.bottom + 2 : Math.max(8, rect.top - maxH - 2);
+    // Inside a dialog whose backdrop is blurred (the Review Desk), "fixed"
+    // is relative to that backdrop, not to the window.
+    const origin = fixedOrigin(anchor);
     setFixedStyle({
-      top: `${top}px`,
-      left: `${rect.left + 8}px`,
+      top: `${top - origin.top}px`,
+      left: `${rect.left + 8 - origin.left}px`,
       width: `${rect.width - 16}px`,
     });
   }, [triggerRef]);

@@ -278,6 +278,28 @@ describe("Agent view provider", () => {
     expect(exited).toEqual([{ type: "exit", at: 3, source: "agent-view", code: 0, signal: null }]);
   });
 
+  it("reports the vendor's own cost from its results as exact usage, once per change", () => {
+    const store = agentStore();
+    store.injectEvent(INIT);
+    let prev: AgentViewObservation | null = null;
+    const step = (at: number) => {
+      const next = agentViewObservationOf(store.getSnapshot() as AgentViewSnapshot);
+      const events = agentViewProvider.observe(prev, next, at).filter((e) => e.type === "usage");
+      prev = next;
+      return events;
+    };
+    expect(step(1)).toEqual([]); // no result yet: nothing is known
+    store.injectEvent({ ...(RESULT_OK as object), uuid: "u1", total_cost_usd: 0.25, usage: { input_tokens: 1000, output_tokens: 200 } } as unknown as AgentEvent);
+    expect(step(2)).toEqual([
+      { type: "usage", at: 2, source: "agent-view", inputTokens: 1000, outputTokens: 200, costUsd: 0.25, confidence: "exact" },
+    ]);
+    expect(step(3)).toEqual([]);
+    store.injectEvent({ ...(RESULT_OK as object), uuid: "u2", total_cost_usd: 0.5, usage: { input_tokens: 10, output_tokens: 20 } } as unknown as AgentEvent);
+    expect(step(4)).toEqual([
+      { type: "usage", at: 4, source: "agent-view", inputTokens: 1010, outputTokens: 220, costUsd: 0.75, confidence: "exact" },
+    ]);
+  });
+
   it("approvalDetail names the tool and what it acts on, on one short line", () => {
     expect(approvalDetail("Edit", { file_path: "src/a.ts" })).toBe("Edit: src/a.ts");
     expect(approvalDetail("Mystery", {})).toBe("Mystery");

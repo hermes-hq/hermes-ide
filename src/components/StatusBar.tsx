@@ -12,6 +12,7 @@ import { useSessionStatus } from "../agent/status/attentionStore";
 import { BLOCKING_STATUS_KINDS } from "../agent/contract/status";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useReportedTotals } from "../fleet/useReportedTotals";
+import { spendText } from "../fleet/spend";
 // Theme switching moved to Settings → Appearance in 1.1.15.  The
 // status bar is for state, not configuration; keeping the picker
 // out of here removes a redundant entry point.
@@ -63,11 +64,17 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
   const sessions = useSessionList();
   const legacyCost = useTotalCost();
   const legacyTokens = useTotalTokens();
-  // With the 2.0 fleet controls on, only what the agents themselves
-  // reported is added up: no estimated cost, no tokens read off the screen.
+  // With the 2.0 fleet controls on, the sessions' usage is added up (the
+  // same numbers the rows and the Context panel show): the agents' own
+  // costs, and Hermes's estimates from their transcripts, marked as such.
+  // Tokens read off the screen are never counted.
   const fleetOn = isFeatureFlagEnabled("fleetControls");
   const reported = useReportedTotals(sessions.map((s) => s.id), fleetOn);
   const totalCost = fleetOn ? reported.costUsd ?? 0 : legacyCost;
+  const estimated = fleetOn && reported.spend === "estimated";
+  const costText = fleetOn
+    ? spendText({ kind: reported.spend, costUsd: reported.costUsd }, t)
+    : `$${totalCost.toFixed(2)}`;
   const totalTokens = useMemo(
     () => (fleetOn ? { input: reported.inputTokens ?? 0, output: reported.outputTokens ?? 0 } : legacyTokens),
     [fleetOn, reported.inputTokens, reported.outputTokens, legacyTokens],
@@ -166,12 +173,19 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
         )}
         {totalCost > 0 && (
           <>
-            <span className="status-bar-item status-bar-cost" title={fleetOn ? t("fleet.spendReported") : undefined} onContextMenu={(e) => {
-              showStatusMenu(e, [
-                menuItem("status.copy-cost", t("status.copyCost")),
-                menuItem("status.copy-tokens", t("status.copyTokenCount")),
-              ]);
-            }}>${totalCost.toFixed(2)}</span>
+            <span
+              className="status-bar-item status-bar-cost"
+              data-spend={fleetOn ? reported.spend : undefined}
+              title={fleetOn ? (estimated ? t("fleet.spendEstimatedTitle") : t("fleet.spendReported")) : undefined}
+              onContextMenu={(e) => {
+                showStatusMenu(e, [
+                  menuItem("status.copy-cost", t("status.copyCost")),
+                  menuItem("status.copy-tokens", t("status.copyTokenCount")),
+                ]);
+              }}
+            >
+              {costText}
+            </span>
             <span className="status-bar-divider" />
           </>
         )}

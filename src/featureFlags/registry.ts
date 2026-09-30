@@ -87,7 +87,7 @@ export const FEATURE_FLAGS = [
     id: "reviewDesk",
     label: "Review Desk (⌘G)",
     description:
-      "Replaces the git panels with one review surface: the diff from the merge-base grouped by turn or by file, viewed checkboxes, line comments sent back to the agent that made the turn with a delivery receipt, revert of one turn, and risk flags on lockfiles, workflows, secrets and binaries.",
+      "Replaces the git panels with one review surface: a Changes section with their per-file stage, unstage and discard, commit (message drafted from the turns), push, pull and branch switch; the diff from the merge-base grouped by turn or by file, viewed checkboxes, line comments sent back to the agent that made the turn with a delivery receipt, revert of one turn, and risk flags on lockfiles, workflows, secrets and binaries.",
   },
   {
     id: "landSheet",
@@ -113,7 +113,7 @@ export const FEATURE_FLAGS = [
     id: "fleetControls",
     label: "Spend caps, overlap badges and the task queue",
     description:
-      "Shows only the spend an agent reports itself (n/a otherwise) and stops a session at a spend cap you set, marks sessions whose latest turns touched the same files, and queues new agent tasks beyond a running-agents or memory cap (Settings > Limits).",
+      "Shows the spend an agent reports itself, or Hermes's estimate from the token counts in its transcript marked \"(estimated)\" (n/a otherwise), the same in the rows, the project headers, the status bar and the Context panel, and stops a session at a spend cap you set (on reported spend only), marks sessions whose latest turns touched the same files, and queues new agent tasks beyond a running-agents or memory cap (Settings > Limits).",
   },
   {
     id: "taskLauncher",

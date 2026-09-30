@@ -16,7 +16,7 @@ import type { PersistedMemory } from "../types";
 import { useI18n } from "../i18n/I18nProvider";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
-import { formatUsd } from "../fleet/spend";
+import { spendOf, spendText } from "../fleet/spend";
 
 interface ContextPanelProps {
   session: SessionData;
@@ -472,11 +472,12 @@ export function ContextPanel({ session }: ContextPanelProps) {
     }
   }, [session.id]);
 
-  // With the 2.0 fleet controls on, a cost is shown only when the agent
-  // reported it (a `usage` event); otherwise "n/a", never an estimate.
+  // With the 2.0 fleet controls on, tokens and cost come only from the
+  // session's `usage` events: the agent's own cost, or Hermes's estimate
+  // from the agent's transcript (marked); never the terminal analyzer's.
   const fleetOn = isFeatureFlagEnabled("fleetControls");
   const reportedUsage = useSessionEvents(session.id).usage;
-  const reportedCost = reportedUsage?.costUsd ?? null;
+  const reportedSpend = spendOf(reportedUsage);
   const { totalInput, totalOutput, totalCost, totalTokens } = useMemo(() => {
     let inp = 0, out = 0, cost = 0;
     for (const t of Object.values(metrics.token_usage)) {
@@ -630,10 +631,29 @@ export function ContextPanel({ session }: ContextPanelProps) {
           </div>
         )}
 
-        {/* Tokens */}
-        {totalTokens > 0 && (
+        {/* Tokens: with the fleet controls, the session's usage events only
+            (the same numbers as its row and the status bar). */}
+        {fleetOn && reportedUsage && (
+          <div className="ctx-section ctx-usage">
+            <div className="ctx-section-title">
+              {t("fleet.usageTokens")}{" "}
+              <span className="ctx-cost" data-spend={reportedSpend.kind} title={reportedSpend.kind === "estimated" ? t("fleet.spendEstimatedTitle") : undefined}>
+                {spendText(reportedSpend, t)}
+              </span>
+            </div>
+            <div className="ctx-tokens-row">
+              <span className="ctx-token-in" data-tokens={reportedUsage.inputTokens ?? ""}>
+                {t("fleet.tokensIn", { tokens: reportedUsage.inputTokens === null ? t("fleet.spendNa") : formatTokens(reportedUsage.inputTokens) })}
+              </span>
+              <span className="ctx-token-out" data-tokens={reportedUsage.outputTokens ?? ""}>
+                {t("fleet.tokensOut", { tokens: reportedUsage.outputTokens === null ? t("fleet.spendNa") : formatTokens(reportedUsage.outputTokens) })}
+              </span>
+            </div>
+          </div>
+        )}
+        {!fleetOn && totalTokens > 0 && (
           <div className="ctx-section">
-            <div className="ctx-section-title">Tokens <span className="ctx-cost" data-spend={fleetOn ? (reportedCost === null ? "na" : "exact") : undefined}>{fleetOn ? (reportedCost === null ? t("fleet.spendNa") : formatUsd(reportedCost)) : formatCost(totalCost)}</span></div>
+            <div className="ctx-section-title">Tokens <span className="ctx-cost">{formatCost(totalCost)}</span></div>
             {sparkData.length >= 2 && (
               <div className="ctx-sparkline-wrap">
                 <Sparkline data={sparkData} color={session.color} width={260} height={28} />
@@ -650,8 +670,8 @@ export function ContextPanel({ session }: ContextPanelProps) {
                 <div key={provider} className="ctx-provider-row">
                   <span className="ctx-provider-name">{provider}</span>
                   <span className="ctx-provider-model mono">{tokens.model}</span>
-                  {!fleetOn && <span className="ctx-provider-cost">{formatCost(provCost)}</span>}
-                  {!fleetOn && <span className="ctx-provider-pct">{pct}%</span>}
+                  <span className="ctx-provider-cost">{formatCost(provCost)}</span>
+                  <span className="ctx-provider-pct">{pct}%</span>
                 </div>
               );
             })}

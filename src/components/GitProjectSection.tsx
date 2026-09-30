@@ -22,6 +22,16 @@ interface GitProjectSectionProps {
   onRefresh: () => void;
   onDiffFile: (sessionId: string, projectId: string, file: GitFile) => void;
   onToast: (message: string, type?: GitToast["type"]) => void;
+  /**
+   * "changes": the Review Desk's Changes section (reviewDesk flag), where
+   * history and stash live in the Repository tab instead: no History toggle,
+   * no stash list, no folder line. Default "panel": the git panel as it was.
+   */
+  variant?: "panel" | "changes";
+  /** A commit message to start from (drafted from the turns); the person's own text is never replaced. */
+  draftMessage?: string;
+  /** A label above the commit message box ("changes" variant). */
+  commitLabel?: string;
 }
 
 type ViewMode = "changes" | "history";
@@ -58,9 +68,19 @@ export function friendlyWorktreeLabel(projectName: string, projectPath: string):
   return projectName;
 }
 
-export function GitProjectSection({ sessionId, projectId, project, onRefresh, onDiffFile, onToast }: GitProjectSectionProps) {
+export function GitProjectSection({ sessionId, projectId, project, onRefresh, onDiffFile, onToast, variant = "panel", draftMessage, commitLabel }: GitProjectSectionProps) {
+  const changesOnly = variant === "changes";
   const [expanded, setExpanded] = useState(true);
-  const [commitMsg, setCommitMsg] = useState("");
+  const [commitMsg, setCommitMsg] = useState(draftMessage ?? "");
+  // A new draft replaces the message only while the person has not typed
+  // one; after a commit the box stays empty until the draft changes.
+  const draftApplied = useRef(draftMessage ?? "");
+  const edited = useRef(false);
+  useEffect(() => {
+    if (!draftMessage || draftMessage === draftApplied.current) return;
+    draftApplied.current = draftMessage;
+    if (!edited.current) setCommitMsg(draftMessage);
+  }, [draftMessage]);
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +200,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
       } catch { /* use defaults */ }
       await gitCommit(sessionId, projectId, commitMsg.trim(), authorName, authorEmail);
       setCommitMsg("");
+      edited.current = false;
       onToast("Committed successfully");
       onRefresh();
     } catch (e) { setError(String(e)); }
@@ -292,7 +313,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
   const canCompleteMerge = inMerge && mergeStatus?.conflicted_files.length === 0;
 
   return (
-    <div className="git-project-section" style={{ position: "relative" }}>
+    <div className="git-project-section" style={{ position: "relative" }} data-project-id={projectId} data-branch={project.branch ?? ""} data-variant={variant}>
       <div className="git-project-header" onClick={() => setExpanded((v) => !v)} onContextMenu={(e) => showEmptyMenu(e, buildEmptyAreaMenuItems("git-section"))}>
         <span className={`git-project-chevron ${expanded ? "git-project-chevron-open" : ""}`}>&#9656;</span>
         <span className="git-project-name">{project.project_name}</span>
@@ -318,7 +339,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
         {project.ahead > 0 && <span className="git-project-ahead" title={`${project.ahead} ahead`}>&uarr;{project.ahead}</span>}
         {project.behind > 0 && <span className="git-project-behind" title={`${project.behind} behind`}>&darr;{project.behind}</span>}
       </div>
-      {expanded && project.project_path && (
+      {expanded && !changesOnly && project.project_path && (
         <div className="git-project-path" title={isWorktreePath(project.project_path) ? friendlyWorktreeLabel(project.project_name, project.project_path) : project.project_path}>
           <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" className="git-project-path-icon">
             <path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7Z" />
@@ -349,21 +370,23 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
             <div className="git-error">{project.error}</div>
           )}
 
-          {/* View Toggle: Changes | History */}
-          <div className="git-view-toggle">
-            <button
-              className={`git-view-toggle-btn ${viewMode === "changes" ? "git-view-toggle-btn-active" : ""}`}
-              onClick={() => setViewMode("changes")}
-            >
-              Changes
-            </button>
-            <button
-              className={`git-view-toggle-btn ${viewMode === "history" ? "git-view-toggle-btn-active" : ""}`}
-              onClick={() => setViewMode("history")}
-            >
-              History
-            </button>
-          </div>
+          {/* View Toggle: Changes | History (the Review Desk keeps history in its Repository tab) */}
+          {!changesOnly && (
+            <div className="git-view-toggle">
+              <button
+                className={`git-view-toggle-btn ${viewMode === "changes" ? "git-view-toggle-btn-active" : ""}`}
+                onClick={() => setViewMode("changes")}
+              >
+                Changes
+              </button>
+              <button
+                className={`git-view-toggle-btn ${viewMode === "history" ? "git-view-toggle-btn-active" : ""}`}
+                onClick={() => setViewMode("history")}
+              >
+                History
+              </button>
+            </div>
+          )}
 
           {viewMode === "changes" && (
             <>
@@ -440,15 +463,17 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-empty">No changes</div>
               )}
 
-              {/* Stash Section */}
-              <GitStashSection
-                sessionId={sessionId}
-                projectId={projectId}
-                stashCount={project.stash_count}
-                hasChanges={hasChanges}
-                onRefresh={onRefresh}
-                onToast={onToast}
-              />
+              {/* Stash Section (the Review Desk has it in its Repository tab) */}
+              {!changesOnly && (
+                <GitStashSection
+                  sessionId={sessionId}
+                  projectId={projectId}
+                  stashCount={project.stash_count}
+                  hasChanges={hasChanges}
+                  onRefresh={onRefresh}
+                  onToast={onToast}
+                />
+              )}
 
               {/* Commit / Merge Actions */}
               {inMerge ? (
@@ -475,11 +500,42 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 </div>
               ) : (
                 <div className="git-commit-area">
+                  {changesOnly ? (
+                    <>
+                      {commitLabel && (
+                        <label className="git-commit-label" htmlFor={`git-commit-${projectId}`}>
+                          {commitLabel}
+                        </label>
+                      )}
+                      {/* Several lines: the drafted message lists the turns. */}
+                      <textarea
+                        id={`git-commit-${projectId}`}
+                        className="git-commit-input git-commit-textarea"
+                        placeholder="Commit message..."
+                        rows={3}
+                        value={commitMsg}
+                        onChange={(e) => {
+                          edited.current = true;
+                          setCommitMsg(e.target.value);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                            e.preventDefault();
+                            handleCommit();
+                          }
+                        }}
+                        onContextMenu={textContextMenu}
+                      />
+                    </>
+                  ) : (
                   <input
                     className="git-commit-input"
                     placeholder="Commit message..."
                     value={commitMsg}
-                    onChange={(e) => setCommitMsg(e.target.value)}
+                    onChange={(e) => {
+                      edited.current = true;
+                      setCommitMsg(e.target.value);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
@@ -488,6 +544,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                     }}
                     onContextMenu={textContextMenu}
                   />
+                  )}
                   <div className="git-commit-actions">
                     <button
                       className="git-btn git-btn-commit"

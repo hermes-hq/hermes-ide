@@ -13,7 +13,7 @@
 // component re-renders exactly when its session changed.
 
 import { useSyncExternalStore } from "react";
-import type { LaunchRejectedEvent, SessionEvent } from "./events";
+import type { LaunchRejectedEvent, SessionEvent, UsageConfidence } from "./events";
 import { UNKNOWN_STATUS, type AgentStatus } from "./status";
 
 /** How many events a session keeps in memory (oldest dropped first). */
@@ -32,11 +32,13 @@ export interface SessionTurnState {
   readonly completed: number;
 }
 
-/** The latest usage totals the agent reported (F31); null parts are "n/a". */
+/** The latest usage totals (F31); null parts are "n/a". */
 export interface SessionUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly costUsd: number | null;
+  /** "exact": the agent reported the cost; "estimated": Hermes priced its transcript's tokens. */
+  readonly confidence: UsageConfidence;
   /** Epoch ms of the usage event these totals came from. */
   readonly at: number;
 }
@@ -151,16 +153,24 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
     case "limit":
       next.limit = event.state === "limited" ? Object.freeze({ resetsAt: event.resetsAt, window: event.window }) : null;
       break;
-    case "usage":
-      // Totals as the agent reports them. A part it stopped reporting keeps
-      // the last value it did report; nothing is added up or guessed here.
+    case "usage": {
+      // Totals as reported. A part the agent stopped reporting keeps the
+      // last value; nothing is added up or guessed here. Once the agent
+      // itself reported its usage, an estimate never replaces it. An
+      // estimate is always Hermes's complete running total, so it is taken
+      // as it is: a null cost there means "no price" (n/a), not "unchanged".
+      const confidence = event.confidence ?? "exact";
+      if (confidence === "estimated" && prev.usage?.confidence === "exact") break;
+      const same = confidence === "exact" && prev.usage?.confidence === "exact";
       next.usage = Object.freeze({
-        inputTokens: event.inputTokens ?? prev.usage?.inputTokens ?? null,
-        outputTokens: event.outputTokens ?? prev.usage?.outputTokens ?? null,
-        costUsd: event.costUsd ?? prev.usage?.costUsd ?? null,
+        inputTokens: event.inputTokens ?? (same ? prev.usage?.inputTokens : null) ?? null,
+        outputTokens: event.outputTokens ?? (same ? prev.usage?.outputTokens : null) ?? null,
+        costUsd: event.costUsd ?? (same ? prev.usage?.costUsd : null) ?? null,
+        confidence,
         at: event.at,
       });
       break;
+    }
     case "context":
       next.context = Object.freeze({ usedTokens: event.usedTokens, contextLimit: event.contextLimit, model: event.model, at: event.at });
       break;

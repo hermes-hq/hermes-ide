@@ -814,6 +814,21 @@
   color: var(--text-3);
 }
 
+/* A spend like "≈$1.04 (estimated)" gives way before the project name does. */
+.project-header > .project-header-left:has(+ .project-header-right > .project-header-cost[data-spend]) {
+  min-width: var(--space-8);
+}
+.project-header-right:has(> .project-header-cost[data-spend]) {
+  flex-shrink: 1;
+  min-width: 0;
+}
+.project-header-cost[data-spend] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project-header-add-btn {
   background: none;
   border: none;

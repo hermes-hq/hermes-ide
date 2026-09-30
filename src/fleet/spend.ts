@@ -1,8 +1,10 @@
 // ─── Honest spend (F31) ──────────────────────────────────────────────
 //
-// Hermes shows a cost only when the agent itself reported it, through a
-// `usage` SessionEvent (docs/adr/004-2.0-contracts.md). Everything else is
-// "n/a": no price tables, no token-times-rate guesses.
+// Every cost Hermes shows comes from the `usage` SessionEvent
+// (docs/adr/004-2.0-contracts.md): the agent's own cost ("$0.42"), or, when
+// the agent only wrote token counts to its transcript, Hermes's estimate at
+// list prices, always marked as such ("≈$0.42 (estimated)"). Nothing known
+// is "n/a". Tokens read off the screen are never priced.
 //
 // A soft cap trips once per scope and cap value: the session (or every
 // session of a feature branch) is interrupted and a `limit` inbox item is
@@ -26,6 +28,56 @@ export function sumReported(costs: readonly ReportedCost[]): ReportedCost {
   let total: number | null = null;
   for (const c of costs) if (c !== null) total = (total ?? 0) + c;
   return total;
+}
+
+/**
+ * What one place shows for spend, from the session-event store's usage (the
+ * one source every surface reads): "exact" when the agent reported its cost,
+ * "estimated" when Hermes priced the tokens in the agent's transcript, "na"
+ * when no cost is known.
+ */
+export type SpendKind = "na" | "exact" | "estimated";
+
+export interface SpendView {
+  readonly kind: SpendKind;
+  readonly costUsd: number | null;
+}
+
+interface UsageLike {
+  readonly costUsd: number | null;
+  readonly confidence?: "exact" | "estimated";
+}
+
+export function spendOf(usage: UsageLike | null | undefined): SpendView {
+  if (!usage || usage.costUsd === null) return { kind: "na", costUsd: null };
+  return { kind: usage.confidence === "estimated" ? "estimated" : "exact", costUsd: usage.costUsd };
+}
+
+/** The sum over sessions; "estimated" as soon as one estimated cost is in it. */
+export function totalSpend(usages: readonly (UsageLike | null | undefined)[]): SpendView {
+  let total: number | null = null;
+  let estimated = false;
+  for (const u of usages) {
+    const s = spendOf(u);
+    if (s.costUsd === null) continue;
+    total = (total ?? 0) + s.costUsd;
+    if (s.kind === "estimated") estimated = true;
+  }
+  if (total === null) return { kind: "na", costUsd: null };
+  return { kind: estimated ? "estimated" : "exact", costUsd: total };
+}
+
+/** "$0.42", "≈$0.42 (estimated)" or "n/a", in the person's language. */
+export function spendText(view: SpendView, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  if (view.costUsd === null) return t("fleet.spendNa");
+  const cost = formatUsd(view.costUsd);
+  return view.kind === "estimated" ? t("fleet.spendEstimated", { cost }) : cost;
+}
+
+/** The cost a spend cap acts on: only what the agent itself reported. */
+export function cappableCost(usage: UsageLike | null | undefined): ReportedCost {
+  const s = spendOf(usage);
+  return s.kind === "exact" ? s.costUsd : null;
 }
 
 export interface FeatureRef {
