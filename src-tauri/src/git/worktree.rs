@@ -722,31 +722,34 @@ pub fn create_worktree_from(
         });
     }
 
-    // A new branch must not collide with any existing one, not even in
-    // letter case: on macOS and Windows `git worktree add … Develop` would
-    // check out `develop`, and the session's commits would move it. An
-    // existing branch is used only under its exact name (the user chose it).
-    let clash = local_branch_clash(&repo, branch_name);
-    if create_branch {
-        if let Some(clash) = clash {
+    // A name that differs from an existing branch only in letter case (or
+    // whose folder does) is never used, new or not: on macOS and Windows
+    // `git worktree add … Develop` would check out `develop`, and the
+    // session's commits would move it. An existing branch is used only under
+    // its exact name, as before (the branch-in-use choice relies on it: a
+    // branch held elsewhere comes back as BRANCH_IN_USE).
+    match local_branch_clash(&repo, branch_name) {
+        Some(clash @ (BranchClash::Case(_) | BranchClash::Folder(_))) => {
             return Err(branch_clash_error(branch_name, &clash));
         }
-        let base = match base_branch {
-            Some(base) => repo
-                .find_branch(base, BranchType::Local)
-                .map_err(|e| format!("Base branch '{}' not found: {}", base, e))?
-                .into_reference(),
-            None => repo
-                .head()
-                .map_err(|e| format!("Failed to get HEAD: {}", e))?,
-        };
-        let commit = base
-            .peel_to_commit()
-            .map_err(|e| format!("Failed to resolve base commit: {}", e))?;
-        repo.branch(branch_name, &commit, false)
-            .map_err(|e| format!("Failed to create branch '{}': {}", branch_name, e))?;
-    } else if let Some(clash @ (BranchClash::Case(_) | BranchClash::Folder(_))) = clash {
-        return Err(branch_clash_error(branch_name, &clash));
+        Some(BranchClash::Same(_)) => {}
+        None if create_branch => {
+            let base = match base_branch {
+                Some(base) => repo
+                    .find_branch(base, BranchType::Local)
+                    .map_err(|e| format!("Base branch '{}' not found: {}", base, e))?
+                    .into_reference(),
+                None => repo
+                    .head()
+                    .map_err(|e| format!("Failed to get HEAD: {}", e))?,
+            };
+            let commit = base
+                .peel_to_commit()
+                .map_err(|e| format!("Failed to resolve base commit: {}", e))?;
+            repo.branch(branch_name, &commit, false)
+                .map_err(|e| format!("Failed to create branch '{}': {}", branch_name, e))?;
+        }
+        None => {}
     }
 
     // Build the `git worktree add` command
@@ -2686,13 +2689,9 @@ mod tests {
     }
 
     #[test]
-    fn test_new_branch_with_an_existing_name_is_refused() {
+    fn test_new_branch_in_a_folder_differing_only_in_case_is_refused() {
         let app_data = create_test_app_data_dir();
         let (_repo_dir, repo_path) = repo_with_develop();
-        let err =
-            create_worktree(app_data.path(), &repo_path, "s1", "develop", true, None).unwrap_err();
-        assert!(err.starts_with(BRANCH_NAME_CLASH_PREFIX), "got: {err}");
-        // A folder that differs only in case is refused too.
         git_out(&repo_path, &["branch", "feature/inbox"]);
         let err = create_worktree(app_data.path(), &repo_path, "s2", "Feature/new", true, None)
             .unwrap_err();
