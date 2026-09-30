@@ -2,6 +2,7 @@ import "../styles/components/ShortcutsPanel.css";
 import { useEffect } from "react";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
+import { CloseButton } from "./ui";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import { visibleShortcutGroups } from "../utils/shortcuts";
@@ -36,7 +37,7 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
       <div className="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-header">
           <span className="shortcuts-title">{t("shortcuts.title")}</span>
-          <button className="close-btn shortcuts-close" onClick={onClose} aria-label={t("common.close")}>&times;</button>
+          <CloseButton className="shortcuts-close" onClick={onClose} label={t("common.close")} />
         </div>
         <div className="shortcuts-body">
           {VISIBLE_SHORTCUT_GROUPS.map((group) => (

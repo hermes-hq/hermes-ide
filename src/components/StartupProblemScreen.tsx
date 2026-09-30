@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { StartupProblem } from "../api/startupProblem";
 import { languagePacks } from "../i18n/packs";
 import { getStoredUiLanguage, translateIn, type LanguagePack } from "../i18n/registry";
+import { Button } from "./ui";
 
 interface StartupProblemScreenProps {
 	problem: StartupProblem;
@@ -66,9 +67,9 @@ export function StartupProblemScreen({ problem, onQuit, locale = getStoredUiLang
 					<code>{problem.dataPath}</code>
 				</p>
 				<div className="startup-problem-actions">
-					<button type="button" className="startup-problem-quit" onClick={onQuit} autoFocus>
+					<Button variant="primary" className="startup-problem-quit" onClick={onQuit} autoFocus>
 						{t("startupProblem.quit")}
-					</button>
+					</Button>
 				</div>
 			</div>
 		</main>

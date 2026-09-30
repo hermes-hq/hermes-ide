@@ -23,7 +23,7 @@ const READ_WORKBENCH = `
   const panel = e2e.first(".workbench-panel");
   if (!panel) return null;
   // textContent: the tabs are upper-cased by CSS only.
-  const selected = e2e.all('.workbench-tab[aria-selected="true"]', panel).map((t) => t.textContent.trim());
+  const selected = e2e.all('.workbench-tabs [role=tab][aria-selected="true"]', panel).map((t) => t.textContent.trim());
   const split = panel.querySelector(".workbench-split");
   const notes = panel.querySelector(".workbench-notes-textarea");
   return {
@@ -58,10 +58,10 @@ await runScenario("N11-workbench-notes-restore", async ({ evidenceDir, log, asse
     // Any tab but the default one proves the tab comes back. Git, or
     // Context when the Review Desk (on by default since 2.0) retires the
     // Workbench's Git tab.
-    const TAB = (await b1.eval(`return e2e.all(".workbench-tabs .workbench-tab").map((t) => t.textContent.trim());`)).includes("Git") ? "Git" : "Context";
+    const TAB = (await b1.eval(`return e2e.all(".workbench-tabs [role=tab]").map((t) => t.textContent.trim());`)).includes("Git") ? "Git" : "Context";
     await b1.clickByName(TAB, { within: ".workbench-tabs" });
     await b1.waitFor(`the ${TAB} tab to be selected`, `
-      return e2e.first('.workbench-tab[aria-selected="true"]')?.textContent.trim() === ${JSON.stringify(TAB)};
+      return e2e.first('.workbench-tabs [role=tab][aria-selected="true"]')?.textContent.trim() === ${JSON.stringify(TAB)};
     `);
 
     // Drag the Files/Notes divider up by a third of the panel's height.

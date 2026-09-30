@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import "../styles/components/CloseSessionDialog.css";
 import type { SessionMode } from "../types/session";
 import { useI18n } from "../i18n/I18nProvider";
+import { Button, Checkbox } from "./ui";
 
 interface CloseSessionDialogProps {
   sessionId: string;
@@ -46,19 +47,12 @@ export function CloseSessionDialog({ sessionId, sessionMode, onConfirm, onCancel
         <div className="close-dialog-body">
           {mode === "agent" ? t("close.agent.body") : t("close.terminal.body")}
         </div>
-        <label className="close-dialog-checkbox">
-          <input
-            type="checkbox"
-            checked={dontAsk}
-            onChange={(e) => setDontAsk(e.target.checked)}
-          />
-          {t("close.dontAsk")}
-        </label>
+        <Checkbox className="close-dialog-checkbox" checked={dontAsk} onChange={setDontAsk} label={t("close.dontAsk")} />
         <div className="close-dialog-actions">
-          <button className="close-dialog-btn" onClick={onCancel}>{t("common.cancel")}</button>
-          <button className="close-dialog-btn close-dialog-btn-confirm" onClick={handleConfirm}>
+          <Button className="close-dialog-btn" onClick={onCancel}>{t("common.cancel")}</Button>
+          <Button variant="danger-solid" className="close-dialog-btn-confirm" onClick={handleConfirm}>
             {mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

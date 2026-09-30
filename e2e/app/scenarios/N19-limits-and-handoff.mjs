@@ -325,18 +325,18 @@ async function handOff(bridge, sessionId, kind, agentId, { editTask } = {}) {
     return e2e.click(e2e.must(e2e.first(".session-limit-handoff", row), "the Hand off button"));
   `);
   await bridge.waitFor("the handoff dialog", `return !!e2e.first('.handoff-modal[role="dialog"]');`);
-  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first('.handoff-kind[data-kind="${kind}"] input'), "${kind}"));`);
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first('.handoff-kinds input[value="${kind}"]'), "${kind}"));`);
   await bridge.waitFor(`the ${agentId} option to be ready`, `
-    const b = e2e.first('.handoff-agent[data-agent-id="${agentId}"]');
-    return !!b && !b.disabled && b.dataset.state === "ready";
+    const b = e2e.first('.handoff-agents input[value="${agentId}"]');
+    return !!b && !b.disabled;
   `, { timeoutMs: 20_000 });
-  const offered = await bridge.eval(`return e2e.all(".handoff-agent").map((b) => ({ id: b.dataset.agentId, state: b.dataset.state, disabled: b.disabled }));`);
-  await bridge.click(`.handoff-agent[data-agent-id="${agentId}"]`);
+  const offered = await bridge.eval(`return e2e.all(".handoff-agents input").map((b) => ({ id: b.value, state: b.disabled ? e2e.norm(b.closest("label").innerText) : "ready", disabled: b.disabled }));`);
+  await bridge.click(`.handoff-agents input[value="${agentId}"]`);
   if (editTask) await bridge.eval(setInput(".handoff-task", editTask, "HTMLTextAreaElement"));
   await bridge.waitFor("the Start button", `const b = e2e.first(".handoff-btn-start"); return !!b && !b.disabled;`, { timeoutMs: 20_000 });
   const dialog = await bridge.eval(`
     return {
-      kind: document.querySelector(".handoff-kind-selected")?.dataset.kind ?? null,
+      kind: document.querySelector(".handoff-kinds input:checked")?.value ?? null,
       files: [...document.querySelectorAll(".handoff-file")].map((li) => li.textContent),
       seed: document.querySelector(".handoff-seed-text")?.textContent ?? "",
       note: e2e.norm(e2e.first(".handoff-note")?.innerText),

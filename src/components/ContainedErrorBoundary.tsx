@@ -1,6 +1,7 @@
 import "../styles/components/ContainedErrorBoundary.css";
 import { Component, Fragment, type ErrorInfo, type ReactNode } from "react";
 import { translate } from "../i18n/registry";
+import { Button } from "./ui";
 
 /**
  * Where a crash is contained.
@@ -78,10 +79,10 @@ export class ContainedErrorBoundary extends Component<Props, State> {
 				<div className="contained-error-hint">{translate(text.hint)}</div>
 				{error.message ? <pre className="contained-error-message">{error.message}</pre> : null}
 				<div className="contained-error-actions">
-					<button type="button" className="contained-error-reload" onClick={this.reload}>
-						{translate(text.reload)}
-					</button>
 					{actions}
+					<Button variant="primary" className="contained-error-reload" onClick={this.reload}>
+						{translate(text.reload)}
+					</Button>
 				</div>
 			</div>
 		);

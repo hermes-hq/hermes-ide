@@ -2,6 +2,7 @@ import "../styles/components/PluginUpdateConfirmDialog.css";
 import type { PluginUpdateInfo } from "../hooks/usePluginUpdateChecker";
 import type { ChangelogEntry } from "../plugins/types";
 import { hasUpdate } from "../plugins/semver";
+import { Button } from "./ui";
 
 interface PluginUpdateConfirmDialogProps {
 	plugins: PluginUpdateInfo[];
@@ -31,12 +32,12 @@ export function PluginUpdateConfirmDialog({ plugins, onConfirm, onCancel }: Plug
 					))}
 				</div>
 				<div className="puc-footer">
-					<button className="puc-btn puc-btn-cancel" onClick={onCancel}>
+					<Button className="puc-btn-cancel" onClick={onCancel}>
 						Cancel
-					</button>
-					<button className="puc-btn puc-btn-confirm" onClick={onConfirm}>
+					</Button>
+					<Button variant="primary" className="puc-btn-confirm" onClick={onConfirm}>
 						{single ? "Update" : "Update All"}
-					</button>
+					</Button>
 				</div>
 			</div>
 		</div>

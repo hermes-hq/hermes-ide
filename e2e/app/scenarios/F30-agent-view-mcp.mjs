@@ -70,7 +70,7 @@ await runScenario("F30-agent-view-mcp", async ({ evidenceDir, log, assert, apps,
   }
   await bridge.waitFor("the workbench", `return !!e2e.first(".workbench-panel");`);
   await bridge.clickWhenReady(`
-    const tab = e2e.all(".workbench-tab").find((b) => e2e.norm(b.innerText).toLowerCase() === "context");
+    const tab = e2e.all(".workbench-tabs [role=tab]").find((b) => e2e.norm(b.innerText).toLowerCase() === "context");
     return e2e.click(e2e.must(tab, "the workbench's Context tab"));
   `);
   const MCP = `.workbench-panel .agent-context-section[data-section="mcp"]`;

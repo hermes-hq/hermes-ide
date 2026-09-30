@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import "../styles/components/QuitWithAgentsDialog.css";
 import { useI18n } from "../i18n/I18nProvider";
+import { Button } from "./ui";
 
 /** A session the quit would interrupt: its id and the label people know it by. */
 export interface WorkingSession {
@@ -51,9 +52,9 @@ export function QuitWithAgentsDialog({ sessions, onKeep, onStop, onCancel }: Qui
           ))}
         </ul>
         <div className="quit-dialog-actions">
-          <button className="quit-dialog-btn" onClick={onCancel}>{t("common.cancel")}</button>
-          <button className="quit-dialog-btn quit-dialog-btn-stop" onClick={onStop}>{t("quit.keep.stop")}</button>
-          <button className="quit-dialog-btn quit-dialog-btn-keep" onClick={onKeep} autoFocus>{t("quit.keep.keep")}</button>
+          <Button className="quit-dialog-btn" onClick={onCancel}>{t("common.cancel")}</Button>
+          <Button variant="danger" className="quit-dialog-btn-stop" onClick={onStop}>{t("quit.keep.stop")}</Button>
+          <Button variant="primary" className="quit-dialog-btn-keep" onClick={onKeep} autoFocus>{t("quit.keep.keep")}</Button>
         </div>
       </div>
     </div>

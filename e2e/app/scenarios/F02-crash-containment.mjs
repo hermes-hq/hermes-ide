@@ -266,20 +266,20 @@ try {
   assert(!before5b.includes("EditorPane") && !before5b.includes("FileExplorerPanel"), "editor and file explorer not loaded yet");
   // Attach the folder as a project: "+ Add Project" in the left pane, type the path, Scan.
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first(".split-pane")?.querySelector(".scope-bar-add"), "+ Add Project"));`);
-  await bridge.waitFor("the project picker", `return !!e2e.first(".project-picker-footer .workspace-scan-input");`);
+  await bridge.waitFor("the project picker", `return !!e2e.first(".project-picker-footer .project-picker-scan-input");`);
   await bridge.eval(`
-    const input = e2e.first(".project-picker-footer .workspace-scan-input");
+    const input = e2e.first(".project-picker-footer .project-picker-scan-input");
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     setValue.call(input, ${JSON.stringify(projectDir)});
     input.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
   `);
   await bridge.clickWhenReady(`
-    const scan = e2e.all(".project-picker-footer .workspace-scan-btn").find((b) => e2e.norm(b.innerText) === "Scan");
+    const scan = e2e.all(".project-picker-footer .project-picker-scan").find((b) => e2e.norm(b.innerText) === "Scan");
     return e2e.click(e2e.must(scan, "Scan button"));
   `);
   await bridge.waitFor("the project to be attached", `
-    return !!e2e.first(".project-picker-footer .workspace-scan-input") && e2e.first(".project-picker-footer .workspace-scan-input").value === "";
+    return !!e2e.first(".project-picker-footer .project-picker-scan-input") && e2e.first(".project-picker-footer .project-picker-scan-input").value === "";
   `);
   await bridge.click(".project-picker-done");
   await bridge.clickWhenReady(`

@@ -12,6 +12,7 @@
  * land on a focused approve button.
  */
 import "../styles/components/PermissionRequestModal.css";
+import { Button, Textarea } from "./ui";
 import { useEffect, useMemo, useState } from "react";
 import {
   buildApproveAllAllowRule,
@@ -92,12 +93,15 @@ export function PermissionRequestModal({ request, permissionMode, onDecision, ca
 
       {editing && (
         <div className="perm-modal-edit">
-          <textarea
+          <Textarea
+            code
             className="perm-edit-textarea"
+            aria-label="Tool input (JSON)"
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             rows={8}
             spellCheck={false}
+            invalid={parsedEdit === null}
           />
           {parsedEdit === null && (
             <div className="perm-edit-error">invalid JSON — fix to enable confirm</div>
@@ -108,20 +112,20 @@ export function PermissionRequestModal({ request, permissionMode, onDecision, ca
       <div className="perm-modal-actions">
         {editing ? (
           <>
-            <button
-              type="button"
-              className="perm-link"
+            <Button
+              variant="quiet"
+              className="perm-link-cancel"
               onClick={() => {
                 setEditing(false);
                 setEditText(JSON.stringify(request.input, null, 2));
               }}
             >
               Cancel
-            </button>
+            </Button>
             <span className="perm-modal-actions-spacer" />
-            <button
-              type="button"
-              className="perm-link perm-link-primary"
+            <Button
+              variant="primary"
+              className="perm-link-primary"
               disabled={parsedEdit === null}
               onClick={() => {
                 if (parsedEdit) {
@@ -130,7 +134,7 @@ export function PermissionRequestModal({ request, permissionMode, onDecision, ca
               }}
             >
               Confirm edit
-            </button>
+            </Button>
           </>
         ) : (
           <>
@@ -138,38 +142,37 @@ export function PermissionRequestModal({ request, permissionMode, onDecision, ca
              * Layout follows the standard dialog pattern: destructive
              * + secondary options sit at the leading edge, the
              * confirm action gets the trailing spotlight. */}
-            <button
-              type="button"
-              className="perm-link perm-link-deny"
+            <Button
+              variant="danger"
+              className="perm-link-deny"
               onClick={() => onDecision({ kind: "deny" })}
             >
               Deny
-            </button>
-            <button
-              type="button"
-              className="perm-link"
+            </Button>
+            <Button
+              variant="quiet"
+              className="perm-link-edit"
               onClick={() => setEditing(true)}
             >
               Edit input
-            </button>
+            </Button>
             <span className="perm-modal-actions-spacer" />
             {canPersist && (
-              <button
-                type="button"
-                className="perm-link"
+              <Button
+                className="perm-link-always"
                 title={`Adds permissions.allow: ['${allowRule}'] to this project's .claude/settings.local.json`}
                 onClick={() => onDecision({ kind: "allow", persist: allowRule })}
               >
                 Always allow ({request.toolName})
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
-              className="perm-link perm-link-primary"
+            <Button
+              variant="primary"
+              className="perm-link-primary"
               onClick={() => onDecision({ kind: "allow" })}
             >
               Approve once
-            </button>
+            </Button>
           </>
         )}
       </div>

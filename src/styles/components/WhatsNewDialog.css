@@ -361,65 +361,8 @@
   flex-shrink: 0;
 }
 
-.whatsnew-suppress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font: 12px/1 var(--font-display, var(--font-ui));
-  color: var(--ink-tertiary, var(--text-3));
-  user-select: none;
-}
-
-.whatsnew-suppress input[type="checkbox"] {
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.whatsnew-suppress:hover {
-  color: var(--ink-secondary, var(--text-2));
-}
-
 .whatsnew-spacer {
   flex: 1 1 auto;
-}
-
-.whatsnew-btn {
-  appearance: none;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent);
-  padding: 8px 18px;
-  border-radius: 7px;
-  cursor: pointer;
-  font: 13px/1 var(--font-display, var(--font-ui));
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
-}
-
-.whatsnew-btn:hover {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: var(--accent);
-}
-
-.whatsnew-btn:active {
-  transform: translateY(0.5px);
-}
-
-.whatsnew-btn-primary {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--accent) 95%, white) 0%,
-    var(--accent) 100%);
-  border-color: var(--accent);
-  color: var(--bg-0);
-  box-shadow: 0 1px 0 color-mix(in srgb, white 18%, transparent) inset;
-}
-
-.whatsnew-btn-primary:hover {
-  filter: brightness(1.08);
-  background: var(--accent);
-  color: var(--bg-0);
 }
 
 /* Narrow widths — drop the dialog padding a bit so it fits */

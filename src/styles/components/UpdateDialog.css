@@ -123,66 +123,11 @@
 .update-dialog-actions {
   display: flex;
   gap: var(--space-2);
-  justify-content: flex-end;
+  align-items: center;
 }
 
-.update-dialog-btn {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  color: var(--text-1);
-  padding: 8px 16px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  font-family: var(--font-ui);
-  transition: background 0.1s, border-color 0.1s;
-}
-
-.update-dialog-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--text-3);
-}
-
-.update-dialog-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.update-dialog-spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 8px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  vertical-align: -2px;
-  animation: updateDialogSpin 0.7s linear infinite;
-}
-
-@keyframes updateDialogSpin {
-  to { transform: rotate(360deg); }
-}
-
-
-.update-dialog-btn-cancel {
-  border-color: var(--yellow);
-  color: var(--yellow);
-}
-
-.update-dialog-btn-cancel:hover {
-  background: color-mix(in srgb, var(--yellow) 15%, transparent);
-}
-
-.update-dialog-btn-primary {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.update-dialog-btn-primary:hover {
-  background: var(--accent);
-  color: var(--bg-0);
+.update-dialog-spacer {
+  flex: 1;
 }
 
 /* ─── Status bar update indicator ─────────────────────── */

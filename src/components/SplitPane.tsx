@@ -25,6 +25,7 @@ import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from
 import { triggerMenuBarAction } from "../hooks/nativeMenuBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { agentDisplayName } from "../catalog/agentCatalog";
+import { Button } from "./ui";
 
 // The agent view (and everything it pulls in: markdown, syntax
 // highlighting, tool cards) loads on demand, the first time an
@@ -375,9 +376,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
             scope="pane"
             label={session.label}
             actions={
-              <button type="button" onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
+              <Button onClick={() => dispatch({ type: "CLOSE_PANE", paneId })}>
                 {translate("crash.closePane")}
-              </button>
+              </Button>
             }
           >
             {import.meta.env.VITE_HERMES_E2E === "1" && <CrashProbe target={`pane:${sessionId}`} />}

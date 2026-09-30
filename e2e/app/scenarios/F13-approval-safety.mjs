@@ -243,7 +243,7 @@ try {
   }
   await bridge.waitFor("the workbench", `return !!e2e.first(".workbench-panel");`);
   await bridge.clickWhenReady(`
-    const tab = e2e.all(".workbench-tab").find((b) => e2e.norm(b.innerText).toLowerCase() === "context");
+    const tab = e2e.all(".workbench-tabs [role=tab]").find((b) => e2e.norm(b.innerText).toLowerCase() === "context");
     return e2e.click(e2e.must(tab, "the workbench's Context tab"));
   `);
   await bridge.waitFor("the permissions list", `return !!e2e.first(".workbench-panel .perms-section");`);

@@ -64,31 +64,3 @@
   justify-content: flex-end;
   gap: 8px;
 }
-
-.quit-dialog-btn {
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--text-1);
-  font-size: var(--text-md);
-  cursor: pointer;
-}
-
-.quit-dialog-btn:hover {
-  background: var(--bg-3);
-}
-
-.quit-dialog-btn-stop {
-  color: var(--danger, #e5484d);
-}
-
-.quit-dialog-btn-keep {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg, #fff);
-}
-
-.quit-dialog-btn-keep:hover {
-  filter: brightness(1.1);
-}

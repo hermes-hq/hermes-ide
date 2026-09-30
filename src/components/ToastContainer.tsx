@@ -1,5 +1,7 @@
 import "../styles/components/ToastContainer.css";
 import type { Toast } from "../hooks/useToastStore";
+import { translate } from "../i18n/registry";
+import { Button, CloseButton } from "./ui";
 
 const CheckIcon = () => (
 	<svg viewBox="0 0 24 24" width="14" height="14">
@@ -58,22 +60,27 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
 					<span className="toast-message">{toast.message}</span>
 					{toast.actions && toast.actions.length > 0 && (
 						<div className="toast-actions">
-							{toast.actions.map((action, i) => (
-								<button
-									key={i}
-									className={`toast-action-btn${action.primary ? " toast-action-primary" : ""}`}
-									onClick={() => {
-										action.onClick();
-										onDismiss(toast.id);
-									}}
-								>
-									{action.label}
-								</button>
-							))}
+							{/* The primary action, if any, is the right-most. */}
+							{[...toast.actions]
+								.sort((a, b) => Number(!!a.primary) - Number(!!b.primary))
+								.map((action) => (
+									<Button
+										key={action.label}
+										size="sm"
+										variant={action.primary ? "primary" : "secondary"}
+										className={action.primary ? "toast-action-primary" : "toast-action-btn"}
+										onClick={() => {
+											action.onClick();
+											onDismiss(toast.id);
+										}}
+									>
+										{action.label}
+									</Button>
+								))}
 						</div>
 					)}
 					{toast.dismissible !== false && (
-						<button className="toast-close" onClick={() => onDismiss(toast.id)}>&times;</button>
+						<CloseButton className="toast-close" label={translate("common.close")} onClick={() => onDismiss(toast.id)} />
 					)}
 				</div>
 			))}

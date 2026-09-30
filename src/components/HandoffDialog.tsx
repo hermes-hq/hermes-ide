@@ -36,6 +36,7 @@ import {
 import { HandoffError, runHandoff } from "../limits/runHandoff";
 import { isLimited } from "../limits/limitStatus";
 import type { SessionData } from "../types/session";
+import { Button, CloseButton, RadioGroup, Textarea } from "./ui";
 
 interface HandoffDialogProps {
   session: SessionData;
@@ -156,44 +157,41 @@ export function HandoffDialog({ session, initialKind, onClose }: HandoffDialogPr
       >
         <div className="handoff-header">
           <span className="handoff-title" id="handoff-title">{t("handoff.title")}</span>
-          <button className="handoff-close" onClick={onClose} aria-label={t("handoff.cancel")} disabled={busy}>&times;</button>
+          <CloseButton className="handoff-close" onClick={onClose} label={t("handoff.cancel")} disabled={busy} />
         </div>
         <div className="handoff-body">
-          <div className="handoff-kinds" role="radiogroup" aria-label={t("handoff.title")}>
-            {(["continue", "duplicate"] as const).map((k) => (
-              <label key={k} className={`handoff-kind${kind === k ? " handoff-kind-selected" : ""}`} data-kind={k}>
-                <input type="radio" name="handoff-kind" value={k} checked={kind === k} onChange={() => setKind(k)} disabled={busy} />
-                <span className="handoff-kind-text">
-                  <span className="handoff-kind-name">{t(k === "continue" ? "handoff.continue" : "handoff.duplicate")}</span>
-                  <span className="handoff-kind-hint">{t(k === "continue" ? "handoff.continueHint" : "handoff.duplicateHint")}</span>
-                </span>
-              </label>
-            ))}
-          </div>
+          <RadioGroup<HandoffKind>
+            className="handoff-kinds"
+            name="handoff-kind"
+            label={t("handoff.title")}
+            value={kind}
+            onChange={setKind}
+            options={(["continue", "duplicate"] as const).map((k) => ({
+              value: k,
+              label: t(k === "continue" ? "handoff.continue" : "handoff.duplicate"),
+              description: t(k === "continue" ? "handoff.continueHint" : "handoff.duplicateHint"),
+              disabled: busy,
+            }))}
+          />
 
           <div className="handoff-section-label">{t("handoff.agent")}</div>
-          <div className="handoff-agents" role="listbox" aria-label={t("handoff.agent")}>
-            {installed === null && <div className="handoff-muted">{t("handoff.loading")}</div>}
-            {targets.map((x) => (
-              <button
-                key={x.agent.id}
-                type="button"
-                role="option"
-                aria-selected={agentId === x.agent.id}
-                className={`handoff-agent${agentId === x.agent.id ? " handoff-agent-selected" : ""}`}
-                data-agent-id={x.agent.id}
-                data-state={x.state}
-                disabled={x.state !== "ready" || busy}
-                onClick={() => setAgentId(x.agent.id)}
-              >
-                <span className="handoff-agent-name">{x.agent.name}</span>
-                {x.state !== "ready" && <span className="handoff-agent-state">{stateLabel(x)}</span>}
-              </button>
-            ))}
-          </div>
+          {installed === null && <div className="handoff-muted">{t("handoff.loading")}</div>}
+          <RadioGroup
+            className="handoff-agents"
+            name="handoff-agent"
+            label={t("handoff.agent")}
+            value={agentId}
+            onChange={setAgentId}
+            options={targets.map((x) => ({
+              value: x.agent.id,
+              label: x.agent.name,
+              description: x.state !== "ready" ? stateLabel(x) : undefined,
+              disabled: x.state !== "ready" || busy,
+            }))}
+          />
 
           <label className="handoff-section-label" htmlFor="handoff-task">{t("handoff.task")}</label>
-          <textarea
+          <Textarea
             id="handoff-task"
             className="handoff-task"
             value={task}
@@ -227,15 +225,16 @@ export function HandoffDialog({ session, initialKind, onClose }: HandoffDialogPr
           {error && <div className="handoff-error" role="alert">{error}</div>}
         </div>
         <div className="handoff-actions">
-          <button type="button" className="handoff-btn handoff-btn-cancel" onClick={onClose} disabled={busy}>{t("handoff.cancel")}</button>
-          <button
-            type="button"
-            className="handoff-btn handoff-btn-start"
+          <Button className="handoff-btn-cancel" onClick={onClose} disabled={busy}>{t("handoff.cancel")}</Button>
+          <Button
+            variant="primary"
+            className="handoff-btn-start"
             onClick={() => void start()}
-            disabled={!agentId || busy || files === null}
+            disabled={!agentId || files === null}
+            loading={busy}
           >
             {busy ? t("handoff.starting") : t("handoff.start")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>,

@@ -27,6 +27,8 @@ import {
   MAX_FILES_NOTES_SPLIT,
 } from "../utils/workbenchLayout";
 import type { SessionData } from "../types/session";
+import { CloseButton, Tabs } from "./ui";
+import { tabId, tabPanelId } from "./ui/Tabs";
 
 interface WorkbenchPanelProps {
   /** Active session.  The component is intended to mount only when
@@ -219,48 +221,21 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
             {sessionLabel}
           </span>
           <span className="workbench-scope">workbench</span>
-          <button
-            type="button"
-            className="workbench-close"
-            onClick={close}
-            title="Close workbench (⌥⌘B)"
-            aria-label="Close workbench"
-          >
-            ✕
-          </button>
+          <CloseButton className="workbench-close" onClick={close} title="Close workbench (⌥⌘B)" label="Close workbench" />
         </div>
 
-        <div className="workbench-tabs" role="tablist">
-          <button
-            type="button"
-            className="workbench-tab"
-            role="tab"
-            aria-selected={activeTab === "files"}
-            onClick={() => setTab("files")}
-          >
-            Files
-          </button>
-          <button
-            type="button"
-            className="workbench-tab"
-            role="tab"
-            aria-selected={activeTab === "context"}
-            onClick={() => setTab("context")}
-          >
-            Context
-          </button>
-          {gitTab && (
-            <button
-              type="button"
-              className="workbench-tab"
-              role="tab"
-              aria-selected={activeTab === "git"}
-              onClick={() => setTab("git")}
-            >
-              Git
-            </button>
-          )}
-        </div>
+        <Tabs
+          idPrefix="workbench"
+          className="workbench-tabs"
+          label="Workbench"
+          value={activeTab}
+          onChange={setTab}
+          tabs={[
+            { value: "files" as const, label: "Files" },
+            { value: "context" as const, label: "Context" },
+            ...(gitTab ? [{ value: "git" as const, label: "Git" }] : []),
+          ]}
+        />
       </header>
 
       {/* Both tab bodies are mounted; only the active one is visible.
@@ -270,7 +245,9 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
       <div
         className="workbench-body"
         role="tabpanel"
+        id={tabPanelId("workbench", "files")}
         aria-label="Files"
+        aria-labelledby={tabId("workbench", "files")}
         hidden={activeTab !== "files"}
       >
         <FileExplorerPanel visible={activeTab === "files"} />
@@ -278,7 +255,9 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
       <div
         className="workbench-body"
         role="tabpanel"
+        id={tabPanelId("workbench", "context")}
         aria-label="Context"
+        aria-labelledby={tabId("workbench", "context")}
         hidden={activeTab !== "context"}
       >
         <AgentContextPanel session={session} />
@@ -287,7 +266,9 @@ export function WorkbenchPanel({ session }: WorkbenchPanelProps) {
         <div
           className="workbench-body"
           role="tabpanel"
+          id={tabPanelId("workbench", "git")}
           aria-label="Git"
+          aria-labelledby={tabId("workbench", "git")}
           hidden={activeTab !== "git"}
         >
           <GitPanel visible={activeTab === "git"} />

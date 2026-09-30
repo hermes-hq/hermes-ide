@@ -60,15 +60,6 @@
 
 .track-close {
   margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.track-close:hover {
-  color: var(--text-0);
 }
 
 .track-branch {
@@ -97,15 +88,9 @@
   align-items: center;
 }
 
-.track-select {
+.track-promote .track-select {
   flex: 1;
   min-width: 0;
-  background: var(--bg-2);
-  color: var(--text-1);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 6px;
-  font-size: var(--text-xs);
 }
 
 .track-phases {
@@ -205,41 +190,8 @@
   border-top: 1px solid var(--border);
 }
 
-.track-btn {
-  background: var(--bg-2);
-  color: var(--text-1);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: var(--text-xs);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.track-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-0);
-}
-
-.track-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.track-btn-primary {
-  background: var(--brass);
-  color: var(--bg-0);
-  border-color: var(--brass);
-}
-
-.track-btn-primary:hover:not(:disabled) {
-  background: var(--brass-bright);
-  color: var(--bg-0);
-}
-
-.track-btn kbd {
+.track-actions kbd,
+.track-gate kbd {
   font-family: var(--font-code);
   font-size: var(--text-2xs);
   color: var(--text-3);

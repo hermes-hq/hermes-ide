@@ -13,6 +13,7 @@ import { useI18n } from "../i18n/I18nProvider";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { PLUGIN_API_V1_REMOVED_IN, resolvePluginApi } from "../plugins/apiV2";
 import { useReviewChecks } from "../agent/contract/reviewChecks";
+import { Badge, Button, Chip, CloseButton, Counter, IconButton, Input, NativeSelect, TabPanel, Tabs } from "./ui";
 
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 	"storage": "Read and write persistent data on your device",
@@ -414,7 +415,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 				</label>
 				<span className="ps-hint">{t("language.panel.subtitle")}</span>
 				<div className="ps-control">
-					<select
+					<NativeSelect
 						id="language-pack-locale"
 						className="ps-select"
 						value={currentLanguage}
@@ -425,7 +426,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 								{language.nativeLabel ?? language.label} ({language.locale})
 							</option>
 						))}
-					</select>
+					</NativeSelect>
 				</div>
 			</div>
 		</div>
@@ -460,26 +461,29 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 						<span className="pm-row-author">{p.manifest.author}</span>
 					</div>
 					<div className="pm-row-badges">
-						{p.builtin && <span className="pm-badge">{t("plugins.builtIn")}</span>}
-						{!p.enabled && <span className="pm-badge pm-badge-disabled">{t("plugins.off")}</span>}
-						{update && <span className="pm-badge pm-badge-update">{t("plugins.update")}</span>}
+						{p.builtin && <Badge className="pm-badge">{t("plugins.builtIn")}</Badge>}
+						{!p.enabled && <Badge className="pm-badge pm-badge-disabled">{t("plugins.off")}</Badge>}
+						{update && <Badge tone="success" className="pm-badge pm-badge-update">{t("plugins.update")}</Badge>}
 						{p.enabled && apiDeprecated && (
-							<span className="pm-badge pm-badge-deprecated" title={t("plugins.apiV1Deprecated", { version: PLUGIN_API_V1_REMOVED_IN })}>
-								{t("plugins.apiV1Badge")}
+							<span className="pm-badge-tip" title={t("plugins.apiV1Deprecated", { version: PLUGIN_API_V1_REMOVED_IN })}>
+								<Badge tone="warning" className="pm-badge pm-badge-deprecated">{t("plugins.apiV1Badge")}</Badge>
 							</span>
 						)}
 						{p.enabled && apiRefusal && (
-							<span className="pm-badge pm-badge-incompatible" title={apiRefusal}>{t("plugins.apiUnavailableBadge")}</span>
+							<span className="pm-badge-tip" title={apiRefusal}>
+								<Badge tone="danger" className="pm-badge pm-badge-incompatible">{t("plugins.apiUnavailableBadge")}</Badge>
+							</span>
 						)}
 					</div>
 					<div className="pm-row-action">
-						<button
-							className="pm-btn pm-btn-sm"
+						<Button
+							size="sm"
+							className="pm-row-toggle"
 							onClick={(e) => { e.stopPropagation(); handleToggleEnabled(p.manifest.id, p.enabled); }}
 							disabled={isToggling || p.builtin}
 						>
 							{p.builtin ? t("plugins.builtIn") : p.enabled ? t("plugins.disable") : t("plugins.enable")}
-						</button>
+						</Button>
 					</div>
 				</div>
 				{isExpanded && (
@@ -561,16 +565,17 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 						{p.manifest.id === "hermes.language-pack" && renderLanguagePackSettings()}
 						<div className="pm-detail-actions">
 							{!p.builtin && (
-								<button
-									className="pm-btn"
+								<Button
+									size="sm"
+									className="pm-detail-toggle"
 									onClick={() => handleToggleEnabled(p.manifest.id, p.enabled)}
 									disabled={isToggling}
 								>
 									{p.enabled ? t("plugins.disable") : t("plugins.enable")}
-								</button>
+								</Button>
 							)}
 							{update && !isUpdating && (
-								<button className="pm-btn pm-btn-update" onClick={() => {
+								<Button size="sm" className="pm-btn-update" onClick={() => {
 									if (onConfirmUpdate) {
 										onConfirmUpdate(update);
 									} else {
@@ -578,7 +583,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 									}
 								}}>
 									{t("plugins.updateTo", { version: update.version })}
-								</button>
+								</Button>
 							)}
 							{isUpdating && (
 								<span className="pm-progress">
@@ -587,12 +592,14 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 								</span>
 							)}
 							{!p.builtin && (
-								<button
-									className="pm-btn pm-btn-danger"
+								<Button
+									size="sm"
+									variant="danger"
+									className="pm-btn-uninstall"
 									onClick={() => handleUninstall(p.manifest.id, p.dirName, p.manifest.name)}
 								>
 									{t("plugins.uninstall")}
-								</button>
+								</Button>
 							)}
 						</div>
 					</div>
@@ -620,19 +627,20 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 						<span className="pm-row-author">{p.author}</span>
 					</div>
 					<div className="pm-row-badges">
-						{!compatible && <span className="pm-badge pm-badge-incompatible">v{p.minAppVersion}+</span>}
+						{!compatible && <Badge tone="warning" className="pm-badge pm-badge-incompatible">v{p.minAppVersion}+</Badge>}
 					</div>
 					<div className="pm-row-action">
 						{isInstalling ? (
 							<span className="pm-progress"><span className="pm-spinner" /></span>
 						) : (
-							<button
-								className="pm-btn pm-btn-primary pm-btn-sm"
+							<Button
+								size="sm"
+								className="pm-row-install"
 								onClick={(e) => { e.stopPropagation(); handleInstall(p); }}
 								disabled={!compatible}
 							>
 								{t("plugins.install")}
-							</button>
+							</Button>
 						)}
 					</div>
 				</div>
@@ -680,13 +688,14 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 									{phaseLabel(installPhase)}
 								</span>
 							) : (
-								<button
-									className="pm-btn pm-btn-primary"
+								<Button
+									size="sm"
+									className="pm-detail-install"
 									onClick={() => handleInstall(p)}
 									disabled={!compatible}
 								>
 									{t("plugins.install")}
-								</button>
+								</Button>
 							)}
 						</div>
 					</div>
@@ -699,9 +708,10 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 		<div className="pm">
 			{/* Search */}
 			<div className="pm-search">
-				<span className="pm-search-icon"><SearchIcon /></span>
-				<input
+				<Input
+					type="search"
 					className="pm-search-input"
+					aria-label={t("plugins.search")}
 					placeholder={t("plugins.search")}
 					value={search}
 					onChange={(e) => setSearch(e.target.value)}
@@ -712,49 +722,61 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 			{error && (
 				<div className="pm-error">
 					<span style={{ flex: 1 }}>{error}</span>
-					<button className="pm-error-dismiss" onClick={() => setError(null)}>&times;</button>
+					<CloseButton className="pm-error-dismiss" label={t("common.close")} onClick={() => setError(null)} />
 				</div>
 			)}
 
 			{/* Tabs */}
 			<div className="pm-tabs">
-				<button
-					className={`pm-tab${activeTab === "installed" ? " pm-tab-active" : ""}`}
-					onClick={() => setActiveTab("installed")}
-				>
-					{t("plugins.installed")}
-					{installed.length > 0 && (
-						<span className="pm-tab-badge">{installed.length}</span>
-					)}
-					{updatablePlugins.length > 0 && (
-						<span className="pm-tab-badge pm-tab-badge-update">{updatablePlugins.length}</span>
-					)}
-				</button>
-				<button
-					className={`pm-tab${activeTab === "browse" ? " pm-tab-active" : ""}`}
-					onClick={() => setActiveTab("browse")}
-				>
-					{t("plugins.browse")}
-					{availablePlugins.length > 0 && (
-						<span className="pm-tab-badge">{availablePlugins.length}</span>
-					)}
-				</button>
+				<Tabs
+					idPrefix="pm"
+					label={t("app.plugins")}
+					value={activeTab}
+					onChange={setActiveTab}
+					tabs={[
+						{
+							value: "installed",
+							label: t("plugins.installed"),
+							badge: (installed.length > 0 || updatablePlugins.length > 0) ? (
+								<span className="pm-tab-counters">
+									{installed.length > 0 && <Counter value={installed.length} className="pm-tab-badge" />}
+									{updatablePlugins.length > 0 && (
+										<Counter
+											value={updatablePlugins.length}
+											tone="attention"
+											label={t("plugins.updateAll", { count: updatablePlugins.length })}
+											className="pm-tab-badge pm-tab-badge-update"
+										/>
+									)}
+								</span>
+							) : undefined,
+						},
+						{
+							value: "browse",
+							label: t("plugins.browse"),
+							badge: availablePlugins.length > 0 ? <Counter value={availablePlugins.length} className="pm-tab-badge" /> : undefined,
+						},
+					]}
+				/>
+				<span className="pm-tabs-spacer" />
 				{updatablePlugins.length > 0 && onConfirmUpdateAll && (
-					<button
-						className="pm-btn pm-btn-update pm-btn-update-all"
+					<Button
+						size="sm"
+						className="pm-btn-update-all"
 						onClick={() => onConfirmUpdateAll(updatablePlugins)}
 						disabled={!!installingId}
 					>
 						{t("plugins.updateAll", { count: updatablePlugins.length })}
-					</button>
+					</Button>
 				)}
-				<button
+				<IconButton
+					size="sm"
 					className="pm-check-updates"
+					label={t("plugins.checkUpdates")}
 					onClick={handleCheckForUpdates}
 					disabled={checking}
-					title={t("plugins.checkUpdates")}
-				>
-					{checking ? (
+					aria-busy={checking || undefined}
+					icon={checking ? (
 						<span className="pm-spinner" />
 					) : (
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -763,32 +785,30 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 							<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
 						</svg>
 					)}
-				</button>
+				/>
 			</div>
 
 			{/* Category filter chips (browse tab only) */}
 			{activeTab === "browse" && categories.length > 0 && (
 				<div className="pm-categories">
-					<button
-						className={`pm-chip${categoryFilter === null ? " pm-chip-active" : ""}`}
-						onClick={() => setCategoryFilter(null)}
-					>
+					<Chip size="sm" selected={categoryFilter === null} onToggle={() => setCategoryFilter(null)}>
 						{t("plugins.all")}
-					</button>
+					</Chip>
 					{categories.map(cat => (
-						<button
+						<Chip
 							key={cat}
-							className={`pm-chip${categoryFilter === cat ? " pm-chip-active" : ""}`}
-							onClick={() => setCategoryFilter(prev => prev === cat ? null : cat)}
+							size="sm"
+							selected={categoryFilter === cat}
+							onToggle={() => setCategoryFilter(prev => prev === cat ? null : cat)}
 						>
 							{cat}
-						</button>
+						</Chip>
 					))}
 				</div>
 			)}
 
 			{/* List */}
-			<div className="pm-list">
+			<TabPanel idPrefix="pm" value={activeTab} className="pm-list">
 				{loading ? (
 					<div className="pm-empty">
 						<span className="pm-progress"><span className="pm-spinner" />{t("plugins.loading")}</span>
@@ -834,7 +854,7 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 						</div>
 					)
 				)}
-			</div>
+			</TabPanel>
 
 			{/* Footer */}
 			<div className="pm-footer">
@@ -851,8 +871,8 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 						<div className="pm-confirm-title">{t("plugins.uninstallConfirmTitle", { name: pendingUninstall.pluginName })}</div>
 						<div className="pm-confirm-desc">{t("plugins.uninstallConfirmDesc")}</div>
 						<div className="pm-confirm-actions">
-							<button className="pm-btn" onClick={() => setPendingUninstall(null)}>{t("common.cancel")}</button>
-							<button className="pm-btn pm-btn-danger" onClick={confirmUninstall}>{t("plugins.uninstall")}</button>
+							<Button className="pm-confirm-cancel" onClick={() => setPendingUninstall(null)}>{t("common.cancel")}</Button>
+							<Button variant="danger-solid" className="pm-confirm-uninstall" onClick={confirmUninstall}>{t("plugins.uninstall")}</Button>
 						</div>
 					</div>
 				</div>
@@ -873,8 +893,8 @@ export function PluginManager({ runtime, onConfirmUpdate, onConfirmUpdateAll, re
 							))}
 						</div>
 						<div className="pm-confirm-actions">
-							<button className="pm-btn" onClick={() => setPendingInstall(null)}>{t("common.cancel")}</button>
-							<button className="pm-btn pm-btn-primary" onClick={confirmInstall}>{t("plugins.install")}</button>
+							<Button className="pm-confirm-cancel" onClick={() => setPendingInstall(null)}>{t("common.cancel")}</Button>
+							<Button variant="primary" className="pm-confirm-install" onClick={confirmInstall}>{t("plugins.install")}</Button>
 						</div>
 					</div>
 				</div>

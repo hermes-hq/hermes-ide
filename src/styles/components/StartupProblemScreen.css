@@ -63,24 +63,3 @@
   display: flex;
   justify-content: flex-end;
 }
-
-.startup-problem-quit {
-  padding: 8px 18px;
-  border: none;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-size: var(--text-md);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-
-.startup-problem-quit:hover {
-  background: var(--accent-bright);
-}
-
-.startup-problem-quit:focus-visible {
-  outline: 2px solid var(--accent-bright);
-  outline-offset: 2px;
-}

@@ -22,22 +22,6 @@
   color: var(--text-0);
   flex: 1;
 }
-.cost-dashboard-tabs { display: flex; gap: var(--space-1); }
-.cost-tab {
-  font-size: var(--text-base);
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-2);
-  cursor: pointer;
-}
-.cost-tab-active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-.cost-tab:hover { background: var(--bg-hover); }
-.cost-dashboard-close {
-  font-size: var(--text-2xl);
-}
-.cost-dashboard-close:hover { color: var(--text-1); }
 .cost-dashboard-body { padding: 12px 16px; }
 .cost-dashboard-empty {
   padding: 40px 16px;

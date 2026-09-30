@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import "../styles/components/DirtyWorktreeDialog.css";
+import { Button, CloseButton } from "./ui";
 
 export interface DirtyWorktreeChange {
   projectId: string;
@@ -182,7 +183,7 @@ export function DirtyWorktreeDialog({
         <div className="dirty-wt-header">
           <span className="dirty-wt-icon">&#9888;</span>
           <span className="dirty-wt-title" id="dirty-wt-dialog-title">Uncommitted Changes</span>
-          <button className="dirty-wt-close" onClick={onCancel} disabled={stashing} aria-label="Close">&times;</button>
+          <CloseButton className="dirty-wt-close" onClick={onCancel} disabled={stashing} label="Close" />
         </div>
 
         {/* Body */}
@@ -256,38 +257,38 @@ export function DirtyWorktreeDialog({
 
         {/* Actions */}
         <div className="dirty-wt-actions">
-          <button className="dirty-wt-btn" onClick={onCancel} disabled={stashing}>
+          <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
             Cancel
-          </button>
+          </Button>
           {committing ? (
             <>
-              <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
                 Discard changes and close
-              </button>
-              <button className="dirty-wt-btn dirty-wt-btn--archive" onClick={handleArchiveAndClose} disabled={stashing}>
+              </Button>
+              <Button className="dirty-wt-btn--archive" onClick={handleArchiveAndClose} disabled={stashing}>
                 Archive (keep branch)
-              </button>
-              <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={handleCommitAndClose} disabled={stashing}>
+              </Button>
+              <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleCommitAndClose} disabled={stashing}>
                 {stashing ? "Saving changes..." : "Commit to session branch & close"}
-              </button>
+              </Button>
             </>
           ) : stashErrors && stashErrors.length > 0 ? (
             <>
-              <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
                 Discard changes and close
-              </button>
-              <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
+              </Button>
+              <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
                 {stashing ? "Stashing changes..." : "Try Again"}
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button className="dirty-wt-btn dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
                 Discard changes and close
-              </button>
-              <button className="dirty-wt-btn dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
+              </Button>
+              <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
                 {stashing ? "Stashing changes..." : "Stash & Close"}
-              </button>
+              </Button>
             </>
           )}
         </div>

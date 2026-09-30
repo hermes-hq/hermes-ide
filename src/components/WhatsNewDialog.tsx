@@ -11,6 +11,7 @@ import {
   WHATS_NEW_PREVIEW_STORAGE_KEY,
   WHATS_NEW_SUPPRESS_SETTING as SETTING_SUPPRESS,
 } from "./startupDialogSettings";
+import { Button, Checkbox } from "./ui";
 
 interface WhatsNewDialogProps {
   /** Current app version (from __APP_VERSION__) */
@@ -120,18 +121,16 @@ export function WhatsNewDialog({ version }: WhatsNewDialogProps) {
           ) : null}
         </div>
         <div className="whatsnew-footer">
-          <label className="whatsnew-suppress">
-            <input
-              type="checkbox"
-              checked={suppress}
-              onChange={(e) => setSuppress(e.target.checked)}
-            />
-            Don&rsquo;t show after updates
-          </label>
+          <Checkbox
+            className="whatsnew-suppress"
+            checked={suppress}
+            onChange={setSuppress}
+            label={<>Don&rsquo;t show after updates</>}
+          />
           <div className="whatsnew-spacer" />
-          <button className="whatsnew-btn whatsnew-btn-primary" onClick={handleDismiss}>
+          <Button variant="primary" className="whatsnew-btn-primary" onClick={handleDismiss}>
             Got it
-          </button>
+          </Button>
         </div>
       </div>
     </div>

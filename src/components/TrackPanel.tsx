@@ -23,6 +23,7 @@ import { FEATURE_TRACKS, type FeatureTrack } from "../agent/contract/featureFron
 import { useToastStore } from "../hooks/useToastStore";
 import { useI18n } from "../i18n/I18nProvider";
 import { fmt } from "../utils/platform";
+import { Button, CloseButton, Select } from "./ui";
 
 interface TrackPanelProps {
   session: SessionData;
@@ -174,6 +175,8 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
     (e: React.KeyboardEvent<HTMLElement>) => {
       const target = e.target as HTMLElement;
       if (target.tagName === "SELECT" || target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      // The track picker (a combobox) takes letters for type-ahead.
+      if (target.getAttribute("role") === "combobox") return;
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         void approve();
@@ -216,9 +219,7 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
         {slug && <span className="track-slug mono">{slug}</span>}
         {meta && <span className="track-kind">{meta.track}</span>}
         <span className={`track-role track-role-${role}`}>{role === "writer" ? t("track.roleWriter") : role === "reader" ? t("track.roleReader", { writer: writer?.label || t("track.theWriter") }) : t("track.roleNone")}</span>
-        <button type="button" className="track-close" onClick={onClose} aria-label={t("track.close")} title={t("track.close")}>
-          ✕
-        </button>
+        <CloseButton className="track-close" onClick={onClose} label={t("track.close")} />
       </header>
 
       {state.branch && <div className="track-branch mono">{state.branch}</div>}
@@ -228,16 +229,21 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
           <p>{t("track.empty")}</p>
           <p className="text-muted">{t("track.emptyHint")}</p>
           <div className="track-promote">
-            <select className="track-select" value={promoteTrack} onChange={(e) => setPromoteTrack(e.target.value as FeatureTrack)} aria-label={t("app.track")}>
-              {FEATURE_TRACKS.map((kind) => (
-                <option key={kind} value={kind}>
-                  {kind} {kind === "Quick" ? t("track.quickHint") : kind === "Light" ? t("track.lightHint") : t("track.fullHint")}
-                </option>
-              ))}
-            </select>
-            <button type="button" className="track-btn track-btn-primary track-make-feature" onClick={() => void promote()} disabled={busy}>
+            <Select<FeatureTrack>
+              size="sm"
+              className="track-select"
+              value={promoteTrack}
+              onChange={setPromoteTrack}
+              aria-label={t("app.track")}
+              options={FEATURE_TRACKS.map((kind) => ({
+                value: kind,
+                label: kind,
+                detail: kind === "Quick" ? t("track.quickHint") : kind === "Light" ? t("track.lightHint") : t("track.fullHint"),
+              }))}
+            />
+            <Button size="sm" variant="primary" className="track-make-feature" onClick={() => void promote()} disabled={busy}>
               {t("track.makeFeature")}
-            </button>
+            </Button>
           </div>
           <p className="text-muted mono">{`hermes/${slugFromBranch(state.branch, worktree)}`}</p>
         </section>
@@ -247,9 +253,9 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
         <section className="track-error" data-testid="track-error" role="alert">
           <p>{t("track.unreadable", { line: feature.error.line })}</p>
           <p className="text-muted">{feature.error.message}</p>
-          <button type="button" className="track-btn track-open-error" onClick={() => void openInEditor()}>
+          <Button size="sm" className="track-open-error" onClick={() => void openInEditor()}>
             {t("track.open")}
-          </button>
+          </Button>
         </section>
       )}
 
@@ -285,9 +291,9 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
             {waiting && (
               <>
                 <span className="track-gate-text">{t("track.gateWaiting", { phase: meta.phase })}</span>
-                <button type="button" className="track-btn track-btn-primary track-approve" onClick={() => void approve()} disabled={busy}>
+                <Button size="sm" variant="primary" className="track-approve" onClick={() => void approve()} disabled={busy}>
                   {t("track.approve")} {fmt("{mod}⏎")}
-                </button>
+                </Button>
               </>
             )}
             {meta.gate === "approved" && <span className="track-gate-text">{t("track.gateApproved", { phase: meta.phase })}</span>}
@@ -307,18 +313,18 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
           )}
 
           <div className="track-actions">
-            <button type="button" className="track-btn track-open" onClick={() => void openPreview()} disabled={!phaseFileInfo && !feature}>
+            <Button size="sm" variant="quiet" className="track-open" onClick={() => void openPreview()} disabled={!phaseFileInfo && !feature}>
               {preview ? t("track.hide") : t("track.open")} <kbd>o</kbd>
-            </button>
-            <button type="button" className="track-btn track-open-editor" onClick={() => void openInEditor()}>
+            </Button>
+            <Button size="sm" variant="quiet" className="track-open-editor" onClick={() => void openInEditor()}>
               {t("track.editorSplit")} <kbd>⇧O</kbd>
-            </button>
-            <button type="button" className="track-btn track-send-edits" onClick={() => void sendEdits()} disabled={!phaseFileInfo || busy}>
+            </Button>
+            <Button size="sm" variant="quiet" className="track-send-edits" onClick={() => void sendEdits()} disabled={!phaseFileInfo || busy}>
               {t("track.sendEdits")} <kbd>r</kbd>
-            </button>
-            <button type="button" className="track-btn track-skip" onClick={() => void skip()} disabled={meta.phase === "done" || busy}>
+            </Button>
+            <Button size="sm" variant="quiet" className="track-skip" onClick={() => void skip()} disabled={meta.phase === "done" || busy}>
               {t("track.skip")} <kbd>s</kbd>
-            </button>
+            </Button>
           </div>
 
           {preview && (

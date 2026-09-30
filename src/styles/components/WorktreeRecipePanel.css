@@ -14,23 +14,13 @@
   overflow-y: auto;
 }
 
+.worktree-recipe-toggle {
+  align-self: flex-start;
+}
+
 /* ...while a card asks or runs, it is above them: the wizard waits on it. */
 .worktree-recipe-panel-active {
   z-index: 1100;
-}
-
-.worktree-recipe-toggle {
-  align-self: flex-start;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--accent);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.worktree-recipe-toggle:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-shadow);
 }
 
 .worktree-recipe-card {
@@ -154,29 +144,4 @@
 
 .worktree-recipe-actions:empty {
   display: none;
-}
-
-.worktree-recipe-btn {
-  background: var(--bg-2);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  color: var(--text-0);
-  padding: 4px 12px;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.worktree-recipe-btn:hover {
-  background: var(--bg-hover);
-}
-.worktree-recipe-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring-shadow);
-}
-.worktree-recipe-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg-0);
-}
-.worktree-recipe-btn-primary:hover {
-  background: var(--accent-bright);
 }
