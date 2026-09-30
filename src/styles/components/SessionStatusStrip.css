@@ -69,3 +69,6 @@
 
 /* The inbox shortcut is the control set's quiet small Button. */
 .session-status-strip-inbox { margin-left: auto; }
+/* The strip is exactly as tall as the button and clips (overflow: hidden), so
+ * the ring is drawn inside the control instead of 2 px outside it. */
+.session-status-strip :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }

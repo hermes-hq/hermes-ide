@@ -7,18 +7,32 @@
  * the highlight named by aria-activedescendant, Enter runs it).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 vi.mock("../hooks/useTextContextMenu", () => ({ useTextContextMenu: () => ({ onContextMenu: () => {} }) }));
+vi.mock("../api/sessions", () => ({
+  sshListPortForwards: vi.fn(() => Promise.resolve([])),
+  sshAddPortForward: vi.fn(() => Promise.resolve()),
+  sshRemovePortForward: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("../api/settings", () => ({
+  getSetting: vi.fn(() => Promise.resolve(null)),
+  setSetting: vi.fn(() => Promise.resolve()),
+}));
 
 import { Badge, Chip, Counter, ListRow } from "../components/ui";
 import { ActivityBar } from "../components/ActivityBar";
 import { CommandPalette } from "../components/CommandPalette";
+import { PortForwardsPanel } from "../components/PortForwardsPanel";
 import { I18nProvider } from "../i18n/I18nProvider";
+import { registerLanguagePack, setLanguage } from "../i18n/registry";
 import type { SessionData } from "../types/session";
 
-afterEach(() => cleanup());
+afterEach(async () => {
+  cleanup();
+  await setLanguage("en");
+});
 
 describe("ListRow", () => {
   it("marks the current row and the highlighted row, and passes role, id, aria and handlers through", () => {
@@ -179,6 +193,12 @@ describe("the command palette", () => {
     expect(current[0]).toHaveAttribute("aria-current", "true");
   });
 
+  it("the list of results has a name of its own, not the field's placeholder", () => {
+    const { input, list } = renderPalette(null);
+    expect(list).toHaveAccessibleName("Commands and sessions");
+    expect(list.getAttribute("aria-label")).not.toBe(input.getAttribute("placeholder"));
+  });
+
   it("no session in view: no current row", () => {
     const { list } = renderPalette(null);
     expect(within(list).getAllByRole("option").some((o) => o.hasAttribute("data-current"))).toBe(false);
@@ -203,5 +223,28 @@ describe("the command palette", () => {
     expect(input).toHaveAttribute("aria-activedescendant", options()[0].id);
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSelectSession).toHaveBeenCalledWith("s2");
+  });
+});
+
+describe("the port forwards panel", () => {
+  it("its Close is named in the person's language and closes the panel", async () => {
+    const onClose = vi.fn();
+    render(
+      <I18nProvider>
+        <PortForwardsPanel sessionId="s1" onClose={onClose} />
+      </I18nProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const pack = registerLanguagePack({ locale: "xxchrome", label: "Chrome Test", messages: { "common.close": "XX-close" } });
+    try {
+      await act(async () => {
+        await setLanguage("xxchrome");
+      });
+      expect(screen.getByRole("button", { name: "XX-close" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    } finally {
+      pack.dispose();
+    }
   });
 });

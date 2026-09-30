@@ -37,6 +37,11 @@
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
+/* The header line sits at the top edge of the pane, which clips
+ * (overflow: hidden): rings are drawn inside the controls. */
+.split-pane-header :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
+/* A long chip value (a project name) ends in "…" instead of pushing the line. */
+.split-pane-header .h-chip-label { overflow: hidden; text-overflow: ellipsis; }
 
 /* One dense-chrome line: small chips and the small Close (28 px). */
 .split-pane-label {

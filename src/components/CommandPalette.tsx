@@ -154,7 +154,7 @@ export function CommandPalette({
           autoCapitalize="off"
           spellCheck={false}
         />
-        <div className="command-palette-results" role="listbox" id="command-palette-results" aria-label={t("palette.placeholder")}>
+        <div className="command-palette-results" role="listbox" id="command-palette-results" aria-label={t("palette.resultsLabel")}>
           {filtered.map((cmd, i) => (
             <ListRow
               key={cmd.id}

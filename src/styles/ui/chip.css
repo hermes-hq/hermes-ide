@@ -66,5 +66,4 @@
 .h-chip--action:hover:not(:disabled) { background: var(--control-bg-hover); }
 .h-chip--action[aria-expanded="true"] { background: var(--control-bg-active); }
 .h-chip--action:disabled { opacity: var(--disabled-opacity); cursor: not-allowed; }
-.h-chip-label,
 .h-chip--action { overflow: hidden; text-overflow: ellipsis; }

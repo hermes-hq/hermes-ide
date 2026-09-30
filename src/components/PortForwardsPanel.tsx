@@ -2,6 +2,7 @@ import "../styles/components/PortForwardsPanel.css";
 import { useState, useEffect, useCallback } from "react";
 import type { PortForward } from "../types/session";
 import { CloseButton } from "./ui";
+import { useI18n } from "../i18n/I18nProvider";
 import { sshAddPortForward, sshRemovePortForward, sshListPortForwards } from "../api/sessions";
 
 interface PortForwardsPanelProps {
@@ -10,6 +11,7 @@ interface PortForwardsPanelProps {
 }
 
 export function PortForwardsPanel({ sessionId, onClose }: PortForwardsPanelProps) {
+  const { t } = useI18n();
   const [forwards, setForwards] = useState<PortForward[]>([]);
   const [localPort, setLocalPort] = useState("");
   const [remoteHost, setRemoteHost] = useState("localhost");
@@ -63,7 +65,7 @@ export function PortForwardsPanel({ sessionId, onClose }: PortForwardsPanelProps
     <div className="port-forwards-panel">
       <div className="port-forwards-header">
         <span className="port-forwards-title">Port Forwards</span>
-        <CloseButton className="port-forwards-close" label="Close" onClick={onClose} />
+        <CloseButton className="port-forwards-close" label={t("common.close")} onClick={onClose} />
       </div>
 
       {forwards.length > 0 && (

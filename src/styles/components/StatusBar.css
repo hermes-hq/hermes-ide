@@ -23,6 +23,9 @@
   gap: var(--space-2);
 }
 .status-bar-right { max-width: 60%; }
+/* The bar is the bottom edge of the window, which clips: rings are drawn
+ * inside the controls instead of 2 px outside them. */
+.status-bar :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
 
 .status-bar-item {
   display: flex;

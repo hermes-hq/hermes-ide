@@ -14,6 +14,9 @@
   overflow-x: auto;
   overflow-y: hidden;
 }
+/* The bar scrolls sideways and clips its 28 px line, so rings are drawn
+ * inside the controls instead of 2 px outside them. */
+.scope-bar :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
 
 .scope-bar::-webkit-scrollbar { height: var(--space-1); }
 .scope-bar::-webkit-scrollbar-track { background: transparent; }

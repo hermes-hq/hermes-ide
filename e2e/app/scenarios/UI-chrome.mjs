@@ -11,7 +11,9 @@
 //   sidebar   the current session's row is filled with --row-active-bg and
 //             carries a 2 px rail in --primary-bg (brass); it is the only
 //             current row; every piece of text in every row (metadata
-//             included) is ≥ 4.5:1 on what it is drawn on
+//             included) is ≥ 4.5:1 on what it is drawn on; a row's model
+//             and permission-mode tags are 18 px and share one line,
+//             clear of the row's Close
 //   header    the pane header line is 28 px; its chips are 24 px Chips
 //   strip     28 px, its inbox button a 28 px Button, its text ≥ 4.5:1
 //   close     every close / remove / dismiss button in the chrome is the one
@@ -33,14 +35,22 @@
 //             activity bar, inbox and palette draws the solid focus ring
 //             (the stylesheets' own :focus-visible rules, copied in place as
 //             in UI-focus-ring: the test window has no keyboard focus
-//             locally)
+//             locally), and the ring shows whole: its rectangle (the box
+//             grown by outline-offset + outline-width) fits inside the
+//             window and inside every ancestor that clips (overflow not
+//             visible)
 // with screenshots of the sidebar and header, the strip, the inbox and the
 // palette in both themes.
 //
 // Negative control (must end in RESULT: FAIL):
-//   HERMES_E2E_UICHROME_NEGATIVE=1  puts back the old current row (the grey
-//                                   --bg-active fill, no rail) before the
-//                                   checks.
+//   HERMES_E2E_UICHROME_NEGATIVE=1     puts back the old current row (the
+//                                      grey --bg-active fill, no rail)
+//                                      before the checks.
+//   HERMES_E2E_UICHROME_NEGATIVE=clip  draws the rings of the strip, the
+//                                      pane header, the scope bar and the
+//                                      status bar 2 px outside the control
+//                                      again, where their containers clip
+//                                      them.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/UI-chrome.mjs
@@ -61,6 +71,7 @@ const log = createLogger(logFile);
 const onWindows = platform() === "win32";
 const MAC = platform() === "darwin";
 const NEGATIVE = process.env.HERMES_E2E_UICHROME_NEGATIVE === "1";
+const NEGATIVE_CLIP = process.env.HERMES_E2E_UICHROME_NEGATIVE === "clip";
 const THEMES = [
   { id: "frosted-dark", label: "Frosted Dark" },
   { id: "frosted-light", label: "Frosted Light" },
@@ -319,6 +330,44 @@ const textContrast = (root) => {
 };
 const box = (el) => { const r = el.getBoundingClientRect(); return { w: +r.width.toFixed(2), h: +r.height.toFixed(2), top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
 
+/**
+ * Where the ring as drawn (the element's box grown by outline-offset +
+ * outline-width on every side) is cut off: by the window, or by an ancestor
+ * whose overflow is not visible (its padding box clips). An ancestor clips a
+ * positioned element only if it is on that element's containing-block chain.
+ * Returns one line per cut, [] when the whole ring shows.
+ */
+const ringClips = (el, cs) => {
+  const ext = (parseFloat(cs.outlineOffset) || 0) + (parseFloat(cs.outlineWidth) || 0);
+  const r = el.getBoundingClientRect();
+  const ring = { top: r.top - ext, bottom: r.bottom + ext, left: r.left - ext, right: r.right + ext };
+  const cuts = [];
+  const cut = (by, b, x, y) => {
+    const c = { top: y ? b.top - ring.top : 0, bottom: y ? ring.bottom - b.bottom : 0, left: x ? b.left - ring.left : 0, right: x ? ring.right - b.right : 0 };
+    const sides = Object.entries(c).filter(([, v]) => v > 0.5);
+    if (sides.length) cuts.push(by + ": " + sides.map(([k, v]) => k + " " + v.toFixed(1) + "px").join(", "));
+  };
+  const de = document.documentElement;
+  cut("the window", { top: 0, left: 0, right: de.clientWidth, bottom: de.clientHeight }, true, true);
+  let pos = cs.position;
+  for (let n = el.parentElement; n && n !== de; n = n.parentElement) {
+    const s = getComputedStyle(n);
+    const holds = pos === "fixed"
+      ? s.transform !== "none" || s.filter !== "none" || s.perspective !== "none" || /paint|layout|strict|content/.test(s.contain)
+      : pos === "absolute" ? s.position !== "static" || s.transform !== "none" : true;
+    if (!holds) continue;
+    pos = s.position === "fixed" || s.position === "absolute" ? s.position : "static";
+    const x = s.overflowX !== "visible";
+    const y = s.overflowY !== "visible";
+    if (!x && !y) continue;
+    const b = n.getBoundingClientRect();
+    const left = b.left + n.clientLeft;
+    const top = b.top + n.clientTop;
+    cut(n.tagName.toLowerCase() + "." + String(n.className).trim().split(/\s+/)[0] + " (overflow " + s.overflowX + " " + s.overflowY + ")", { left, top, right: left + n.clientWidth, bottom: top + n.clientHeight }, x, y);
+  }
+  return cuts;
+};
+
 window.__uiFocus = window.__uiFocus || (() => {
   const done = new WeakSet();
   const focusOnly = (sel) => sel.split(",").map((s) => s.trim())
@@ -354,10 +403,12 @@ window.__uiFocus = window.__uiFocus || (() => {
         const cs = getComputedStyle(el);
         const out = { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth) || 0, colour: cs.outlineColor, opacity: opacityOf(el) };
         const ring = tokenColour(el, "--focus-ring");
+        const clipped = ringClips(el, cs);
+        const offset = cs.outlineOffset;
         el.removeAttribute("data-simfocus");
         const name = (el.getAttribute("aria-label") || el.innerText || el.placeholder || "").trim().replace(/\s+/g, " ").slice(0, 30);
         const ok = out.style === "solid" && out.width >= 2 && sameColour(out.colour, ring) && out.opacity > 0.9;
-        return { what: el.tagName.toLowerCase() + "." + String(el.className).trim().split(/\s+/).slice(0, 3).join("."), name, ok, outline: out.style + " " + out.width + "px " + out.colour + " opacity " + out.opacity.toFixed(2) };
+        return { what: el.tagName.toLowerCase() + "." + String(el.className).trim().split(/\s+/).slice(0, 4).join("."), name, ok, clipped, outline: out.style + " " + out.width + "px " + out.colour + " offset " + offset + " opacity " + out.opacity.toFixed(2) };
       });
     },
   };
@@ -389,6 +440,16 @@ async function checkSidebar(bridge, theme, active, other) {
       brass: cur ? tokenColour(cur.parentElement, "--primary-bg") : null,
       text: rows.flatMap((w) => textContrast(w)),
       currentText: cur ? textContrast(cur) : [],
+      // The model and permission-mode tags of each row.
+      identity: rows.map((w) => {
+        const close = w.querySelector(".session-item-close");
+        const cb = close ? close.getBoundingClientRect() : null;
+        return [...w.querySelectorAll(".session-item-identity-row .h-chip")].filter(shown).map((c) => {
+          const r = c.getBoundingClientRect();
+          const underClose = !!cb && r.left < cb.right && r.right > cb.left && r.top < cb.bottom && r.bottom > cb.top;
+          return { text: e2e.norm(c.innerText), h: box(c).h, w: box(c).w, top: box(c).top, line: box(c.parentElement).w, underClose };
+        });
+      }).filter((c) => c.length > 0),
     };
   `);
   check(m.rows === 2, `${theme}: two session rows in the sidebar`);
@@ -398,6 +459,12 @@ async function checkSidebar(bridge, theme, active, other) {
   check(!!m.rail && m.rail.content !== "none" && m.rail.w === 2 && m.rail.h > 8 && sameColourNode(m.rail.bg, m.brass), `${theme}: the current row has a 2 px brass rail (${JSON.stringify(m.rail)}, brass ${m.brass})`);
   logContrast(`${theme}: current session row`, m.currentText);
   logContrast(`${theme}: all session rows`, m.text);
+  // Density: the model and permission tags are tag-sized chips that share one line.
+  log(`  ${theme}: identity tags ${JSON.stringify(m.identity.map((r) => r.map((c) => `${c.text} ${c.w}×${c.h}px in a ${c.line}px line`)))}`);
+  check(m.identity.length === 2 && m.identity.every((r) => r.length >= 2), `${theme}: both rows show their model and permission tags (${m.identity.map((r) => r.length).join(", ")})`);
+  check(m.identity.every((r) => r.every((c) => c.h === 18)), `${theme}: the tags are 18 px (badge height), not 24 px chips (${m.identity.flat().map((c) => c.h).join(", ")})`);
+  check(m.identity.every((r) => r.every((c) => Math.abs(c.top - r[0].top) < 0.5)), `${theme}: a row's tags sit on one line`);
+  check(m.identity.every((r) => r.every((c) => !c.underClose)), `${theme}: no tag runs under the row's Close`);
   void other;
 }
 
@@ -514,6 +581,10 @@ async function checkFocus(bridge, theme, roots, { min = 10 } = {}) {
     const bad = rows.filter((r) => !r.ok);
     for (const r of bad) log(`    NO RING  ${r.what} "${r.name}" (${r.outline})`);
     check(bad.length === 0, `${theme}: ${sel}: ${rows.length} controls, every one draws the solid focus ring`);
+    // The ring must also show whole: nothing may cut it off.
+    const cut = rows.filter((r) => r.clipped.length > 0);
+    for (const r of cut) log(`    CLIPPED  ${r.what} "${r.name}" (${r.outline}) — ${r.clipped.join("; ")}`);
+    check(cut.length === 0, `${theme}: ${sel}: every ring shows whole, none cut off by the window or a clipping container${cut.length ? ` (clipped: ${cut.map((r) => r.what).join(", ")})` : ""}`);
   }
   check(total >= min, `${theme}: the focus check saw the controls (${total} ≥ ${min})`);
 }
@@ -573,6 +644,8 @@ async function checkInbox(bridge, theme, active) {
   check(moved.selected.length === 1 && moved.selected[0] === moved.highlighted[0], `${theme}: the highlighted row is the selected option`);
   if (moved.fill) check(sameColourNode(moved.fill, moved.hover), `${theme}: a highlighted row takes the quiet hover fill (${moved.fill})`);
   logContrast(`${theme}: inbox after ↓`, moved.text);
+  // Focus ring of the inbox (its list) while it is open.
+  await checkFocus(bridge, `${theme} (inbox)`, [".attention-inbox"], { min: 1 });
   await pressKey(bridge, { key: "Escape", code: "Escape" });
   await bridge.waitFor("Esc to close the inbox", `return !e2e.first(".attention-inbox");`);
   log(`  ok — ${theme}: Esc closed the inbox`);
@@ -641,7 +714,7 @@ let failed = false;
 let undoRegistryPath = null;
 
 try {
-  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL (the old current row)" : ""}`);
+  log(`scenario: ${SCENARIO}   platform: ${platform()}${NEGATIVE ? "   NEGATIVE CONTROL (the old current row)" : ""}${NEGATIVE_CLIP ? "   NEGATIVE CONTROL (rings outside clipping containers)" : ""}`);
   undoRegistryPath = addFakeBinToRegistryPath();
   app = await launch();
   const { bridge } = app;
@@ -676,6 +749,16 @@ try {
     `);
   }
 
+  if (NEGATIVE_CLIP) {
+    log("NEGATIVE CONTROL: the rings of the strip, header, scope bar and status bar drawn 2 px outside again");
+    await bridge.eval(`
+      const st = document.createElement("style");
+      st.textContent = ".session-status-strip :focus-visible, .split-pane-header :focus-visible, .scope-bar :focus-visible, .status-bar :focus-visible { outline-offset: var(--focus-ring-offset) !important; }";
+      document.head.appendChild(st);
+      return true;
+    `);
+  }
+
   for (const theme of THEMES) {
     log(`theme: ${theme.label}`);
     await pickTheme(bridge, theme);
@@ -685,8 +768,10 @@ try {
     await checkHeaderStripBars(bridge, theme.id, B);
     await checkOneClose(bridge, theme.id);
     await checkFocus(bridge, theme.id, [".session-list", ".split-pane-header", ".session-status-strip", ".status-bar", ".activity-bar", ".topbar .attention-center"]);
-    // The ring as drawn: the current row's Close with the simulated focus.
-    await bridge.eval(`const b = e2e.first(".session-item-active .session-item-close"); b.setAttribute("data-simfocus", ""); return true;`);
+    // The rings as drawn: the current row's Close, the strip's ⌘I, "+ Add
+    // Project", the pane's Close and the status bar's buttons with the
+    // simulated focus (one screenshot; each ring shows whole).
+    await bridge.eval(`for (const sel of [".session-item-active .session-item-close", ".session-status-strip-inbox", ".scope-bar-add", ".split-pane-close", ".status-bug-btn", ".status-shortcuts-btn"]) e2e.first(sel)?.setAttribute("data-simfocus", ""); return true;`);
     await bridge.screenshot(join(evidenceDir, `${theme.id}-close-focus.png`));
     await bridge.eval(`document.querySelectorAll("[data-simfocus]").forEach((el) => el.removeAttribute("data-simfocus")); return true;`);
     await checkInbox(bridge, theme.id, B);

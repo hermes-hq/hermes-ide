@@ -438,20 +438,27 @@
   gap: var(--space-1);
   margin-top: var(--space-1);
   min-width: 0;
+  /* The tags sit below the row's Close (a 28 px button at the top), so their
+   * line also runs under the Close's column: the model and the permission
+   * mode fit on one line. */
+  margin-right: calc(-1 * (var(--control-h-sm) + var(--space-2)));
 }
 
-/* Small Chips of the control set; a long model id wraps inside its chip
- * instead of being cut. */
+/* Chips of the control set at tag density (badge height, 10 px), so the
+ * model and the permission mode share one line of a sidebar row; a long
+ * model id wraps inside its chip instead of being cut. */
 .h-chip.session-model-chip,
 .h-chip.session-permission-chip {
   height: auto;
-  min-height: var(--chip-h-sm);
+  min-height: var(--badge-h);
   max-width: 100%;
+  padding: 0 var(--space-1);
+  font-family: var(--font-numeric);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-snug);
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.session-model-chip .h-chip-label,
-.session-permission-chip .h-chip-label { overflow: visible; }
 
 /* 2.0: the model asked for at launch, until the agent reports its own. */
 .h-chip.session-model-chip-requested {
