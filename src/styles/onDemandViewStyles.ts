@@ -11,6 +11,7 @@ import "./components/AddMcpDialog.css";
 import "./components/AgentContextPanel.css";
 import "./components/AskUserQuestionCard.css";
 import "./components/AttentionCenter.css";
+import "./components/BranchConflictDialog.css";
 import "./components/CliCommandBanner.css";
 import "./components/CommandPalette.css";
 import "./components/ContextPanel.css";

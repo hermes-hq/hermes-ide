@@ -1,4 +1,5 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, ReactNode } from "react";
+import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, Suspense, ReactNode } from "react";
+import { lazyView } from "../utils/lazyView";
 import { markStartupSession } from "../attention/startupSessions";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AgentEvent } from "../agent/types";
@@ -48,7 +49,8 @@ import {
 import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
 import { useWorkspaceFlushOnQuit } from "./useWorkspaceFlushOnQuit";
 import { runWorktreeRecipes, type CreatedWorktree } from "./worktreeRecipes";
-import { BranchConflictDialog } from "../components/BranchConflictDialog";
+// Shown only when a branch is in use elsewhere: its code loads on demand.
+const BranchConflictDialog = lazyView("BranchConflictDialog", () => import("../components/BranchConflictDialog").then((m) => m.BranchConflictDialog));
 import type { SessionWorktree } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
@@ -2885,6 +2887,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         />
       )}
       {pendingBranchConflict && (
+        <Suspense fallback={null}>
         <BranchConflictDialog
           key={`${pendingBranchConflict.conflict.projectId}:${pendingBranchConflict.conflict.branch}`}
           branchName={pendingBranchConflict.conflict.branch}
@@ -2908,6 +2911,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             pendingBranchConflict.resolve({ kind: "cancel" });
           }}
         />
+        </Suspense>
       )}
     </SessionContext.Provider>
   );
